@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>棱镜 Prism · 设计方案总览</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+  body { background: #F7F8FA; min-height: 100vh; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 64px 40px 96px; }
+
+  /* === HERO === */
+  .hero {
+    background: linear-gradient(135deg, #161A24 0%, #1F1A3A 60%, #2D2B82 100%);
+    border-radius: 20px;
+    padding: 56px 56px 48px;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 32px;
+  }
+  .hero::before {
+    content: ''; position: absolute;
+    right: -120px; top: -160px;
+    width: 540px; height: 540px;
+    background: conic-gradient(from 220deg, #6B7CFF, #4B9BFF, #2BBFB9, #4FB87A, #D4A53A, #E08648, #E25C73, #B85AC4, #6B7CFF);
+    filter: blur(80px); opacity: .42;
+    border-radius: 50%;
+  }
+  .hero > * { position: relative; z-index: 1; }
+
+  .hero-eyebrow { display: inline-flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; color: var(--brand-300); text-transform: uppercase; }
+  .hero-eyebrow::before { content: ''; width: 28px; height: 1px; background: var(--brand-300); }
+
+  .hero-title { font-family: var(--font-display); font-size: 56px; line-height: 1.05; font-weight: 600; letter-spacing: -0.028em; margin: 18px 0 16px; }
+  .hero-title em { font-style: normal; background: linear-gradient(120deg, var(--brand-300), var(--accent-300) 50%, var(--dim-bug)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  .hero-desc { color: rgba(255,255,255,.75); font-size: 16px; line-height: 1.8; max-width: 620px; }
+
+  .hero-meta { display: flex; gap: 32px; margin-top: 36px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.10); flex-wrap: wrap; }
+  .hero-meta .it { display: flex; flex-direction: column; gap: 4px; }
+  .hero-meta .it .l { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; color: rgba(255,255,255,.5); text-transform: uppercase; }
+  .hero-meta .it .v { font-family: var(--font-display); font-size: 16px; font-weight: 500; }
+
+  /* === Section heading === */
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin: 48px 0 20px; }
+  .sec-head h2 { font-family: var(--font-display); font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .sec-head .n { font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); letter-spacing: .12em; }
+  .sec-head .sep { color: var(--gray-300); }
+  .sec-head .desc { color: var(--gray-500); font-size: 13.5px; }
+
+  /* === Main card ===== */
+  .doc-card {
+    background: #fff; border: 1px solid var(--gray-100); border-radius: 14px;
+    padding: 24px;
+    display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center;
+    transition: all .2s ease;
+    text-decoration: none; color: inherit;
+  }
+  .doc-card:hover { border-color: var(--brand-200); box-shadow: var(--shadow-3); transform: translateY(-2px); }
+  .doc-card .head { display: flex; align-items: center; gap: 16px; }
+  .doc-card .head .icon { width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, var(--brand-500), var(--accent-400)); display: flex; align-items: center; justify-content: center; flex-shrink: 0; position: relative; box-shadow: 0 8px 20px -6px rgba(91,88,232,.4); }
+  .doc-card .head .icon::after { content: ''; position: absolute; inset: 14px; background: #fff; border-radius: 4px; opacity: .9; }
+  .doc-card .head .icon span { position: relative; z-index: 2; font-family: var(--font-display); font-size: 13px; font-weight: 700; color: var(--brand-700); }
+  .doc-card .head .meta-text .t { font-family: var(--font-display); font-size: 18px; font-weight: 600; color: var(--gray-900); display: flex; align-items: center; gap: 8px; }
+  .doc-card .head .meta-text .tag { font-family: var(--font-mono); font-size: 10px; padding: 2px 8px; border-radius: 999px; background: var(--brand-50); color: var(--brand-600); letter-spacing: .05em; }
+  .doc-card .head .meta-text .s { color: var(--gray-500); font-size: 13px; margin-top: 4px; }
+  .doc-card .arrow { width: 40px; height: 40px; border-radius: 50%; background: var(--gray-50); display: flex; align-items: center; justify-content: center; color: var(--gray-700); font-family: var(--font-mono); transition: all .2s; }
+  .doc-card:hover .arrow { background: var(--brand-500); color: #fff; transform: translateX(4px); }
+
+  /* === Page grid === */
+  .pages { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .page-card {
+    background: #fff; border: 1px solid var(--gray-100); border-radius: 12px;
+    padding: 20px;
+    text-decoration: none; color: inherit;
+    display: flex; gap: 16px;
+    transition: all .2s ease;
+    position: relative; overflow: hidden;
+  }
+  .page-card:hover { border-color: var(--brand-200); box-shadow: var(--shadow-2); transform: translateY(-1px); }
+  .page-card.featured { background: linear-gradient(135deg, #FAFAFE, #F0EFFE); border-color: var(--brand-100); }
+
+  .pn-num { font-family: var(--font-display); font-size: 36px; font-weight: 600; color: var(--gray-200); letter-spacing: -0.02em; line-height: 1; flex-shrink: 0; width: 50px; }
+  .page-card.featured .pn-num { color: var(--brand-300); }
+  .pn-body { flex: 1; min-width: 0; }
+  .pn-body .h { display: flex; align-items: center; gap: 8px; }
+  .pn-body .t { font-family: var(--font-display); font-size: 16px; font-weight: 600; color: var(--gray-900); }
+  .pn-body .star { color: var(--brand-500); font-size: 14px; }
+  .pn-body .sub { font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+  .pn-body .d { color: var(--gray-600); font-size: 13px; line-height: 1.6; margin-top: 10px; }
+  .pn-tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .pn-tags span { font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: 999px; background: var(--gray-100); color: var(--gray-600); }
+
+  /* === Resources === */
+  .res { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .res a {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px;
+    background: #fff; border: 1px solid var(--gray-100); border-radius: 10px;
+    text-decoration: none; color: var(--gray-700);
+    font-size: 13px;
+    transition: all .15s ease;
+  }
+  .res a:hover { border-color: var(--brand-300); color: var(--brand-600); }
+  .res a .ext { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--gray-400); }
+
+  /* spectrum bar */
+  .spectrum-bar { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 36px; }
+  .spectrum-bar > div { height: 6px; border-radius: 3px; }
+
+  footer.foot { margin-top: 64px; padding-top: 28px; border-top: 1px solid var(--gray-200); display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11.5px; color: var(--gray-500); }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="hero-eyebrow"><span class="prism-mark" style="width: 22px; height: 22px; border-radius: 6px;"></span>PRISM · 棱镜 · 设计方案 v1.0</div>
+    <h1 class="hero-title">让代码穿过<em>棱镜</em>，<br>折射出 8 个维度的真相。</h1>
+    <p class="hero-desc">这是为「基于大模型智能体的代码质量审查管理系统」定制的视觉重塑方案。包含完整设计令牌、5 张核心页面高保真原型、AI 微交互代码片段，以及面向答辩的落地路径。</p>
+
+    <div class="spectrum-bar">
+      <div style="background: var(--dim-style);"></div>
+      <div style="background: var(--dim-naming);"></div>
+      <div style="background: var(--dim-comment);"></div>
+      <div style="background: var(--dim-maintain);"></div>
+      <div style="background: var(--dim-perf);"></div>
+      <div style="background: var(--dim-except);"></div>
+      <div style="background: var(--dim-bug);"></div>
+      <div style="background: var(--dim-security);"></div>
+    </div>
+
+    <div class="hero-meta">
+      <div class="it"><span class="l">CONCEPT</span><span class="v">棱镜 · 光谱 · 折射</span></div>
+      <div class="it"><span class="l">DIRECTION</span><span class="v">A 暗色 + C 数据可视化</span></div>
+      <div class="it"><span class="l">STACK</span><span class="v">Vue 3 · Element Plus 2.7</span></div>
+      <div class="it"><span class="l">PAGES</span><span class="v">5 张高保真原型</span></div>
+      <div class="it"><span class="l">DELIVERY</span><span class="v">SCSS + HTML 可直接接入</span></div>
+    </div>
+  </section>
+
+  <!-- ============ DESIGN SYSTEM DOC ============ -->
+  <div class="sec-head">
+    <h2>完整设计方案</h2>
+    <span class="sep">·</span>
+    <span class="desc">理念、令牌、组件、AI 微交互、落地路径——一份文档说清楚</span>
+    <span class="n" style="margin-left: auto;">DOC</span>
+  </div>
+  <a class="doc-card" href="design-system.html">
+    <div class="head">
+      <div class="icon"><span>DS</span></div>
+      <div class="meta-text">
+        <div class="t">Prism Design System <span class="tag">61 KB · 7 章</span></div>
+        <div class="s">设计理念 → 完整令牌（含 SCSS 代码）→ 布局规范 → 组件规范 → ECharts/Monaco 主题 → AI 微交互代码 → P0/P1/P2 落地路径</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+  </a>
+
+  <!-- ============ PAGES ============ -->
+  <div class="sec-head">
+    <h2>5 张核心页面</h2>
+    <span class="sep">·</span>
+    <span class="desc">1440 标准宽 · 真实中文数据 · 独立可运行</span>
+    <span class="n" style="margin-left: auto;">PAGES</span>
+  </div>
+  <div class="pages">
+    <a class="page-card" href="login.html">
+      <div class="pn-num">01</div>
+      <div class="pn-body">
+        <div class="h"><span class="t">Login</span></div>
+        <div class="sub">登录入口 · LOGIN</div>
+        <div class="d">左暗右白的双栏布局，左侧棱镜光晕承载品牌氛围与 slogan，右侧极简表单 + 三种角色快速登录。</div>
+        <div class="pn-tags"><span>双栏</span><span>暗色品牌区</span><span>角色快登</span></div>
+      </div>
+    </a>
+    <a class="page-card" href="dashboard.html">
+      <div class="pn-num">02</div>
+      <div class="pn-body">
+        <div class="h"><span class="t">Dashboard</span></div>
+        <div class="sub">仪表盘 · DASHBOARD</div>
+        <div class="d">6 张统计卡（含一张暗色"评分"主卡）+ 8 维度极坐标 + 趋势/严重度/TOP6 + 实时 AI 活动流。</div>
+        <div class="pn-tags"><span>6 卡 + 4 图</span><span>AI 活动流</span><span>极坐标</span></div>
+      </div>
+    </a>
+    <a class="page-card" href="project-list.html">
+      <div class="pn-num">03</div>
+      <div class="pn-body">
+        <div class="h"><span class="t">ProjectList</span></div>
+        <div class="sub">项目管理 · PROJECT LIST</div>
+        <div class="d">表格视图（评分微仪表 + 严重度堆叠条 + 责任人头像）+ 卡片视图（8 维度迷你光谱）+ 双视图切换 + 多筛选条。</div>
+        <div class="pn-tags"><span>表格 / 卡片</span><span>严重度堆叠</span><span>多筛选</span></div>
+      </div>
+    </a>
+    <a class="page-card featured" href="review-task-detail.html">
+      <div class="pn-num">04</div>
+      <div class="pn-body">
+        <div class="h"><span class="t">ReviewTaskDetail</span><span class="star">★ 核心</span></div>
+        <div class="sub">审查工作台 · REVIEW TASK DETAIL</div>
+        <div class="d">三栏 + 抽屉：文件树 · Monaco 代码（行级问题标记）· 问题列表（严重度/维度筛选）· AI 详情抽屉（流式输出 + Diff + 讨论）。顶部实时 AI 进度光带。</div>
+        <div class="pn-tags"><span>三栏 + 抽屉</span><span>行级标记</span><span>流式 AI</span><span>Diff 预览</span></div>
+      </div>
+    </a>
+    <a class="page-card" href="report-detail.html" style="grid-column: span 2;">
+      <div class="pn-num">05</div>
+      <div class="pn-body">
+        <div class="h"><span class="t">ReportDetail</span></div>
+        <div class="sub">审查报告 · REPORT DETAIL · 可打印 A4</div>
+        <div class="d">暗色封面（评分巨字 + 风险等级摘要）→ 8 维度雷达 → 严重度分布 / 修复进度仪表 / 评分历史 → 8 维度详评卡 → TOP6 典型问题 → AI 总结建议。@media print 已优化分页与隐藏。</div>
+        <div class="pn-tags"><span>暗色封面</span><span>雷达图</span><span>仪表 + 趋势</span><span>打印优化</span><span>AI 总结</span></div>
+      </div>
+    </a>
+  </div>
+
+  <!-- ============ RESOURCES ============ -->
+  <div class="sec-head">
+    <h2>共享资源</h2>
+    <span class="sep">·</span>
+    <span class="desc">所有页面共用</span>
+    <span class="n" style="margin-left: auto;">RESOURCES</span>
+  </div>
+  <div class="res">
+    <a href="theme.css"><span style="font-family: var(--font-mono); color: var(--brand-500);">{ }</span>theme.css <span class="ext">CSS · 8.6KB</span></a>
+    <a href="layout.css"><span style="font-family: var(--font-mono); color: var(--brand-500);">▣</span>layout.css <span class="ext">CSS · 7.5KB</span></a>
+    <a href="design-system.html#tokens"><span style="font-family: var(--font-mono); color: var(--brand-500);">⊞</span>SCSS 完整代码（在设计文档内）<span class="ext">SCSS</span></a>
+  </div>
+
+  <footer class="foot">
+    <span>PRISM v1.0 · 基于大模型智能体的代码质量审查管理系统</span>
+    <span>2026 · 本科毕业设计作品</span>
+  </footer>
+
+</main>
+</body>
+</html>

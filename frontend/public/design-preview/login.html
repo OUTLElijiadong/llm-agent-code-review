@@ -1,0 +1,277 @@
+<!doctype html>
+<!--
+  Login · 棱镜 Prism
+  尺寸: 1440 × 900   断点: 1024 / 1280
+  设计意图:
+    · 左侧暗色品牌区——大面积留给 slogan 与棱镜光带，体现 AI 工作站气质
+    · 右侧白底表单——克制、专业，最大限度降低学生/老师的认知负担
+    · 顶部留品牌 Logo + 学校名占位，方便答辩时挂学校 LOGO
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>登录 · 棱镜 Prism</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+  body { background: #fff; overflow: hidden; }
+  .page { display: grid; grid-template-columns: 1fr 560px; min-height: 100vh; }
+  @media (max-width: 1280px) { .page { grid-template-columns: 1fr 480px; } }
+
+  /* ============ 左侧品牌区 ============ */
+  .brand {
+    position: relative; overflow: hidden;
+    background: linear-gradient(165deg, #1A1E2C 0%, #161A24 55%, #1F1A3A 100%);
+    color: #fff;
+    padding: 48px 64px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  /* 棱镜光晕 */
+  .brand::before {
+    content: ''; position: absolute;
+    width: 720px; height: 720px;
+    right: -180px; top: -200px;
+    background: conic-gradient(from 220deg,
+      #6B7CFF, #4B9BFF, #2BBFB9, #4FB87A,
+      #D4A53A, #E08648, #E25C73, #B85AC4, #6B7CFF);
+    filter: blur(80px); opacity: .45;
+    border-radius: 50%;
+  }
+  /* 光束 */
+  .brand::after {
+    content: ''; position: absolute;
+    width: 2px; height: 60vh;
+    left: 30%; top: 20%;
+    background: linear-gradient(180deg, transparent, rgba(255,255,255,.6), transparent);
+    transform: rotate(15deg);
+    filter: blur(.5px);
+  }
+  .brand > * { position: relative; z-index: 2; }
+
+  .brand-top { display: flex; align-items: center; gap: 14px; }
+  .brand-top .name { font-family: var(--font-display); font-size: 18px; font-weight: 600; letter-spacing: .02em; }
+  .brand-top .school { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: rgba(255,255,255,.5); padding: 4px 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; }
+
+  .brand-center { max-width: 520px; }
+  .brand-eyebrow { font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; color: var(--brand-300); text-transform: uppercase; }
+  .brand-title { font-family: var(--font-display); font-size: 52px; font-weight: 600; line-height: 1.08; letter-spacing: -0.025em; margin: 16px 0 24px; }
+  .brand-title em { font-style: normal; background: linear-gradient(120deg, var(--brand-300), var(--accent-300) 50%, var(--dim-bug) 90%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand-sub { font-size: 15px; line-height: 1.75; color: rgba(255,255,255,.7); max-width: 460px; }
+
+  .spectrum {
+    margin-top: 40px;
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px;
+  }
+  .spectrum .seg {
+    height: 4px; border-radius: 2px;
+    animation: pulseSeg 3s ease-in-out infinite;
+  }
+  @keyframes pulseSeg {
+    0%, 100% { opacity: .55; transform: scaleY(1); }
+    50% { opacity: 1; transform: scaleY(1.6); }
+  }
+  .spectrum-labels {
+    margin-top: 14px;
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px;
+    font-size: 10px; color: rgba(255,255,255,.4);
+    font-family: var(--font-mono);
+  }
+
+  .brand-bottom { display: flex; justify-content: space-between; align-items: flex-end; font-family: var(--font-mono); font-size: 11px; color: rgba(255,255,255,.4); }
+  .brand-bottom .dot { display: inline-flex; align-items: center; gap: 6px; }
+  .brand-bottom .dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #4FB87A; box-shadow: 0 0 8px #4FB87A; }
+
+  /* ============ 右侧表单区 ============ */
+  .form-wrap {
+    display: flex; align-items: center; justify-content: center;
+    padding: 48px;
+    background: #FFFFFF;
+  }
+  .form { width: 100%; max-width: 380px; }
+  .form-eyebrow { font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; color: var(--brand-500); text-transform: uppercase; }
+  .form-title { font-family: var(--font-display); font-size: 32px; font-weight: 600; margin: 12px 0 8px; color: var(--gray-900); letter-spacing: -0.015em; }
+  .form-sub { color: var(--gray-500); font-size: 14px; margin-bottom: 32px; }
+
+  .tab-switch {
+    display: inline-flex; padding: 4px;
+    background: var(--gray-100); border-radius: 10px;
+    margin-bottom: 28px;
+  }
+  .tab-switch button {
+    height: 32px; padding: 0 18px;
+    border: none; background: transparent;
+    border-radius: 7px;
+    font-size: 13px; color: var(--gray-500);
+    cursor: pointer; transition: all .2s;
+  }
+  .tab-switch button.active {
+    background: #fff; color: var(--gray-900); font-weight: 500;
+    box-shadow: var(--shadow-1);
+  }
+
+  .field { margin-bottom: 18px; }
+  .field label {
+    display: block; font-size: 12px; color: var(--gray-600); margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .field .input-wrap {
+    position: relative;
+    display: flex; align-items: center;
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    height: 44px;
+    transition: all .15s ease;
+  }
+  .field .input-wrap:hover { border-color: var(--gray-300); }
+  .field .input-wrap.focused { border-color: var(--brand-400); box-shadow: 0 0 0 4px rgba(91,88,232,.12); }
+  .field .input-wrap .icon { width: 44px; display: flex; align-items: center; justify-content: center; color: var(--gray-400); font-family: var(--font-mono); font-size: 14px; }
+  .field input {
+    flex: 1; border: none; outline: none; background: transparent;
+    font-size: 14px; color: var(--gray-900);
+    padding-right: 14px;
+    font-family: var(--font-sans);
+  }
+  .field .toggle-eye { width: 44px; color: var(--gray-400); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+
+  .row-between { display: flex; align-items: center; justify-content: space-between; margin: -4px 0 24px; font-size: 13px; }
+  .check { display: inline-flex; align-items: center; gap: 8px; color: var(--gray-600); cursor: pointer; }
+  .check .box { width: 16px; height: 16px; border: 1.5px solid var(--gray-300); border-radius: 4px; display: inline-block; position: relative; background: #fff; }
+  .check.checked .box { background: var(--brand-500); border-color: var(--brand-500); }
+  .check.checked .box::after { content: '✓'; position: absolute; inset: 0; color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; }
+  .link { color: var(--brand-500); text-decoration: none; }
+  .link:hover { text-decoration: underline; }
+
+  .btn-login {
+    width: 100%; height: 48px;
+    background: var(--gray-900);
+    color: #fff;
+    border: none; border-radius: 10px;
+    font-size: 15px; font-weight: 500; font-family: var(--font-display);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    position: relative; overflow: hidden;
+    transition: all .2s ease;
+  }
+  .btn-login::after {
+    content: ''; position: absolute;
+    top: 0; bottom: 0; left: -100%; width: 60%;
+    background: linear-gradient(90deg, transparent, rgba(143,136,245,.4), transparent);
+    transform: skewX(-20deg);
+    transition: left .6s ease;
+  }
+  .btn-login:hover { background: var(--brand-600); transform: translateY(-1px); box-shadow: 0 8px 24px -8px rgba(91,88,232,.5); }
+  .btn-login:hover::after { left: 120%; }
+  .btn-login .arrow { font-family: var(--font-mono); }
+
+  .divider { display: flex; align-items: center; gap: 12px; color: var(--gray-400); font-size: 11px; margin: 24px 0; font-family: var(--font-mono); }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--gray-200); }
+
+  .role-quick {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+  }
+  .role-quick button {
+    height: 40px; border: 1px solid var(--gray-200); background: #fff; color: var(--gray-700);
+    border-radius: 8px; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: all .15s ease;
+  }
+  .role-quick button:hover { border-color: var(--brand-300); color: var(--brand-500); background: var(--brand-50); }
+  .role-quick button .badge { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--gray-100); color: var(--gray-500); }
+  .role-quick button:hover .badge { background: var(--brand-100); color: var(--brand-600); }
+
+  .footer-mini { text-align: center; font-size: 12px; color: var(--gray-400); margin-top: 32px; font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ 左侧品牌区 ============ -->
+  <aside class="brand">
+    <header class="brand-top">
+      <span class="prism-mark"></span>
+      <span class="name">Prism · 棱镜</span>
+      <span class="school">本科毕设 · 计算机学院</span>
+    </header>
+
+    <div class="brand-center">
+      <div class="brand-eyebrow">AI Code Review · Powered by DeepSeek</div>
+      <h1 class="brand-title">让代码穿过<br><em>棱镜</em>，<br>折射真相。</h1>
+      <p class="brand-sub">大模型智能体替你读完每一行代码，并用自然语言告诉你：哪里有问题，为什么有问题，怎么改才更好。比 SonarQube 更懂语义，比人工 Review 快 10 倍。</p>
+
+      <div class="spectrum">
+        <div class="seg" style="background: var(--dim-style); animation-delay: 0s;"></div>
+        <div class="seg" style="background: var(--dim-naming); animation-delay: .1s;"></div>
+        <div class="seg" style="background: var(--dim-comment); animation-delay: .2s;"></div>
+        <div class="seg" style="background: var(--dim-maintain); animation-delay: .3s;"></div>
+        <div class="seg" style="background: var(--dim-perf); animation-delay: .4s;"></div>
+        <div class="seg" style="background: var(--dim-except); animation-delay: .5s;"></div>
+        <div class="seg" style="background: var(--dim-bug); animation-delay: .6s;"></div>
+        <div class="seg" style="background: var(--dim-security); animation-delay: .7s;"></div>
+      </div>
+      <div class="spectrum-labels">
+        <span>规范</span><span>命名</span><span>注释</span><span>维护</span>
+        <span>性能</span><span>异常</span><span>Bug</span><span>安全</span>
+      </div>
+    </div>
+
+    <footer class="brand-bottom">
+      <span class="dot">DeepSeek-V3 在线</span>
+      <span>v1.0 · 2026</span>
+    </footer>
+  </aside>
+
+  <!-- ============ 右侧表单区 ============ -->
+  <main class="form-wrap">
+    <div class="form">
+      <div class="form-eyebrow">WELCOME BACK</div>
+      <h2 class="form-title">登录到你的工作台</h2>
+      <p class="form-sub">没有账号？<a class="link" href="#">立即注册 →</a></p>
+
+      <div class="tab-switch">
+        <button class="active">账号密码</button>
+        <button>邮箱验证码</button>
+      </div>
+
+      <form onsubmit="event.preventDefault();">
+        <div class="field">
+          <label>账号 / 学号</label>
+          <div class="input-wrap focused">
+            <span class="icon">@</span>
+            <input value="zhang_teacher" autocomplete="username" />
+          </div>
+        </div>
+        <div class="field">
+          <label>密码</label>
+          <div class="input-wrap">
+            <span class="icon">✻</span>
+            <input type="password" value="••••••••••" autocomplete="current-password" />
+            <span class="toggle-eye" title="显示密码">◐</span>
+          </div>
+        </div>
+
+        <div class="row-between">
+          <span class="check checked"><span class="box"></span>记住我</span>
+          <a class="link" href="#">忘记密码？</a>
+        </div>
+
+        <button class="btn-login" type="submit">
+          进入棱镜
+          <span class="arrow">→</span>
+        </button>
+
+        <div class="divider">或快速登录</div>
+
+        <div class="role-quick">
+          <button>学生 <span class="badge">S</span></button>
+          <button>教师 <span class="badge">T</span></button>
+          <button>管理员 <span class="badge">A</span></button>
+        </div>
+      </form>
+
+      <div class="footer-mini">© 2026 Prism · 本科毕业设计作品</div>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

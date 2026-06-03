@@ -1,0 +1,54 @@
+from typing import List
+
+from app.agents.base import AgentResult, BaseAgent
+
+
+class ProjectAnalyzerAgent(BaseAgent):
+    """项目分析智能体
+
+    根据文件夹名称和文件列表,推断项目名称、描述和主语言。
+    """
+
+    name = "project_analyzer"
+    description = "根据文件夹名称和文件列表智能分析项目元数据"
+    icon = "project_analyzer"
+    color = "#5BB89A"
+    category = "analyzer"
+    skills = ("项目分析", "目录结构识别", "文件分类")
+
+    def __init__(self):
+        system_prompt = (
+            "你是一个专业的软件项目分析专家。请根据提供的文件夹名称和文件列表,"
+            "分析这个项目并生成合适的元数据。\n\n"
+            "要求:\n"
+            "1. project_name: 根据文件夹名和文件内容推断,生成一个简洁有意义的中文项目名(2-15字)\n"
+            "2. description: 简要描述项目功能和用途(15-60字)\n"
+            "3. language: 根据文件扩展名判断主要编程语言标识\n\n"
+            "支持的语言标识: python/javascript/typescript/java/go/cpp/vue/html/css/php/c/sql/plaintext\n\n"
+            "输出格式: 严格JSON对象, 包含 project_name, description, language, language_name 四个字段。"
+        )
+        super().__init__(system_prompt=system_prompt, temperature=0.3, max_tokens=500)
+
+    def execute(self, folder_name: str, file_names: List[str]) -> AgentResult:
+        file_list = file_names[:30]
+        file_list_str = "\n".join(f"- {f}" for f in file_list)
+        user_msg = (
+            f"文件夹名称: {folder_name or '(未命名)'}\n"
+            f"包含的文件:\n{file_list_str or '(无)'}"
+        )
+        result = self.call_json(user_msg)
+        if not result.success:
+            return result
+        data = result.data
+        valid = {"python", "javascript", "typescript", "java", "go",
+                 "cpp", "vue", "html", "css", "php", "c", "sql", "plaintext"}
+        lang = data.get("language", "plaintext")
+        if lang not in valid:
+            lang = "plaintext"
+        result.data = {
+            "project_name": data.get("project_name", folder_name or "未命名项目")[:50],
+            "description": data.get("description", "")[:200],
+            "language": lang,
+            "language_name": data.get("language_name", lang.capitalize()),
+        }
+        return result

@@ -1,0 +1,279 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import './variables.scss';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  font-family: var(--font-family-base);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  background: var(--color-bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--brand-500);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+
+  &:hover { color: var(--brand-400); }
+}
+
+/* ============================================================
+ * 字体工具类
+ * ============================================================ */
+.font-display { font-family: var(--font-display); letter-spacing: -0.01em; }
+.font-mono    { font-family: var(--font-mono); }
+
+/* ============================================================
+ * Prism LOGO mark · 棱镜标
+ * ============================================================ */
+.prism-mark {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: conic-gradient(from 210deg at 50% 50%,
+    var(--dim-style), var(--dim-naming), var(--dim-comment),
+    var(--dim-maintain), var(--dim-perf), var(--dim-except),
+    var(--dim-bug), var(--dim-security), var(--dim-style));
+  position: relative;
+  box-shadow: 0 4px 12px -2px rgba(91, 88, 232, 0.45),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border-radius: 4px;
+    background: var(--side-bg);
+  }
+
+  &.lg { width: 44px; height: 44px; border-radius: 12px; &::after { inset: 9px; border-radius: 6px; } }
+  &.sm { width: 22px; height: 22px; border-radius: 6px;  &::after { inset: 5px; border-radius: 3px; } }
+  &.on-light::after { background: #fff; }
+}
+
+/* ============================================================
+ * 严重度徽章 · sev
+ * ============================================================ */
+.sev {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-display);
+  white-space: nowrap;
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  &.sev-severe { color: var(--sev-severe); background: var(--sev-severe-bg); &::before { background: var(--sev-severe); } }
+  &.sev-high   { color: var(--sev-high);   background: var(--sev-high-bg);   &::before { background: var(--sev-high);   } }
+  &.sev-medium { color: #A47A30;           background: var(--sev-medium-bg); &::before { background: var(--sev-medium); } }
+  &.sev-low    { color: #3F7FA8;           background: var(--sev-low-bg);    &::before { background: var(--sev-low);    } }
+}
+
+/* ============================================================
+ * 8 维度 chip · dim
+ * ============================================================ */
+.dim {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-100);
+  font-size: 12px;
+  color: var(--gray-700);
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  &.dim-style    .dot { background: var(--dim-style); }
+  &.dim-naming   .dot { background: var(--dim-naming); }
+  &.dim-comment  .dot { background: var(--dim-comment); }
+  &.dim-maintain .dot { background: var(--dim-maintain); }
+  &.dim-perf     .dot { background: var(--dim-perf); }
+  &.dim-except   .dot { background: var(--dim-except); }
+  &.dim-bug      .dot { background: var(--dim-bug); }
+  &.dim-security .dot { background: var(--dim-security); }
+}
+
+/* ============================================================
+ * 8 维度光谱条
+ * ============================================================ */
+.spectrum-bar {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+
+  > div {
+    height: 6px;
+    border-radius: 3px;
+    &:nth-child(1) { background: var(--dim-style); }
+    &:nth-child(2) { background: var(--dim-naming); }
+    &:nth-child(3) { background: var(--dim-comment); }
+    &:nth-child(4) { background: var(--dim-maintain); }
+    &:nth-child(5) { background: var(--dim-perf); }
+    &:nth-child(6) { background: var(--dim-except); }
+    &:nth-child(7) { background: var(--dim-bug); }
+    &:nth-child(8) { background: var(--dim-security); }
+  }
+}
+
+/* ============================================================
+ * AI 思考 / 流式输出动效
+ * ============================================================ */
+@keyframes prismPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.15); opacity: 0.6; }
+}
+
+@keyframes lightSweep {
+  0%   { transform: translateX(-100%) skewX(-20deg); }
+  100% { transform: translateX(300%) skewX(-20deg); }
+}
+
+@keyframes thinkDot {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+  40%           { transform: scale(1); opacity: 1; }
+}
+
+@keyframes streamCursor {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+.think-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+
+  span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--brand-500);
+    animation: thinkDot 1.4s ease-in-out infinite;
+
+    &:nth-child(2) { animation-delay: 0.16s; background: var(--accent-400); }
+    &:nth-child(3) { animation-delay: 0.32s; background: var(--dim-bug); }
+  }
+}
+
+.stream-cursor::after {
+  content: '▍';
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--brand-500);
+  animation: streamCursor 1s steps(1) infinite;
+}
+
+/* ============================================================
+ * Element Plus 微调
+ * ============================================================ */
+.el-card {
+  border-color: var(--el-border-color-light) !important;
+  box-shadow: var(--shadow-1) !important;
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
+
+  &.is-hoverable:hover {
+    box-shadow: var(--shadow-3) !important;
+    transform: translateY(-2px);
+  }
+}
+
+.el-button--primary:hover:not(.is-disabled) {
+  box-shadow: 0 4px 12px -2px rgba(91, 88, 232, 0.35);
+}
+
+.el-menu { border-right: none !important; }
+
+.el-loading-mask {
+  background-color: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(2px);
+}
+
+.el-loading-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+
+  .circular {
+    width: 42px;
+    height: 42px;
+    padding: 5px;
+    border-radius: 50%;
+    background: conic-gradient(from 210deg,
+      var(--dim-style),
+      var(--dim-comment),
+      var(--dim-perf),
+      var(--dim-bug),
+      var(--dim-style));
+    animation: prismSpin 1.2s linear infinite;
+
+    .path {
+      display: none;
+    }
+  }
+
+  &::after {
+    content: '正在加载数据...';
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--gray-600);
+    letter-spacing: 0.03em;
+  }
+}
+
+@keyframes prismSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ============================================================
+ * 滚动条
+ * ============================================================ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--gray-200);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+
+  &:hover {
+    background: var(--gray-300);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

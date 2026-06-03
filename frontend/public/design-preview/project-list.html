@@ -1,0 +1,581 @@
+<!doctype html>
+<!--
+  ProjectList · 棱镜 Prism
+  尺寸: 1440 × 自适应高   断点: 1024 / 1280
+  设计意图:
+    · 顶部筛选条：搜索 + 语言/状态/责任人筛选 + 视图切换（表格/卡片）
+    · 表格视图：高密度 + 内嵌问题严重度堆叠条 + 评分微仪表
+    · 卡片视图：每张卡显示棱镜 8 维度迷你光谱 + 评分大数字
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>项目管理 · 棱镜 Prism</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="layout.css">
+<style>
+  /* 筛选条 */
+  .filters {
+    background: #fff; border: 1px solid var(--gray-100);
+    border-radius: var(--r-lg); padding: 14px 16px;
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px;
+  }
+  .filters .search-input {
+    flex: 1; max-width: 340px;
+    display: flex; align-items: center; gap: 8px;
+    height: 36px; padding: 0 12px;
+    border: 1px solid var(--gray-200); border-radius: 10px;
+    color: var(--gray-500); font-size: 13px;
+    transition: all .15s ease;
+  }
+  .filters .search-input:focus-within { border-color: var(--brand-400); box-shadow: 0 0 0 3px rgba(91,88,232,.10); }
+  .filters .search-input input { flex: 1; border: none; outline: none; font-size: 13px; color: var(--gray-900); background: transparent; font-family: var(--font-sans); }
+  .filters .search-input .kbd { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--gray-100); }
+
+  .filter-chip {
+    height: 32px; padding: 0 12px;
+    border: 1px solid var(--gray-200); border-radius: 8px;
+    background: #fff;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12.5px; color: var(--gray-700);
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+  .filter-chip:hover { border-color: var(--brand-300); color: var(--brand-500); }
+  .filter-chip.active { background: var(--brand-50); color: var(--brand-600); border-color: var(--brand-200); }
+  .filter-chip .ico { width: 14px; color: var(--gray-400); }
+  .filter-chip .arrow { color: var(--gray-400); font-size: 10px; margin-left: 2px; }
+
+  .view-switch {
+    margin-left: auto;
+    display: inline-flex; padding: 3px;
+    background: var(--gray-100); border-radius: 8px;
+  }
+  .view-switch button {
+    width: 32px; height: 26px; border: none; background: transparent;
+    border-radius: 5px; color: var(--gray-500); cursor: pointer;
+    font-family: var(--font-mono); font-size: 13px;
+  }
+  .view-switch button.active { background: #fff; color: var(--gray-900); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+
+  /* 表格 */
+  .table-wrap {
+    background: #fff; border: 1px solid var(--gray-100);
+    border-radius: var(--r-lg); overflow: hidden;
+  }
+  table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.t thead th {
+    background: var(--gray-50);
+    color: var(--gray-600); font-weight: 500; text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 12px; letter-spacing: .02em;
+    white-space: nowrap;
+  }
+  table.t thead th.right { text-align: right; }
+  table.t tbody td {
+    padding: 16px;
+    border-bottom: 1px solid var(--gray-100);
+    vertical-align: middle;
+  }
+  table.t tbody tr { transition: background .15s ease; }
+  table.t tbody tr:hover { background: var(--brand-50); }
+  table.t tbody tr.selected { background: var(--brand-50); }
+  table.t tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--brand-500); }
+
+  .proj-cell { display: flex; align-items: center; gap: 12px; }
+  .proj-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 600; color: #fff; font-size: 13px;
+    flex-shrink: 0;
+  }
+  .proj-cell .name { font-weight: 500; color: var(--gray-900); display: flex; align-items: center; gap: 8px; }
+  .proj-cell .name .lang { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--gray-100); color: var(--gray-600); }
+  .proj-cell .meta { font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-top: 3px; }
+
+  .score-bar {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .score-bar .val { font-family: var(--font-display); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; width: 32px; }
+  .score-bar .track { width: 72px; height: 4px; border-radius: 2px; background: var(--gray-100); position: relative; overflow: hidden; }
+  .score-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; }
+
+  .sev-stack {
+    display: inline-flex; gap: 2px;
+    height: 18px; border-radius: 4px; overflow: hidden;
+    background: var(--gray-100);
+    width: 140px;
+  }
+  .sev-stack div { height: 100%; }
+  .sev-counts { margin-top: 4px; display: inline-flex; gap: 10px; font-family: var(--font-mono); font-size: 10.5px; }
+
+  .owner { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .owner .av { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, var(--brand-400), var(--accent-400)); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; font-family: var(--font-display); }
+
+  .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .row-actions a { color: var(--brand-500); font-size: 12.5px; text-decoration: none; padding: 4px 8px; border-radius: 4px; }
+  .row-actions a:hover { background: var(--brand-50); }
+  .row-actions a.danger { color: var(--sev-severe); }
+  .row-actions a.danger:hover { background: var(--sev-severe-bg); }
+
+  /* Pagination */
+  .pagination {
+    margin-top: 16px; padding: 12px 16px;
+    background: #fff; border: 1px solid var(--gray-100); border-radius: var(--r-lg);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; color: var(--gray-500);
+  }
+  .pagination .pages { display: inline-flex; gap: 4px; }
+  .pagination .pages button {
+    min-width: 30px; height: 30px; padding: 0 8px;
+    border: 1px solid var(--gray-200); background: #fff;
+    border-radius: 6px; font-size: 12.5px;
+    color: var(--gray-700); cursor: pointer;
+    font-family: var(--font-mono);
+  }
+  .pagination .pages button:hover { border-color: var(--brand-300); color: var(--brand-500); }
+  .pagination .pages button.active { background: var(--brand-500); color: #fff; border-color: var(--brand-500); }
+  .pagination .pages button.dots { border: none; cursor: default; }
+
+  /* Card view (hidden initially, shown as a second example below) */
+  .card-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; }
+  .pcard {
+    background: #fff; border: 1px solid var(--gray-100); border-radius: var(--r-lg);
+    padding: 20px; transition: all .2s ease; cursor: pointer;
+    position: relative; overflow: hidden;
+  }
+  .pcard:hover { box-shadow: var(--shadow-3); transform: translateY(-2px); border-color: var(--brand-100); }
+  .pcard.featured { background: linear-gradient(135deg, #1A1E2C 0%, #2A2773 100%); color: #fff; border-color: transparent; }
+  .pcard.featured::before { content: ''; position: absolute; right: -60px; top: -60px; width: 200px; height: 200px; background: conic-gradient(from 200deg, var(--brand-400), var(--accent-400), var(--dim-bug), var(--brand-400)); filter: blur(50px); opacity: .5; border-radius: 50%; }
+  .pcard.featured > * { position: relative; z-index: 1; }
+
+  .pcard-head { display: flex; align-items: flex-start; gap: 12px; }
+  .pcard-head .proj-icon { width: 40px; height: 40px; border-radius: 10px; }
+  .pcard-head .name { font-family: var(--font-display); font-size: 17px; font-weight: 600; }
+  .pcard-head .meta { font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+  .pcard.featured .pcard-head .meta { color: rgba(255,255,255,.6); }
+  .pcard-head .more { margin-left: auto; color: var(--gray-400); padding: 4px; cursor: pointer; }
+
+  .pcard-score { margin-top: 18px; display: flex; align-items: baseline; gap: 6px; }
+  .pcard-score .big { font-family: var(--font-display); font-size: 44px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
+  .pcard-score .max { color: var(--gray-400); font-family: var(--font-mono); font-size: 13px; }
+  .pcard.featured .pcard-score .max { color: rgba(255,255,255,.5); }
+  .pcard-score .grade { margin-left: auto; padding: 3px 10px; border-radius: 999px; font-family: var(--font-display); font-size: 12px; font-weight: 500; }
+
+  .pcard-spectrum { display: flex; gap: 3px; margin-top: 14px; height: 28px; }
+  .pcard-spectrum > div { flex: 1; border-radius: 3px; opacity: .85; position: relative; transition: opacity .15s; }
+  .pcard-spectrum > div:hover { opacity: 1; }
+  .pcard-meta-row { margin-top: 16px; display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--gray-500); }
+  .pcard.featured .pcard-meta-row { color: rgba(255,255,255,.65); }
+  .pcard-meta-row .it { display: inline-flex; align-items: center; gap: 5px; }
+  .pcard-meta-row .it b { color: var(--gray-900); font-weight: 500; }
+  .pcard.featured .pcard-meta-row .it b { color: #fff; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="side-logo">
+      <span class="prism-mark"></span>
+      <span class="text">Prism<div class="sub">CODE REVIEW · AI</div></span>
+    </div>
+    <div class="side-search">
+      <span style="color: var(--brand-300);">⌕</span><span>全局搜索</span><span class="kbd">⌘K</span>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item" href="dashboard.html"><span class="ico">◐</span>仪表盘</a>
+      <div class="side-group-label">— 审查 —</div>
+      <a class="nav-item" href="review-task-detail.html"><span class="ico">▸</span>代码审查<span class="badge">7</span></a>
+      <a class="nav-item" href="#"><span class="ico">⊟</span>审查报告</a>
+      <a class="nav-item" href="#"><span class="ico">⌬</span>规则配置</a>
+      <div class="side-group-label">— 项目 —</div>
+      <a class="nav-item active" href="project-list.html"><span class="ico">◫</span>项目管理</a>
+      <a class="nav-item" href="#"><span class="ico">⎘</span>代码文件</a>
+      <a class="nav-item" href="#"><span class="ico">⟲</span>版本历史</a>
+      <div class="side-group-label">— 管理 —</div>
+      <a class="nav-item" href="#"><span class="ico">⊙</span>用户管理</a>
+      <a class="nav-item" href="#"><span class="ico">✻</span>AI 调用日志</a>
+    </nav>
+    <div class="side-bottom">
+      <div class="user-mini">
+        <div class="avatar">张</div>
+        <div class="info"><div class="name">张老师</div><div class="role">TEACHER · ADMIN</div></div>
+        <span class="more">▾</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><span>工作台</span><span class="sep">/</span><span class="now">项目管理</span></div>
+      <div class="top-search"><span>⌕</span>搜索项目、审查任务、问题…<span class="kbd">⌘K</span></div>
+      <button class="top-ai"><span class="dot"></span>AI 助手</button>
+      <button class="top-icon-btn">⌬</button>
+      <button class="top-icon-btn">🛎<span class="red-dot"></span></button>
+      <div class="top-user"><div class="avatar">张</div><span class="name">张老师</span><span class="role">TEACHER</span></div>
+    </header>
+
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <h1>项目管理</h1>
+          <div class="sub">共 <b style="color: var(--brand-600);">47</b> 个项目 · 本月新增 <b style="color: var(--success);">+6</b> · 累计代码 <b>1.2M</b> 行</div>
+        </div>
+        <div class="page-head-actions">
+          <button class="btn btn-default btn-sm">⤓ 批量导入</button>
+          <button class="btn btn-default btn-sm">⎘ 从 Git 克隆</button>
+          <button class="btn btn-primary btn-sm">+ 新建项目</button>
+        </div>
+      </div>
+
+      <!-- 筛选条 -->
+      <div class="filters">
+        <div class="search-input">
+          <span style="color: var(--gray-400);">⌕</span>
+          <input value="" placeholder="按项目名 / 描述 / 创建人搜索…" />
+          <span class="kbd">⌘F</span>
+        </div>
+        <button class="filter-chip active"><span class="ico">●</span>全部 <span style="font-family: var(--font-mono); color: var(--brand-500); margin-left: 2px;">47</span></button>
+        <button class="filter-chip">Java <span class="arrow">▾</span></button>
+        <button class="filter-chip">Python <span class="arrow">▾</span></button>
+        <button class="filter-chip">活跃中 <span class="arrow">▾</span></button>
+        <button class="filter-chip">责任人：全部 <span class="arrow">▾</span></button>
+        <button class="filter-chip">最近 30 天 <span class="arrow">▾</span></button>
+        <div class="view-switch">
+          <button title="表格视图" class="active">☰</button>
+          <button title="卡片视图">▦</button>
+        </div>
+      </div>
+
+      <!-- 表格 -->
+      <div class="table-wrap">
+        <table class="t">
+          <thead>
+            <tr>
+              <th style="width: 28px; padding: 12px 0 12px 16px;"><input type="checkbox" /></th>
+              <th>项目</th>
+              <th>责任人</th>
+              <th>评分</th>
+              <th>问题分布</th>
+              <th>最近审查</th>
+              <th>状态</th>
+              <th class="right" style="padding-right: 16px;">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- selected row -->
+            <tr class="selected">
+              <td><input type="checkbox" checked /></td>
+              <td>
+                <div class="proj-cell">
+                  <div class="proj-icon" style="background: linear-gradient(135deg, #5B58E8, #4B9BFF);">pb</div>
+                  <div>
+                    <div class="name">prism-backend <span class="lang">Java</span></div>
+                    <div class="meta">12,488 lines · 56 files · #main</div>
+                  </div>
+                </div>
+              </td>
+              <td><div class="owner"><div class="av">王</div>王教授</div></td>
+              <td>
+                <div class="score-bar"><span class="val" style="color: var(--sev-medium);">76</span>
+                  <div class="track"><div class="fill" style="width: 76%; background: linear-gradient(90deg, var(--brand-400), var(--sev-medium));"></div></div>
+                </div>
+              </td>
+              <td>
+                <div class="sev-stack">
+                  <div style="background: var(--sev-severe); width: 8%;"></div>
+                  <div style="background: var(--sev-high); width: 22%;"></div>
+                  <div style="background: var(--sev-medium); width: 42%;"></div>
+                  <div style="background: var(--sev-low); width: 28%;"></div>
+                </div>
+                <div class="sev-counts"><span style="color: var(--sev-severe);">2</span><span style="color: var(--sev-high);">5</span><span style="color: var(--sev-medium);">9</span><span style="color: var(--sev-low);">7</span></div>
+              </td>
+              <td><span style="font-family: var(--font-mono); font-size: 12px; color: var(--gray-700);">12 分钟前</span></td>
+              <td><span class="sev" style="color: var(--brand-600); background: var(--brand-50);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--brand-500);margin-right:2px;"></span>审查中</span></td>
+              <td><div class="row-actions"><a href="review-task-detail.html">查看</a><a href="#">审查</a><a href="#">···</a></div></td>
+            </tr>
+
+            <tr>
+              <td><input type="checkbox" /></td>
+              <td>
+                <div class="proj-cell">
+                  <div class="proj-icon" style="background: linear-gradient(135deg, #4FB87A, #2BBFB9);">sp</div>
+                  <div>
+                    <div class="name">student-portal <span class="lang">TS</span></div>
+                    <div class="meta">8,260 lines · 92 files · Vue 3</div>
+                  </div>
+                </div>
+              </td>
+              <td><div class="owner"><div class="av" style="background: linear-gradient(135deg, #4FB87A, #2BBFB9);">李</div>李同学</div></td>
+              <td>
+                <div class="score-bar"><span class="val" style="color: var(--success);">88</span>
+                  <div class="track"><div class="fill" style="width: 88%; background: linear-gradient(90deg, var(--brand-400), var(--success));"></div></div>
+                </div>
+              </td>
+              <td>
+                <div class="sev-stack">
+                  <div style="background: var(--sev-severe); width: 0%;"></div>
+                  <div style="background: var(--sev-high); width: 8%;"></div>
+                  <div style="background: var(--sev-medium); width: 30%;"></div>
+                  <div style="background: var(--sev-low); width: 62%;"></div>
+                </div>
+                <div class="sev-counts"><span style="color: var(--gray-400);">0</span><span style="color: var(--sev-high);">1</span><span style="color: var(--sev-medium);">3</span><span style="color: var(--sev-low);">8</span></div>
+              </td>
+              <td><span style="font-family: var(--font-mono); font-size: 12px; color: var(--gray-700);">2 小时前</span></td>
+              <td><span class="sev" style="color: var(--success); background: rgba(79,184,122,.10);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);margin-right:2px;"></span>已完成</span></td>
+              <td><div class="row-actions"><a href="#">查看</a><a href="#">审查</a><a href="#">···</a></div></td>
+            </tr>
+
+            <tr>
+              <td><input type="checkbox" /></td>
+              <td>
+                <div class="proj-cell">
+                  <div class="proj-icon" style="background: linear-gradient(135deg, #DC4961, #E08648);">ah</div>
+                  <div>
+                    <div class="name">algo-homework-3 <span class="lang">C++</span></div>
+                    <div class="meta">4,120 lines · 18 files · 课程作业</div>
+                  </div>
+                </div>
+              </td>
+              <td><div class="owner"><div class="av" style="background: linear-gradient(135deg, #DC4961, #E08648);">陈</div>陈同学</div></td>
+              <td>
+                <div class="score-bar"><span class="val" style="color: var(--sev-severe);">58</span>
+                  <div class="track"><div class="fill" style="width: 58%; background: linear-gradient(90deg, var(--brand-400), var(--sev-severe));"></div></div>
+                </div>
+              </td>
+              <td>
+                <div class="sev-stack">
+                  <div style="background: var(--sev-severe); width: 22%;"></div>
+                  <div style="background: var(--sev-high); width: 38%;"></div>
+                  <div style="background: var(--sev-medium); width: 28%;"></div>
+                  <div style="background: var(--sev-low); width: 12%;"></div>
+                </div>
+                <div class="sev-counts"><span style="color: var(--sev-severe);">9</span><span style="color: var(--sev-high);">16</span><span style="color: var(--sev-medium);">12</span><span style="color: var(--sev-low);">4</span></div>
+              </td>
+              <td><span style="font-family: var(--font-mono); font-size: 12px; color: var(--gray-700);">昨天 18:42</span></td>
+              <td><span class="sev sev-severe" style="background: var(--sev-severe-bg);">待修复</span></td>
+              <td><div class="row-actions"><a href="#">查看</a><a href="#">审查</a><a href="#">···</a></div></td>
+            </tr>
+
+            <tr>
+              <td><input type="checkbox" /></td>
+              <td>
+                <div class="proj-cell">
+                  <div class="proj-icon" style="background: linear-gradient(135deg, #4B9BFF, #3DBCD9);">dp</div>
+                  <div>
+                    <div class="name">data-pipeline <span class="lang">Python</span></div>
+                    <div class="meta">15,830 lines · 124 files · Airflow</div>
+                  </div>
+                </div>
+              </td>
+              <td><div class="owner"><div class="av" style="background: linear-gradient(135deg, #4B9BFF, #3DBCD9);">赵</div>赵研究员</div></td>
+              <td>
+                <div class="score-bar"><span class="val" style="color: var(--sev-medium);">82</span>
+                  <div class="track"><div class="fill" style="width: 82%; background: linear-gradient(90deg, var(--brand-400), var(--sev-medium));"></div></div>
+                </div>
+              </td>
+              <td>
+                <div class="sev-stack">
+                  <div style="background: var(--sev-severe); width: 4%;"></div>
+                  <div style="background: var(--sev-high); width: 16%;"></div>
+                  <div style="background: var(--sev-medium); width: 36%;"></div>
+                  <div style="background: var(--sev-low); width: 44%;"></div>
+                </div>
+                <div class="sev-counts"><span style="color: var(--sev-severe);">1</span><span style="color: var(--sev-high);">2</span><span style="color: var(--sev-medium);">5</span><span style="color: var(--sev-low);">9</span></div>
+              </td>
+              <td><span style="font-family: var(--font-mono); font-size: 12px; color: var(--gray-700);">2 天前</span></td>
+              <td><span class="sev" style="color: var(--success); background: rgba(79,184,122,.10);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);margin-right:2px;"></span>已完成</span></td>
+              <td><div class="row-actions"><a href="#">查看</a><a href="#">审查</a><a href="#">···</a></div></td>
+            </tr>
+
+            <tr>
+              <td><input type="checkbox" /></td>
+              <td>
+                <div class="proj-cell">
+                  <div class="proj-icon" style="background: linear-gradient(135deg, #B85AC4, #E25C73);">ic</div>
+                  <div>
+                    <div class="name">image-classifier <span class="lang">Python</span></div>
+                    <div class="meta">3,840 lines · 36 files · PyTorch</div>
+                  </div>
+                </div>
+              </td>
+              <td><div class="owner"><div class="av" style="background: linear-gradient(135deg, #B85AC4, #E25C73);">孙</div>孙同学</div></td>
+              <td>
+                <div class="score-bar"><span class="val" style="color: var(--success);">92</span>
+                  <div class="track"><div class="fill" style="width: 92%; background: linear-gradient(90deg, var(--brand-400), var(--success));"></div></div>
+                </div>
+              </td>
+              <td>
+                <div class="sev-stack">
+                  <div style="background: var(--sev-severe); width: 0%;"></div>
+                  <div style="background: var(--sev-high); width: 0%;"></div>
+                  <div style="background: var(--sev-medium); width: 32%;"></div>
+                  <div style="background: var(--sev-low); width: 68%;"></div>
+                </div>
+                <div class="sev-counts"><span style="color: var(--gray-400);">0</span><span style="color: var(--gray-400);">0</span><span style="color: var(--sev-medium);">2</span><span style="color: var(--sev-low);">6</span></div>
+              </td>
+              <td><span style="font-family: var(--font-mono); font-size: 12px; color: var(--gray-700);">3 天前</span></td>
+              <td><span class="sev" style="color: var(--success); background: rgba(79,184,122,.10);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);margin-right:2px;"></span>已完成</span></td>
+              <td><div class="row-actions"><a href="#">查看</a><a href="#">审查</a><a href="#">···</a></div></td>
+            </tr>
+
+            <tr>
+              <td><input type="checkbox" /></td>
+              <td>
+                <div class="proj-cell">
+                  <div class="proj-icon" style="background: linear-gradient(135deg, #E08648, #D9A857);">mb</div>
+                  <div>
+                    <div class="name">my-blog <span class="lang">Go</span></div>
+                    <div class="meta">6,210 lines · 48 files · Gin</div>
+                  </div>
+                </div>
+              </td>
+              <td><div class="owner"><div class="av" style="background: linear-gradient(135deg, #E08648, #D9A857);">周</div>周同学</div></td>
+              <td>
+                <div class="score-bar"><span class="val" style="color: var(--sev-high);">68</span>
+                  <div class="track"><div class="fill" style="width: 68%; background: linear-gradient(90deg, var(--brand-400), var(--sev-high));"></div></div>
+                </div>
+              </td>
+              <td>
+                <div class="sev-stack">
+                  <div style="background: var(--sev-severe); width: 6%;"></div>
+                  <div style="background: var(--sev-high); width: 28%;"></div>
+                  <div style="background: var(--sev-medium); width: 44%;"></div>
+                  <div style="background: var(--sev-low); width: 22%;"></div>
+                </div>
+                <div class="sev-counts"><span style="color: var(--sev-severe);">1</span><span style="color: var(--sev-high);">4</span><span style="color: var(--sev-medium);">7</span><span style="color: var(--sev-low);">3</span></div>
+              </td>
+              <td><span style="font-family: var(--font-mono); font-size: 12px; color: var(--gray-700);">5 天前</span></td>
+              <td><span class="sev" style="color: var(--status-ignored); background: rgba(155,163,176,.16);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--status-ignored);margin-right:2px;"></span>待复查</span></td>
+              <td><div class="row-actions"><a href="#">查看</a><a href="#">审查</a><a href="#" class="danger">删除</a></div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 分页 -->
+      <div class="pagination">
+        <div>共 <b style="color: var(--gray-900);">47</b> 条 · 每页
+          <select style="border: 1px solid var(--gray-200); border-radius: 4px; padding: 2px 6px; font-family: var(--font-sans); margin: 0 4px;"><option>10</option><option>20</option></select>
+          条
+        </div>
+        <div class="pages">
+          <button>‹</button>
+          <button class="active">1</button>
+          <button>2</button>
+          <button>3</button>
+          <button>4</button>
+          <button class="dots">…</button>
+          <button>5</button>
+          <button>›</button>
+        </div>
+      </div>
+
+      <!-- 卡片视图预览（同一页演示） -->
+      <div style="margin-top: 32px; display: flex; align-items: baseline; gap: 12px;">
+        <h2 style="font-family: var(--font-display); font-size: 18px; font-weight: 600; margin: 0;">卡片视图预览</h2>
+        <span style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500);">CARD MODE · 8 维度迷你光谱</span>
+      </div>
+      <div class="card-grid">
+        <!-- featured card -->
+        <div class="pcard featured">
+          <div class="pcard-head">
+            <div class="proj-icon" style="background: rgba(255,255,255,.16);">pb</div>
+            <div>
+              <div class="name">prism-backend</div>
+              <div class="meta">Java · 56 files · #main</div>
+            </div>
+            <div class="more">⋯</div>
+          </div>
+          <div class="pcard-score">
+            <span class="big">76</span><span class="max">/100</span>
+            <span class="grade" style="background: rgba(217,168,87,.18); color: var(--sev-medium);">中等</span>
+          </div>
+          <div class="pcard-spectrum">
+            <div style="background: var(--dim-style); height: 80%;"></div>
+            <div style="background: var(--dim-naming); height: 60%;"></div>
+            <div style="background: var(--dim-comment); height: 50%;"></div>
+            <div style="background: var(--dim-maintain); height: 40%;"></div>
+            <div style="background: var(--dim-perf); height: 90%;"></div>
+            <div style="background: var(--dim-except); height: 70%;"></div>
+            <div style="background: var(--dim-bug); height: 85%;"></div>
+            <div style="background: var(--dim-security); height: 30%;"></div>
+          </div>
+          <div class="pcard-meta-row">
+            <div class="it"><b>23</b>问题</div>
+            <div class="it"><b>56</b>文件</div>
+            <div class="it"><b>12 分钟</b>前</div>
+          </div>
+        </div>
+
+        <div class="pcard">
+          <div class="pcard-head">
+            <div class="proj-icon" style="background: linear-gradient(135deg, #4FB87A, #2BBFB9);">sp</div>
+            <div>
+              <div class="name">student-portal</div>
+              <div class="meta">TypeScript · 92 files · Vue 3</div>
+            </div>
+            <div class="more">⋯</div>
+          </div>
+          <div class="pcard-score">
+            <span class="big" style="color: var(--success);">88</span><span class="max">/100</span>
+            <span class="grade" style="background: rgba(79,184,122,.12); color: var(--success);">优秀</span>
+          </div>
+          <div class="pcard-spectrum">
+            <div style="background: var(--dim-style); height: 30%;"></div>
+            <div style="background: var(--dim-naming); height: 25%;"></div>
+            <div style="background: var(--dim-comment); height: 60%;"></div>
+            <div style="background: var(--dim-maintain); height: 20%;"></div>
+            <div style="background: var(--dim-perf); height: 40%;"></div>
+            <div style="background: var(--dim-except); height: 35%;"></div>
+            <div style="background: var(--dim-bug); height: 20%;"></div>
+            <div style="background: var(--dim-security); height: 10%;"></div>
+          </div>
+          <div class="pcard-meta-row">
+            <div class="it"><b>12</b>问题</div>
+            <div class="it"><b>92</b>文件</div>
+            <div class="it"><b>2 小时</b>前</div>
+          </div>
+        </div>
+
+        <div class="pcard">
+          <div class="pcard-head">
+            <div class="proj-icon" style="background: linear-gradient(135deg, #DC4961, #E08648);">ah</div>
+            <div>
+              <div class="name">algo-homework-3</div>
+              <div class="meta">C++ · 18 files · 课程作业</div>
+            </div>
+            <div class="more">⋯</div>
+          </div>
+          <div class="pcard-score">
+            <span class="big" style="color: var(--sev-severe);">58</span><span class="max">/100</span>
+            <span class="grade" style="background: rgba(220,73,97,.10); color: var(--sev-severe);">需重点修复</span>
+          </div>
+          <div class="pcard-spectrum">
+            <div style="background: var(--dim-style); height: 95%;"></div>
+            <div style="background: var(--dim-naming); height: 90%;"></div>
+            <div style="background: var(--dim-comment); height: 70%;"></div>
+            <div style="background: var(--dim-maintain); height: 85%;"></div>
+            <div style="background: var(--dim-perf); height: 60%;"></div>
+            <div style="background: var(--dim-except); height: 100%;"></div>
+            <div style="background: var(--dim-bug); height: 95%;"></div>
+            <div style="background: var(--dim-security); height: 75%;"></div>
+          </div>
+          <div class="pcard-meta-row">
+            <div class="it"><b>41</b>问题</div>
+            <div class="it"><b>18</b>文件</div>
+            <div class="it"><b>昨天</b>18:42</div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

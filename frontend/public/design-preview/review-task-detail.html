@@ -1,0 +1,711 @@
+<!doctype html>
+<!--
+  ReviewTaskDetail · 棱镜 Prism · ★ 平台最核心工作台
+  尺寸: 1440 × 900   断点: 1024 / 1280
+  设计意图:
+    · 三栏布局：文件树 220px | 代码 flex | 问题列表 380px
+    · 问题列表顶部：严重度筛选 + 维度筛选 + 状态筛选 + AI 进度
+    · 代码侧：Monaco prism-light 主题，问题行左侧标记色条 + 下划波浪
+    · 选中问题后底部弹起"问题详情抽屉"（含 AI 解释、修复建议、diff）
+    · 顶部加一条 AI 实时审查进度条（流式光带 + 思考点）
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>审查工作台 · 棱镜 Prism</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="layout.css">
+<style>
+  .content { padding: 0; overflow: hidden; }
+  .workbench { display: grid; grid-template-columns: 240px 1fr 400px; height: calc(100vh - 56px); }
+
+  /* ============ 文件树 ============ */
+  .files {
+    background: #fff;
+    border-right: 1px solid var(--gray-100);
+    overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+  .files-head {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .files-head .title { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+  .files-head .count { font-family: var(--font-mono); font-size: 10.5px; color: var(--gray-500); background: var(--gray-100); padding: 1px 6px; border-radius: 4px; margin-left: auto; }
+
+  .file-search {
+    margin: 10px 12px;
+    height: 30px; padding: 0 10px;
+    background: var(--gray-50); border-radius: 8px;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--gray-500);
+    border: 1px solid transparent;
+  }
+  .file-search:focus-within { background: #fff; border-color: var(--brand-300); }
+  .file-search input { border: none; outline: none; background: transparent; flex: 1; font-size: 12px; font-family: var(--font-sans); }
+
+  .file-tree { flex: 1; padding: 4px 8px 16px; font-family: var(--font-mono); font-size: 12px; }
+  .ft-folder { display: flex; align-items: center; gap: 6px; padding: 4px 8px; color: var(--gray-700); cursor: pointer; border-radius: 4px; }
+  .ft-folder:hover { background: var(--gray-50); }
+  .ft-folder .arrow { width: 10px; color: var(--gray-400); font-size: 9px; }
+  .ft-folder .ico { color: var(--brand-400); }
+  .ft-file { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 30px; color: var(--gray-600); cursor: pointer; border-radius: 4px; position: relative; }
+  .ft-file:hover { background: var(--gray-50); color: var(--gray-900); }
+  .ft-file.active { background: var(--brand-50); color: var(--brand-700); }
+  .ft-file.active::before { content: ''; position: absolute; left: 22px; top: 6px; bottom: 6px; width: 2px; background: var(--brand-500); border-radius: 1px; }
+  .ft-file .ico { color: var(--gray-400); }
+  .ft-file .badge { margin-left: auto; font-size: 9px; padding: 1px 5px; border-radius: 8px; color: #fff; font-family: var(--font-mono); }
+  .ft-file .badge.severe { background: var(--sev-severe); }
+  .ft-file .badge.high { background: var(--sev-high); }
+  .ft-file .badge.medium { background: var(--sev-medium); }
+  .ft-file .badge.low { background: var(--sev-low); }
+
+  /* ============ 中间：代码区 ============ */
+  .editor-col { display: flex; flex-direction: column; min-width: 0; }
+
+  /* AI 进度条 */
+  .ai-progress {
+    background: linear-gradient(90deg, #1A1E2C, #161A24);
+    color: #fff;
+    padding: 10px 18px;
+    display: flex; align-items: center; gap: 16px;
+    font-size: 12.5px;
+    border-bottom: 1px solid #2A2F3F;
+    position: relative; overflow: hidden;
+  }
+  .ai-progress .label { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 500; }
+  .ai-progress .label::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--brand-400); box-shadow: 0 0 8px var(--brand-400); animation: prismPulse 1.6s ease-in-out infinite; }
+  .ai-progress .meta { font-family: var(--font-mono); color: rgba(255,255,255,.6); }
+  .ai-progress .bar { flex: 1; height: 5px; background: rgba(255,255,255,.10); border-radius: 3px; position: relative; overflow: hidden; }
+  .ai-progress .bar .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 68%; background: linear-gradient(90deg, var(--brand-400), var(--accent-400)); border-radius: 3px; }
+  .ai-progress .bar .fill::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.5), transparent);
+    width: 40%;
+    animation: lightSweep 1.6s linear infinite;
+  }
+  .ai-progress .stat { font-family: var(--font-mono); font-size: 12px; }
+  .ai-progress .stat b { color: #fff; }
+
+  /* 标签页 */
+  .ed-tabs { display: flex; background: #fff; border-bottom: 1px solid var(--gray-100); padding: 0 4px; }
+  .ed-tab {
+    display: flex; align-items: center; gap: 8px;
+    height: 38px; padding: 0 14px;
+    border-right: 1px solid var(--gray-100);
+    font-family: var(--font-mono); font-size: 12px; color: var(--gray-500);
+    cursor: pointer;
+    position: relative;
+  }
+  .ed-tab.active { color: var(--gray-900); background: #FBFBFD; }
+  .ed-tab.active::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--brand-500); }
+  .ed-tab .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .ed-tab .close { color: var(--gray-400); margin-left: 4px; }
+
+  .file-header {
+    padding: 10px 18px;
+    background: #FBFBFD;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex; align-items: center; gap: 12px;
+    font-size: 12px;
+    color: var(--gray-600);
+    font-family: var(--font-mono);
+  }
+  .file-header .path b { color: var(--gray-900); font-weight: 500; }
+  .file-header .meta { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+  .file-header .meta .it { display: inline-flex; align-items: center; gap: 4px; }
+  .file-header .meta .it.severe { color: var(--sev-severe); }
+  .file-header .meta .it.high { color: var(--sev-high); }
+  .file-header .meta .it.medium { color: var(--sev-medium); }
+  .file-header .meta .it.low { color: var(--sev-low); }
+
+  /* 代码编辑器 */
+  .editor {
+    flex: 1; background: #FBFBFD; overflow-y: auto;
+    font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65;
+    color: var(--gray-800);
+  }
+  .editor table { border-collapse: collapse; width: 100%; }
+  .editor td { padding: 0; vertical-align: top; white-space: pre; }
+  .editor td.ln { width: 56px; text-align: right; padding-right: 14px; color: var(--gray-400); user-select: none; border-right: 1px solid var(--gray-100); }
+  .editor td.gut { width: 14px; padding: 0 0 0 4px; }
+  .editor td.code { padding: 0 18px 0 16px; }
+  .editor tr.has-issue td.ln { color: var(--gray-700); font-weight: 500; }
+  .editor tr.has-issue td.code { background: linear-gradient(90deg, var(--sev-severe-bg) 0%, transparent 30%); position: relative; }
+  .editor tr.has-issue.high td.code { background: linear-gradient(90deg, var(--sev-high-bg) 0%, transparent 30%); }
+  .editor tr.has-issue.medium td.code { background: linear-gradient(90deg, var(--sev-medium-bg) 0%, transparent 30%); }
+  .editor tr.has-issue.low td.code { background: linear-gradient(90deg, var(--sev-low-bg) 0%, transparent 30%); }
+  .editor tr.selected td.code { background: linear-gradient(90deg, rgba(91,88,232,.10) 0%, rgba(91,88,232,.04) 100%) !important; }
+  .editor tr.selected td.ln { background: var(--brand-50); color: var(--brand-600); font-weight: 600; }
+  .editor tr.has-issue td.gut { position: relative; }
+  .editor tr.has-issue td.gut::before {
+    content: ''; position: absolute;
+    left: 4px; top: 2px; bottom: 2px; width: 3px; border-radius: 1.5px;
+  }
+  .editor tr.has-issue.severe td.gut::before { background: var(--sev-severe); }
+  .editor tr.has-issue.high td.gut::before { background: var(--sev-high); }
+  .editor tr.has-issue.medium td.gut::before { background: var(--sev-medium); }
+  .editor tr.has-issue.low td.gut::before { background: var(--sev-low); }
+  .editor tr.selected td.gut::before { box-shadow: 0 0 8px currentColor; }
+
+  /* token colors */
+  .tk-key { color: #B85AC4; }
+  .tk-fn  { color: #4A46D4; }
+  .tk-str { color: #4FB87A; }
+  .tk-num { color: #25A5C4; }
+  .tk-com { color: #9BA3B0; font-style: italic; }
+  .tk-type { color: #B85AC4; }
+  .tk-anno { color: #D9A857; }
+  .squiggle { text-decoration: underline wavy; text-decoration-thickness: 1.2px; text-underline-offset: 3px; }
+  .sq-severe { text-decoration-color: var(--sev-severe); }
+  .sq-high { text-decoration-color: var(--sev-high); }
+  .sq-medium { text-decoration-color: var(--sev-medium); }
+
+  /* 悬浮提示 */
+  .hover-tip {
+    position: absolute;
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 12px 14px;
+    box-shadow: var(--shadow-3);
+    width: 320px;
+    z-index: 10;
+    font-family: var(--font-sans); font-size: 12px;
+    line-height: 1.6;
+    color: var(--gray-700);
+  }
+  .hover-tip::before { content: ''; position: absolute; top: -6px; left: 30px; width: 10px; height: 10px; background: #fff; border: 1px solid var(--gray-200); border-right: none; border-bottom: none; transform: rotate(45deg); }
+  .hover-tip .head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .hover-tip code { font-family: var(--font-mono); background: var(--brand-50); color: var(--brand-700); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+
+  /* ============ 右侧：问题列表 ============ */
+  .issues {
+    background: #fff;
+    border-left: 1px solid var(--gray-100);
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .iss-head {
+    padding: 14px 18px 0;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .iss-title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .iss-title-row .t { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+  .iss-title-row .n { font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); background: var(--gray-100); padding: 2px 8px; border-radius: 999px; }
+  .iss-title-row .ai-btn { margin-left: auto; height: 28px; padding: 0 10px; border-radius: 6px; background: var(--brand-50); color: var(--brand-600); border: 1px solid var(--brand-100); font-size: 11px; font-family: var(--font-display); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+  .iss-title-row .ai-btn:hover { background: var(--brand-500); color: #fff; border-color: var(--brand-500); }
+
+  .sev-filter { display: flex; gap: 6px; margin-bottom: 12px; }
+  .sev-pill {
+    flex: 1; padding: 6px 8px;
+    border: 1px solid var(--gray-200); border-radius: 8px;
+    background: #fff; cursor: pointer;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    transition: all .15s ease;
+  }
+  .sev-pill:hover { background: var(--gray-50); }
+  .sev-pill.active { background: var(--brand-50); border-color: var(--brand-300); box-shadow: 0 0 0 2px rgba(91,88,232,.08); }
+  .sev-pill .lbl { font-size: 10.5px; color: var(--gray-500); display: flex; align-items: center; gap: 4px; }
+  .sev-pill .lbl::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+  .sev-pill.s-severe .lbl::before { background: var(--sev-severe); }
+  .sev-pill.s-high .lbl::before { background: var(--sev-high); }
+  .sev-pill.s-medium .lbl::before { background: var(--sev-medium); }
+  .sev-pill.s-low .lbl::before { background: var(--sev-low); }
+  .sev-pill.s-all .lbl::before { background: linear-gradient(45deg, var(--sev-severe), var(--sev-low)); }
+  .sev-pill .num { font-family: var(--font-display); font-size: 18px; font-weight: 600; color: var(--gray-900); }
+
+  .iss-sub-filter { display: flex; gap: 6px; padding-bottom: 12px; overflow-x: auto; }
+  .iss-sub-filter::-webkit-scrollbar { display: none; }
+  .sub-chip {
+    height: 24px; padding: 0 10px;
+    border: 1px solid var(--gray-200); border-radius: 999px;
+    background: #fff;
+    font-size: 11.5px; color: var(--gray-700);
+    display: inline-flex; align-items: center; gap: 5px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .sub-chip:hover { border-color: var(--brand-300); }
+  .sub-chip.active { background: var(--gray-900); color: #fff; border-color: var(--gray-900); }
+  .sub-chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .sub-chip .n { font-family: var(--font-mono); font-size: 10px; opacity: .7; }
+
+  /* 问题列表 */
+  .iss-list { flex: 1; overflow-y: auto; padding: 8px 12px 100px; }
+  .iss-item {
+    padding: 12px 14px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    border: 1px solid transparent;
+    background: var(--gray-50);
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+  .iss-item:hover { background: #fff; border-color: var(--gray-200); box-shadow: var(--shadow-1); }
+  .iss-item.selected { background: #fff; border-color: var(--brand-300); box-shadow: 0 0 0 3px rgba(91,88,232,.08); }
+  .iss-item .top-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .iss-item .title { font-size: 13px; color: var(--gray-900); margin-top: 8px; font-weight: 500; line-height: 1.45; }
+  .iss-item .ai-snippet { font-size: 12px; color: var(--gray-600); margin-top: 6px; line-height: 1.55; }
+  .iss-item .ai-snippet .ai-tag { color: var(--brand-600); font-family: var(--font-mono); font-weight: 500; font-size: 10px; padding: 1px 5px; background: var(--brand-50); border-radius: 3px; margin-right: 4px; }
+  .iss-item .loc { font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-top: 8px; display: flex; align-items: center; justify-content: space-between; }
+  .iss-item .loc .actions { display: inline-flex; gap: 8px; color: var(--brand-500); }
+  .iss-item .loc .actions span { cursor: pointer; }
+  .iss-item .loc .actions span:hover { text-decoration: underline; }
+
+  /* ============ 抽屉：问题详情 ============ */
+  .drawer {
+    position: absolute;
+    right: 0; top: 56px; bottom: 0;
+    width: 540px;
+    background: #fff;
+    box-shadow: -16px 0 32px -8px rgba(37,42,55,.12);
+    border-left: 1px solid var(--gray-100);
+    display: flex; flex-direction: column;
+    z-index: 30;
+  }
+  .drawer-head {
+    padding: 18px 22px 16px;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .drawer-head .row { display: flex; align-items: center; gap: 10px; }
+  .drawer-head h3 { font-family: var(--font-display); font-size: 17px; font-weight: 600; margin: 12px 0 0; line-height: 1.4; }
+  .drawer-head .close-x { margin-left: auto; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--gray-500); background: transparent; border: none; font-size: 16px; cursor: pointer; }
+  .drawer-head .close-x:hover { background: var(--gray-100); }
+
+  .drawer-body { flex: 1; overflow-y: auto; padding: 0 22px 22px; }
+
+  .dbl { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; color: var(--gray-500); text-transform: uppercase; margin: 18px 0 8px; }
+
+  .ai-explain {
+    background: linear-gradient(135deg, #161A24 0%, #1F2330 100%);
+    color: #DCE0EA;
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-family: var(--font-sans); font-size: 13px; line-height: 1.7;
+    position: relative;
+    overflow: hidden;
+  }
+  .ai-explain::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--brand-400), var(--accent-400), transparent);
+  }
+  .ai-explain .head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-family: var(--font-mono); font-size: 11px; color: rgba(255,255,255,.6); letter-spacing: .06em; }
+  .ai-explain .head .by { color: var(--brand-300); font-weight: 600; }
+  .ai-explain code { font-family: var(--font-mono); background: rgba(91,88,232,.18); color: var(--brand-300); padding: 1px 6px; border-radius: 3px; font-size: 12px; }
+  .ai-explain .cursor { display: inline-block; width: 6px; height: 14px; background: var(--brand-400); vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* diff */
+  .diff {
+    border: 1px solid var(--gray-200);
+    border-radius: 10px; overflow: hidden;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.65;
+  }
+  .diff .head { display: flex; justify-content: space-between; padding: 8px 12px; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); font-size: 11px; color: var(--gray-500); }
+  .diff .body { background: #FBFBFD; padding: 8px 0; }
+  .diff .ln {
+    display: grid; grid-template-columns: 36px 16px 1fr; align-items: center;
+    padding: 0 12px 0 0;
+  }
+  .diff .ln .no { text-align: right; padding-right: 8px; color: var(--gray-400); font-size: 10px; }
+  .diff .ln .sg { text-align: center; font-weight: bold; }
+  .diff .ln.del { background: rgba(220,73,97,.08); }
+  .diff .ln.del .sg { color: var(--sev-severe); }
+  .diff .ln.add { background: rgba(79,184,122,.08); }
+  .diff .ln.add .sg { color: var(--success); }
+
+  .drawer-footer {
+    padding: 14px 22px;
+    border-top: 1px solid var(--gray-100);
+    display: flex; gap: 8px;
+    background: #FBFBFD;
+  }
+  .drawer-footer .btn-primary { flex: 1; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="side-logo">
+      <span class="prism-mark"></span>
+      <span class="text">Prism<div class="sub">CODE REVIEW · AI</div></span>
+    </div>
+    <div class="side-search"><span style="color: var(--brand-300);">⌕</span><span>全局搜索</span><span class="kbd">⌘K</span></div>
+    <nav class="side-nav">
+      <a class="nav-item" href="dashboard.html"><span class="ico">◐</span>仪表盘</a>
+      <div class="side-group-label">— 审查 —</div>
+      <a class="nav-item active" href="review-task-detail.html"><span class="ico">▸</span>代码审查<span class="badge">7</span></a>
+      <a class="nav-item" href="#"><span class="ico">⊟</span>审查报告</a>
+      <a class="nav-item" href="#"><span class="ico">⌬</span>规则配置</a>
+      <div class="side-group-label">— 项目 —</div>
+      <a class="nav-item" href="project-list.html"><span class="ico">◫</span>项目管理</a>
+      <a class="nav-item" href="#"><span class="ico">⎘</span>代码文件</a>
+      <a class="nav-item" href="#"><span class="ico">⟲</span>版本历史</a>
+      <div class="side-group-label">— 管理 —</div>
+      <a class="nav-item" href="#"><span class="ico">⊙</span>用户管理</a>
+      <a class="nav-item" href="#"><span class="ico">✻</span>AI 调用日志</a>
+    </nav>
+    <div class="side-bottom">
+      <div class="user-mini">
+        <div class="avatar">张</div>
+        <div class="info"><div class="name">张老师</div><div class="role">TEACHER · ADMIN</div></div>
+        <span class="more">▾</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main" style="position: relative;">
+    <header class="topbar">
+      <div class="crumbs">
+        <span>工作台</span><span class="sep">/</span>
+        <span>代码审查</span><span class="sep">/</span>
+        <span>prism-backend</span><span class="sep">/</span>
+        <span class="now">任务 #1284</span>
+      </div>
+      <div class="top-search"><span>⌕</span>搜索项目、审查任务、问题…<span class="kbd">⌘K</span></div>
+      <button class="top-ai"><span class="dot"></span>AI 助手</button>
+      <button class="top-icon-btn">⌬</button>
+      <button class="top-icon-btn">🛎<span class="red-dot"></span></button>
+      <div class="top-user"><div class="avatar">张</div><span class="name">张老师</span><span class="role">TEACHER</span></div>
+    </header>
+
+    <div class="content">
+      <!-- ========== AI 进度 ========== -->
+      <div class="ai-progress">
+        <span class="label">DeepSeek 智能体正在审查</span>
+        <span class="meta">prism-backend / src/main/java · 38/56 文件 · 已发现 23 个问题</span>
+        <div class="bar"><div class="fill"></div></div>
+        <div class="stat">耗时 <b>00:38</b> · <span class="think-dots" style="margin-left: 8px;"><span></span><span></span><span></span></span></div>
+      </div>
+
+      <div class="workbench">
+
+        <!-- ========== 文件树 ========== -->
+        <aside class="files">
+          <div class="files-head">
+            <span class="title">文件 · 56</span>
+            <span class="count">23 issues</span>
+          </div>
+          <div class="file-search">
+            <span style="color: var(--gray-400);">⌕</span>
+            <input placeholder="按文件名搜索…" />
+          </div>
+          <div class="file-tree">
+            <div class="ft-folder"><span class="arrow">▾</span><span class="ico">📁</span>src/main/java</div>
+            <div style="padding-left: 16px;">
+              <div class="ft-folder"><span class="arrow">▾</span><span class="ico">📁</span>service</div>
+              <div style="padding-left: 16px;">
+                <div class="ft-file active"><span class="ico">⎘</span>UserService.java<span class="badge severe">4</span></div>
+                <div class="ft-file"><span class="ico">⎘</span>ReviewService.java<span class="badge medium">2</span></div>
+                <div class="ft-file"><span class="ico">⎘</span>AiAgent.java<span class="badge high">3</span></div>
+              </div>
+              <div class="ft-folder"><span class="arrow">▾</span><span class="ico">📁</span>controller</div>
+              <div style="padding-left: 16px;">
+                <div class="ft-file"><span class="ico">⎘</span>UserCtrl.java<span class="badge high">2</span></div>
+                <div class="ft-file"><span class="ico">⎘</span>ReviewCtrl.java<span class="badge medium">1</span></div>
+                <div class="ft-file"><span class="ico">⎘</span>AuthCtrl.java</div>
+              </div>
+              <div class="ft-folder"><span class="arrow">▾</span><span class="ico">📁</span>dao</div>
+              <div style="padding-left: 16px;">
+                <div class="ft-file"><span class="ico">⎘</span>UserDao.java<span class="badge severe">1</span></div>
+                <div class="ft-file"><span class="ico">⎘</span>ReviewDao.java<span class="badge low">2</span></div>
+              </div>
+              <div class="ft-folder"><span class="arrow">▸</span><span class="ico">📁</span>util</div>
+              <div class="ft-folder"><span class="arrow">▸</span><span class="ico">📁</span>config</div>
+            </div>
+            <div class="ft-folder"><span class="arrow">▸</span><span class="ico">📁</span>src/test/java</div>
+            <div class="ft-folder"><span class="arrow">▸</span><span class="ico">📁</span>src/main/resources</div>
+            <div class="ft-file" style="padding-left: 8px;"><span class="ico">⎘</span>pom.xml</div>
+            <div class="ft-file" style="padding-left: 8px;"><span class="ico">⎘</span>README.md</div>
+          </div>
+        </aside>
+
+        <!-- ========== 代码区 ========== -->
+        <div class="editor-col">
+          <div class="ed-tabs">
+            <div class="ed-tab active"><span class="dot" style="background: var(--sev-severe);"></span>UserService.java<span class="close">×</span></div>
+            <div class="ed-tab"><span class="dot" style="background: var(--sev-high);"></span>AiAgent.java<span class="close">×</span></div>
+            <div class="ed-tab"><span class="dot" style="background: var(--sev-medium);"></span>ReviewService.java<span class="close">×</span></div>
+          </div>
+          <div class="file-header">
+            <span class="path">src/main/java/service/<b>UserService.java</b></span>
+            <span style="color: var(--gray-300);">·</span>
+            <span>Java · 142 行</span>
+            <div class="meta">
+              <span class="it severe">● 1</span>
+              <span class="it high">● 2</span>
+              <span class="it medium">● 1</span>
+              <span class="it" style="color: var(--gray-400);">/ 142 行</span>
+            </div>
+          </div>
+
+          <div class="editor" style="position: relative;">
+            <table>
+              <tr><td class="ln">1</td><td class="gut"></td><td class="code"><span class="tk-key">package</span> com.prism.service;</td></tr>
+              <tr><td class="ln">2</td><td class="gut"></td><td class="code"></td></tr>
+              <tr><td class="ln">3</td><td class="gut"></td><td class="code"><span class="tk-key">import</span> com.prism.dao.UserDao;</td></tr>
+              <tr><td class="ln">4</td><td class="gut"></td><td class="code"><span class="tk-key">import</span> com.prism.model.User;</td></tr>
+              <tr><td class="ln">5</td><td class="gut"></td><td class="code"><span class="tk-key">import</span> org.springframework.beans.factory.annotation.Autowired;</td></tr>
+              <tr><td class="ln">6</td><td class="gut"></td><td class="code"></td></tr>
+              <tr><td class="ln">7</td><td class="gut"></td><td class="code"><span class="tk-com">/** 用户服务 · 提供查询、创建、删除等基础能力 */</span></td></tr>
+              <tr><td class="ln">8</td><td class="gut"></td><td class="code"><span class="tk-anno">@Service</span></td></tr>
+              <tr><td class="ln">9</td><td class="gut"></td><td class="code"><span class="tk-key">public class</span> <span class="tk-type">UserService</span> {</td></tr>
+              <tr><td class="ln">10</td><td class="gut"></td><td class="code">  <span class="tk-anno">@Autowired</span></td></tr>
+              <tr class="has-issue medium"><td class="ln">11</td><td class="gut"></td><td class="code">  <span class="tk-key">private</span> <span class="tk-type">UserDao</span> <span class="squiggle sq-medium">userRepo</span>;</td></tr>
+              <tr><td class="ln">12</td><td class="gut"></td><td class="code"></td></tr>
+              <tr><td class="ln">13</td><td class="gut"></td><td class="code">  <span class="tk-com">// 查询用户</span></td></tr>
+              <tr><td class="ln">14</td><td class="gut"></td><td class="code">  <span class="tk-key">public</span> <span class="tk-type">User</span> <span class="tk-fn">findById</span>(<span class="tk-type">Long</span> id) {</td></tr>
+              <tr><td class="ln">15</td><td class="gut"></td><td class="code">    <span class="tk-key">if</span> (id == <span class="tk-num">null</span>) {</td></tr>
+              <tr><td class="ln">16</td><td class="gut"></td><td class="code">      <span class="tk-key">throw new</span> <span class="tk-type">IllegalArgumentException</span>(<span class="tk-str">"id 不能为空"</span>);</td></tr>
+              <tr><td class="ln">17</td><td class="gut"></td><td class="code">    }</td></tr>
+              <tr class="has-issue severe selected"><td class="ln">18</td><td class="gut"></td><td class="code">    <span class="tk-key">return</span> userRepo.<span class="tk-fn squiggle sq-severe">findOne</span>(id);  <span class="tk-com">// ← AI 高亮</span></td></tr>
+              <tr><td class="ln">19</td><td class="gut"></td><td class="code">  }</td></tr>
+              <tr><td class="ln">20</td><td class="gut"></td><td class="code"></td></tr>
+              <tr><td class="ln">21</td><td class="gut"></td><td class="code">  <span class="tk-com">// 删除用户 (危险)</span></td></tr>
+              <tr><td class="ln">22</td><td class="gut"></td><td class="code">  <span class="tk-key">public</span> <span class="tk-key">void</span> <span class="tk-fn">deleteAll</span>() {</td></tr>
+              <tr class="has-issue high"><td class="ln">23</td><td class="gut"></td><td class="code">    userRepo.<span class="tk-fn squiggle sq-high">executeNative</span>(<span class="tk-str">"DELETE FROM user WHERE 1=1"</span>);</td></tr>
+              <tr><td class="ln">24</td><td class="gut"></td><td class="code">  }</td></tr>
+              <tr><td class="ln">25</td><td class="gut"></td><td class="code"></td></tr>
+              <tr><td class="ln">26</td><td class="gut"></td><td class="code">  <span class="tk-com">// 根据用户名查询 (SQL 拼接)</span></td></tr>
+              <tr><td class="ln">27</td><td class="gut"></td><td class="code">  <span class="tk-key">public</span> <span class="tk-type">User</span> <span class="tk-fn">findByName</span>(<span class="tk-type">String</span> name) {</td></tr>
+              <tr class="has-issue high"><td class="ln">28</td><td class="gut"></td><td class="code">    <span class="tk-type">String</span> sql = <span class="tk-str squiggle sq-high">"SELECT * FROM user WHERE name = '"</span> + name + <span class="tk-str">"'"</span>;</td></tr>
+              <tr><td class="ln">29</td><td class="gut"></td><td class="code">    <span class="tk-key">return</span> userRepo.<span class="tk-fn">queryNative</span>(sql, <span class="tk-type">User</span>.<span class="tk-key">class</span>);</td></tr>
+              <tr><td class="ln">30</td><td class="gut"></td><td class="code">  }</td></tr>
+              <tr><td class="ln">31</td><td class="gut"></td><td class="code"></td></tr>
+              <tr><td class="ln">32</td><td class="gut"></td><td class="code">  <span class="tk-key">public</span> <span class="tk-type">List</span>&lt;<span class="tk-type">User</span>&gt; <span class="tk-fn">listActive</span>() {</td></tr>
+              <tr><td class="ln">33</td><td class="gut"></td><td class="code">    <span class="tk-type">List</span>&lt;<span class="tk-type">User</span>&gt; all = userRepo.<span class="tk-fn">findAll</span>();</td></tr>
+              <tr><td class="ln">34</td><td class="gut"></td><td class="code">    <span class="tk-type">List</span>&lt;<span class="tk-type">User</span>&gt; result = <span class="tk-key">new</span> <span class="tk-type">ArrayList</span>&lt;&gt;();</td></tr>
+              <tr><td class="ln">35</td><td class="gut"></td><td class="code">    <span class="tk-key">for</span> (<span class="tk-type">User</span> u : all) {</td></tr>
+              <tr><td class="ln">36</td><td class="gut"></td><td class="code">      <span class="tk-key">if</span> (u.<span class="tk-fn">isActive</span>()) result.<span class="tk-fn">add</span>(u);</td></tr>
+              <tr><td class="ln">37</td><td class="gut"></td><td class="code">    }</td></tr>
+              <tr><td class="ln">38</td><td class="gut"></td><td class="code">    <span class="tk-key">return</span> result;</td></tr>
+              <tr><td class="ln">39</td><td class="gut"></td><td class="code">  }</td></tr>
+              <tr><td class="ln">40</td><td class="gut"></td><td class="code">}</td></tr>
+            </table>
+
+            <!-- 悬浮提示 -->
+            <div class="hover-tip" style="left: 220px; top: 360px;">
+              <div class="head"><span class="sev sev-severe">SEVERE</span><span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>潜在 Bug</span></div>
+              <div style="color: var(--gray-900); font-weight: 500; margin-bottom: 6px;">空指针返回未做兜底</div>
+              <div><code>userRepo.findOne(id)</code> 在记录不存在时返回 <code>null</code>，调用方未做空值检查会直接 NPE。建议使用 <code>Optional&lt;User&gt;</code> 包装。</div>
+              <div style="margin-top: 10px; display: flex; gap: 8px;">
+                <button class="btn btn-primary btn-sm">查看建议</button>
+                <button class="btn btn-default btn-sm">忽略</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========== 问题列表 ========== -->
+        <aside class="issues">
+          <div class="iss-head">
+            <div class="iss-title-row">
+              <span class="t">问题列表</span>
+              <span class="n">23 · 当前文件 4</span>
+              <button class="ai-btn">✦ 询问 AI</button>
+            </div>
+            <div class="sev-filter">
+              <button class="sev-pill s-all active"><span class="lbl">全部</span><span class="num">23</span></button>
+              <button class="sev-pill s-severe"><span class="lbl">危急</span><span class="num">3</span></button>
+              <button class="sev-pill s-high"><span class="lbl">高</span><span class="num">7</span></button>
+              <button class="sev-pill s-medium"><span class="lbl">中</span><span class="num">9</span></button>
+              <button class="sev-pill s-low"><span class="lbl">低</span><span class="num">4</span></button>
+            </div>
+            <div class="iss-sub-filter">
+              <button class="sub-chip active">全部维度 <span class="n">23</span></button>
+              <button class="sub-chip"><span class="dot" style="background: var(--dim-bug);"></span>Bug <span class="n">6</span></button>
+              <button class="sub-chip"><span class="dot" style="background: var(--dim-security);"></span>安全 <span class="n">3</span></button>
+              <button class="sub-chip"><span class="dot" style="background: var(--dim-perf);"></span>性能 <span class="n">4</span></button>
+              <button class="sub-chip"><span class="dot" style="background: var(--dim-style);"></span>规范 <span class="n">5</span></button>
+              <button class="sub-chip"><span class="dot" style="background: var(--dim-naming);"></span>命名 <span class="n">3</span></button>
+              <button class="sub-chip"><span class="dot" style="background: var(--dim-maintain);"></span>维护 <span class="n">2</span></button>
+            </div>
+          </div>
+
+          <div class="iss-list">
+            <!-- Selected -->
+            <div class="iss-item selected">
+              <div class="top-row">
+                <span class="sev sev-severe">SEVERE</span>
+                <span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>潜在 Bug</span>
+                <span style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-left: auto;">#001</span>
+              </div>
+              <div class="title">空指针返回未做兜底处理</div>
+              <div class="ai-snippet">
+                <span class="ai-tag">AI</span>检测到 <code style="font-family: var(--font-mono); background: var(--brand-50); padding: 1px 4px; border-radius: 3px; color: var(--brand-700);">findOne()</code> 在记录不存在时返回 null，建议改用 <code style="font-family: var(--font-mono); background: var(--brand-50); padding: 1px 4px; border-radius: 3px; color: var(--brand-700);">Optional&lt;User&gt;</code> 并显式抛业务异常。
+              </div>
+              <div class="loc">
+                <span>UserService.java · L18</span>
+                <span class="actions"><span>定位</span><span>修复</span><span>忽略</span></span>
+              </div>
+            </div>
+
+            <div class="iss-item">
+              <div class="top-row">
+                <span class="sev sev-high">HIGH</span>
+                <span class="dim"><span class="dot" style="background: var(--dim-security);"></span>安全漏洞</span>
+                <span style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-left: auto;">#002</span>
+              </div>
+              <div class="title">SQL 注入：用户名直接拼接到原生 SQL</div>
+              <div class="ai-snippet">
+                <span class="ai-tag">AI</span>字符串拼接构造 SQL 会导致注入风险，攻击者可通过 <code style="font-family: var(--font-mono); background: var(--brand-50); padding: 1px 4px; border-radius: 3px; color: var(--brand-700);">' OR '1'='1</code> 绕过查询。请使用参数化查询或 MyBatis #{}。
+              </div>
+              <div class="loc">
+                <span>UserService.java · L28</span>
+                <span class="actions"><span>定位</span><span>修复</span><span>忽略</span></span>
+              </div>
+            </div>
+
+            <div class="iss-item">
+              <div class="top-row">
+                <span class="sev sev-high">HIGH</span>
+                <span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>潜在 Bug</span>
+                <span style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-left: auto;">#003</span>
+              </div>
+              <div class="title">deleteAll 方法没有事务保护，存在数据丢失风险</div>
+              <div class="ai-snippet">
+                <span class="ai-tag">AI</span>该方法直接执行原生 DELETE，且未限制角色权限，一旦被误调将清空 user 表。建议加 <code style="font-family: var(--font-mono); background: var(--brand-50); padding: 1px 4px; border-radius: 3px; color: var(--brand-700);">@Transactional</code> + 权限校验。
+              </div>
+              <div class="loc">
+                <span>UserService.java · L22-24</span>
+                <span class="actions"><span>定位</span><span>修复</span><span>忽略</span></span>
+              </div>
+            </div>
+
+            <div class="iss-item">
+              <div class="top-row">
+                <span class="sev sev-medium">MEDIUM</span>
+                <span class="dim"><span class="dot" style="background: var(--dim-naming);"></span>命名规范</span>
+                <span style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-left: auto;">#004</span>
+              </div>
+              <div class="title">字段命名不一致：userRepo 与类型 UserDao 不匹配</div>
+              <div class="ai-snippet">
+                <span class="ai-tag">AI</span>字段类型为 <code style="font-family: var(--font-mono); background: var(--brand-50); padding: 1px 4px; border-radius: 3px; color: var(--brand-700);">UserDao</code>，但变量名为 userRepo，违反 DAO/Repository 命名一致性。建议统一为 <code style="font-family: var(--font-mono); background: var(--brand-50); padding: 1px 4px; border-radius: 3px; color: var(--brand-700);">userDao</code>。
+              </div>
+              <div class="loc">
+                <span>UserService.java · L11</span>
+                <span class="actions"><span>定位</span><span>修复</span><span>忽略</span></span>
+              </div>
+            </div>
+
+            <div class="iss-item">
+              <div class="top-row">
+                <span class="sev sev-medium">MEDIUM</span>
+                <span class="dim"><span class="dot" style="background: var(--dim-perf);"></span>性能问题</span>
+                <span style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-left: auto;">#005</span>
+              </div>
+              <div class="title">listActive() 在内存中过滤，应改为 SQL where 条件</div>
+              <div class="loc">
+                <span>UserService.java · L32-39</span>
+                <span class="actions"><span>定位</span><span>修复</span><span>忽略</span></span>
+              </div>
+            </div>
+
+            <div class="iss-item">
+              <div class="top-row">
+                <span class="sev sev-low">LOW</span>
+                <span class="dim"><span class="dot" style="background: var(--dim-comment);"></span>注释完整性</span>
+                <span style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-left: auto;">#006</span>
+              </div>
+              <div class="title">公开方法缺少 Javadoc 参数与返回值说明</div>
+              <div class="loc">
+                <span>UserService.java · L14, L22, L27</span>
+                <span class="actions"><span>定位</span><span>修复</span><span>忽略</span></span>
+              </div>
+            </div>
+
+          </div>
+        </aside>
+
+      </div>
+
+      <!-- ============ 抽屉：问题详情 ============ -->
+      <aside class="drawer">
+        <div class="drawer-head">
+          <div class="row">
+            <span class="sev sev-severe">SEVERE</span>
+            <span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>潜在 Bug</span>
+            <span style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500);">问题 #001 · 1/23</span>
+            <button class="close-x">×</button>
+          </div>
+          <h3>空指针返回未做兜底处理 —— <span style="color: var(--gray-500); font-weight: 500;">findById()</span></h3>
+          <div style="display: flex; align-items: center; gap: 12px; margin-top: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--gray-500);">
+            <span>📄 UserService.java <b style="color: var(--gray-900);">L18</b></span>
+            <span>·</span>
+            <span>检出于 12 分钟前</span>
+            <span>·</span>
+            <span style="color: var(--status-unfix); display: inline-flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--status-unfix);"></span>未修复</span>
+          </div>
+        </div>
+
+        <div class="drawer-body">
+          <div class="dbl">AI 分析 · DeepSeek-V3</div>
+          <div class="ai-explain">
+            <div class="head">
+              <span style="color: var(--brand-300);">✦</span>
+              <span class="by">DEEPSEEK</span>
+              <span>· 流式输出 · 已生成 187 tokens</span>
+            </div>
+            <div>
+              在 <code>findById</code> 方法中，<code>userRepo.findOne(id)</code> 是 Spring Data JPA 在<b style="color: #fff;">查询不到记录时会返回 null</b>的 API。
+              当前代码将其直接 return，调用方一旦未做空值判断，将在后续操作（如 <code>user.getName()</code>）触发 NullPointerException。
+              <br><br>
+              更严重的是，这种 NPE 通常出现在生产环境的边界场景，本地难以复现。
+              建议将返回类型改为 <code>Optional&lt;User&gt;</code>，或显式抛出 <code>UserNotFoundException</code> 让全局异常处理器返回 404。<span class="cursor"></span>
+            </div>
+          </div>
+
+          <div class="dbl">建议修复 · Diff 预览</div>
+          <div class="diff">
+            <div class="head"><span>UserService.java · L14 ~ L19</span><span style="color: var(--brand-500); cursor: pointer;">⎘ 应用</span></div>
+            <div class="body">
+              <div class="ln del"><span class="no">14</span><span class="sg">−</span><span><span class="tk-key">public</span> <span class="tk-type">User</span> <span class="tk-fn">findById</span>(<span class="tk-type">Long</span> id) {</span></div>
+              <div class="ln"><span class="no">15</span><span class="sg"> </span><span>  <span class="tk-key">if</span> (id == <span class="tk-num">null</span>) <span class="tk-key">throw new</span> <span class="tk-type">IllegalArgumentException</span>(<span class="tk-str">"id 不能为空"</span>);</span></div>
+              <div class="ln del"><span class="no">16</span><span class="sg">−</span><span>  <span class="tk-key">return</span> userRepo.<span class="tk-fn">findOne</span>(id);</span></div>
+              <div class="ln add"><span class="no">14</span><span class="sg">+</span><span><span class="tk-key">public</span> <span class="tk-type">User</span> <span class="tk-fn">findById</span>(<span class="tk-type">Long</span> id) {</span></div>
+              <div class="ln add"><span class="no">16</span><span class="sg">+</span><span>  <span class="tk-key">return</span> userRepo.<span class="tk-fn">findById</span>(id)</span></div>
+              <div class="ln add"><span class="no">17</span><span class="sg">+</span><span>    .<span class="tk-fn">orElseThrow</span>(() -&gt; <span class="tk-key">new</span> <span class="tk-type">UserNotFoundException</span>(id));</span></div>
+              <div class="ln"><span class="no">18</span><span class="sg"> </span><span>}</span></div>
+            </div>
+          </div>
+
+          <div class="dbl">关联规则</div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>NPE-001 空指针返回兜底</span>
+            <span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>NPE-007 Optional 推荐</span>
+            <span class="dim"><span class="dot" style="background: var(--dim-maintain);"></span>EXC-002 业务异常显式化</span>
+          </div>
+
+          <div class="dbl">讨论 · 2</div>
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: grid; grid-template-columns: 28px 1fr; gap: 10px;">
+              <div style="width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--dim-perf), var(--dim-except)); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">王</div>
+              <div>
+                <div style="font-size: 12.5px;"><b>王教授</b> <span style="color: var(--gray-500); font-size: 11px; font-family: var(--font-mono); margin-left: 6px;">8 分钟前</span></div>
+                <div style="font-size: 13px; color: var(--gray-700); margin-top: 4px; line-height: 1.6;">同意 AI 建议。我们项目里 UserNotFoundException 已经在 GlobalExceptionHandler 注册了，直接用就行。</div>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 28px 1fr; gap: 10px;">
+              <div style="width: 28px; height: 28px; border-radius: 50%; background: var(--brand-500); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">张</div>
+              <div>
+                <div style="font-size: 12.5px;"><b>张老师</b> <span style="color: var(--gray-500); font-size: 11px; font-family: var(--font-mono); margin-left: 6px;">2 分钟前</span></div>
+                <div style="font-size: 13px; color: var(--gray-700); margin-top: 4px; line-height: 1.6;">收到，我来改。findByName 那条 SQL 注入更紧急，先合一起改了。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-footer">
+          <button class="btn btn-default btn-sm" style="padding: 0 14px;">⊘ 忽略</button>
+          <button class="btn btn-default btn-sm" style="padding: 0 14px;">↻ 待复查</button>
+          <button class="btn btn-primary">✓ 应用修复并标记已修复</button>
+        </div>
+      </aside>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

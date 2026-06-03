@@ -1,0 +1,646 @@
+<!doctype html>
+<!--
+  ReportDetail · 棱镜 Prism
+  尺寸: 1440 × A4 友好（可打印）   断点: 1024 / 1280
+  设计意图:
+    · 顶部封面区：项目名 + 评分巨字 + 8 维度雷达图 + 风险等级摘要
+    · 中段：8 维度详细评分卡（每张含分数 + 进度 + 维度名 + 问题数）
+    · 严重度堆叠 + 修复进度 + 历史趋势
+    · 底部：典型问题 TOP 6 + 改进建议
+    · @media print 隐藏侧栏/顶栏，纸张 A4，分页友好
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>审查报告 · prism-backend · 棱镜 Prism</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="layout.css">
+<style>
+  .content { padding: 0; background: var(--gray-100); }
+  .report-wrap { max-width: 1080px; margin: 24px auto 48px; padding: 0 24px; }
+
+  /* === 报告封面卡 === */
+  .cover {
+    background: linear-gradient(135deg, #161A24 0%, #1F1A3A 60%, #2D2B82 100%);
+    color: #fff;
+    border-radius: 16px;
+    padding: 40px;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .cover::before {
+    content: ''; position: absolute;
+    right: -100px; top: -120px;
+    width: 480px; height: 480px;
+    background: conic-gradient(from 220deg, var(--dim-style), var(--dim-naming), var(--dim-comment), var(--dim-maintain), var(--dim-perf), var(--dim-except), var(--dim-bug), var(--dim-security), var(--dim-style));
+    filter: blur(80px); opacity: .35;
+    border-radius: 50%;
+  }
+  .cover-grid { position: relative; display: grid; grid-template-columns: 1.1fr 1fr; gap: 32px; }
+
+  .cover-meta { font-family: var(--font-mono); font-size: 11px; color: rgba(255,255,255,.5); letter-spacing: .12em; text-transform: uppercase; display: flex; align-items: center; gap: 12px; }
+  .cover-meta::before { content: ''; width: 22px; height: 1px; background: var(--brand-300); }
+  .cover h1 { font-family: var(--font-display); font-size: 48px; font-weight: 600; letter-spacing: -0.025em; margin: 16px 0 8px; line-height: 1.1; }
+  .cover h1 .lang { font-family: var(--font-mono); font-size: 12px; padding: 4px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; vertical-align: middle; margin-left: 8px; color: rgba(255,255,255,.7); font-weight: 400; }
+  .cover .desc { color: rgba(255,255,255,.65); font-size: 14px; max-width: 460px; line-height: 1.7; }
+
+  .cover-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.10); }
+  .cover-stats .s .l { font-family: var(--font-mono); font-size: 10.5px; color: rgba(255,255,255,.5); letter-spacing: .08em; }
+  .cover-stats .s .v { font-family: var(--font-display); font-size: 22px; font-weight: 600; margin-top: 6px; }
+  .cover-stats .s .sub { color: rgba(255,255,255,.5); font-size: 11px; margin-top: 2px; font-family: var(--font-mono); }
+
+  /* 评分大数字 + 雷达 */
+  .cover-score-block { position: relative; display: flex; flex-direction: column; align-items: center; }
+  .score-big {
+    font-family: var(--font-display); font-size: 96px; font-weight: 600;
+    letter-spacing: -0.04em; line-height: 1;
+    background: linear-gradient(135deg, #fff 0%, var(--brand-300) 60%, var(--accent-300));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .score-row { display: flex; align-items: baseline; gap: 4px; }
+  .score-max { color: rgba(255,255,255,.4); font-size: 18px; font-family: var(--font-mono); }
+  .score-tag { font-family: var(--font-display); padding: 4px 14px; border-radius: 999px; background: rgba(217,168,87,.16); color: var(--sev-medium); font-size: 13px; font-weight: 500; margin-top: 6px; border: 1px solid rgba(217,168,87,.25); }
+  .score-delta { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-family: var(--font-mono); font-size: 12px; margin-top: 8px; }
+
+  /* === 8 维度雷达 === */
+  .radar-card {
+    background: #fff; border-radius: 12px; padding: 24px;
+    margin-bottom: 16px;
+    border: 1px solid var(--gray-100);
+  }
+  .radar-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 32px; align-items: center; }
+  .radar-svg { width: 100%; max-width: 380px; }
+  .dim-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; }
+  .dim-line { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
+  .dim-line .d { width: 10px; height: 10px; border-radius: 3px; }
+  .dim-line .name { color: var(--gray-700); }
+  .dim-line .v { font-family: var(--font-mono); font-weight: 600; color: var(--gray-900); }
+  .dim-line .bar { grid-column: 1 / 4; height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+  .dim-line .bar .fill { height: 100%; border-radius: 2px; }
+
+  /* === 8 维度详评卡 === */
+  .sec-title { font-family: var(--font-display); font-size: 18px; font-weight: 600; margin: 24px 0 12px; display: flex; align-items: center; gap: 10px; }
+  .sec-title .num { font-family: var(--font-mono); font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--gray-100); color: var(--gray-500); letter-spacing: .08em; }
+
+  .dim-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .dimc {
+    background: #fff; border: 1px solid var(--gray-100); border-radius: 10px;
+    padding: 16px;
+    position: relative; overflow: hidden;
+  }
+  .dimc::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .dimc .head { display: flex; align-items: center; gap: 8px; }
+  .dimc .head .ico { width: 24px; height: 24px; border-radius: 6px; color: #fff; font-family: var(--font-mono); font-size: 11px; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+  .dimc .head .name { font-size: 13px; color: var(--gray-700); }
+  .dimc .v { font-family: var(--font-display); font-size: 28px; font-weight: 600; line-height: 1.1; margin-top: 10px; letter-spacing: -0.02em; }
+  .dimc .v .max { font-size: 12px; color: var(--gray-400); font-weight: 400; }
+  .dimc .meta { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--gray-500); margin-top: 8px; }
+  .dimc .meta .issues { font-family: var(--font-mono); }
+  .dimc .meta .delta { font-family: var(--font-mono); padding: 1px 5px; border-radius: 3px; }
+  .dimc .meta .delta.up { color: var(--success); background: rgba(79,184,122,.10); }
+  .dimc .meta .delta.down { color: var(--sev-severe); background: rgba(220,73,97,.10); }
+
+  /* === 严重度 + 修复进度 + 趋势 === */
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .panelc { background: #fff; border: 1px solid var(--gray-100); border-radius: 10px; padding: 20px; }
+  .panelc .h { font-family: var(--font-display); font-weight: 600; font-size: 14px; margin-bottom: 14px; }
+
+  /* 严重度横向条 */
+  .sev-list { display: flex; flex-direction: column; gap: 10px; }
+  .sev-line { display: grid; grid-template-columns: 56px 1fr 36px; gap: 10px; align-items: center; font-size: 12px; }
+  .sev-line .l { display: inline-flex; align-items: center; gap: 6px; }
+  .sev-line .l::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
+  .sev-line .track { height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; }
+  .sev-line .fill { height: 100%; border-radius: 4px; }
+  .sev-line .v { font-family: var(--font-mono); font-weight: 500; text-align: right; }
+
+  /* 修复进度仪表 */
+  .gauge-big { display: flex; flex-direction: column; align-items: center; padding: 8px 0; }
+  .gauge-num { font-family: var(--font-display); font-size: 40px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+  .gauge-num .pct { font-size: 16px; color: var(--gray-500); }
+  .gauge-sub { color: var(--gray-500); font-size: 11.5px; margin-top: 4px; font-family: var(--font-mono); }
+  .gauge-legend { display: flex; gap: 12px; margin-top: 16px; font-size: 11px; color: var(--gray-500); }
+  .gauge-legend .it { display: inline-flex; align-items: center; gap: 5px; }
+  .gauge-legend .it::before { content: ''; width: 8px; height: 8px; border-radius: 2px; }
+  .gauge-legend .it.fix::before { background: var(--success); }
+  .gauge-legend .it.ign::before { background: var(--gray-400); }
+  .gauge-legend .it.rev::before { background: var(--brand-500); }
+  .gauge-legend .it.un::before { background: var(--sev-high); }
+
+  /* === TOP 问题 === */
+  .top-issues { background: #fff; border: 1px solid var(--gray-100); border-radius: 10px; overflow: hidden; margin-top: 16px; }
+  .top-issues table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .top-issues th { background: var(--gray-50); color: var(--gray-600); text-align: left; padding: 12px 16px; font-weight: 500; font-size: 12px; border-bottom: 1px solid var(--gray-100); }
+  .top-issues td { padding: 14px 16px; border-bottom: 1px solid var(--gray-100); vertical-align: middle; }
+  .top-issues tr:last-child td { border-bottom: none; }
+  .top-issues td.loc { font-family: var(--font-mono); font-size: 12px; color: var(--gray-700); }
+  .top-issues td .summary { font-weight: 500; color: var(--gray-900); }
+  .top-issues td .summary-sub { color: var(--gray-500); font-size: 11.5px; margin-top: 2px; }
+
+  /* === AI 总结 === */
+  .ai-summary {
+    background: linear-gradient(135deg, #161A24 0%, #1F2330 100%);
+    color: #DCE0EA;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-top: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .ai-summary::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--brand-400), var(--accent-400), transparent);
+  }
+  .ai-summary .head { display: flex; align-items: center; gap: 10px; }
+  .ai-summary .head .by { font-family: var(--font-display); font-weight: 600; }
+  .ai-summary .head .tag { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 8px; border-radius: 4px; background: rgba(91,88,232,.18); color: var(--brand-300); letter-spacing: .06em; }
+  .ai-summary h3 { font-family: var(--font-display); font-size: 20px; font-weight: 600; margin: 16px 0 8px; color: #fff; line-height: 1.4; }
+  .ai-summary p { font-size: 14px; line-height: 1.8; color: rgba(255,255,255,.78); margin: 0 0 12px; }
+  .ai-summary p code { background: rgba(91,88,232,.20); color: var(--brand-300); padding: 1px 5px; border-radius: 3px; font-family: var(--font-mono); font-size: 12px; }
+  .ai-summary .actions { display: flex; gap: 12px; margin-top: 18px; }
+  .ai-summary .actions button { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); color: #fff; height: 32px; padding: 0 14px; border-radius: 6px; font-family: var(--font-display); font-size: 12px; cursor: pointer; }
+  .ai-summary .actions button.primary { background: var(--brand-500); border-color: var(--brand-500); }
+
+  /* === 顶部工具栏（屏幕版） === */
+  .report-toolbar {
+    background: #fff; border: 1px solid var(--gray-100); border-radius: 12px;
+    padding: 14px 20px;
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-1);
+  }
+  .report-toolbar .t { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
+  .report-toolbar .meta { color: var(--gray-500); font-size: 12px; font-family: var(--font-mono); }
+  .report-toolbar .right { margin-left: auto; display: flex; gap: 8px; }
+
+  /* Footer (page number for print) */
+  .report-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--gray-200); color: var(--gray-500); font-size: 12px; font-family: var(--font-mono); }
+
+  /* === 打印优化 === */
+  @media print {
+    .sidebar, .topbar, .report-toolbar { display: none !important; }
+    body, .content, .app, .main { background: #fff !important; display: block !important; }
+    .report-wrap { max-width: none; margin: 0; padding: 16mm 14mm; }
+    .cover, .radar-card, .panelc, .top-issues, .ai-summary, .dimc { break-inside: avoid; box-shadow: none !important; }
+    .cover { color: #fff !important; }
+    @page { size: A4; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="side-logo">
+      <span class="prism-mark"></span>
+      <span class="text">Prism<div class="sub">CODE REVIEW · AI</div></span>
+    </div>
+    <div class="side-search"><span style="color: var(--brand-300);">⌕</span><span>全局搜索</span><span class="kbd">⌘K</span></div>
+    <nav class="side-nav">
+      <a class="nav-item" href="dashboard.html"><span class="ico">◐</span>仪表盘</a>
+      <div class="side-group-label">— 审查 —</div>
+      <a class="nav-item" href="review-task-detail.html"><span class="ico">▸</span>代码审查<span class="badge">7</span></a>
+      <a class="nav-item active" href="report-detail.html"><span class="ico">⊟</span>审查报告</a>
+      <a class="nav-item" href="#"><span class="ico">⌬</span>规则配置</a>
+      <div class="side-group-label">— 项目 —</div>
+      <a class="nav-item" href="project-list.html"><span class="ico">◫</span>项目管理</a>
+      <a class="nav-item" href="#"><span class="ico">⎘</span>代码文件</a>
+      <a class="nav-item" href="#"><span class="ico">⟲</span>版本历史</a>
+      <div class="side-group-label">— 管理 —</div>
+      <a class="nav-item" href="#"><span class="ico">⊙</span>用户管理</a>
+      <a class="nav-item" href="#"><span class="ico">✻</span>AI 调用日志</a>
+    </nav>
+    <div class="side-bottom">
+      <div class="user-mini">
+        <div class="avatar">张</div>
+        <div class="info"><div class="name">张老师</div><div class="role">TEACHER · ADMIN</div></div>
+        <span class="more">▾</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs"><span>工作台</span><span class="sep">/</span><span>审查报告</span><span class="sep">/</span><span class="now">prism-backend · 2026-05-26</span></div>
+      <div class="top-search"><span>⌕</span>搜索…<span class="kbd">⌘K</span></div>
+      <button class="top-ai"><span class="dot"></span>AI 助手</button>
+      <button class="top-icon-btn">⌬</button>
+      <button class="top-icon-btn">🛎<span class="red-dot"></span></button>
+      <div class="top-user"><div class="avatar">张</div><span class="name">张老师</span><span class="role">TEACHER</span></div>
+    </header>
+
+    <div class="content">
+      <div class="report-wrap">
+
+        <!-- 屏幕版工具栏 -->
+        <div class="report-toolbar">
+          <span class="t">审查报告 #REP-2026-0526-0184</span>
+          <span style="color: var(--gray-300);">·</span>
+          <span class="meta">生成于 2026-05-26 14:32 · DeepSeek-V3 · 耗时 47s</span>
+          <div class="right">
+            <button class="btn btn-default btn-sm">⤓ PDF</button>
+            <button class="btn btn-default btn-sm">⊞ Word</button>
+            <button class="btn btn-default btn-sm" onclick="window.print()">🖨 打印</button>
+            <button class="btn btn-primary btn-sm">✦ 重新生成</button>
+          </div>
+        </div>
+
+        <!-- ========== 报告封面 ========== -->
+        <section class="cover">
+          <div class="cover-grid">
+            <div>
+              <div class="cover-meta">PRISM CODE REVIEW REPORT · 2026 SPRING</div>
+              <h1>prism-backend <span class="lang">JAVA 17 · Spring Boot 3</span></h1>
+              <div class="desc">本次审查覆盖 56 个源文件 / 12,488 行代码，由 DeepSeek-V3 智能体在 47 秒内完成 8 维度全量分析，共识别 23 个问题。</div>
+
+              <div class="cover-stats">
+                <div class="s"><div class="l">FILES SCANNED</div><div class="v">56</div><div class="sub">+4 较上次</div></div>
+                <div class="s"><div class="l">LINES OF CODE</div><div class="v">12,488</div><div class="sub">+812 较上次</div></div>
+                <div class="s"><div class="l">REVIEW DURATION</div><div class="v">47<span style="font-size: 13px; color: rgba(255,255,255,.5);">s</span></div><div class="sub">DeepSeek-V3</div></div>
+                <div class="s"><div class="l">ISSUES FOUND</div><div class="v" style="color: var(--sev-high);">23</div><div class="sub">−5 较上次</div></div>
+                <div class="s"><div class="l">FIXED RATE</div><div class="v" style="color: var(--success);">61%</div><div class="sub">14 已修复</div></div>
+                <div class="s"><div class="l">RISK LEVEL</div><div class="v" style="color: var(--sev-medium);">中等</div><div class="sub">B+</div></div>
+              </div>
+            </div>
+
+            <div class="cover-score-block">
+              <div class="cover-meta" style="align-self: center;">PRISM SCORE</div>
+              <div class="score-row" style="margin-top: 12px;">
+                <span class="score-big">86</span>
+                <span class="score-max">/ 100</span>
+              </div>
+              <div class="score-tag">B+ · 良好</div>
+              <div class="score-delta">▲ 较上次 +4.2 分</div>
+              <div style="margin-top: 22px; display: flex; gap: 6px; align-self: stretch; padding-top: 22px; border-top: 1px solid rgba(255,255,255,.10);">
+                <div style="flex: 1; text-align: center;"><div style="font-family: var(--font-mono); font-size: 10px; color: rgba(255,255,255,.5);">SEVERE</div><div style="font-family: var(--font-display); font-size: 20px; font-weight: 600; color: var(--sev-severe); margin-top: 4px;">3</div></div>
+                <div style="flex: 1; text-align: center;"><div style="font-family: var(--font-mono); font-size: 10px; color: rgba(255,255,255,.5);">HIGH</div><div style="font-family: var(--font-display); font-size: 20px; font-weight: 600; color: var(--sev-high); margin-top: 4px;">7</div></div>
+                <div style="flex: 1; text-align: center;"><div style="font-family: var(--font-mono); font-size: 10px; color: rgba(255,255,255,.5);">MEDIUM</div><div style="font-family: var(--font-display); font-size: 20px; font-weight: 600; color: var(--sev-medium); margin-top: 4px;">9</div></div>
+                <div style="flex: 1; text-align: center;"><div style="font-family: var(--font-mono); font-size: 10px; color: rgba(255,255,255,.5);">LOW</div><div style="font-family: var(--font-display); font-size: 20px; font-weight: 600; color: var(--sev-low); margin-top: 4px;">4</div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== 8 维度雷达 ========== -->
+        <section class="radar-card">
+          <div class="sec-title" style="margin-top: 0;">8 维度评分 · 棱镜光谱<span class="num">SECTION 01</span></div>
+          <div class="radar-grid">
+            <svg class="radar-svg" viewBox="0 0 360 360">
+              <defs>
+                <radialGradient id="radarFill" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#5B58E8" stop-opacity=".25"/>
+                  <stop offset="100%" stop-color="#5B58E8" stop-opacity=".05"/>
+                </radialGradient>
+              </defs>
+              <g transform="translate(180 180)">
+                <!-- grid octagons 4 layers -->
+                <g fill="none" stroke="#E0E3EA">
+                  <polygon points="0,-140 99,-99 140,0 99,99 0,140 -99,99 -140,0 -99,-99" stroke-dasharray="3 3"/>
+                  <polygon points="0,-105 74,-74 105,0 74,74 0,105 -74,74 -105,0 -74,-74" stroke-dasharray="3 3"/>
+                  <polygon points="0,-70 49,-49 70,0 49,49 0,70 -49,49 -70,0 -49,-49" stroke-dasharray="3 3"/>
+                  <polygon points="0,-35 24,-24 35,0 24,24 0,35 -24,24 -35,0 -24,-24" stroke-dasharray="3 3"/>
+                </g>
+                <!-- spokes -->
+                <g stroke="#EEF0F4">
+                  <line x1="0" y1="0" x2="0" y2="-140"/>
+                  <line x1="0" y1="0" x2="99" y2="-99"/>
+                  <line x1="0" y1="0" x2="140" y2="0"/>
+                  <line x1="0" y1="0" x2="99" y2="99"/>
+                  <line x1="0" y1="0" x2="0" y2="140"/>
+                  <line x1="0" y1="0" x2="-99" y2="99"/>
+                  <line x1="0" y1="0" x2="-140" y2="0"/>
+                  <line x1="0" y1="0" x2="-99" y2="-99"/>
+                </g>
+                <!-- scale label -->
+                <text x="2" y="-105" font-family="JetBrains Mono" font-size="9" fill="#9BA3B0">75</text>
+                <text x="2" y="-70" font-family="JetBrains Mono" font-size="9" fill="#9BA3B0">50</text>
+                <text x="2" y="-35" font-family="JetBrains Mono" font-size="9" fill="#9BA3B0">25</text>
+
+                <!-- data polygon: top→clockwise: 规范85, 命名78, 注释72, 维护82, 性能75, 异常80, Bug 70, 安全 92 -->
+                <!-- top=85/100 * 140 = 119 (-119)
+                     45° = 78 * 140/100 = 109 → (109*sin45, -109*cos45) = (77, -77)
+                     90° = 72 * 140/100 = 101 → (101, 0)
+                     135° = 82 → 115 → (81, 81)
+                     180° = 75 → 105 → (0, 105)
+                     225° = 80 → 112 → (-79, 79)
+                     270° = 70 → 98 → (-98, 0)
+                     315° = 92 → 129 → (-91, -91) -->
+                <polygon points="0,-119 77,-77 101,0 81,81 0,105 -79,79 -98,0 -91,-91"
+                         fill="url(#radarFill)" stroke="#5B58E8" stroke-width="2" />
+                <!-- vertex dots -->
+                <g fill="#5B58E8">
+                  <circle cx="0" cy="-119" r="3.5"/>
+                  <circle cx="77" cy="-77" r="3.5"/>
+                  <circle cx="101" cy="0" r="3.5"/>
+                  <circle cx="81" cy="81" r="3.5"/>
+                  <circle cx="0" cy="105" r="3.5"/>
+                  <circle cx="-79" cy="79" r="3.5"/>
+                  <circle cx="-98" cy="0" r="3.5"/>
+                  <circle cx="-91" cy="-91" r="3.5"/>
+                </g>
+                <!-- labels around -->
+                <g font-family="Noto Sans SC" font-size="12" fill="#383E4D">
+                  <text x="0" y="-156" text-anchor="middle">代码规范</text>
+                  <text x="0" y="-145" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#6B7CFF">85</text>
+                  <text x="118" y="-110" text-anchor="middle">命名规范</text>
+                  <text x="118" y="-100" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#4B9BFF">78</text>
+                  <text x="160" y="4" text-anchor="middle">注释</text>
+                  <text x="160" y="18" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#2BBFB9">72</text>
+                  <text x="118" y="118" text-anchor="middle">可维护性</text>
+                  <text x="118" y="132" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#4FB87A">82</text>
+                  <text x="0" y="158" text-anchor="middle">性能问题</text>
+                  <text x="0" y="172" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#D4A53A">75</text>
+                  <text x="-118" y="118" text-anchor="middle">异常处理</text>
+                  <text x="-118" y="132" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#E08648">80</text>
+                  <text x="-160" y="4" text-anchor="middle">潜在Bug</text>
+                  <text x="-160" y="18" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#E25C73">70</text>
+                  <text x="-118" y="-110" text-anchor="middle">安全漏洞</text>
+                  <text x="-118" y="-100" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#B85AC4">92</text>
+                </g>
+              </g>
+            </svg>
+
+            <div>
+              <div class="dim-scores">
+                <div>
+                  <div class="dim-line"><span class="d" style="background: var(--dim-style);"></span><span class="name">代码规范</span><span class="v">85</span></div>
+                  <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 4px;"><div style="height: 100%; width: 85%; background: var(--dim-style); border-radius: 2px;"></div></div>
+                </div>
+                <div>
+                  <div class="dim-line"><span class="d" style="background: var(--dim-security);"></span><span class="name">安全漏洞</span><span class="v">92</span></div>
+                  <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 4px;"><div style="height: 100%; width: 92%; background: var(--dim-security); border-radius: 2px;"></div></div>
+                </div>
+                <div>
+                  <div class="dim-line"><span class="d" style="background: var(--dim-naming);"></span><span class="name">命名规范</span><span class="v">78</span></div>
+                  <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 4px;"><div style="height: 100%; width: 78%; background: var(--dim-naming); border-radius: 2px;"></div></div>
+                </div>
+                <div>
+                  <div class="dim-line"><span class="d" style="background: var(--dim-bug);"></span><span class="name">潜在 Bug</span><span class="v">70</span></div>
+                  <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 4px;"><div style="height: 100%; width: 70%; background: var(--dim-bug); border-radius: 2px;"></div></div>
+                </div>
+                <div>
+                  <div class="dim-line"><span class="d" style="background: var(--dim-comment);"></span><span class="name">注释完整性</span><span class="v">72</span></div>
+                  <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 4px;"><div style="height: 100%; width: 72%; background: var(--dim-comment); border-radius: 2px;"></div></div>
+                </div>
+                <div>
+                  <div class="dim-line"><span class="d" style="background: var(--dim-maintain);"></span><span class="name">可维护性</span><span class="v">82</span></div>
+                  <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 4px;"><div style="height: 100%; width: 82%; background: var(--dim-maintain); border-radius: 2px;"></div></div>
+                </div>
+                <div>
+                  <div class="dim-line"><span class="d" style="background: var(--dim-perf);"></span><span class="name">性能问题</span><span class="v">75</span></div>
+                  <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 4px;"><div style="height: 100%; width: 75%; background: var(--dim-perf); border-radius: 2px;"></div></div>
+                </div>
+                <div>
+                  <div class="dim-line"><span class="d" style="background: var(--dim-except);"></span><span class="name">异常处理</span><span class="v">80</span></div>
+                  <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 4px;"><div style="height: 100%; width: 80%; background: var(--dim-except); border-radius: 2px;"></div></div>
+                </div>
+              </div>
+
+              <div style="margin-top: 24px; padding: 16px; background: var(--brand-50); border-radius: 8px; font-size: 13px; line-height: 1.7; color: var(--gray-700); border-left: 3px solid var(--brand-500);">
+                <b style="color: var(--brand-700);">✦ 一句话总结：</b>项目整体质量良好（86 / B+），<b>安全维度表现优秀</b>，但<b style="color: var(--sev-severe);">潜在 Bug 维度（70 分）</b>是当前最薄弱环节，建议优先处理 NPE 与边界条件类问题。
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== 严重度 + 修复进度 ========== -->
+        <div class="sec-title">问题分布 · 修复进度<span class="num">SECTION 02</span></div>
+        <div class="row3">
+          <div class="panelc">
+            <div class="h">严重度分布</div>
+            <div class="sev-list">
+              <div class="sev-line"><span class="l" style="color: var(--sev-severe);"><span style="color: var(--sev-severe);"></span>危急</span><div class="track"><div class="fill" style="background: var(--sev-severe); width: 13%;"></div></div><span class="v">3</span></div>
+              <div class="sev-line"><span class="l" style="color: var(--sev-high);">高</span><div class="track"><div class="fill" style="background: var(--sev-high); width: 30%;"></div></div><span class="v">7</span></div>
+              <div class="sev-line"><span class="l" style="color: #A47A30;">中</span><div class="track"><div class="fill" style="background: var(--sev-medium); width: 39%;"></div></div><span class="v">9</span></div>
+              <div class="sev-line"><span class="l" style="color: #3F7FA8;">低</span><div class="track"><div class="fill" style="background: var(--sev-low); width: 18%;"></div></div><span class="v">4</span></div>
+            </div>
+            <div style="margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--gray-200); font-size: 12px; color: var(--gray-500);">总计 <b style="color: var(--gray-900); font-family: var(--font-mono);">23</b> 个问题 · 平均严重度 <b style="color: var(--sev-medium); font-family: var(--font-mono);">2.4 / 4</b></div>
+            <div style="margin-top: 8px;">
+              <div style="display: flex; gap: 2px; height: 16px; border-radius: 4px; overflow: hidden;">
+                <div style="background: var(--sev-severe); width: 13%;"></div>
+                <div style="background: var(--sev-high); width: 30%;"></div>
+                <div style="background: var(--sev-medium); width: 39%;"></div>
+                <div style="background: var(--sev-low); width: 18%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panelc">
+            <div class="h">修复进度</div>
+            <div class="gauge-big">
+              <svg width="180" height="100" viewBox="0 0 180 100">
+                <path d="M 18 90 A 72 72 0 0 1 162 90" fill="none" stroke="#EEF0F4" stroke-width="12" stroke-linecap="round"/>
+                <path d="M 18 90 A 72 72 0 0 1 124 28" fill="none" stroke="url(#g1)" stroke-width="12" stroke-linecap="round"/>
+                <defs>
+                  <linearGradient id="g1"><stop offset="0%" stop-color="#5B58E8"/><stop offset="100%" stop-color="#4FB87A"/></linearGradient>
+                </defs>
+              </svg>
+              <div class="gauge-num" style="margin-top: -22px;">61<span class="pct">%</span></div>
+              <div class="gauge-sub">14 of 23 fixed</div>
+            </div>
+            <div class="gauge-legend" style="justify-content: center; flex-wrap: wrap;">
+              <span class="it fix">已修复 14</span>
+              <span class="it un">未修复 6</span>
+              <span class="it rev">待复查 2</span>
+              <span class="it ign">已忽略 1</span>
+            </div>
+          </div>
+
+          <div class="panelc">
+            <div class="h">评分历史 · 近 6 次</div>
+            <svg viewBox="0 0 280 130" width="100%">
+              <g stroke="#EEF0F4" stroke-dasharray="3 3">
+                <line x1="0" y1="30" x2="280" y2="30"/>
+                <line x1="0" y1="70" x2="280" y2="70"/>
+                <line x1="0" y1="110" x2="280" y2="110"/>
+              </g>
+              <g font-family="JetBrains Mono" font-size="9" fill="#9BA3B0">
+                <text x="0" y="26">100</text><text x="0" y="66">80</text><text x="0" y="106">60</text>
+              </g>
+              <!-- 78 81 75 82 84 86 -->
+              <path d="M 40 74 L 88 68 L 136 80 L 184 66 L 232 62 L 270 58"
+                fill="none" stroke="#5B58E8" stroke-width="2"/>
+              <g fill="#5B58E8">
+                <circle cx="40" cy="74" r="3"/>
+                <circle cx="88" cy="68" r="3"/>
+                <circle cx="136" cy="80" r="3"/>
+                <circle cx="184" cy="66" r="3"/>
+                <circle cx="232" cy="62" r="3"/>
+                <circle cx="270" cy="58" r="4" stroke="#fff" stroke-width="2"/>
+              </g>
+              <g font-family="JetBrains Mono" font-size="9" fill="#6E7689">
+                <text x="40" y="126" text-anchor="middle">4/12</text>
+                <text x="88" y="126" text-anchor="middle">4/26</text>
+                <text x="136" y="126" text-anchor="middle">5/03</text>
+                <text x="184" y="126" text-anchor="middle">5/12</text>
+                <text x="232" y="126" text-anchor="middle">5/19</text>
+                <text x="270" y="126" text-anchor="middle">今日</text>
+              </g>
+              <text x="270" y="48" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#5B58E8" font-weight="600">86</text>
+            </svg>
+            <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: var(--gray-500); margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--gray-200);">
+              <span>较首次审查 <b style="color: var(--success); font-family: var(--font-mono);">+8 分</b></span>
+              <span>最近 30 天 <b style="color: var(--success); font-family: var(--font-mono);">▲ 4.2 分</b></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========== 8 维度详评卡（重点突出） ========== -->
+        <div class="sec-title">8 维度详评<span class="num">SECTION 03</span></div>
+        <div class="dim-cards">
+          <div class="dimc" style="border-color: rgba(184,90,196,.2);">
+            <div style="background: var(--dim-security);" class="..."></div>
+            <div class="head"><div class="ico" style="background: var(--dim-security);">安</div><div class="name">安全漏洞</div></div>
+            <div class="v" style="color: var(--dim-security);">92<span class="max">/100</span></div>
+            <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 8px;"><div style="height: 100%; width: 92%; background: var(--dim-security); border-radius: 2px;"></div></div>
+            <div class="meta"><span class="issues">3 issues</span><span class="delta up">▲ +2</span></div>
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dim-security);"></div>
+          </div>
+          <div class="dimc">
+            <div class="head"><div class="ico" style="background: var(--dim-style);">规</div><div class="name">代码规范</div></div>
+            <div class="v" style="color: var(--dim-style);">85<span class="max">/100</span></div>
+            <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 8px;"><div style="height: 100%; width: 85%; background: var(--dim-style); border-radius: 2px;"></div></div>
+            <div class="meta"><span class="issues">5 issues</span><span class="delta up">▲ +3</span></div>
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dim-style);"></div>
+          </div>
+          <div class="dimc">
+            <div class="head"><div class="ico" style="background: var(--dim-maintain);">维</div><div class="name">可维护性</div></div>
+            <div class="v" style="color: var(--dim-maintain);">82<span class="max">/100</span></div>
+            <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 8px;"><div style="height: 100%; width: 82%; background: var(--dim-maintain); border-radius: 2px;"></div></div>
+            <div class="meta"><span class="issues">2 issues</span><span class="delta up">▲ +1</span></div>
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dim-maintain);"></div>
+          </div>
+          <div class="dimc">
+            <div class="head"><div class="ico" style="background: var(--dim-except);">异</div><div class="name">异常处理</div></div>
+            <div class="v" style="color: var(--dim-except);">80<span class="max">/100</span></div>
+            <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 8px;"><div style="height: 100%; width: 80%; background: var(--dim-except); border-radius: 2px;"></div></div>
+            <div class="meta"><span class="issues">2 issues</span><span class="delta up">▲ +0</span></div>
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dim-except);"></div>
+          </div>
+          <div class="dimc">
+            <div class="head"><div class="ico" style="background: var(--dim-naming);">名</div><div class="name">命名规范</div></div>
+            <div class="v" style="color: var(--dim-naming);">78<span class="max">/100</span></div>
+            <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 8px;"><div style="height: 100%; width: 78%; background: var(--dim-naming); border-radius: 2px;"></div></div>
+            <div class="meta"><span class="issues">3 issues</span><span class="delta down">▼ −2</span></div>
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dim-naming);"></div>
+          </div>
+          <div class="dimc">
+            <div class="head"><div class="ico" style="background: var(--dim-perf);">性</div><div class="name">性能问题</div></div>
+            <div class="v" style="color: var(--dim-perf);">75<span class="max">/100</span></div>
+            <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 8px;"><div style="height: 100%; width: 75%; background: var(--dim-perf); border-radius: 2px;"></div></div>
+            <div class="meta"><span class="issues">4 issues</span><span class="delta up">▲ +1</span></div>
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dim-perf);"></div>
+          </div>
+          <div class="dimc">
+            <div class="head"><div class="ico" style="background: var(--dim-comment);">注</div><div class="name">注释完整性</div></div>
+            <div class="v" style="color: var(--dim-comment);">72<span class="max">/100</span></div>
+            <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 8px;"><div style="height: 100%; width: 72%; background: var(--dim-comment); border-radius: 2px;"></div></div>
+            <div class="meta"><span class="issues">4 issues</span><span class="delta down">▼ −1</span></div>
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dim-comment);"></div>
+          </div>
+          <div class="dimc" style="background: var(--sev-severe-bg); border-color: rgba(220,73,97,.25);">
+            <div class="head"><div class="ico" style="background: var(--dim-bug);">缺</div><div class="name">潜在 Bug · ★</div></div>
+            <div class="v" style="color: var(--dim-bug);">70<span class="max">/100</span></div>
+            <div style="height: 4px; background: var(--gray-100); border-radius: 2px; overflow: hidden; margin-top: 8px;"><div style="height: 100%; width: 70%; background: var(--dim-bug); border-radius: 2px;"></div></div>
+            <div class="meta"><span class="issues">6 issues</span><span class="delta down">▼ −3 · 待重点</span></div>
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dim-bug);"></div>
+          </div>
+        </div>
+
+        <!-- ========== TOP 问题 ========== -->
+        <div class="sec-title">典型问题 TOP 6<span class="num">SECTION 04</span></div>
+        <div class="top-issues">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 36px;">#</th>
+                <th style="width: 92px;">严重度</th>
+                <th style="width: 110px;">维度</th>
+                <th>问题描述</th>
+                <th style="width: 180px;">位置</th>
+                <th style="width: 90px;">状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="font-family: var(--font-mono); color: var(--gray-500);">01</td>
+                <td><span class="sev sev-severe">SEVERE</span></td>
+                <td><span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>潜在 Bug</span></td>
+                <td><div class="summary">findById 返回 null 未做兜底</div><div class="summary-sub">建议改用 Optional + 业务异常</div></td>
+                <td class="loc">UserService.java<br>L18</td>
+                <td><span class="sev" style="color: var(--status-unfix); background: rgba(226,124,74,.10);">未修复</span></td>
+              </tr>
+              <tr>
+                <td style="font-family: var(--font-mono); color: var(--gray-500);">02</td>
+                <td><span class="sev sev-severe">SEVERE</span></td>
+                <td><span class="dim"><span class="dot" style="background: var(--dim-security);"></span>安全漏洞</span></td>
+                <td><div class="summary">SQL 注入：用户名拼接到原生 SQL</div><div class="summary-sub">使用参数化查询或 MyBatis #{}</div></td>
+                <td class="loc">UserService.java<br>L28</td>
+                <td><span class="sev" style="color: var(--status-unfix); background: rgba(226,124,74,.10);">未修复</span></td>
+              </tr>
+              <tr>
+                <td style="font-family: var(--font-mono); color: var(--gray-500);">03</td>
+                <td><span class="sev sev-severe">SEVERE</span></td>
+                <td><span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>潜在 Bug</span></td>
+                <td><div class="summary">deleteAll 缺少事务与权限保护</div><div class="summary-sub">误调用将清空 user 表</div></td>
+                <td class="loc">UserService.java<br>L22-24</td>
+                <td><span class="sev" style="color: var(--status-review); background: var(--brand-50);">待复查</span></td>
+              </tr>
+              <tr>
+                <td style="font-family: var(--font-mono); color: var(--gray-500);">04</td>
+                <td><span class="sev sev-high">HIGH</span></td>
+                <td><span class="dim"><span class="dot" style="background: var(--dim-perf);"></span>性能</span></td>
+                <td><div class="summary">N+1 查询：列表渲染时循环查关联表</div><div class="summary-sub">建议改 JOIN 或 IN 批查</div></td>
+                <td class="loc">ReviewService.java<br>L88</td>
+                <td><span class="sev" style="color: var(--success); background: rgba(79,184,122,.10);">已修复</span></td>
+              </tr>
+              <tr>
+                <td style="font-family: var(--font-mono); color: var(--gray-500);">05</td>
+                <td><span class="sev sev-high">HIGH</span></td>
+                <td><span class="dim"><span class="dot" style="background: var(--dim-except);"></span>异常</span></td>
+                <td><div class="summary">AI 调用 catch (Exception) 后吞掉异常</div><div class="summary-sub">应记录日志并向上抛出业务异常</div></td>
+                <td class="loc">AiAgent.java<br>L142</td>
+                <td><span class="sev" style="color: var(--status-unfix); background: rgba(226,124,74,.10);">未修复</span></td>
+              </tr>
+              <tr>
+                <td style="font-family: var(--font-mono); color: var(--gray-500);">06</td>
+                <td><span class="sev sev-medium">MEDIUM</span></td>
+                <td><span class="dim"><span class="dot" style="background: var(--dim-naming);"></span>命名</span></td>
+                <td><div class="summary">字段名 userRepo 与类型 UserDao 不一致</div><div class="summary-sub">统一为 userDao 或将类型改名 Repository</div></td>
+                <td class="loc">UserService.java<br>L11</td>
+                <td><span class="sev" style="color: var(--success); background: rgba(79,184,122,.10);">已修复</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ========== AI 总结建议 ========== -->
+        <section class="ai-summary">
+          <div class="head">
+            <span class="prism-mark" style="width: 28px; height: 28px;"></span>
+            <span class="by" style="color: #fff;">DeepSeek 智能体 · 总结与建议</span>
+            <span class="tag">AI GENERATED · STREAMING</span>
+          </div>
+          <h3>本次审查的 3 个关键发现 与 4 条改进建议</h3>
+          <p>本项目在<b style="color: var(--brand-300);">安全维度（92 分）</b>表现优秀——基本规避了 XSS、CSRF 等常见 Web 安全风险。但仍存在两个<b style="color: var(--sev-severe);">需立刻修复的危急问题</b>：<code>UserService.findById</code> 的空指针返回 与 <code>findByName</code> 的 SQL 拼接。后者一旦上线可被攻击者通过 <code>' OR 1=1 --</code> 拿到全表用户。</p>
+          <p>潜在 Bug 维度仅 70 分，是本次薄弱项，主要由 4 处空值边界与 2 处事务边界引发。建议在迭代 v0.4 中以"<b style="color: var(--accent-300);">空安全 + 事务边界</b>"为主题集中重构 Service 层；预估投入 6 ~ 8 人天。</p>
+          <p>命名规范分数从上次 80 降至 78（−2），主要原因是新加入的 <code>algo-*</code> 模块中存在拼音变量与缩写命名。建议将《Prism 命名规约》纳入 Code Review checklist，并在 IDE 接入 Checkstyle 提示。</p>
+          <div class="actions">
+            <button class="primary">✦ 一键生成整改 issue</button>
+            <button>继续追问 AI</button>
+            <button>查看完整流式日志</button>
+          </div>
+        </section>
+
+        <div class="report-foot">
+          <span>Prism v1.0 · DeepSeek-V3 · REP-2026-0526-0184</span>
+          <span>第 1 / 1 页 · 共 23 条问题</span>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

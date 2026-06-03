@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>棱镜 Prism · 设计方案</title>
+<meta name="viewport" content="width=1440">
+<link rel="stylesheet" href="theme.css">
+<style>
+  body { background: var(--gray-50); }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 80px 48px 120px; }
+  .eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; color: var(--brand-500); text-transform: uppercase; }
+  h1.hero { font-family: var(--font-display); font-size: 64px; line-height: 1.05; font-weight: 600; letter-spacing: -0.025em; margin: 16px 0 20px; color: var(--gray-900); }
+  h1.hero em { font-style: normal; background: linear-gradient(120deg, var(--brand-500), var(--accent-400) 60%, var(--dim-bug)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { font-size: 18px; color: var(--gray-600); max-width: 720px; line-height: 1.7; }
+  .slogan { font-family: var(--font-display); font-size: 22px; color: var(--gray-700); margin-top: 32px; padding-left: 20px; border-left: 3px solid var(--brand-500); }
+
+  section { margin-top: 96px; }
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 32px; padding-bottom: 16px; border-bottom: 1px solid var(--gray-200); }
+  .sec-head h2 { font-family: var(--font-display); font-size: 32px; font-weight: 600; margin: 0; letter-spacing: -0.015em; }
+  .sec-head .num { font-family: var(--font-mono); font-size: 13px; color: var(--gray-400); }
+
+  /* Color swatches */
+  .grid { display: grid; gap: 16px; }
+  .grid-12 { grid-template-columns: repeat(12, 1fr); }
+  .grid-8 { grid-template-columns: repeat(8, 1fr); }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+  .swatch { border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--gray-100); background: #fff; }
+  .swatch .chip { height: 88px; display: flex; align-items: flex-end; padding: 10px 12px; color: #fff; font-family: var(--font-mono); font-size: 11px; }
+  .swatch .meta { padding: 10px 12px; }
+  .swatch .meta .name { font-size: 12px; font-weight: 500; color: var(--gray-800); }
+  .swatch .meta .hex { font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+
+  .brand-row { display: grid; grid-template-columns: repeat(10, 1fr); gap: 0; border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-1); }
+  .brand-row .step { padding: 24px 12px 14px; color: #fff; font-family: var(--font-mono); font-size: 11px; }
+  .brand-row .step .num { opacity: .85; }
+  .brand-row .step .val { display: block; margin-top: 6px; font-size: 10px; opacity: .7; }
+
+  .dim-card { padding: 18px; border-radius: var(--r-md); background: #fff; border: 1px solid var(--gray-100); position: relative; overflow: hidden; }
+  .dim-card .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
+  .dim-card .icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-family: var(--font-mono); font-size: 14px; font-weight: 600; }
+  .dim-card .name { font-weight: 500; margin-top: 12px; }
+  .dim-card .hex { font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+
+  .sev-card { padding: 20px; border-radius: var(--r-md); border: 1px solid var(--gray-100); }
+  .sev-card .label { display: flex; align-items: center; justify-content: space-between; }
+  .sev-card .label .name { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+  .sev-card .desc { color: var(--gray-500); font-size: 13px; margin-top: 8px; line-height: 1.6; }
+
+  /* Type */
+  .type-row { display: grid; grid-template-columns: 140px 1fr 100px; align-items: baseline; padding: 18px 0; border-bottom: 1px dashed var(--gray-200); }
+  .type-row .label { font-family: var(--font-mono); font-size: 12px; color: var(--gray-500); }
+  .type-row .sample { color: var(--gray-900); }
+  .type-row .meta { font-family: var(--font-mono); font-size: 11px; color: var(--gray-400); text-align: right; }
+
+  /* Component panels */
+  .panel { padding: 32px; border-radius: var(--r-lg); background: #fff; border: 1px solid var(--gray-100); }
+  .panel-title { font-family: var(--font-mono); font-size: 12px; color: var(--gray-500); margin-bottom: 18px; text-transform: uppercase; letter-spacing: .08em; }
+
+  /* SCSS code block */
+  pre.code {
+    background: var(--gray-900); color: #DCE0EA;
+    border-radius: var(--r-md); padding: 20px 22px;
+    font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
+    overflow-x: auto;
+    border: 1px solid #2A2F3F;
+  }
+  pre.code .c { color: #6E7689; font-style: italic; }
+  pre.code .k { color: #8DDDE9; }
+  pre.code .v { color: #E8A85B; }
+  pre.code .s { color: #B7B3FB; }
+
+  /* Roadmap */
+  .road { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .road .col { padding: 24px; border-radius: var(--r-lg); background: #fff; border: 1px solid var(--gray-100); }
+  .road .tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; border-radius: 999px; }
+  .road .col h3 { font-family: var(--font-display); margin: 14px 0 6px; font-size: 20px; }
+  .road .est { font-family: var(--font-mono); font-size: 12px; color: var(--gray-500); }
+  .road ul { padding-left: 18px; margin: 16px 0 0; color: var(--gray-700); line-height: 1.8; font-size: 13.5px; }
+
+  /* AI thinking demo */
+  .ai-demo {
+    background: linear-gradient(180deg, #1A1E2C 0%, #161A24 100%);
+    border-radius: var(--r-lg); padding: 32px; color: #DCE0EA;
+    position: relative; overflow: hidden;
+    border: 1px solid #2A2F3F;
+  }
+  .ai-demo::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(600px 200px at 20% 0%, rgba(91,88,232,.18), transparent 60%);
+    pointer-events: none;
+  }
+  .ai-demo .row { display: flex; align-items: center; gap: 12px; }
+  .ai-demo .lbl { font-family: var(--font-mono); font-size: 11px; color: #6E7689; text-transform: uppercase; letter-spacing: .08em; }
+  .ai-demo .stream { font-family: var(--font-mono); font-size: 13px; margin-top: 12px; line-height: 1.7; color: #C8CDD6; }
+  .ai-demo .stream .cursor { display: inline-block; width: 8px; height: 14px; background: var(--brand-400); vertical-align: -2px; animation: blink 1s steps(2) infinite; margin-left: 2px; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .light-bar {
+    position: relative; height: 6px; border-radius: 3px;
+    background: rgba(91,88,232,.15);
+    overflow: hidden;
+  }
+  .light-bar::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 30%;
+    background: linear-gradient(90deg, transparent, var(--brand-400), var(--accent-400), transparent);
+    animation: lightSweep 1.8s linear infinite;
+  }
+
+  /* Layout spec drawing */
+  .layout-spec {
+    display: grid; grid-template-columns: 220px 1fr; gap: 0;
+    height: 320px; border-radius: var(--r-lg); overflow: hidden;
+    border: 1px solid var(--gray-200); background: #fff;
+  }
+  .layout-spec .ls-side { background: var(--side-bg); color: var(--side-text); padding: 18px 14px; font-family: var(--font-mono); font-size: 11px; }
+  .layout-spec .ls-side .logo { display: flex; align-items: center; gap: 10px; color: #fff; font-family: var(--font-display); font-size: 14px; font-weight: 600; }
+  .layout-spec .ls-side .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; margin-top: 4px; color: var(--side-text-dim); }
+  .layout-spec .ls-side .nav-item.active { background: var(--side-active-bg); color: var(--side-active-fg); }
+  .layout-spec .ls-side .nav-item::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+  .layout-spec .ls-main { background: var(--gray-50); padding: 0; }
+  .layout-spec .ls-top { height: 56px; background: #fff; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; padding: 0 24px; gap: 16px; font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); }
+  .layout-spec .ls-content { padding: 24px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .layout-spec .ls-content .cube { height: 100px; border-radius: 8px; background: #fff; border: 1px dashed var(--gray-200); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 11px; color: var(--gray-400); }
+
+  .dim-spec-bullet { font-size: 13px; color: var(--gray-700); padding: 6px 0; }
+  .dim-spec-bullet b { color: var(--gray-900); font-weight: 500; }
+  .dim-spec-bullet code { font-family: var(--font-mono); background: var(--gray-100); padding: 1px 6px; border-radius: 4px; font-size: 12px; color: var(--brand-600); }
+
+  /* Quick page nav */
+  .page-nav { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  .page-nav a { display: block; padding: 20px; border-radius: var(--r-md); background: #fff; border: 1px solid var(--gray-100); text-decoration: none; color: inherit; transition: all .2s ease; }
+  .page-nav a:hover { border-color: var(--brand-300); box-shadow: var(--shadow-2); transform: translateY(-2px); }
+  .page-nav .n { font-family: var(--font-mono); font-size: 11px; color: var(--brand-500); }
+  .page-nav .t { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin-top: 6px; }
+  .page-nav .s { font-size: 12px; color: var(--gray-500); margin-top: 4px; line-height: 1.5; }
+
+  /* prism hero visual */
+  .prism-hero { position: relative; padding: 48px; border-radius: var(--r-lg); background: linear-gradient(135deg, #1A1E2C 0%, #161A24 60%, #1F1A3A 100%); overflow: hidden; color: #fff; margin-top: 48px; min-height: 280px; }
+  .prism-hero::after {
+    content: ''; position: absolute; top: -120px; right: -100px;
+    width: 480px; height: 480px;
+    background: conic-gradient(from 220deg, var(--dim-style), var(--dim-naming), var(--dim-comment), var(--dim-maintain), var(--dim-perf), var(--dim-except), var(--dim-bug), var(--dim-security), var(--dim-style));
+    filter: blur(60px); opacity: .55; border-radius: 50%;
+  }
+  .prism-hero > * { position: relative; z-index: 2; }
+  .prism-hero .beam {
+    position: absolute; left: 0; right: 50%; top: 50%; height: 2px;
+    background: linear-gradient(90deg, transparent, #fff);
+    opacity: .4; z-index: 1;
+  }
+  .prism-hero .fan {
+    position: absolute; right: 0; top: 50%; width: 60%; height: 2px;
+    transform-origin: left center;
+    z-index: 1;
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <!-- HERO -->
+  <div>
+    <div class="eyebrow">设计方案 · v1.0 · 2026</div>
+    <h1 class="hero">让代码穿过 <em>棱镜</em>，<br>折射出 8 个维度的真相。</h1>
+    <p class="lede">「棱镜 Prism」是为<strong>基于大模型智能体的代码质量审查管理系统</strong>定制的视觉语言。它把"AI 智能体审查代码"这件抽象的事，转译成一个所有人都能瞬间理解的隐喻：代码像一束白光穿过棱镜，被 AI 折射成 8 道彩色的维度光谱——每一道颜色，都对应一类被发现的问题。</p>
+    <p class="slogan">One beam in, eight truths out. — 一束代码进，八重洞察出。</p>
+  </div>
+
+  <div class="prism-hero">
+    <div class="eyebrow" style="color: var(--brand-300);">CONCEPT</div>
+    <div style="font-family: var(--font-display); font-size: 36px; font-weight: 600; margin-top: 12px; line-height: 1.25; max-width: 560px;">在 SonarQube 像"扫描仪"、GitHub 像"批注板"的时候，<br>我们做一台<span style="color: var(--brand-300);">会说话的棱镜</span>。</div>
+    <div style="font-size: 14px; color: rgba(255,255,255,.65); margin-top: 18px; max-width: 560px; line-height: 1.7;">DeepSeek 大模型让审查从"模式匹配"升级为"语义理解"——它会用自然语言告诉你为什么这段代码有问题，并给出该怎么改。视觉语言必须把这种"智能感"和"折射感"传递出去。</div>
+  </div>
+
+  <!-- 1. 设计理念 -->
+  <section>
+    <div class="sec-head"><h2>1 &nbsp;设计理念</h2><span class="num">01 / 07 — Philosophy</span></div>
+    <div class="grid grid-3">
+      <div class="panel">
+        <div class="panel-title">关键词</div>
+        <div style="font-family: var(--font-display); font-size: 26px; font-weight: 600; color: var(--gray-900);">棱镜 · 光谱 · 折射</div>
+        <p style="color: var(--gray-600); font-size: 14px; line-height: 1.7; margin-top: 12px;">三个词共同构造一个核心隐喻：AI 智能体 = 棱镜；8 维度审查 = 光谱；自然语言反馈 = 折射出的可见光。隐喻自带答辩记忆点，不依赖"AI 蓝"、"赛博绿"这类被用滥的视觉。</p>
+      </div>
+      <div class="panel">
+        <div class="panel-title">为什么契合本品</div>
+        <p style="color: var(--gray-600); font-size: 14px; line-height: 1.7; margin: 0;">SonarQube/ESLint 是"过滤器"——它们只筛出已知模式。我们是"折射器"——大模型把一段难以名状的代码气味，折射为 8 道清晰的、可命名的维度。这恰好把产品的差异化（语义理解、自然语言反馈）变成了视觉差异化。</p>
+      </div>
+      <div class="panel">
+        <div class="panel-title">推荐风格方向</div>
+        <p style="color: var(--gray-600); font-size: 14px; line-height: 1.7; margin: 0;">采用你倾向的 <b style="color: var(--brand-600);">A 暗色侧栏 + C 高饱和图表</b>。理由：① 侧栏暗化让品牌色更"发光"，强化 AI 工作站气质；② 主内容区保持浅色高密度，照顾教师/学生长时间阅读代码的视疲劳；③ 8 维度天然就是一组数据可视化色板，与 C 的诉求完全一致。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 设计令牌 -->
+  <section>
+    <div class="sec-head"><h2>2 &nbsp;设计令牌</h2><span class="num">02 / 07 — Tokens</span></div>
+
+    <!-- 品牌主色 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 0 0 14px;">品牌主色 · 棱镜紫 Brand · Prism Violet</h3>
+    <div class="brand-row">
+      <div class="step" style="background: #EFEEFE; color: #2D2B82;"><span class="num">50</span><span class="val">#EFEEFE</span></div>
+      <div class="step" style="background: #DCDAFD; color: #2D2B82;"><span class="num">100</span><span class="val">#DCDAFD</span></div>
+      <div class="step" style="background: #B7B3FB; color: #2D2B82;"><span class="num">200</span><span class="val">#B7B3FB</span></div>
+      <div class="step" style="background: #8E88F5;"><span class="num">300</span><span class="val">#8E88F5</span></div>
+      <div class="step" style="background: #6F69EE;"><span class="num">400</span><span class="val">#6F69EE</span></div>
+      <div class="step" style="background: #5B58E8; outline: 2px solid var(--brand-700); outline-offset: -2px;"><span class="num">500 ★</span><span class="val">#5B58E8 · rgb(91,88,232)</span></div>
+      <div class="step" style="background: #4A46D4;"><span class="num">600</span><span class="val">#4A46D4</span></div>
+      <div class="step" style="background: #3B38AE;"><span class="num">700</span><span class="val">#3B38AE</span></div>
+      <div class="step" style="background: #2D2B82;"><span class="num">800</span><span class="val">#2D2B82</span></div>
+      <div class="step" style="background: #1E1C55;"><span class="num">900</span><span class="val">#1E1C55</span></div>
+    </div>
+
+    <!-- 辅助色 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 36px 0 14px;">辅助色 · 折射青 Refraction Cyan（用于强调与图表 highlight）</h3>
+    <div class="brand-row">
+      <div class="step" style="background: #E7F8FB; color: #1C849E;"><span class="num">50</span><span class="val">#E7F8FB</span></div>
+      <div class="step" style="background: #C6EEF4; color: #1C849E;"><span class="num">100</span><span class="val">#C6EEF4</span></div>
+      <div class="step" style="background: #8DDDE9; color: #1C849E;"><span class="num">200</span><span class="val">#8DDDE9</span></div>
+      <div class="step" style="background: #54CCDE;"><span class="num">300</span><span class="val">#54CCDE</span></div>
+      <div class="step" style="background: #3DBCD9;"><span class="num">400 ★</span><span class="val">#3DBCD9 · rgb(61,188,217)</span></div>
+      <div class="step" style="background: #25A5C4;"><span class="num">500</span><span class="val">#25A5C4</span></div>
+      <div class="step" style="background: #1C849E;"><span class="num">600</span><span class="val">#1C849E</span></div>
+      <div class="step" style="background: #156878;"><span class="num">700</span><span class="val">#156878</span></div>
+      <div class="step" style="background: #0E4D58;"><span class="num">800</span><span class="val">#0E4D58</span></div>
+      <div class="step" style="background: #082F35;"><span class="num">900</span><span class="val">#082F35</span></div>
+    </div>
+
+    <!-- 8 维度 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 36px 0 14px;">8 维度光谱 · 8 Dimensions Spectrum</h3>
+    <div class="grid grid-8">
+      <div class="dim-card"><div class="bar" style="background: var(--dim-style);"></div><div class="icon" style="background: var(--dim-style);">规</div><div class="name">代码规范</div><div class="hex">#6B7CFF</div></div>
+      <div class="dim-card"><div class="bar" style="background: var(--dim-naming);"></div><div class="icon" style="background: var(--dim-naming);">名</div><div class="name">命名规范</div><div class="hex">#4B9BFF</div></div>
+      <div class="dim-card"><div class="bar" style="background: var(--dim-comment);"></div><div class="icon" style="background: var(--dim-comment);">注</div><div class="name">注释完整性</div><div class="hex">#2BBFB9</div></div>
+      <div class="dim-card"><div class="bar" style="background: var(--dim-maintain);"></div><div class="icon" style="background: var(--dim-maintain);">维</div><div class="name">可维护性</div><div class="hex">#4FB87A</div></div>
+      <div class="dim-card"><div class="bar" style="background: var(--dim-perf);"></div><div class="icon" style="background: var(--dim-perf);">性</div><div class="name">性能问题</div><div class="hex">#D4A53A</div></div>
+      <div class="dim-card"><div class="bar" style="background: var(--dim-except);"></div><div class="icon" style="background: var(--dim-except);">异</div><div class="name">异常处理</div><div class="hex">#E08648</div></div>
+      <div class="dim-card"><div class="bar" style="background: var(--dim-bug);"></div><div class="icon" style="background: var(--dim-bug);">缺</div><div class="name">潜在 Bug</div><div class="hex">#E25C73</div></div>
+      <div class="dim-card"><div class="bar" style="background: var(--dim-security);"></div><div class="icon" style="background: var(--dim-security);">安</div><div class="name">安全漏洞</div><div class="hex">#B85AC4</div></div>
+    </div>
+
+    <!-- 严重度 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 36px 0 14px;">4 级严重度 · Severity</h3>
+    <div class="grid grid-4">
+      <div class="sev-card" style="background: var(--sev-severe-bg); border-color: rgba(220,73,97,.2);">
+        <div class="label"><span class="name" style="color: var(--sev-severe);">危急 Severe</span><span class="sev sev-severe">SEVERE</span></div>
+        <div class="desc">阻塞性安全漏洞 / 已知 CVE / 程序崩溃路径。必须立即修复，禁止合并。</div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--sev-severe); margin-top: 14px;">#DC4961 · rgb(220,73,97)</div>
+      </div>
+      <div class="sev-card" style="background: var(--sev-high-bg); border-color: rgba(226,124,74,.2);">
+        <div class="label"><span class="name" style="color: var(--sev-high);">高 High</span><span class="sev sev-high">HIGH</span></div>
+        <div class="desc">明显逻辑缺陷 / 高概率 Bug / 性能瓶颈。本次迭代必须解决。</div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--sev-high); margin-top: 14px;">#E27C4A · rgb(226,124,74)</div>
+      </div>
+      <div class="sev-card" style="background: var(--sev-medium-bg); border-color: rgba(217,168,87,.2);">
+        <div class="label"><span class="name" style="color: #A47A30;">中 Medium</span><span class="sev sev-medium">MEDIUM</span></div>
+        <div class="desc">代码异味 / 命名不清晰 / 维护性下降。建议本周内修复。</div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--sev-medium); margin-top: 14px;">#D9A857 · rgb(217,168,87)</div>
+      </div>
+      <div class="sev-card" style="background: var(--sev-low-bg); border-color: rgba(111,163,199,.25);">
+        <div class="label"><span class="name" style="color: #3F7FA8;">低 Low</span><span class="sev sev-low">LOW</span></div>
+        <div class="desc">风格统一 / 注释优化建议。优先级最低，可选择性忽略。</div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--sev-low); margin-top: 14px;">#6FA3C7 · rgb(111,163,199)</div>
+      </div>
+    </div>
+
+    <!-- 中性色 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 36px 0 14px;">中性色 · Cool Neutrals（9 阶）</h3>
+    <div class="brand-row">
+      <div class="step" style="background: #F7F8FA; color: #161A24;"><span class="num">50</span><span class="val">#F7F8FA</span></div>
+      <div class="step" style="background: #EEF0F4; color: #161A24;"><span class="num">100</span><span class="val">#EEF0F4</span></div>
+      <div class="step" style="background: #E0E3EA; color: #161A24;"><span class="num">200</span><span class="val">#E0E3EA</span></div>
+      <div class="step" style="background: #C8CDD6; color: #161A24;"><span class="num">300</span><span class="val">#C8CDD6</span></div>
+      <div class="step" style="background: #9BA3B0;"><span class="num">400</span><span class="val">#9BA3B0</span></div>
+      <div class="step" style="background: #6E7689;"><span class="num">500</span><span class="val">#6E7689</span></div>
+      <div class="step" style="background: #4F5667;"><span class="num">600</span><span class="val">#4F5667</span></div>
+      <div class="step" style="background: #383E4D;"><span class="num">700</span><span class="val">#383E4D</span></div>
+      <div class="step" style="background: #252A37;"><span class="num">800</span><span class="val">#252A37</span></div>
+      <div class="step" style="background: #161A24;"><span class="num">900</span><span class="val">#161A24</span></div>
+    </div>
+
+    <!-- 字体 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 36px 0 14px;">字体系统 · Typography</h3>
+    <div class="panel">
+      <div class="type-row"><span class="label">display / 标题</span><span class="sample" style="font-family: var(--font-display); font-size: 36px; font-weight: 600; letter-spacing: -0.02em;">Space Grotesk · 棱镜 Prism</span><span class="meta">Google Fonts</span></div>
+      <div class="type-row"><span class="label">sans / 正文</span><span class="sample" style="font-family: var(--font-sans); font-size: 18px;">Noto Sans SC · 让代码穿过棱镜</span><span class="meta">Google Fonts</span></div>
+      <div class="type-row"><span class="label">mono / 代码</span><span class="sample" style="font-family: var(--font-mono); font-size: 16px;">JetBrains Mono · const reviewer = new Agent();</span><span class="meta">Google Fonts</span></div>
+      <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--gray-100); display: grid; grid-template-columns: repeat(7, 1fr); gap: 16px;">
+        <div><div style="font-size: 12px; color: var(--gray-800);">xs · 12</div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-400); margin-top: 2px;">辅助说明</div></div>
+        <div><div style="font-size: 13px;">sm · 13</div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-400); margin-top: 2px;">表格副文</div></div>
+        <div><div style="font-size: 14px;">base · 14</div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-400); margin-top: 2px;">默认正文</div></div>
+        <div><div style="font-size: 16px;">md · 16</div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-400); margin-top: 2px;">强调正文</div></div>
+        <div><div style="font-size: 18px;">lg · 18</div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-400); margin-top: 2px;">小标题</div></div>
+        <div><div style="font-size: 22px;">xl · 22</div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-400); margin-top: 2px;">卡片标题</div></div>
+        <div><div style="font-size: 28px;">2xl · 28</div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-400); margin-top: 2px;">页面标题</div></div>
+      </div>
+    </div>
+
+    <!-- 间距 圆角 阴影 -->
+    <div class="grid grid-3" style="margin-top: 28px;">
+      <div class="panel">
+        <div class="panel-title">间距阶 (px)</div>
+        <div style="display: flex; align-items: flex-end; gap: 12px; height: 80px;">
+          <div style="display: flex; flex-direction: column; align-items: center;"><div style="width: 4px; height: 4px; background: var(--brand-500);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">4</div></div>
+          <div style="display: flex; flex-direction: column; align-items: center;"><div style="width: 8px; height: 8px; background: var(--brand-500);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">8</div></div>
+          <div style="display: flex; flex-direction: column; align-items: center;"><div style="width: 12px; height: 12px; background: var(--brand-500);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">12</div></div>
+          <div style="display: flex; flex-direction: column; align-items: center;"><div style="width: 16px; height: 16px; background: var(--brand-500);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">16</div></div>
+          <div style="display: flex; flex-direction: column; align-items: center;"><div style="width: 24px; height: 24px; background: var(--brand-500);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">24</div></div>
+          <div style="display: flex; flex-direction: column; align-items: center;"><div style="width: 32px; height: 32px; background: var(--brand-500);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">32</div></div>
+          <div style="display: flex; flex-direction: column; align-items: center;"><div style="width: 48px; height: 48px; background: var(--brand-500);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">48</div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">圆角阶 (px)</div>
+        <div style="display: flex; align-items: flex-end; gap: 20px; height: 80px;">
+          <div style="text-align: center;"><div style="width: 48px; height: 48px; background: var(--brand-100); border-radius: 4px;"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">sm · 4</div></div>
+          <div style="text-align: center;"><div style="width: 48px; height: 48px; background: var(--brand-100); border-radius: 8px;"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">md · 8</div></div>
+          <div style="text-align: center;"><div style="width: 48px; height: 48px; background: var(--brand-100); border-radius: 12px;"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">lg · 12</div></div>
+          <div style="text-align: center;"><div style="width: 48px; height: 48px; background: var(--brand-100); border-radius: 18px;"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 6px;">xl · 18</div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">阴影阶</div>
+        <div style="display: flex; gap: 20px; align-items: center;">
+          <div style="text-align: center;"><div style="width: 56px; height: 56px; background: #fff; border-radius: 10px; box-shadow: var(--shadow-1);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 8px;">1</div></div>
+          <div style="text-align: center;"><div style="width: 56px; height: 56px; background: #fff; border-radius: 10px; box-shadow: var(--shadow-2);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 8px;">2</div></div>
+          <div style="text-align: center;"><div style="width: 56px; height: 56px; background: #fff; border-radius: 10px; box-shadow: var(--shadow-3);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 8px;">3</div></div>
+          <div style="text-align: center;"><div style="width: 56px; height: 56px; background: #fff; border-radius: 10px; box-shadow: var(--shadow-4);"></div><div style="font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); margin-top: 8px;">4</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCSS code -->
+    <h3 class="h-display" style="font-size: 18px; margin: 36px 0 14px;">variables.scss · 完整覆盖代码</h3>
+<pre class="code"><span class="c">// ===========================================
+// src/assets/styles/variables.scss
+// 棱镜 Prism · Element Plus 主题覆盖
+// ===========================================</span>
+
+<span class="c">// ---- 品牌 ----</span>
+<span class="k">$brand-50</span>:  <span class="v">#EFEEFE</span>; <span class="k">$brand-100</span>: <span class="v">#DCDAFD</span>; <span class="k">$brand-200</span>: <span class="v">#B7B3FB</span>;
+<span class="k">$brand-300</span>: <span class="v">#8E88F5</span>; <span class="k">$brand-400</span>: <span class="v">#6F69EE</span>; <span class="k">$brand-500</span>: <span class="v">#5B58E8</span>;
+<span class="k">$brand-600</span>: <span class="v">#4A46D4</span>; <span class="k">$brand-700</span>: <span class="v">#3B38AE</span>; <span class="k">$brand-800</span>: <span class="v">#2D2B82</span>;
+<span class="k">$brand-900</span>: <span class="v">#1E1C55</span>;
+
+<span class="c">// ---- 严重度 ----</span>
+<span class="k">$sev-severe</span>: <span class="v">#DC4961</span>; <span class="k">$sev-high</span>: <span class="v">#E27C4A</span>;
+<span class="k">$sev-medium</span>: <span class="v">#D9A857</span>; <span class="k">$sev-low</span>: <span class="v">#6FA3C7</span>;
+
+<span class="c">// ---- 8 维度 ----</span>
+<span class="k">$dim</span>: (
+  <span class="s">'style'</span>: <span class="v">#6B7CFF</span>, <span class="s">'naming'</span>: <span class="v">#4B9BFF</span>,
+  <span class="s">'comment'</span>: <span class="v">#2BBFB9</span>, <span class="s">'maintain'</span>: <span class="v">#4FB87A</span>,
+  <span class="s">'perf'</span>: <span class="v">#D4A53A</span>, <span class="s">'except'</span>: <span class="v">#E08648</span>,
+  <span class="s">'bug'</span>: <span class="v">#E25C73</span>, <span class="s">'security'</span>: <span class="v">#B85AC4</span>
+);
+
+<span class="c">// ---- 覆盖 Element Plus CSS 变量 ----</span>
+<span class="k">:root</span> {
+  <span class="c">// 主色</span>
+  --el-color-primary: <span class="v">#5B58E8</span>;
+  --el-color-primary-light-3: <span class="v">#8E88F5</span>;
+  --el-color-primary-light-5: <span class="v">#B7B3FB</span>;
+  --el-color-primary-light-7: <span class="v">#DCDAFD</span>;
+  --el-color-primary-light-8: <span class="v">#E8E6FE</span>;
+  --el-color-primary-light-9: <span class="v">#EFEEFE</span>;
+  --el-color-primary-dark-2: <span class="v">#3B38AE</span>;
+
+  <span class="c">// 语义色</span>
+  --el-color-success: <span class="v">#4FB87A</span>;
+  --el-color-warning: <span class="v">#D9A857</span>;
+  --el-color-danger:  <span class="v">#DC4961</span>;
+  --el-color-info:    <span class="v">#4B9BFF</span>;
+
+  <span class="c">// 文字 / 边框 / 背景</span>
+  --el-text-color-primary:   <span class="v">#252A37</span>;
+  --el-text-color-regular:   <span class="v">#4F5667</span>;
+  --el-text-color-secondary: <span class="v">#6E7689</span>;
+  --el-border-color:         <span class="v">#E0E3EA</span>;
+  --el-border-color-light:   <span class="v">#EEF0F4</span>;
+  --el-fill-color-blank:     <span class="v">#FFFFFF</span>;
+  --el-bg-color-page:        <span class="v">#F7F8FA</span>;
+
+  <span class="c">// 圆角 / 字号 (Element Plus 系统级)</span>
+  --el-border-radius-base:   <span class="v">8px</span>;
+  --el-border-radius-small:  <span class="v">4px</span>;
+  --el-border-radius-round:  <span class="v">18px</span>;
+  --el-font-size-base:       <span class="v">14px</span>;
+
+  <span class="c">// 自定义令牌</span>
+  --prism-shadow-1: 0 1px 2px 0 rgba(37,42,55,.04);
+  --prism-shadow-2: 0 2px 6px -1px rgba(37,42,55,.06), 0 4px 12px -2px rgba(91,88,232,.05);
+  --prism-shadow-3: 0 8px 24px -4px rgba(37,42,55,.08), 0 16px 32px -8px rgba(91,88,232,.06);
+}
+
+<span class="c">// ---- 暗色模式（加分项）----</span>
+<span class="k">html.dark</span> {
+  --el-bg-color:        <span class="v">#161A24</span>;
+  --el-bg-color-page:   <span class="v">#0F1219</span>;
+  --el-bg-color-overlay:<span class="v">#1F2330</span>;
+  --el-text-color-primary:   <span class="v">#EEF0F4</span>;
+  --el-text-color-regular:   <span class="v">#C8CDD6</span>;
+  --el-text-color-secondary: <span class="v">#9BA3B0</span>;
+  --el-border-color:         <span class="v">#2A2F3F</span>;
+  --el-border-color-light:   <span class="v">#252A37</span>;
+  --el-fill-color-blank:     <span class="v">#1F2330</span>;
+  --el-color-primary:        <span class="v">#8E88F5</span>; <span class="c">// 暗色下提亮一档</span>
+  --el-color-primary-light-9:rgba(91,88,232,.10);
+}
+
+<span class="c">// ---- 字体 ----</span>
+<span class="k">body</span> {
+  font-family: <span class="s">'Noto Sans SC'</span>, -apple-system, <span class="s">'PingFang SC'</span>, sans-serif;
+}
+<span class="k">.font-display</span> { font-family: <span class="s">'Space Grotesk'</span>, <span class="s">'Noto Sans SC'</span>, sans-serif; }
+<span class="k">.font-mono</span>    { font-family: <span class="s">'JetBrains Mono'</span>, <span class="s">'SF Mono'</span>, Consolas, monospace; }
+</pre>
+  </section>
+
+  <!-- 3. 布局规范 -->
+  <section>
+    <div class="sec-head"><h2>3 &nbsp;布局规范</h2><span class="num">03 / 07 — Layout</span></div>
+    <div class="layout-spec">
+      <div class="ls-side">
+        <div class="logo"><span class="prism-mark" style="width:22px;height:22px;border-radius:6px"></span>Prism</div>
+        <div style="margin-top: 18px;">
+          <div class="nav-item">仪表盘</div>
+          <div class="nav-item active">代码审查</div>
+          <div class="nav-item">项目管理</div>
+          <div class="nav-item">规则配置</div>
+          <div style="margin-top: 16px; padding: 0 10px; color: var(--side-text-dim); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;">— 管理 —</div>
+          <div class="nav-item">用户管理</div>
+        </div>
+      </div>
+      <div class="ls-main">
+        <div class="ls-top">
+          <span>面包屑：仪表盘 / 代码审查</span>
+          <div style="flex: 1;"></div>
+          <span>全局搜索 ⌘K</span>
+          <span style="color: var(--brand-500);">✦ AI 助手</span>
+          <span>张老师 ▾</span>
+        </div>
+        <div class="ls-content">
+          <div class="cube">内容卡片</div>
+          <div class="cube">内容卡片</div>
+          <div class="cube">内容卡片</div>
+        </div>
+      </div>
+    </div>
+    <div class="grid grid-3" style="margin-top: 18px;">
+      <div class="panel">
+        <div class="panel-title">侧栏 Sidebar</div>
+        <div class="dim-spec-bullet"><b>展开：</b><code>220px</code> · <b>折叠：</b><code>64px</code></div>
+        <div class="dim-spec-bullet"><b>背景：</b><code>#161A24</code> 单色 + 顶部 12px 微光渐隐</div>
+        <div class="dim-spec-bullet"><b>菜单项 hover：</b>整行 8px 圆角浅紫蒙层</div>
+        <div class="dim-spec-bullet"><b>菜单项 active：</b>左侧 3px 棱镜紫光柱 + 浅色文字</div>
+        <div class="dim-spec-bullet"><b>分组分隔：</b>10px 大写英文 label + 1px 虚线</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">顶栏 Topbar</div>
+        <div class="dim-spec-bullet"><b>高度：</b><code>56px</code> 白底 + 底部 1px 浅边</div>
+        <div class="dim-spec-bullet"><b>面包屑：</b>左对齐 · 当前页加粗</div>
+        <div class="dim-spec-bullet"><b>全局搜索（新增）：</b>居中宽 360px · <code>⌘K</code> 唤起</div>
+        <div class="dim-spec-bullet"><b>AI 助手入口（新增）：</b>右侧渐光按钮，常驻可呼出对话面板</div>
+        <div class="dim-spec-bullet"><b>用户区：</b>头像 + 角色徽章 + 折叠菜单</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">内容区 Content</div>
+        <div class="dim-spec-bullet"><b>内边距：</b><code>24px</code>（移动端 16px）</div>
+        <div class="dim-spec-bullet"><b>卡片间距：</b><code>16px</code></div>
+        <div class="dim-spec-bullet"><b>栅格：</b>12 列，gutter 16</div>
+        <div class="dim-spec-bullet"><b>最大宽度：</b><code>1440px</code> 居中；超宽屏左右留白</div>
+        <div class="dim-spec-bullet"><b>断点：</b>1024 / 1280 / 1440 / 1680</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 页面索引 -->
+  <section>
+    <div class="sec-head"><h2>4 &nbsp;核心页面 · 5 张高保真</h2><span class="num">04 / 07 — Pages</span></div>
+    <p style="color: var(--gray-600); font-size: 14px; line-height: 1.7; max-width: 880px;">每张页面均为独立可运行 HTML（共享 <code style="font-family: var(--font-mono); font-size: 12px; background: var(--gray-100); padding: 2px 6px; border-radius: 4px;">theme.css</code>，浏览器直接打开），标准宽 1440px，使用真实中文示例数据。点击下方卡片打开对应页面。</p>
+    <div class="page-nav" style="margin-top: 24px;">
+      <a href="login.html"><div class="n">01</div><div class="t">Login</div><div class="s">登录入口 · 品牌氛围 + slogan 留白</div></a>
+      <a href="dashboard.html"><div class="n">02</div><div class="t">Dashboard</div><div class="s">6 统计卡 + 4 图表 + AI 活动流</div></a>
+      <a href="project-list.html"><div class="n">03</div><div class="t">ProjectList</div><div class="s">表格/卡片视图 · 搜索筛选</div></a>
+      <a href="review-task-detail.html"><div class="n">04 ★</div><div class="t">ReviewTaskDetail</div><div class="s">核心工作台 · 代码 + 问题 + 抽屉</div></a>
+      <a href="report-detail.html"><div class="n">05</div><div class="t">ReportDetail</div><div class="s">雷达图 + 8 维度 + 打印版式</div></a>
+    </div>
+  </section>
+
+  <!-- 5. 组件规范 -->
+  <section>
+    <div class="sec-head"><h2>5 &nbsp;组件视觉规范</h2><span class="num">05 / 07 — Components</span></div>
+
+    <!-- 按钮 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 0 0 14px;">按钮 Button</h3>
+    <div class="panel">
+      <div style="display: grid; grid-template-columns: 100px 1fr 1fr 1fr 1fr; gap: 16px 24px; align-items: center;">
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500);">尺寸</div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500);">PRIMARY</div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500);">DEFAULT</div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500);">TEXT</div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500);">DANGER</div>
+
+        <div style="font-size: 13px;">large 44</div>
+        <div><button class="btn btn-primary btn-lg">开始审查</button></div>
+        <div><button class="btn btn-default btn-lg">取消</button></div>
+        <div><button class="btn btn-text btn-lg">查看详情</button></div>
+        <div><button class="btn btn-danger btn-lg">删除项目</button></div>
+
+        <div style="font-size: 13px;">default 36</div>
+        <div><button class="btn btn-primary">开始审查</button></div>
+        <div><button class="btn btn-default">取消</button></div>
+        <div><button class="btn btn-text">查看详情</button></div>
+        <div><button class="btn btn-danger">删除项目</button></div>
+
+        <div style="font-size: 13px;">small 28</div>
+        <div><button class="btn btn-primary btn-sm">开始</button></div>
+        <div><button class="btn btn-default btn-sm">取消</button></div>
+        <div><button class="btn btn-text btn-sm">详情</button></div>
+        <div><button class="btn btn-danger btn-sm">删除</button></div>
+
+        <div style="font-size: 13px;">状态</div>
+        <div style="display: flex; gap: 8px;"><button class="btn btn-primary">默认</button><button class="btn btn-primary" style="background: var(--brand-600); box-shadow: 0 4px 12px -2px rgba(91,88,232,.35);">悬停</button><button class="btn btn-primary" style="background: var(--brand-700);">按下</button><button class="btn btn-primary" disabled style="opacity: .5; cursor: not-allowed;">禁用</button></div>
+        <div></div><div></div><div></div>
+      </div>
+    </div>
+
+    <!-- Tag -->
+    <h3 class="h-display" style="font-size: 18px; margin: 32px 0 14px;">严重度徽章 + 8 维度 Tag</h3>
+    <div class="panel">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <span class="sev sev-severe">SEVERE</span>
+        <span class="sev sev-high">HIGH</span>
+        <span class="sev sev-medium">MEDIUM</span>
+        <span class="sev sev-low">LOW</span>
+      </div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px;">
+        <span class="dim"><span class="dot" style="background: var(--dim-style);"></span>代码规范</span>
+        <span class="dim"><span class="dot" style="background: var(--dim-naming);"></span>命名规范</span>
+        <span class="dim"><span class="dot" style="background: var(--dim-comment);"></span>注释完整性</span>
+        <span class="dim"><span class="dot" style="background: var(--dim-maintain);"></span>可维护性</span>
+        <span class="dim"><span class="dot" style="background: var(--dim-perf);"></span>性能问题</span>
+        <span class="dim"><span class="dot" style="background: var(--dim-except);"></span>异常处理</span>
+        <span class="dim"><span class="dot" style="background: var(--dim-bug);"></span>潜在 Bug</span>
+        <span class="dim"><span class="dot" style="background: var(--dim-security);"></span>安全漏洞</span>
+      </div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px;">
+        <span class="sev" style="color: var(--status-unfix); background: rgba(226,124,74,.10);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--status-unfix);margin-right:2px;"></span>未修复</span>
+        <span class="sev" style="color: var(--status-fixed); background: rgba(79,184,122,.10);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--status-fixed);margin-right:2px;"></span>已修复</span>
+        <span class="sev" style="color: var(--status-ignored); background: rgba(155,163,176,.16);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--status-ignored);margin-right:2px;"></span>已忽略</span>
+        <span class="sev" style="color: var(--status-review); background: rgba(91,88,232,.10);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--status-review);margin-right:2px;"></span>待复查</span>
+      </div>
+    </div>
+
+    <!-- 输入 / 选择 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 32px 0 14px;">输入 · 选择 · 表格</h3>
+    <div class="grid grid-2">
+      <div class="panel">
+        <div class="panel-title">输入与选择</div>
+        <div style="display: grid; gap: 14px;">
+          <input class="input" placeholder="搜索项目名称、代码片段..." />
+          <input class="input" value="my-project" />
+          <input class="input" placeholder="禁用态" disabled style="background: var(--gray-50); color: var(--gray-400); cursor: not-allowed;" />
+          <div class="input" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;"><span>请选择审查模式</span><span style="color: var(--gray-400);">▾</span></div>
+          <div class="input" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; border-color: var(--brand-400); box-shadow: 0 0 0 3px rgba(91,88,232,.12);"><span>全量审查 / 增量审查</span><span style="color: var(--brand-500);">▾</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">表格 Table</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="background: var(--gray-50); color: var(--gray-600); text-align: left;">
+              <th style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid var(--gray-200);">项目</th>
+              <th style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid var(--gray-200);">问题数</th>
+              <th style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid var(--gray-200);">评分</th>
+              <th style="padding: 10px 12px; font-weight: 500; border-bottom: 1px solid var(--gray-200);">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td style="padding: 12px;">prism-backend</td><td style="padding: 12px; font-family: var(--font-mono);">23</td><td style="padding: 12px; font-family: var(--font-mono);">82</td><td style="padding: 12px;"><span class="sev sev-medium">MEDIUM</span></td></tr>
+            <tr style="background: var(--brand-50);"><td style="padding: 12px;">student-portal</td><td style="padding: 12px; font-family: var(--font-mono);">7</td><td style="padding: 12px; font-family: var(--font-mono);">94</td><td style="padding: 12px;"><span class="sev sev-low">LOW</span></td></tr>
+            <tr style="background: var(--gray-50);"><td style="padding: 12px;">algo-homework-3</td><td style="padding: 12px; font-family: var(--font-mono);">41</td><td style="padding: 12px; font-family: var(--font-mono);">58</td><td style="padding: 12px;"><span class="sev sev-severe">SEVERE</span></td></tr>
+            <tr><td style="padding: 12px;">data-pipeline</td><td style="padding: 12px; font-family: var(--font-mono);">12</td><td style="padding: 12px; font-family: var(--font-mono);">88</td><td style="padding: 12px;"><span class="sev sev-low">LOW</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Monaco theme -->
+    <h3 class="h-display" style="font-size: 18px; margin: 32px 0 14px;">Monaco Editor 主题 · prism-light / prism-dark</h3>
+    <div class="grid grid-2">
+      <div class="card" style="overflow: hidden;">
+        <div style="padding: 10px 16px; border-bottom: 1px solid var(--gray-100); font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); display: flex; justify-content: space-between;"><span>prism-light</span><span>UserService.java · 浅色</span></div>
+        <pre style="margin: 0; padding: 16px 20px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; background: #FBFBFD; color: #252A37;"><span style="color: #6E7689;">// 查询用户</span>
+<span style="color: #B85AC4;">public</span> <span style="color: #B85AC4;">User</span> <span style="color: #4A46D4;">findById</span>(<span style="color: #B85AC4;">Long</span> id) {
+  <span style="color: #B85AC4;">if</span> (id == <span style="color: #25A5C4;">null</span>) {
+    <span style="color: #B85AC4;">throw</span> <span style="color: #B85AC4;">new</span> <span style="color: #E25C73;">IllegalArgumentException</span>(<span style="color: #4FB87A;">"id 不能为空"</span>);
+  }
+  <span style="color: #B85AC4;">return</span> userRepo.<span style="color: #4A46D4;">findOne</span>(id);
+}</pre>
+        <div style="padding: 10px 16px; background: var(--gray-50); border-top: 1px solid var(--gray-100); font-family: var(--font-mono); font-size: 10px; color: var(--gray-500); display: flex; gap: 12px; flex-wrap: wrap;">
+          <span>bg #FBFBFD</span><span>fg #252A37</span><span style="color: #B85AC4;">keyword #B85AC4</span><span style="color: #4A46D4;">function #4A46D4</span><span style="color: #4FB87A;">string #4FB87A</span><span style="color: #25A5C4;">literal #25A5C4</span><span style="color: #6E7689;">comment #6E7689</span>
+        </div>
+      </div>
+      <div class="card" style="overflow: hidden; background: #161A24; border-color: #2A2F3F;">
+        <div style="padding: 10px 16px; border-bottom: 1px solid #2A2F3F; font-family: var(--font-mono); font-size: 11px; color: #9BA3B0; display: flex; justify-content: space-between;"><span>prism-dark</span><span>UserService.java · 暗色</span></div>
+        <pre style="margin: 0; padding: 16px 20px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; background: #0F1219; color: #DCE0EA;"><span style="color: #6E7689;">// 查询用户</span>
+<span style="color: #C99AD5;">public</span> <span style="color: #C99AD5;">User</span> <span style="color: #8E88F5;">findById</span>(<span style="color: #C99AD5;">Long</span> id) {
+  <span style="color: #C99AD5;">if</span> (id == <span style="color: #54CCDE;">null</span>) {
+    <span style="color: #C99AD5;">throw</span> <span style="color: #C99AD5;">new</span> <span style="color: #E879A0;">IllegalArgumentException</span>(<span style="color: #80D49A;">"id 不能为空"</span>);
+  }
+  <span style="color: #C99AD5;">return</span> userRepo.<span style="color: #8E88F5;">findOne</span>(id);
+}</pre>
+        <div style="padding: 10px 16px; background: #1F2330; border-top: 1px solid #2A2F3F; font-family: var(--font-mono); font-size: 10px; color: #9BA3B0; display: flex; gap: 12px; flex-wrap: wrap;">
+          <span>bg #0F1219</span><span>fg #DCE0EA</span><span style="color: #C99AD5;">keyword #C99AD5</span><span style="color: #8E88F5;">function #8E88F5</span><span style="color: #80D49A;">string #80D49A</span><span style="color: #54CCDE;">literal #54CCDE</span><span style="color: #6E7689;">comment #6E7689</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ECharts theme -->
+    <h3 class="h-display" style="font-size: 18px; margin: 32px 0 14px;">ECharts 主题 · prism.json</h3>
+<pre class="code">{
+  <span class="s">"color"</span>: [
+    <span class="v">"#5B58E8"</span>, <span class="v">"#3DBCD9"</span>, <span class="v">"#E25C73"</span>, <span class="v">"#D9A857"</span>,
+    <span class="v">"#4FB87A"</span>, <span class="v">"#B85AC4"</span>, <span class="v">"#E08648"</span>, <span class="v">"#4B9BFF"</span>
+  ],
+  <span class="s">"backgroundColor"</span>: <span class="v">"transparent"</span>,
+  <span class="s">"textStyle"</span>: { <span class="s">"fontFamily"</span>: <span class="v">"Noto Sans SC, sans-serif"</span> },
+  <span class="s">"title"</span>: { <span class="s">"textStyle"</span>: { <span class="s">"color"</span>: <span class="v">"#252A37"</span>, <span class="s">"fontWeight"</span>: <span class="v">600</span> } },
+  <span class="s">"legend"</span>: { <span class="s">"textStyle"</span>: { <span class="s">"color"</span>: <span class="v">"#6E7689"</span> } },
+  <span class="s">"grid"</span>: { <span class="s">"left"</span>: <span class="v">48</span>, <span class="s">"right"</span>: <span class="v">24</span>, <span class="s">"top"</span>: <span class="v">40</span>, <span class="s">"bottom"</span>: <span class="v">32</span>, <span class="s">"containLabel"</span>: <span class="v">true</span> },
+  <span class="s">"xAxis"</span>: { <span class="s">"axisLine"</span>: { <span class="s">"lineStyle"</span>: { <span class="s">"color"</span>: <span class="v">"#E0E3EA"</span> } },
+              <span class="s">"axisLabel"</span>: { <span class="s">"color"</span>: <span class="v">"#6E7689"</span> },
+              <span class="s">"splitLine"</span>: { <span class="s">"show"</span>: <span class="v">false</span> } },
+  <span class="s">"yAxis"</span>: { <span class="s">"axisLine"</span>: { <span class="s">"show"</span>: <span class="v">false</span> },
+              <span class="s">"axisLabel"</span>: { <span class="s">"color"</span>: <span class="v">"#6E7689"</span> },
+              <span class="s">"splitLine"</span>: { <span class="s">"lineStyle"</span>: { <span class="s">"color"</span>: <span class="v">"#EEF0F4"</span>, <span class="s">"type"</span>: <span class="v">"dashed"</span> } } },
+  <span class="s">"tooltip"</span>: { <span class="s">"backgroundColor"</span>: <span class="v">"#FFFFFF"</span>,
+                 <span class="s">"borderColor"</span>: <span class="v">"#E0E3EA"</span>,
+                 <span class="s">"textStyle"</span>: { <span class="s">"color"</span>: <span class="v">"#252A37"</span> },
+                 <span class="s">"extraCssText"</span>: <span class="v">"box-shadow: 0 8px 24px -4px rgba(37,42,55,.08);"</span> }
+}</pre>
+
+    <!-- 空态 -->
+    <h3 class="h-display" style="font-size: 18px; margin: 32px 0 14px;">空状态 · 弹窗 · 抽屉</h3>
+    <div class="grid grid-3">
+      <div class="panel">
+        <div class="panel-title">空状态</div>
+        <div style="padding: 24px 0; text-align: center;">
+          <div style="display: inline-block; position: relative;">
+            <div class="prism-mark lg" style="opacity: .85;"></div>
+          </div>
+          <div style="font-family: var(--font-display); font-weight: 600; margin-top: 16px; color: var(--gray-700);">还没有审查任务</div>
+          <div style="color: var(--gray-500); font-size: 13px; margin-top: 4px;">把代码交给棱镜，让它折射出问题</div>
+          <button class="btn btn-primary" style="margin-top: 16px;">+ 创建第一次审查</button>
+        </div>
+        <div style="font-size: 12px; color: var(--gray-500); border-top: 1px dashed var(--gray-200); padding-top: 12px;">配图方向：棱镜 mark 灰度版 / 几何线稿，不要用 emoji</div>
+      </div>
+      <div class="panel" style="background: var(--gray-100); padding: 0; overflow: hidden;">
+        <div class="panel-title" style="padding: 32px 32px 0;">对话框 Dialog</div>
+        <div style="padding: 32px; display: flex; justify-content: center;">
+          <div style="background: #fff; border-radius: var(--r-lg); box-shadow: var(--shadow-4); width: 100%; max-width: 320px;">
+            <div style="padding: 20px 24px 0; font-family: var(--font-display); font-weight: 600; font-size: 16px;">确认删除项目</div>
+            <div style="padding: 12px 24px 24px; color: var(--gray-600); font-size: 13px; line-height: 1.6;">删除后项目下的所有审查记录将被永久清除，无法恢复。</div>
+            <div style="padding: 0 16px 16px; display: flex; gap: 8px; justify-content: flex-end;">
+              <button class="btn btn-default btn-sm">取消</button>
+              <button class="btn btn-danger btn-sm">确认删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="panel" style="padding: 0; overflow: hidden;">
+        <div class="panel-title" style="padding: 32px 32px 0;">抽屉 Drawer</div>
+        <div style="padding: 32px; height: 200px; display: flex; justify-content: flex-end; overflow: hidden;">
+          <div style="background: #fff; border-left: 1px solid var(--gray-100); box-shadow: -16px 0 32px -8px rgba(37,42,55,.08); padding: 16px; width: 60%; border-radius: 0;">
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 14px;">问题详情</div>
+            <div style="margin-top: 10px;"><span class="sev sev-severe">SEVERE</span> <span class="dim" style="margin-left: 4px;"><span class="dot" style="background:var(--dim-security)"></span>安全</span></div>
+            <div style="font-family: var(--font-mono); font-size: 11px; color: var(--gray-500); margin-top: 12px;">UserCtrl.java : 42</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. AI 微交互 -->
+  <section>
+    <div class="sec-head"><h2>6 &nbsp;AI 产品感的微交互</h2><span class="num">06 / 07 — Motion</span></div>
+    <div class="ai-demo">
+      <div class="row"><div class="prism-mark"></div><div><div style="font-family: var(--font-display); font-weight: 600; font-size: 16px;">DeepSeek 智能体正在审查</div><div class="lbl">prism-backend / UserService.java</div></div></div>
+      <div style="margin-top: 24px;"><div class="lbl">PRISM BEAM · 流式 loading</div><div class="light-bar" style="margin-top: 10px;"></div></div>
+      <div class="row" style="margin-top: 24px;"><div class="lbl">THINKING DOTS</div><div class="think-dots"><span></span><span></span><span></span></div></div>
+      <div style="margin-top: 24px;">
+        <div class="lbl">STREAMING OUTPUT · 逐字浮现 + 光标</div>
+        <div class="stream">检测到 <span style="color: var(--dim-bug);">L42</span> 存在<span style="color: var(--brand-300);">空指针异常风险</span>：当 <code style="background:rgba(91,88,232,.15);padding:1px 5px;border-radius:4px;color:var(--brand-300);">userRepo.findOne(id)</code> 返回 null 时未做兜底处理。<br>建议使用 <code style="background:rgba(91,88,232,.15);padding:1px 5px;border-radius:4px;color:var(--brand-300);">Optional&lt;User&gt;</code> 包装返回值并显式抛出业务异常<span class="cursor"></span></div>
+      </div>
+    </div>
+
+    <h3 class="h-display" style="font-size: 18px; margin: 32px 0 14px;">可直接落地的代码片段</h3>
+    <div class="grid grid-2">
+<pre class="code"><span class="c">/* === 1. 棱镜光流 loading === */</span>
+<span class="k">.prism-beam</span> {
+  position: relative; height: <span class="v">6px</span>;
+  border-radius: <span class="v">3px</span>;
+  background: rgba(91,88,232,.15);
+  overflow: hidden;
+}
+<span class="k">.prism-beam::after</span> {
+  content: <span class="v">''</span>;
+  position: absolute; inset: 0;
+  width: <span class="v">30%</span>;
+  background: linear-gradient(90deg,
+    transparent,
+    <span class="v">#6F69EE</span>,
+    <span class="v">#3DBCD9</span>,
+    transparent);
+  animation: prismSweep <span class="v">1.8s</span> linear infinite;
+}
+<span class="k">@keyframes</span> prismSweep {
+  <span class="v">0%</span>   { transform: translateX(-100%); }
+  <span class="v">100%</span> { transform: translateX(333%); }
+}
+<span class="c">/* Vue 用法：&lt;div class="prism-beam" v-if="reviewing" /&gt; */</span></pre>
+
+<pre class="code"><span class="c">/* === 2. 流式字符浮现 + 闪烁光标 === */</span>
+<span class="c">// Vue 3 composable</span>
+<span class="k">import</span> { ref, onUnmounted } <span class="k">from</span> <span class="v">'vue'</span>;
+<span class="k">export function</span> useStreamText(target) {
+  <span class="k">const</span> text = ref(<span class="v">''</span>);
+  <span class="k">let</span> i = 0, timer;
+  <span class="k">const</span> start = () =&gt; {
+    timer = setInterval(() =&gt; {
+      <span class="k">if</span> (i &gt;= target.length) <span class="k">return</span> clearInterval(timer);
+      text.value += target[i++];
+    }, <span class="v">22</span>);
+  };
+  onUnmounted(() =&gt; clearInterval(timer));
+  <span class="k">return</span> { text, start };
+}
+<span class="c">/* 模板：&lt;span&gt;{{ text }}&lt;span class="cursor"&gt;&lt;/span&gt;&lt;/span&gt; */</span>
+<span class="k">.cursor</span> {
+  display: inline-block;
+  width: <span class="v">8px</span>; height: <span class="v">1em</span>;
+  background: <span class="v">#6F69EE</span>; vertical-align: <span class="v">-2px</span>;
+  animation: blink <span class="v">1s</span> steps(2) infinite;
+  margin-left: <span class="v">2px</span>;
+}
+<span class="k">@keyframes</span> blink { <span class="v">50%</span> { opacity: <span class="v">0</span>; } }</pre>
+    </div>
+    <div class="grid grid-2" style="margin-top: 16px;">
+<pre class="code"><span class="c">/* === 3. 评分滚动 0 → target === */</span>
+<span class="c">// 用于 Dashboard / Report 评分大数字</span>
+<span class="k">export function</span> useCountUp(target, duration = <span class="v">1200</span>) {
+  <span class="k">const</span> value = ref(<span class="v">0</span>);
+  <span class="k">const</span> start = performance.now();
+  <span class="k">const</span> ease = t =&gt; <span class="v">1</span> - Math.pow(<span class="v">1</span> - t, <span class="v">3</span>); <span class="c">// easeOutCubic</span>
+  <span class="k">const</span> tick = (now) =&gt; {
+    <span class="k">const</span> t = Math.min((now - start) / duration, <span class="v">1</span>);
+    value.value = Math.round(target * ease(t));
+    <span class="k">if</span> (t &lt; <span class="v">1</span>) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  <span class="k">return</span> value;
+}</pre>
+
+<pre class="code"><span class="c">/* === 4. 严重度脉冲提示 (新问题出现) === */</span>
+<span class="k">@keyframes</span> sevPulse {
+  <span class="v">0%</span>   { box-shadow: <span class="v">0 0 0 0</span> rgba(220,73,97,.55); }
+  <span class="v">70%</span>  { box-shadow: <span class="v">0 0 0 10px</span> rgba(220,73,97,0); }
+  <span class="v">100%</span> { box-shadow: <span class="v">0 0 0 0</span> rgba(220,73,97,0); }
+}
+<span class="k">.sev-severe.is-new</span> {
+  animation: sevPulse <span class="v">1.6s</span> ease-out <span class="v">2</span>;
+}
+<span class="c">/* Vue: :class="{ 'is-new': issue.justFound }" */</span>
+<span class="c">/* 当 SSE 推送新问题时，给 chip 加 is-new 1.6s × 2 次脉冲 */</span></pre>
+    </div>
+  </section>
+
+  <!-- 7. 落地路径 -->
+  <section>
+    <div class="sec-head"><h2>7 &nbsp;落地路径</h2><span class="num">07 / 07 — Roadmap</span></div>
+    <div class="road">
+      <div class="col">
+        <span class="tag" style="background: var(--sev-severe-bg); color: var(--sev-severe);">● P0 · 必改</span>
+        <h3>品牌感知层</h3>
+        <div class="est">预估工时 · 1.5 ~ 2 天</div>
+        <ul>
+          <li>覆盖 Element Plus CSS 变量 → 主色 #5B58E8</li>
+          <li>暗色侧栏 + Logo + 折叠态 + active 光柱</li>
+          <li>统计卡片 / 按钮 / 圆角 / 阴影 替换</li>
+          <li>严重度 4 色 + 8 维度色板 落地</li>
+          <li>顶栏：面包屑 + 全局搜索 + AI 助手入口</li>
+        </ul>
+      </div>
+      <div class="col">
+        <span class="tag" style="background: var(--sev-medium-bg); color: #A47A30;">● P1 · 建议改</span>
+        <h3>专业度与体验层</h3>
+        <div class="est">预估工时 · 2 ~ 3 天</div>
+        <ul>
+          <li>ECharts 主题色板替换 → 8 维度光谱</li>
+          <li>Monaco prism-light / prism-dark 双主题</li>
+          <li>AI 审查 loading（光流 + 思考点 + 流式输出）</li>
+          <li>评分 countUp、严重度脉冲、问题流入动画</li>
+          <li>所有空状态替换为棱镜插画方向</li>
+          <li>报告页打印 CSS（A4 + 分页 + 隐藏侧栏）</li>
+        </ul>
+      </div>
+      <div class="col">
+        <span class="tag" style="background: var(--sev-low-bg); color: #3F7FA8;">● P2 · 可保留</span>
+        <h3>Element Plus 默认</h3>
+        <div class="est">预估工时 · 0.5 天（仅微调）</div>
+        <ul>
+          <li>表单 / 校验提示</li>
+          <li>分页 / 日期选择器</li>
+          <li>Message / Notification</li>
+          <li>权限路由等纯逻辑组件</li>
+        </ul>
+        <div style="margin-top: 14px; padding: 12px; background: var(--gray-50); border-radius: 6px; font-size: 12px; color: var(--gray-600); line-height: 1.6;">建议把 P0+P1 都做完再答辩，单是 P0 也能让评委一眼看出 AI 产品气质。</div>
+      </div>
+    </div>
+  </section>
+
+  <footer style="margin-top: 96px; padding-top: 32px; border-top: 1px solid var(--gray-200); display: flex; justify-content: space-between; color: var(--gray-500); font-size: 13px;">
+    <div style="display: flex; align-items: center; gap: 12px;"><span class="prism-mark" style="width:20px;height:20px;border-radius:5px"></span>棱镜 Prism Design v1.0</div>
+    <div style="font-family: var(--font-mono); font-size: 11px;">© 2026 · 本科毕设视觉重塑方案</div>
+  </footer>
+
+</main>
+</body>
+</html>

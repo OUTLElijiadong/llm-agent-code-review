@@ -1,0 +1,262 @@
+/* ============================================================
+   棱镜 Prism · 设计令牌
+   基于大模型智能体的代码质量审查管理系统
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ---------- 品牌主色（棱镜紫）---------- */
+  --brand-50:  #EFEEFE;
+  --brand-100: #DCDAFD;
+  --brand-200: #B7B3FB;
+  --brand-300: #8E88F5;
+  --brand-400: #6F69EE;
+  --brand-500: #5B58E8;  /* 主色 */
+  --brand-600: #4A46D4;
+  --brand-700: #3B38AE;
+  --brand-800: #2D2B82;
+  --brand-900: #1E1C55;
+
+  /* ---------- 辅助色（折射青）---------- */
+  --accent-50:  #E7F8FB;
+  --accent-100: #C6EEF4;
+  --accent-200: #8DDDE9;
+  --accent-300: #54CCDE;
+  --accent-400: #3DBCD9;
+  --accent-500: #25A5C4;
+  --accent-600: #1C849E;
+
+  /* ---------- 8 维度光谱（按光谱顺序排列）---------- */
+  --dim-style:    #6B7CFF;  /* 代码规范  */
+  --dim-naming:   #4B9BFF;  /* 命名规范  */
+  --dim-comment:  #2BBFB9;  /* 注释完整性 */
+  --dim-maintain: #4FB87A;  /* 可维护性  */
+  --dim-perf:     #D4A53A;  /* 性能问题  */
+  --dim-except:   #E08648;  /* 异常处理  */
+  --dim-bug:      #E25C73;  /* 潜在 Bug */
+  --dim-security: #B85AC4;  /* 安全漏洞  */
+
+  /* ---------- 4 级严重度 ---------- */
+  --sev-severe:  #DC4961;  /* 危急 - 深玫红 */
+  --sev-severe-bg: #FCEAEE;
+  --sev-high:    #E27C4A;  /* 高   - 暖橙   */
+  --sev-high-bg: #FBEEE3;
+  --sev-medium:  #D9A857;  /* 中   - 琥珀   */
+  --sev-medium-bg: #FAF1DF;
+  --sev-low:     #6FA3C7;  /* 低   - 雾蓝   */
+  --sev-low-bg:  #E8F0F6;
+
+  /* ---------- 状态色 ---------- */
+  --status-unfix:   #E27C4A;
+  --status-fixed:   #4FB87A;
+  --status-ignored: #9BA3B0;
+  --status-review:  #5B58E8;
+
+  /* ---------- 中性 9 阶（偏冷调）---------- */
+  --gray-50:  #F7F8FA;
+  --gray-100: #EEF0F4;
+  --gray-200: #E0E3EA;
+  --gray-300: #C8CDD6;
+  --gray-400: #9BA3B0;
+  --gray-500: #6E7689;
+  --gray-600: #4F5667;
+  --gray-700: #383E4D;
+  --gray-800: #252A37;
+  --gray-900: #161A24;
+
+  /* ---------- 语义色 ---------- */
+  --success: #4FB87A;
+  --warning: #D9A857;
+  --danger:  #DC4961;
+  --info:    #4B9BFF;
+
+  /* ---------- 字体 ---------- */
+  --font-display: 'Space Grotesk', 'Noto Sans SC', -apple-system, sans-serif;
+  --font-sans:    'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+                  'Helvetica Neue', Helvetica, sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace;
+
+  /* ---------- 字号 7 阶 ---------- */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
+  --fs-3xl: 32px;
+
+  /* ---------- 间距 8 阶 ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* ---------- 圆角 4 阶 ---------- */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 18px;
+
+  /* ---------- 阴影 4 阶（有层次、带蓝紫调）---------- */
+  --shadow-1: 0 1px 2px 0 rgba(37, 42, 55, 0.04),
+              0 1px 1px 0 rgba(37, 42, 55, 0.03);
+  --shadow-2: 0 2px 6px -1px rgba(37, 42, 55, 0.06),
+              0 4px 12px -2px rgba(91, 88, 232, 0.05);
+  --shadow-3: 0 8px 24px -4px rgba(37, 42, 55, 0.08),
+              0 16px 32px -8px rgba(91, 88, 232, 0.06);
+  --shadow-4: 0 24px 48px -12px rgba(37, 42, 55, 0.18),
+              0 0 0 1px rgba(91, 88, 232, 0.04);
+
+  /* ---------- 侧栏深色调（与主体浅色协调）---------- */
+  --side-bg:    #161A24;
+  --side-bg-2:  #1F2330;
+  --side-border:#2A2F3F;
+  --side-text:  #C8CDD6;
+  --side-text-dim: #6E7689;
+  --side-active-bg: rgba(91, 88, 232, 0.16);
+  --side-active-fg: #B7B3FB;
+}
+
+/* ===== 基础 reset ===== */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  color: var(--gray-800);
+  background: var(--gray-50);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button { font-family: inherit; cursor: pointer; }
+
+/* ===== 通用按钮 ===== */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 36px; padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font-size: var(--fs-base); font-weight: 500;
+  transition: all .15s ease;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--brand-500); color: #fff; }
+.btn-primary:hover { background: var(--brand-600); box-shadow: 0 4px 12px -2px rgba(91,88,232,.35); }
+.btn-primary:active { background: var(--brand-700); }
+.btn-default { background: #fff; color: var(--gray-700); border-color: var(--gray-200); }
+.btn-default:hover { color: var(--brand-500); border-color: var(--brand-300); background: var(--brand-50); }
+.btn-text { background: transparent; color: var(--brand-500); padding: 0 8px; }
+.btn-text:hover { background: var(--brand-50); }
+.btn-danger { background: var(--sev-severe); color: #fff; }
+.btn-sm { height: 28px; padding: 0 10px; font-size: var(--fs-sm); }
+.btn-lg { height: 44px; padding: 0 20px; font-size: var(--fs-md); }
+
+/* ===== 输入 ===== */
+.input {
+  height: 36px; padding: 0 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-md);
+  background: #fff;
+  font-size: var(--fs-base);
+  color: var(--gray-800);
+  transition: all .15s ease;
+  outline: none;
+}
+.input:hover { border-color: var(--gray-300); }
+.input:focus { border-color: var(--brand-400); box-shadow: 0 0 0 3px rgba(91,88,232,.12); }
+
+/* ===== 卡片 ===== */
+.card {
+  background: #fff;
+  border: 1px solid var(--gray-100);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+.card-hover { transition: all .2s ease; }
+.card-hover:hover { box-shadow: var(--shadow-3); transform: translateY(-2px); border-color: var(--brand-100); }
+
+/* ===== 严重度徽章 ===== */
+.sev {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 8px;
+  border-radius: 4px;
+  font-size: 12px; font-weight: 500;
+  font-family: var(--font-display);
+}
+.sev::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+.sev-severe { color: var(--sev-severe); background: var(--sev-severe-bg); }
+.sev-severe::before { background: var(--sev-severe); }
+.sev-high { color: var(--sev-high); background: var(--sev-high-bg); }
+.sev-high::before { background: var(--sev-high); }
+.sev-medium { color: #A47A30; background: var(--sev-medium-bg); }
+.sev-medium::before { background: var(--sev-medium); }
+.sev-low { color: #3F7FA8; background: var(--sev-low-bg); }
+.sev-low::before { background: var(--sev-low); }
+
+/* ===== 维度 chip ===== */
+.dim {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 24px; padding: 0 10px;
+  border-radius: 999px;
+  background: var(--gray-50);
+  font-size: 12px;
+  color: var(--gray-700);
+  border: 1px solid var(--gray-100);
+}
+.dim .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* ===== 标题 ===== */
+.h-display { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; }
+
+/* ===== 棱镜 LOGO mark ===== */
+.prism-mark {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: conic-gradient(from 210deg at 50% 50%,
+    var(--dim-style), var(--dim-naming), var(--dim-comment),
+    var(--dim-maintain), var(--dim-perf), var(--dim-except),
+    var(--dim-bug), var(--dim-security), var(--dim-style));
+  position: relative;
+  box-shadow: 0 4px 12px -2px rgba(91,88,232,.45), inset 0 0 0 1px rgba(255,255,255,.12);
+}
+.prism-mark::after {
+  content: ''; position: absolute; inset: 6px;
+  border-radius: 4px;
+  background: var(--side-bg);
+}
+.prism-mark.lg { width: 44px; height: 44px; border-radius: 12px; }
+.prism-mark.lg::after { inset: 9px; border-radius: 6px; }
+
+/* ===== AI 思考动画 ===== */
+@keyframes prismPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: .6; }
+}
+@keyframes lightSweep {
+  0% { transform: translateX(-100%) skewX(-20deg); }
+  100% { transform: translateX(300%) skewX(-20deg); }
+}
+@keyframes thinkDot {
+  0%, 80%, 100% { transform: scale(0); opacity: .4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+.think-dots { display: inline-flex; gap: 4px; align-items: center; }
+.think-dots span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--brand-500);
+  animation: thinkDot 1.4s ease-in-out infinite;
+}
+.think-dots span:nth-child(2) { animation-delay: .16s; background: var(--accent-400); }
+.think-dots span:nth-child(3) { animation-delay: .32s; background: var(--dim-bug); }
+
+/* ===== 滚动条 ===== */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--gray-300); background-clip: padding-box; border: 2px solid transparent; }
+::-webkit-scrollbar-track { background: transparent; }

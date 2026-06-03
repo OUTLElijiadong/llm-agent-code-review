@@ -1,0 +1,336 @@
+/* ============================================================
+ * 棱镜 Prism · 设计令牌
+ * 基于大模型智能体的代码质量审查管理系统
+ * ----------------------------------------------------------
+ * 1. Prism 品牌令牌（光谱紫 + 8 维度 + 4 级严重度）
+ * 2. Element Plus --el-* 变量覆盖（组件自动接管视觉）
+ * 3. 项目内现存视图使用的 --color-* 别名（向后兼容）
+ * ============================================================ */
+
+/* ---- SCSS 颜色（供 Element Plus 主题源码编译使用）---- */
+$brand-50:  #EFEEFE;
+$brand-100: #DCDAFD;
+$brand-200: #B7B3FB;
+$brand-300: #8E88F5;
+$brand-400: #6F69EE;
+$brand-500: #5B58E8;
+$brand-600: #4A46D4;
+$brand-700: #3B38AE;
+$brand-800: #2D2B82;
+$brand-900: #1E1C55;
+
+$sev-severe: #DC4961;
+$sev-high:   #E27C4A;
+$sev-medium: #D9A857;
+$sev-low:    #6FA3C7;
+
+$dim-style:    #6B7CFF;
+$dim-naming:   #4B9BFF;
+$dim-comment:  #2BBFB9;
+$dim-maintain: #4FB87A;
+$dim-perf:     #D4A53A;
+$dim-except:   #E08648;
+$dim-bug:      #E25C73;
+$dim-security: #B85AC4;
+
+:root {
+  /* ============================================================
+   * 1. PRISM 品牌令牌
+   * ============================================================ */
+
+  /* ---- 品牌主色（棱镜紫）---- */
+  --brand-50:  #EFEEFE;
+  --brand-100: #DCDAFD;
+  --brand-200: #B7B3FB;
+  --brand-300: #8E88F5;
+  --brand-400: #6F69EE;
+  --brand-500: #5B58E8;
+  --brand-600: #4A46D4;
+  --brand-700: #3B38AE;
+  --brand-800: #2D2B82;
+  --brand-900: #1E1C55;
+
+  /* ---- 辅助色（折射青）---- */
+  --accent-50:  #E7F8FB;
+  --accent-100: #C6EEF4;
+  --accent-200: #8DDDE9;
+  --accent-300: #54CCDE;
+  --accent-400: #3DBCD9;
+  --accent-500: #25A5C4;
+  --accent-600: #1C849E;
+
+  /* ---- 8 维度光谱 ---- */
+  --dim-style:    #6B7CFF;   /* 代码规范  */
+  --dim-naming:   #4B9BFF;   /* 命名规范  */
+  --dim-comment:  #2BBFB9;   /* 注释完整性 */
+  --dim-maintain: #4FB87A;   /* 可维护性  */
+  --dim-perf:     #D4A53A;   /* 性能问题  */
+  --dim-except:   #E08648;   /* 异常处理  */
+  --dim-bug:      #E25C73;   /* 潜在 Bug */
+  --dim-security: #B85AC4;   /* 安全漏洞  */
+
+  /* ---- 4 级严重度 ---- */
+  --sev-severe:    #DC4961;
+  --sev-severe-bg: #FCEAEE;
+  --sev-high:      #E27C4A;
+  --sev-high-bg:   #FBEEE3;
+  --sev-medium:    #D9A857;
+  --sev-medium-bg: #FAF1DF;
+  --sev-low:       #6FA3C7;
+  --sev-low-bg:    #E8F0F6;
+
+  /* ---- 问题状态色 ---- */
+  --status-unfix:   #E27C4A;
+  --status-fixed:   #4FB87A;
+  --status-ignored: #9BA3B0;
+  --status-review:  #5B58E8;
+
+  /* ---- 中性 9 阶（偏冷调）---- */
+  --gray-50:  #F7F8FA;
+  --gray-100: #EEF0F4;
+  --gray-200: #E0E3EA;
+  --gray-300: #C8CDD6;
+  --gray-400: #9BA3B0;
+  --gray-500: #6E7689;
+  --gray-600: #4F5667;
+  --gray-700: #383E4D;
+  --gray-800: #252A37;
+  --gray-900: #161A24;
+
+  /* ---- 字体 ---- */
+  --font-display: 'Space Grotesk', 'Noto Sans SC', -apple-system, sans-serif;
+  --font-sans:    'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+                  'Helvetica Neue', Helvetica, sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace;
+
+  /* ---- 字号 7 阶 ---- */
+  --fs-xs:   12px;
+  --fs-sm:   13px;
+  --fs-base: 14px;
+  --fs-md:   16px;
+  --fs-lg:   18px;
+  --fs-xl:   22px;
+  --fs-2xl:  28px;
+  --fs-3xl:  32px;
+
+  /* ---- 间距 8 阶 ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* ---- 圆角 4 阶 ---- */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 18px;
+
+  /* ---- 阴影 4 阶（带蓝紫调）---- */
+  --shadow-1: 0 1px 2px 0 rgba(37, 42, 55, 0.04),
+              0 1px 1px 0 rgba(37, 42, 55, 0.03);
+  --shadow-2: 0 2px 6px -1px rgba(37, 42, 55, 0.06),
+              0 4px 12px -2px rgba(91, 88, 232, 0.05);
+  --shadow-3: 0 8px 24px -4px rgba(37, 42, 55, 0.08),
+              0 16px 32px -8px rgba(91, 88, 232, 0.06);
+  --shadow-4: 0 24px 48px -12px rgba(37, 42, 55, 0.18),
+              0 0 0 1px rgba(91, 88, 232, 0.04);
+  --prism-shadow-1: var(--shadow-1);
+  --prism-shadow-2: var(--shadow-2);
+  --prism-shadow-3: var(--shadow-3);
+
+  /* ---- 侧栏深色调 ---- */
+  --side-bg:        #161A24;
+  --side-bg-2:      #1F2330;
+  --side-border:    #2A2F3F;
+  --side-text:      #C8CDD6;
+  --side-text-dim:  #6E7689;
+  --side-active-bg: rgba(91, 88, 232, 0.16);
+  --side-active-fg: #B7B3FB;
+
+  /* ============================================================
+   * 2. ELEMENT PLUS 变量覆盖
+   * （所有 el-* 组件会自动接管新视觉）
+   * ============================================================ */
+
+  /* 主色 */
+  --el-color-primary:         #5B58E8;
+  --el-color-primary-light-3: #8E88F5;
+  --el-color-primary-light-5: #B7B3FB;
+  --el-color-primary-light-7: #DCDAFD;
+  --el-color-primary-light-8: #E8E6FE;
+  --el-color-primary-light-9: #EFEEFE;
+  --el-color-primary-dark-2:  #3B38AE;
+
+  /* 语义色 */
+  --el-color-success: #4FB87A;
+  --el-color-warning: #D9A857;
+  --el-color-danger:  #DC4961;
+  --el-color-error:   #DC4961;
+  --el-color-info:    #4B9BFF;
+
+  /* 文字 */
+  --el-text-color-primary:    #252A37;
+  --el-text-color-regular:    #4F5667;
+  --el-text-color-secondary:  #6E7689;
+  --el-text-color-placeholder:#9BA3B0;
+  --el-text-color-disabled:   #C8CDD6;
+
+  /* 边框 / 填充 / 背景 */
+  --el-border-color:         #E0E3EA;
+  --el-border-color-light:   #EEF0F4;
+  --el-border-color-lighter: #EEF0F4;
+  --el-border-color-hover:   #C8CDD6;
+  --el-fill-color-blank:     #FFFFFF;
+  --el-fill-color-light:     #F7F8FA;
+  --el-bg-color:             #FFFFFF;
+  --el-bg-color-page:        #F7F8FA;
+  --el-bg-color-overlay:     #FFFFFF;
+
+  /* 圆角 / 字号（系统级）*/
+  --el-border-radius-base:  8px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 18px;
+  --el-font-size-base:      14px;
+
+  /* 阴影 */
+  --el-box-shadow:         var(--shadow-2);
+  --el-box-shadow-light:   var(--shadow-1);
+  --el-box-shadow-lighter: var(--shadow-1);
+  --el-box-shadow-dark:    var(--shadow-3);
+
+  /* ============================================================
+   * 3. 向后兼容别名（现存视图仍使用 --color-* / --spacing-* 等）
+   * ============================================================ */
+
+  /* 主色 */
+  --color-primary:         #5B58E8;
+  --color-primary-light:   #6F69EE;
+  --color-primary-lighter: #B7B3FB;
+  --color-primary-light-9: #EFEEFE;
+  --color-primary-dark:    #3B38AE;
+
+  /* 功能色 */
+  --color-success:       #4FB87A;
+  --color-success-light: #E5F4EC;
+  --color-warning:       #D9A857;
+  --color-warning-light: #FAF1DF;
+  --color-danger:        #DC4961;
+  --color-danger-light:  #FCEAEE;
+  --color-info:          #4B9BFF;
+  --color-info-light:    #E4F0FE;
+
+  /* 严重度色 */
+  --color-severity-severe: #DC4961;
+  --color-severity-high:   #E27C4A;
+  --color-severity-medium: #D9A857;
+  --color-severity-low:    #6FA3C7;
+
+  /* 中性色 */
+  --color-white: #FFFFFF;
+  --color-black: #161A24;
+  --color-text-primary:     #252A37;
+  --color-text-regular:     #4F5667;
+  --color-text-secondary:   #6E7689;
+  --color-text-placeholder: #9BA3B0;
+  --color-text-disabled:    #C8CDD6;
+
+  --color-border-base:        #E0E3EA;
+  --color-border-light:       #EEF0F4;
+  --color-border-lighter:     #EEF0F4;
+  --color-border-extra-light: #F7F8FA;
+
+  --color-bg-page:    #F7F8FA;
+  --color-bg-card:    #FFFFFF;
+  --color-bg-overlay: #FFFFFF;
+  --color-bg-dark:    #EEF0F4;
+
+  /* 间距 */
+  --spacing-xs:   4px;
+  --spacing-sm:   8px;
+  --spacing-md:   12px;
+  --spacing-base: 16px;
+  --spacing-lg:   24px;
+  --spacing-xl:   32px;
+  --spacing-xxl:  48px;
+
+  /* 字号 */
+  --font-size-xs:   12px;
+  --font-size-sm:   13px;
+  --font-size-base: 14px;
+  --font-size-md:   16px;
+  --font-size-lg:   18px;
+  --font-size-xl:   20px;
+  --font-size-xxl:  24px;
+
+  /* 字体 */
+  --font-family-base: 'Noto Sans SC', -apple-system, BlinkMacSystemFont,
+    'PingFang SC', 'Helvetica Neue', Helvetica, 'Microsoft YaHei', '微软雅黑',
+    Arial, sans-serif;
+  --font-family-code: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Monaco',
+    'Consolas', 'Courier New', monospace;
+
+  /* 行高 */
+  --line-height-base:    1.5;
+  --line-height-heading: 1.3;
+  --line-height-code:    1.6;
+
+  /* 圆角 */
+  --border-radius-base:  8px;
+  --border-radius-sm:    4px;
+  --border-radius-lg:    12px;
+  --border-radius-round: 50%;
+
+  /* 阴影 */
+  --box-shadow-light: var(--shadow-1);
+  --box-shadow-base:  var(--shadow-2);
+  --box-shadow-dark:  var(--shadow-3);
+
+  /* 过渡 */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.25s ease;
+  --transition-slow: 0.4s ease;
+
+  /* 布局 */
+  --header-height:           56px;
+  --sidebar-width:           232px;
+  --sidebar-collapsed-width: 64px;
+  --content-max-width:       1440px;
+
+  /* z-index */
+  --z-index-dropdown:       1000;
+  --z-index-sticky:         1020;
+  --z-index-fixed:          1030;
+  --z-index-modal-backdrop: 1040;
+  --z-index-modal:          1050;
+  --z-index-popover:        1060;
+  --z-index-tooltip:        1070;
+  --z-index-loading:        2000;
+  --z-index-message:        3000;
+}
+
+/* ============================================================
+ * 暗色模式（加 html.dark 启用）
+ * ============================================================ */
+html.dark {
+  --el-bg-color:         #161A24;
+  --el-bg-color-page:    #0F1219;
+  --el-bg-color-overlay: #1F2330;
+  --el-text-color-primary:   #EEF0F4;
+  --el-text-color-regular:   #C8CDD6;
+  --el-text-color-secondary: #9BA3B0;
+  --el-border-color:         #2A2F3F;
+  --el-border-color-light:   #252A37;
+  --el-fill-color-blank:     #1F2330;
+  --el-color-primary:        #8E88F5;
+  --el-color-primary-light-9:rgba(91, 88, 232, 0.10);
+
+  --color-bg-page:    #0F1219;
+  --color-bg-card:    #1F2330;
+  --color-text-primary: #EEF0F4;
+  --color-text-regular: #C8CDD6;
+  --color-border-light: #2A2F3F;
+}

@@ -1,0 +1,122 @@
+"""SecuritySentinel 安全审计 API 路由 (v2.1 新增)
+
+所有端点经 Orchestrator 委派给 SecuritySentinelAgent 执行。
+"""
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.agents import AgentContext
+from app.agents.orchestrator import get_orchestrator
+from app.ai.exceptions import AiServiceError
+from app.core.database import get_db
+from app.core.dependencies import get_current_user
+from app.models.user import User
+from app.schemas.common import Resp
+from app.schemas.security import (
+    SecurityChecklistOut,
+    SecurityDashboardSummaryOut,
+    SecurityScanFileIn,
+    SecurityScanOut,
+    SecurityScanProjectIn,
+    SecurityScanTaskIn,
+)
+from app.services import security_service
+
+router = APIRouter()
+
+
+def _ctx(user: User) -> AgentContext:
+    return AgentContext(user_id=user.id)
+
+
+@router.get("/checklist", response_model=Resp[SecurityChecklistOut])
+def get_checklist(_: User = Depends(get_current_user)):
+    """返回 OWASP Top10 + 内置敏感信息正则规则清单"""
+    orch = get_orchestrator()
+    data = orch.security_sentinel.get_checklist()
+    return Resp(data=SecurityChecklistOut(**data))
+
+
+@router.post("/scan-file", response_model=Resp[SecurityScanOut])
+def scan_file(
+    payload: SecurityScanFileIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """单文件深度安全扫描"""
+    orch = get_orchestrator()
+    orch.inject_db(db, user=user)
+    result = orch.security_sentinel.scan_file(
+        file_id=payload.file_id,
+        scan_depth=payload.scan_depth,
+        ctx=_ctx(user),
+    )
+    if not result.success:
+        raise AiServiceError(result.error or "安全扫描失败", code=50220)
+    return Resp(data=SecurityScanOut(**result.data))
+
+
+@router.post("/scan-task", response_model=Resp[SecurityScanOut])
+def scan_task(
+    payload: SecurityScanTaskIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """任务级安全复审:为已落库的安全 issue 补 OWASP/CWE 标签"""
+    orch = get_orchestrator()
+    orch.inject_db(db, user=user)
+    result = orch.security_sentinel.scan_task(
+        task_id=payload.task_id, ctx=_ctx(user),
+    )
+    if not result.success:
+        raise AiServiceError(result.error or "安全复审失败", code=50220)
+    return Resp(data=SecurityScanOut(**result.data))
+
+
+@router.post("/scan-project", response_model=Resp[SecurityScanOut])
+def scan_project(
+    payload: SecurityScanProjectIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """项目级威胁建模:跨文件数据流追踪"""
+    orch = get_orchestrator()
+    orch.inject_db(db, user=user)
+    result = orch.security_sentinel.scan_project(
+        project_id=payload.project_id,
+        top_n=payload.top_n,
+        trace_dataflow=payload.trace_dataflow,
+        ctx=_ctx(user),
+    )
+    if not result.success:
+        raise AiServiceError(result.error or "项目安全扫描失败", code=50220)
+    return Resp(data=SecurityScanOut(**result.data))
+
+
+@router.get("/findings", response_model=Resp[SecurityScanOut])
+def list_findings(
+    task_id: int = Query(..., description="审查任务 ID"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """查询某个任务下已落库的安全 finding(等价于 scan-task)"""
+    orch = get_orchestrator()
+    orch.inject_db(db, user=user)
+    result = orch.security_sentinel.scan_task(task_id=task_id, ctx=_ctx(user))
+    if not result.success:
+        raise AiServiceError(result.error or "查询安全发现失败", code=50220)
+    return Resp(data=SecurityScanOut(**result.data))
+
+
+@router.get("/dashboard-summary", response_model=Resp[SecurityDashboardSummaryOut])
+def dashboard_summary(
+    days: int = Query(30, ge=1, le=365, description="统计窗口天数"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """工作台安全态势汇总 (v2.1.1)
+
+    返回当前用户范围内所有项目的安全状况聚合,供 Dashboard 顶部卡片使用。
+    """
+    data = security_service.get_dashboard_summary(db, user=user, days=days)
+    return Resp(data=SecurityDashboardSummaryOut(**data))
