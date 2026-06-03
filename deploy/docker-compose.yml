@@ -31,17 +31,16 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    # JWT_SECRET / DEEPSEEK_* / CORS_ORIGINS 等从 .env 整体注入
+    env_file: .env
     environment:
       APP_ENV: prod
+      # 数据库连接固定指向 mysql 容器，账号直接复用 MYSQL_* 这套，避免填两遍
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
-      JWT_SECRET: ${JWT_SECRET}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
-      CORS_ORIGINS: ${CORS_ORIGINS}
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE}
     ports:
       - "8000:8000"
 
