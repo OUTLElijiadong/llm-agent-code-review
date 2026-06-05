@@ -17,8 +17,10 @@ fi
 echo "✓ MySQL 就绪 (localhost:3307)"
 
 # 2) 后端：热重载（改 .py 自动重启）
+# 显式连本机 docker MySQL 的映射端口 3307（compose 把容器 3306 映射到主机 3307）。
+# 这里覆盖 .env，避免全新 checkout 按 .env.example 的默认 3306 连不上数据库。
 echo "▶ 启动后端  http://localhost:8000  (--reload)"
-( cd backend && source .venv/bin/activate && exec uvicorn app.main:app --reload --port 8000 ) &
+( cd backend && source .venv/bin/activate && export DB_HOST=127.0.0.1 DB_PORT=3307 && exec uvicorn app.main:app --reload --port 8000 ) &
 BACK_PID=$!
 
 # 3) 前端：HMR（改 src 即时热更新）
