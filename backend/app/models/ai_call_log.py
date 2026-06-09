@@ -3,7 +3,7 @@ AI调用日志表ORM模型
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
@@ -16,6 +16,11 @@ def _utcnow():
 
 class AiCallLog(Base, IdMixin):
     __tablename__ = "ai_call_log"
+    __table_args__ = (
+        Index("ix_ai_call_log_task", "task_id"),
+        Index("ix_ai_call_log_user_create", "user_id", "create_time"),
+        Index("ix_ai_call_log_status", "status"),
+    )
 
     task_id = Column(BigInteger)
     user_id = Column(BigInteger)

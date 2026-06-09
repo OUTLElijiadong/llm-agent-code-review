@@ -1,7 +1,16 @@
 """
 代码版本历史表ORM模型
 """
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
@@ -10,6 +19,10 @@ from app.models.base import IdMixin
 
 class CodeVersion(Base, IdMixin):
     __tablename__ = "code_version"
+    __table_args__ = (
+        UniqueConstraint("file_id", "version_no", name="uk_file_version"),
+        Index("ix_code_version_create_time", "create_time"),
+    )
 
     file_id = Column(BigInteger, nullable=False)
     version_no = Column(Integer, nullable=False)

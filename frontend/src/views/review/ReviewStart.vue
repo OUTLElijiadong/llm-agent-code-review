@@ -194,7 +194,7 @@ async function onSubmit() {
         },
       })
     } else {
-      await startReview({
+      const res = await startReview({
         project_id: form.project_id!,
         file_ids: form.file_ids,
         review_type: form.review_type,
@@ -202,7 +202,11 @@ async function onSubmit() {
       })
       reviewingSublabel.value = '已提交至 Agent 调度器'
       reviewingVisible.value = true
-      setTimeout(() => { reviewingVisible.value = false; router.push('/reviews') }, 2500)
+      // 后端已异步执行,直接跳转任务详情页查看实时进度(无 task_id 时退回列表)
+      setTimeout(() => {
+        reviewingVisible.value = false
+        router.push(res?.task_id ? `/reviews/${res.task_id}` : '/reviews')
+      }, 1500)
     }
   } catch { /* interceptor handles */ }
   finally { submitting.value = false }
