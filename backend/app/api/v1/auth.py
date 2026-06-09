@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
 from app.models.user import User
 from app.schemas.auth import ChangePasswordIn, LoginIn, LoginOut, RegisterIn, UserOut
 from app.schemas.common import Resp
@@ -24,6 +25,7 @@ def _client_ip(request: Request) -> str:
 
 
 @router.post("/register", response_model=Resp[dict])
+@limiter.limit("10/minute")
 def register(payload: RegisterIn, request: Request, db: Session = Depends(get_db)):
     """用户注册"""
     user = auth_service.register(db, payload)
@@ -37,6 +39,7 @@ def register(payload: RegisterIn, request: Request, db: Session = Depends(get_db
 
 
 @router.post("/login", response_model=Resp[LoginOut])
+@limiter.limit("10/minute")
 def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
     """用户登录"""
     ip = _client_ip(request)

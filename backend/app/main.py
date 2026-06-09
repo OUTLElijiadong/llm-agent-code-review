@@ -3,8 +3,10 @@ FastAPI应用主入口
 """
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.api import api_router
 from app.api.v1 import discussion as discussion_router
@@ -12,6 +14,7 @@ from app.api.v1.ws_discussion import ws_discuss
 from app.core.config import settings
 from app.core.error_handlers import register_handlers
 from app.core.logger import setup_logger
+from app.core.rate_limit import limiter
 
 
 @asynccontextmanager
@@ -38,6 +41,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 接口限流: 注册 Limiter 与 429 处理器(返回项目统一的 Resp 信封)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """命中限流时返回 429 + 统一错误结构"""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "code": 42900,
+            "message": "请求过于频繁,请稍后再试",
+            "detail": str(exc.detail) if getattr(exc, "detail", None) else None,
+            "request_id": request.headers.get("X-Request-Id"),
+        },
+    )
+
 
 register_handlers(app)
 app.include_router(api_router, prefix="/api")

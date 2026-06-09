@@ -1,7 +1,7 @@
 """
 用户表ORM模型
 """
-from sqlalchemy import Column, DateTime, SmallInteger, String
+from sqlalchemy import Column, DateTime, Index, SmallInteger, String
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -9,6 +9,9 @@ from app.models.base import IdMixin, TimestampMixin
 
 class User(Base, IdMixin, TimestampMixin):
     __tablename__ = "user"
+    __table_args__ = (
+        Index("ix_user_status", "status"),
+    )
 
     username = Column(String(50), unique=True, nullable=False)
     password = Column(String(255), nullable=False)

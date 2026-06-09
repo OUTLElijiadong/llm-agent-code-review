@@ -1,7 +1,16 @@
 """
 审查规则表ORM模型
 """
-from sqlalchemy import BigInteger, Column, Integer, SmallInteger, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -9,6 +18,10 @@ from app.models.base import IdMixin, TimestampMixin
 
 class ReviewRule(Base, IdMixin, TimestampMixin):
     __tablename__ = "review_rule"
+    __table_args__ = (
+        UniqueConstraint("user_id", "rule_code", name="uk_user_rule_code"),
+        Index("ix_review_rule_enabled", "enabled"),
+    )
 
     user_id = Column(BigInteger, comment="NULL表示系统内置规则")
     rule_code = Column(String(50), nullable=False, comment="机器标识")

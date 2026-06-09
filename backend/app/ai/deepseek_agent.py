@@ -8,6 +8,7 @@ DeepSeek Agent: HTTP调用、重试、日志记录
 
 时区约定: 所有 create_time 均为 timezone-aware UTC (datetime.now(timezone.utc))。
 """
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -19,6 +20,31 @@ from sqlalchemy.orm import Session
 from app.ai.exceptions import AiServiceError
 from app.core.config import settings
 from app.models.ai_call_log import AiCallLog
+
+# 进程级共享 HTTP 客户端(带连接池) —— 一次审查会发起数十次请求,
+# 复用 keep-alive 连接可省去重复的 TCP+TLS 握手开销。
+_SHARED_CLIENT: Optional[httpx.Client] = None
+_CLIENT_LOCK = threading.Lock()
+
+
+def _get_http_client() -> httpx.Client:
+    """返回进程级共享的 httpx.Client。
+
+    httpx.Client 的请求方法是线程安全的,可被并行感知阶段的多个线程共享;
+    单次请求的超时通过 client.post(timeout=...) 覆盖,故无需为不同超时重建客户端。
+    """
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is None:
+        with _CLIENT_LOCK:
+            if _SHARED_CLIENT is None:
+                _SHARED_CLIENT = httpx.Client(
+                    limits=httpx.Limits(
+                        max_keepalive_connections=20,
+                        max_connections=40,
+                    ),
+                    timeout=httpx.Timeout(settings.deepseek_timeout),
+                )
+    return _SHARED_CLIENT
 
 
 class DeepSeekAgent:
@@ -69,8 +95,8 @@ class DeepSeekAgent:
         不处理重试, 由调用方控制重试策略。
         """
         t0 = time.time()
-        with httpx.Client(timeout=self.timeout) as client:
-            resp = client.post(url, headers=headers, json=payload)
+        client = _get_http_client()
+        resp = client.post(url, headers=headers, json=payload, timeout=self.timeout)
         return resp, int((time.time() - t0) * 1000)
 
     # ── 并行线程调用 (不带 db, 返回 meta 供事后补录) ──

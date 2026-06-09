@@ -8,6 +8,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     Text,
@@ -20,6 +21,9 @@ from app.models.base import IdMixin, TimestampMixin
 
 class ReviewExperience(Base, IdMixin, TimestampMixin):
     __tablename__ = "review_experience"
+    __table_args__ = (
+        Index("ix_review_experience_lang_weight", "language", "weight"),
+    )
 
     fingerprint = Column(String(64), nullable=False, index=True,
                          comment="问题指纹:issue_type+归一化模式哈希")
