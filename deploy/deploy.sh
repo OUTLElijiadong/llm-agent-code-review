@@ -28,7 +28,8 @@ echo ""
 echo "✅ 部署完成！容器状态："
 docker compose ps
 echo ""
-IP=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || echo "你的服务器IP")
-echo "🌐 前端访问:  http://$IP"
-echo "📖 接口文档:  http://$IP/docs"
+APP_DOMAIN=$(awk -F= '/^APP_DOMAIN=/{print $2}' .env 2>/dev/null | tail -n 1 | tr -d '"' | tr -d "'")
+APP_DOMAIN=${APP_DOMAIN:-你的域名}
+echo "🌐 前端访问:  https://$APP_DOMAIN"
+echo "📖 接口文档:  https://$APP_DOMAIN/docs"
 echo "📜 查看日志:  docker compose logs -f backend"

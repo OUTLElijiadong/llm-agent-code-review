@@ -1,9 +1,16 @@
 {
     email admin@lijiadong.cn
+    servers {
+        protocols h1 h2
+    }
 }
 
 (app_gateway) {
     encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+    }
 
     request_body {
         max_size 50MB
@@ -49,9 +56,12 @@ http://lijiadong.cn {
 }
 
 http:// {
-    import app_gateway
+    redir https://lijiadong.cn{uri} permanent
 }
 
 lijiadong.cn {
+    tls {
+        key_type rsa2048
+    }
     import app_gateway
 }
