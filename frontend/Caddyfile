@@ -9,11 +9,27 @@
         max_size 50MB
     }
 
+    handle /api/ws/* {
+        reverse_proxy backend:8000
+    }
+
+    handle /api/agents/events* {
+        reverse_proxy backend:8000
+    }
+
     handle /api/* {
         reverse_proxy backend:8000
     }
 
+    handle /healthz {
+        reverse_proxy backend:8000
+    }
+
     handle /docs {
+        reverse_proxy backend:8000
+    }
+
+    handle /redoc {
         reverse_proxy backend:8000
     }
 

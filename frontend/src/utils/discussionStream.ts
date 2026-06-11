@@ -3,7 +3,7 @@
  *
  * URL 构建:
  *   dev 环境: ws://localhost:5173/api/ws/discuss/{session_id}  → Vite 代理至 localhost:8000
- *   prod 环境: wss://domain/api/ws/discuss/{session_id}        → Nginx 代理至后端
+ *   prod 环境: wss://domain/api/ws/discuss/{session_id}        → Caddy 代理至后端
  */
 import { getToken } from '@/utils/token'
 
@@ -28,15 +28,35 @@ export interface DiscussionStream {
 }
 
 interface SubOpts {
+  wsUrl?: string
   onStatus?: (status: 'connecting' | 'connected' | 'disconnected' | 'error') => void
   onError?: (message: string) => void
 }
 
-function buildWsUrl(sessionId: string): string {
+/**
+ * 把后端返回的相对/绝对 ws_url 解析为当前页面可用的 WebSocket 地址。
+ * @param sessionId - 讨论会话 ID,用于缺省路径兜底。
+ * @param wsUrl - 后端预检返回的 WebSocket 路径或完整地址。
+ * @returns WebSocket URL；鉴权 token 通过 Sec-WebSocket-Protocol 发送，避免出现在访问日志 URL 中。
+ */
+function buildWsUrl(sessionId: string, wsUrl?: string): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  const host = window.location.host
+  const fallback = `${proto}://${window.location.host}/api/ws/discuss/${sessionId}`
+  const raw = wsUrl?.trim() || fallback
+  const base = raw.startsWith('ws://') || raw.startsWith('wss://')
+    ? raw
+    : `${proto}://${window.location.host}${raw.startsWith('/') ? raw : `/${raw}`}`
+  const url = new URL(base)
+  return url.toString()
+}
+
+/**
+ * 生成 WebSocket 子协议鉴权参数。
+ * @returns 浏览器 WebSocket 构造器可接受的协议列表。
+ */
+function buildProtocols(): string[] | undefined {
   const token = getToken()
-  return `${proto}://${host}/api/ws/discuss/${sessionId}?token=${token ?? ''}`
+  return token ? ['prism-auth', token] : undefined
 }
 
 export function subscribeDiscussion(
@@ -44,7 +64,7 @@ export function subscribeDiscussion(
   onMessage: (msg: WsMessage) => void,
   opts: SubOpts = {},
 ): DiscussionStream {
-  const url = buildWsUrl(sessionId)
+  const url = buildWsUrl(sessionId, opts.wsUrl)
   let ws: WebSocket | null = null
   let closed = false
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -53,7 +73,8 @@ export function subscribeDiscussion(
   function connect() {
     if (closed) return
     opts.onStatus?.('connecting')
-    ws = new WebSocket(url)
+    const protocols = buildProtocols()
+    ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url)
 
     ws.onopen = () => {
       opts.onStatus?.('connected')

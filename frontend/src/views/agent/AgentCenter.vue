@@ -151,6 +151,7 @@
     <AgentDiscussionPanel
       v-if="discussVisible && discussSessionId"
       :session-id="discussSessionId"
+      :ws-url="discussWsUrl"
       :agents="discussAgents"
       :file-name="discussFileName"
       @close="closeDiscussPanel"
@@ -424,12 +425,14 @@ onBeforeUnmount(teardownStream)
 
 const discussVisible = ref(false)
 const discussSessionId = ref('')
+const discussWsUrl = ref('')
 const discussAgents = ref<Array<{ code: string; name: string }>>([])
 const discussFileName = ref('')
 
 function closeDiscussPanel() {
   discussVisible.value = false
   discussSessionId.value = ''
+  discussWsUrl.value = ''
   discussFileName.value = ''
 }
 
@@ -437,8 +440,10 @@ function onStartDiscussion(
   sessionId: string,
   agents: Array<{ code: string; name: string }>,
   fileName = '',
+  wsUrl = '',
 ) {
   discussSessionId.value = sessionId
+  discussWsUrl.value = wsUrl
   discussAgents.value = agents
   discussFileName.value = fileName
   discussVisible.value = true
@@ -448,11 +453,13 @@ defineExpose({ onStartDiscussion })
 
 function initDiscussionFromRoute() {
   const session = route.query.discuss_session as string
+  const wsUrl = route.query.discuss_ws as string
   const agentsJson = route.query.discuss_agents as string
   if (session && agentsJson) {
     try {
       const agents = JSON.parse(agentsJson)
       discussSessionId.value = session
+      discussWsUrl.value = wsUrl || ''
       discussAgents.value = agents
       discussFileName.value = (route.query.discuss_file as string) || ''
       discussVisible.value = true

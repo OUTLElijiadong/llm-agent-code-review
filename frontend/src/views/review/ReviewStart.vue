@@ -253,6 +253,7 @@ async function submitSingleProject(): Promise<void> {
       name: 'AgentCenter',
       query: {
         discuss_session: data.session_id,
+        discuss_ws: data.ws_url,
         discuss_agents: JSON.stringify(data.agents),
         discuss_file: data.file_name,
       },

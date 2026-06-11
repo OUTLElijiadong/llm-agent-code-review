@@ -186,6 +186,7 @@ import {
 
 const props = defineProps<{
   sessionId: string
+  wsUrl?: string
   agents: Array<{ code: string; name: string }>
   fileName?: string
 }>()
@@ -306,6 +307,7 @@ function connectWs() {
       }
     },
     {
+      wsUrl: props.wsUrl,
       onStatus: (s) => {
         status.value = s
         if (s === 'connected') lastError.value = ''
