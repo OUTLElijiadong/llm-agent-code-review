@@ -6,7 +6,7 @@ import { getToken, clearToken } from '@/utils/token'
 export interface Resp<T = unknown> {
   code: number
   message: string
-  data: T
+  data: T | null
   request_id?: string
   detail?: unknown
 }
@@ -47,22 +47,22 @@ export default http
 
 export async function get<T>(url: string, params?: object): Promise<T> {
   const r = await http.get<Resp<T>>(url, { params })
-  return r.data.data
+  return r.data.data as T
 }
 
 export async function post<T>(url: string, body?: object, params?: object): Promise<T> {
   const r = await http.post<Resp<T>>(url, body, { params })
-  return r.data.data
+  return r.data.data as T
 }
 
 export async function put<T>(url: string, body?: object): Promise<T> {
   const r = await http.put<Resp<T>>(url, body)
-  return r.data.data
+  return r.data.data as T
 }
 
 export async function del<T>(url: string): Promise<T> {
   const r = await http.delete<Resp<T>>(url)
-  return r.data.data
+  return r.data.data as T
 }
 
 /**

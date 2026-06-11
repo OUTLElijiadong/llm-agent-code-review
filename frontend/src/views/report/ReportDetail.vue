@@ -526,7 +526,7 @@ onMounted(() => {
 .cover-project {
   font-size: 40px;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   line-height: 1.1;
   margin: 12px 0 8px;
   color: #fff;
@@ -580,7 +580,7 @@ onMounted(() => {
 .ring-val {
   font-size: 56px;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   line-height: 1;
 }
 
@@ -729,7 +729,7 @@ onMounted(() => {
   font-size: 22px;
   font-weight: 600;
   color: var(--gray-900);
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 /* ============ 通用卡片 ============ */

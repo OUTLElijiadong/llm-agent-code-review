@@ -9,7 +9,7 @@
 
 所有图标走 currentColor，可被父容器 color/filter 控制以适配状态。
 
-## 二、11 个 Agent 的视觉档案
+## 二、14 个 Agent 的视觉档案
 
 | code | 中文名 | 几何图形 | 主色 | 隐喻 |
 |---|---|---|---|---|
@@ -26,9 +26,9 @@
 | `reporter` | 报告生成 | 文档 + 折角 | `#D9A857` 砂金 | 出具 |
 | `ai_prompt` | 提示词专家（**v2.0 新**） | 反引号 + 闪电 | `#E25C73` 红 | 提示词产出 |
 | `security_sentinel` | 安全哨兵（**v2.1 新**） | 盾牌 + 居中锁孔 + 上方雷达扇形 | `#D93B3B` 警戒红 | 主动巡视的护盾 |
+| `evolution` | 自进化代理（**v3.0 新**） | 螺旋箭头 + 节点 | `#6F8E35` 橄榄绿 | 反馈沉淀与规则演进 |
 
-> 注：v2.0 实际注册 12 个 Agent（11 原有 + 1 新增 `ai_prompt`）。
-> v2.1 计划新增 1 个 Agent（`security_sentinel`），注册总数变为 13。详见 [08-SecuritySentinelAgent设计.md](./08-SecuritySentinelAgent设计.md)。
+> 注：v2.0 当时注册 12 个 Agent（11 原有 + `ai_prompt`）；v2.1 新增 `security_sentinel`；v3.0 新增 `evolution`。当前主项目运行时注册总数为 14。详见 [08-SecuritySentinelAgent设计.md](./08-SecuritySentinelAgent设计.md) 和 `docs/Agent自进化/`。
 
 ## 三、动画规范
 

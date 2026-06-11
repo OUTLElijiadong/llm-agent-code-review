@@ -6,10 +6,12 @@
 3. get_runtime_agents 能正确把 AiCallLog 回填到 Agent
 4. get_situation 输出符合 Schema 形状
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.agents.event_bus import AgentEventBus
+from app.agents.events import AgentEvent, AgentEventType
 from app.agents.orchestrator import get_orchestrator
 from app.agents.registry import AgentRegistry
 from app.services import agent_service
@@ -137,6 +139,20 @@ class _FakeSituationDb:
         return self._rows
 
 
+@pytest.fixture
+def _isolated_event_history():
+    """隔离 EventBus 历史，避免运行态测试互相污染。"""
+    bus = AgentEventBus.instance()
+    old_history = list(bus._history)
+    bus._history.clear()
+    try:
+        yield bus
+    finally:
+        bus._history.clear()
+        for event in old_history:
+            bus._history.append(event)
+
+
 def test_get_situation_shape():
     """态势数据结构符合 AgentSituationOut Schema"""
     db = _FakeSituationDb([])
@@ -151,3 +167,58 @@ def test_get_situation_shape():
     for bucket in data["spectrum"]:
         assert "bucket" in bucket and "count" in bucket
         assert bucket["count"] == 0    # 无数据时全 0
+
+
+def test_get_situation_counts_latest_active_event(_isolated_event_history):
+    """最新事件处于进行中时，应准确计入 working。"""
+    code = AgentRegistry.instance().list_runtime()[0]["code"]
+    _isolated_event_history.publish(AgentEvent(
+        type=AgentEventType.PROGRESS,
+        agent=code,
+        trace_id="trc_test_active",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    ))
+
+    data = agent_service.get_situation(_FakeSituationDb([]), user_id=None, minutes=60)
+
+    assert data["working"] == 1
+    assert data["idle"] == data["online"] - 1
+
+
+def test_get_situation_complete_event_clears_stale_working(_isolated_event_history):
+    """完成事件比进行中事件更新时，不应继续把 Agent 算作 working。"""
+    code = AgentRegistry.instance().list_runtime()[0]["code"]
+    now = datetime.now(timezone.utc)
+    _isolated_event_history.publish(AgentEvent(
+        type=AgentEventType.PROGRESS,
+        agent=code,
+        trace_id="trc_test_stale",
+        timestamp=(now - timedelta(seconds=10)).isoformat(),
+    ))
+    _isolated_event_history.publish(AgentEvent(
+        type=AgentEventType.COMPLETE,
+        agent=code,
+        trace_id="trc_test_stale",
+        timestamp=now.isoformat(),
+    ))
+
+    data = agent_service.get_situation(_FakeSituationDb([]), user_id=None, minutes=60)
+
+    assert data["working"] == 0
+    assert data["idle"] == data["online"]
+
+
+def test_get_runtime_agents_restores_status_from_latest_event(_isolated_event_history):
+    """runtime 首次加载应能从 EventBus 最新事件恢复 Agent 卡片状态。"""
+    code = AgentRegistry.instance().list_runtime()[0]["code"]
+    _isolated_event_history.publish(AgentEvent(
+        type=AgentEventType.THINKING,
+        agent=code,
+        trace_id="trc_test_runtime_status",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    ))
+
+    runtime = agent_service.get_runtime_agents(_FakeDb([]))
+    by_code = {r["code"]: r for r in runtime}
+
+    assert by_code[code]["status"] == "thinking"

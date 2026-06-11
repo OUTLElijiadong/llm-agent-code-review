@@ -33,10 +33,10 @@ export interface EvolutionProposal {
   proposal_type: string
   target_rule_id?: number | null
   title: string
-  payload?: Record<string, unknown> | null
-  evidence?: Record<string, unknown> | null
+  payload?: Record<string, unknown> | unknown[] | null
+  evidence?: Record<string, unknown> | unknown[] | null
   status: string
-  eval_score?: Record<string, unknown> | null
+  eval_score?: Record<string, unknown> | unknown[] | null
   applied_rule_id?: number | null
   created_by: string
   reviewed_by?: number | null

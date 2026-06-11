@@ -33,10 +33,10 @@ export function createProject(data: Record<string, unknown>): Promise<{ id: numb
  * 更新项目
  * @param projectId - 项目 ID
  * @param data - 项目更新参数
- * @returns 更新后的项目
+ * @returns void
  */
-export function updateProject(projectId: number, data: Record<string, unknown>): Promise<ProjectOut> {
-  return put<ProjectOut>(`/projects/${projectId}`, data)
+export function updateProject(projectId: number, data: Record<string, unknown>): Promise<void> {
+  return put<void>(`/projects/${projectId}`, data)
 }
 
 /**

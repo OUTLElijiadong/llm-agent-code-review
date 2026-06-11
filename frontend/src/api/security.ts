@@ -5,6 +5,7 @@ import { get, post } from './http'
 import type {
   SecurityChecklistOut,
   SecurityDashboardSummaryOut,
+  SecurityScanAllProjectsIn,
   SecurityScanFileIn,
   SecurityScanOut,
   SecurityScanProjectIn,
@@ -29,6 +30,11 @@ export function scanTask(payload: SecurityScanTaskIn): Promise<SecurityScanOut> 
 /** 项目级威胁建模 */
 export function scanProject(payload: SecurityScanProjectIn): Promise<SecurityScanOut> {
   return post<SecurityScanOut>('/security/scan-project', payload)
+}
+
+/** 全量项目安全扫描 */
+export function scanAllProjects(payload: SecurityScanAllProjectsIn): Promise<SecurityScanOut> {
+  return post<SecurityScanOut>('/security/scan-all-projects', payload)
 }
 
 /** 查询已落库的 finding (等价于 scan-task) */

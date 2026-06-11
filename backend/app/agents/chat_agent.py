@@ -875,17 +875,15 @@ class ChatAssistantAgent(BaseAgent):
 
         import httpx
 
-        from app.core.config import settings
-
         last_error = None
         for attempt in range(self._max_retries + 1):
             t0 = time.time()
             try:
                 with httpx.Client(timeout=self._timeout) as client:
                     resp = client.post(
-                        f"{settings.deepseek_base_url}/chat/completions",
+                        f"{self._base_url}/chat/completions",
                         headers={
-                            "Authorization": f"Bearer {settings.deepseek_api_key}",
+                            "Authorization": f"Bearer {self._api_key}",
                             "Content-Type": "application/json",
                         },
                         json={

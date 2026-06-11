@@ -652,7 +652,7 @@ onMounted(() => {
     font-size: 18px;
     font-weight: 600;
     color: var(--gray-900);
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

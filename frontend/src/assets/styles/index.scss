@@ -1,5 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-@import './variables.scss';
+@use './variables.scss';
 
 * {
   margin: 0;
@@ -10,14 +9,20 @@
 html, body, #app {
   width: 100%;
   height: 100%;
+  min-width: 320px;
   font-family: var(--font-family-base);
   color: var(--color-text-primary);
   font-size: var(--font-size-base);
   line-height: var(--line-height-base);
-  background: var(--color-bg-page);
+  background: var(--app-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+html,
+body {
+  overflow-x: hidden;
 }
 
 a {
@@ -28,11 +33,191 @@ a {
   &:hover { color: var(--brand-400); }
 }
 
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
 /* ============================================================
  * 字体工具类
  * ============================================================ */
-.font-display { font-family: var(--font-display); letter-spacing: -0.01em; }
+.font-display { font-family: var(--font-display); letter-spacing: 0; }
 .font-mono    { font-family: var(--font-mono); }
+
+/* ============================================================
+ * Prism 工作台基础类
+ * ============================================================ */
+.prism-page-shell {
+  width: min(100%, var(--content-max-width));
+  margin: 0 auto;
+  min-width: 0;
+}
+
+.prism-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+
+.prism-page-title {
+  margin: 0;
+  color: var(--gray-900);
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 650;
+  line-height: 1.16;
+}
+
+.prism-page-sub {
+  margin-top: var(--sp-2);
+  color: var(--gray-500);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.prism-surface {
+  background: var(--surface-1);
+  border: var(--hairline);
+  border-radius: 10px;
+  box-shadow: var(--shadow-1);
+}
+
+.prism-surface-soft {
+  background: var(--surface-2);
+  border: var(--hairline);
+  border-radius: 10px;
+}
+
+.prism-icon-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--brand-600);
+  background: var(--brand-50);
+  border: 1px solid rgba(183, 179, 251, 0.52);
+}
+
+@media (max-width: 768px) {
+  .prism-page-title {
+    font-size: var(--fs-xl);
+  }
+
+  .prism-page-head {
+    align-items: stretch;
+    gap: var(--sp-3);
+  }
+}
+
+/* ============================================================
+ * 响应式布局契约
+ * ============================================================ */
+.page-head,
+.prism-page-head {
+  min-width: 0;
+}
+
+.page-actions,
+.filter-bar {
+  min-width: 0;
+}
+
+.table-card,
+.responsive-table-card {
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pagination-wrap,
+.pagination-wrapper {
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1024px) {
+  .page-head,
+  .prism-page-head {
+    gap: var(--sp-4);
+  }
+
+  .page-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .filter-bar {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-head,
+  .prism-page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .page-actions {
+    width: 100%;
+  }
+
+  .filter-bar {
+    padding: var(--sp-3);
+  }
+
+  .filter-bar .el-input,
+  .filter-bar .el-select,
+  .filter-bar .search-input,
+  .filter-bar .filter-select {
+    width: min(100%, 280px) !important;
+  }
+
+  .pagination-wrap,
+  .pagination-wrapper {
+    justify-content: flex-start !important;
+    padding-bottom: var(--sp-1);
+  }
+}
+
+@media (max-width: 520px) {
+  .page-actions > *,
+  .filter-bar > .el-input,
+  .filter-bar > .el-select,
+  .filter-bar > .el-button,
+  .filter-bar .search-input,
+  .filter-bar .filter-select {
+    width: 100% !important;
+  }
+
+  .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  .el-message-box {
+    width: calc(100vw - 32px) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 /* ============================================================
  * Prism LOGO mark · 棱镜标
@@ -195,18 +380,33 @@ a {
  * Element Plus 微调
  * ============================================================ */
 .el-card {
-  border-color: var(--el-border-color-light) !important;
+  border-color: var(--surface-border) !important;
+  border-radius: 10px !important;
   box-shadow: var(--shadow-1) !important;
   transition: box-shadow var(--transition-base), transform var(--transition-base);
 
   &.is-hoverable:hover {
-    box-shadow: var(--shadow-3) !important;
-    transform: translateY(-2px);
+    box-shadow: var(--panel-shadow) !important;
+    transform: translateY(-1px);
   }
 }
 
 .el-button--primary:hover:not(.is-disabled) {
   box-shadow: 0 4px 12px -2px rgba(91, 88, 232, 0.35);
+}
+
+.el-button {
+  font-weight: 500;
+}
+
+.el-input__wrapper,
+.el-select__wrapper {
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--brand-400) inset, var(--focus-ring) !important;
 }
 
 .el-menu { border-right: none !important; }

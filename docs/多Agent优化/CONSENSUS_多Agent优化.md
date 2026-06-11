@@ -27,8 +27,7 @@
 
 - `full` 审查能通过多代理组合生成 Prompt。
 - `security/performance` 能映射到专项代理组合。
-- `standard` 保持原模型标签 `deepseek-chat`。
+- `standard` 保持低成本单代理审查;当前默认模型名由 `settings.deepseek_model` 决定,主项目默认值为 `deepseek-v4-flash`。
 - 新增测试通过。
 - 前端构建通过。
 - 根说明文档和 docs 关键文档口径一致。
-

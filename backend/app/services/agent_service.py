@@ -181,6 +181,16 @@ _REGISTRY_TO_PROFILE_CODES: dict[str, set[str]] = {
     "code_reviewer": {"general", "reliability", "performance", "maintainability"},
 }
 
+_EVENT_STATUS_MAP: dict[str, str] = {
+    AgentEventType.DISPATCH.value: "thinking",
+    AgentEventType.THINKING.value: "thinking",
+    AgentEventType.PROGRESS.value: "working",
+    AgentEventType.COMPLETE.value: "idle",
+    AgentEventType.FAILED.value: "error",
+    AgentEventType.CLARIFY.value: "blocked",
+}
+_ACTIVE_RUNTIME_STATUSES = {"thinking", "working"}
+
 
 def _agent_codes_from_model_name(model_name: str, all_codes: set[str]) -> set[str]:
     """从 AiCallLog.model_name 反推涉及的 Agent code 集合
@@ -227,6 +237,76 @@ def _agent_codes_from_model_name(model_name: str, all_codes: set[str]) -> set[st
     return set()
 
 
+def _parse_event_timestamp(value: str) -> Optional[datetime]:
+    """将 AgentEvent.timestamp 解析为 UTC datetime。
+
+    Args:
+        value: 事件时间字符串，通常为 ISO-8601。
+
+    Returns:
+        Optional[datetime]: 可解析时返回 UTC 时间，否则返回 None。
+    """
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _event_type_value(type_: object) -> str:
+    """归一化事件类型，兼容枚举和字符串。"""
+    return type_.value if isinstance(type_, AgentEventType) else str(type_)
+
+
+def _derive_runtime_statuses(
+    agent_codes: set[str],
+    active_window_seconds: int = 90,
+    error_window_seconds: int = 6,
+) -> dict[str, str]:
+    """根据每个 Agent 的最新事件推导当前运行状态。
+
+    Args:
+        agent_codes: 当前注册中心内合法的 Agent code。
+        active_window_seconds: thinking/working/blocked 保留的活动窗口。
+        error_window_seconds: failed 后错误状态在运行时卡片上的短暂保留窗口。
+
+    Returns:
+        dict[str, str]: 每个 Agent 的运行状态，未命中事件时为 idle。
+    """
+    now = datetime.now(timezone.utc)
+    latest: dict[str, tuple[datetime, str]] = {}
+    for ev in AgentEventBus.instance().recent(limit=500):
+        if ev.agent not in agent_codes:
+            continue
+        event_type = _event_type_value(ev.type)
+        if event_type not in _EVENT_STATUS_MAP:
+            continue
+        ev_time = _parse_event_timestamp(ev.timestamp)
+        if ev_time is None:
+            continue
+        current = latest.get(ev.agent)
+        if current is None or ev_time >= current[0]:
+            latest[ev.agent] = (ev_time, event_type)
+
+    statuses = {code: "idle" for code in agent_codes}
+    for code, (ev_time, event_type) in latest.items():
+        status = _EVENT_STATUS_MAP[event_type]
+        age = max(0.0, (now - ev_time).total_seconds())
+        if status in _ACTIVE_RUNTIME_STATUSES and age <= active_window_seconds:
+            statuses[code] = status
+        elif status == "blocked" and age <= active_window_seconds:
+            statuses[code] = status
+        elif status == "error" and age <= error_window_seconds:
+            statuses[code] = status
+        else:
+            statuses[code] = "idle"
+    return statuses
+
+
 def _aggregate_log_stats(
     db: Session, user_id: Optional[int], codes: set[str],
 ) -> dict[str, dict]:
@@ -267,8 +347,10 @@ def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]
     runtime = AgentRegistry.instance().list_runtime()
     codes = {r["code"] for r in runtime}
     stats = _aggregate_log_stats(db, user_id, codes)
+    statuses = _derive_runtime_statuses(codes)
     for item in runtime:
         s = stats.get(item["code"], {})
+        item["status"] = statuses.get(item["code"], "idle")
         item["call_count"] = s.get("call_count", 0)
         item["success_count"] = s.get("success_count", 0)
         item["failed_count"] = s.get("failed_count", 0)
@@ -300,21 +382,9 @@ def get_situation(db: Session, user_id: Optional[int] = None,
     online = len(runtime)
     agent_codes = {r["code"] for r in runtime}
 
-    # 通过 EventBus 近期事件判断哪些 Agent 正在工作
-    import time as _time
-    now_ts = _time.time()
-    recent_events = AgentEventBus.instance().recent(limit=200)
-    active_agents: set[str] = set()
-    for ev in recent_events:
-        try:
-            ev_ts = datetime.fromisoformat(ev.timestamp).timestamp()
-        except (ValueError, TypeError):
-            continue
-        if (now_ts - ev_ts) <= 60 and ev.type in (
-            AgentEventType.DISPATCH, AgentEventType.THINKING, AgentEventType.PROGRESS,
-        ):
-            active_agents.add(ev.agent)
-    working = len(active_agents & agent_codes)
+    # 通过 EventBus 最新事件判断哪些 Agent 仍处于执行态。
+    statuses = _derive_runtime_statuses(agent_codes)
+    working = sum(1 for status in statuses.values() if status in _ACTIVE_RUNTIME_STATUSES)
     idle = max(0, online - working)
 
     # 今日调用数 + 热点 Agent

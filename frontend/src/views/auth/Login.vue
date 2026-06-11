@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { resolvePostLoginPath } from '@/utils/roleHome'
 
 const router = useRouter()
 const route = useRoute()
@@ -41,8 +42,9 @@ async function handleLogin(): Promise<void> {
     try {
       await userStore.login({ username: form.username, password: form.password })
       ElMessage.success('登录成功')
-      const redirect = (route.query.redirect as string) || '/dashboard'
-      router.push(redirect)
+      const queryRedirect = route.query.redirect
+      const redirect = Array.isArray(queryRedirect) ? queryRedirect[0] : queryRedirect
+      router.replace(resolvePostLoginPath(userStore.profile?.role, redirect))
     } catch {
       /* 请求拦截器会展示后端返回的错误信息，避免重复 toast。 */
     } finally {
@@ -99,6 +101,10 @@ function goRegister(): void {
     <!-- =========== 右侧表单区 =========== -->
     <main class="form-wrap">
       <div class="form-card">
+        <div class="mobile-brand">
+          <span class="prism-mark sm on-light"></span>
+          <span class="mobile-brand-text font-display">Prism · 棱镜</span>
+        </div>
         <div class="form-eyebrow font-mono">WELCOME BACK</div>
         <h2 class="form-title font-display">登录到你的工作台</h2>
         <p class="form-sub">
@@ -244,7 +250,7 @@ function goRegister(): void {
   font-size: 52px;
   font-weight: 600;
   line-height: 1.08;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
   margin: 16px 0 24px;
   color: #fff;
 
@@ -336,6 +342,19 @@ function goRegister(): void {
   max-width: 380px;
 }
 
+.mobile-brand {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 26px;
+}
+
+.mobile-brand-text {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--gray-900);
+}
+
 .form-eyebrow {
   font-size: 11px;
   letter-spacing: 0.12em;
@@ -348,7 +367,7 @@ function goRegister(): void {
   font-weight: 600;
   margin: 12px 0 8px;
   color: var(--gray-900);
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
 }
 
 .form-sub {
@@ -440,5 +459,58 @@ function goRegister(): void {
   font-size: 12px;
   color: var(--gray-400);
   margin-top: 32px;
+}
+
+@media (max-width: 900px) {
+  .form-wrap {
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 96px 24px 32px;
+    background:
+      linear-gradient(180deg, #fff 0%, var(--app-bg-soft) 56%, var(--app-bg) 100%);
+  }
+
+  .form-card {
+    max-width: 420px;
+    margin: 0 auto;
+  }
+
+  .mobile-brand {
+    display: inline-flex;
+  }
+
+  .form-title {
+    font-size: 30px;
+  }
+
+  .prism-form {
+    :deep(.el-form-item) {
+      display: block;
+      margin-bottom: 18px;
+    }
+
+    :deep(.el-form-item__label) {
+      display: flex;
+      justify-content: flex-start;
+      width: auto !important;
+      height: auto;
+      margin-bottom: 8px;
+      padding: 0;
+    }
+  }
+}
+
+@media (max-width: 430px) {
+  .form-wrap {
+    padding: 72px 24px 28px;
+  }
+
+  .form-title {
+    font-size: 28px;
+  }
+
+  .footer-mini {
+    margin-top: 26px;
+  }
 }
 </style>

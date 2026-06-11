@@ -1,8 +1,8 @@
 <template>
-  <div class="agent-office-page">
-    <header class="page-head">
+  <div class="agent-office-page prism-page-shell">
+    <header class="page-head prism-page-head">
       <div>
-        <h2 class="page-title">Agent 办公室</h2>
+        <h2 class="page-title font-display">Agent 办公室</h2>
         <p class="page-sub">
           注册中心实时同步 ·
           <b class="hl">{{ runtime.length }}</b> 个 Agent 在岗 ·
@@ -223,9 +223,26 @@ const categoryOptions = computed(() =>
   })),
 )
 
+const EXECUTION_STATUSES: ReadonlySet<AgentStatus> = new Set(['thinking', 'working'])
+const STATUS_PRIORITY: Record<AgentStatus, number> = {
+  working: 0,
+  thinking: 1,
+  blocked: 2,
+  error: 3,
+  idle: 4,
+  offline: 5,
+}
+
 const filteredAgents = computed(() => {
-  if (!filterCategory.value) return runtime.value
-  return runtime.value.filter((a) => a.category === filterCategory.value)
+  const order = new Map(runtime.value.map((a, idx) => [a.code, idx]))
+  const base = filterCategory.value
+    ? runtime.value.filter((a) => a.category === filterCategory.value)
+    : runtime.value
+  return [...base].sort((a, b) => {
+    const statusDelta = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status]
+    if (statusDelta !== 0) return statusDelta
+    return (order.get(a.code) ?? 0) - (order.get(b.code) ?? 0)
+  })
 })
 
 function toggleCategory(c: string): void {
@@ -253,7 +270,7 @@ function goRules(): void {
   router.push('/rules')
 }
 function goReview(): void {
-  router.push('/review/start')
+  router.push('/reviews/start')
 }
 
 async function loadAll(): Promise<void> {
@@ -293,24 +310,31 @@ const STATUS_BY_EVENT: Record<AgentEventType, AgentStatus> = {
 }
 
 const ERROR_TIMEOUT_MS = 6_000
+const STATS_REFRESH_DELAY_MS = 800
+const HEARTBEAT_REFRESH_MS = 15_000
 const errorTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let stream: ReturnType<typeof subscribeAgentEvents> | null = null
 
+function syncSituationActivityCounts(): void {
+  if (!situation.value) return
+  const online = situation.value.online || runtime.value.length
+  const working = runtime.value.filter((x) => EXECUTION_STATUSES.has(x.status)).length
+  situation.value = {
+    ...situation.value,
+    online,
+    working,
+    idle: Math.max(0, online - working),
+  }
+}
+
 function setAgentStatus(code: string, status: AgentStatus): void {
   const a = runtime.value.find((x) => x.code === code)
-  if (!a) return
-  a.status = status
-  // 同步态势统计:working = 非 idle 的数量
-  if (situation.value) {
-    const working = runtime.value.filter(
-      (x) => x.status !== 'idle' && x.status !== 'offline',
-    ).length
-    situation.value = {
-      ...situation.value,
-      working,
-      idle: Math.max(0, situation.value.online - working),
-    }
+  if (!a) {
+    scheduleStatsRefresh()
+    return
   }
+  a.status = status
+  syncSituationActivityCounts()
 }
 
 function clearErrorTimer(code: string): void {
@@ -333,19 +357,19 @@ function handleAgentEvent(ev: AgentEvent): void {
       errorTimers.delete(ev.agent)
     }, ERROR_TIMEOUT_MS))
   }
-  // 审查完成/失败时触发统计刷新(debounce 合并多 agent 批量事件)
-  if (ev.type === 'complete' || ev.type === 'failed') {
+  // 终态事件触发统计刷新(debounce 合并多 agent 批量事件)
+  if (ev.type === 'complete' || ev.type === 'failed' || ev.type === 'clarify') {
     scheduleStatsRefresh()
   }
 }
 
-// === 轻量统计刷新: 只更新 call_count/success_count/failed_count, 不覆盖 SSE 维护的 status ===
+// === 轻量统计刷新: 后端最新 EventBus 状态 + AiCallLog 统计为准 ===
 
 let statsRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 function scheduleStatsRefresh(): void {
   if (statsRefreshTimer) clearTimeout(statsRefreshTimer)
-  statsRefreshTimer = setTimeout(refreshAgentStats, 2_000)
+  statsRefreshTimer = setTimeout(refreshAgentStats, STATS_REFRESH_DELAY_MS)
 }
 
 async function refreshAgentStats(): Promise<void> {
@@ -354,22 +378,12 @@ async function refreshAgentStats(): Promise<void> {
       listRuntimeAgents(),
       getSituation(60),
     ])
-    // 合并统计字段到当前 runtime, 保留 SSE 维护的 status
-    const statusMap = new Map(runtime.value.map((a) => [a.code, a.status]))
-    for (const a of fresh) {
-      const cur = runtime.value.find((x) => x.code === a.code)
-      if (cur) {
-        cur.call_count = a.call_count
-        cur.success_count = a.success_count
-        cur.failed_count = a.failed_count
-        cur.last_called_at = a.last_called_at
-        // status 以 SSE 为准: 不覆盖非 idle 状态
-        if (statusMap.get(a.code) !== 'idle') {
-          cur.status = statusMap.get(a.code)!
-        }
-      }
+    runtime.value = fresh
+    if (selectedAgent.value) {
+      selectedAgent.value = runtime.value.find((a) => a.code === selectedAgent.value?.code) ?? null
     }
     situation.value = sit
+    syncSituationActivityCounts()
   } catch {
     // 静默失败
   }
@@ -399,7 +413,7 @@ function teardownStream(): void {
 onMounted(async () => {
   await loadAll()
   ensureStream()
-  heartbeatTimer = setInterval(refreshAgentStats, 60_000)
+  heartbeatTimer = setInterval(refreshAgentStats, HEARTBEAT_REFRESH_MS)
   // 从 ReviewStart 跳转过来时自动打开讨论面板
   initDiscussionFromRoute()
 })
@@ -458,7 +472,6 @@ function initDiscussionFromRoute() {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: var(--spacing-lg);
 }
 
 .page-head {
@@ -473,7 +486,7 @@ function initDiscussionFromRoute() {
   margin: 0;
   font-size: 22px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: var(--gray-900);
 }
 
@@ -500,8 +513,8 @@ function initDiscussionFromRoute() {
 
 .bucket-card {
   flex-shrink: 0;
-  background: #fff;
-  border: 1px solid var(--gray-100);
+  background: var(--surface-1);
+  border: var(--hairline);
   border-radius: 10px;
   padding: 10px 16px;
   display: flex;
@@ -513,6 +526,7 @@ function initDiscussionFromRoute() {
 
   &:hover {
     border-color: var(--brand-300);
+    box-shadow: var(--shadow-1);
   }
 
   &.active {
@@ -540,9 +554,9 @@ function initDiscussionFromRoute() {
 }
 
 .type-mapping-card {
-  background: #fff;
-  border: 1px solid var(--gray-100);
-  border-radius: 14px;
+  background: var(--surface-1);
+  border: var(--hairline);
+  border-radius: 10px;
   padding: 18px 20px;
 }
 

@@ -14,9 +14,9 @@
 
 ## 3. 项目上下文（现状盘点）
 
-- 后端：FastAPI + SQLAlchemy 2.x + Pydantic v2，Python 3.9，SQLite（本地）/ MySQL 8（部署）。
+- 后端：FastAPI + SQLAlchemy 2.x + Pydantic v2，本地 Python 3.9+ / 容器 Python 3.11，数据库以 Docker MySQL 8 为准；SQLite 仅保留在历史辅助脚本和部分内存测试语境中。
 - AI 审查链路：`ReviewService → CodeChunker → PromptBuilder → DeepSeekAgent → ResultParser → ReviewIssue`。
-- 多 Agent：`backend/app/agents/` 下 13 个 `BaseAgent` + `registry` + `event_bus` + `orchestrator`，已有圆桌讨论与主动提问机制。
+- 多 Agent：`backend/app/agents/` 当前注册 14 个 `BaseAgent` + `registry` + `event_bus` + `orchestrator`，已有圆桌讨论、主动提问、安全哨兵与自进化机制。
 
 **自进化要挂载的基础设施大多已存在：**
 

@@ -8,6 +8,7 @@ from app.api.v1 import (
     ai_chat,
     ai_logs,
     ai_prompt,
+    api_config,
     audit,
     auth,
     code_files,
@@ -39,3 +40,4 @@ api_router.include_router(security.router, prefix="/security", tags=["安全审�
 api_router.include_router(agents.router, prefix="/agents", tags=["Agent中心"])
 api_router.include_router(evolution.router, prefix="/evolution", tags=["Agent自进化"])
 api_router.include_router(audit.router, prefix="/admin/audit", tags=["操作审计"])
+api_router.include_router(api_config.router, tags=["API配置"])

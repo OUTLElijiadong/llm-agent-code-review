@@ -166,6 +166,191 @@ def test_scan_file_invalid_depth_returns_error():
     assert "scan_depth" in result.error
 
 
+def test_scan_all_projects_empty_scope_returns_empty_result():
+    """全量扫描在没有可见项目时应稳定返回空结果"""
+    agent = SecuritySentinelAgent()
+    db = MagicMock()
+    chain = MagicMock()
+    chain.filter.return_value = chain
+    chain.order_by.return_value.all.return_value = []
+    db.query.return_value = chain
+    agent.inject(db, user=_make_user())
+
+    result = agent.scan_all_projects()
+
+    assert result.success is True
+    assert result.data["findings"] == []
+    assert result.data["file_count"] == 0
+    assert result.data["risk_score"] == 100
+    assert result.data["compliance"]["project_count"] == 0
+
+
+def test_scan_all_projects_aggregates_project_results(monkeypatch):
+    """全量扫描应复用单项目扫描并聚合 findings/文件数/数据流"""
+    agent = SecuritySentinelAgent()
+    db = MagicMock()
+    projects = [
+        _make_project(project_id=1, user_id=1, name="alpha"),
+        _make_project(project_id=2, user_id=1, name="beta"),
+    ]
+    chain = MagicMock()
+    chain.filter.return_value = chain
+    chain.order_by.return_value.all.return_value = projects
+    db.query.return_value = chain
+    agent.inject(db, user=_make_user())
+
+    def fake_scan_project(project_id, top_n=50, trace_dataflow=True, ctx=None):
+        return AgentResult(success=True, data={
+            "findings": [{
+                "title": f"SQL 注入 {project_id}",
+                "category": "注入",
+                "owasp": "A03:2021-Injection",
+                "cwe": "CWE-89",
+                "severity": "严重",
+                "file_path": "api.py",
+                "file_id": project_id,
+                "lines": "L1",
+                "line_number": 1,
+                "end_line": 1,
+                "evidence": "query",
+                "exploit_scenario": "SQL 注入",
+                "fix_suggestion": "参数化查询",
+                "references": [],
+                "confidence": 0.9,
+                "source": "llm",
+            }],
+            "threat_model": {
+                "entry_points": [{"file": "api.py", "line": 1}],
+                "data_flows": [{
+                    "from": "api.py:handler",
+                    "via": ["service.py:run"],
+                    "to": "db.py:query",
+                    "risk_type": "SQL 注入",
+                    "severity": "严重",
+                }],
+                "api_endpoints": [{
+                    "method": "POST",
+                    "path": "/login",
+                    "file_path": "api.py",
+                    "line_number": 1,
+                    "handler": "handler",
+                    "auth_hint": "未发现明显认证线索",
+                    "source": "python_route",
+                }],
+                "code_links": [{
+                    "from": "api.py:handler",
+                    "to": "db.py:query",
+                    "relation": "跨文件数据流",
+                    "risk_type": "SQL 注入",
+                    "severity": "严重",
+                }],
+                "attack_surface_summary": "mock",
+            },
+            "compliance": {},
+            "risk_score": 85,
+            "summary": "mock",
+            "file_count": project_id,
+            "duration_ms": 1,
+        })
+
+    monkeypatch.setattr(agent, "scan_project", fake_scan_project)
+
+    result = agent.scan_all_projects(top_n_per_project=10)
+
+    assert result.success is True
+    assert len(result.data["findings"]) == 2
+    assert result.data["file_count"] == 3
+    assert result.data["risk_score"] == 70
+    assert result.data["compliance"]["scanned_project_count"] == 2
+    assert result.data["findings"][0]["file_path"] == "alpha/api.py"
+    assert result.data["threat_model"]["data_flows"][1]["from"] == "beta/api.py:handler"
+    assert result.data["threat_model"]["api_endpoints"][0]["file_path"] == "alpha/api.py"
+    assert result.data["threat_model"]["code_links"][1]["to"] == "beta/db.py:query"
+    assert result.data["discussion"]["turns"]
+
+
+def test_extract_api_endpoints_detects_common_routes():
+    """接口扫描应识别后端路由和前端 HTTP client 调用"""
+    agent = SecuritySentinelAgent()
+    file = _make_file(
+        content=(
+            "from fastapi import APIRouter, Depends\n"
+            "router = APIRouter()\n"
+            "@router.post('/users')\n"
+            "async def create_user(current_user=Depends(get_current_user)):\n"
+            "    pass\n"
+            "app.get('/health', handler)\n"
+            "axios.post('/api/login', data)\n"
+        ),
+        file_name="api.py",
+        language="python",
+    )
+
+    endpoints = agent._extract_api_endpoints(file)
+
+    paths = {(item["method"], item["path"]) for item in endpoints}
+    assert ("POST", "/users") in paths
+    assert ("GET", "/health") in paths
+    assert ("POST", "/api/login") in paths
+    user_endpoint = next(item for item in endpoints if item["path"] == "/users")
+    assert user_endpoint["handler"] == "create_user"
+    assert user_endpoint["auth_hint"] == "发现认证/权限线索"
+
+
+def test_build_code_links_connects_endpoint_to_sink_and_dataflow():
+    """代码联动关系应同时包含接口到 sink 和已有数据流"""
+    agent = SecuritySentinelAgent()
+
+    links = agent._build_code_links(
+        api_endpoints=[{
+            "method": "POST",
+            "path": "/users",
+            "file_path": "api.py",
+            "line_number": 3,
+            "handler": "create_user",
+        }],
+        sinks=[{
+            "file": "api.py",
+            "name": "raw_query",
+            "sink_type": "SQL",
+        }],
+        data_flows=[{
+            "from": "api.py:create_user",
+            "to": "db.py:query",
+            "risk_type": "SQL 注入",
+            "severity": "高",
+        }],
+    )
+
+    assert any(link["relation"] == "接口到同文件危险接收点" for link in links)
+    assert any(link["relation"] == "跨文件数据流" for link in links)
+    assert any(link["risk_type"] == "SQL 注入" for link in links)
+
+
+def test_build_multi_agent_discussion_returns_action_items():
+    """多 Agent 讨论摘要应给出发言、共识和行动项"""
+    agent = SecuritySentinelAgent()
+    discussion = agent._build_multi_agent_discussion(
+        findings=[{
+            "severity": "高",
+            "owasp": "A03:2021-Injection",
+        }],
+        threat_model={
+            "api_endpoints": [{
+                "auth_hint": "未发现明显认证线索",
+            }],
+            "data_flows": [],
+            "code_links": [{"severity": "高"}],
+        },
+        project_count=2,
+    )
+
+    assert discussion["mode"] == "multi_agent_summary"
+    assert len(discussion["turns"]) >= 4
+    assert "多 Agent 共识" in discussion["consensus"]
+    assert any("认证" in item for item in discussion["action_items"])
+
+
 # ---------- 风险评分 ----------
 
 

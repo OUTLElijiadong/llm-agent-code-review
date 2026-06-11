@@ -123,9 +123,9 @@ useTilt(cardRef, { max: 7, scale: 1.015 })
 
 <style scoped lang="scss">
 .desk-card {
-  background: #fff;
-  border: 1px solid var(--gray-100);
-  border-radius: 14px;
+  background: var(--surface-1);
+  border: var(--hairline);
+  border-radius: 10px;
   padding: 16px 18px 14px;
   display: flex;
   flex-direction: column;
@@ -139,7 +139,7 @@ useTilt(cardRef, { max: 7, scale: 1.015 })
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 14px;
+    border-radius: 10px;
     pointer-events: none;
     background: linear-gradient(180deg, var(--accent, #5B58E8) 0%, transparent 6%);
     opacity: 0.7;
@@ -147,7 +147,7 @@ useTilt(cardRef, { max: 7, scale: 1.015 })
 
   &:hover {
     border-color: var(--accent);
-    box-shadow: 0 10px 24px -16px var(--accent);
+    box-shadow: var(--panel-shadow);
     transform: translateY(-1px);
   }
 }

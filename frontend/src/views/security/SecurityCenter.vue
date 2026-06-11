@@ -9,6 +9,7 @@ import type {
   SecurityChecklistOut,
   SecurityDashboardSummaryOut,
 } from '@/types/security'
+import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { OWASP_TOP10, type OwaspDoc } from './owasp-knowledge'
 
 const router = useRouter()
@@ -19,6 +20,7 @@ const dashboardData = ref<SecurityDashboardSummaryOut | null>(null)
 const dashboardLoading = ref(false)
 const selectedOwasp = ref<OwaspDoc | null>(null)
 const detailVisible = ref(false)
+const securityScanVisible = ref(false)
 
 const secretCount = computed(() => checklist.value?.secret_patterns.length ?? 0)
 const staticCount = computed(() => checklist.value?.static_rules.length ?? 0)
@@ -84,6 +86,10 @@ function gotoProjects(): void {
   router.push('/projects')
 }
 
+function openAllProjectScan(): void {
+  securityScanVisible.value = true
+}
+
 function jumpAndCloseDetail(): void {
   detailVisible.value = false
   router.push('/projects')
@@ -111,11 +117,21 @@ onMounted(() => {
         </p>
       </div>
       <div class="page-actions">
-        <el-button type="primary" :icon="ArrowRight" @click="gotoProjects">
-          🛡 立即扫描我的项目
+        <el-button type="primary" :icon="Lock" @click="openAllProjectScan">
+          全量扫描
+        </el-button>
+        <el-button :icon="ArrowRight" @click="gotoProjects">
+          单项目扫描
         </el-button>
       </div>
     </header>
+
+    <SecurityScanModal
+      v-model="securityScanVisible"
+      source="all-projects"
+      :ref-id="null"
+      ref-name="全部可见项目"
+    />
 
     <!-- ========== 我的项目安全概览 (v2.1.1) ========== -->
     <section class="block overview" v-loading="dashboardLoading">
@@ -135,8 +151,11 @@ onMounted(() => {
             你有 <b>{{ dashboardData.project_count }}</b> 个项目还未进行安全审计,
             点击「立即扫描」开始分析。
           </div>
-          <el-button size="small" type="primary" :icon="Lock" @click="gotoProjects">
-            立即扫描
+          <el-button size="small" type="primary" :icon="Lock" @click="openAllProjectScan">
+            全量扫描
+          </el-button>
+          <el-button size="small" :icon="ArrowRight" @click="gotoProjects">
+            单项目扫描
           </el-button>
         </div>
 
@@ -336,7 +355,17 @@ onMounted(() => {
         <li>
           <span class="usage-glyph">🛡</span>
           <div>
-            <b>项目级威胁建模</b>
+            <b>全量项目安全扫描</b>
+            <span>
+              在本页点击 <kbd>全量扫描</kbd>,
+              对当前账号可见的所有活跃项目统一执行安全审计并聚合风险。
+            </span>
+          </div>
+        </li>
+        <li>
+          <span class="usage-glyph">◎</span>
+          <div>
+            <b>单项目威胁建模</b>
             <span>
               在「项目详情」点 <kbd>🛡 安全审计</kbd>,
               获得跨文件数据流追踪 + OWASP/CWE 标签 + 风险评分。
@@ -471,6 +500,13 @@ onMounted(() => {
     color: #D93B3B;
     font-weight: 600;
   }
+}
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .block {

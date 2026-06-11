@@ -21,6 +21,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.ai_call_log import AiCallLog
 from app.models.review_report import ReviewReport
 from app.models.audit_log import AuditLog
+from app.models.api_config import UserApiConfig  # v3.1
 
 config = context.config
 if config.config_file_name is not None:

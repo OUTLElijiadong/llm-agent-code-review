@@ -2,8 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Lock, RefreshRight, View } from '@element-plus/icons-vue'
-import { scanFile, scanProject, scanTask } from '@/api/security'
+import { scanAllProjects, scanFile, scanProject, scanTask } from '@/api/security'
 import type {
+  ApiEndpointOut,
+  CodeLinkOut,
   DataFlowOut,
   SecurityFindingOut,
   SecurityScanOut,
@@ -11,9 +13,9 @@ import type {
 
 interface Props {
   modelValue: boolean
-  /** 'file' / 'task' / 'project' 三态 */
-  source: 'file' | 'task' | 'project'
-  /** 对应 id (file_id / task_id / project_id) */
+  /** 'file' / 'task' / 'project' / 'all-projects' 四态 */
+  source: 'file' | 'task' | 'project' | 'all-projects'
+  /** 对应 id (file_id / task_id / project_id); all-projects 模式不需要 */
   refId: number | null
   /** project 模式可显示名,用于标题 */
   refName?: string
@@ -51,8 +53,18 @@ const dialogTitle = computed(() => {
     file: '文件安全扫描',
     task: '任务安全复审',
     project: '项目威胁建模',
+    'all-projects': '全量项目安全扫描',
   }
   return `🛡 ${map[props.source]}`
+})
+
+const isProjectScan = computed(() => {
+  return props.source === 'project' || props.source === 'all-projects'
+})
+
+const scopeLabel = computed(() => {
+  if (props.source === 'all-projects') return '全部可见项目'
+  return `${props.source}#${props.refId ?? '-'}`
 })
 
 const severityCounts = computed(() => {
@@ -97,7 +109,7 @@ const scoreIcon = computed(() => {
 })
 
 async function runScan(): Promise<void> {
-  if (props.refId === null) {
+  if (props.source !== 'all-projects' && props.refId === null) {
     ElMessage.warning('缺少必要的 ID 参数')
     return
   }
@@ -108,15 +120,20 @@ async function runScan(): Promise<void> {
   try {
     if (props.source === 'file') {
       result.value = await scanFile({
-        file_id: props.refId,
+        file_id: props.refId as number,
         scan_depth: scanDepth.value,
       })
     } else if (props.source === 'task') {
-      result.value = await scanTask({ task_id: props.refId })
-    } else {
+      result.value = await scanTask({ task_id: props.refId as number })
+    } else if (props.source === 'project') {
       result.value = await scanProject({
-        project_id: props.refId,
+        project_id: props.refId as number,
         top_n: topN.value,
+        trace_dataflow: traceDataflow.value,
+      })
+    } else {
+      result.value = await scanAllProjects({
+        top_n_per_project: topN.value,
         trace_dataflow: traceDataflow.value,
       })
     }
@@ -136,7 +153,7 @@ function downloadReport(): void {
   const lines: string[] = []
   lines.push(`# 棱镜 Prism · 安全审计报告`)
   lines.push('')
-  lines.push(`- 扫描范围: ${props.source}#${props.refId} ${props.refName ? `(${props.refName})` : ''}`)
+  lines.push(`- 扫描范围: ${scopeLabel.value} ${props.refName ? `(${props.refName})` : ''}`)
   lines.push(`- 风险评分: **${result.value.risk_score}/100**`)
   lines.push(`- 扫描文件数: ${result.value.file_count}`)
   lines.push(`- 耗时: ${(result.value.duration_ms / 1000).toFixed(2)}s`)
@@ -144,6 +161,44 @@ function downloadReport(): void {
   lines.push(`## 概要`)
   lines.push(result.value.summary)
   lines.push('')
+  const endpoints = result.value.threat_model?.api_endpoints ?? []
+  if (endpoints.length) {
+    lines.push(`## 接口扫描 (${endpoints.length} 个)`)
+    for (const endpoint of endpoints) {
+      lines.push(
+        `- ${endpoint.method} ${endpoint.path} · ` +
+          `\`${endpoint.file_path}:${endpoint.line_number}\` · ${endpoint.auth_hint}`,
+      )
+    }
+    lines.push('')
+  }
+  const codeLinks = result.value.threat_model?.code_links ?? []
+  if (codeLinks.length) {
+    lines.push(`## 代码联动关系 (${codeLinks.length} 条)`)
+    for (const link of codeLinks) {
+      lines.push(
+        `- [${link.severity}] ${link.relation} · ${link.risk_type}: ` +
+          `${link.from} → ${link.to}`,
+      )
+    }
+    lines.push('')
+  }
+  if (result.value.discussion) {
+    lines.push('## 多 Agent 讨论结论')
+    lines.push(result.value.discussion.consensus)
+    lines.push('')
+    for (const turn of result.value.discussion.turns) {
+      lines.push(`- ${turn.agent_name}: ${turn.content}`)
+    }
+    if (result.value.discussion.action_items.length) {
+      lines.push('')
+      lines.push('### 行动项')
+      for (const item of result.value.discussion.action_items) {
+        lines.push(`- ${item}`)
+      }
+    }
+    lines.push('')
+  }
   lines.push(
     `## 严重度分布\n严重 ${severityCounts.value.严重} · ` +
       `高 ${severityCounts.value.高} · ` +
@@ -186,7 +241,7 @@ function downloadReport(): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `prism_security_${props.source}_${props.refId}.md`
+  a.download = `prism_security_${props.source}_${props.refId ?? 'all'}.md`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -199,6 +254,14 @@ function severityClass(sev: string): string {
 
 function dataflowPath(f: DataFlowOut): string {
   return [f.from, ...f.via, f.to].filter(Boolean).join(' → ')
+}
+
+function endpointLocation(endpoint: ApiEndpointOut): string {
+  return `${endpoint.file_path}:${endpoint.line_number}`
+}
+
+function codeLinkPath(link: CodeLinkOut): string {
+  return [link.from, link.to].filter(Boolean).join(' → ')
 }
 
 watch(visible, (v) => {
@@ -233,8 +296,10 @@ watch(() => props.refId, () => {
           </el-radio-group>
         </template>
 
-        <template v-else-if="source === 'project'">
-          <span class="tb-label">扫描文件数</span>
+        <template v-else-if="isProjectScan">
+          <span class="tb-label">
+            {{ source === 'all-projects' ? '每项目文件数' : '扫描文件数' }}
+          </span>
           <el-input-number v-model="topN" :min="1" :max="200" size="small" />
           <el-checkbox v-model="traceDataflow" size="small">跨文件数据流追踪</el-checkbox>
         </template>
@@ -271,12 +336,18 @@ watch(() => props.refId, () => {
     <div v-if="loading" class="sec-loading">
       <div class="loading-icon">🛡</div>
       <div class="loading-text">
-        {{ source === 'project' ? '正在扫描项目文件并构建威胁模型' : '正在执行网络安全审查' }}
+        {{
+          source === 'all-projects'
+            ? '正在扫描全部可见项目、接口和代码联动关系'
+            : source === 'project'
+              ? '正在扫描项目文件并构建威胁模型'
+              : '正在执行网络安全审查'
+        }}
       </div>
       <div class="loading-sub">
         {{
-          source === 'project'
-            ? '逐文件 LLM 审查 + 第二轮跨文件数据流分析,大型项目预计 30s ~ 3 分钟'
+          isProjectScan
+            ? '逐项目/逐文件执行正则、静态规则、接口抽取、数据流追踪和多 Agent 讨论摘要'
             : '正则秘钥扫描 + LLM 深度漏洞审查'
         }}
       </div>
@@ -324,6 +395,107 @@ watch(() => props.refId, () => {
 
       <div class="sec-summary" v-if="result.summary">
         {{ result.summary }}
+      </div>
+
+      <!-- 接口、联动和多 Agent 讨论 -->
+      <div
+        v-if="
+          result.threat_model &&
+          (result.threat_model.api_endpoints.length ||
+            result.threat_model.code_links.length ||
+            result.discussion)
+        "
+        class="sec-threat-grid"
+      >
+        <section
+          v-if="result.threat_model.api_endpoints.length"
+          class="threat-panel"
+        >
+          <header class="block-head compact">
+            <span class="block-title">接口扫描</span>
+            <span class="block-count font-mono">
+              {{ result.threat_model.api_endpoints.length }}
+            </span>
+          </header>
+          <ul class="endpoint-list">
+            <li
+              v-for="endpoint in result.threat_model.api_endpoints"
+              :key="`${endpoint.method}-${endpoint.path}-${endpoint.file_path}-${endpoint.line_number}`"
+              class="endpoint-row"
+            >
+              <span class="method-chip">{{ endpoint.method }}</span>
+              <span class="endpoint-path font-mono">{{ endpoint.path }}</span>
+              <span class="endpoint-file font-mono">{{ endpointLocation(endpoint) }}</span>
+              <span
+                class="auth-hint"
+                :class="{ missing: endpoint.auth_hint.includes('未发现') }"
+              >
+                {{ endpoint.auth_hint }}
+              </span>
+            </li>
+          </ul>
+        </section>
+
+        <section
+          v-if="result.threat_model.code_links.length"
+          class="threat-panel"
+        >
+          <header class="block-head compact">
+            <span class="block-title">代码联动关系</span>
+            <span class="block-count font-mono">
+              {{ result.threat_model.code_links.length }}
+            </span>
+          </header>
+          <ul class="link-list">
+            <li
+              v-for="(link, idx) in result.threat_model.code_links"
+              :key="`${link.from}-${link.to}-${idx}`"
+              class="link-row"
+            >
+              <span class="sev-chip" :class="severityClass(link.severity)">
+                {{ link.severity }}
+              </span>
+              <div class="link-info">
+                <div class="link-title">{{ link.relation }} · {{ link.risk_type }}</div>
+                <div class="link-path font-mono">{{ codeLinkPath(link) }}</div>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section
+          v-if="result.discussion"
+          class="threat-panel discussion-panel"
+        >
+          <header class="block-head compact">
+            <span class="block-title">多 Agent 讨论</span>
+            <span class="block-count font-mono">
+              {{ result.discussion.turns.length }}
+            </span>
+          </header>
+          <div class="discussion-consensus">{{ result.discussion.consensus }}</div>
+          <ul class="discussion-turns">
+            <li
+              v-for="turn in result.discussion.turns"
+              :key="`${turn.agent_code}-${turn.role}`"
+              class="discussion-turn"
+            >
+              <span class="agent-name">{{ turn.agent_name }}</span>
+              <span class="agent-content">{{ turn.content }}</span>
+            </li>
+          </ul>
+          <ul
+            v-if="result.discussion.action_items.length"
+            class="action-list"
+          >
+            <li
+              v-for="item in result.discussion.action_items"
+              :key="item"
+            >
+              {{ item }}
+            </li>
+          </ul>
+        </section>
       </div>
 
       <!-- findings 列表 -->
@@ -459,7 +631,7 @@ watch(() => props.refId, () => {
       <div class="empty-sub">
         将由 <code>security_sentinel</code> Agent 负责执行,
         包含正则秘钥识别 + LLM 深度漏洞审查
-        <span v-if="source === 'project'"> + 跨文件数据流追踪</span>
+        <span v-if="isProjectScan"> + 跨文件数据流追踪</span>
       </div>
       <el-button type="primary" :icon="RefreshRight" :loading="loading" @click="runScan">
         开始扫描
@@ -791,6 +963,178 @@ watch(() => props.refId, () => {
   margin-top: 2px;
 
   &:hover { text-decoration: underline; }
+}
+
+.sec-threat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.threat-panel {
+  border: 1px solid var(--gray-100);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  min-width: 0;
+}
+
+.discussion-panel {
+  grid-column: 1 / -1;
+}
+
+.block-head.compact {
+  margin: 0 0 8px;
+}
+
+.endpoint-list,
+.link-list,
+.discussion-turns,
+.action-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.endpoint-list,
+.link-list,
+.discussion-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.endpoint-row {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr);
+  gap: 4px 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--gray-50);
+  border-radius: 6px;
+}
+
+.method-chip {
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--brand-600, #5B58E8);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+.endpoint-path {
+  font-size: 11px;
+  color: var(--gray-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.endpoint-file {
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  color: var(--gray-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-hint {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: #4FB87A;
+
+  &.missing {
+    color: #D9A857;
+  }
+}
+
+.link-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 8px;
+  background: var(--gray-50);
+  border-radius: 6px;
+}
+
+.link-info {
+  min-width: 0;
+}
+
+.link-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray-800);
+}
+
+.link-path {
+  font-size: 10.5px;
+  color: var(--gray-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discussion-consensus {
+  background: rgba(91, 88, 232, 0.08);
+  border-left: 3px solid var(--brand-600, #5B58E8);
+  border-radius: 4px;
+  color: var(--gray-800);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 7px 9px;
+  margin-bottom: 8px;
+}
+
+.discussion-turn {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--gray-100);
+  font-size: 12px;
+}
+
+.agent-name {
+  color: var(--gray-700);
+  font-weight: 600;
+}
+
+.agent-content {
+  color: var(--gray-600);
+  line-height: 1.5;
+}
+
+.action-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  li {
+    color: var(--gray-800);
+    font-size: 12px;
+    line-height: 1.5;
+    padding-left: 12px;
+    position: relative;
+
+    &::before {
+      content: '';
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: #D93B3B;
+      position: absolute;
+      left: 0;
+      top: 8px;
+    }
+  }
 }
 
 .sec-dataflows {

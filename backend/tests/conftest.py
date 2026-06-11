@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.models.ai_call_log import AiCallLog  # noqa: F401,E402
+from app.models.api_config import UserApiConfig  # noqa: F401,E402  -- v3.1
 from app.models.audit_log import AuditLog  # noqa: F401,E402
 from app.models.code_file import CodeFile  # noqa: F401,E402
 from app.models.code_version import CodeVersion  # noqa: F401,E402

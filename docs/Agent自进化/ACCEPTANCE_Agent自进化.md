@@ -66,8 +66,7 @@
   - 反馈聚合 4、经验记忆 7、评估闸门 9、生命周期 5、EvolutionAgent 8。
   - 覆盖:采纳率/假阳性率、双门槛拦截、时间衰减、harvest 幂等、闸门召回/噪声判定与分级把关、
     审批生效、回滚还原、未过闸门拒绝审批等。
-- **建表**:全新库跑 `init_sqlite.py` 建 13 张表;部署 MySQL 经 `deploy/mysql/init.sql`,
-  存量库用 `Base.metadata.create_all` 补建 3 张新表已验证(MySQL 8 实测 14 张表)。
+- **建表**:当前主路径为 Docker MySQL,`deploy/mysql/init.sql` 含 14 张业务表;`init_sqlite.py` 仅作为历史辅助脚本和本地快速验证入口保留。
 - **集成**:`app.main` 正常加载,`/api/evolution/*` 10 条路由注册;`AgentRegistry` 含 `evolution`(共 14 个 Agent)。
 - **前端**:5 个改动模块经 Vite 按需编译全部 200;`vue-tsc` 全量类型检查零报错。
 - **MySQL 实测闭环**(Docker `cr_mysql`):登录 admin → `/run` 从 11 条真实已修复问题沉淀 11 条经验;

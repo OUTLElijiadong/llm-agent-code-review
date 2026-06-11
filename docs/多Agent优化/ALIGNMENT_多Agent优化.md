@@ -11,6 +11,8 @@
 - AI 审查链路为 `ReviewService -> CodeChunker -> PromptBuilder -> DeepSeekAgent -> ResultParser -> ReviewIssue`。
 - 实际 `/api` 路由数为 47 条,数据库模型表为 9 张。
 
+> 当前状态补充（2026-06-05）：本文为 2026-05-26 多 Agent 优化阶段快照。当时口径为 47 条路由/9 张模型表；当前主项目基线为 87 条 HTTP API + 1 条 WebSocket、14 张业务表、14 个 Agent。
+
 ## 3. 已识别问题
 
 | 类别 | 问题 | 决策 |
@@ -29,4 +31,3 @@
 ## 5. 疑问澄清
 
 当前需求可以基于现有项目自动决策,无必须中断确认的问题。多 agent 默认落在 `full/security/performance` 审查类型中,保持 `standard` 低成本。
-

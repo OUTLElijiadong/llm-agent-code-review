@@ -21,6 +21,11 @@ class SecurityScanProjectIn(BaseModel):
     trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
 
 
+class SecurityScanAllProjectsIn(BaseModel):
+    top_n_per_project: int = Field(50, ge=1, le=200, description="每个项目最多扫描的文件数")
+    trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
+
+
 # ---- Output ----
 
 
@@ -57,6 +62,30 @@ class DataFlowOut(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ApiEndpointOut(BaseModel):
+    """接口扫描结果"""
+
+    method: str = Field("", description="HTTP 方法")
+    path: str = Field("", description="接口路径")
+    file_path: str = Field("", description="定义接口的文件路径")
+    line_number: int = Field(0, description="接口定义行号")
+    handler: str = Field("", description="处理函数或回调")
+    auth_hint: str = Field("", description="认证/授权线索")
+    source: str = Field("", description="识别来源")
+
+
+class CodeLinkOut(BaseModel):
+    """接口到代码/危险接收点的联动关系"""
+
+    from_loc: str = Field("", alias="from", description="起点")
+    to: str = Field("", description="终点")
+    relation: str = Field("", description="关系类型")
+    risk_type: str = Field("", description="风险类型")
+    severity: str = Field("中", description="严重度")
+
+    model_config = {"populate_by_name": True}
+
+
 class EntryPointOut(BaseModel):
     """外部输入入口"""
 
@@ -71,7 +100,28 @@ class ThreatModelOut(BaseModel):
 
     entry_points: List[EntryPointOut] = Field(default_factory=list)
     data_flows: List[DataFlowOut] = Field(default_factory=list)
+    api_endpoints: List[ApiEndpointOut] = Field(default_factory=list)
+    code_links: List[CodeLinkOut] = Field(default_factory=list)
     attack_surface_summary: str = ""
+
+
+class DiscussionTurnOut(BaseModel):
+    """多 Agent 讨论发言"""
+
+    agent_code: str = ""
+    agent_name: str = ""
+    role: str = "agent"
+    content: str = ""
+
+
+class SecurityDiscussionOut(BaseModel):
+    """多 Agent 讨论审查摘要"""
+
+    mode: str = "multi_agent_summary"
+    participants: List[str] = Field(default_factory=list)
+    turns: List[DiscussionTurnOut] = Field(default_factory=list)
+    consensus: str = ""
+    action_items: List[str] = Field(default_factory=list)
 
 
 class SecurityScanOut(BaseModel):
@@ -79,6 +129,7 @@ class SecurityScanOut(BaseModel):
 
     findings: List[SecurityFindingOut] = Field(default_factory=list)
     threat_model: Optional[ThreatModelOut] = None
+    discussion: Optional[SecurityDiscussionOut] = None
     compliance: dict = Field(default_factory=dict)
     risk_score: int = Field(100, ge=0, le=100)
     summary: str = ""

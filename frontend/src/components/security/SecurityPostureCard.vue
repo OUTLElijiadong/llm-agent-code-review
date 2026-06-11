@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowRight, Link, Lock } from '@element-plus/icons-vue'
+import { ArrowRight, FolderOpened, Lock } from '@element-plus/icons-vue'
 import { getSecurityDashboard } from '@/api/security'
 import type { SecurityDashboardSummaryOut, TrendPointOut } from '@/types/security'
 
@@ -136,7 +136,7 @@ onMounted(loadDashboard)
   <article class="posture-card" v-loading="loading">
     <header class="card-head">
       <div class="head-title">
-        <span class="head-glyph">🛡</span>
+        <span class="head-mark prism-mark sm on-light"></span>
         <h3 class="font-display">项目安全态势</h3>
         <span class="head-range font-mono">近 {{ days }} 天</span>
       </div>
@@ -152,7 +152,9 @@ onMounted(loadDashboard)
 
     <!-- 空态: 一个项目都没有 -->
     <div v-else-if="isEmpty" class="state-empty">
-      <div class="empty-icon">📁</div>
+      <div class="empty-icon">
+        <el-icon><FolderOpened /></el-icon>
+      </div>
       <div class="empty-text">还没有项目可分析</div>
       <el-button size="small" type="primary" @click="gotoCreateProject">
         去创建项目
@@ -161,7 +163,9 @@ onMounted(loadDashboard)
 
     <!-- 半空态: 有项目但都没扫过 -->
     <div v-else-if="isUnScanned" class="state-empty">
-      <div class="empty-icon">🛡</div>
+      <div class="empty-icon danger">
+        <el-icon><Lock /></el-icon>
+      </div>
       <div class="empty-text">
         你有 <b>{{ data?.project_count }}</b> 个项目还没做过安全审计
       </div>
@@ -266,10 +270,10 @@ onMounted(loadDashboard)
               <div class="risky-name">{{ p.project_name }}</div>
               <div class="risky-sub">
                 <span v-if="p.severe_issues > 0" class="r-sev">
-                  🔴 {{ p.severe_issues }} 严重
+                  <i class="risk-dot severe"></i>{{ p.severe_issues }} 严重
                 </span>
                 <span v-if="p.high_issues > 0" class="r-high">
-                  🟠 {{ p.high_issues }} 高
+                  <i class="risk-dot high"></i>{{ p.high_issues }} 高
                 </span>
               </div>
             </div>
@@ -278,7 +282,7 @@ onMounted(loadDashboard)
             </div>
           </li>
         </ul>
-        <div v-else class="col-empty">所有项目都健康 ✅</div>
+        <div v-else class="col-empty">所有项目都健康</div>
       </div>
     </div>
   </article>
@@ -286,13 +290,11 @@ onMounted(loadDashboard)
 
 <style scoped lang="scss">
 .posture-card {
-  background: linear-gradient(
-    135deg,
-    rgba(217, 59, 59, 0.04) 0%,
-    rgba(91, 88, 232, 0.04) 100%
-  );
-  border: 1px solid var(--gray-100);
-  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(217, 59, 59, 0.035), rgba(91, 88, 232, 0.035)),
+    var(--surface-1);
+  border: var(--hairline);
+  border-radius: 10px;
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
@@ -313,8 +315,8 @@ onMounted(loadDashboard)
   gap: 8px;
 }
 
-.head-glyph {
-  font-size: 18px;
+.head-mark {
+  box-shadow: 0 5px 14px -8px rgba(91, 88, 232, 0.7);
 }
 
 .head-title h3 {
@@ -359,7 +361,22 @@ onMounted(loadDashboard)
 }
 
 .empty-icon {
-  font-size: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  color: var(--brand-600);
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+  font-size: 20px;
+
+  &.danger {
+    color: #D93B3B;
+    background: rgba(217, 59, 59, 0.08);
+    border-color: rgba(217, 59, 59, 0.18);
+  }
 }
 
 .empty-text {
@@ -559,6 +576,22 @@ onMounted(loadDashboard)
     display: flex;
     gap: 8px;
     margin-top: 2px;
+
+    span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+  }
+
+  .risk-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+
+    &.severe { background: #DC4961; }
+    &.high { background: #E27C4A; }
   }
 
   .risky-score {

@@ -121,9 +121,10 @@ const peakBucket = computed(() => {
 
 <style scoped lang="scss">
 .situation {
-  background: linear-gradient(135deg, #161A24 0%, #1F1A3A 60%, #2D2B82 100%);
+  background:
+    linear-gradient(135deg, #161A24 0%, #1F2330 62%, #252A37 100%);
   color: #fff;
-  border-radius: 16px;
+  border-radius: 10px;
   padding: 22px 24px;
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr) minmax(0, 1fr);
@@ -135,15 +136,11 @@ const peakBucket = computed(() => {
   &::before {
     content: '';
     position: absolute;
-    right: -120px;
-    top: -120px;
-    width: 360px;
-    height: 360px;
-    background: conic-gradient(from 220deg,
+    inset: 0 0 auto;
+    height: 3px;
+    background: linear-gradient(90deg,
       #5B58E8, #3DBCD9, #5BB89A, #D9A857, #E27C4A, #DC4961, #9F7AEA, #5B58E8);
-    filter: blur(80px);
-    opacity: 0.35;
-    border-radius: 50%;
+    opacity: 0.9;
     pointer-events: none;
   }
 
@@ -163,7 +160,7 @@ const peakBucket = computed(() => {
     width: 18px;
     height: 18px;
     border-radius: 4px;
-    background: conic-gradient(from 90deg, #5B58E8, #3DBCD9, #D9A857, #DC4961, #5B58E8);
+    background: linear-gradient(135deg, #5B58E8, #3DBCD9 48%, #D9A857);
   }
 
   .title {
@@ -191,7 +188,7 @@ const peakBucket = computed(() => {
 .metric {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -200,7 +197,7 @@ const peakBucket = computed(() => {
   .metric-num {
     font-size: 22px;
     font-weight: 600;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
   }
 
   .metric-label {

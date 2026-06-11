@@ -13,7 +13,7 @@
 | 检查项 | 状态 | 结果 |
 | --- | --- | --- |
 | Docker MySQL 健康检查 | 已完成 | `cr_mysql` 状态为 `healthy` |
-| 后端 pytest | 已完成 | `112 passed`，覆盖率 `38%` |
+| 后端 pytest | 已完成 | 本轮原始结果 `112 passed`，覆盖率 `38%`;2026-06-05 文档对齐复核为 `115 passed`，覆盖率 `39%` |
 | 后端 ruff | 已完成 | `All checks passed!` |
 | 后端 compileall | 已完成 | 通过 |
 | 前端构建 | 已完成 | `npm run build` 通过 |
@@ -72,3 +72,80 @@
 ## 验收结论
 
 本轮全量真实点击、日志监控、DeepSeek QA 调用、缺陷修复、测试验证和合成数据清理均已完成。应用内 Browser 在后半程仍不可用，已用 Safari Computer Use 完成剩余真实点击验证。
+
+---
+
+## 2026-06-10 API 与真实按钮专项复测
+
+### 执行信息
+
+- 日期：2026-06-10
+- 环境：macOS + Docker MySQL `cr_mysql` + FastAPI + Vite + 临时 Chrome CDP UI 自动化
+- 数据库约束：使用 `127.0.0.1:3307` MySQL，未使用 SQLite
+- 测试账号：管理员 `admin`
+- 测试数据：`UI按钮验证_*`、`UI按钮复测_*` QA 项目和 `qa_ui.py` QA 文件，测试结束后均已清理
+
+### 自动化检查
+
+| 检查项 | 状态 | 结果 |
+| --- | --- | --- |
+| Docker MySQL 健康检查 | 已完成 | `cr_mysql` 状态为 `healthy` |
+| 数据库迁移 | 已完成 | `alembic upgrade head` 通过 |
+| 后端 pytest | 已完成 | `141 passed`，覆盖率 `40%` |
+| 后端 ruff | 已完成 | `ruff check app tests alembic/versions/001_add_user_api_config.py` 通过 |
+| 后端 compileall | 已完成 | `compileall app alembic/versions/001_add_user_api_config.py` 通过 |
+| 前端构建 | 已完成 | `npm run build` 通过 |
+| API DB 交叉核对 | 已完成 | `_qa_crosscheck.py` 全部通过 |
+| FastAPI 业务路由枚举 | 已完成 | 排除 Swagger/OpenAPI/Redoc 后为 `93` 条 HTTP + `1` 条 WebSocket |
+| 业务 HTTP 冒烟 | 已完成 | `API_SMOKE_TOTAL=93 PASSED=93 FAILED=0` |
+
+### API 冒烟覆盖
+
+| 模块 | 覆盖内容 |
+| --- | --- |
+| 鉴权与用户 | 注册、登录、当前用户、修改密码、退出、用户列表、角色、状态、重置密码 |
+| 项目与代码文件 | 项目 CRUD，文件新增/列表/详情/更新/重命名/删除，上传、文件夹上传、版本列表/详情/恢复 |
+| 审查链路 | 启动审查校验、任务列表/详情/问题/取消/删除、问题列表/详情/状态/批量 |
+| 报告与仪表盘 | 报告列表/详情/Word/PDF 导出，仪表盘汇总、图表、趋势、频次 |
+| Agent 与日志 | Agent 列表、映射、运行态、态势、调用日志列表/详情 |
+| AI 与配置 | API 配置获取/保存/测试/删除，AI 语言识别、文件夹分析、对话受控失败分支 |
+| 安全审计 | checklist、dashboard-summary、scan-file、scan-task、findings、scan-project、scan-all-projects |
+| 自进化与审计 | feedback、experiences、eval-cases、proposals、run、admin audit |
+| 圆桌讨论 | `/api/discuss/start` 预检入口 |
+
+### 真实按钮覆盖
+
+| 页面或功能 | 已验证按钮/控件 | 结果 |
+| --- | --- | --- |
+| 登录与顶部栏 | 登录、全局搜索、Agent 抽屉打开/关闭 | 通过 |
+| 仪表盘 | 新建审查跳转 | 通过 |
+| 项目管理 | 表格/卡片切换、重置、新建项目、编辑保存、详情跳转 | 通过 |
+| 项目详情 | 安全扫描弹窗入口 | 通过 |
+| 代码中心/编辑器 | 项目卡片、查看代码、保存、版本历史、查看版本内容 | 通过 |
+| 审查任务 | 启动审查页、项目下拉、文件全选、重置 | 通过；未触发真实大模型审查 |
+| 问题追踪 | 查看审查任务跳转 | 通过 |
+| 审查报告 | 查看详情跳转 | 通过 |
+| Agent 中心 | 刷新、查看审查规则跳转 | 通过 |
+| 审查规则 | 新增规则弹窗 | 通过；未提交破坏性规则变更 |
+| 安全中心 | 全量扫描弹窗、跨文件数据流追踪配置、单项目扫描跳转 | 通过；真实扫描接口已由 API 冒烟验证 |
+| 个人中心 | 保存偏好、前往 API 配置、前往修改密码、取消返回 | 通过 |
+| 管理页 | 用户查询、AI 调用日志详情、系统操作审计、Agent 自进化刷新 | 通过 |
+
+### 缺陷与修复
+
+| 缺陷 | 修复结果 |
+| --- | --- |
+| MySQL 下 `user_api_config.user_id` 使用 `Integer`，与 `user.id BIGINT` 外键类型不兼容，导致迁移失败 | `ApiConfig.id/user_id` 和迁移脚本统一使用 `BigInteger().with_variant(Integer, "sqlite")`，`alembic upgrade head` 复测通过 |
+| API 配置相关新增文件存在未使用导入/排序问题 | 清理未使用导入并执行 ruff，静态检查通过 |
+
+### 清理结果
+
+| 对象 | 结果 |
+| --- | --- |
+| QA 项目 `id=6` | 首轮 UI 验证后 API 清理成功 |
+| QA 项目 `id=7` | 复测后 API 清理成功 |
+| QA 文件 `id=505/506` | 随 QA 项目软删除，不再作为活跃数据出现 |
+
+### 验收结论
+
+2026-06-10 复测中，后端测试、迁移、静态检查、前端构建、93 条业务 HTTP 接口真实冒烟、主要页面真实按钮点击均已通过。破坏性动作与外部大模型调用仅验证到安全边界或使用受控失败分支，未修改真实账号密码、用户状态或生产规则。

@@ -10,7 +10,7 @@ DeepSeek Agent: HTTP调用、重试、日志记录
 """
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import httpx
 from loguru import logger
@@ -20,9 +20,12 @@ from app.ai.exceptions import AiServiceError
 from app.core.config import settings
 from app.models.ai_call_log import AiCallLog
 
+if TYPE_CHECKING:
+    from app.utils.api_resolver import ApiConfig
+
 
 class DeepSeekAgent:
-    """DeepSeek API 统一调用封装"""
+    """API 统一调用封装 — 支持用户自定义配置"""
 
     def __init__(
         self,
@@ -31,10 +34,19 @@ class DeepSeekAgent:
         model: Optional[str] = None,
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
+        api_config: Optional["ApiConfig"] = None,
     ):
-        self.base_url = (base_url or settings.deepseek_base_url).rstrip("/")
-        self.api_key = api_key or settings.deepseek_api_key
-        self.model = model or settings.deepseek_model
+        # 用户自定义配置优先
+        if api_config:
+            self.base_url = api_config.base_url.rstrip("/")
+            self.api_key = api_config.api_key
+            self.model = api_config.model
+        else:
+            self.base_url = (base_url or settings.deepseek_base_url).rstrip("/")
+            self.api_key = api_key or settings.deepseek_api_key
+            self.model = model or settings.deepseek_model
+
+        self.api_config = api_config  # 保留引用, 供协程/线程下游使用
         self.timeout = timeout or settings.deepseek_timeout
         self.max_retries = max_retries if max_retries is not None else settings.deepseek_max_retries
 

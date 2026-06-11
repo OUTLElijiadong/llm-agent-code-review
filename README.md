@@ -24,7 +24,7 @@
 | 层 | 技术 |
 | --- | --- |
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + Vue Router + ECharts + Monaco Editor + Axios |
-| 后端 | Python 3.9+ + FastAPI + SQLAlchemy 2.x + Pydantic v2 + Alembic + Uvicorn |
+| 后端 | Python 3.9+ 本地开发 / Python 3.11 容器运行 + FastAPI + SQLAlchemy 2.x + Pydantic v2 + Alembic + Uvicorn |
 | 数据库 | MySQL 8.0 |
 | AI 模型 | DeepSeek V4 (deepseek-v4-flash) + 多 Agent Prompt 编排 |
 | 报告导出 | python-docx (Word) + ReportLab (PDF) |
@@ -64,9 +64,9 @@
 │   │   ├── api/v1/                # RESTful API 路由 (87条 HTTP + 1条 WebSocket)
 │   │   ├── core/                  # 配置、安全、数据库、异常、依赖
 │   │   ├── exporters/             # Word/PDF 导出
-│   │   ├── models/                # SQLAlchemy ORM (10张表)
-│   │   ├── schemas/               # Pydantic Schema (14个模块)
-│   │   ├── services/              # 业务服务层 (12个服务)
+│   │   ├── models/                # SQLAlchemy ORM (14张业务表 + base)
+│   │   ├── schemas/               # Pydantic Schema (16个模块)
+│   │   ├── services/              # 业务服务层 (17个服务)
 │   │   ├── utils/                 # 工具函数
 │   │   └── main.py
 │   ├── alembic/                   # 数据库迁移
@@ -75,14 +75,14 @@
 │   └── Dockerfile
 ├── frontend/                       # Vue3 前端
 │   ├── src/
-│   │   ├── api/                   # 接口封装 (13个模块)
-│   │   ├── components/            # 通用组件 (22个)
+│   │   ├── api/                   # 接口封装 (17个模块)
+│   │   ├── components/            # 通用组件 (23个)
 │   │   ├── constants/             # 常量定义
 │   │   ├── router/                # 路由 + 守卫
 │   │   ├── stores/                # Pinia 状态管理
-│   │   ├── types/                 # TypeScript 类型定义 (13个)
+│   │   ├── types/                 # TypeScript 类型定义 (15个)
 │   │   ├── utils/                 # 工具函数
-│   │   ├── views/                 # 页面 (25个)
+│   │   ├── views/                 # 页面 (27个)
 │   │   ├── assets/styles/         # 全局样式
 │   │   ├── App.vue
 │   │   └── main.ts
@@ -92,11 +92,13 @@
 │   └── Dockerfile
 ├── deploy/                         # 部署相关
 │   ├── docker-compose.yml
-│   ├── nginx.conf
+│   ├── deploy.sh
+│   ├── README.md
+│   ├── .env.example
 │   └── mysql/
-│       ├── init.sql               # 10张表 DDL
+│       ├── init.sql               # 14张业务表 DDL
 │       └── seed.sql               # 管理员 + 内置审查规则
-└── .env.example
+└── frontend/Caddyfile             # 前端容器 Caddy/HTTPS 配置
 ```
 
 ## 快速开始
@@ -105,16 +107,25 @@
 # 1. 进入项目目录
 cd 棱镜-Prism
 
-# 2. 配置环境变量
+# 2. 配置本地开发环境变量
 cp .env.example .env
-# 编辑 .env, 填入 DEEPSEEK_API_KEY、MYSQL 密码等
+# 编辑 .env, 填入 DEEPSEEK_API_KEY、DB_HOST=127.0.0.1、DB_PORT=3307 等
 
-# 3. 用 docker-compose 一键启动
-docker compose --env-file .env -f deploy/docker-compose.yml up -d
+# 3. 本地开发一键启动（MySQL 容器 + 后端热重载 + 前端 HMR）
+./dev.sh
 
 # 4. 访问
 # 前端: http://localhost:5173
 # 后端 Swagger: http://localhost:8000/docs
+```
+
+生产 Docker Compose 部署:
+
+```bash
+cd deploy
+cp .env.example .env
+# 编辑 deploy/.env, 填入 MySQL 密码、DEEPSEEK_API_KEY、JWT_SECRET
+./deploy.sh
 ```
 
 本地开发模式:
@@ -124,7 +135,8 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-alembic upgrade head
+cd .. && docker compose --env-file .env -f deploy/docker-compose.yml up -d mysql
+cd backend
 uvicorn app.main:app --reload --port 8000
 
 # 前端

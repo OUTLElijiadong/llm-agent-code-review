@@ -30,6 +30,24 @@ export interface DataFlowOut {
   severity: string
 }
 
+export interface ApiEndpointOut {
+  method: string
+  path: string
+  file_path: string
+  line_number: number
+  handler: string
+  auth_hint: string
+  source: string
+}
+
+export interface CodeLinkOut {
+  from: string
+  to: string
+  relation: string
+  risk_type: string
+  severity: string
+}
+
 export interface EntryPointOut {
   file: string
   function: string
@@ -40,12 +58,30 @@ export interface EntryPointOut {
 export interface ThreatModelOut {
   entry_points: EntryPointOut[]
   data_flows: DataFlowOut[]
+  api_endpoints: ApiEndpointOut[]
+  code_links: CodeLinkOut[]
   attack_surface_summary: string
+}
+
+export interface DiscussionTurnOut {
+  agent_code: string
+  agent_name: string
+  role: string
+  content: string
+}
+
+export interface SecurityDiscussionOut {
+  mode: string
+  participants: string[]
+  turns: DiscussionTurnOut[]
+  consensus: string
+  action_items: string[]
 }
 
 export interface SecurityScanOut {
   findings: SecurityFindingOut[]
   threat_model: ThreatModelOut | null
+  discussion: SecurityDiscussionOut | null
   compliance: Record<string, unknown>
   risk_score: number
   summary: string
@@ -65,6 +101,11 @@ export interface SecurityScanTaskIn {
 export interface SecurityScanProjectIn {
   project_id: number
   top_n?: number
+  trace_dataflow?: boolean
+}
+
+export interface SecurityScanAllProjectsIn {
+  top_n_per_project?: number
   trace_dataflow?: boolean
 }
 

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, SwitchButton, UserFilled, Search, MagicStick, Menu } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { canRoleOpenPath, normalizeRole, type UserRole } from '@/utils/roleHome'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +19,7 @@ interface SearchItem {
   path?: string
   action?: 'agent'
   admin?: boolean
+  roles?: UserRole[]
 }
 
 const searchVisible = ref(false)
@@ -44,21 +46,29 @@ const roleLabel = computed(() => {
 })
 
 const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const currentRole = computed(() => normalizeRole(userStore.profile?.role))
 
 const searchItems = computed<SearchItem[]>(() => {
   const items: SearchItem[] = [
-    { title: '工作台', description: '查看审查任务、风险分布和最近活动', path: '/dashboard' },
-    { title: '项目管理', description: '管理项目、上传代码文件和编辑项目信息', path: '/projects' },
-    { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start' },
-    { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews' },
-    { title: '审查规则', description: '配置代码规范、性能、安全等审查维度', path: '/rules' },
-    { title: '审查报告', description: '查看和导出审查报告', path: '/reports' },
-    { title: '修改密码', description: '更新当前账号登录密码', path: '/profile/password' },
+    { title: '工作台', description: '查看审查任务、风险分布和最近活动', path: '/dashboard', roles: ['user'] },
+    { title: '项目管理', description: '管理项目、上传代码文件和编辑项目信息', path: '/projects', roles: ['user'] },
+    { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start', roles: ['user', 'reviewer'] },
+    { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'] },
+    { title: '审查规则', description: '配置代码规范、性能、安全等审查维度', path: '/rules', roles: ['user', 'reviewer'] },
+    { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['admin', 'user', 'reviewer'] },
+    { title: '修改密码', description: '更新当前账号登录密码', path: '/profile/password', roles: ['admin', 'user', 'reviewer'] },
     { title: 'Agent 助手', description: '打开智能助手咨询代码审查问题', action: 'agent' },
     { title: '用户管理', description: '管理平台用户和角色权限', path: '/admin/users', admin: true },
     { title: 'Agent 调用日志', description: '查看大模型调用状态和异常日志', path: '/admin/ai-logs', admin: true },
+    { title: '系统操作审计', description: '查看管理员操作和平台审计记录', path: '/admin/audit', admin: true },
+    { title: 'Agent 自进化', description: '审批和回滚 Agent 经验提案', path: '/admin/evolution', admin: true },
   ]
-  return items.filter((item) => !item.admin || isAdmin.value)
+  return items.filter((item) => {
+    if (item.admin && !isAdmin.value) return false
+    if (item.roles && !item.roles.includes(currentRole.value)) return false
+    if (item.path && !canRoleOpenPath(currentRole.value, item.path)) return false
+    return true
+  })
 })
 
 const filteredSearchItems = computed(() => {
@@ -260,9 +270,13 @@ onBeforeUnmount(() => {
   gap: 24px;
   height: var(--header-height);
   padding: 0 24px;
-  background: #fff;
-  border-bottom: 1px solid var(--color-border-light);
+  background: var(--surface-glass);
+  border-bottom: var(--hairline);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 /* 面包屑 ------------------------------- */
@@ -272,7 +286,9 @@ onBeforeUnmount(() => {
   gap: 8px;
   font-size: 13px;
   color: var(--color-text-regular);
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .menu-trigger {
@@ -281,11 +297,18 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 1px solid var(--color-border-light);
+  border: var(--hairline);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-1);
   color: var(--color-text-regular);
   cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+
+  &:hover {
+    border-color: var(--brand-200);
+    color: var(--brand-600);
+    background: var(--brand-50);
+  }
 }
 
 .crumb-home {
@@ -302,6 +325,9 @@ onBeforeUnmount(() => {
 .crumb {
   color: var(--color-text-regular);
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 
   &.is-current {
     color: var(--color-text-primary);
@@ -314,17 +340,20 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
 .search-trigger {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--color-border-light);
+  height: 36px;
+  min-width: 238px;
+  padding: 0 10px 0 12px;
+  border: var(--hairline);
   border-radius: 8px;
-  background: var(--gray-50);
+  background: rgba(255, 255, 255, 0.72);
   color: var(--color-text-secondary);
   font-size: 12.5px;
   cursor: pointer;
@@ -334,6 +363,7 @@ onBeforeUnmount(() => {
     border-color: var(--brand-200);
     background: #fff;
     color: var(--color-text-primary);
+    box-shadow: var(--shadow-1);
   }
 
   .el-icon {
@@ -342,6 +372,7 @@ onBeforeUnmount(() => {
 }
 
 .search-label {
+  flex: 1;
   min-width: 64px;
   text-align: left;
 }
@@ -359,11 +390,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 34px;
+  height: 36px;
   padding: 0 14px;
   border: 1px solid var(--brand-200);
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--brand-50), #fff);
+  background: linear-gradient(135deg, #fff, var(--brand-50));
   color: var(--brand-600);
   font-size: 13px;
   font-weight: 500;
@@ -372,7 +403,8 @@ onBeforeUnmount(() => {
 
   &:hover {
     border-color: var(--brand-400);
-    box-shadow: 0 2px 8px -2px rgba(91, 88, 232, 0.3);
+    background: #fff;
+    box-shadow: 0 6px 16px -10px rgba(91, 88, 232, 0.52);
   }
 }
 
@@ -387,11 +419,14 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  padding: 4px 8px 4px 4px;
+  padding: 4px 10px 4px 4px;
   border-radius: 8px;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
 
-  &:hover { background: var(--gray-50); }
+  &:hover {
+    background: rgba(255, 255, 255, 0.78);
+    box-shadow: var(--shadow-1);
+  }
 }
 
 .user-avatar {
@@ -497,6 +532,35 @@ onBeforeUnmount(() => {
   max-width: calc(100vw - 24px);
 }
 
+@media (max-width: 1100px) {
+  .app-header {
+    gap: 16px;
+    padding: 0 18px;
+  }
+
+  .search-trigger {
+    min-width: 180px;
+  }
+
+  .user-name {
+    max-width: 96px;
+  }
+}
+
+@media (max-width: 920px) {
+  .search-trigger {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .search-label,
+  .search-kbd {
+    display: none;
+  }
+}
+
 @media (max-width: 768px) {
   .app-header {
     gap: 12px;
@@ -519,6 +583,7 @@ onBeforeUnmount(() => {
 
   .search-trigger {
     width: 34px;
+    min-width: 34px;
     padding: 0;
     justify-content: center;
   }
@@ -535,6 +600,21 @@ onBeforeUnmount(() => {
     width: 34px;
     padding: 0;
     justify-content: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .app-header {
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .header-right {
+    gap: 6px;
+  }
+
+  .user-info {
+    padding: 0;
   }
 }
 </style>

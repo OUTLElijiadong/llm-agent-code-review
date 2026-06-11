@@ -22,6 +22,8 @@ from app.models.audit_log import AuditLog
 from app.models.review_experience import ReviewExperience
 from app.models.evolution_proposal import EvolutionProposal
 from app.models.eval_case import EvalCase
+# v3.1: 用户自定义 API 配置
+from app.models.api_config import UserApiConfig
 
 def main():
     # Create tables

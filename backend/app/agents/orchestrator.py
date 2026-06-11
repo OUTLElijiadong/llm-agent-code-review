@@ -21,6 +21,7 @@ from app.agents.review_orchestrator_agent import ReviewOrchestratorAgent
 from app.agents.rule_agent import RuleManagerAgent
 from app.agents.security_sentinel_agent import SecuritySentinelAgent
 from app.models.user import User
+from app.utils.api_resolver import ApiConfig, resolve_api_config
 
 
 class Orchestrator(BaseAgent):
@@ -28,6 +29,9 @@ class Orchestrator(BaseAgent):
 
     管理全部专业 Agent(含 v3.0 新增的自进化代理), 注入 DB 依赖,
     通过 ChatAgent 统一入口接收用户指令。
+
+    v3.1: 支持用户自定义 API 配置; 通过 set_api_config() 注入,
+    chat() 和 start_review() 自动传递。
     """
 
     name = "orchestrator"
@@ -40,6 +44,8 @@ class Orchestrator(BaseAgent):
     def __init__(self):
         super().__init__(temperature=0.5, max_tokens=256)
         self._registry = AgentRegistry.instance()
+        self._api_config: Optional[ApiConfig] = None
+        self._db: Optional[Session] = None
         self._init_agents()
 
     def _init_agents(self):
@@ -75,6 +81,33 @@ class Orchestrator(BaseAgent):
             f"{', '.join(self._registry.list().keys())}"
         )
 
+    def set_api_config(self, api_config: Optional[ApiConfig]) -> None:
+        """v3.1: 注入用户自定义 API 配置
+
+        聊天和审查流程将在调用 LLM 时自动使用该配置。
+        传入 None 恢复系统默认。
+        """
+        self._api_config = api_config
+        if api_config:
+            # 将配置应用到 chat_agent 的底层属性
+            self.chat_agent._base_url = api_config.base_url.rstrip("/")
+            self.chat_agent._api_key = api_config.api_key
+            self.chat_agent._model = api_config.model
+            logger.info(
+                f"[Orchestrator] API 配置已注入: "
+                f"source={api_config.source} model={api_config.model}"
+            )
+        else:
+            # 恢复默认
+            from app.core.config import settings as s
+            self.chat_agent._base_url = s.deepseek_base_url.rstrip("/")
+            self.chat_agent._api_key = s.deepseek_api_key
+            self.chat_agent._model = s.deepseek_model
+
+    def get_api_config(self) -> Optional[ApiConfig]:
+        """获取当前注入的 API 配置"""
+        return self._api_config
+
     def inject_db(self, db: Session, user: Optional[User] = None) -> None:
         inject_user = user or self._make_dummy_user()
         for a in [
@@ -83,6 +116,13 @@ class Orchestrator(BaseAgent):
             self.ai_prompt, self.security_sentinel, self.evolution_agent,
         ]:
             a.inject(db, user=inject_user)
+        self._db = db
+
+        # v3.1: 自动解析用户 API 配置
+        if user:
+            cfg = resolve_api_config(db, user.id)
+            self.set_api_config(cfg)
+
         logger.info("[Orchestrator] DB 已注入到所有操作类 Agent")
 
     @staticmethod

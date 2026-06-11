@@ -73,7 +73,10 @@ provide('openAgentChat', openAgentChat)
   display: flex;
   width: 100%;
   height: 100%;
-  background: var(--color-bg-page);
+  min-height: 100dvh;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, var(--app-bg-soft) 0%, var(--app-bg) 42%, #F1F4F9 100%);
 }
 
 .app-layout-right {
@@ -81,13 +84,20 @@ provide('openAgentChat', openAgentChat)
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0) 240px);
 }
 
 .app-layout-main {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
-  padding: 24px;
-  background: var(--color-bg-page);
+  overflow-x: hidden;
+  padding: var(--layout-main-padding);
+  background: transparent;
+  scroll-padding-top: var(--layout-main-padding);
 }
 
 .sidebar-mask {
@@ -121,10 +131,11 @@ provide('openAgentChat', openAgentChat)
 @media (max-width: 768px) {
   .app-layout {
     overflow-x: hidden;
+    height: 100dvh;
   }
 
   .app-layout-main {
-    padding: 16px 12px;
+    padding: var(--layout-main-padding) 12px 24px;
   }
 
   .sidebar-mask {
@@ -133,6 +144,12 @@ provide('openAgentChat', openAgentChat)
     inset: 0;
     z-index: 1990;
     background: rgba(13, 18, 32, 0.42);
+  }
+}
+
+@media (max-width: 420px) {
+  .app-layout-main {
+    padding: var(--layout-main-padding) 10px 22px;
   }
 }
 </style>

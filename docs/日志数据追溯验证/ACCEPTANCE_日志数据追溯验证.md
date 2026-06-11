@@ -19,7 +19,7 @@
 
 ## 验证命令
 
-- `backend/.venv/bin/python -m pytest`：112 passed
+- `backend/.venv/bin/python -m pytest`：本轮原始结果 112 passed；2026-06-05 文档对齐复核为 115 passed
 - `backend/.venv/bin/python -m ruff check app tests`：All checks passed
 - `cd frontend && npm run build`：通过
 - `backend/.venv/bin/python _qa_crosscheck.py`：全部通过

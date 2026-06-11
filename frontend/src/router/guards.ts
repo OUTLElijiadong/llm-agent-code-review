@@ -5,6 +5,7 @@
 
 import type { Router, RouteLocationNormalized } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { getRoleHomePath } from '@/utils/roleHome'
 
 /**
  * 安装全局路由守卫
@@ -15,6 +16,16 @@ export function setupGuards(router: Router): void {
     const user = useUserStore()
 
     if (to.meta.public) {
+      if ((to.path === '/login' || to.path === '/register') && user.token) {
+        try {
+          if (!user.profile) {
+            await user.fetchProfile()
+          }
+          return { path: getRoleHomePath(user.profile?.role), replace: true }
+        } catch {
+          user.logout()
+        }
+      }
       return true
     }
 
@@ -29,6 +40,10 @@ export function setupGuards(router: Router): void {
         user.logout()
         return { path: '/login', query: { redirect: to.fullPath } }
       }
+    }
+
+    if (to.path === '/') {
+      return { path: getRoleHomePath(user.profile?.role), replace: true }
     }
 
     if (to.meta.role && to.meta.role !== user.profile?.role) {

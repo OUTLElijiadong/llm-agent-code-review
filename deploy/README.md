@@ -1,7 +1,7 @@
 # 部署指南
 
-用 Docker Compose 一键部署，三个容器：**MySQL + 后端(FastAPI) + 前端(Vue/nginx)**。
-前端 nginx 已把 `/api` 反代到后端，前后端同源，无需配跨域。
+用 Docker Compose 一键部署，三个容器：**MySQL + 后端(FastAPI) + 前端(Vue/Caddy)**。
+前端 Caddy 已把 `/api` 反代到后端，并支持 Let’s Encrypt 自动 HTTPS。
 
 ---
 
@@ -25,10 +25,10 @@ vim .env          # 改 MySQL 密码、填 DEEPSEEK_API_KEY、JWT_SECRET
 
 启动完成后访问：
 
-- 前端：`http://你的服务器IP`
-- 接口文档：`http://你的服务器IP/docs`
+- 前端：`http://你的服务器IP` 或 `https://你的域名`
+- 接口文档：`http://你的服务器IP/docs` 或 `https://你的域名/docs`
 
-> ⚠️ 记得在云服务商的「安全组 / 防火墙」放行 **80** 端口（如需直连后端再放行 8000）。
+> 记得在云服务商的「安全组 / 防火墙」放行 **80** 和 **443** 端口（如需直连后端再放行 8000）。
 
 ---
 
@@ -55,7 +55,7 @@ cd llm-agent-code-review/deploy && ./deploy.sh
 ```bash
 docker compose ps                 # 查看容器状态
 docker compose logs -f backend    # 实时看后端日志
-docker compose logs -f frontend   # 看前端/nginx 日志
+docker compose logs -f frontend   # 看前端/Caddy 日志
 docker compose restart backend    # 只重启后端
 docker compose down               # 停止全部容器（数据保留）
 docker compose up -d              # 重新拉起

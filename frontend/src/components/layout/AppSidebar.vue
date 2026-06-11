@@ -18,12 +18,14 @@ import {
   MagicStick,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { normalizeRole, type UserRole } from '@/utils/roleHome'
 
 interface MenuItem {
   path: string
   title: string
   icon: typeof HomeFilled
   admin?: boolean
+  roles?: UserRole[]
 }
 
 const route = useRoute()
@@ -41,16 +43,16 @@ const emit = defineEmits<{
 }>()
 
 const menuItems: MenuItem[] = [
-  { path: '/dashboard', title: '工作台',     icon: HomeFilled },
-  { path: '/projects',  title: '项目管理',   icon: FolderOpened },
-  { path: '/code',      title: '代码中心',   icon: Document },
-  { path: '/reviews',   title: '审查任务',   icon: DocumentChecked },
-  { path: '/issues',    title: '问题追踪',   icon: Warning },
-  { path: '/reports',   title: '审查报告',   icon: DataBoard },
-  { path: '/agents',    title: 'Agent 中心', icon: Cpu },
-  { path: '/security',  title: '安全中心',   icon: Aim },
-  { path: '/rules',     title: '审查规则',   icon: List },
-  { path: '/profile',   title: '个人中心',   icon: Avatar },
+  { path: '/dashboard', title: '工作台',     icon: HomeFilled,       roles: ['user'] },
+  { path: '/projects',  title: '项目管理',   icon: FolderOpened,     roles: ['user'] },
+  { path: '/code',      title: '代码中心',   icon: Document,         roles: ['user'] },
+  { path: '/reviews',   title: '审查任务',   icon: DocumentChecked,  roles: ['user', 'reviewer'] },
+  { path: '/issues',    title: '问题追踪',   icon: Warning,          roles: ['user', 'reviewer'] },
+  { path: '/reports',   title: '审查报告',   icon: DataBoard,        roles: ['admin', 'user', 'reviewer'] },
+  { path: '/agents',    title: 'Agent 中心', icon: Cpu,              roles: ['admin', 'user', 'reviewer'] },
+  { path: '/security',  title: '安全中心',   icon: Aim,              roles: ['admin', 'user', 'reviewer'] },
+  { path: '/rules',     title: '审查规则',   icon: List,             roles: ['user', 'reviewer'] },
+  { path: '/profile',   title: '个人中心',   icon: Avatar,           roles: ['admin', 'user', 'reviewer'] },
 ]
 
 const adminItems: MenuItem[] = [
@@ -61,6 +63,10 @@ const adminItems: MenuItem[] = [
 ]
 
 const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const currentRole = computed(() => normalizeRole(userStore.profile?.role))
+const visibleMenuItems = computed(() => {
+  return menuItems.filter((item) => !item.roles || item.roles.includes(currentRole.value))
+})
 
 /**
  * 判断菜单项是否匹配当前路由
@@ -96,7 +102,7 @@ function go(item: MenuItem): void {
       <div class="nav-group">
         <div class="nav-group-label font-mono">主导航</div>
         <button
-          v-for="item in menuItems"
+          v-for="item in visibleMenuItems"
           :key="item.path"
           class="nav-item"
           :class="{ 'is-active': isActive(item.path) }"

@@ -109,6 +109,8 @@ token 过期返回 `401 40101`,前端需引导用户重新登录。
 | `/api/agents/*` | Agent 中心 (v2.0) |
 | `/api/ai/*` | AI 助手对话 (v2.0) |
 | `/api/ai-prompt/*` | AI 提示词生成 (v2.0) |
+| `/api/security/*` | 安全审计 (v2.1) |
+| `/api/evolution/*` | Agent 自进化 (v3.0, 管理员) |
 | `/api/admin/audit/*` | 操作审计 (v2.0) |
 | `/api/discuss/*` | 圆桌讨论审预检 (v2.3) |
 | `/api/ws/discuss/{id}` | 圆桌讨论审 WebSocket (v2.3) |
@@ -403,7 +405,7 @@ token 过期返回 `401 40101`,前端需引导用户重新登录。
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `project_id` | int | 项目 id |
-| `file` | binary | 单文件 ≤ 200KB |
+| `file` | binary | 单文件 ≤ 20MB,后端默认不限制扩展名但阻止系统/构建目录 |
 | `file_path` | string | 选填,逻辑路径 |
 | `language` | string | 选填,不填则自动识别 |
 
@@ -411,6 +413,33 @@ token 过期返回 `401 40101`,前端需引导用户重新登录。
 
 ```json
 { "code": 0, "data": { "file_id": 101, "language": "python", "version_no": 1 } }
+```
+
+### 5.2.1 批量上传文件夹
+
+`POST /api/code-files/upload-folder` (multipart/form-data)
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `project_id` | int | 项目 id |
+| `files` | binary[] | 多文件列表,每个文件沿用单文件上传校验 |
+
+**Response**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "success_count": 2,
+    "fail_count": 1,
+    "files": [
+      { "file_name": "src/a.py", "file_id": 101, "language": "python", "version_no": 1 }
+    ],
+    "errors": [
+      { "file_name": "node_modules/x.js", "error": "不允许上传系统目录中的文件" }
+    ]
+  }
+}
 ```
 
 **错误**:`41301` 文件超出限制;`41500` 扩展名不支持。
@@ -661,7 +690,7 @@ token 过期返回 `401 40101`,前端需引导用户重新登录。
     "severe_issues": 1, "high_issues": 3, "medium_issues": 5, "low_issues": 3,
     "score": 82,
     "summary": "整体代码结构清晰,但存在 1 处明显的 SQL 注入风险...",
-    "model_name": "deepseek-chat/multi-agent",
+    "model_name": "deepseek-v4-flash/multi-agent",
     "duration_ms": 45230,
     "start_time": "...",
     "end_time": "...",
@@ -686,7 +715,7 @@ token 过期返回 `401 40101`,前端需引导用户重新登录。
 }
 ```
 
-### 7.5 取消任务(预留未实现)
+### 7.5 取消任务
 
 `POST /api/review/tasks/{id}/cancel`
 
@@ -721,7 +750,7 @@ token 过期返回 `401 40101`,前端需引导用户重新登录。
 }
 ```
 
-### 7.7 删除任务(预留未实现)
+### 7.7 删除任务
 
 `DELETE /api/review/tasks/{id}` (软删除)
 
@@ -938,7 +967,7 @@ Content-Disposition: attachment; filename="review_report_33.pdf"
       {
         "id": 999, "task_id": 33, "user_id": 12,
         "file_id": 101, "chunk_index": 0,
-        "model_name": "deepseek-chat",
+        "model_name": "deepseek-v4-flash",
         "prompt_tokens": 612, "completion_tokens": 488, "total_tokens": 1100,
         "duration_ms": 8420, "status": "success",
         "create_time": "..."
@@ -959,7 +988,7 @@ Content-Disposition: attachment; filename="review_report_33.pdf"
   "data": {
     "id": 999,
     "task_id": 33,
-    "model_name": "deepseek-chat",
+    "model_name": "deepseek-v4-flash",
     "prompt": "<完整 prompt 内容>",
     "response": "<完整 response 内容>",
     "status": "success",
@@ -1082,7 +1111,7 @@ data: {"event":"dispatch","trace_id":"abc123","agent_id":"security","timestamp":
   "code": 0,
   "data": {
     "content": "正在启动审查...",
-    "model": "deepseek-chat/multi-agent",
+    "model": "deepseek-v4-flash/multi-agent",
     "trace_id": "trace_abc",
     "clarify": null
   }
@@ -1165,9 +1194,117 @@ data: {"event":"dispatch","trace_id":"abc123","agent_id":"security","timestamp":
 
 ---
 
-## 15. 操作审计 `/api/admin/audit` (v2.0, 管理员)
+## 15. 安全审计 `/api/security` (v2.1)
 
-### 15.1 审计日志列表
+### 15.1 安全规则清单
+
+`GET /api/security/checklist`
+
+返回 OWASP Top10、CWE 和内置敏感信息正则规则清单,供安全中心知识页和扫描弹窗使用。
+
+### 15.2 单文件安全扫描
+
+`POST /api/security/scan-file`
+
+```json
+{ "file_id": 101, "scan_depth": "standard" }
+```
+
+### 15.3 任务安全复审
+
+`POST /api/security/scan-task`
+
+```json
+{ "task_id": 33 }
+```
+
+### 15.4 项目级威胁建模
+
+`POST /api/security/scan-project`
+
+```json
+{ "project_id": 7, "top_n": 50, "trace_dataflow": true }
+```
+
+### 15.5 全量项目安全扫描
+
+`POST /api/security/scan-all-projects`
+
+```json
+{ "top_n_per_project": 50, "trace_dataflow": true }
+```
+
+扫描当前用户可见的全部活跃项目。普通用户仅扫描自己的项目;管理员扫描全平台活跃项目。响应复用 `SecurityScanOut`,会聚合所有项目的 findings、风险评分、扫描文件数、接口清单、代码联动关系、跨文件攻击路径和多 Agent 讨论结论。
+
+响应中 `threat_model` 额外包含:
+
+- `api_endpoints`: 识别到的接口方法、路径、文件位置、处理函数和认证线索。
+- `code_links`: 接口到危险接收点、跨文件数据流等代码联动关系。
+- `data_flows`: 跨文件攻击路径。
+
+响应中 `discussion` 包含安全、可靠性、性能、可维护性和主持 Agent 的同步讨论摘要、共识和行动项。
+
+### 15.6 查询任务安全发现
+
+`GET /api/security/findings?task_id=33`
+
+等价于对任务执行安全复审,返回结构化安全发现、OWASP/CWE 标签和修复建议。
+
+### 15.7 工作台安全态势汇总
+
+`GET /api/security/dashboard-summary?days=30`
+
+返回当前用户可见项目范围内的风险评分、严重度分布、OWASP 热点、覆盖率和趋势数据。
+
+---
+
+## 16. Agent 自进化 `/api/evolution` (v3.0, 管理员)
+
+所有接口均需管理员权限。
+
+### 16.1 反馈信号总览
+
+`GET /api/evolution/feedback?window_days=90`
+
+### 16.2 经验记忆库
+
+`GET /api/evolution/experiences?limit=50`
+
+### 16.3 黄金回归集
+
+`GET /api/evolution/eval-cases`
+
+### 16.4 触发一轮进化
+
+`POST /api/evolution/run`
+
+```json
+{ "window_days": 90 }
+```
+
+### 16.5 提案列表与详情
+
+- `GET /api/evolution/proposals?status=&limit=100`
+- `GET /api/evolution/proposals/{proposal_id}`
+
+### 16.6 提案评估、审批、驳回与回滚
+
+- `POST /api/evolution/proposals/{proposal_id}/evaluate`
+- `POST /api/evolution/proposals/{proposal_id}/approve`
+- `POST /api/evolution/proposals/{proposal_id}/reject`
+- `POST /api/evolution/proposals/{proposal_id}/rollback`
+
+`reject` 和 `rollback` 请求体:
+
+```json
+{ "note": "原因说明" }
+```
+
+---
+
+## 17. 操作审计 `/api/admin/audit` (v2.0, 管理员)
+
+### 17.1 审计日志列表
 
 `GET /api/admin/audit?action=&keyword=&actor_id=&start=&end=&page=1&page_size=20`
 
@@ -1196,11 +1333,11 @@ data: {"event":"dispatch","trace_id":"abc123","agent_id":"security","timestamp":
 
 ---
 
-## 16. 圆桌讨论审 `/api/discuss` + WebSocket (v2.3)
+## 18. 圆桌讨论审 `/api/discuss` + WebSocket (v2.3)
 
 实时、对话式的多 Agent 讨论审查。先用 REST 预检注册会话,再用 WebSocket 建立双向实时连接。详见 `docs/圆桌讨论/圆桌讨论功能文档.md`。
 
-### 16.1 预检并注册讨论
+### 18.1 预检并注册讨论
 
 `GET /api/discuss/start?project_id=&file_id=&review_type=full`
 
@@ -1229,7 +1366,7 @@ data: {"event":"dispatch","trace_id":"abc123","agent_id":"security","timestamp":
 
 > 预检只创建会话并暂存上下文,**讨论在 WebSocket 连接建立后才启动**;默认 2 轮。
 
-### 16.2 讨论 WebSocket
+### 18.2 讨论 WebSocket
 
 `WS /api/ws/discuss/{session_id}?token=<JWT>`
 
@@ -1254,7 +1391,7 @@ data: {"event":"dispatch","trace_id":"abc123","agent_id":"security","timestamp":
 
 > 注:WebSocket 不受 §1.3 统一响应结构约束,直接收发上述 JSON 帧。
 
-### 16.3 讨论产物:审查报告
+### 18.3 讨论产物:审查报告
 
 讨论结束(自然结束或终止)后,后端自动创建 `ReviewTask(review_type="discuss", status="success")` 并抽取结构化 `ReviewIssue`,因此:
 
@@ -1265,7 +1402,7 @@ data: {"event":"dispatch","trace_id":"abc123","agent_id":"security","timestamp":
 
 ---
 
-## 17. OpenAPI / Swagger
+## 19. OpenAPI / Swagger
 
 FastAPI 自动暴露:
 
@@ -1275,7 +1412,7 @@ FastAPI 自动暴露:
 
 生产环境关闭 `/docs` 与 `/redoc`,通过环境变量 `OPENAPI_ENABLED=false` 控制。
 
-## 18. 速率限制
+## 20. 速率限制
 
 | 接口 | 限制 |
 | --- | --- |
@@ -1286,17 +1423,17 @@ FastAPI 自动暴露:
 
 超出返回 `429 42900`。
 
-## 19. 健康检查
+## 21. 健康检查
 
 `GET /healthz`
 
 ```json
-{ "status": "ok", "db": "ok", "deepseek": "ok", "timestamp": "..." }
+{ "status": "ok" }
 ```
 
-`GET /readyz` 用于容器编排探针,仅检查 DB 连通性。
+当前代码未提供 `/readyz`;容器健康检查由 MySQL 容器自身 healthcheck 和后端 `/healthz` 共同承担。
 
-## 20. Schema 速查(Pydantic 命名约定)
+## 22. Schema 速查(Pydantic 命名约定)
 
 ```
 schemas/
@@ -1313,12 +1450,14 @@ schemas/
   ├── ai_log.py     (AiLogOut, AiLogDetailOut)
   ├── agent.py      (AgentProfileOut, AgentRuntimeOut, AgentRuntimeSummaryOut, AgentSituationOut)
   ├── ai_prompt.py  (AiPromptBundleOut, AiPromptIssueIn, AiPromptTaskIn, AiPromptProjectIn)
+  ├── security.py   (SecurityScanOut, SecurityChecklistOut, SecurityDashboardSummaryOut)
+  ├── evolution.py  (ExperienceOut, ProposalOut, EvalCaseOut, RunIn, RejectIn)
   └── audit.py      (AuditLogOut)
 ```
 
 `In` 后缀为请求体,`Out` 后缀为响应体,所有字段类型严格。
 
-## 21. 请求示例(curl)
+## 23. 请求示例(curl)
 
 ```bash
 # 登录

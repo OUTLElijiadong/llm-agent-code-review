@@ -40,6 +40,13 @@
         </div>
         <div class="action-row">
           <div>
+            <p class="action-title">API 配置</p>
+            <p class="action-desc">配置个人大模型 API Key 和端点</p>
+          </div>
+          <el-button type="primary" plain @click="goApiConfig">前往配置</el-button>
+        </div>
+        <div class="action-row">
+          <div>
             <p class="action-title">退出登录</p>
             <p class="action-desc">清除本机 Token 并返回登录页</p>
           </div>
@@ -129,6 +136,10 @@ function savePrefs(): void {
 
 function goChangePassword(): void {
   router.push('/profile/password')
+}
+
+function goApiConfig(): void {
+  router.push('/profile/api-config')
 }
 
 async function handleLogout(): Promise<void> {

@@ -129,7 +129,9 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
 
     review_type = payload.review_type or "standard"
     profiles = get_agent_profiles(review_type)
-    agent = DeepSeekAgent()
+    from app.utils.api_resolver import resolve_api_config
+    _api_cfg = resolve_api_config(db, user.id)
+    agent = DeepSeekAgent(api_config=_api_cfg)
 
     task = ReviewTask(
         user_id=user.id,
@@ -382,6 +384,7 @@ def _review_chunk_collaborative(
                 _call_single_agent,
                 profile, chunk.text, language, file_name, rules, line_offset,
                 experience_section,
+                shared_agent.api_config,
             )
             future_map[future] = profile
 
@@ -562,13 +565,16 @@ def _call_single_agent(
     rules: list,
     line_offset: int,
     experience_section: str = "",
+    api_config = None,
 ) -> tuple:
     """单次代理并行调用 — 通过 DeepSeekAgent.call_raw() 统一入口
 
     每个线程独立创建 DeepSeekAgent,通过统一的 call_raw() 调用 DeepSeek API。
     返回 (raw_response_text, meta_dict), meta 供主线程事后 log_deferred() 补写 AiCallLog。
+
+    v3.1: 支持 api_config 参数注入用户自定义 API 配置。
     """
-    agent = DeepSeekAgent()
+    agent = DeepSeekAgent(api_config=api_config)
     system_prompt, user_prompt = build_prompt(
         language=language,
         file_name=file_name,

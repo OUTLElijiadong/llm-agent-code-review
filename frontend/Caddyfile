@@ -1,0 +1,41 @@
+{
+    email admin@lijiadong.cn
+}
+
+(app_gateway) {
+    encode gzip zstd
+
+    request_body {
+        max_size 50MB
+    }
+
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    handle /docs {
+        reverse_proxy backend:8000
+    }
+
+    handle /openapi.json {
+        reverse_proxy backend:8000
+    }
+
+    handle {
+        root * /usr/share/caddy
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}
+
+http://lijiadong.cn {
+    redir https://lijiadong.cn{uri} permanent
+}
+
+http:// {
+    import app_gateway
+}
+
+lijiadong.cn {
+    import app_gateway
+}

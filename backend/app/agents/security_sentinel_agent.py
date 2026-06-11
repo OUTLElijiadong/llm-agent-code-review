@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json as json_lib
+import re
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -358,7 +359,19 @@ class SecuritySentinelAgent(BaseAgent):
         all_findings: List[dict] = []
         all_entries: List[dict] = []
         all_sinks: List[dict] = []
+        all_endpoints: List[dict] = []
         for idx, file in enumerate(files_sorted):
+            file_path = file.file_path or file.file_name
+            endpoints = self._extract_api_endpoints(file)
+            all_endpoints.extend(endpoints)
+            for endpoint in endpoints:
+                all_entries.append({
+                    "file": file_path,
+                    "function": endpoint.get("handler") or endpoint.get("path") or "",
+                    "line": endpoint.get("line_number") or 0,
+                    "risk": f"{endpoint.get('method', '')} {endpoint.get('path', '')}".strip(),
+                    "input_source": "HTTP API",
+                })
             # 正则
             all_findings.extend(self._regex_findings(file))
             # 静态语义规则 (v2.1.1)
@@ -367,10 +380,10 @@ class SecuritySentinelAgent(BaseAgent):
             chunk_result = self._llm_audit_collect(file, ctx=ctx, scan_depth="standard")
             all_findings.extend(chunk_result.findings)
             for ep in chunk_result.entry_points:
-                ep["file"] = file.file_path or file.file_name
+                ep["file"] = file_path
                 all_entries.append(ep)
             for sk in chunk_result.dangerous_sinks:
-                sk["file"] = file.file_path or file.file_name
+                sk["file"] = file_path
                 all_sinks.append(sk)
 
             self._emit(
@@ -387,8 +400,11 @@ class SecuritySentinelAgent(BaseAgent):
         threat_model: dict = {
             "entry_points": all_entries[:30],
             "data_flows": [],
+            "api_endpoints": all_endpoints[:100],
+            "code_links": [],
             "attack_surface_summary": (
-                f"扫描入口 {len(all_entries)} 处,危险接收点 {len(all_sinks)} 处。"
+                f"扫描接口 {len(all_endpoints)} 个,入口 {len(all_entries)} 处,"
+                f"危险接收点 {len(all_sinks)} 处。"
             ),
         }
         if trace_dataflow and all_entries and all_sinks:
@@ -399,10 +415,14 @@ class SecuritySentinelAgent(BaseAgent):
             )
             data_flows = self._llm_dataflow_analysis(
                 all_entries, all_sinks, project_name=project.project_name, ctx=ctx,
+                api_endpoints=all_endpoints,
             )
             threat_model["data_flows"] = data_flows
             # 升级出现在数据流上的 finding 严重度
             self._upgrade_findings_on_dataflow(all_findings, data_flows)
+        threat_model["code_links"] = self._build_code_links(
+            all_endpoints, all_sinks, threat_model["data_flows"],
+        )
 
         duration_ms = int((time.time() - t0) * 1000)
         risk_score = self._compute_risk_score(all_findings)
@@ -439,7 +459,600 @@ class SecuritySentinelAgent(BaseAgent):
             duration_ms=duration_ms,
         )
 
+    def scan_all_projects(self, top_n_per_project: int = 50,
+                          trace_dataflow: bool = True,
+                          ctx: Optional[AgentContext] = None) -> AgentResult:
+        """全量项目安全扫描:聚合当前用户可见的全部活跃项目
+
+        Args:
+            top_n_per_project: 每个项目最多扫描的文件数量。
+            trace_dataflow: 是否对每个项目启用跨文件数据流追踪。
+            ctx: Agent 调用上下文。
+
+        Returns:
+            AgentResult: 复用 SecurityScanOut 结构的聚合结果。
+        """
+        if (err := self._ensure_db()) is not None:
+            return err
+
+        try:
+            top_n = int(top_n_per_project)
+        except (TypeError, ValueError):
+            top_n = 50
+        top_n = max(1, min(200, top_n))
+
+        q = self._db.query(Project).filter(Project.status == "active")
+        if self._user and self._user.role != "admin":
+            q = q.filter(Project.user_id == self._user.id)
+        projects = q.order_by(Project.id.asc()).all()
+
+        t0 = time.time()
+        self._emit(
+            AgentEventType.DISPATCH, ctx,
+            message=f"开始全量扫描 {len(projects)} 个项目",
+            payload={
+                "scope": "all_projects",
+                "project_count": len(projects),
+                "top_n_per_project": top_n,
+                "trace_dataflow": trace_dataflow,
+            },
+        )
+
+        if not projects:
+            duration_ms = int((time.time() - t0) * 1000)
+            return AgentResult(
+                success=True,
+                data={
+                    "findings": [],
+                    "threat_model": {
+                        "entry_points": [],
+                        "data_flows": [],
+                        "api_endpoints": [],
+                        "code_links": [],
+                        "attack_surface_summary": "当前账号暂无可扫描的活跃项目。",
+                    },
+                    "discussion": self._build_multi_agent_discussion([], {
+                        "entry_points": [],
+                        "data_flows": [],
+                        "api_endpoints": [],
+                        "code_links": [],
+                    }),
+                    "compliance": {
+                        "project_count": 0,
+                        "scanned_project_count": 0,
+                        "skipped_project_count": 0,
+                        "project_errors": [],
+                    },
+                    "risk_score": 100,
+                    "summary": "当前账号暂无可扫描的活跃项目。",
+                    "file_count": 0,
+                    "duration_ms": duration_ms,
+                },
+                model=self._model,
+                duration_ms=duration_ms,
+            )
+
+        all_findings: List[dict] = []
+        all_entries: List[dict] = []
+        all_flows: List[dict] = []
+        all_endpoints: List[dict] = []
+        all_code_links: List[dict] = []
+        project_errors: List[dict] = []
+        total_files = 0
+        scanned_projects = 0
+
+        def project_path(project: Project, path: str) -> str:
+            name = project.project_name or f"项目 #{project.id}"
+            return f"{name}/{path}" if path else name
+
+        for idx, project in enumerate(projects, start=1):
+            self._emit(
+                AgentEventType.PROGRESS, ctx,
+                message=f"全量扫描进度 {idx}/{len(projects)}: {project.project_name}",
+                payload={
+                    "scope": "all_projects",
+                    "index": idx,
+                    "total": len(projects),
+                    "project_id": project.id,
+                },
+            )
+            result = self.scan_project(
+                project.id,
+                top_n=top_n,
+                trace_dataflow=trace_dataflow,
+                ctx=ctx,
+            )
+            if not result.success:
+                project_errors.append({
+                    "project_id": project.id,
+                    "project_name": project.project_name,
+                    "error": result.error or "扫描失败",
+                })
+                continue
+
+            data = result.data or {}
+            scanned_projects += 1
+            total_files += int(data.get("file_count") or 0)
+
+            for raw in data.get("findings") or []:
+                if not isinstance(raw, dict):
+                    continue
+                finding = dict(raw)
+                finding["file_path"] = project_path(project, str(finding.get("file_path") or ""))
+                all_findings.append(finding)
+
+            threat_model = data.get("threat_model") or {}
+            for raw_entry in threat_model.get("entry_points") or []:
+                if not isinstance(raw_entry, dict):
+                    continue
+                entry = dict(raw_entry)
+                entry["file"] = project_path(project, str(entry.get("file") or ""))
+                all_entries.append(entry)
+
+            for raw_flow in threat_model.get("data_flows") or []:
+                if not isinstance(raw_flow, dict):
+                    continue
+                flow = dict(raw_flow)
+                if flow.get("from"):
+                    flow["from"] = project_path(project, str(flow.get("from")))
+                if flow.get("to"):
+                    flow["to"] = project_path(project, str(flow.get("to")))
+                flow["via"] = [
+                    project_path(project, str(v))
+                    for v in (flow.get("via") or [])
+                    if v
+                ]
+                all_flows.append(flow)
+
+            for raw_endpoint in threat_model.get("api_endpoints") or []:
+                if not isinstance(raw_endpoint, dict):
+                    continue
+                endpoint = dict(raw_endpoint)
+                endpoint["file_path"] = project_path(
+                    project, str(endpoint.get("file_path") or ""),
+                )
+                all_endpoints.append(endpoint)
+
+            for raw_link in threat_model.get("code_links") or []:
+                if not isinstance(raw_link, dict):
+                    continue
+                link = dict(raw_link)
+                if link.get("from"):
+                    link["from"] = project_path(project, str(link.get("from")))
+                if link.get("to"):
+                    link["to"] = project_path(project, str(link.get("to")))
+                all_code_links.append(link)
+
+        duration_ms = int((time.time() - t0) * 1000)
+        risk_score = self._compute_risk_score(all_findings)
+        sev_counts = self._severity_counts(all_findings)
+        skipped_projects = len(projects) - scanned_projects
+        compliance = self._compute_compliance(all_findings)
+        compliance.update({
+            "project_count": len(projects),
+            "scanned_project_count": scanned_projects,
+            "skipped_project_count": skipped_projects,
+            "project_errors": project_errors,
+        })
+        summary = (
+            f"全量项目扫描完成:可见项目 {len(projects)} 个,成功扫描 {scanned_projects} 个,"
+            f"跳过 {skipped_projects} 个,累计扫描文件 {total_files} 个;"
+            f"识别接口 {len(all_endpoints)} 个,代码联动关系 {len(all_code_links)} 条;"
+            f"发现 {sev_counts['严重']} 处严重 / {sev_counts['高']} 处高危 / "
+            f"{sev_counts['中']} 处中危 / {sev_counts['低']} 处低危。"
+            f"综合风险评分 {risk_score}/100。"
+        )
+        threat_model = {
+            "entry_points": all_entries[:100],
+            "data_flows": all_flows[:100],
+            "api_endpoints": all_endpoints[:200],
+            "code_links": all_code_links[:200],
+            "attack_surface_summary": (
+                f"全量扫描覆盖 {scanned_projects} 个项目,"
+                f"识别接口 {len(all_endpoints)} 个,入口 {len(all_entries)} 处,"
+                f"跨文件攻击路径 {len(all_flows)} 条,代码联动关系 {len(all_code_links)} 条。"
+            ),
+        }
+        discussion = self._build_multi_agent_discussion(
+            all_findings, threat_model, project_count=scanned_projects,
+        )
+
+        self._emit(
+            AgentEventType.COMPLETE, ctx,
+            message="全量项目扫描完成",
+            payload={
+                "scope": "all_projects",
+                "project_count": len(projects),
+                "scanned_project_count": scanned_projects,
+                "findings_count": len(all_findings),
+                "risk_score": risk_score,
+                "duration_ms": duration_ms,
+            },
+        )
+
+        return AgentResult(
+            success=True,
+            data={
+                "findings": all_findings,
+                "threat_model": threat_model,
+                "discussion": discussion,
+                "compliance": compliance,
+                "risk_score": risk_score,
+                "summary": summary,
+                "file_count": total_files,
+                "duration_ms": duration_ms,
+            },
+            model=self._model,
+            duration_ms=duration_ms,
+        )
+
     # ============ 内部辅助 ============
+
+    def _extract_api_endpoints(self, file: CodeFile) -> List[dict]:
+        """从常见框架代码中抽取接口定义和前端接口调用封装。
+
+        Args:
+            file: 已落库的代码文件对象。
+
+        Returns:
+            List[dict]: 接口方法、路径、定义位置、处理函数和认证线索。
+        """
+        content = file.content or ""
+        if not content:
+            return []
+
+        file_path = file.file_path or file.file_name
+        lines = content.splitlines()
+        endpoints: List[dict] = []
+        seen: set[tuple[str, str, str, int, str]] = set()
+
+        def add_endpoint(method: str, path: str, line_no: int,
+                         source: str, handler: str = "") -> None:
+            method_norm = (method or "GET").upper()
+            path_norm = (path or "").strip()
+            if not path_norm:
+                return
+            if not path_norm.startswith(("/", "http://", "https://")):
+                path_norm = f"/{path_norm.lstrip('/')}"
+            key = (method_norm, path_norm, file_path, line_no, source)
+            if key in seen:
+                return
+            seen.add(key)
+            endpoints.append({
+                "method": method_norm,
+                "path": path_norm,
+                "file_path": file_path,
+                "line_number": line_no,
+                "handler": handler or self._next_handler_name(lines, line_no - 1),
+                "auth_hint": self._endpoint_auth_hint(lines, line_no - 1),
+                "source": source,
+            })
+
+        fastapi_pattern = re.compile(
+            r"@\s*(?:[\w_]+\.)?(?:router|app|api)\."
+            r"(get|post|put|delete|patch|options|head)\(\s*['\"]([^'\"]+)['\"]",
+            re.IGNORECASE,
+        )
+        flask_route_pattern = re.compile(
+            r"@\s*(?:[\w_]+\.)?(?:app|blueprint|bp|router)\.route\("
+            r"\s*['\"]([^'\"]+)['\"](?P<opts>.*)",
+            re.IGNORECASE,
+        )
+        express_pattern = re.compile(
+            r"\b(?:app|router)\."
+            r"(get|post|put|delete|patch|options|head|all)\(\s*['\"`]([^'\"`]+)['\"`]",
+            re.IGNORECASE,
+        )
+        spring_method_pattern = re.compile(
+            r"@\s*(Get|Post|Put|Delete|Patch)Mapping\("
+            r"\s*(?:value\s*=\s*|path\s*=\s*)?['\"]([^'\"]+)['\"]",
+            re.IGNORECASE,
+        )
+        spring_request_pattern = re.compile(
+            r"@\s*RequestMapping\((?P<body>[^)]*)\)",
+            re.IGNORECASE,
+        )
+        django_path_pattern = re.compile(
+            r"\b(?:path|re_path)\(\s*[rR]?['\"]([^'\"]+)['\"]",
+            re.IGNORECASE,
+        )
+        http_client_pattern = re.compile(
+            r"\b(?:axios|request|apiClient|http)\."
+            r"(get|post|put|delete|patch)\(\s*['\"`]([^'\"`]+)['\"`]",
+            re.IGNORECASE,
+        )
+
+        for idx, line in enumerate(lines, start=1):
+            for match in fastapi_pattern.finditer(line):
+                add_endpoint(match.group(1), match.group(2), idx, "python_route")
+
+            flask_match = flask_route_pattern.search(line)
+            if flask_match:
+                path = flask_match.group(1)
+                methods = self._parse_route_methods(flask_match.group("opts"))
+                for method in methods:
+                    add_endpoint(method, path, idx, "python_route")
+
+            for match in express_pattern.finditer(line):
+                add_endpoint(match.group(1), match.group(2), idx, "node_route")
+
+            spring_match = spring_method_pattern.search(line)
+            if spring_match:
+                method = spring_match.group(1).replace("Mapping", "")
+                add_endpoint(method, spring_match.group(2), idx, "java_route")
+
+            request_match = spring_request_pattern.search(line)
+            if request_match:
+                body = request_match.group("body")
+                path_match = re.search(
+                    r"(?:value|path)\s*=\s*['\"]([^'\"]+)['\"]|['\"]([^'\"]+)['\"]",
+                    body,
+                    re.IGNORECASE,
+                )
+                if path_match:
+                    path = path_match.group(1) or path_match.group(2)
+                    methods = re.findall(r"RequestMethod\.([A-Z]+)", body)
+                    for method in (methods or ["ANY"]):
+                        add_endpoint(method, path, idx, "java_route")
+
+            django_match = django_path_pattern.search(line)
+            if django_match:
+                add_endpoint("ANY", django_match.group(1), idx, "django_url")
+
+            for match in http_client_pattern.finditer(line):
+                add_endpoint(match.group(1), match.group(2), idx, "http_client_wrapper")
+
+        return endpoints[:200]
+
+    def _parse_route_methods(self, route_options: str) -> List[str]:
+        """解析 Flask/Django 风格路由声明中的 HTTP method 列表。
+
+        Args:
+            route_options: 路由装饰器中 path 之后的参数文本。
+
+        Returns:
+            List[str]: 识别到的方法列表,未声明时默认 GET。
+        """
+        if not route_options:
+            return ["GET"]
+        match = re.search(
+            r"methods\s*=\s*(?:\[|\()(?P<methods>[^\]\)]+)(?:\]|\))",
+            route_options,
+            re.IGNORECASE,
+        )
+        if not match:
+            return ["GET"]
+        methods = re.findall(r"['\"]([A-Z]+)['\"]", match.group("methods"), re.IGNORECASE)
+        return [m.upper() for m in methods] or ["GET"]
+
+    def _next_handler_name(self, lines: List[str], start_idx: int) -> str:
+        """从路由声明后的几行代码中推断处理函数名称。
+
+        Args:
+            lines: 文件内容按行切分后的列表。
+            start_idx: 路由声明行的零基索引。
+
+        Returns:
+            str: 处理函数名称,无法判断时为空字符串。
+        """
+        for idx in range(start_idx + 1, min(len(lines), start_idx + 8)):
+            line = lines[idx].strip()
+            py_match = re.search(r"\b(?:async\s+def|def)\s+([\w_]+)\s*\(", line)
+            if py_match:
+                return py_match.group(1)
+            js_match = re.search(
+                r"\b(?:async\s+)?(?:function\s+)?([A-Za-z_$][\w$]*)\s*(?:=|\()",
+                line,
+            )
+            if js_match and js_match.group(1) not in {"return", "if", "for", "while"}:
+                return js_match.group(1)
+            java_match = re.search(
+                r"\b(?:public|private|protected)\s+[\w<>\[\],\s]+\s+(\w+)\s*\(",
+                line,
+            )
+            if java_match:
+                return java_match.group(1)
+        return ""
+
+    def _endpoint_auth_hint(self, lines: List[str], start_idx: int) -> str:
+        """判断接口附近是否存在认证或授权相关线索。
+
+        Args:
+            lines: 文件内容按行切分后的列表。
+            start_idx: 接口声明行的零基索引。
+
+        Returns:
+            str: 认证/授权线索说明。
+        """
+        lower = "\n".join(
+            lines[max(0, start_idx - 3): min(len(lines), start_idx + 10)]
+        ).lower()
+        auth_keywords = (
+            "depends", "get_current_user", "login_required", "permission",
+            "authorize", "authenticated", "jwt", "bearer", "token",
+            "role", "admin", "principal", "security", "preauthorize",
+            "rolesallowed", "current_user", "session",
+        )
+        if any(keyword in lower for keyword in auth_keywords):
+            return "发现认证/权限线索"
+        return "未发现明显认证线索"
+
+    def _build_code_links(self, api_endpoints: List[dict], sinks: List[dict],
+                          data_flows: List[dict]) -> List[dict]:
+        """生成接口、数据流和危险接收点之间的代码联动关系。
+
+        Args:
+            api_endpoints: 接口扫描结果。
+            sinks: LLM 或规则识别到的危险接收点。
+            data_flows: 跨文件数据流推断结果。
+
+        Returns:
+            List[dict]: 用于前端展示的联动关系列表。
+        """
+        links: List[dict] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def add_link(from_loc: str, to_loc: str, relation: str,
+                     risk_type: str, severity: str) -> None:
+            if not from_loc or not to_loc:
+                return
+            sev = severity if severity in _ALLOWED_SEVERITY else "中"
+            key = (from_loc, to_loc, relation)
+            if key in seen:
+                return
+            seen.add(key)
+            links.append({
+                "from": from_loc,
+                "to": to_loc,
+                "relation": relation,
+                "risk_type": risk_type or "代码联动风险",
+                "severity": sev,
+            })
+
+        for flow in data_flows or []:
+            add_link(
+                str(flow.get("from") or ""),
+                str(flow.get("to") or ""),
+                "跨文件数据流",
+                str(flow.get("risk_type") or ""),
+                str(flow.get("severity") or "中"),
+            )
+
+        sinks_by_file: dict[str, List[dict]] = {}
+        for sink in sinks or []:
+            sink_file = str(sink.get("file") or "")
+            if sink_file:
+                sinks_by_file.setdefault(sink_file, []).append(sink)
+
+        for endpoint in api_endpoints or []:
+            endpoint_file = str(endpoint.get("file_path") or "")
+            if not endpoint_file:
+                continue
+            endpoint_loc = (
+                f"{endpoint_file}:{endpoint.get('handler') or endpoint.get('path') or ''}"
+            )
+            for sink in sinks_by_file.get(endpoint_file, []):
+                sink_text = str(sink.get("sink_type") or sink.get("name") or "")
+                sink_lower = sink_text.lower()
+                if "sql" in sink_lower:
+                    risk_type, severity = "SQL 注入", "高"
+                elif "exec" in sink_lower or "command" in sink_lower:
+                    risk_type, severity = "命令执行/RCE", "严重"
+                elif "request" in sink_lower or "http" in sink_lower:
+                    risk_type, severity = "SSRF", "高"
+                elif "open" in sink_lower or "file" in sink_lower:
+                    risk_type, severity = "路径遍历/任意文件访问", "高"
+                else:
+                    risk_type, severity = "危险接收点", "中"
+                sink_loc = f"{endpoint_file}:{sink.get('name') or sink_text or 'sink'}"
+                add_link(endpoint_loc, sink_loc, "接口到同文件危险接收点", risk_type, severity)
+                if len(links) >= 200:
+                    return links
+
+        return links[:200]
+
+    def _build_multi_agent_discussion(self, findings: List[dict],
+                                      threat_model: dict,
+                                      project_count: int = 0) -> dict:
+        """构造多 Agent 讨论式审查摘要。
+
+        Args:
+            findings: 聚合后的安全发现。
+            threat_model: 聚合后的威胁模型。
+            project_count: 本次成功扫描的项目数量。
+
+        Returns:
+            dict: 多 Agent 发言、共识和行动项。
+        """
+        counts = self._severity_counts(findings)
+        endpoints = threat_model.get("api_endpoints") or []
+        data_flows = threat_model.get("data_flows") or []
+        code_links = threat_model.get("code_links") or []
+        unauth_count = sum(
+            1 for endpoint in endpoints
+            if "未发现" in str(endpoint.get("auth_hint") or "")
+        )
+
+        owasp_counts: dict[str, int] = {}
+        for finding in findings:
+            owasp = str(finding.get("owasp") or "").strip()
+            if not owasp:
+                continue
+            key = owasp.split(":")[0]
+            owasp_counts[key] = owasp_counts.get(key, 0) + 1
+        top_owasp = sorted(owasp_counts.items(), key=lambda item: item[1], reverse=True)[:3]
+        top_owasp_text = "、".join(f"{code}({count})" for code, count in top_owasp) or "暂无集中 OWASP 类别"
+
+        participants = ["安全审查 Agent", "可靠性 Agent", "性能 Agent", "可维护性 Agent", "主持 Agent"]
+        turns = [
+            {
+                "agent_code": "security_sentinel",
+                "agent_name": "安全审查 Agent",
+                "role": "reviewer",
+                "content": (
+                    f"共发现严重 {counts['严重']} 处、高危 {counts['高']} 处。"
+                    f"接口面 {len(endpoints)} 个,其中 {unauth_count} 个未发现明显认证线索。"
+                    f"高频 OWASP 类别: {top_owasp_text}。"
+                ),
+            },
+            {
+                "agent_code": "reliability_agent",
+                "agent_name": "可靠性 Agent",
+                "role": "reviewer",
+                "content": (
+                    f"已识别跨文件攻击路径 {len(data_flows)} 条、代码联动关系 {len(code_links)} 条。"
+                    "建议优先验证接口输入是否在服务层、数据层持续保持校验。"
+                ),
+            },
+            {
+                "agent_code": "performance_agent",
+                "agent_name": "性能 Agent",
+                "role": "reviewer",
+                "content": (
+                    f"本次覆盖 {project_count} 个项目。全量扫描会按项目逐个聚合,"
+                    "大仓库建议控制每项目文件数并保留跨文件追踪开关。"
+                ),
+            },
+            {
+                "agent_code": "maintainability_agent",
+                "agent_name": "可维护性 Agent",
+                "role": "reviewer",
+                "content": (
+                    "接口、入口、危险接收点已拆成独立结构输出。"
+                    "后续修复可按接口路径和联动关系定位责任模块。"
+                ),
+            },
+        ]
+
+        action_items: List[str] = []
+        if counts["严重"] or counts["高"]:
+            action_items.append("优先修复严重和高危发现,完成后重新运行全量扫描确认风险评分回升。")
+        if unauth_count:
+            action_items.append("复核未发现明显认证线索的接口,确认是否需要登录态、角色或权限校验。")
+        if code_links:
+            action_items.append("沿代码联动关系逐条验证接口输入是否能抵达 SQL、命令执行、文件或请求类危险接收点。")
+        if not action_items:
+            action_items.append("当前未发现高优先级风险,建议保留定期全量扫描和新增接口后的回归扫描。")
+
+        consensus = (
+            "多 Agent 共识:本次全量扫描应以接口暴露面、跨文件数据流和高危发现为主线推进整改。"
+            if findings or code_links or endpoints
+            else "多 Agent 共识:当前范围未形成明确攻击面,可作为基线结果保存。"
+        )
+        turns.append({
+            "agent_code": "orchestrator",
+            "agent_name": "主持 Agent",
+            "role": "moderator",
+            "content": consensus,
+        })
+
+        return {
+            "mode": "multi_agent_summary",
+            "participants": participants,
+            "turns": turns,
+            "consensus": consensus,
+            "action_items": action_items,
+        }
 
     def _regex_findings(self, file: CodeFile) -> List[dict]:
         """正则秘钥扫描 → findings"""
@@ -637,18 +1250,21 @@ class SecuritySentinelAgent(BaseAgent):
 
     def _llm_dataflow_analysis(self, entries: List[dict], sinks: List[dict],
                                project_name: str,
-                               ctx: Optional[AgentContext]) -> List[dict]:
+                               ctx: Optional[AgentContext],
+                               api_endpoints: Optional[List[dict]] = None) -> List[dict]:
         """第二轮 LLM:跨文件数据流推断"""
         def _short(items: List[dict], limit: int = 30) -> List[dict]:
             return items[:limit]
 
         user_msg = (
-            f"项目「{project_name}」入口/接收点清单(已截断到 30 条以内):\n\n"
+            f"项目「{project_name}」接口/入口/接收点清单(已截断到 30 条以内):\n\n"
+            f"## 接口 api_endpoints\n"
+            f"{json_lib.dumps(_short(api_endpoints or []), ensure_ascii=False, indent=2)}\n\n"
             f"## 入口 entry_points\n"
             f"{json_lib.dumps(_short(entries), ensure_ascii=False, indent=2)}\n\n"
             f"## 危险接收点 dangerous_sinks\n"
             f"{json_lib.dumps(_short(sinks), ensure_ascii=False, indent=2)}\n\n"
-            "请推断哪些入口数据流可以通过 import / 函数调用 / 路由抵达哪些接收点。\n"
+            "请推断哪些接口或入口数据流可以通过 import / 函数调用 / 路由抵达哪些接收点。\n"
             "对每条可达路径输出 JSON 对象,字段:\n"
             "- from: 入口位置(file:function 或 file:line)\n"
             "- via: 中间经过的函数/模块列表(string 数组)\n"

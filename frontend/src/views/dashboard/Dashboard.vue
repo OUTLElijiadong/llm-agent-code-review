@@ -1,7 +1,7 @@
 <template>
-  <div class="dashboard-page">
+  <div class="dashboard-page prism-page-shell">
     <!-- ============ 页头 ============ -->
-    <header class="page-head">
+    <header class="page-head prism-page-head">
       <div>
         <h1 class="page-title font-display">仪表盘</h1>
         <p class="page-sub">
@@ -31,9 +31,11 @@
     <!-- ============ 6 张统计卡 ============ -->
     <section class="stat-grid">
       <div v-for="card in statCards" :key="card.label" class="stat" :class="{ feature: card.feature }">
-        <div v-if="card.feature" class="feature-glow"></div>
+        <div v-if="card.feature" class="feature-spectrum"></div>
         <div class="stat-label">
-          <span class="stat-ico" :style="card.iconStyle">{{ card.glyph }}</span>
+          <span class="stat-ico" :style="card.iconStyle">
+            <el-icon><component :is="card.icon" /></el-icon>
+          </span>
           {{ card.label }}
         </div>
         <div class="stat-num font-display">
@@ -92,7 +94,9 @@
             class="activity-item"
             :class="{ live: item.live }"
           >
-            <div class="ico" :style="{ background: item.color }">{{ item.glyph }}</div>
+            <div class="ico" :style="{ background: item.color }">
+              <el-icon><component :is="item.icon" /></el-icon>
+            </div>
             <div class="body">
               <div class="title" v-html="item.title"></div>
               <div class="meta font-mono">{{ item.meta }}</div>
@@ -208,40 +212,40 @@ const statCards = computed(() => {
   const hasFile = summary.value.file_count > 0
   return [
     {
-      label: '累计审查任务', value: summary.value.review_count, unit: '次', glyph: '◉',
+      label: '累计审查任务', value: summary.value.review_count, unit: '次', icon: 'DocumentChecked',
       iconStyle: { background: 'var(--brand-50)', color: 'var(--brand-600)' },
       delta: hasReview ? '已上线' : '— 暂无数据', deltaDir: hasReview ? 'up' : 'flat',
       feature: false,
     },
     {
-      label: '累计发现问题', value: summary.value.total_issues, unit: '个', glyph: '⚠',
+      label: '累计发现问题', value: summary.value.total_issues, unit: '个', icon: 'Warning',
       iconStyle: { background: 'rgba(226,92,115,.10)', color: 'var(--dim-bug)' },
       delta: hasIssue ? `共 ${summary.value.severe_issues} 个严重` : '— 暂无',
       deltaDir: 'flat',
       feature: false,
     },
     {
-      label: '严重问题', value: summary.value.severe_issues, unit: '个', glyph: '!',
+      label: '严重问题', value: summary.value.severe_issues, unit: '个', icon: 'CircleClose',
       iconStyle: { background: 'rgba(220,73,97,.10)', color: 'var(--sev-severe)' },
       delta: hasSevere ? '需优先处理' : '— 暂无',
       deltaDir: hasSevere ? 'down' : 'flat',
       feature: false,
     },
     {
-      label: '平均代码评分', value: avgScore.toFixed(1), unit: '/100', glyph: '★',
+      label: '平均代码评分', value: avgScore.toFixed(1), unit: '/100', icon: 'TrendCharts',
       iconStyle: { background: 'rgba(255,255,255,.16)', color: '#fff' },
       delta: hasReview ? null : '— 暂无审查',
       deltaDir: 'flat',
       feature: true,
     },
     {
-      label: '活跃项目', value: summary.value.project_count, unit: '个', glyph: '◫',
+      label: '活跃项目', value: summary.value.project_count, unit: '个', icon: 'FolderOpened',
       iconStyle: { background: 'rgba(75,155,255,.10)', color: 'var(--dim-naming)' },
       delta: hasProject ? '已建项目' : '— 暂无', deltaDir: 'flat',
       feature: false,
     },
     {
-      label: '代码文件', value: summary.value.file_count, unit: '份', glyph: '✦',
+      label: '代码文件', value: summary.value.file_count, unit: '份', icon: 'Document',
       iconStyle: { background: 'rgba(61,188,217,.12)', color: 'var(--accent-600)' },
       delta: hasFile ? '已上传' : '— 暂无', deltaDir: 'flat',
       feature: false,
@@ -379,7 +383,7 @@ function escapeHtml(value: string): string {
 
 interface ActivityItem {
   id: number
-  glyph: string
+  icon: string
   color: string
   title: string
   meta: string
@@ -392,7 +396,7 @@ const activityFeed = computed<ActivityItem[]>(() => {
   if (tasks.length === 0) {
     return [{
       id: 0,
-      glyph: 'AG',
+      icon: 'Cpu',
       color: 'var(--brand-500)',
       title: '正在等待 Agent 审查任务上线',
       meta: 'DeepSeek V4 · 待命中',
@@ -411,7 +415,7 @@ const activityFeed = computed<ActivityItem[]>(() => {
     const ok = status === 'success'
     return {
       id,
-      glyph: live ? 'AG' : ok ? '✓' : '!',
+      icon: live ? 'Cpu' : ok ? 'Select' : 'Warning',
       color: live ? 'var(--brand-500)' : ok ? 'var(--status-fixed)' : 'var(--dim-bug)',
       title: live
         ? `正在审查 <b>${safeProjectName}</b>`
@@ -502,7 +506,7 @@ function onWeeklyReport() {
   th{color:#888;font-weight:600}
   @media print{body{margin:16px}}
 </style></head><body>
-  <h1>🛡 棱镜 Prism · 代码审查周报</h1>
+  <h1>棱镜 Prism · 代码审查周报</h1>
   <div class="sub">统计区间:近 ${esc(timeRange.value)} 天 · 生成时间:${esc(dayjs().format('YYYY-MM-DD HH:mm'))}</div>
   <h2>总体概览</h2>
   <div class="cards">
@@ -562,6 +566,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 /* ============ 页头 ============ */
@@ -574,9 +579,9 @@ onMounted(() => {
 }
 
 .page-title {
-  font-size: 26px;
+  font-size: var(--fs-2xl);
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
   color: var(--gray-900);
   margin: 0;
 }
@@ -593,6 +598,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* ============ 6 卡 ============ */
@@ -608,12 +614,15 @@ onMounted(() => {
 @media (max-width: 768px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
+@media (max-width: 520px) {
+  .stat-grid { grid-template-columns: 1fr; }
+}
 
 .stat {
   position: relative;
-  background: #fff;
-  border: 1px solid var(--gray-100);
-  border-radius: 12px;
+  background: var(--surface-1);
+  border: var(--hairline);
+  border-radius: 10px;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -623,36 +632,33 @@ onMounted(() => {
 
   &:hover {
     border-color: var(--brand-200);
-    box-shadow: var(--shadow-2);
+    box-shadow: var(--panel-shadow);
     transform: translateY(-1px);
   }
 
   &.feature {
-    background: rgba(26, 30, 44, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background:
+      linear-gradient(145deg, rgba(22, 26, 36, 0.96), rgba(31, 35, 48, 0.96));
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.12);
 
-    .feature-glow {
+    .feature-spectrum {
       position: absolute;
-      right: -80px;
-      top: -80px;
-      width: 200px;
-      height: 200px;
-      background: conic-gradient(from 180deg,
+      left: 16px;
+      right: 16px;
+      bottom: 12px;
+      height: 2px;
+      background: linear-gradient(90deg,
         var(--dim-style), var(--dim-naming), var(--dim-comment),
         var(--dim-maintain), var(--dim-perf), var(--dim-except),
         var(--dim-bug), var(--dim-security), var(--dim-style));
-      filter: blur(36px);
-      opacity: 0.65;
-      border-radius: 50%;
-      animation: rotateGlow 15s linear infinite;
+      opacity: 0.8;
+      border-radius: 999px;
       pointer-events: none;
       z-index: 0;
     }
 
-    & > *:not(.feature-glow) {
+    & > *:not(.feature-spectrum) {
       position: relative;
       z-index: 1;
     }
@@ -661,11 +667,6 @@ onMounted(() => {
     .stat-num   { color: #fff; }
     .stat-unit  { color: rgba(255, 255, 255, 0.5); }
   }
-}
-
-@keyframes rotateGlow {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
 }
 
 .stat-label {
@@ -678,20 +679,24 @@ onMounted(() => {
 }
 
 .stat-ico {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 15px;
   font-family: var(--font-mono);
+
+  .el-icon {
+    font-size: inherit;
+  }
 }
 
 .stat-num {
   font-size: 28px;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
   line-height: 1.1;
   color: var(--gray-900);
   z-index: 1;
@@ -743,6 +748,7 @@ onMounted(() => {
 .chart-row {
   display: grid;
   gap: 14px;
+  min-width: 0;
 
   &.two-col   { grid-template-columns: 1.4fr 1fr; }
   &.three-col { grid-template-columns: 1fr 1fr 1fr; }
@@ -754,12 +760,15 @@ onMounted(() => {
 
 .security-row {
   display: block;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .chart-card {
-  background: #fff;
-  border: 1px solid var(--gray-100);
-  border-radius: 12px;
+  min-width: 0;
+  background: var(--surface-1);
+  border: var(--hairline);
+  border-radius: 10px;
   padding: 18px 20px;
   box-shadow: var(--shadow-1);
 }
@@ -801,6 +810,21 @@ onMounted(() => {
   margin-top: 8px;
 }
 
+@media (max-width: 520px) {
+  .chart-card {
+    padding: 16px;
+  }
+
+  .chart-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .legend-list {
+    grid-template-columns: 1fr;
+  }
+}
+
 .legend-item {
   display: flex;
   align-items: center;
@@ -829,9 +853,9 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--gray-100);
-  border-radius: 10px;
-  background: #fff;
+  border: var(--hairline);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
   transition: all 0.15s ease;
 
   &:hover { border-color: var(--brand-100); background: var(--gray-50); }
@@ -861,9 +885,13 @@ onMounted(() => {
     justify-content: center;
     color: #fff;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 15px;
     font-weight: 600;
     flex-shrink: 0;
+
+    .el-icon {
+      font-size: inherit;
+    }
   }
 
   .body { min-width: 0; }
@@ -885,6 +913,17 @@ onMounted(() => {
     font-size: 11px;
     color: var(--gray-400);
     white-space: nowrap;
+  }
+}
+
+@media (max-width: 520px) {
+  .activity-item {
+    grid-template-columns: 32px 1fr;
+
+    .when {
+      grid-column: 2;
+      justify-self: flex-start;
+    }
   }
 }
 

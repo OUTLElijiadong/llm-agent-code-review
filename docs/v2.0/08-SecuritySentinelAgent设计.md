@@ -1,13 +1,13 @@
 # 08 · SecuritySentinel 安全哨兵 Agent 设计
 
-> 版本：v2.1 · 状态：设计中 · 起始日期：2026-05-28
+> 版本：v2.1 · 状态：已实现 · 起始日期：2026-05-28
 > 编号衔接 v2.0 第 07 篇，作为 v2.0 之后的首个能力扩展。
 
 ## 一、立项动机
 
 ### 1.1 现状
 
-棱镜 v2.0 已注册 12 个 Agent。其中"安全"相关能力分布在两处：
+棱镜 v2.0 当时已注册 12 个 Agent。当前主项目已经完成 v2.1 安全哨兵和 v3.0 自进化扩展,运行时注册中心为 14 个 Agent。其中"安全"相关能力分布在两处：
 
 | 位置 | 形态 | 局限 |
 |---|---|---|
@@ -29,7 +29,7 @@
 
 | 编号 | 目标 | 验收口径 |
 |---|---|---|
-| G1 | 新增 `security_sentinel` 独立 Agent，注册到 AgentRegistry | `/api/agents/runtime` 返回数 = 13；Agent 办公室出现第 13 张工位卡 |
+| G1 | 新增 `security_sentinel` 独立 Agent，注册到 AgentRegistry | `/api/agents/runtime` 返回当前全部 14 个 Agent；Agent 办公室出现安全哨兵工位卡 |
 | G2 | 支持三种调用形态：file / task / project | 三种入参均返回结构化 `SecurityFinding[]`，含 OWASP/CWE/严重度 |
 | G3 | 确定性敏感信息扫描 | 不依赖 LLM 也能识别 ≥ 10 类常见硬编码秘钥（API key/JWT/密码/私钥等） |
 | G4 | 项目级跨文件威胁建模 | 给出"输入入口 → 中间处理 → 危险接收点"的攻击路径概览 |
@@ -666,7 +666,7 @@ issue = ReviewIssue(
 ### 12.2 前端验证
 
 - vue-tsc 零错误
-- AgentOffice 显示 13 张工位卡，security_sentinel 卡有红色 SVG + skills 标签
+- AgentOffice 显示当前全部 14 张工位卡，security_sentinel 卡有红色 SVG + skills 标签
 - SecurityScanModal 弹出、提交、结果渲染端到端走通
 - IssueDetailDrawer 在 issue.extra.owasp 存在时显示 OWASP 标签
 
@@ -674,7 +674,7 @@ issue = ReviewIssue(
 
 | # | 路径 | 操作 | 预期 |
 |---|---|---|---|
-| 1 | `/agents` | 打开办公室 | 13 张工位卡，含安全哨兵（红色盾牌） |
+| 1 | `/agents` | 打开办公室 | 14 张工位卡，含安全哨兵（红色盾牌） |
 | 2 | 点 security_sentinel | 弹出详情抽屉 | 显示 skills 6 项 |
 | 3 | Agent 助手 | "帮我做项目 12 的安全审计" | 触发 security_audit intent |
 | 4 | Agent 助手 | "帮我做安全扫描" | CLARIFY 追问 scope |

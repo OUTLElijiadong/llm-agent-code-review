@@ -17,7 +17,6 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/components/layout/AppLayout.vue'),
-    redirect: '/dashboard',
     children: [
       {
         path: 'dashboard',
@@ -127,6 +126,12 @@ const routes: RouteRecordRaw[] = [
         name: 'ChangePassword',
         component: () => import('@/views/profile/ChangePassword.vue'),
         meta: { title: '修改密码' },
+      },
+      {
+        path: 'profile/api-config',
+        name: 'ApiConfig',
+        component: () => import('@/views/profile/ApiConfig.vue'),
+        meta: { title: 'API 配置' },
       },
       {
         path: 'admin/users',

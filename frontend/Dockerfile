@@ -1,12 +1,12 @@
 FROM node:20-alpine AS build
 WORKDIR /app
+ENV NODE_OPTIONS=--max-old-space-size=1536
 COPY package*.json ./
-RUN npm ci
+RUN npm config set registry https://registry.npmmirror.com && npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+FROM caddy:2-alpine
+COPY --from=build /app/dist /usr/share/caddy
+COPY Caddyfile /etc/caddy/Caddyfile
+EXPOSE 80 443

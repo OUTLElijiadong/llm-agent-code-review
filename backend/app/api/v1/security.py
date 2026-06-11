@@ -15,6 +15,7 @@ from app.schemas.common import Resp
 from app.schemas.security import (
     SecurityChecklistOut,
     SecurityDashboardSummaryOut,
+    SecurityScanAllProjectsIn,
     SecurityScanFileIn,
     SecurityScanOut,
     SecurityScanProjectIn,
@@ -90,6 +91,25 @@ def scan_project(
     )
     if not result.success:
         raise AiServiceError(result.error or "项目安全扫描失败", code=50220)
+    return Resp(data=SecurityScanOut(**result.data))
+
+
+@router.post("/scan-all-projects", response_model=Resp[SecurityScanOut])
+def scan_all_projects(
+    payload: SecurityScanAllProjectsIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """全量项目安全扫描:扫描当前用户可见的全部活跃项目"""
+    orch = get_orchestrator()
+    orch.inject_db(db, user=user)
+    result = orch.security_sentinel.scan_all_projects(
+        top_n_per_project=payload.top_n_per_project,
+        trace_dataflow=payload.trace_dataflow,
+        ctx=_ctx(user),
+    )
+    if not result.success:
+        raise AiServiceError(result.error or "全量项目安全扫描失败", code=50220)
     return Resp(data=SecurityScanOut(**result.data))
 
 

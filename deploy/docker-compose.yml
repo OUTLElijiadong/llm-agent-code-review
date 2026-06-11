@@ -54,6 +54,12 @@ services:
       - backend
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
 
 volumes:
   mysql_data:
+  caddy_data:
+  caddy_config:

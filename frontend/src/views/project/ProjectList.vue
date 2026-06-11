@@ -399,6 +399,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 /* ============ 页头 ============ */
@@ -413,7 +414,7 @@ onMounted(() => {
 .page-title {
   font-size: 26px;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
   color: var(--gray-900);
   margin: 0;
 }
@@ -430,6 +431,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .view-switch {
@@ -474,6 +476,8 @@ onMounted(() => {
   background: #fff;
   border: 1px solid var(--gray-100);
   border-radius: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .search-input { width: 280px; }
@@ -489,12 +493,15 @@ onMounted(() => {
   background: #fff;
   border: 1px solid var(--gray-100);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   box-shadow: var(--shadow-1);
 }
 
 .prism-table {
   width: 100%;
+  min-width: 960px;
   border-collapse: collapse;
   font-size: 13px;
 
@@ -646,7 +653,7 @@ onMounted(() => {
 /* ============ 卡片视图 ============ */
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: 14px;
 }
 
@@ -725,5 +732,68 @@ onMounted(() => {
 .pagination-wrap {
   display: flex;
   justify-content: flex-end;
+
+  :deep(.el-pagination) {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .project-list {
+    gap: 14px;
+  }
+
+  .page-actions,
+  .view-switch {
+    width: 100%;
+  }
+
+  .view-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .filter-spacer,
+  .filter-result {
+    display: none;
+  }
+
+  .proj-desc {
+    max-width: 240px;
+  }
+
+  .pagination-wrap {
+    justify-content: flex-start;
+
+    :deep(.el-pagination) {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  }
+}
+
+@media (max-width: 520px) {
+  .page-title {
+    font-size: 22px;
+  }
+
+  .proj-card {
+    padding: 16px;
+  }
+
+  .proj-card-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .proj-card-head .status-pill {
+    margin-left: 56px;
+  }
+
+  .pagination-wrap {
+    :deep(.el-pagination__jump) {
+      display: none;
+    }
+  }
 }
 </style>

@@ -142,6 +142,20 @@ $dim-security: #B85AC4;
   --prism-shadow-2: var(--shadow-2);
   --prism-shadow-3: var(--shadow-3);
 
+  /* ---- 高级工作台表面 ---- */
+  --app-bg: #F5F7FB;
+  --app-bg-soft: #FBFCFF;
+  --surface-1: rgba(255, 255, 255, 0.92);
+  --surface-2: rgba(255, 255, 255, 0.76);
+  --surface-3: rgba(247, 248, 250, 0.84);
+  --surface-border: rgba(224, 227, 234, 0.86);
+  --surface-border-strong: rgba(200, 205, 214, 0.86);
+  --surface-hover: rgba(239, 238, 254, 0.48);
+  --surface-glass: rgba(255, 255, 255, 0.82);
+  --focus-ring: 0 0 0 4px rgba(91, 88, 232, 0.12);
+  --panel-shadow: 0 12px 32px -20px rgba(22, 26, 36, 0.28);
+  --hairline: 1px solid rgba(224, 227, 234, 0.72);
+
   /* ---- 侧栏深色调 ---- */
   --side-bg:        #161A24;
   --side-bg-2:      #1F2330;
@@ -299,6 +313,7 @@ $dim-security: #B85AC4;
   --sidebar-width:           232px;
   --sidebar-collapsed-width: 64px;
   --content-max-width:       1440px;
+  --layout-main-padding:     28px;
 
   /* z-index */
   --z-index-dropdown:       1000;
@@ -310,6 +325,25 @@ $dim-security: #B85AC4;
   --z-index-tooltip:        1070;
   --z-index-loading:        2000;
   --z-index-message:        3000;
+}
+
+@media (max-width: 1200px) {
+  :root {
+    --content-max-width: 1120px;
+    --layout-main-padding: 24px;
+  }
+}
+
+@media (max-width: 768px) {
+  :root {
+    --layout-main-padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --layout-main-padding: 12px;
+  }
 }
 
 /* ============================================================
@@ -333,4 +367,16 @@ html.dark {
   --color-text-primary: #EEF0F4;
   --color-text-regular: #C8CDD6;
   --color-border-light: #2A2F3F;
+
+  --app-bg: #0F1219;
+  --app-bg-soft: #161A24;
+  --surface-1: rgba(31, 35, 48, 0.92);
+  --surface-2: rgba(31, 35, 48, 0.76);
+  --surface-3: rgba(22, 26, 36, 0.86);
+  --surface-border: rgba(42, 47, 63, 0.92);
+  --surface-border-strong: rgba(79, 86, 103, 0.86);
+  --surface-hover: rgba(91, 88, 232, 0.16);
+  --surface-glass: rgba(31, 35, 48, 0.78);
+  --panel-shadow: 0 18px 42px -24px rgba(0, 0, 0, 0.72);
+  --hairline: 1px solid rgba(42, 47, 63, 0.86);
 }
