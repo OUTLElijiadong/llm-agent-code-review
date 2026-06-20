@@ -1,7 +1,8 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# 国内构建加速: npm 源切淘宝/npmmirror 镜像(registry.npmjs.org 国内拉取极慢)
+RUN npm ci --registry=https://registry.npmmirror.com
 COPY . .
 RUN npm run build
 
