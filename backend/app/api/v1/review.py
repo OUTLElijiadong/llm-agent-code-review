@@ -17,7 +17,7 @@ router = APIRouter()
 @router.post("/start", response_model=Resp[dict])
 def start(payload: ReviewStartIn, db: Session = Depends(get_db),
           user: User = Depends(get_current_user)):
-    """启动代码审查"""
+    """启动代码审查(异步):立即返回 running 任务,前端轮询任务详情查看进度/结果"""
     task = review_service.start(db, user=user, payload=payload)
     return Resp(data={"task_id": task.id, "status": task.status})
 

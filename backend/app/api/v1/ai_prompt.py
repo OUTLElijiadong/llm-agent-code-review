@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.agents import AgentContext
-from app.agents.orchestrator import get_orchestrator
+from app.agents.orchestrator import get_orchestrator, get_request_orchestrator
 from app.ai.exceptions import AiServiceError
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -43,8 +43,7 @@ def generate_for_issue(
     user: User = Depends(get_current_user),
 ):
     """单条问题生成 AI 提示词"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     result = orch.generate_ai_prompt_for_issue(
         issue_id=payload.issue_id,
         target_tool=payload.target_tool,
@@ -63,8 +62,7 @@ def generate_for_task(
     user: User = Depends(get_current_user),
 ):
     """审查任务下批量生成提示词"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     result = orch.generate_ai_prompt_for_task(
         task_id=payload.task_id,
         target_tool=payload.target_tool,
@@ -84,8 +82,7 @@ def generate_for_project(
     user: User = Depends(get_current_user),
 ):
     """项目级 AI 修复手册: 按严重度优先,取前 top_n 条问题生成提示词"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     result = orch.generate_ai_prompt_for_project(
         project_id=payload.project_id,
         target_tool=payload.target_tool,

@@ -37,10 +37,30 @@ class PendingDiscussion:
 
 
 _pending: dict[str, PendingDiscussion] = {}
+# session_id → 发起讨论的用户 id,用于 WebSocket 连接时的归属校验。
+_session_owners: dict[str, int] = {}
 
 
 def register_pending(session_id: str, **kwargs):
     _pending[session_id] = PendingDiscussion(session_id, **kwargs)
+    owner = kwargs.get("user_id")
+    if owner is not None:
+        _session_owners[session_id] = int(owner)
+
+
+def _load_active_user(user_id: int):
+    """用独立短连接校验用户存在且启用(WebSocket 无 Depends(get_db) 可用)。"""
+    from app.core.database import SessionLocal
+    from app.models.user import User
+
+    db = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        if not user or user.status != 1:
+            return None
+        return user
+    finally:
+        db.close()
 
 
 async def ws_discuss(websocket: WebSocket, session_id: str):
@@ -56,9 +76,27 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
         await websocket.close(code=4001, reason="缺少 token")
         return
     try:
-        jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        claims = jwt.decode(
+            token, settings.jwt_secret, algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "sub"]},
+        )
+        ws_user_id = int(claims["sub"])
     except Exception:
         await websocket.close(code=4001, reason="token 无效")
+        return
+
+    # 校验用户存在且未禁用,并做会话归属校验:仅会话发起人或管理员可连接。
+    ws_user = _load_active_user(ws_user_id)
+    if ws_user is None:
+        await websocket.close(code=4003, reason="账号不存在或已禁用")
+        return
+    owner_id = _session_owners.get(session_id)
+    if owner_id is not None and owner_id != ws_user_id and ws_user.role != "admin":
+        logger.warning(
+            f"[WS] 讨论连接拒绝: 越权访问 session={session_id} "
+            f"owner={owner_id} user={ws_user_id}"
+        )
+        await websocket.close(code=4003, reason="无权访问该讨论会话")
         return
 
     # 检查是否有待启动的讨论

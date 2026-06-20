@@ -67,6 +67,11 @@ def decode_token(token: str) -> dict:
 
     Raises:
         jwt.ExpiredSignatureError: 令牌已过期
-        jwt.InvalidTokenError: 令牌非法
+        jwt.InvalidTokenError: 令牌非法(含缺少 exp/sub 必填声明)
     """
-    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    return jwt.decode(
+        token,
+        settings.jwt_secret,
+        algorithms=[settings.jwt_algorithm],
+        options={"require": ["exp", "sub"]},
+    )
