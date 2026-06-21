@@ -44,6 +44,9 @@ def get_current_user(
     user = db.get(User, user_id)
     if not user or user.status != 1:
         raise ForbiddenError("账号不存在或已禁用", code=40301)
+    # 令牌版本校验: 改密/禁用/重置后旧令牌的 ver 与数据库不一致 → 失效
+    if int(payload.get("ver", 0)) != (user.token_version or 0):
+        raise AuthError("登录态已失效,请重新登录", code=40102)
     return user
 
 

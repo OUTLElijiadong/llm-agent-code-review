@@ -63,7 +63,7 @@ def login(db: Session, username: str, password: str):
         raise ForbiddenError("账号已禁用", code=40301)
     user.last_login = datetime.now(timezone.utc)
     db.commit()
-    token = create_access_token(user.id, user.role)
+    token = create_access_token(user.id, user.role, getattr(user, "token_version", 0) or 0)
     return token, user
 
 
@@ -82,4 +82,6 @@ def change_password(db: Session, user: User, old_password: str, new_password: st
     if not verify_password(old_password, user.password):
         raise AuthError("旧密码错误", code=40001)
     user.password = hash_password(new_password)
+    # 递增 token 版本 → 改密后此前签发的所有 JWT 立即失效
+    user.token_version = (getattr(user, "token_version", 0) or 0) + 1
     db.commit()

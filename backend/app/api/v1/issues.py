@@ -40,7 +40,7 @@ def list_issues(
 def get_issue(issue_id: int, db: Session = Depends(get_db),
               user: User = Depends(get_current_user)):
     """问题详情"""
-    issue = issue_service.get_issue(db, issue_id)
+    issue = issue_service.get_issue(db, user, issue_id)
     return Resp(data=IssueOut.model_validate(issue))
 
 

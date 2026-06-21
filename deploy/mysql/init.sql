@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS user (
     role         VARCHAR(20)  NOT NULL DEFAULT 'user' COMMENT 'admin/user/reviewer',
     status       TINYINT      NOT NULL DEFAULT 1      COMMENT '1=启用,0=禁用',
     last_login   DATETIME     DEFAULT NULL            COMMENT '最后登录时间',
+    token_version INT         NOT NULL DEFAULT 0      COMMENT '令牌版本:改密/禁用/重置时递增使旧JWT失效',
     create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),

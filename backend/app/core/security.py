@@ -36,12 +36,13 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_ctx.verify(plain, hashed)
 
 
-def create_access_token(user_id: int, role: str) -> str:
+def create_access_token(user_id: int, role: str, token_version: int = 0) -> str:
     """生成JWT访问令牌
 
     Args:
         user_id: 用户ID
         role: 用户角色
+        token_version: 令牌版本(与 user.token_version 一致,改密/禁用后递增使旧令牌失效)
 
     Returns:
         str: JWT令牌字符串
@@ -50,6 +51,7 @@ def create_access_token(user_id: int, role: str) -> str:
     payload = {
         "sub": str(user_id),
         "role": role,
+        "ver": int(token_version or 0),
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(seconds=settings.jwt_expire_seconds)).timestamp()),
     }

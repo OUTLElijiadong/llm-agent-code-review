@@ -15,19 +15,28 @@ from app.models.review_task import ReviewTask
 from app.models.user import User
 
 
-def get_issue(db: Session, issue_id: int) -> ReviewIssue:
+def get_issue(db: Session, user: User, issue_id: int) -> ReviewIssue:
     """获取问题详情
 
     Args:
         db: 数据库会话
+        user: 当前用户
         issue_id: 问题ID
 
     Returns:
         ReviewIssue: 问题ORM对象
+
+    Raises:
+        NotFoundError: 问题不存在或无访问权限(为防枚举,越权一律按不存在处理)
     """
     issue = db.get(ReviewIssue, issue_id)
     if not issue:
         raise NotFoundError("问题不存在", code=40400)
+    # 归属校验: 通过 issue → task 反查所有者
+    if user.role != "admin":
+        task = db.get(ReviewTask, issue.task_id)
+        if task is None or task.user_id != user.id:
+            raise NotFoundError("问题不存在", code=40400)
     return issue
 
 
@@ -44,7 +53,8 @@ def update_status(db: Session, user: User, issue_id: int, status: str) -> None:
     if not issue:
         raise NotFoundError("问题不存在", code=40400)
     task = db.get(ReviewTask, issue.task_id)
-    if task and task.user_id != user.id and user.role != "admin":
+    # 孤儿问题(task 缺失)对非管理员一律拒绝,避免绕过归属校验
+    if user.role != "admin" and (task is None or task.user_id != user.id):
         raise ForbiddenError("无操作权限", code=40300)
     issue.status = status
     issue.handled_by = user.id
