@@ -58,12 +58,18 @@ export function subscribeAgentEvents(
 
   const connectOnce = async () => {
     if (closedByUser) return
-    options.onStatus?.('connecting')
     const token = getToken()
+    // 无令牌时不发起请求(否则后端缺少 Authorization 会判成 400),稍后重连
+    if (!token) {
+      options.onStatus?.('connecting')
+      scheduleReconnect()
+      return
+    }
+    options.onStatus?.('connecting')
     try {
       const resp = await fetch(url, {
         method: 'GET',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal,
         credentials: 'same-origin',
       })

@@ -17,7 +17,9 @@ v2.0 新增:
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, Query
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -28,6 +30,8 @@ from app.agents.event_bus import AgentEventBus
 from app.agents.orchestrator import get_request_orchestrator
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import AuthError, ForbiddenError
+from app.core.security import decode_token
 from app.models.user import User
 from app.schemas.agent import (
     AgentOverviewOut,
@@ -116,16 +120,43 @@ def get_situation(
 # =================== v2.0 M2: Agent 调用反馈 SSE ===================
 
 
+def _resolve_sse_user(authorization: Optional[str], token: Optional[str], db: Session) -> User:
+    """SSE 专用鉴权: 从 Authorization 头或 token 查询参数解析用户。
+
+    EventSource/部分流式场景无法自定义请求头,故同时支持 ?token= 查询参数。
+    缺失/非法一律抛 AuthError(401),避免因「必填 Header 缺失」被 FastAPI 判成 400。
+    """
+    raw = None
+    if authorization and authorization.startswith("Bearer "):
+        raw = authorization[7:]
+    elif token:
+        raw = token
+    if not raw:
+        raise AuthError("缺少token", code=40100)
+    try:
+        payload = decode_token(raw)
+    except Exception:
+        raise AuthError("token非法或已过期", code=40101)
+    u = db.get(User, int(payload["sub"]))
+    if not u or u.status != 1:
+        raise ForbiddenError("账号不存在或已禁用", code=40301)
+    return u
+
+
 @router.get("/events")
 async def stream_agent_events(
     replay: int = Query(20, ge=0, le=100),
-    user: User = Depends(get_current_user),
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ):
     """SSE 实时事件流: Agent 调度 / 思考 / 完成 / 失败 / 追问
 
     Args:
         replay: 订阅初期回放最近 N 条历史事件,默认 20
+        token: 可选,SSE 鉴权令牌(等价于 Authorization: Bearer)
     """
+    _resolve_sse_user(authorization, token, db)
     async def event_source():
         bus = AgentEventBus.instance()
         yield ":connected\n\n"

@@ -47,13 +47,30 @@ http.interceptors.response.use(
 
 export default http
 
+/**
+ * 清洗查询参数：剔除值为 undefined / null / 空字符串的项。
+ * 后端整型 Query 参数(如 days/limit)收到空字符串会触发 400 参数校验失败;
+ * 字符串参数省略与传空等价(默认 ""),故统一剔除空值,既修复又不改变语义。
+ * @param params - 原始查询参数对象。
+ * @returns 仅含有效值的查询参数对象。
+ */
+function cleanParams(params?: object): object | undefined {
+  if (!params) return params
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
+    if (v === undefined || v === null || v === '') continue
+    out[k] = v
+  }
+  return out
+}
+
 export async function get<T>(url: string, params?: object): Promise<T> {
-  const r = await http.get<Resp<T>>(url, { params })
+  const r = await http.get<Resp<T>>(url, { params: cleanParams(params) })
   return r.data.data as T
 }
 
 export async function post<T>(url: string, body?: object, params?: object): Promise<T> {
-  const r = await http.post<Resp<T>>(url, body, { params })
+  const r = await http.post<Resp<T>>(url, body, { params: cleanParams(params) })
   return r.data.data as T
 }
 
@@ -74,6 +91,6 @@ export async function del<T>(url: string): Promise<T> {
  * @returns 文件内容 Blob。
  */
 export async function download(url: string, params?: object): Promise<Blob> {
-  const response = await http.get<Blob>(url, { params, responseType: 'blob' })
+  const response = await http.get<Blob>(url, { params: cleanParams(params), responseType: 'blob' })
   return response.data
 }

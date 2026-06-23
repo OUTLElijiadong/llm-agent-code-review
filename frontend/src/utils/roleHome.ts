@@ -2,10 +2,11 @@ export type UserRole = 'admin' | 'reviewer' | 'user'
 
 const FALLBACK_ROLE: UserRole = 'user'
 
+// 登录后默认进入「工作台」图表仪表盘(各角色统一:admin 看平台级数据,其余看本人数据)
 const ROLE_HOME_PATHS: Record<UserRole, string> = {
-  admin: '/admin/users',
-  reviewer: '/reviews',
-  user: '/projects',
+  admin: '/dashboard',
+  reviewer: '/dashboard',
+  user: '/dashboard',
 }
 
 /**

@@ -50,7 +50,7 @@ const emit = defineEmits<{
 }>()
 
 const menuItems: MenuItem[] = [
-  { path: '/dashboard', title: '工作台',     icon: HomeFilled,       roles: ['user'] },
+  { path: '/dashboard', title: '工作台',     icon: HomeFilled,       roles: ['admin', 'user', 'reviewer'] },
   { path: '/projects',  title: '项目管理',   icon: FolderOpened,     roles: ['user'] },
   { path: '/code',      title: '代码中心',   icon: Document,         roles: ['user'] },
   { path: '/reviews',   title: '审查任务',   icon: DocumentChecked,  roles: ['user', 'reviewer'] },

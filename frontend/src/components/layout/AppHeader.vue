@@ -50,7 +50,7 @@ const currentRole = computed(() => normalizeRole(userStore.profile?.role))
 
 const searchItems = computed<SearchItem[]>(() => {
   const items: SearchItem[] = [
-    { title: '工作台', description: '查看审查任务、风险分布和最近活动', path: '/dashboard', roles: ['user'] },
+    { title: '工作台', description: '查看审查任务、风险分布和最近活动', path: '/dashboard', roles: ['admin', 'user', 'reviewer'] },
     { title: '项目管理', description: '管理项目、上传代码文件和编辑项目信息', path: '/projects', roles: ['user'] },
     { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start', roles: ['user', 'reviewer'] },
     { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'] },
