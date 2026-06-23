@@ -13,7 +13,9 @@ export interface Resp<T = unknown> {
 
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
-  timeout: 120_000,
+  // 慢推理模型(如 gpt-5.5)单次调用可达 ~90s+,聊天为多次调用串联;
+  // 放宽到 10 分钟,与 nginx proxy_read_timeout(600s)对齐,避免前端提前中断。
+  timeout: 600_000,
 })
 
 http.interceptors.request.use((config) => {
