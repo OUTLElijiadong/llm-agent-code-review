@@ -3,9 +3,36 @@
 """
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.models.review_rule import ReviewRule
+from app.models.user import User
 from app.schemas.rule import RuleIn, RuleUpdateIn
+
+
+def _ensure_can_mutate(user: User, rule: ReviewRule, *, allow_builtin_for_admin: bool = True) -> None:
+    """规则写操作统一鉴权
+
+    - 管理员: 可操作全部规则(内置规则的启停由管理员统一治理)。
+    - 普通用户: 只能操作自己创建的自定义规则;内置/全局规则(user_id 为空)一律拒绝。
+
+    Args:
+        user: 当前操作用户。
+        rule: 目标规则。
+        allow_builtin_for_admin: 管理员是否可操作内置规则(启停=True,改/删=False)。
+
+    Raises:
+        ForbiddenError: 无权操作该规则。
+        ConflictError: 内置规则不可改/删。
+    """
+    is_global = rule.is_builtin or rule.user_id is None
+    if user.role == "admin":
+        if is_global and not allow_builtin_for_admin:
+            raise ConflictError("不可修改内置规则", code=40901)
+        return
+    if is_global:
+        raise ForbiddenError("无权操作内置规则", code=40300)
+    if rule.user_id != user.id:
+        raise ForbiddenError("无权操作他人规则", code=40300)
 
 
 def get_enabled_rules(db: Session, user_id: int, language: str = "") -> list[ReviewRule]:
@@ -52,17 +79,20 @@ def list_rules(db: Session, user_id: int) -> list[ReviewRule]:
     ).order_by(ReviewRule.sort_order).all()
 
 
-def toggle_rule(db: Session, rule_id: int, enabled: int) -> None:
+def toggle_rule(db: Session, user: User, rule_id: int, enabled: int) -> None:
     """启用/禁用规则
 
     Args:
         db: 数据库会话
+        user: 当前操作用户
         rule_id: 规则ID
         enabled: 1启用/0禁用
     """
     rule = db.get(ReviewRule, rule_id)
     if not rule:
         raise NotFoundError("规则不存在", code=40400)
+    # 启停允许管理员操作内置规则(全局治理),普通用户仅限自有规则
+    _ensure_can_mutate(user, rule, allow_builtin_for_admin=True)
     rule.enabled = enabled
     db.commit()
 
@@ -91,13 +121,13 @@ def create_rule(db: Session, user_id: int, payload: RuleIn) -> ReviewRule:
     return rule
 
 
-def update_rule(db: Session, rule_id: int, payload: RuleUpdateIn) -> None:
+def update_rule(db: Session, user: User, rule_id: int, payload: RuleUpdateIn) -> None:
     """更新自定义规则"""
     rule = db.get(ReviewRule, rule_id)
     if not rule:
         raise NotFoundError("规则不存在", code=40400)
-    if rule.is_builtin:
-        raise ConflictError("不可修改内置规则", code=40901)
+    # 内置规则任何人都不可改;自定义规则仅创建者或管理员可改
+    _ensure_can_mutate(user, rule, allow_builtin_for_admin=False)
     if payload.rule_name is not None:
         rule.rule_name = payload.rule_name
     if payload.rule_type is not None:
@@ -111,12 +141,14 @@ def update_rule(db: Session, rule_id: int, payload: RuleUpdateIn) -> None:
     db.commit()
 
 
-def delete_rule(db: Session, rule_id: int) -> None:
+def delete_rule(db: Session, user: User, rule_id: int) -> None:
     """删除自定义规则"""
     rule = db.get(ReviewRule, rule_id)
     if not rule:
         raise NotFoundError("规则不存在", code=40400)
     if rule.is_builtin:
         raise ConflictError("不可删除内置规则", code=40901)
+    # 自定义规则仅创建者或管理员可删
+    _ensure_can_mutate(user, rule, allow_builtin_for_admin=False)
     db.delete(rule)
     db.commit()

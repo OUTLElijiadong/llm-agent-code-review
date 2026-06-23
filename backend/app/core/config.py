@@ -5,9 +5,14 @@ FastAPI应用核心配置模块
 from pathlib import Path
 from typing import List
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+
+# 不安全的占位默认值 —— 生产环境若仍为这些值,直接拒绝启动
+_INSECURE_JWT_SECRETS = {"", "code-review-platform-dev-secret-key"}
+_INSECURE_API_KEYS = {"", "sk-xxxxx"}
 
 
 class Settings(BaseSettings):
@@ -61,6 +66,27 @@ class Settings(BaseSettings):
             f"mysql+pymysql://{self.db_user}:{self.db_password}@"
             f"{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
         )
+
+    @model_validator(mode="after")
+    def _guard_production_secrets(self) -> "Settings":
+        """非 dev 环境下,拒绝使用不安全的默认密钥/API Key 启动。
+
+        生产忘配 .env 时会静默沿用公开的默认 JWT 密钥,导致任何人都能伪造令牌;
+        此处在配置加载阶段直接 fail-fast,把隐患暴露在启动而非线上。
+        """
+        if self.app_env.lower() == "dev":
+            return self
+        problems: List[str] = []
+        if self.jwt_secret in _INSECURE_JWT_SECRETS:
+            problems.append("JWT_SECRET 仍为默认/空值,请设置为足够随机的字符串")
+        if self.deepseek_api_key in _INSECURE_API_KEYS:
+            problems.append("DEEPSEEK_API_KEY 未正确配置")
+        if problems:
+            raise ValueError(
+                f"检测到不安全的生产配置(APP_ENV={self.app_env}): "
+                + "; ".join(problems),
+            )
+        return self
 
 
 settings = Settings()

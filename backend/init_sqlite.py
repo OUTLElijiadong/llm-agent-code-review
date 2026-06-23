@@ -47,10 +47,14 @@ def main():
         admin_user = db.query(User).filter(User.username == "admin").first()
         if not admin_user:
             print("Creating admin user...")
-            # Hash is for admin123
+            from app.core.security import hash_password
+            admin_pwd = os.environ.get("ADMIN_PASSWORD", "admin123")
+            if admin_pwd == "admin123":
+                print("⚠️  正在使用默认管理员口令 admin123,生产环境请设置 ADMIN_PASSWORD "
+                      "环境变量,或首次登录后立即修改密码!")
             admin_user = User(
                 username="admin",
-                password="$2b$12$Z6ulrL6Jmnek.a.FALzQleAJ2yYcnI.cj9yEuj5GbYAlZfkrnWD7O",
+                password=hash_password(admin_pwd),
                 email="admin@local",
                 nickname="管理员",
                 role="admin",

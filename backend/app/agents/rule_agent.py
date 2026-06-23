@@ -44,8 +44,10 @@ class RuleManagerAgent(BaseAgent):
                     ctx: Optional[AgentContext] = None) -> AgentResult:
         if not self._db:
             return AgentResult(success=False, error="DB 未注入")
+        if not self._user:
+            return AgentResult(success=False, error="用户未注入")
         try:
-            rule_service.toggle_rule(self._db, rule_id, 1 if enabled else 0)
+            rule_service.toggle_rule(self._db, self._user, rule_id, 1 if enabled else 0)
             return AgentResult(success=True, data={"rule_id": rule_id, "enabled": enabled})
         except Exception as e:
             return AgentResult(success=False, error=str(e))

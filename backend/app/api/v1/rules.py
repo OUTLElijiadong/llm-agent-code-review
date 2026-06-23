@@ -32,7 +32,7 @@ def list_rules(db: Session = Depends(get_db), user: User = Depends(get_current_u
 def toggle_rule(rule_id: int, payload: RuleToggleIn, request: Request,
                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """启用/禁用规则"""
-    rule_service.toggle_rule(db, rule_id, payload.enabled)
+    rule_service.toggle_rule(db, user, rule_id, payload.enabled)
     audit_service.log(
         db, user, "rule",
         target_type="rule", target_id=rule_id,
@@ -60,7 +60,7 @@ def create_rule(payload: RuleIn, request: Request, db: Session = Depends(get_db)
 def update_rule(rule_id: int, payload: RuleUpdateIn, request: Request,
                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """更新自定义规则"""
-    rule_service.update_rule(db, rule_id, payload)
+    rule_service.update_rule(db, user, rule_id, payload)
     audit_service.log(
         db, user, "rule",
         target_type="rule", target_id=rule_id,
@@ -74,7 +74,7 @@ def update_rule(rule_id: int, payload: RuleUpdateIn, request: Request,
 def delete_rule(rule_id: int, request: Request, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """删除自定义规则"""
-    rule_service.delete_rule(db, rule_id)
+    rule_service.delete_rule(db, user, rule_id)
     audit_service.log(
         db, user, "rule",
         target_type="rule", target_id=rule_id,

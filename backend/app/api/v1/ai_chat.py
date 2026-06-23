@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.agents import AgentContext
-from app.agents.orchestrator import get_orchestrator
+from app.agents.orchestrator import get_orchestrator, get_request_orchestrator
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
@@ -92,8 +92,7 @@ def agent_chat(
     current_user: User = Depends(get_current_user),
 ):
     """Agent 聊天接口 — 通过对话调控所有 Agent"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=current_user)
+    orch = get_request_orchestrator(db, user=current_user)
     messages = [{"role": m.role, "content": m.content} for m in payload.messages]
     ctx = _ctx(current_user, payload.trace_id)
     result = orch.chat(messages, ctx=ctx)
@@ -123,8 +122,7 @@ def agent_detect_language(
     current_user: User = Depends(get_current_user),
 ):
     """Agent 智能识别项目语言"""
-    orch = get_orchestrator()
-    orch.inject_db(db)
+    orch = get_request_orchestrator(db, user=current_user)
     result = orch.detect_language(
         payload.project_name, payload.description, ctx=_ctx(current_user))
     if not result.success:
@@ -140,8 +138,7 @@ def agent_analyze_folder(
     current_user: User = Depends(get_current_user),
 ):
     """Agent 智能分析文件夹"""
-    orch = get_orchestrator()
-    orch.inject_db(db)
+    orch = get_request_orchestrator(db, user=current_user)
     result = orch.analyze_project(
         payload.folder_name, payload.file_names, ctx=_ctx(current_user))
     if not result.success:

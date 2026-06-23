@@ -261,7 +261,7 @@ async function submitSingleProject(): Promise<void> {
     return
   }
 
-  await startReview({
+  const res = await startReview({
     project_id: form.project_id!,
     file_ids: fileIds,
     review_type: form.review_type,
@@ -269,7 +269,11 @@ async function submitSingleProject(): Promise<void> {
   })
   reviewingSublabel.value = '已提交至 Agent 调度器'
   reviewingVisible.value = true
-  setTimeout(() => { reviewingVisible.value = false; router.push('/reviews') }, 2000)
+  // 后端异步执行,跳转任务详情页查看实时进度(无 task_id 时退回列表)
+  setTimeout(() => {
+    reviewingVisible.value = false
+    router.push(res?.task_id ? `/reviews/${res.task_id}` : '/reviews')
+  }, 1500)
 }
 
 async function submitAllProjects(): Promise<void> {

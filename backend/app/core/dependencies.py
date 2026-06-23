@@ -29,17 +29,24 @@ def get_current_user(
         AuthError: token缺失/非法/过期
         ForbiddenError: 用户不存在或已禁用
     """
-    if not authorization.startswith("Bearer "):
+    if not authorization or not authorization.startswith("Bearer "):
         raise AuthError("缺少token", code=40100)
     token = authorization[7:]
     try:
         payload = decode_token(token)
+        user_id = int(payload["sub"])
+    except (KeyError, ValueError, TypeError):
+        # 签名有效但缺少/非法 sub 声明
+        raise AuthError("token非法或已过期", code=40101)
     except Exception:
         raise AuthError("token非法或已过期", code=40101)
 
-    user = db.get(User, int(payload["sub"]))
+    user = db.get(User, user_id)
     if not user or user.status != 1:
         raise ForbiddenError("账号不存在或已禁用", code=40301)
+    # 令牌版本校验: 改密/禁用/重置后旧令牌的 ver 与数据库不一致 → 失效
+    if int(payload.get("ver", 0)) != (user.token_version or 0):
+        raise AuthError("登录态已失效,请重新登录", code=40102)
     return user
 
 

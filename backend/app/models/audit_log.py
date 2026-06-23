@@ -6,7 +6,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Index, String, Text
 
 from app.core.database import Base
 from app.models.base import IdMixin
@@ -14,6 +14,11 @@ from app.models.base import IdMixin
 
 class AuditLog(Base, IdMixin):
     __tablename__ = "audit_log"
+    __table_args__ = (
+        Index("ix_audit_log_action_time", "action", "create_time"),
+        Index("ix_audit_log_actor_time", "actor_id", "create_time"),
+        Index("ix_audit_log_create_time", "create_time"),
+    )
 
     actor_id = Column(BigInteger, comment="操作者用户ID;系统操作可为 NULL")
     actor_name = Column(String(80), comment="操作者用户名快照,便于用户删除后仍可读")

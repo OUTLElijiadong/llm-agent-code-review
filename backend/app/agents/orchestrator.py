@@ -41,8 +41,13 @@ class Orchestrator(BaseAgent):
     category = "meta"
     skills = ("Agent 路由", "依赖注入", "调度编排", "执行结果汇总")
 
-    def __init__(self):
+    def __init__(self, register: bool = True):
         super().__init__(temperature=0.5, max_tokens=256)
+        # register=True: 启动时构造的"元数据"实例,把所有 Agent 登记进全局注册中心,
+        #   供 /api/agents 等只读元数据端点消费。
+        # register=False: 每个请求构造的独立实例,持有请求级 db/user,绝不写全局
+        #   注册中心 —— 避免并发请求互相覆盖注入态导致跨用户数据/身份串号。
+        self._register = register
         self._registry = AgentRegistry.instance()
         self._api_config: Optional[ApiConfig] = None
         self._db: Optional[Session] = None
@@ -65,6 +70,10 @@ class Orchestrator(BaseAgent):
 
         self.chat_agent = ChatAssistantAgent()
         self.chat_agent.set_orchestrator(self)
+
+        # 请求级实例(register=False)不写全局注册中心,避免并发覆盖。
+        if not self._register:
+            return
 
         for a in [
             self.lang_agent, self.project_agent, self.code_reviewer,
@@ -234,7 +243,24 @@ _orchestrator: Optional[Orchestrator] = None
 
 
 def get_orchestrator() -> Orchestrator:
+    """返回进程级"元数据"单例 — 只用于只读元数据(如 /api/agents 列表)。
+
+    ⚠️ 不要在请求处理里对它调用 inject_db():该实例被所有请求共享,
+    注入请求级 db/user 会被并发请求互相覆盖,造成跨用户数据/身份串号。
+    需要执行带 db 的 Agent 操作时,请用 get_request_orchestrator()。
+    """
     global _orchestrator
     if _orchestrator is None:
         _orchestrator = Orchestrator()
     return _orchestrator
+
+
+def get_request_orchestrator(db: Session, user: Optional[User] = None) -> Orchestrator:
+    """为单个请求构造独立的 Orchestrator,并注入该请求的 db/user。
+
+    每个请求拿到全新的 Agent 实例,彼此隔离,从根上消除共享单例的并发串号问题。
+    构造成本很低(仅属性赋值,无网络/IO),远小于一次 LLM 调用。
+    """
+    orch = Orchestrator(register=False)
+    orch.inject_db(db, user=user)
+    return orch

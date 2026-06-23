@@ -4,7 +4,7 @@ EvolutionAgent 从反馈聚合产出的「候选进化动作」,默认不生效,
 经评估闸门(eval_case)+ admin 人工审批才 promote 写入 review_rule;
 applied_snapshot 保存改动前状态以支持一键回滚。
 """
-from sqlalchemy import BigInteger, Column, DateTime, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Index, String, Text
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -12,6 +12,10 @@ from app.models.base import IdMixin, TimestampMixin
 
 class EvolutionProposal(Base, IdMixin, TimestampMixin):
     __tablename__ = "evolution_proposal"
+    __table_args__ = (
+        Index("ix_evolution_proposal_status", "status"),
+        Index("ix_evolution_proposal_type", "proposal_type"),
+    )
 
     proposal_type = Column(String(30), nullable=False,
                            comment="new_rule/disable_rule/adjust_severity/narrow_language/new_fewshot")

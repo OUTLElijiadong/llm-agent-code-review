@@ -1,7 +1,7 @@
 """
 审查问题表ORM模型
 """
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
@@ -10,6 +10,12 @@ from app.models.base import IdMixin, TimestampMixin
 
 class ReviewIssue(Base, IdMixin, TimestampMixin):
     __tablename__ = "review_issue"
+    __table_args__ = (
+        Index("ix_review_issue_task_severity", "task_id", "severity"),
+        Index("ix_review_issue_task_status", "task_id", "status"),
+        Index("ix_review_issue_file", "file_id"),
+        Index("ix_review_issue_create_time", "create_time"),
+    )
 
     task_id = Column(BigInteger, nullable=False)
     file_id = Column(BigInteger)

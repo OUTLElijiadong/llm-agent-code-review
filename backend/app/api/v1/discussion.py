@@ -14,7 +14,7 @@ from app.agents.discussion_bus import DiscussionBus
 from app.api.v1.ws_discussion import register_pending
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.user import User
@@ -44,8 +44,10 @@ def start_discussion(
     3. 用户可通过 WebSocket 发送 {action:"user_input",content:"..."} 参与讨论
     """
     project = db.get(Project, project_id)
-    if not project:
+    if not project or project.status == "deleted":
         raise NotFoundError("项目不存在", code=40400)
+    if project.user_id != user.id and user.role != "admin":
+        raise ForbiddenError("无访问权限", code=40300)
 
     code_file = db.query(CodeFile).filter(
         CodeFile.id == file_id,

@@ -9,12 +9,15 @@ v2.1.2: 多 Agent 协同审查 — 三阶段流水线
 """
 import concurrent.futures
 import json as json_lib
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Optional
 
 from loguru import logger
 from sqlalchemy.orm import Session
+
+from app.core.database import SessionLocal
 
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEvent, AgentEventType
@@ -78,7 +81,11 @@ def _safe_commit(db: Session, task: Optional[ReviewTask] = None) -> None:
 
 
 def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
-    """启动代码审查任务(同步执行)
+    """创建审查任务并提交后台异步执行 —— 立即返回 status=running 的任务。
+
+    校验(项目归属/文件存在/数量上限)在请求线程内同步完成,非法请求立刻返回 4xx;
+    真正耗时的多 Agent 审查流水线在后台守护线程中以独立 DB Session 运行,
+    请求不再被 LLM 调用阻塞。前端通过轮询 GET /review/tasks/{id} 获取进度与最终结果。
 
     Args:
         db: 数据库会话
@@ -86,7 +93,7 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
         payload: 审查启动请求
 
     Returns:
-        ReviewTask: 完成后的审查任务
+        ReviewTask: 已入库、状态为 running 的审查任务
 
     Raises:
         NotFoundError: 项目或文件不存在
@@ -114,30 +121,6 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
 
     project_lang = (project.language or "").strip().lower()
     rules = get_enabled_rules(db, user.id, language=project_lang)
-
-    # Agent 自进化 L1: 检索本语言历史经验注入 Prompt;失败则降级为不注入,审查照常进行
-    experience_section = ""
-    try:
-        from app.services import experience_service
-        exps = experience_service.retrieve(db, language=project_lang)
-        experience_section = _format_experience(exps)
-        if exps:
-            logger.info(f"[evolution] 注入 {len(exps)} 条历史经验到本次审查 (lang={project_lang or '*'})")
-    except Exception as e:
-        logger.warning(f"[evolution] 经验检索失败,降级为不注入: {e}")
-        experience_section = ""
-
-    # 个性化:把用户画像偏好注入审查(追加到经验段);失败降级为不注入
-    try:
-        from app.services import personalization_service
-        persona_section = personalization_service.build_review_context(
-            db, user.id, language=project_lang)
-        if persona_section:
-            experience_section = (f"{experience_section}\n\n{persona_section}").strip()
-            logger.info(f"[personalization] 已注入用户画像到审查 (user={user.id})")
-    except Exception as e:
-        logger.warning(f"[personalization] 审查画像注入失败,降级: {e}")
-
     review_type = payload.review_type or "standard"
     profiles = get_agent_profiles(review_type)
     from app.utils.api_resolver import resolve_api_config
@@ -161,7 +144,98 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
     db.add_all(ReviewTaskFile(task_id=task.id, file_id=f.id) for f in files)
     _safe_commit(db)
 
+    threading.Thread(
+        target=_run_review_task,
+        args=(task.id, user.id),
+        name=f"review-task-{task.id}",
+        daemon=True,
+    ).start()
+    logger.info(
+        f"审查任务 #{task.id} 已提交后台执行 (type={review_type}, files={len(files)})",
+    )
+    return task
+
+
+def _run_review_task(task_id: int, user_id: int) -> None:
+    """后台线程入口: 用独立 DB Session 执行完整审查流水线。
+
+    线程没有调用方,任何异常都在此被吞掉(失败状态已由 _execute_review 落库),
+    避免未捕获异常导致线程静默崩溃而任务永远停留在 running。
+
+    Args:
+        task_id: 审查任务 ID(已在请求线程中入库)
+        user_id: 发起用户 ID
+    """
+    db = SessionLocal()
+    try:
+        task = db.get(ReviewTask, task_id)
+        user = db.get(User, user_id)
+        if not task or not user:
+            logger.error(f"[review] 后台任务 #{task_id} 找不到 task/user,放弃执行")
+            return
+
+        project = db.get(Project, task.project_id)
+        project_lang = (project.language or "").strip().lower() if project else ""
+
+        rules = get_enabled_rules(db, user.id, language=project_lang)
+
+        # Agent 自进化 L1: 检索本语言历史经验注入 Prompt;失败则降级为不注入,审查照常进行
+        experience_section = ""
+        try:
+            from app.services import experience_service
+            exps = experience_service.retrieve(db, language=project_lang)
+            experience_section = _format_experience(exps)
+            if exps:
+                logger.info(
+                    f"[evolution] 注入 {len(exps)} 条历史经验到本次审查 "
+                    f"(lang={project_lang or '*'})",
+                )
+        except Exception as e:
+            logger.warning(f"[evolution] 经验检索失败,降级为不注入: {e}")
+            experience_section = ""
+
+        # 个性化:把用户画像偏好注入审查(追加到经验段);失败降级为不注入
+        try:
+            from app.services import personalization_service
+            persona_section = personalization_service.build_review_context(
+                db, user.id, language=project_lang)
+            if persona_section:
+                experience_section = (f"{experience_section}\n\n{persona_section}").strip()
+                logger.info(f"[personalization] 已注入用户画像到审查 (user={user.id})")
+        except Exception as e:
+            logger.warning(f"[personalization] 审查画像注入失败,降级: {e}")
+
+        profiles = get_agent_profiles(task.review_type)
+        # 使用解析后的 API 配置(用户自定义 > 管理员全局如 gpt-5.5 > 系统默认 DeepSeek)
+        from app.utils.api_resolver import resolve_api_config
+        agent = DeepSeekAgent(api_config=resolve_api_config(db, user.id))
+        files = (
+            db.query(CodeFile)
+            .join(ReviewTaskFile, ReviewTaskFile.file_id == CodeFile.id)
+            .filter(ReviewTaskFile.task_id == task.id)
+            .order_by(ReviewTaskFile.id.asc())
+            .all()
+        )
+
+        _execute_review(db, agent, task, user, files, rules, profiles, experience_section)
+    except Exception as e:
+        logger.exception(e)
+    finally:
+        db.close()
+
+
+def _execute_review(
+    db: Session, agent: DeepSeekAgent, task: ReviewTask, user: User,
+    files: list, rules: list, profiles: tuple[ReviewAgentProfile, ...],
+    experience_section: str,
+) -> None:
+    """执行审查主循环并将统计结果落库。
+
+    逐文件审查、累计问题、刷新进度,最终汇总评分与摘要;
+    捕获取消信号与异常,分别落库为 cancelled / failed 状态,不向上抛出。
+    """
     t0 = time.time()
+    review_type = task.review_type
     agent_codes = [_PROFILE_TO_AGENT_CODE.get(p.code, p.code) for p in profiles]
     _emit_review_event(AgentEventType.DISPATCH, task, user,
                        f"审查任务 #{task.id} 启动,类型={review_type},文件={len(files)},代理={len(profiles)}")
@@ -227,10 +301,6 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
         for ac in set(agent_codes):
             _emit_review_event(AgentEventType.FAILED, task, user,
                                f"审查任务 #{task.id} 失败", agent_code=ac)
-        raise
-
-    db.refresh(task)
-    return task
 
 
 def _review_one_file(db: Session, agent: DeepSeekAgent, task: ReviewTask,
@@ -772,9 +842,16 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
     pagination = Pagination(page, page_size, total)
     rows = q.order_by(ReviewTask.create_time.desc()).offset(pagination.offset).limit(pagination.page_size).all()
 
+    # 批量取项目名,避免逐行 db.get(Project) 造成 N+1 查询
+    project_ids = {row.project_id for row in rows}
+    projects = {
+        p.id: p
+        for p in db.query(Project).filter(Project.id.in_(project_ids)).all()
+    } if project_ids else {}
+
     items = []
     for row in rows:
-        project = db.get(Project, row.project_id)
+        project = projects.get(row.project_id)
         items.append({
             "id": row.id, "task_name": row.task_name,
             "project_id": row.project_id,

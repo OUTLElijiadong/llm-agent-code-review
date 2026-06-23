@@ -37,18 +37,23 @@ def list_files(db: Session, user: User, project_id: int = None, language: str = 
     Returns:
         dict: 分页响应
     """
+    from app.core.exceptions import ValidationError
     from app.core.pagination import Pagination
 
     BINARY_LANGS = {"binary", "unknown", "image", "jpeg", "jpg", "png", "gif", "svg"}
 
-    q = db.query(CodeFile).filter(CodeFile.status == "active")
-    if project_id:
-        project = db.get(Project, project_id)
-        if not project or project.status == "deleted":
-            raise NotFoundError("项目不存在", code=40400)
-        if project.user_id != user.id and user.role != "admin":
-            raise ForbiddenError("无访问权限", code=40300)
-        q = q.filter(CodeFile.project_id == project_id)
+    # 防御性编程: 必须限定项目,否则会跨用户返回全库文件。
+    if not project_id:
+        raise ValidationError("project_id 必填", code=40001)
+
+    project = db.get(Project, project_id)
+    if not project or project.status == "deleted":
+        raise NotFoundError("项目不存在", code=40400)
+    if project.user_id != user.id and user.role != "admin":
+        raise ForbiddenError("无访问权限", code=40300)
+
+    q = db.query(CodeFile).filter(
+        CodeFile.status == "active", CodeFile.project_id == project_id)
     if exclude_binary:
         q = q.filter(~CodeFile.language.in_(BINARY_LANGS))
     if language:

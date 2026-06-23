@@ -3,7 +3,7 @@
 进化提案 promote 前必须在这些人工锚点用例上复跑,
 precision/recall 不退化才放行。seed 用例永不被进化覆盖,防回声室。
 """
-from sqlalchemy import Column, SmallInteger, String, Text
+from sqlalchemy import Column, Index, SmallInteger, String, Text
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
@@ -12,6 +12,9 @@ from app.models.base import IdMixin, TimestampMixin
 
 class EvalCase(Base, IdMixin, TimestampMixin):
     __tablename__ = "eval_case"
+    __table_args__ = (
+        Index("ix_eval_case_enabled", "enabled"),
+    )
 
     name = Column(String(100), nullable=False, comment="用例名")
     language = Column(String(30), default="*", comment="语言")

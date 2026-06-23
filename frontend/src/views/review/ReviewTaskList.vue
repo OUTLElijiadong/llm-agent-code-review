@@ -121,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
@@ -180,8 +180,26 @@ function formatDuration(ms: number): string {
   return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`
 }
 
-async function loadData() {
-  loading.value = true
+// 审查在后台异步执行,列表里存在 running 任务时轮询刷新,跑完即停。
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+const POLL_INTERVAL = 4000
+
+function clearPoll() {
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+}
+
+function maybeSchedulePoll() {
+  clearPoll()
+  if (tasks.value.some((t) => t.status === 'running')) {
+    pollTimer = setTimeout(() => loadData(true), POLL_INTERVAL)
+  }
+}
+
+async function loadData(silent = false) {
+  if (!silent) loading.value = true
   try {
     const params: Record<string, unknown> = {
       page: page.value,
@@ -197,8 +215,9 @@ async function loadData() {
     const data = await getReviewTasks(params)
     tasks.value = data.items
     total.value = data.total
+    maybeSchedulePoll()
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -254,6 +273,8 @@ onMounted(() => {
   loadProjects()
   loadData()
 })
+
+onUnmounted(clearPoll)
 </script>
 
 <style scoped lang="scss">

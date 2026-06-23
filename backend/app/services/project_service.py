@@ -1,6 +1,7 @@
 """
 项目管理服务模块
 """
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
@@ -43,21 +44,38 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
     pagination = Pagination(page, page_size, total)
     rows = q.order_by(Project.create_time.desc()).offset(pagination.offset).limit(pagination.page_size).all()
 
+    # 批量聚合,避免 N+1: 一次查全部文件数 + 一次查全部最近成功审查
+    proj_ids = [r.id for r in rows]
+    file_counts: dict[int, int] = {}
+    last_tasks: dict[int, ReviewTask] = {}
+    if proj_ids:
+        file_counts = dict(
+            db.query(CodeFile.project_id, func.count(CodeFile.id))
+            .filter(CodeFile.project_id.in_(proj_ids), CodeFile.status == "active")
+            .group_by(CodeFile.project_id)
+            .all()
+        )
+        succ_tasks = (
+            db.query(ReviewTask)
+            .filter(ReviewTask.project_id.in_(proj_ids), ReviewTask.status == "success")
+            .order_by(ReviewTask.create_time.desc())
+            .all()
+        )
+        for t in succ_tasks:
+            # 已按时间倒序,首次出现即该项目最近一次成功审查
+            if t.project_id not in last_tasks:
+                last_tasks[t.project_id] = t
+
     items = []
     for row in rows:
-        file_count = db.query(CodeFile.id).filter(
-            CodeFile.project_id == row.id, CodeFile.status == "active").count()
-        last_task = db.query(ReviewTask).filter(
-            ReviewTask.project_id == row.id, ReviewTask.status == "success"
-        ).order_by(ReviewTask.create_time.desc()).first()
+        last_task = last_tasks.get(row.id)
         # v2.0 B2: 用最近一次成功审查的真实评分,前端不再 hash 派生
-        score = last_task.score if last_task else None
         items.append({
             "id": row.id, "project_name": row.project_name,
             "description": row.description, "language": row.language,
-            "status": row.status, "file_count": file_count,
+            "status": row.status, "file_count": file_counts.get(row.id, 0),
             "last_review_at": last_task.create_time if last_task else None,
-            "score": score,
+            "score": last_task.score if last_task else None,
             "create_time": row.create_time,
         })
     return pagination.to_dict(items)

@@ -55,6 +55,8 @@ def reset_password(db: Session, user_id: int) -> dict:
         raise NotFoundError("用户不存在", code=40400)
     default_pwd = "123456"
     user.password = hash_password(default_pwd)
+    # 重置密码后吊销该用户此前所有 JWT
+    user.token_version = (user.token_version or 0) + 1
     db.commit()
     return {"default_password": default_pwd}
 
@@ -71,6 +73,9 @@ def toggle_status(db: Session, user_id: int, status: int) -> None:
     if not user:
         raise NotFoundError("用户不存在", code=40400)
     user.status = status
+    # 禁用用户时立即吊销其所有 JWT,避免被禁用后旧令牌仍可用
+    if status == 0:
+        user.token_version = (user.token_version or 0) + 1
     db.commit()
 
 

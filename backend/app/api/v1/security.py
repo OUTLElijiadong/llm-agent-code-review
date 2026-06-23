@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.agents import AgentContext
-from app.agents.orchestrator import get_orchestrator
+from app.agents.orchestrator import get_orchestrator, get_request_orchestrator
 from app.ai.exceptions import AiServiceError
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -45,8 +45,7 @@ def scan_file(
     user: User = Depends(get_current_user),
 ):
     """单文件深度安全扫描"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_file(
         file_id=payload.file_id,
         scan_depth=payload.scan_depth,
@@ -64,8 +63,7 @@ def scan_task(
     user: User = Depends(get_current_user),
 ):
     """任务级安全复审:为已落库的安全 issue 补 OWASP/CWE 标签"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_task(
         task_id=payload.task_id, ctx=_ctx(user),
     )
@@ -81,8 +79,7 @@ def scan_project(
     user: User = Depends(get_current_user),
 ):
     """项目级威胁建模:跨文件数据流追踪"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_project(
         project_id=payload.project_id,
         top_n=payload.top_n,
@@ -120,8 +117,7 @@ def list_findings(
     user: User = Depends(get_current_user),
 ):
     """查询某个任务下已落库的安全 finding(等价于 scan-task)"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_task(task_id=task_id, ctx=_ctx(user))
     if not result.success:
         raise AiServiceError(result.error or "查询安全发现失败", code=50220)

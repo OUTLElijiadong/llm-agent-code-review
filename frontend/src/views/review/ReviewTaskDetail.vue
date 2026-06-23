@@ -270,7 +270,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Lock, MagicStick, ZoomIn, ZoomOut, RefreshRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -467,16 +467,16 @@ const highlightLines = computed(() => {
   return lines
 })
 
-async function loadTaskDetail() {
+async function loadTaskDetail(silent = false) {
   try {
     task.value = await getReviewTaskDetail(taskId)
     fileList.value = (task.value.files ?? []).map((item) => ({ ...item }))
   } catch {
-    pageError.value = '加载审查任务详情失败'
+    if (!silent) pageError.value = '加载审查任务详情失败'
   }
 }
 
-async function doLoadIssues() {
+async function doLoadIssues(silent = false) {
   try {
     const params: Record<string, unknown> = {
       page: issuePage.value,
@@ -501,7 +501,7 @@ async function doLoadIssues() {
     })
     fileList.value = Array.from(fileSet.values())
   } catch {
-    ElMessage.error('加载问题列表失败')
+    if (!silent) ElMessage.error('加载问题列表失败')
   }
 }
 
@@ -514,7 +514,30 @@ async function loadAllData() {
     if (!pageError.value) pageError.value = '加载审查详情失败'
   } finally {
     pageLoading.value = false
+    schedulePollIfRunning()
   }
+}
+
+// ── 运行中任务轮询: 后端异步执行审查,前端定时刷新进度直至终态 ──
+const POLL_INTERVAL = 3000
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+function stopPolling() {
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+}
+
+function schedulePollIfRunning() {
+  stopPolling()
+  if (task.value?.status !== 'running') return
+  pollTimer = setTimeout(async () => {
+    // 静默刷新,避免轮询期间反复弹出错误提示或闪烁整页骨架屏
+    await loadTaskDetail(true)
+    await doLoadIssues(true)
+    schedulePollIfRunning()
+  }, POLL_INTERVAL)
 }
 
 async function loadFileCode(fileId: number) {
@@ -602,6 +625,10 @@ function goFile(projectId: number, fileId: number): void {
 
 onMounted(() => {
   loadAllData()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 

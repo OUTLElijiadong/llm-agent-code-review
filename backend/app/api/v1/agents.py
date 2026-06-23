@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.agents import AgentContext
 from app.agents.clarify_store import ClarifyStore
 from app.agents.event_bus import AgentEventBus
-from app.agents.orchestrator import get_orchestrator
+from app.agents.orchestrator import get_request_orchestrator
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
@@ -175,8 +175,7 @@ def submit_clarification(
     intent_name = pending["intent"]
     merged = {**pending.get("payload", {}), **(payload.answers or {})}
 
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     ctx = AgentContext(user_id=user.id, extra={})
     result = orch.chat_agent.dispatch_with_payload(intent_name, merged, ctx)
     if not result.success:
