@@ -14,12 +14,18 @@ from app.api.v1 import (
     code_files,
     dashboard,
     evolution,
+    feedback,
+    forum,
     issues,
+    knowledge,
+    llm_config,
+    maintenance,
     projects,
     reports,
     review,
     rules,
     security,
+    user_profile,
     users,
 )
 
@@ -41,3 +47,9 @@ api_router.include_router(agents.router, prefix="/agents", tags=["Agent中心"])
 api_router.include_router(evolution.router, prefix="/evolution", tags=["Agent自进化"])
 api_router.include_router(audit.router, prefix="/admin/audit", tags=["操作审计"])
 api_router.include_router(api_config.router, tags=["API配置"])
+api_router.include_router(maintenance.router, prefix="/maintenance", tags=["维修工单"])
+api_router.include_router(feedback.router, prefix="/feedback", tags=["用户反馈"])
+api_router.include_router(forum.router, prefix="/forum", tags=["开发者论坛"])
+api_router.include_router(user_profile.router, prefix="/me", tags=["用户画像"])
+api_router.include_router(knowledge.router, prefix="/knowledge", tags=["个人知识库"])
+api_router.include_router(llm_config.router, prefix="/admin/llm", tags=["大模型配置"])

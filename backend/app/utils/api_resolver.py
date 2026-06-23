@@ -111,6 +111,29 @@ def resolve_api_config(
                 )
             logger.warning(f"[api_resolver] 用户 {user_id} 的 API Key 解密失败，回退系统默认")
 
+    # 管理员全局覆盖: 平台级在 DeepSeek 与自定义 OpenAI 兼容端点(如 gpt-5.5)间切换。
+    # 优先级低于用户自定义, 高于系统内置默认; 任何异常都降级为内置默认。
+    try:
+        from app.services import system_config_service
+
+        gcfg = system_config_service.get_llm_config(db)
+        if (
+            gcfg
+            and gcfg.get("active")
+            and gcfg.get("api_key")
+            and gcfg.get("base_url")
+            and gcfg.get("model")
+        ):
+            return ApiConfig(
+                api_key=gcfg["api_key"],
+                base_url=gcfg["base_url"],
+                model=gcfg["model"],
+                provider=gcfg.get("provider", "custom"),
+                source="global",
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[api_resolver] 全局 LLM 配置解析失败，回退系统默认: {e}")
+
     # 回退系统默认
     return ApiConfig(
         api_key=settings.deepseek_api_key,

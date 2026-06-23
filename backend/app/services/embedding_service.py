@@ -1,0 +1,139 @@
+"""
+嵌入(embedding)服务 — RAG 的向量化底座
+
+设计目标(见需求决策):
+- 可配置:管理员可在系统设置里填 OpenAI 兼容的 /embeddings 端点+模型+Key
+- 无 Key 自动降级:未配置或调用失败时,回退到本地确定性哈希向量(纯词袋,
+  中文按字+二元组、英文按单词),保证全流程可跑通,语义较弱但永不阻塞交付。
+
+检索侧务必用与入库侧「同一方法」嵌入 query;不同维度的向量在 cosine 中按
+长度不匹配直接跳过,避免历史数据与配置切换造成崩溃。
+"""
+import hashlib
+import json
+import math
+import re
+from typing import List, Tuple
+
+from loguru import logger
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.services import system_config_service
+
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+")
+_CJK_RE = re.compile(r"[一-鿿]")
+
+FALLBACK_TAG = "fallback:hash"
+
+
+# ──────────────────────────────────────────────────────────
+# 本地降级:确定性哈希词袋向量
+# ──────────────────────────────────────────────────────────
+def _tokenize(text: str) -> List[str]:
+    text = text.lower()
+    tokens = _TOKEN_RE.findall(text)
+    cjk = _CJK_RE.findall(text)
+    tokens.extend(cjk)
+    # 中文二元组,提升短语匹配
+    tokens.extend(cjk[i] + cjk[i + 1] for i in range(len(cjk) - 1))
+    return tokens
+
+
+def _hash_embed(text: str, dim: int) -> List[float]:
+    vec = [0.0] * dim
+    for tok in _tokenize(text):
+        h = int(hashlib.md5(tok.encode("utf-8")).hexdigest(), 16)
+        idx = h % dim
+        sign = 1.0 if (h >> 8) & 1 else -1.0
+        vec[idx] += sign
+    return _l2_normalize(vec)
+
+
+def _l2_normalize(vec: List[float]) -> List[float]:
+    norm = math.sqrt(sum(v * v for v in vec))
+    if norm == 0:
+        return vec
+    return [v / norm for v in vec]
+
+
+# ──────────────────────────────────────────────────────────
+# 远端 API(OpenAI 兼容 /embeddings)
+# ──────────────────────────────────────────────────────────
+def _api_embed(texts: List[str], cfg: dict) -> List[List[float]]:
+    import httpx
+
+    url = f"{cfg['base_url'].rstrip('/')}/embeddings"
+    headers = {
+        "Authorization": f"Bearer {cfg['api_key']}",
+        "Content-Type": "application/json",
+    }
+    out: List[List[float]] = []
+    batch = 32
+    with httpx.Client(timeout=settings.embedding_timeout) as client:
+        for i in range(0, len(texts), batch):
+            chunk = texts[i:i + batch]
+            resp = client.post(url, headers=headers, json={
+                "model": cfg["model"], "input": chunk,
+            })
+            resp.raise_for_status()
+            body = resp.json()
+            # 按 index 排序,保证与输入顺序一致
+            items = sorted(body["data"], key=lambda d: d.get("index", 0))
+            out.extend([_l2_normalize([float(x) for x in it["embedding"]]) for it in items])
+    return out
+
+
+# ──────────────────────────────────────────────────────────
+# 对外 API
+# ──────────────────────────────────────────────────────────
+def embed_texts(db: Session, texts: List[str]) -> Tuple[List[List[float]], str]:
+    """批量嵌入文本
+
+    Returns:
+        (vectors, model_tag):
+        - 优先用配置的 embedding API;失败/未配置则用本地哈希向量
+        - model_tag 形如 "api:text-embedding-3-small" 或 "fallback:hash"
+    """
+    if not texts:
+        return [], FALLBACK_TAG
+
+    cfg = system_config_service.get_embedding_config(db)
+    if cfg.get("enabled"):
+        try:
+            vecs = _api_embed(texts, cfg)
+            return vecs, f"api:{cfg['model']}"
+        except Exception as e:  # noqa: BLE001 — 任何失败都降级,绝不阻塞
+            logger.warning(f"[embedding] API 调用失败,降级为本地向量: {e}")
+
+    dim = settings.embedding_dim
+    return [_hash_embed(t, dim) for t in texts], FALLBACK_TAG
+
+
+def embed_one(db: Session, text: str) -> Tuple[List[float], str]:
+    vecs, tag = embed_texts(db, [text])
+    return (vecs[0] if vecs else []), tag
+
+
+def cosine(a: List[float], b: List[float]) -> float:
+    """余弦相似度;维度不一致(历史向量/配置切换)返回 -1 表示不可比"""
+    if not a or not b or len(a) != len(b):
+        return -1.0
+    # 向量已 L2 归一化,点积即余弦
+    return sum(x * y for x, y in zip(a, b))
+
+
+def is_remote_enabled(db: Session) -> bool:
+    return bool(system_config_service.get_embedding_config(db).get("enabled"))
+
+
+def parse_vector(raw) -> List[float]:
+    """从存储(JSON 文本)解析向量,容错返回空列表"""
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []

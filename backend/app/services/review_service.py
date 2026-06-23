@@ -127,6 +127,17 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
         logger.warning(f"[evolution] 经验检索失败,降级为不注入: {e}")
         experience_section = ""
 
+    # 个性化:把用户画像偏好注入审查(追加到经验段);失败降级为不注入
+    try:
+        from app.services import personalization_service
+        persona_section = personalization_service.build_review_context(
+            db, user.id, language=project_lang)
+        if persona_section:
+            experience_section = (f"{experience_section}\n\n{persona_section}").strip()
+            logger.info(f"[personalization] 已注入用户画像到审查 (user={user.id})")
+    except Exception as e:
+        logger.warning(f"[personalization] 审查画像注入失败,降级: {e}")
+
     review_type = payload.review_type or "standard"
     profiles = get_agent_profiles(review_type)
     from app.utils.api_resolver import resolve_api_config

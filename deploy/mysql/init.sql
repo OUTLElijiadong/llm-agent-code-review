@@ -263,3 +263,132 @@ CREATE TABLE IF NOT EXISTS eval_case (
     PRIMARY KEY (id),
     KEY idx_enabled (enabled)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='黄金回归集(自进化评估闸门)';
+
+-- ============================================================
+-- v2.4 平台支持 + 社区 + 个性化(画像/RAG)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS maintenance_ticket (
+    id           BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id      BIGINT       NOT NULL                      COMMENT '提交人',
+    title        VARCHAR(150) NOT NULL                      COMMENT '工单标题',
+    category     VARCHAR(20)  NOT NULL DEFAULT 'bug'        COMMENT 'bug/account/feature/performance/other',
+    description  TEXT         NOT NULL                      COMMENT '问题描述',
+    priority     VARCHAR(10)  NOT NULL DEFAULT 'medium'     COMMENT 'low/medium/high',
+    status       VARCHAR(20)  NOT NULL DEFAULT 'pending'    COMMENT 'pending/processing/resolved/closed',
+    admin_reply  TEXT         DEFAULT NULL                  COMMENT '管理员处理回复',
+    handled_by   BIGINT       DEFAULT NULL                  COMMENT '处理管理员ID',
+    handled_at   DATETIME     DEFAULT NULL                  COMMENT '处理时间(UTC)',
+    create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_user_status (user_id, status),
+    KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='维修工单(平台问题)';
+
+CREATE TABLE IF NOT EXISTS user_feedback (
+    id            BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id       BIGINT       NOT NULL                      COMMENT '反馈人',
+    feedback_type VARCHAR(20)  NOT NULL DEFAULT 'suggestion' COMMENT 'suggestion/complaint/praise/bug/other',
+    content       TEXT         NOT NULL                      COMMENT '反馈内容',
+    contact       VARCHAR(100) DEFAULT NULL                  COMMENT '可选联系方式',
+    status        VARCHAR(20)  NOT NULL DEFAULT 'new'         COMMENT 'new/read/replied/closed',
+    admin_reply   TEXT         DEFAULT NULL                  COMMENT '管理员回复',
+    handled_by    BIGINT       DEFAULT NULL                  COMMENT '处理管理员ID',
+    handled_at    DATETIME     DEFAULT NULL                  COMMENT '处理时间(UTC)',
+    create_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_user_status (user_id, status),
+    KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户反馈(向管理员)';
+
+CREATE TABLE IF NOT EXISTS forum_post (
+    id           BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id      BIGINT       NOT NULL                      COMMENT '作者',
+    category     VARCHAR(20)  NOT NULL DEFAULT 'qa'         COMMENT 'qa/tech/share/announce/other',
+    title        VARCHAR(200) NOT NULL                      COMMENT '标题',
+    content      TEXT         NOT NULL                      COMMENT '正文(Markdown)',
+    view_count   INT          NOT NULL DEFAULT 0            COMMENT '浏览数',
+    reply_count  INT          NOT NULL DEFAULT 0            COMMENT '回复数',
+    is_pinned    TINYINT      NOT NULL DEFAULT 0            COMMENT '是否置顶',
+    status       VARCHAR(20)  NOT NULL DEFAULT 'normal'     COMMENT 'normal/deleted',
+    create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_status_pinned (status, is_pinned),
+    KEY idx_category (category),
+    KEY idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开发者论坛-主题帖';
+
+CREATE TABLE IF NOT EXISTS forum_reply (
+    id           BIGINT       NOT NULL AUTO_INCREMENT,
+    post_id      BIGINT       NOT NULL                      COMMENT '所属主题帖',
+    user_id      BIGINT       NOT NULL                      COMMENT '回复人',
+    content      TEXT         NOT NULL                      COMMENT '回复内容',
+    status       VARCHAR(20)  NOT NULL DEFAULT 'normal'     COMMENT 'normal/deleted',
+    create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_post (post_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开发者论坛-回复';
+
+CREATE TABLE IF NOT EXISTS user_profile (
+    id                 BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id            BIGINT       NOT NULL                  COMMENT '用户ID(一对一)',
+    hobbies            TEXT         DEFAULT NULL              COMMENT '爱好/兴趣',
+    goals              TEXT         DEFAULT NULL              COMMENT '学习/工作目标',
+    tech_stack         TEXT         DEFAULT NULL              COMMENT '常用技术栈',
+    focus_areas        TEXT         DEFAULT NULL              COMMENT '关注重点 JSON 数组',
+    preferred_language VARCHAR(50)  DEFAULT NULL              COMMENT '偏好编程语言',
+    experience_level   VARCHAR(20)  DEFAULT NULL              COMMENT 'beginner/intermediate/advanced',
+    auto_learn         TINYINT      NOT NULL DEFAULT 1        COMMENT '是否允许隐式学习',
+    derived_summary    TEXT         DEFAULT NULL              COMMENT 'AI 综合画像摘要',
+    derived_stats      TEXT         DEFAULT NULL              COMMENT '行为统计 JSON',
+    last_learned_at    DATETIME     DEFAULT NULL              COMMENT '最近隐式学习时间(UTC)',
+    create_time        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户画像(显式+隐式)';
+
+CREATE TABLE IF NOT EXISTS knowledge_doc (
+    id           BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id      BIGINT       NOT NULL                      COMMENT '所属用户(隔离键)',
+    source_type  VARCHAR(20)  NOT NULL DEFAULT 'upload'     COMMENT 'upload/code/issue/forum/feedback/ticket',
+    source_ref   VARCHAR(64)  DEFAULT NULL                  COMMENT '来源引用,用于去重',
+    title        VARCHAR(200) NOT NULL                      COMMENT '文档标题',
+    char_count   INT          NOT NULL DEFAULT 0            COMMENT '原文字符数',
+    chunk_count  INT          NOT NULL DEFAULT 0            COMMENT '切片数',
+    status       VARCHAR(20)  NOT NULL DEFAULT 'active'     COMMENT 'active/deleted',
+    create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_user_status (user_id, status),
+    KEY idx_user_source (user_id, source_type, source_ref)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='个人知识库-文档来源(RAG)';
+
+CREATE TABLE IF NOT EXISTS knowledge_chunk (
+    id           BIGINT       NOT NULL AUTO_INCREMENT,
+    doc_id       BIGINT       NOT NULL                      COMMENT '所属文档',
+    user_id      BIGINT       NOT NULL                      COMMENT '所属用户(隔离键)',
+    seq          INT          NOT NULL DEFAULT 0            COMMENT '切片序号',
+    content      TEXT         NOT NULL                      COMMENT '切片正文',
+    embedding    LONGTEXT     DEFAULT NULL                  COMMENT '嵌入向量 JSON 数组',
+    embed_model  VARCHAR(64)  DEFAULT NULL                  COMMENT '向量来源标记(api:model 或 fallback)',
+    create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_user (user_id),
+    KEY idx_doc (doc_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='个人知识库-切片向量(RAG)';
+
+CREATE TABLE IF NOT EXISTS system_config (
+    id           BIGINT       NOT NULL AUTO_INCREMENT,
+    config_key   VARCHAR(64)  NOT NULL                      COMMENT '配置键',
+    config_value TEXT         DEFAULT NULL                  COMMENT '配置值(字符串/JSON)',
+    create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_config_key (config_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统运行期配置(键值)';

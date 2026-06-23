@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     deepseek_max_retries: int = 2
     deepseek_chunk_threshold: int = 6000
 
+    # ── RAG 嵌入(embedding)配置 ──
+    # 留空则降级为本地确定性哈希向量,保证无 Key 也能跑通(语义弱)。
+    # 运行期可被 system_config 表(管理员在前端配置)覆盖。
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+    embedding_model: str = ""
+    embedding_dim: int = 256          # 本地降级向量维度
+    embedding_timeout: int = 30
+
     max_upload_size: int = 20 * 1024 * 1024  # 20MB
     allowed_extensions: List[str] = ["*"]
 

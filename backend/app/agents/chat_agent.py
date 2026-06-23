@@ -863,12 +863,25 @@ class ChatAssistantAgent(BaseAgent):
         self._temperature = 0.7
         self._max_tokens = 4096
 
+        # 个性化注入(画像 + 个人知识库 RAG);任何异常都降级为不注入
+        persona_block = ""
+        try:
+            db = getattr(self._orchestrator, "_db", None)
+            uid = ctx.user_id if ctx else None
+            if db is not None and uid:
+                from app.services import personalization_service
+                query = messages[-1]["content"] if messages else ""
+                persona_block = personalization_service.chat_context_for_agent(db, uid, query)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[chat_agent] 个性化注入失败,降级: {e}")
+        system_content = self._system_prompt + (persona_block or "")
+
         history = []
         for msg in messages[-10:]:
             history.append({"role": msg["role"], "content": msg["content"]})
 
         messages_for_api = [
-            {"role": "system", "content": self._system_prompt},
+            {"role": "system", "content": system_content},
         ] + history
 
         import time

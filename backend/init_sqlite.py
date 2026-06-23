@@ -24,6 +24,15 @@ from app.models.evolution_proposal import EvolutionProposal
 from app.models.eval_case import EvalCase
 # v3.1: 用户自定义 API 配置
 from app.models.api_config import UserApiConfig
+# v2.4: 维修工单 / 用户反馈 / 开发者论坛 / 用户画像 / 个人知识库(RAG) / 系统配置
+from app.models.maintenance_ticket import MaintenanceTicket
+from app.models.user_feedback import UserFeedback
+from app.models.forum_post import ForumPost
+from app.models.forum_reply import ForumReply
+from app.models.user_profile import UserProfile
+from app.models.knowledge_doc import KnowledgeDoc
+from app.models.knowledge_chunk import KnowledgeChunk
+from app.models.system_config import SystemConfig
 
 def main():
     # Create tables

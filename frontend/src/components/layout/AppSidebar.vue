@@ -16,6 +16,13 @@ import {
   Lock,
   Aim,
   MagicStick,
+  ChatLineSquare,
+  Collection,
+  Star,
+  Tools,
+  Comment,
+  Connection,
+  Operation,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { normalizeRole, type UserRole } from '@/utils/roleHome'
@@ -52,6 +59,11 @@ const menuItems: MenuItem[] = [
   { path: '/agents',    title: 'Agent 中心', icon: Cpu,              roles: ['admin', 'user', 'reviewer'] },
   { path: '/security',  title: '安全中心',   icon: Aim,              roles: ['admin', 'user', 'reviewer'] },
   { path: '/rules',     title: '审查规则',   icon: List,             roles: ['user', 'reviewer'] },
+  { path: '/forum',     title: '开发者论坛', icon: ChatLineSquare,   roles: ['admin', 'user', 'reviewer'] },
+  { path: '/knowledge', title: '个人知识库', icon: Collection,       roles: ['admin', 'user', 'reviewer'] },
+  { path: '/profile/personalization', title: '个性化画像', icon: Star, roles: ['admin', 'user', 'reviewer'] },
+  { path: '/support/maintenance', title: '申请维修', icon: Tools,    roles: ['admin', 'user', 'reviewer'] },
+  { path: '/support/feedback',    title: '意见反馈', icon: Comment,  roles: ['admin', 'user', 'reviewer'] },
   { path: '/profile',   title: '个人中心',   icon: Avatar,           roles: ['admin', 'user', 'reviewer'] },
 ]
 
@@ -60,6 +72,8 @@ const adminItems: MenuItem[] = [
   { path: '/admin/ai-logs',  title: 'Agent 调用日志', icon: ChatDotRound,  admin: true },
   { path: '/admin/audit',    title: '系统操作审计',    icon: Lock,          admin: true },
   { path: '/admin/evolution', title: 'Agent 自进化',   icon: MagicStick,    admin: true },
+  { path: '/admin/llm',       title: '大模型配置',      icon: Operation,     admin: true },
+  { path: '/admin/embedding', title: 'RAG 嵌入配置',   icon: Connection,    admin: true },
 ]
 
 const isAdmin = computed(() => userStore.profile?.role === 'admin')
