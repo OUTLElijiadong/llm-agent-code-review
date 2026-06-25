@@ -56,11 +56,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ../frontend/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      # Let's Encrypt 证书（只读给 nginx 用）+ ACME 续期校验 webroot
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
 
 volumes:
   mysql_data:
-  caddy_data:
-  caddy_config:

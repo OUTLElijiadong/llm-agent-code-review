@@ -29,3 +29,5 @@ db.sqlite3
 code_review.db
 .gstack/
 logs/
+# Let's Encrypt 证书与 ACME 校验目录（含私钥，绝不入库）
+deploy/certbot/
