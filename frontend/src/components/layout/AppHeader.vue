@@ -55,7 +55,7 @@ const searchItems = computed<SearchItem[]>(() => {
     { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start', roles: ['user', 'reviewer'] },
     { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'] },
     { title: '审查规则', description: '配置代码规范、性能、安全等审查维度', path: '/rules', roles: ['user', 'reviewer'] },
-    { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['admin', 'user', 'reviewer'] },
+    { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['user', 'reviewer'] },
     { title: '修改密码', description: '更新当前账号登录密码', path: '/profile/password', roles: ['admin', 'user', 'reviewer'] },
     { title: 'Agent 助手', description: '打开智能助手咨询代码审查问题', action: 'agent' },
     { title: '用户管理', description: '管理平台用户和角色权限', path: '/admin/users', admin: true },

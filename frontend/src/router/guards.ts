@@ -5,7 +5,7 @@
 
 import type { Router, RouteLocationNormalized } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { getRoleHomePath } from '@/utils/roleHome'
+import { canAdminOpenPath, getRoleHomePath, normalizeRole } from '@/utils/roleHome'
 
 /**
  * 安装全局路由守卫
@@ -48,6 +48,11 @@ export function setupGuards(router: Router): void {
 
     if (to.meta.role && to.meta.role !== user.profile?.role) {
       return { path: '/403' }
+    }
+
+    // 管理员只能进入「管理相关」页面；访问开发/用户页面一律回到工作台。
+    if (normalizeRole(user.profile?.role) === 'admin' && !canAdminOpenPath(to.path)) {
+      return { path: '/dashboard', replace: true }
     }
 
     return true

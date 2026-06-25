@@ -30,6 +30,26 @@ export function getRoleHomePath(role?: string | null): string {
   return ROLE_HOME_PATHS[normalizeRole(role)]
 }
 
+// 管理员只允许进入「管理相关」页面：管理区(/admin/*)、平台工作台、个人账户，
+// 以及管理员有管理职责的共享页（论坛版务 / 维修工单受理 / 反馈回复 / 平台安全与
+// Agent 监控）。开发/用户专属页（项目、代码、审查、报告、知识库、个性化画像等）
+// 对管理员隐藏且不可直达。
+const ADMIN_ALLOWED_PREFIXES = [
+  '/dashboard', '/agents', '/security', '/forum', '/support', '/admin',
+]
+
+/**
+ * 判断管理员是否允许进入某路径（菜单可见性与路由守卫共用此唯一判定）
+ * @param path - 目标路由路径
+ * @returns 管理员是否允许进入
+ */
+export function canAdminOpenPath(path: string): boolean {
+  // 个性化画像属于用户专属，管理员不可进；其余个人中心子页（改密/API配置）允许
+  if (path === '/profile/personalization') return false
+  if (path === '/profile' || path.startsWith('/profile/')) return true
+  return ADMIN_ALLOWED_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))
+}
+
 /**
  * 判断指定角色是否允许直接进入某个路径
  * @param role - 后端用户角色
@@ -39,8 +59,9 @@ export function getRoleHomePath(role?: string | null): string {
 export function canRoleOpenPath(role: string | null | undefined, path: string): boolean {
   const normalizedRole = normalizeRole(role)
   if (!path.startsWith('/')) return false
-  if (path.startsWith('/admin')) return normalizedRole === 'admin'
   if (path === '/login' || path === '/register') return false
+  if (normalizedRole === 'admin') return canAdminOpenPath(path)
+  if (path.startsWith('/admin')) return false
   return true
 }
 
