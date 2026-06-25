@@ -95,6 +95,20 @@ class ChatAssistantAgent(BaseAgent):
         super().__init__(temperature=0.7, max_tokens=4096)
         self._orchestrator: Optional["Orchestrator"] = None
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 ChatAssistantSelfImprovementSkill + ChatAssistantProactiveSkill
+
+        将聊天助手 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+        """
+        from app.agents.skills.chat_assistant import (
+            ChatAssistantProactiveSkill,
+            ChatAssistantSelfImprovementSkill,
+        )
+
+        self.attach_skill(ChatAssistantSelfImprovementSkill(self.name))
+        self.attach_skill(ChatAssistantProactiveSkill(self.name))
+
     def set_orchestrator(self, orch: "Orchestrator") -> None:
         self._orchestrator = orch
 

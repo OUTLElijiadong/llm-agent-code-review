@@ -24,6 +24,20 @@ class CodeFileManagerAgent(BaseAgent):
         self._db: Optional[Session] = None
         self._user = None
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 CodeFileManagerSelfImprovementSkill + CodeFileManagerProactiveSkill
+
+        将代码文件管理 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+        """
+        from app.agents.skills.code_file_manager import (
+            CodeFileManagerProactiveSkill,
+            CodeFileManagerSelfImprovementSkill,
+        )
+
+        self.attach_skill(CodeFileManagerSelfImprovementSkill(self.name))
+        self.attach_skill(CodeFileManagerProactiveSkill(self.name))
+
     def inject(self, db: Session, user=None) -> None:
         self._db = db
         self._user = user

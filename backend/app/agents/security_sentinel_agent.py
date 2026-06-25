@@ -103,6 +103,20 @@ class SecuritySentinelAgent(BaseAgent):
         self._db: Optional[Session] = None
         self._user: Optional[User] = None
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 SecuritySentinelSelfImprovementSkill + SecuritySentinelProactiveSkill
+
+        将安全哨兵 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+        """
+        from app.agents.skills.security_sentinel import (
+            SecuritySentinelProactiveSkill,
+            SecuritySentinelSelfImprovementSkill,
+        )
+
+        self.attach_skill(SecuritySentinelSelfImprovementSkill(self.name))
+        self.attach_skill(SecuritySentinelProactiveSkill(self.name))
+
     # ---- 注入 ----
 
     def inject(self, db: Session, user: Optional[User] = None) -> None:
@@ -141,8 +155,6 @@ class SecuritySentinelAgent(BaseAgent):
             AgentResult: data["issues"] 为 List[Finding],data["summary"] 为整体评价;
                          失败时 success=False,error 字段含错误信息
         """
-        from app.ai.static_analyzer import Finding
-
         # 1. 复用 _build_audit_prompt 生成安全审查 prompt
         user_msg = self._build_audit_prompt(code, language, file_name, line_offset)
 

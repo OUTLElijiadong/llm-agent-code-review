@@ -53,6 +53,24 @@ class Orchestrator(BaseAgent):
         self._db: Optional[Session] = None
         self._init_agents()
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 OrchestratorSelfImprovementSkill + OrchestratorProactiveSkill
+
+        将主调度 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+
+        注意:本方法在 super().__init__() 末尾被调用,先于 _init_agents() 执行,
+        挂载的是 Orchestrator 自身的 Skill(orchestrator.self_improve + orchestrator.proactive),
+        与子 Agent 无关,子 Agent 各自在自己的 _init_skills() 中挂载专属 Skill。
+        """
+        from app.agents.skills.orchestrator_skill import (
+            OrchestratorProactiveSkill,
+            OrchestratorSelfImprovementSkill,
+        )
+
+        self.attach_skill(OrchestratorSelfImprovementSkill(self.name))
+        self.attach_skill(OrchestratorProactiveSkill(self.name))
+
     def _init_agents(self):
         self.lang_agent = LanguageDetectorAgent()
         self.project_agent = ProjectAnalyzerAgent()

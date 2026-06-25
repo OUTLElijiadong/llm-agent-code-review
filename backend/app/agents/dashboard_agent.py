@@ -24,6 +24,20 @@ class DashboardAgent(BaseAgent):
         self._db: Optional[Session] = None
         self._user: Optional[object] = None
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 DashboardSelfImprovementSkill + DashboardProactiveSkill
+
+        将仪表盘 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+        """
+        from app.agents.skills.dashboard import (
+            DashboardProactiveSkill,
+            DashboardSelfImprovementSkill,
+        )
+
+        self.attach_skill(DashboardSelfImprovementSkill(self.name))
+        self.attach_skill(DashboardProactiveSkill(self.name))
+
     def inject(self, db: Session, user=None) -> None:
         self._db = db
         self._user = user

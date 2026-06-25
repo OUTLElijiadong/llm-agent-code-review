@@ -24,6 +24,20 @@ class ReportAgent(BaseAgent):
         self._db: Optional[Session] = None
         self._user = None
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 ReporterSelfImprovementSkill + ReporterProactiveSkill
+
+        将报告 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+        """
+        from app.agents.skills.reporter import (
+            ReporterProactiveSkill,
+            ReporterSelfImprovementSkill,
+        )
+
+        self.attach_skill(ReporterSelfImprovementSkill(self.name))
+        self.attach_skill(ReporterProactiveSkill(self.name))
+
     def inject(self, db: Session, user=None) -> None:
         self._db = db
         self._user = user

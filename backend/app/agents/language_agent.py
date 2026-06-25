@@ -28,6 +28,20 @@ class LanguageDetectorAgent(BaseAgent):
         )
         super().__init__(system_prompt=system_prompt, temperature=0.1, max_tokens=200)
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 LanguageDetectorSelfImprovementSkill + LanguageDetectorProactiveSkill
+
+        将语言检测 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+        """
+        from app.agents.skills.language_detector import (
+            LanguageDetectorProactiveSkill,
+            LanguageDetectorSelfImprovementSkill,
+        )
+
+        self.attach_skill(LanguageDetectorSelfImprovementSkill(self.name))
+        self.attach_skill(LanguageDetectorProactiveSkill(self.name))
+
     def execute(self, project_name: str, description: str = "") -> AgentResult:
         user_msg = f"项目名称: {project_name}\n项目描述: {description or '无'}"
         result = self.call_json(user_msg)

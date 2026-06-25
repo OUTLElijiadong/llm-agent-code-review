@@ -29,6 +29,20 @@ class ProjectAnalyzerAgent(BaseAgent):
         )
         super().__init__(system_prompt=system_prompt, temperature=0.3, max_tokens=500)
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 ProjectAnalyzerSelfImprovementSkill + ProjectAnalyzerProactiveSkill
+
+        将项目分析 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+        """
+        from app.agents.skills.project_analyzer import (
+            ProjectAnalyzerProactiveSkill,
+            ProjectAnalyzerSelfImprovementSkill,
+        )
+
+        self.attach_skill(ProjectAnalyzerSelfImprovementSkill(self.name))
+        self.attach_skill(ProjectAnalyzerProactiveSkill(self.name))
+
     def execute(self, folder_name: str, file_names: List[str]) -> AgentResult:
         file_list = file_names[:30]
         file_list_str = "\n".join(f"- {f}" for f in file_list)

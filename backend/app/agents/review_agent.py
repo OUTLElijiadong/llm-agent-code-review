@@ -40,6 +40,20 @@ class CodeReviewerAgent(BaseAgent):
         )
         super().__init__(system_prompt=system_prompt, temperature=0.2, max_tokens=4096)
 
+    def _init_skills(self) -> None:
+        """子类 override:挂载 CodeReviewerSelfImprovementSkill + CodeReviewerProactiveSkill
+
+        将代码审查 Agent 的自进化与主动监测能力下沉到 Skill,通过 SkillRegistry
+        统一注册,供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+        """
+        from app.agents.skills.code_reviewer import (
+            CodeReviewerProactiveSkill,
+            CodeReviewerSelfImprovementSkill,
+        )
+
+        self.attach_skill(CodeReviewerSelfImprovementSkill(self.name))
+        self.attach_skill(CodeReviewerProactiveSkill(self.name))
+
     def execute(self, code: str, rules: str, language: str,
                 file_name: str = "", line_offset: int = 0) -> AgentResult:
         """旧版执行方法(保留向后兼容,新流程请用 execute_review)
