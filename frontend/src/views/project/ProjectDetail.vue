@@ -42,81 +42,165 @@
     />
 
     <template v-if="project">
-      <el-descriptions :column="3" border class="info-card">
-        <el-descriptions-item label="项目名称">{{ project.project_name }}</el-descriptions-item>
-        <el-descriptions-item label="编程语言">
-          <el-tag v-if="project.language" size="small" type="info">{{ project.language }}</el-tag>
-          <span v-else class="text-muted">未设置</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="project.status === 'active' ? 'success' : 'info'" size="small">
-            {{ project.status === 'active' ? '活跃' : '归档' }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="文件数量">{{ project.file_count }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ formatDate(project.create_time) }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ formatDate(project.update_time) }}</el-descriptions-item>
-        <el-descriptions-item v-if="project.description" label="描述" :span="3">
-          {{ project.description }}
-        </el-descriptions-item>
-      </el-descriptions>
-
-      <div class="section">
-        <div class="section-header">
-          <h3>代码文件</h3>
-          <div class="section-actions">
-            <el-button size="small" @click="handleUploadFile">上传文件</el-button>
-            <el-button type="primary" size="small" @click="handleUploadFolder">上传文件夹</el-button>
-          </div>
-        </div>
-        <CodeFileList
-          :project-id="projectId"
-          :key="fileListKey"
-          @uploaded="onFileUploaded"
-        />
-      </div>
-
-      <div class="section">
-        <div class="section-header">
-          <h3>最近审查任务</h3>
-        </div>
-        <el-table
-          v-if="project.recent_tasks.length > 0"
-          :data="project.recent_tasks"
-          border
-          stripe
-          empty-text="暂无审查记录"
-        >
-          <el-table-column label="任务编号" width="100" align="center">
-            <template #default="{ row }">
-              {{ row.id }}
-            </template>
-          </el-table-column>
-          <el-table-column label="评分" width="100" align="center">
-            <template #default="{ row }">
-              <el-tag :type="getScoreType(row.score)" size="small">{{ row.score }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="问题数" width="100" align="center">
-            <template #default="{ row }">
-              {{ row.total_issues }}
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="120" align="center">
-            <template #default="{ row }">
-              <el-tag :type="getStatusType(row.status)" size="small">
-                {{ statusLabels[row.status] ?? row.status }}
+      <el-tabs v-model="activeTab" class="detail-tabs">
+        <!-- Tab 1: 项目信息 -->
+        <el-tab-pane label="项目信息" name="info">
+          <el-descriptions :column="3" border class="info-card">
+            <el-descriptions-item label="项目名称">{{ project.project_name }}</el-descriptions-item>
+            <el-descriptions-item label="编程语言">
+              <el-tag v-if="project.language" size="small" type="info">{{ project.language }}</el-tag>
+              <span v-else class="text-muted">未设置</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag :type="project.status === 'active' ? 'success' : 'info'" size="small">
+                {{ project.status === 'active' ? '活跃' : '归档' }}
               </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="创建时间" min-width="180" align="center">
-            <template #default="{ row }">
-              {{ formatDate(row.create_time) }}
-            </template>
-          </el-table-column>
-        </el-table>
-        <EmptyState v-else description="暂无审查记录" />
-      </div>
+            </el-descriptions-item>
+            <el-descriptions-item label="文件数量">{{ project.file_count }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ formatDate(project.create_time) }}</el-descriptions-item>
+            <el-descriptions-item label="更新时间">{{ formatDate(project.update_time) }}</el-descriptions-item>
+            <el-descriptions-item v-if="project.description" label="描述" :span="3">
+              {{ project.description }}
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-tab-pane>
+
+        <!-- Tab 2: 代码文件 -->
+        <el-tab-pane label="代码文件" name="files">
+          <div class="section">
+            <div class="section-header">
+              <h3>代码文件</h3>
+              <div class="section-actions">
+                <el-button size="small" @click="handleUploadFile">上传文件</el-button>
+                <el-button type="primary" size="small" @click="handleUploadFolder">上传文件夹</el-button>
+              </div>
+            </div>
+            <CodeFileList
+              :project-id="projectId"
+              :key="fileListKey"
+              @uploaded="onFileUploaded"
+            />
+          </div>
+        </el-tab-pane>
+
+        <!-- Tab 3: 审查任务 -->
+        <el-tab-pane label="审查任务" name="tasks">
+          <div class="section">
+            <div class="section-header">
+              <h3>最近审查任务</h3>
+            </div>
+            <el-table
+              v-if="project.recent_tasks.length > 0"
+              :data="project.recent_tasks"
+              border
+              stripe
+              empty-text="暂无审查记录"
+            >
+              <el-table-column label="任务编号" width="100" align="center">
+                <template #default="{ row }">
+                  {{ row.id }}
+                </template>
+              </el-table-column>
+              <el-table-column label="评分" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getScoreType(row.score)" size="small">{{ row.score }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="问题数" width="100" align="center">
+                <template #default="{ row }">
+                  {{ row.total_issues }}
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="120" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getStatusType(row.status)" size="small">
+                    {{ statusLabels[row.status] ?? row.status }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="创建时间" min-width="180" align="center">
+                <template #default="{ row }">
+                  {{ formatDate(row.create_time) }}
+                </template>
+              </el-table-column>
+            </el-table>
+            <EmptyState v-else description="暂无审查记录" />
+          </div>
+        </el-tab-pane>
+
+        <!-- Tab 4: 成员管理 -->
+        <el-tab-pane label="成员管理" name="members">
+          <div class="section">
+            <div class="section-header">
+              <h3>项目成员</h3>
+              <div class="section-actions">
+                <el-button
+                  type="primary"
+                  size="small"
+                  :icon="Plus"
+                  @click="openAddMemberDialog"
+                >
+                  添加成员
+                </el-button>
+              </div>
+            </div>
+            <el-table
+              v-loading="memberLoading"
+              :data="members"
+              border
+              stripe
+              empty-text="暂无成员"
+            >
+              <el-table-column label="用户名" min-width="140">
+                <template #default="{ row }">
+                  {{ row.username }}
+                </template>
+              </el-table-column>
+              <el-table-column label="昵称" min-width="140">
+                <template #default="{ row }">
+                  {{ row.nickname || '—' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="项目角色" width="140" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="row.role_in_project === 'owner' ? 'warning' : 'info'" size="small">
+                    {{ row.role_in_project === 'owner' ? '负责人' : '审查员' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="加入时间" width="180" align="center">
+                <template #default="{ row }">
+                  {{ formatDate(row.create_time) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="200" align="center">
+                <template #default="{ row }">
+                  <el-select
+                    v-if="row.role_in_project !== 'owner'"
+                    :model-value="row.role_in_project"
+                    size="small"
+                    style="width: 100px; margin-right: 8px"
+                    @change="(val: ProjectRole) => handleChangeRole(row.user_id, val)"
+                  >
+                    <el-option label="审查员" value="reviewer" />
+                    <el-option label="负责人" value="owner" />
+                  </el-select>
+                  <el-button
+                    v-if="row.role_in_project !== 'owner'"
+                    type="danger"
+                    size="small"
+                    link
+                    @click="handleRemoveMember(row)"
+                  >
+                    移除
+                  </el-button>
+                  <span v-else class="text-muted">—</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </template>
 
     <EmptyState v-else-if="!loading" description="项目不存在" />
@@ -137,18 +221,60 @@
       style="display: none"
       @change="onFolderSelected"
     />
+
+    <!-- 添加成员对话框 -->
+    <el-dialog
+      v-model="addMemberVisible"
+      title="添加项目成员"
+      width="440px"
+      @closed="resetAddForm"
+    >
+      <el-form :model="addForm" label-width="90px">
+        <el-form-item label="用户 ID">
+          <el-input-number
+            v-model="addForm.user_id"
+            :min="1"
+            :controls="false"
+            style="width: 100%"
+            placeholder="请输入被添加用户的 ID"
+          />
+        </el-form-item>
+        <el-form-item label="项目角色">
+          <el-select v-model="addForm.role_in_project" style="width: 100%">
+            <el-option label="审查员" value="reviewer" />
+            <el-option label="负责人" value="owner" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addMemberVisible = false">取消</el-button>
+        <el-button type="primary" :loading="addSubmitting" @click="submitAddMember">
+          确认添加
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Lock, MagicStick } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Lock, MagicStick, Plus } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { getProjectDetail } from '@/api/project'
 import { upload, uploadFolder } from '@/api/codeFile'
+import {
+  listProjectMembers,
+  addProjectMember,
+  updateProjectMemberRole,
+  removeProjectMember,
+} from '@/api/projectMember'
 import type { ProjectDetailOut } from '@/types/project'
+import type {
+  ProjectMemberOut,
+  ProjectRole,
+} from '@/types/projectMember'
 import CodeFileList from '@/views/code/CodeFileList.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import AiPromptModal from '@/components/issue/AiPromptModal.vue'
@@ -167,6 +293,19 @@ const fileInputRef = ref<HTMLInputElement>()
 const folderInputRef = ref<HTMLInputElement>()
 const uploading = ref(false)
 const acceptFileTypes = '.py,.js,.ts,.jsx,.tsx,.vue,.java,.go,.c,.cpp,.h,.hpp,.css,.html,.json,.yaml,.yml,.xml,.zip,.tar,.gz,.tgz,.bz2,.xz'
+
+// ── Tab 切换 ──
+const activeTab = ref<'info' | 'files' | 'tasks' | 'members'>('info')
+
+// ── 成员管理状态 ──
+const members = ref<ProjectMemberOut[]>([])
+const memberLoading = ref(false)
+const addMemberVisible = ref(false)
+const addSubmitting = ref(false)
+const addForm = ref<{ user_id: number | null; role_in_project: ProjectRole }>({
+  user_id: null,
+  role_in_project: 'reviewer',
+})
 
 const statusLabels: Record<string, string> = {
   pending: '待处理',
@@ -352,8 +491,101 @@ function onFileUploaded(): void {
   fileListKey.value++
 }
 
+// ── 成员管理逻辑 ──
+
+/**
+ * 拉取项目成员列表
+ */
+async function fetchMembers(): Promise<void> {
+  memberLoading.value = true
+  try {
+    members.value = await listProjectMembers(projectId)
+  } catch {
+    /* 错误已由 http 拦截器提示 */
+  } finally {
+    memberLoading.value = false
+  }
+}
+
+/**
+ * 打开添加成员对话框
+ */
+function openAddMemberDialog(): void {
+  addMemberVisible.value = true
+}
+
+/**
+ * 重置添加表单（对话框关闭时调用）
+ */
+function resetAddForm(): void {
+  addForm.value = { user_id: null, role_in_project: 'reviewer' }
+}
+
+/**
+ * 提交添加成员
+ */
+async function submitAddMember(): Promise<void> {
+  if (!addForm.value.user_id) {
+    ElMessage.warning('请输入用户 ID')
+    return
+  }
+  addSubmitting.value = true
+  try {
+    await addProjectMember(projectId, {
+      user_id: addForm.value.user_id,
+      role_in_project: addForm.value.role_in_project,
+    })
+    ElMessage.success('成员添加成功')
+    addMemberVisible.value = false
+    fetchMembers()
+  } catch {
+    /* 错误已由 http 拦截器提示 */
+  } finally {
+    addSubmitting.value = false
+  }
+}
+
+/**
+ * 切换成员项目角色
+ * @param userId - 被更新用户的 ID
+ * @param newRole - 新角色
+ */
+async function handleChangeRole(userId: number, newRole: ProjectRole): Promise<void> {
+  try {
+    await updateProjectMemberRole(projectId, userId, { role_in_project: newRole })
+    ElMessage.success('角色已更新')
+    fetchMembers()
+  } catch {
+    /* 错误已由 http 拦截器提示 */
+  }
+}
+
+/**
+ * 移除项目成员（带二次确认）
+ * @param row - 成员行数据
+ */
+async function handleRemoveMember(row: ProjectMemberOut): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确定要将用户「${row.username}」移出项目吗？`,
+      '移除成员',
+      { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return /* 用户取消 */
+  }
+  try {
+    await removeProjectMember(projectId, row.user_id)
+    ElMessage.success('成员已移除')
+    fetchMembers()
+  } catch {
+    /* 错误已由 http 拦截器提示 */
+  }
+}
+
 onMounted(() => {
   fetchDetail()
+  fetchMembers()
 })
 </script>
 
@@ -372,6 +604,10 @@ onMounted(() => {
 }
 
 .info-card {
+  margin-bottom: 24px;
+}
+
+.detail-tabs {
   margin-bottom: 24px;
 }
 
