@@ -3,7 +3,7 @@ Agent 中心相关 Pydantic Schema
 """
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentProfileOut(BaseModel):
@@ -58,6 +58,22 @@ class AgentRuntimeOut(BaseModel):
     success_count: int = 0
     failed_count: int = 0
     last_called_at: Optional[str] = None
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _normalize_skills(cls, v: Any) -> list[str]:
+        """v3.0 起 AgentRegistry 的 skills 为结构化 list[dict]。
+
+        前端契约仍是 string[],故此处兼容性地把结构化技能拍平为技能名,
+        避免响应序列化触发 ResponseValidationError。结构化元数据由
+        GET /api/agents/{name}/skills 单独提供。
+        """
+        if not v:
+            return []
+        return [
+            (item.get("name", "") if isinstance(item, dict) else item)
+            for item in v
+        ]
 
 
 class AgentRuntimeSummaryOut(BaseModel):

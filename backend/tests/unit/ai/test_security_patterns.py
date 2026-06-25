@@ -58,6 +58,28 @@ def test_scan_secrets_detects_hardcoded_password():
     assert any(m.pattern_name == "Hardcoded Password" for m in matches)
 
 
+def test_scan_secrets_detects_db_password_underscore_prefix():
+    """v3 补丁验证:DB_PASSWORD 大写蛇形命名应被命中(原正则 [^A-Za-z0-9_] 漏报)"""
+    code = 'DB_PASSWORD = "mysecret123"'
+    matches = scan_secrets(code)
+    assert any(m.pattern_name == "Hardcoded Password" for m in matches)
+
+
+def test_scan_secrets_detects_user_password_underscore_prefix():
+    """v3 补丁验证:user_password 小写蛇形命名应被命中"""
+    code = 'user_password = "anothersecret456"'
+    matches = scan_secrets(code)
+    assert any(m.pattern_name == "Hardcoded Password" for m in matches)
+
+
+def test_scan_secrets_does_not_false_positive_on_mypassword():
+    """mypassword 整体作为一个标识符,password 前面是字母 p,不应命中(避免误报)"""
+    code = 'mypassword = "notmatched"'
+    matches = scan_secrets(code)
+    # mypassword 不应被识别为 Hardcoded Password(password 前是字母 p)
+    assert not any(m.pattern_name == "Hardcoded Password" for m in matches)
+
+
 def test_scan_secrets_detects_database_url():
     code = 'DB_URL = "postgresql://admin:s3cret@db.example.com:5432/app"'
     matches = scan_secrets(code)

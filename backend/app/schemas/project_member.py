@@ -21,12 +21,17 @@ class MemberRoleUpdateIn(BaseModel):
 
 
 class MemberOut(BaseModel):
-    """项目成员响应项"""
+    """项目成员响应项
+
+    R8 修复(2026-06-25):补齐 update_time,对齐 ProjectMember ORM。
+    """
     id: int
     user_id: int
     username: str
     nickname: Optional[str] = None
     role_in_project: str
     create_time: datetime
+    # R8 修复:补齐 update_time,对齐 ProjectMember ORM
+    update_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

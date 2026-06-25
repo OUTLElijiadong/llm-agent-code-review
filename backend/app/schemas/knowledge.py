@@ -14,6 +14,10 @@ class DocAddIn(BaseModel):
 
 
 class DocOut(BaseModel):
+    """知识文档列表项响应
+
+    R6/R7 修复(2026-06-25):补齐 status/update_time,对齐 KnowledgeDoc ORM。
+    """
     id: int
     title: str
     source_type: str
@@ -21,6 +25,9 @@ class DocOut(BaseModel):
     char_count: int = 0
     chunk_count: int = 0
     create_time: datetime
+    # R6/R7 修复:补齐 status/update_time,对齐 KnowledgeDoc ORM
+    status: str = "active"
+    update_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 

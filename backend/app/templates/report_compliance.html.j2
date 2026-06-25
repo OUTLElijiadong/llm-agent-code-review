@@ -1,0 +1,269 @@
+{# 合规版 HTML 报告模板 (T11)
+   用途: 适合合规审计场景,按 ISO 27001 / GDPR / PCI-DSS / HIPAA 4 套标准展示合规命中情况。
+   渲染上下文变量:
+     - task_info: dict,含 task_name / project_name / review_type / create_time / start_time / end_time / total_files / total_issues 等
+     - summary: str,AI 总体评价
+     - score: int,综合评分 0-100
+     - issues: list[dict],已按严重度排序;每条含 cwe / cvss_score / cvss_vector / compliance_mapping / remediation 等
+     - statistics: dict,含 total_issues / fixed_count / severity_count / cwe_count / compliance_summary / top_vulnerabilities / standard_labels
+   compliance_summary 结构:
+     {iso27001: {total_findings, covered_controls[]},
+      gdpr: {total_findings, covered_articles[]},
+      pci_dss: {total_findings, covered_requirements[]},
+      hipaa: {total_findings, covered_sections[]}}
+   说明: 使用内联 CSS;合规条款编号用 <code> 突出;CVSS 评分用徽章+进度条可视化。
+#}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>合规审计报告 · {{ task_info.project_name or task_info.task_name or "未命名" }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+      margin: 0; padding: 24px; color: #1f2937; background: #f5f7fa; line-height: 1.65;
+    }
+    .container { max-width: 1100px; margin: 0 auto; background: #ffffff; padding: 36px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    h1 { font-size: 26px; margin: 0 0 6px 0; color: #111827; }
+    h2 { font-size: 20px; margin: 32px 0 14px 0; color: #1f2937; border-left: 4px solid #7c3aed; padding-left: 12px; }
+    h3 { font-size: 16px; margin: 18px 0 8px 0; color: #111827; }
+    .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 8px; }
+    .meta { color: #6b7280; font-size: 13px; margin-bottom: 6px; }
+    .score-badge { display: inline-block; padding: 4px 14px; border-radius: 16px; font-weight: 600; font-size: 14px; color: #fff; }
+    .score-good { background: #10b981; }
+    .score-warn { background: #f59e0b; }
+    .score-bad { background: #ef4444; }
+    .summary-box { background: #f5f3ff; border: 1px solid #ddd6fe; padding: 12px 16px; border-radius: 6px; margin: 16px 0; white-space: pre-wrap; }
+    .standards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin: 14px 0; }
+    .standard-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; background: #fafbfc; }
+    .standard-card h3 { margin: 0 0 6px 0; color: #4338ca; }
+    .standard-num { font-size: 24px; font-weight: 700; color: #111827; }
+    .standard-sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+    .codes { margin-top: 8px; }
+    code { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; background: #eef2ff; color: #4338ca; padding: 1px 6px; border-radius: 3px; font-size: 12px; margin: 2px 2px; display: inline-block; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; font-weight: 600; color: #374151; }
+    tr:nth-child(even) td { background: #fafbfc; }
+    .sev { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
+    .sev-严重 { background: #dc2626; }
+    .sev-高 { background: #ea580c; }
+    .sev-中 { background: #ca8a04; }
+    .sev-低 { background: #2563eb; }
+    .sev-其他 { background: #6b7280; }
+    .cvss-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700; color: #fff; }
+    .cvss-critical { background: #7f1d1d; }
+    .cvss-high { background: #dc2626; }
+    .cvss-medium { background: #f59e0b; }
+    .cvss-low { background: #2563eb; }
+    .cvss-none { background: #9ca3af; }
+    .cvss-bar-wrap { background: #e5e7eb; border-radius: 8px; height: 8px; width: 100px; overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 6px; }
+    .cvss-bar { height: 8px; border-radius: 8px; }
+    .dist-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
+    .dist-label { width: 90px; color: #374151; }
+    .dist-bar-wrap { flex: 1; background: #e5e7eb; border-radius: 8px; height: 14px; overflow: hidden; }
+    .dist-bar { height: 14px; border-radius: 8px; }
+    .dist-count { width: 30px; text-align: right; font-weight: 600; }
+    .issue-block { border: 1px solid #e5e7eb; border-left: 4px solid #7c3aed; border-radius: 6px; padding: 14px 16px; margin: 12px 0; }
+    .issue-title { font-weight: 600; color: #111827; margin-bottom: 6px; }
+    .field { margin: 6px 0; font-size: 13px; }
+    .field-label { font-weight: 600; color: #374151; margin-right: 6px; }
+    .compliance-codes { margin-top: 4px; }
+    .empty { color: #9ca3af; font-style: italic; padding: 16px 0; }
+    .footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #9ca3af; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>合规审计报告</h1>
+    <div class="subtitle">依据 ISO 27001:2022、GDPR、PCI-DSS v4.0、HIPAA Security Rule 四项标准审查</div>
+    <div class="meta">任务:{{ task_info.task_name or "未命名任务" }}</div>
+    <div class="meta">项目:{{ task_info.project_name or "-" }} · 审查类型:{{ task_info.review_type or "-" }}</div>
+    <div class="meta">生成时间:{{ task_info.create_time or "-" }}</div>
+    <div class="meta">
+      综合评分:
+      {% if score >= 80 %}
+        <span class="score-badge score-good">{{ score }}/100</span>
+      {% elif score >= 60 %}
+        <span class="score-badge score-warn">{{ score }}/100</span>
+      {% else %}
+        <span class="score-badge score-bad">{{ score }}/100</span>
+      {% endif %}
+    </div>
+
+    {% if summary %}
+    <h2>审查摘要</h2>
+    <div class="summary-box">{{ summary }}</div>
+    {% endif %}
+
+    <h2>合规概览</h2>
+    <div class="standards-grid">
+      {% set cs = statistics.compliance_summary %}
+      <div class="standard-card">
+        <h3>ISO 27001:2022</h3>
+        <div class="standard-num">{{ cs.iso27001.total_findings }}</div>
+        <div class="standard-sub">关联问题数 · 覆盖 {{ cs.iso27001.covered_controls | length }} 条控制措施</div>
+        <div class="codes">
+          {% for code in cs.iso27001.covered_controls %}<code>{{ code }}</code>{% endfor %}
+        </div>
+      </div>
+      <div class="standard-card">
+        <h3>GDPR</h3>
+        <div class="standard-num">{{ cs.gdpr.total_findings }}</div>
+        <div class="standard-sub">关联问题数 · 覆盖 {{ cs.gdpr.covered_articles | length }} 条条款</div>
+        <div class="codes">
+          {% for code in cs.gdpr.covered_articles %}<code>{{ code }}</code>{% endfor %}
+        </div>
+      </div>
+      <div class="standard-card">
+        <h3>PCI-DSS v4.0</h3>
+        <div class="standard-num">{{ cs.pci_dss.total_findings }}</div>
+        <div class="standard-sub">关联问题数 · 覆盖 {{ cs.pci_dss.covered_requirements | length }} 条要求</div>
+        <div class="codes">
+          {% for code in cs.pci_dss.covered_requirements %}<code>{{ code }}</code>{% endfor %}
+        </div>
+      </div>
+      <div class="standard-card">
+        <h3>HIPAA Security Rule</h3>
+        <div class="standard-num">{{ cs.hipaa.total_findings }}</div>
+        <div class="standard-sub">关联问题数 · 覆盖 {{ cs.hipaa.covered_sections | length }} 条章节</div>
+        <div class="codes">
+          {% for code in cs.hipaa.covered_sections %}<code>{{ code }}</code>{% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <h2>CVSS 评分分布</h2>
+    {% set ns = namespace(critical=0, high=0, medium=0, low=0, none=0) %}
+    {% for issue in issues %}
+      {% if issue.cvss_score is not none %}
+        {% if issue.cvss_score >= 9.0 %}{% set ns.critical = ns.critical + 1 %}
+        {% elif issue.cvss_score >= 7.0 %}{% set ns.high = ns.high + 1 %}
+        {% elif issue.cvss_score >= 4.0 %}{% set ns.medium = ns.medium + 1 %}
+        {% elif issue.cvss_score > 0.0 %}{% set ns.low = ns.low + 1 %}
+        {% else %}{% set ns.none = ns.none + 1 %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% set total_cvss = ns.critical + ns.high + ns.medium + ns.low + ns.none %}
+    {% set pct_critical = (ns.critical * 100 // total_cvss) if total_cvss > 0 else 0 %}
+    {% set pct_high = (ns.high * 100 // total_cvss) if total_cvss > 0 else 0 %}
+    {% set pct_medium = (ns.medium * 100 // total_cvss) if total_cvss > 0 else 0 %}
+    {% set pct_low = (ns.low * 100 // total_cvss) if total_cvss > 0 else 0 %}
+    {% set pct_none = (ns.none * 100 // total_cvss) if total_cvss > 0 else 0 %}
+    <div class="dist-row">
+      <span class="dist-label">严重 (9.0-10.0)</span>
+      <div class="dist-bar-wrap"><div class="dist-bar" style="width:{{ pct_critical }}%;background:#7f1d1d;"></div></div>
+      <span class="dist-count">{{ ns.critical }}</span>
+    </div>
+    <div class="dist-row">
+      <span class="dist-label">高危 (7.0-8.9)</span>
+      <div class="dist-bar-wrap"><div class="dist-bar" style="width:{{ pct_high }}%;background:#dc2626;"></div></div>
+      <span class="dist-count">{{ ns.high }}</span>
+    </div>
+    <div class="dist-row">
+      <span class="dist-label">中危 (4.0-6.9)</span>
+      <div class="dist-bar-wrap"><div class="dist-bar" style="width:{{ pct_medium }}%;background:#f59e0b;"></div></div>
+      <span class="dist-count">{{ ns.medium }}</span>
+    </div>
+    <div class="dist-row">
+      <span class="dist-label">低危 (0.1-3.9)</span>
+      <div class="dist-bar-wrap"><div class="dist-bar" style="width:{{ pct_low }}%;background:#2563eb;"></div></div>
+      <span class="dist-count">{{ ns.low }}</span>
+    </div>
+    <div class="dist-row">
+      <span class="dist-label">无评分</span>
+      <div class="dist-bar-wrap"><div class="dist-bar" style="width:{{ pct_none }}%;background:#9ca3af;"></div></div>
+      <span class="dist-count">{{ ns.none }}</span>
+    </div>
+
+    <h2>Top 10 高危漏洞</h2>
+    {% if statistics.top_vulnerabilities %}
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px;">#</th>
+          <th style="width:80px;">CVSS</th>
+          <th style="width:70px;">严重度</th>
+          <th>标题</th>
+          <th style="width:100px;">CWE</th>
+          <th style="width:140px;">文件</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for issue in statistics.top_vulnerabilities %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>
+            {% if issue.cvss_score is not none %}
+              {% if issue.cvss_score >= 9.0 %}<span class="cvss-badge cvss-critical">{{ issue.cvss_score }}
+              {% elif issue.cvss_score >= 7.0 %}<span class="cvss-badge cvss-high">{{ issue.cvss_score }}
+              {% elif issue.cvss_score >= 4.0 %}<span class="cvss-badge cvss-medium">{{ issue.cvss_score }}
+              {% elif issue.cvss_score > 0.0 %}<span class="cvss-badge cvss-low">{{ issue.cvss_score }}
+              {% else %}<span class="cvss-badge cvss-none">{{ issue.cvss_score }}
+              {% endif %}</span>
+              <div class="cvss-bar-wrap"><div class="cvss-bar" style="width:{{ (issue.cvss_score * 10) | int }}%;background:#dc2626;"></div></div>
+            {% else %}-{% endif %}
+          </td>
+          <td><span class="sev sev-{{ issue.severity or '其他' }}">{{ issue.severity or "-" }}</span></td>
+          <td>{{ issue.title or "未命名问题" }}</td>
+          <td>{% if issue.cwe %}<code>{{ issue.cwe }}</code>{% else %}-{% endif %}</td>
+          <td>{{ issue.file_name or "-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">暂无高危漏洞。</div>
+    {% endif %}
+
+    <h2>详细问题列表(含合规映射)</h2>
+    {% if issues %}
+    {% for issue in issues %}
+    <div class="issue-block">
+      <div class="issue-title">
+        <span class="sev sev-{{ issue.severity or '其他' }}">{{ issue.severity or "-" }}</span>
+        {{ issue.title or "未命名问题" }}
+        {% if issue.cwe %}<code>{{ issue.cwe }}</code>{% endif %}
+      </div>
+      <div class="field"><span class="field-label">文件:</span>{{ issue.file_name or "-" }}{% if issue.line_number %}:L{{ issue.line_number }}{% endif %}</div>
+      {% if issue.cvss_score is not none %}
+      <div class="field">
+        <span class="field-label">CVSS:</span>
+        {% if issue.cvss_score >= 9.0 %}<span class="cvss-badge cvss-critical">{{ issue.cvss_score }}
+        {% elif issue.cvss_score >= 7.0 %}<span class="cvss-badge cvss-high">{{ issue.cvss_score }}
+        {% elif issue.cvss_score >= 4.0 %}<span class="cvss-badge cvss-medium">{{ issue.cvss_score }}
+        {% elif issue.cvss_score > 0.0 %}<span class="cvss-badge cvss-low">{{ issue.cvss_score }}
+        {% else %}<span class="cvss-badge cvss-none">{{ issue.cvss_score }}
+        {% endif %}</span>
+        {% if issue.cvss_vector %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">{{ issue.cvss_vector }}</span>{% endif %}
+        <div class="cvss-bar-wrap"><div class="cvss-bar" style="width:{{ (issue.cvss_score * 10) | int }}%;background:#dc2626;"></div></div>
+      </div>
+      {% endif %}
+      {% if issue.compliance_mapping %}
+      <div class="field">
+        <span class="field-label">合规映射:</span>
+        <div class="compliance-codes">
+          {% for std, codes in issue.compliance_mapping.items() %}
+            {% if codes %}<span style="margin-right:8px;">{{ statistics.standard_labels.get(std, std) }}:{% for c in codes %}<code>{{ c }}</code>{% endfor %}</span>{% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if issue.remediation %}
+      <div class="field"><span class="field-label">详细修复方案:</span><div style="margin-top:4px;white-space:pre-wrap;">{{ issue.remediation }}</div></div>
+      {% elif issue.suggestion %}
+      <div class="field"><span class="field-label">修复建议:</span><div style="margin-top:4px;white-space:pre-wrap;">{{ issue.suggestion }}</div></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty">本次审查未发现问题。</div>
+    {% endif %}
+
+    <div class="footer">本报告由基于大模型智能体的代码审查平台自动生成 · 合规版</div>
+  </div>
+</body>
+</html>

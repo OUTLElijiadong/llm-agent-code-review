@@ -30,7 +30,7 @@ from loguru import logger
 
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEvent, AgentEventType, new_trace_id
-from app.agents.metagpt.messages import Message, make_message
+from app.agents.metagpt.messages import Message
 from app.agents.metagpt.role import Role
 
 

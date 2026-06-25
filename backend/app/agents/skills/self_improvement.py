@@ -93,23 +93,71 @@ class SelfImprovementSkill(BaseSkill):
                          effect="proposal_created"(有创建) 或 "no_op"(无创建)
         """
         t0 = time.time()
+        trace_id = (ctx.extra or {}).get("trace_id") if ctx else None
+        tid = f"tid={trace_id} " if trace_id else ""
+
+        logger.info(
+            f"[{self.name}] {tid}[Evolve/Start] agent={self.agent_name} "
+            f"window={window_days}d min_samples={self.min_samples} "
+            f"min_distinct_tasks={self.min_distinct_tasks}"
+        )
         try:
             # 1. Aggregate: 聚合反馈信号
+            t_agg = time.time()
+            logger.info(f"[{self.name}] {tid}[Aggregate/Start] 聚合反馈信号 window={window_days}d")
             stats = self.aggregate_feedback(db, window_days)
+            agg_ms = int((time.time() - t_agg) * 1000)
+            # 概要:每条信号的 rule_type + decided 样本数,便于排查数据缺失
+            stats_summary = [
+                {
+                    "rule_type": s.get("rule_type"),
+                    "decided": s.get("decided", 0),
+                    "false_positive_rate": s.get("false_positive_rate"),
+                }
+                for s in stats
+            ]
             logger.info(
-                f"[{self.name}] 聚合反馈完成 window={window_days}d stats={len(stats)}"
+                f"[{self.name}] {tid}[Aggregate/Done] stats={len(stats)}条 "
+                f"duration={agg_ms}ms"
             )
+            logger.debug(f"[{self.name}] {tid}[Aggregate/Detail] {stats_summary}")
 
             # 2. Reflect: 产出候选提案(纯函数)
+            t_ref = time.time()
+            logger.info(f"[{self.name}] {tid}[Reflect/Start] 产出候选提案")
             proposals = self.evolve_target(db, stats)
-            logger.info(f"[{self.name}] 产出候选提案 {len(proposals)} 条")
+            ref_ms = int((time.time() - t_ref) * 1000)
+            logger.info(
+                f"[{self.name}] {tid}[Reflect/Done] proposals={len(proposals)}条 "
+                f"duration={ref_ms}ms"
+            )
+            # DEBUG:每条提案的标题与目标,便于排查"为何没产出提案"
+            for idx, p in enumerate(proposals):
+                logger.debug(
+                    f"[{self.name}] {tid}[Reflect/Proposal#{idx}] "
+                    f"type={p.get('proposal_type')} title={p.get('title', '')[:80]} "
+                    f"target_rule_id={p.get('target_rule_id')}"
+                )
 
             # 3+4. Gate + Persist: 逐条评估并持久化(去重)
             created, skipped, artifacts = 0, 0, []
-            for proposal in proposals:
+            logger.info(
+                f"[{self.name}] {tid}[Gate/Persist/Start] 开始逐条评估+持久化"
+            )
+            for idx, proposal in enumerate(proposals):
+                proposal_title = proposal.get("title", "")[:80]
+                proposal_type = proposal.get("proposal_type")
+
                 # 闸门评估(失败不阻塞,标记 eval_failed)
                 gate_result = self._safe_evaluate_gate(db, proposal)
-                if gate_result.get("passed"):
+                gate_passed = gate_result.get("passed")
+                gate_reason = gate_result.get("reason", "")
+                logger.info(
+                    f"[{self.name}] {tid}[Gate/Proposal#{idx}] "
+                    f"type={proposal_type} title={proposal_title} "
+                    f"passed={gate_passed} reason={gate_reason}"
+                )
+                if gate_passed:
                     proposal["status"] = "eval_passed"
                     proposal["eval_score"] = gate_result.get("score")
                 else:
@@ -119,17 +167,40 @@ class SelfImprovementSkill(BaseSkill):
                 # 去重 + 持久化
                 if self._is_duplicate(db, proposal):
                     skipped += 1
+                    logger.info(
+                        f"[{self.name}] {tid}[Dedup/Proposal#{idx}] "
+                        f"跳过(同类未决提案已存在) type={proposal_type} "
+                        f"target_rule_id={proposal.get('target_rule_id')}"
+                    )
                     continue
                 record = self._persist_proposal(db, proposal)
                 if record is not None:
                     created += 1
                     artifacts.append({"type": "proposal", "id": record.id})
+                    logger.info(
+                        f"[{self.name}] {tid}[Persist/Proposal#{idx}] "
+                        f"成功 proposal_id={record.id} type={proposal_type} "
+                        f"status={proposal.get('status')}"
+                    )
+                else:
+                    logger.warning(
+                        f"[{self.name}] {tid}[Persist/Proposal#{idx}] "
+                        f"失败(持久化返回 None) type={proposal_type} title={proposal_title}"
+                    )
+
+            # 提交事务
+            t_commit = time.time()
             db.commit()
+            commit_ms = int((time.time() - t_commit) * 1000)
+            logger.info(
+                f"[{self.name}] {tid}[Commit/Done] duration={commit_ms}ms"
+            )
 
             effect = "proposal_created" if created > 0 else "no_op"
             duration_ms = int((time.time() - t0) * 1000)
             logger.info(
-                f"[{self.name}] 进化完成 created={created} skipped={skipped} "
+                f"[{self.name}] {tid}[Evolve/Done] created={created} "
+                f"skipped={skipped} effect={effect} "
                 f"duration={duration_ms}ms"
             )
             return SkillResult(
@@ -144,12 +215,16 @@ class SelfImprovementSkill(BaseSkill):
                 artifacts=artifacts,
             )
         except Exception as e:
-            logger.exception(f"[{self.name}] 进化执行异常")
+            duration_ms = int((time.time() - t0) * 1000)
+            logger.exception(
+                f"[{self.name}] {tid}[Evolve/Failed] 异常: {e} "
+                f"duration={duration_ms}ms"
+            )
             return SkillResult(
                 success=False,
                 error=f"自进化执行异常: {e}",
                 effect="failed",
-                duration_ms=int((time.time() - t0) * 1000),
+                duration_ms=duration_ms,
             )
 
     # ── 子类必须实现的钩子 ──
@@ -241,10 +316,26 @@ class SelfImprovementSkill(BaseSkill):
         Returns:
             dict: {passed: bool, score: dict|None, reason: str}
         """
+        t_gate = time.time()
+        proposal_title = proposal.get("title", "")[:80]
+        logger.debug(
+            f"[{self.name}] [Gate/Enter] proposal_type={proposal.get('proposal_type')} "
+            f"title={proposal_title}"
+        )
         try:
-            return self.evaluate_gate(db, proposal)
+            result = self.evaluate_gate(db, proposal)
+            gate_ms = int((time.time() - t_gate) * 1000)
+            logger.debug(
+                f"[{self.name}] [Gate/Exit] passed={result.get('passed')} "
+                f"duration={gate_ms}ms reason={result.get('reason', '')}"
+            )
+            return result
         except Exception as e:
-            logger.warning(f"[{self.name}] 闸门评估异常,默认通过: {e}")
+            gate_ms = int((time.time() - t_gate) * 1000)
+            logger.warning(
+                f"[{self.name}] [Gate/Exception] 异常,默认通过: {e} "
+                f"duration={gate_ms}ms"
+            )
             return {"passed": True, "score": None, "reason": f"闸门异常: {e}"}
 
     def rollback_proposal(self, db: Session, proposal_id: int) -> bool:
@@ -257,13 +348,26 @@ class SelfImprovementSkill(BaseSkill):
         Returns:
             bool: 是否回滚成功
         """
+        t_rb = time.time()
+        logger.info(
+            f"[{self.name}] [Rollback/Start] proposal_id={proposal_id}"
+        )
         try:
             from app.services import evolution_service
 
             evolution_service.rollback(db, proposal_id)
+            rb_ms = int((time.time() - t_rb) * 1000)
+            logger.info(
+                f"[{self.name}] [Rollback/Done] proposal_id={proposal_id} "
+                f"成功 duration={rb_ms}ms"
+            )
             return True
         except Exception as e:
-            logger.exception(f"[{self.name}] 回滚提案 {proposal_id} 异常")
+            rb_ms = int((time.time() - t_rb) * 1000)
+            logger.exception(
+                f"[{self.name}] [Rollback/Failed] proposal_id={proposal_id} "
+                f"异常 duration={rb_ms}ms: {e}"
+            )
             return False
 
     # ── 持久化与去重(复用 EvolutionAgent 逻辑) ──
@@ -280,6 +384,13 @@ class SelfImprovementSkill(BaseSkill):
         """
         from app.models.evolution_proposal import EvolutionProposal
 
+        t_pers = time.time()
+        proposal_type = proposal.get("proposal_type")
+        proposal_title = proposal.get("title", "")[:80]
+        logger.debug(
+            f"[{self.name}] [Persist/Enter] type={proposal_type} "
+            f"title={proposal_title} status={proposal.get('status')}"
+        )
         try:
             record = EvolutionProposal(
                 proposal_type=proposal["proposal_type"],
@@ -302,9 +413,18 @@ class SelfImprovementSkill(BaseSkill):
             )
             db.add(record)
             db.flush()
+            pers_ms = int((time.time() - t_pers) * 1000)
+            logger.debug(
+                f"[{self.name}] [Persist/Exit] proposal_id={record.id} "
+                f"成功 duration={pers_ms}ms"
+            )
             return record
         except Exception as e:
-            logger.warning(f"[{self.name}] 持久化提案失败: {e}")
+            pers_ms = int((time.time() - t_pers) * 1000)
+            logger.warning(
+                f"[{self.name}] [Persist/Exception] type={proposal_type} "
+                f"失败 duration={pers_ms}ms: {e}"
+            )
             return None
 
     def _is_duplicate(self, db: Session, proposal: Dict[str, Any]) -> bool:
@@ -358,32 +478,64 @@ class SelfImprovementSkill(BaseSkill):
             SkillResult: 调用结果
         """
         action = params.get("action", "evolve")
+        trace_id = (ctx.extra or {}).get("trace_id") if ctx else None
+        tid = f"tid={trace_id} " if trace_id else ""
+        # 参数概要(排除 _db 等内部对象,避免日志不可读)
+        param_keys = [k for k in params.keys() if k != "_db"]
+        logger.info(
+            f"[{self.name}] {tid}[Run/Start] action={action} "
+            f"params_keys={param_keys}"
+        )
+        t_run = time.time()
+
         if action == "evolve":
             # evolve 需要 db,由调用方(skill_service)注入 ctx.extra 或 params
             db = params.get("_db")
             if db is None:
+                logger.warning(
+                    f"[{self.name}] {tid}[Run/evolve] 失败:缺少 _db 参数"
+                )
                 return SkillResult(
                     success=False,
                     error="evolve 动作需要 _db 参数(由 skill_service 注入)",
                     effect="failed",
                 )
             window_days = int(params.get("window_days", 90))
-            return self.evolve(db, window_days, ctx)
+            result = self.evolve(db, window_days, ctx)
+            logger.info(
+                f"[{self.name}] {tid}[Run/Done] action=evolve "
+                f"success={result.success} effect={result.effect} "
+                f"duration={result.duration_ms}ms"
+            )
+            return result
         if action == "rollback":
             db = params.get("_db")
             proposal_id = int(params.get("proposal_id", 0))
             if db is None or proposal_id <= 0:
+                logger.warning(
+                    f"[{self.name}] {tid}[Run/rollback] 失败:缺少 _db 或 proposal_id "
+                    f"proposal_id={proposal_id}"
+                )
                 return SkillResult(
                     success=False,
                     error="rollback 动作需要 _db 与 proposal_id 参数",
                     effect="failed",
                 )
             ok = self.rollback_proposal(db, proposal_id)
+            run_ms = int((time.time() - t_run) * 1000)
+            logger.info(
+                f"[{self.name}] {tid}[Run/Done] action=rollback "
+                f"proposal_id={proposal_id} success={ok} duration={run_ms}ms"
+            )
             return SkillResult(success=ok, effect="success" if ok else "failed")
         if action == "apply":
             db = params.get("_db")
             proposal_id = int(params.get("proposal_id", 0))
             if db is None or proposal_id <= 0:
+                logger.warning(
+                    f"[{self.name}] {tid}[Run/apply] 失败:缺少 _db 或 proposal_id "
+                    f"proposal_id={proposal_id}"
+                )
                 return SkillResult(
                     success=False,
                     error="apply 动作需要 _db 与 proposal_id 参数",
@@ -391,22 +543,41 @@ class SelfImprovementSkill(BaseSkill):
                 )
             from app.models.evolution_proposal import EvolutionProposal
 
+            logger.info(
+                f"[{self.name}] {tid}[Apply/Start] proposal_id={proposal_id}"
+            )
             proposal_row = db.query(EvolutionProposal).filter(
                 EvolutionProposal.id == proposal_id
             ).first()
             if proposal_row is None:
+                logger.warning(
+                    f"[{self.name}] {tid}[Apply/Failed] proposal_id={proposal_id} 不存在"
+                )
                 return SkillResult(success=False, error="提案不存在", effect="failed")
             proposal_dict = {
                 "proposal_type": proposal_row.proposal_type,
                 "target_rule_id": proposal_row.target_rule_id,
                 "payload": json.loads(proposal_row.payload or "{}"),
             }
+            logger.debug(
+                f"[{self.name}] {tid}[Apply/Detail] type={proposal_row.proposal_type} "
+                f"target_rule_id={proposal_row.target_rule_id}"
+            )
             affected_id = self.apply_proposal(db, proposal_dict)
+            run_ms = int((time.time() - t_run) * 1000)
+            logger.info(
+                f"[{self.name}] {tid}[Run/Done] action=apply "
+                f"proposal_id={proposal_id} affected_id={affected_id} "
+                f"duration={run_ms}ms"
+            )
             return SkillResult(
                 success=True,
                 data={"affected_id": affected_id},
                 effect="success",
             )
+        logger.warning(
+            f"[{self.name}] {tid}[Run/Failed] 未知 action={action}"
+        )
         return SkillResult(
             success=False,
             error=f"未知 action: {action}",

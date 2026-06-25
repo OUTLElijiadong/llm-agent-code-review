@@ -151,6 +151,9 @@ def list_issues(
 
     items = []
     for issue, task, project in rows:
+        # R1 修复(2026-06-25):补齐 v2/v3 漏洞元数据字段,
+        # 与 IssueOut schema 声明的字段对齐,避免前端拿不到 OWASP/CWE/CVSS 等漏洞元数据。
+        # 同类问题参考 AC2:_to_traceable_dict 遗漏 agent_label 导致 API 返回 null。
         items.append(
             {
                 "id": issue.id,
@@ -170,6 +173,24 @@ def list_issues(
                 "fixed_code": issue.fixed_code,
                 "status": issue.status,
                 "create_time": issue.create_time,
+                # === v2 漏洞元数据 ===
+                "owasp": issue.owasp,
+                "cwe": issue.cwe,
+                "evidence": issue.evidence,
+                "exploit_scenario": issue.exploit_scenario,
+                "references_json": issue.references_json,
+                "confidence": issue.confidence,
+                "source": issue.source,
+                # === v3 全量漏洞元数据 ===
+                "cvss_score": issue.cvss_score,
+                "cvss_vector": issue.cvss_vector,
+                "compliance_mapping": issue.compliance_mapping,
+                "remediation": issue.remediation,
+                "static_rule_hits": issue.static_rule_hits,
+                # R2 修复:补齐处理人/处理时间/更新时间,与 IssueOut schema 对齐
+                "handled_by": issue.handled_by,
+                "handled_at": issue.handled_at,
+                "update_time": issue.update_time,
             }
         )
     return pagination.to_dict(items)

@@ -8,7 +8,10 @@ from pydantic import BaseModel, Field, field_serializer
 
 
 class UserListItem(BaseModel):
-    """用户列表项"""
+    """用户列表项
+
+    R6 修复(2026-06-25):补齐 update_time,对齐 User ORM。
+    """
     id: int
     username: str
     nickname: Optional[str] = None
@@ -17,10 +20,12 @@ class UserListItem(BaseModel):
     status: int
     last_login: Optional[datetime] = None
     create_time: Optional[datetime] = None
+    # R6 修复:补齐 update_time,对齐 User ORM
+    update_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
-    @field_serializer("last_login", "create_time")
+    @field_serializer("last_login", "create_time", "update_time")
     def _serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
         """将datetime对象序列化为ISO格式字符串"""
         if dt is None:

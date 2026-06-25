@@ -378,6 +378,8 @@ def list_members(db: Session, project_id: int) -> list[dict]:
             User.nickname,
             ProjectMember.role_in_project,
             ProjectMember.create_time,
+            # R8 修复:补齐 update_time,对齐 MemberOut schema
+            ProjectMember.update_time,
         )
         .join(User, User.id == ProjectMember.user_id)
         .filter(ProjectMember.project_id == project_id)
@@ -392,6 +394,8 @@ def list_members(db: Session, project_id: int) -> list[dict]:
             "nickname": r[3],
             "role_in_project": r[4],
             "create_time": r[5],
+            # R8 修复:补齐 update_time
+            "update_time": r[6],
         }
         for r in rows
     ]

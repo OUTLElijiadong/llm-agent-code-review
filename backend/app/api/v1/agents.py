@@ -30,6 +30,8 @@ from app.agents.orchestrator import get_request_orchestrator
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_admin
 from app.core.exceptions import AuthError, ForbiddenError
+from app.core.permission_codes import PermissionCode
+from app.core.rbac_dependency import require_permission
 from app.core.security import decode_token
 from app.models.user import User
 from app.schemas.agent import (
@@ -51,19 +53,22 @@ from app.services import agent_service, skill_service
 router = APIRouter()
 
 
-@router.get("", response_model=Resp[list[AgentProfileOut]])
+@router.get("", response_model=Resp[list[AgentProfileOut]],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def list_agents(_: User = Depends(get_current_user)):
     """v1.0 兼容: 列出 multi_agent 模块的 5 个静态画像"""
     return Resp(data=[AgentProfileOut(**p) for p in agent_service.list_profiles()])
 
 
-@router.get("/type-mappings", response_model=Resp[list[ReviewTypeMappingOut]])
+@router.get("/type-mappings", response_model=Resp[list[ReviewTypeMappingOut]],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def list_type_mappings(_: User = Depends(get_current_user)):
     """列出审查类型 → 代理组合映射"""
     return Resp(data=[ReviewTypeMappingOut(**m) for m in agent_service.list_type_mappings()])
 
 
-@router.get("/usage", response_model=Resp[list[AgentUsageOut]])
+@router.get("/usage", response_model=Resp[list[AgentUsageOut]],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def get_usage(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -74,7 +79,8 @@ def get_usage(
     return Resp(data=[AgentUsageOut(**r) for r in rows])
 
 
-@router.get("/overview", response_model=Resp[AgentOverviewOut])
+@router.get("/overview", response_model=Resp[AgentOverviewOut],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def get_overview(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -88,7 +94,8 @@ def get_overview(
 # =================== v2.0 新增 ===================
 
 
-@router.get("/runtime", response_model=Resp[list[AgentRuntimeOut]])
+@router.get("/runtime", response_model=Resp[list[AgentRuntimeOut]],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def list_runtime_agents(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -102,13 +109,15 @@ def list_runtime_agents(
     return Resp(data=[AgentRuntimeOut(**r) for r in rows])
 
 
-@router.get("/runtime/summary", response_model=Resp[AgentRuntimeSummaryOut])
+@router.get("/runtime/summary", response_model=Resp[AgentRuntimeSummaryOut],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def get_runtime_summary(_: User = Depends(get_current_user)):
     """v2.0: 注册中心汇总,仅做计数,不查 DB"""
     return Resp(data=AgentRuntimeSummaryOut(**agent_service.get_runtime_summary()))
 
 
-@router.get("/situation", response_model=Resp[AgentSituationOut])
+@router.get("/situation", response_model=Resp[AgentSituationOut],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def get_situation(
     minutes: int = Query(60, ge=15, le=240),
     db: Session = Depends(get_db),
@@ -223,7 +232,8 @@ class ClarifyAnswers(BaseModel):
     answers: dict
 
 
-@router.post("/clarify", response_model=Resp[dict])
+@router.post("/clarify", response_model=Resp[dict],
+             dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))])
 def submit_clarification(
     payload: ClarifyAnswers,
     db: Session = Depends(get_db),
@@ -257,7 +267,8 @@ def submit_clarification(
 # =================== v2.4: MetaGPT 编排层 ===================
 
 
-@router.get("/metagpt/info", response_model=Resp[dict])
+@router.get("/metagpt/info", response_model=Resp[dict],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def get_metagpt_info(
     _: User = Depends(get_current_user),
 ):
@@ -271,21 +282,22 @@ def get_metagpt_info(
         Message,
         Role,
         RoleAdapter,
-        build_discussion_environment,
-        build_review_environment,
     )
     from app.agents.registry import AgentRegistry
 
     registry = AgentRegistry.instance()
-    adaptable_agents = []
-    for name, agent in registry.list().items():
-        adaptable_agents.append({
-            "name": agent.name,
-            "description": agent.description,
-            "category": getattr(agent, "category", "general"),
-            "icon": getattr(agent, "icon", ""),
-            "color": getattr(agent, "color", ""),
-        })
+    # registry.list() 返回的是 name -> description 字符串映射,不能当 Agent 对象用。
+    # 改用 list_runtime() 拿规范化的运行时元数据 dict(含 name/description/category/icon/color)。
+    adaptable_agents = [
+        {
+            "name": item["name"],
+            "description": item.get("description", ""),
+            "category": item.get("category", "general"),
+            "icon": item.get("icon", ""),
+            "color": item.get("color", ""),
+        }
+        for item in registry.list_runtime()
+    ]
 
     return Resp(data={
         "version": "v2.4",
@@ -306,7 +318,8 @@ def get_metagpt_info(
     })
 
 
-@router.get("/metagpt/preview", response_model=Resp[dict])
+@router.get("/metagpt/preview", response_model=Resp[dict],
+            dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def preview_metagpt_environment(
     mode: str = Query("review", pattern="^(review|discussion)$"),
     user: User = Depends(get_current_user),
@@ -359,6 +372,7 @@ def preview_metagpt_environment(
 @router.get(
     "/{agent_name}/skills",
     response_model=Resp[list[SkillMetaOut]],
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))],
 )
 def list_agent_skills(
     agent_name: str,
@@ -409,9 +423,18 @@ def invoke_agent_skill(
         Resp[SkillInvokeOut]: Skill 调用结果, 含 success/data/effect/duration_ms/record_id
     """
     from app.agents.base import AgentContext
+    from app.agents.events import new_trace_id
 
+    # 生成 trace_id 写入 ctx.extra,供 Skill 日志透传(tid=xxx 前缀)
+    trace_id = new_trace_id()
     orch = get_request_orchestrator(db, user=admin)
-    ctx = AgentContext(user_id=admin.id, extra={"api": "invoke_agent_skill"})
+    ctx = AgentContext(
+        user_id=admin.id,
+        extra={
+            "api": "invoke_agent_skill",
+            "trace_id": trace_id,
+        },
+    )
 
     # 组装 params: action 优先, 合并 payload.params
     params: dict = {}

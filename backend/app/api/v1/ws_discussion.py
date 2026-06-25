@@ -1,4 +1,4 @@
-"""多 Agent 讨论 WebSocket 端点 (v2.3 M7)
+"""多 Agent 讨论 WebSocket 端点 (v2.3 M7 / v2.4 心跳增强)
 
 ws://host:8000/api/ws/discuss/{session_id}
 
@@ -8,12 +8,19 @@ ws://host:8000/api/ws/discuss/{session_id}
     {"type":"control", "action":"round_start", "payload":{"round":1,"total_rounds":3}}
     {"type":"control", "action":"done"}
     {"type":"session_end"}
+    {"type":"pong"}                        # 响应客户端 ping
 
   客户端 → 服务端: JSON 文本帧
     {"action":"user_input", "content":"..."}
     {"action":"pause"}
     {"action":"resume"}
     {"action":"stop"}
+    {"action":"ping"}                      # 客户端心跳,服务端响应 pong
+
+v2.4 心跳机制:
+  - 客户端每 30s 发送 ping,服务端立即响应 pong
+  - 服务端额外启动 60s 主动探测任务,检测僵尸连接
+  - 双向心跳确保 NAT/防火墙场景下连接保活
 """
 from __future__ import annotations
 
@@ -197,6 +204,23 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
 
     pump_task = asyncio.create_task(pump_bus_to_ws())
 
+    # v2.4: 服务端主动心跳探测任务
+    # 每 60 秒发送一次 {"type":"server_ping"},客户端无需响应(仅保持 TCP 流量)
+    # 主要作用: 在客户端心跳失效时,服务端主动刷新 NAT 会话,防止中间设备断连
+    async def server_heartbeat():
+        try:
+            while True:
+                await asyncio.sleep(60)
+                if websocket.client_state.value == 1:  # CONNECTED
+                    await websocket.send_text('{"type":"server_ping","ts":' + str(int(asyncio.get_event_loop().time())) + '}')
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            # 发送失败说明连接已断开,忽略
+            pass
+
+    heartbeat_task = asyncio.create_task(server_heartbeat())
+
     try:
         while True:
             raw = await websocket.receive_text()
@@ -205,6 +229,7 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
                 action = data.get("action", "")
 
                 if action == "ping":
+                    # 客户端心跳,立即响应 pong
                     await websocket.send_text('{"type":"pong"}')
                     continue
 
@@ -237,4 +262,5 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
         logger.info(f"[WS] 讨论客户端断开 session={session_id}")
     finally:
         pump_task.cancel()
+        heartbeat_task.cancel()
         bus.unsubscribe(session_id, queue)

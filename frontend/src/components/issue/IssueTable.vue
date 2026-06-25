@@ -25,25 +25,67 @@
     </div>
 
     <el-table :data="issues" style="width: 100%" size="small" @row-click="onRowClick" highlight-current-row>
-      <el-table-column prop="file_name" label="文件" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="line_number" label="行号" width="80" />
-      <el-table-column prop="issue_type" label="类型" width="100">
+      <el-table-column prop="file_name" label="文件" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="line_number" label="行号" width="70" />
+      <el-table-column prop="issue_type" label="类型" width="90">
         <template #default="{ row }">
           <el-tag size="small" type="info">{{ issueTypeLabel(row.issue_type) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="severity" label="严重度" width="90">
+      <el-table-column prop="severity" label="严重度" width="80">
         <template #default="{ row }">
           <SeverityTag :severity="row.severity" />
         </template>
       </el-table-column>
-      <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+      <!-- v3: CVSS 评分列(带颜色徽章) -->
+      <el-table-column label="CVSS" width="80" align="center">
+        <template #default="{ row }">
+          <el-tag v-if="row.cvss_score != null" size="small" :type="cvssTagType(row.cvss_score)" effect="dark">
+            {{ row.cvss_score.toFixed(1) }}
+          </el-tag>
+          <span v-else class="text-muted">-</span>
+        </template>
+      </el-table-column>
+      <!-- v3: 合规映射列(命中的标准徽章) -->
+      <el-table-column label="合规映射" width="160" align="center">
+        <template #default="{ row }">
+          <template v-if="row.compliance_mapping && hasComplianceHits(row.compliance_mapping)">
+            <el-tag
+              v-for="std in hitComplianceStandards(row.compliance_mapping)"
+              :key="std.code"
+              size="small"
+              type="warning"
+              effect="plain"
+              class="compliance-badge"
+            >
+              {{ std.label }}
+            </el-tag>
+          </template>
+          <span v-else class="text-muted">-</span>
+        </template>
+      </el-table-column>
+      <!-- v3: 来源列(LLM/静态/混合) -->
+      <el-table-column label="来源" width="90" align="center">
+        <template #default="{ row }">
+          <span class="source-text">
+            {{ sourceLabel(row.source) }}
+            <el-tooltip
+              v-if="row.static_rule_hits && row.static_rule_hits > 0"
+              :content="`双引擎命中(静态规则命中 ${row.static_rule_hits} 次)`"
+              placement="top"
+            >
+              <el-icon class="dual-engine-icon"><Aim /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
       <el-table-column prop="status" label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="create_time" label="发现时间" width="160">
+      <el-table-column prop="create_time" label="发现时间" width="150">
         <template #default="{ row }">
           {{ formatDateTime(row.create_time) }}
         </template>
@@ -65,11 +107,21 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * 问题列表表格组件
+ * v3 增强:
+ *  - 新增 CVSS 评分列(带颜色徽章:9-10红/7-8.9橙/4-6.9黄/0-3.9蓝)
+ *  - 新增 合规映射列(显示命中的标准徽章,如 ISO/GDPR/PCI)
+ *  - 新增 来源列(LLM/静态/混合 对应中文标签)
+ *  - 双引擎命中(static_rule_hits > 0)显示标记图标
+ *  - 保持原有列(行号/类型/严重度/标题/状态/发现时间)不变
+ */
 import { ref, reactive, watch } from 'vue'
+import { Aim } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import SeverityTag from './SeverityTag.vue'
 import { SEVERITY_OPTIONS } from '@/constants/severity'
-import type { IssueOut } from '@/types/review'
+import type { IssueOut, ComplianceMapping } from '@/types/review'
 
 const props = withDefaults(defineProps<{
   issues: IssueOut[]
@@ -117,6 +169,23 @@ const statusTypeMap: Record<string, string> = {
   pending_review: 'warning',
 }
 
+/** 来源字段的中文标签映射 */
+const sourceLabels: Record<string, string> = {
+  LLM: 'LLM',
+  llm: 'LLM',
+  static: '静态',
+  hybrid: '混合',
+  mixed: '混合',
+}
+
+/** 合规标准元信息(key -> 标签) */
+const complianceStandardMeta: { code: 'iso27001' | 'gdpr' | 'pci_dss' | 'hipaa'; label: string }[] = [
+  { code: 'iso27001', label: 'ISO' },
+  { code: 'gdpr', label: 'GDPR' },
+  { code: 'pci_dss', label: 'PCI' },
+  { code: 'hipaa', label: 'HIPAA' },
+]
+
 /**
  * 获取问题类型的中文显示文案
  * @param type - 问题类型枚举值
@@ -142,6 +211,58 @@ function statusLabel(status: string): string {
  */
 function statusType(status: string): string {
   return statusTypeMap[status] ?? 'info'
+}
+
+/**
+ * 获取来源字段的中文标签
+ * v3 新增
+ * @param source - 来源字段值(LLM/静态/混合)
+ * @returns 中文标签
+ */
+function sourceLabel(source?: string): string {
+  if (!source) return '-'
+  return sourceLabels[source] ?? source
+}
+
+/**
+ * 根据 CVSS 评分返回 Element Plus Tag 的 type
+ * 9-10 红(danger) / 7-8.9 橙(warning) / 4-6.9 黄(primary) / 0-3.9 蓝(info)
+ * v3 新增
+ * @param score - CVSS 评分
+ * @returns Element Plus Tag type
+ */
+function cvssTagType(score: number): 'danger' | 'warning' | 'primary' | 'info' {
+  if (score >= 9) return 'danger'
+  if (score >= 7) return 'warning'
+  if (score >= 4) return 'primary'
+  return 'info'
+}
+
+/**
+ * 判断合规映射是否存在命中条款
+ * v3 新增
+ * @param mapping - 合规映射对象
+ * @returns 是否有命中
+ */
+function hasComplianceHits(mapping: ComplianceMapping): boolean {
+  return (
+    (mapping.iso27001?.length ?? 0) > 0 ||
+    (mapping.gdpr?.length ?? 0) > 0 ||
+    (mapping.pci_dss?.length ?? 0) > 0 ||
+    (mapping.hipaa?.length ?? 0) > 0
+  )
+}
+
+/**
+ * 返回命中的合规标准列表(用于徽章展示)
+ * v3 新增
+ * @param mapping - 合规映射对象
+ * @returns 命中的标准元信息数组
+ */
+function hitComplianceStandards(mapping: ComplianceMapping): { code: string; label: string }[] {
+  return complianceStandardMeta
+    .filter((meta) => (mapping[meta.code]?.length ?? 0) > 0)
+    .map((meta) => ({ code: meta.code, label: meta.label }))
 }
 
 /**
@@ -191,5 +312,31 @@ watch(() => props.total, () => {
   display: flex;
   justify-content: flex-end;
   padding-top: 8px;
+}
+
+.text-muted {
+  color: var(--el-text-color-placeholder);
+}
+
+/* v3: 合规映射徽章间距 */
+.compliance-badge {
+  margin-right: 4px;
+
+  &:last-child {
+    margin-right: 0;
+  }
+}
+
+/* v3: 来源单元格样式 */
+.source-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.dual-engine-icon {
+  color: var(--el-color-warning);
+  font-size: 14px;
 }
 </style>

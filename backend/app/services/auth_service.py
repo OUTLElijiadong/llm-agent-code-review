@@ -38,6 +38,13 @@ def register(db: Session, payload: RegisterIn) -> User:
     db.add(user)
     db.commit()
     db.refresh(user)
+    # 新用户自动分配默认 user 角色,确保注册后即拥有基础 RBAC 权限,
+    # 否则无任何 user_role 绑定会被 require_permission 全量拦截(403)。
+    from app.models.rbac import Role
+    from app.services import rbac_service
+    default_role = db.query(Role).filter(Role.code == "user").first()
+    if default_role:
+        rbac_service.assign_roles_to_user(db, user.id, [default_role.id])
     return user
 
 

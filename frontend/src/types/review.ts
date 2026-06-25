@@ -9,6 +9,17 @@ export interface RuleOut {
   sort_order: number
 }
 
+/**
+ * 合规映射结构
+ * 4 个主流安全合规标准命中的条款列表
+ */
+export interface ComplianceMapping {
+  iso27001: string[]
+  gdpr: string[]
+  pci_dss: string[]
+  hipaa: string[]
+}
+
 export interface IssueOut {
   id: number
   task_id: number
@@ -24,6 +35,22 @@ export interface IssueOut {
   fixed_code?: string
   status: string
   create_time: string
+  /** v3: CVSS 评分(0-10) */
+  cvss_score?: number
+  /** v3: CVSS 向量字符串,如 "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" */
+  cvss_vector?: string
+  /** v3: 合规映射命中的标准条款 */
+  compliance_mapping?: ComplianceMapping
+  /** v3: 详细修复方案(markdown 文本) */
+  remediation?: string
+  /** v3: 静态规则引擎命中次数,大于 0 表示双引擎命中 */
+  static_rule_hits?: number
+  /** v3: 问题来源(LLM/静态/混合) */
+  source?: string
+  /** v3: 攻击场景说明 */
+  exploit_scenario?: string
+  /** v3: 漏洞证据代码片段 */
+  evidence?: string
 }
 
 export interface IssueListItemOut extends IssueOut {

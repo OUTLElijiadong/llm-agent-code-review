@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.agents.skills.self_improvement import SelfImprovementSkill
 from app.agents.skills.proactive import ProactiveAction, ProactiveSkill
+from app.agents.skills.self_improvement import SelfImprovementSkill
 
 if TYPE_CHECKING:
     from app.agents.base import AgentContext
@@ -106,7 +106,6 @@ class EvolutionSelfImprovementSkill(SelfImprovementSkill):
         # 延迟 import 避免循环依赖
         from app.agents.evolution_agent import generate_fp_proposals
         from app.models.review_rule import ReviewRule
-        from app.services import experience_service
 
         rules = db.query(ReviewRule).filter(ReviewRule.enabled == 1).all()
 
@@ -201,7 +200,6 @@ class EvolutionSelfImprovementSkill(SelfImprovementSkill):
         Returns:
             int: affected_id(如 review_rule.id)
         """
-        from app.models.evolution_proposal import EvolutionProposal
         from app.services import evolution_service
 
         # 查找 proposal 对应的 EvolutionProposal 记录
@@ -332,8 +330,9 @@ class EvolutionProactiveSkill(ProactiveSkill):
         Returns:
             list[dict]: 学习到的候选改进点
         """
-        from app.models.ai_call_log import AiCallLog
         from datetime import datetime, timedelta
+
+        from app.models.ai_call_log import AiCallLog
 
         try:
             cutoff = datetime.utcnow() - timedelta(days=window_days)

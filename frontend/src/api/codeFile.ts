@@ -4,6 +4,7 @@ import type { Page } from '@/types/common'
 import type {
   CodeFileOut,
   CodeFileDetailOut,
+  CodeFileMetaOut,
   CodeFileUpdateIn,
   VersionOut,
   VersionDetailOut,
@@ -130,6 +131,7 @@ export async function uploadFolder(
  * 下载二进制文件原始字节
  * v2 新增:二进制文件(图片/可执行文件等)不通过编辑器展示 base64,
  * 前端通过此接口下载原文件。
+ * 别名:downloadFile,与 T13 规范文档命名一致
  * @param fileId 文件ID
  * @returns Blob(可直接触发浏览器下载)
  */
@@ -138,4 +140,24 @@ export async function downloadBinary(fileId: number): Promise<Blob> {
     responseType: 'blob',
   })
   return r.data
+}
+
+/**
+ * 下载文件(与 downloadBinary 等价,提供语义化别名)
+ * v3:对齐 T13 任务规范的 downloadFile(file_id) 命名
+ * @param fileId 文件ID
+ * @returns Blob(可直接触发浏览器下载)
+ */
+export async function downloadFile(fileId: number): Promise<Blob> {
+  return downloadBinary(fileId)
+}
+
+/**
+ * 获取文件元信息(不含内容)
+ * v3 新增:二进制文件展示提示卡片时,通过此接口获取 MD5/类型等元数据
+ * @param fileId 文件ID
+ * @returns 文件元信息
+ */
+export function getFileMetadata(fileId: number): Promise<CodeFileMetaOut> {
+  return get<CodeFileMetaOut>(`/code-files/${fileId}/meta`)
 }

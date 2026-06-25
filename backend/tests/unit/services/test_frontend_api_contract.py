@@ -36,6 +36,48 @@ def _normalize_path(path: str) -> str:
     return re.sub(r"(\$\{[^}]+\}|\{[^}]+\})", "{param}", path)
 
 
+def _extract_file_constants(source: str) -> dict[str, str]:
+    """提取前端 API 文件中的字符串常量定义(如 const BASE = '/rbac')。
+
+    用于在路径归一化时把 ${BASE} 等变量引用替换为实际字符串值,
+    避免变量引用导致契约测试无法匹配后端真实路由。
+
+    Args:
+        source: 前端文件源代码文本。
+
+    Returns:
+        dict[str, str]: 变量名到字符串值的映射;无定义时返回空字典。
+    """
+    constants: dict[str, str] = {}
+    # 匹配 const NAME = 'value' 或 const NAME = "value"
+    pattern = re.compile(
+        r"\bconst\s+([A-Z][A-Z0-9_]*)\s*=\s*(['\"])([^'\"]+)\2",
+    )
+    for match in pattern.finditer(source):
+        constants[match.group(1)] = match.group(3)
+    return constants
+
+
+def _resolve_template_variables(path: str, constants: dict[str, str]) -> str:
+    """将路径中的 ${VAR} 模板变量替换为文件级常量值。
+
+    Args:
+        path: 前端调用路径,可能含 ${BASE} 等变量引用。
+        constants: 文件级常量映射(由 _extract_file_constants 提供)。
+
+    Returns:
+        str: 变量被实际值替换后的路径;未找到常量则保留 {param} 占位符。
+    """
+
+    def _replace(match: re.Match) -> str:
+        var_name = match.group(1)
+        if var_name in constants:
+            return constants[var_name]
+        return "{param}"
+
+    return re.sub(r"\$\{([A-Z][A-Z0-9_]*)\}", _replace, path)
+
+
 def _backend_http_routes() -> set[tuple[str, str]]:
     """读取 FastAPI 已注册的 HTTP API 路由。
 
@@ -81,10 +123,15 @@ def _frontend_http_calls() -> set[tuple[str, str, str]]:
         if file_path.name == "http.ts":
             continue
         source = file_path.read_text(encoding="utf-8")
+        # 提取文件级字符串常量(如 const BASE = '/rbac'),用于变量替换
+        constants = _extract_file_constants(source)
         for pattern in patterns:
             for match in pattern.finditer(source):
                 method = HELPER_METHOD_MAP[match.group(1)]
-                path = _normalize_path(match.group(2)[1:-1])
+                raw_path = match.group(2)[1:-1]
+                # 先把 ${BASE} 等变量替换为实际字符串值,再归一化动态参数
+                resolved_path = _resolve_template_variables(raw_path, constants)
+                path = _normalize_path(resolved_path)
                 source_file = str(file_path.relative_to(src_root))
                 calls.add((method, path, source_file))
     return calls

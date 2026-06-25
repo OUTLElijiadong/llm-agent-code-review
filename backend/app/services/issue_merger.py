@@ -17,7 +17,7 @@
     3. 合并后的 Issue 携带全量 v3 字段(cvss_score/cvss_vector/compliance_mapping/
        remediation/static_rule_hits),可直接转换为 ReviewIssue ORM
 """
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from app.ai.result_parser import Issue
 from app.ai.static_analyzer import Finding

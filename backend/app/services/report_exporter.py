@@ -35,7 +35,6 @@ from jinja2 import Environment, select_autoescape
 
 from app.constants.compliance import build_compliance_summary
 
-
 # ============ 模块常量 ============
 
 # 严重度排序权重: 严重 > 高 > 中 > 低(数字越小优先级越高)

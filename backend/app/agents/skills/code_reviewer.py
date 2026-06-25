@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.agents.skills.self_improvement import SelfImprovementSkill
 from app.agents.skills.proactive import ProactiveAction, ProactiveSkill
+from app.agents.skills.self_improvement import SelfImprovementSkill
 
 if TYPE_CHECKING:
     from app.agents.base import AgentContext
@@ -234,6 +234,7 @@ class CodeReviewerProactiveSkill(ProactiveSkill):
             list[dict]: 学习到的候选改进点(失败率偏高时给出建议)
         """
         from datetime import datetime, timedelta
+
         from app.models.ai_call_log import AiCallLog
 
         try:

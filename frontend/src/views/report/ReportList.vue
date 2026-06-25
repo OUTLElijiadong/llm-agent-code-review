@@ -58,9 +58,23 @@
             {{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click.stop="goDetail(row.task_id)">查看详情</el-button>
+            <el-button link type="primary" size="small" @click.stop="goGenerate(row.task_id)">生成报告</el-button>
+            <el-dropdown trigger="click" @command="(cmd: ReportFormat) => handleExport(row, cmd)">
+              <el-button link type="primary" size="small" :loading="exportingTaskId === row.task_id" @click.stop>
+                导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :command="'json'">JSON</el-dropdown-item>
+                  <el-dropdown-item :command="'html'">HTML</el-dropdown-item>
+                  <el-dropdown-item :command="'pdf'">PDF</el-dropdown-item>
+                  <el-dropdown-item :command="'word'">Word</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button link type="danger" size="small" @click.stop="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -84,10 +98,11 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
-import { getReports, deleteReport } from '@/api/report'
+import { getReports, deleteReport, exportReport } from '@/api/report'
 import { getProjects } from '@/api/project'
-import type { ReportListItem } from '@/types/report'
+import type { ReportListItem, ReportFormat } from '@/types/report'
 import type { ProjectOut } from '@/types/project'
 
 const router = useRouter()
@@ -100,6 +115,8 @@ const page = ref(1)
 const pageSize = ref(20)
 const filterProjectId = ref<number | null>(null)
 const dateRange = ref<[string, string] | null>(null)
+/** 当前正在导出的任务 ID(用于导出按钮 loading 态),null 表示无操作 */
+const exportingTaskId = ref<number | null>(null)
 
 function scoreClass(score: number) {
   if (score >= 80) return 'score-high'
@@ -139,6 +156,53 @@ function onRowClick(row: ReportListItem) {
 
 function goDetail(taskId: number) {
   router.push(`/reports/${taskId}`)
+}
+
+/**
+ * 跳转到报告详情页并触发生成(通过 query 参数 generate=1 标记,
+ * 详情页可据此自动滚动到报告操作工具栏)。
+ * @param taskId - 审查任务 ID
+ */
+function goGenerate(taskId: number): void {
+  router.push({ path: `/reports/${taskId}`, query: { generate: '1' } })
+}
+
+/**
+ * 触发浏览器下载 Blob 文件。
+ * @param blob - 文件二进制内容
+ * @param filename - 下载文件名
+ */
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * 导出报告(在列表页直接调用 exportReport 下载文件)。
+ * @param row - 报告行数据
+ * @param format - 导出格式 json/html/pdf/word
+ */
+async function handleExport(row: ReportListItem, format: ReportFormat): Promise<void> {
+  exportingTaskId.value = row.task_id
+  try {
+    const blob = await exportReport(row.task_id, format, 'detailed')
+    const extMap: Record<ReportFormat, string> = {
+      json: 'json', html: 'html', pdf: 'pdf', word: 'docx',
+    }
+    const taskName = row.task_name || `task_${row.task_id}`
+    downloadBlob(blob, `review_report_${taskName}_${row.task_id}.${extMap[format]}`)
+    ElMessage.success(`${format.toUpperCase()} 报告导出成功`)
+  } catch {
+    ElMessage.error(`${format.toUpperCase()} 报告导出失败`)
+  } finally {
+    exportingTaskId.value = null
+  }
 }
 
 /**

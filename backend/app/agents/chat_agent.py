@@ -315,7 +315,6 @@ class ChatAssistantAgent(BaseAgent):
             return self._handle_chat(messages, ctx)
 
         from app.agents.events import AgentEventType
-        from app.agents.chat_planner import ToolCall  # 仅用于类型提示
 
         executed_steps: List[dict] = []
         prev_output: Any = None

@@ -22,9 +22,6 @@ MetaGPT 风格的 Agent 编排层 (v2.4)
     - build_review_environment: 从审查任务构建 Environment
     - build_discussion_environment: 从圆桌讨论构建 Environment
 """
-from app.agents.metagpt.messages import Message, make_message
-from app.agents.metagpt.role import Role
-from app.agents.metagpt.role_adapter import RoleAdapter
 from app.agents.metagpt.environment import Environment
 from app.agents.metagpt.factory import (
     build_discussion_environment,
@@ -32,6 +29,9 @@ from app.agents.metagpt.factory import (
     make_discussion_message,
     make_start_review_message,
 )
+from app.agents.metagpt.messages import Message, make_message
+from app.agents.metagpt.role import Role
+from app.agents.metagpt.role_adapter import RoleAdapter
 
 __all__ = [
     "Message",

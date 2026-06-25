@@ -27,6 +27,7 @@ class ProjectOut(BaseModel):
 
     v2.0 新增 `score`: 最近一次成功审查的评分,前端 ProjectList 使用真实评分,
     不再 hash 派生假数字。无审查记录时为 None。
+    R6 修复(2026-06-25):补齐 update_time,对齐 Project ORM。
     """
     id: int
     project_name: str
@@ -37,6 +38,8 @@ class ProjectOut(BaseModel):
     last_review_at: Optional[datetime] = None
     score: Optional[int] = None
     create_time: datetime
+    # R6 修复:补齐 update_time,对齐 Project ORM
+    update_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 

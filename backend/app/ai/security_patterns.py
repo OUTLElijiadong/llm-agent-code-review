@@ -87,11 +87,13 @@ _PATTERNS: tuple[SecretPattern, ...] = (
         owasp="A07:2021-Identification and Authentication Failures",
         regex=re.compile(
             r"""(?ix)
-            (?:^|[^A-Za-z0-9_])(?:password|passwd|pwd)\s*[:=]\s*
+            # v3 补丁: 允许 _ 前缀,覆盖 DB_PASSWORD / USER_PASSWORD 等大写蛇形命名
+            # 原 [^A-Za-z0-9_] 会拒绝 _ 前缀,导致 DB_PASSWORD = "xxx" 漏报
+            (?:^|[^A-Za-z0-9])(?:password|passwd|pwd)\s*[:=]\s*
             ["']([^"'\s]{6,})["']
             """,
         ),
-        description="硬编码明文密码赋值",
+        description="硬编码明文密码赋值(含 DB_PASSWORD / USER_PASSWORD 等蛇形命名)",
     ),
     SecretPattern(
         name="Generic API Key",

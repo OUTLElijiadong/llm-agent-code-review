@@ -152,16 +152,48 @@ class ProactiveSkill(BaseSkill):
         action_type = params.get("action_type", "check_proactive")
         db = params.get("_db")
         t0 = time.time()
+        trace_id = (ctx.extra or {}).get("trace_id") if ctx else None
+        tid = f"tid={trace_id} " if trace_id else ""
+        # 参数概要(排除 _db / stats 等大对象,避免日志不可读)
+        param_keys = [k for k in params.keys() if k not in ("_db", "stats")]
+        logger.info(
+            f"[{self.name}] {tid}[Run/Start] action_type={action_type} "
+            f"params_keys={param_keys} has_db={db is not None}"
+        )
 
         try:
             if action_type == "check_proactive":
                 if db is None:
+                    logger.warning(
+                        f"[{self.name}] {tid}[Run/check_proactive] 失败:缺少 _db 参数"
+                    )
                     return SkillResult(
                         success=False,
                         error="check_proactive 需要 _db 参数(由 skill_service 注入)",
                         effect="failed",
                     )
+                logger.info(
+                    f"[{self.name}] {tid}[CheckProactive/Start] 扫描自身领域"
+                )
+                t_check = time.time()
                 actions = self.check_proactive(db, ctx)
+                check_ms = int((time.time() - t_check) * 1000)
+                # 概要:每条 action 的类型+优先级+标题,便于排查"为何无建议"
+                actions_summary = [
+                    {
+                        "action_type": a.action_type,
+                        "priority": a.priority,
+                        "title": a.title,
+                    }
+                    for a in actions
+                ]
+                logger.info(
+                    f"[{self.name}] {tid}[CheckProactive/Done] "
+                    f"actions={len(actions)}条 duration={check_ms}ms"
+                )
+                logger.debug(
+                    f"[{self.name}] {tid}[CheckProactive/Detail] {actions_summary}"
+                )
                 return SkillResult(
                     success=True,
                     data={
@@ -183,7 +215,20 @@ class ProactiveSkill(BaseSkill):
 
             if action_type == "trigger_evolution":
                 stats = params.get("stats", {})
+                logger.info(
+                    f"[{self.name}] {tid}[TriggerEvolution/Start] "
+                    f"stats_keys={list(stats.keys())}"
+                )
+                logger.debug(
+                    f"[{self.name}] {tid}[TriggerEvolution/Detail] stats={stats}"
+                )
+                t_trig = time.time()
                 should = self.should_trigger_evolution(stats)
+                trig_ms = int((time.time() - t_trig) * 1000)
+                logger.info(
+                    f"[{self.name}] {tid}[TriggerEvolution/Done] "
+                    f"should_trigger={should} duration={trig_ms}ms"
+                )
                 return SkillResult(
                     success=True,
                     data={"should_trigger": should},
@@ -193,12 +238,27 @@ class ProactiveSkill(BaseSkill):
 
             if action_type == "scan_domain":
                 if db is None:
+                    logger.warning(
+                        f"[{self.name}] {tid}[Run/scan_domain] 失败:缺少 _db 参数"
+                    )
                     return SkillResult(
                         success=False,
                         error="scan_domain 需要 _db 参数",
                         effect="failed",
                     )
+                logger.info(f"[{self.name}] {tid}[ScanDomain/Start] 主动巡检")
+                t_scan = time.time()
                 findings = self.scan_domain(db)
+                scan_ms = int((time.time() - t_scan) * 1000)
+                logger.info(
+                    f"[{self.name}] {tid}[ScanDomain/Done] "
+                    f"findings={len(findings)}条 duration={scan_ms}ms"
+                )
+                # DEBUG:每条 finding 概要
+                for idx, f in enumerate(findings):
+                    logger.debug(
+                        f"[{self.name}] {tid}[ScanDomain/Finding#{idx}] {f}"
+                    )
                 return SkillResult(
                     success=True,
                     data={"findings": findings, "count": len(findings)},
@@ -208,13 +268,31 @@ class ProactiveSkill(BaseSkill):
 
             if action_type == "reflect_from_logs":
                 if db is None:
+                    logger.warning(
+                        f"[{self.name}] {tid}[Run/reflect_from_logs] 失败:缺少 _db 参数"
+                    )
                     return SkillResult(
                         success=False,
                         error="reflect_from_logs 需要 _db 参数",
                         effect="failed",
                     )
                 window_days = int(params.get("window_days", 7))
+                logger.info(
+                    f"[{self.name}] {tid}[Reflect/Start] "
+                    f"window={window_days}d 从 ai_call_log 挖趋势"
+                )
+                t_refl = time.time()
                 reflections = self.reflect_from_logs(db, window_days)
+                refl_ms = int((time.time() - t_refl) * 1000)
+                logger.info(
+                    f"[{self.name}] {tid}[Reflect/Done] "
+                    f"reflections={len(reflections)}条 duration={refl_ms}ms"
+                )
+                # DEBUG:每条 reflection 概要
+                for idx, r in enumerate(reflections):
+                    logger.debug(
+                        f"[{self.name}] {tid}[Reflect/Item#{idx}] {r}"
+                    )
                 return SkillResult(
                     success=True,
                     data={
@@ -225,18 +303,25 @@ class ProactiveSkill(BaseSkill):
                     duration_ms=int((time.time() - t0) * 1000),
                 )
 
+            logger.warning(
+                f"[{self.name}] {tid}[Run/Failed] 未知 action_type={action_type}"
+            )
             return SkillResult(
                 success=False,
                 error=f"未知 action_type: {action_type}",
                 effect="failed",
             )
         except Exception as e:
-            logger.exception(f"[{self.name}] Proactive 执行异常")
+            run_ms = int((time.time() - t0) * 1000)
+            logger.exception(
+                f"[{self.name}] {tid}[Run/Failed] action_type={action_type} "
+                f"异常 duration={run_ms}ms: {e}"
+            )
             return SkillResult(
                 success=False,
                 error=f"Proactive 执行异常: {e}",
                 effect="failed",
-                duration_ms=int((time.time() - t0) * 1000),
+                duration_ms=run_ms,
             )
 
     def _params_schema(self) -> Dict[str, Any]:

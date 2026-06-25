@@ -178,12 +178,14 @@
         </header>
         <div class="pane-body code-body">
           <div v-if="loadingCode" class="loading-box"><el-skeleton :rows="14" animated /></div>
-          <EmptyState v-else-if="!codeContent" description="请从左侧选择一个文件查看代码" />
+          <EmptyState v-else-if="!codeContent && !currentIsBinary" description="请从左侧选择一个文件查看代码" />
           <CodeViewer
             v-else
             ref="codeViewerRef"
             :code="codeContent"
             :language="currentLanguage"
+            :is-binary="currentIsBinary"
+            :binary-meta="currentBinaryMeta"
             height="100%"
             :highlight-lines="highlightLines"
           />
@@ -284,6 +286,7 @@ import PrismLoading from '@/components/common/PrismLoading.vue'
 import { getReviewTaskDetail, getTaskIssues } from '@/api/review'
 import { getDetail as getCodeFileDetail } from '@/api/codeFile'
 import type { TaskDetailOut, TaskFileOut, IssueOut } from '@/types/review'
+import type { CodeFileMetaOut } from '@/types/project'
 import { PRISM_SEVERITY_COLORS } from '@/components/chart/prismTheme'
 import { SEVERITY_OPTIONS, severityClass, severityDisplayLabel } from '@/constants/severity'
 import { DIM_META, normalizeDimKey, dimColor as resolveDimColor, dimLabel as resolveDimLabel } from '@/constants/dim'
@@ -341,6 +344,10 @@ const currentFileId = ref<number | null>(null)
 const currentFileName = ref('')
 const currentLanguage = ref('text')
 const codeContent = ref('')
+/** v3: 当前文件是否为二进制文件 */
+const currentIsBinary = ref(false)
+/** v3: 当前二进制文件的元信息(仅 currentIsBinary 为 true 时使用) */
+const currentBinaryMeta = ref<CodeFileMetaOut | null>(null)
 const loadingCode = ref(false)
 const fileList = ref<TraceFileItem[]>([])
 
@@ -544,7 +551,30 @@ async function loadFileCode(fileId: number) {
   loadingCode.value = true
   try {
     const file = await getCodeFileDetail(fileId)
-    codeContent.value = file.content
+    // v3: 二进制文件 content 由后端置空,不展示 Monaco,改为 CodeViewer 内部的二进制提示卡片
+    currentIsBinary.value = file.is_binary === 1
+    if (currentIsBinary.value) {
+      codeContent.value = ''
+      currentBinaryMeta.value = {
+        id: file.id,
+        file_name: file.file_name,
+        file_path: file.file_path,
+        language: file.language,
+        size_bytes: file.size_bytes,
+        raw_size: file.raw_size,
+        line_count: file.line_count,
+        version_no: file.version_no,
+        is_binary: file.is_binary,
+        mime_type: file.mime_type,
+        md5_hash: file.md5_hash,
+        sha256_hash: file.sha256_hash,
+        create_time: file.create_time,
+        update_time: file.update_time,
+      }
+    } else {
+      codeContent.value = file.content
+      currentBinaryMeta.value = null
+    }
     currentLanguage.value = file.language
     currentFileName.value = file.file_name
   } finally {

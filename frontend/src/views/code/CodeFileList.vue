@@ -27,10 +27,12 @@
       stripe
       empty-text="暂无代码文件"
     >
-      <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip>
+      <el-table-column prop="file_name" label="文件名" min-width="220" show-overflow-tooltip>
         <template #default="{ row }">
-          <span>{{ row.file_name }}</span>
-          <el-tag v-if="row.is_binary === 1" size="small" type="warning" class="binary-tag">二进制</el-tag>
+          <el-icon class="file-icon" :class="`file-icon-${fileCategory(row).key}`">
+            <component :is="fileCategory(row).icon" />
+          </el-icon>
+          <span class="file-name-text">{{ row.file_name }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="language" label="语言" width="120" align="center">
@@ -39,9 +41,20 @@
           <span v-else class="text-muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="size_bytes" label="大小" width="100" align="center">
+      <el-table-column label="类型" width="110" align="center">
         <template #default="{ row }">
-          {{ formatSize(row.size_bytes) }}
+          <el-tag
+            size="small"
+            :type="fileCategory(row).tagType"
+            effect="light"
+          >
+            {{ fileCategory(row).label }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="size_bytes" label="大小" width="110" align="center">
+        <template #default="{ row }">
+          <span :class="{ 'text-muted': row.size_bytes === 0 }">{{ formatFileSize(row.size_bytes) }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="line_count" label="行数" width="100" align="center">
@@ -60,10 +73,13 @@
           {{ formatDate(row.update_time) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200" align="center" fixed="right">
+      <el-table-column label="操作" width="220" align="center" fixed="right">
         <template #default="{ row }">
           <template v-if="row.is_binary === 1">
-            <el-button link type="primary" :loading="downloadingId === row.id" @click="handleDownload(row)">下载文件</el-button>
+            <el-button link type="primary" :loading="downloadingId === row.id" @click="handleDownload(row)">
+              <el-icon><Download /></el-icon>下载
+            </el-button>
+            <el-button link type="info" @click="handleView(row)">查看元信息</el-button>
           </template>
           <template v-else>
             <el-button link type="primary" @click="handleView(row)">查看代码</el-button>
@@ -90,14 +106,33 @@
 <script setup lang="ts">
 /**
  * 代码文件列表组件
- * 展示项目下的代码文件，支持语言筛选、查看代码和版本历史
+ * 展示项目下的代码文件,支持语言筛选、查看代码和版本历史
+ * v3 增强:
+ *  - 文件列表中二进制文件显示专用图标(Picture/Archive/Document)
+ *  - 二进制文件不能点击编辑,改为下载或查看元信息
+ *  - 显示文件大小(使用 formatFileSize 函数格式化)
+ *  - 添加文件类型徽章(文本/图片/压缩包/二进制)
+ *  - 修复:确保压缩包上传后内部文件正常显示,不显示 base64 内容
  */
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Picture, Files, Document, Download } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { list, downloadBinary } from '@/api/codeFile'
 import type { CodeFileOut } from '@/types/project'
+
+/** 文件分类信息 */
+interface FileCategory {
+  /** 分类 key,用于 CSS class */
+  key: 'text' | 'image' | 'archive' | 'binary'
+  /** 中文标签 */
+  label: string
+  /** Element Plus 图标组件 */
+  icon: Component
+  /** Element Plus Tag type */
+  tagType: 'info' | 'success' | 'warning' | 'danger'
+}
 
 const props = defineProps<{
   projectId: number
@@ -121,21 +156,58 @@ const downloadingId = ref<number | null>(null)
 /**
  * 格式化日期
  * @param dateStr - 日期字符串
- * @returns 格式化后的日期字符�?
+ * @returns 格式化后的日期字符串
  */
 function formatDate(dateStr: string): string {
   return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
 }
 
 /**
- * 格式化文件大小
+ * 格式化文件大小为人类可读字符串
+ * v3:对齐 T13 规范命名(formatFileSize)
  * @param bytes - 文件字节数
- * @returns 可读的文件大小字符�?
+ * @returns 可读的文件大小字符串
  */
-function formatSize(bytes: number): string {
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes < 0) return '0 B'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+/**
+ * 根据文件信息推断文件分类(文本/图片/压缩包/二进制)
+ * v3 新增:用于在列表中显示专用图标和类型徽章
+ * @param row - 文件项
+ * @returns 文件分类信息
+ */
+function fileCategory(row: CodeFileOut): FileCategory {
+  // 二进制文件:进一步区分图片/压缩包/其他二进制
+  if (row.is_binary === 1) {
+    const mime = row.mime_type || ''
+    const ext = row.file_name.split('.').pop()?.toLowerCase() || ''
+    // 图片
+    if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'ico'].includes(ext)) {
+      return { key: 'image', label: '图片', icon: Picture, tagType: 'success' }
+    }
+    // 压缩包
+    if (
+      mime === 'application/zip' ||
+      mime === 'application/x-zip-compressed' ||
+      mime === 'application/gzip' ||
+      mime === 'application/x-gzip' ||
+      mime === 'application/x-tar' ||
+      mime === 'application/x-rar-compressed' ||
+      ['zip', 'gz', 'tgz', 'tar', 'rar', '7z', 'bz2'].includes(ext)
+    ) {
+      return { key: 'archive', label: '压缩包', icon: Files, tagType: 'warning' }
+    }
+    // 其他二进制
+    return { key: 'binary', label: '二进制', icon: Document, tagType: 'danger' }
+  }
+  // 文本文件
+  return { key: 'text', label: '文本', icon: Document, tagType: 'info' }
 }
 
 /**
@@ -171,7 +243,8 @@ function handleFilterChange(): void {
 }
 
 /**
- * 查看代码
+ * 查看代码/查看元信息
+ * v3:二进制文件同样跳转到 CodeEditor 页,由 CodeEditor 自行渲染元信息卡片
  * @param row - 文件项
  */
 function handleView(row: CodeFileOut): void {
@@ -189,6 +262,7 @@ function handleHistory(row: CodeFileOut): void {
 /**
  * 下载二进制文件(触发浏览器下载)
  * v2 新增:二进制文件不进入编辑器,直接下载原文件
+ * v3:同时确保不会把 base64 内容塞入编辑器
  * @param row - 文件项
  */
 async function handleDownload(row: CodeFileOut): Promise<void> {
@@ -240,9 +314,31 @@ onMounted(() => {
     color: var(--el-text-color-placeholder);
   }
 
-  /* v2: 二进制文件标签 */
-  .binary-tag {
-    margin-left: 8px;
+  /* v3: 文件名单元格图标 + 文本对齐 */
+  .file-icon {
+    margin-right: 6px;
+    vertical-align: middle;
+    font-size: 16px;
+
+    &.file-icon-text {
+      color: var(--el-color-info);
+    }
+
+    &.file-icon-image {
+      color: var(--el-color-success);
+    }
+
+    &.file-icon-archive {
+      color: var(--el-color-warning);
+    }
+
+    &.file-icon-binary {
+      color: var(--el-color-danger);
+    }
+  }
+
+  .file-name-text {
+    vertical-align: middle;
   }
 }
 </style>

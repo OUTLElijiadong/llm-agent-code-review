@@ -2,9 +2,11 @@
 审查任务和问题模块Pydantic Schema
 """
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.agent_governance import parse_json_value
 
 
 class ReviewStartIn(BaseModel):
@@ -48,7 +50,11 @@ class TaskFileOut(BaseModel):
 
 
 class TaskDetailOut(BaseModel):
-    """审查任务详情"""
+    """审查任务详情
+
+    R4 修复(2026-06-25):新增 error_message 字段,
+    任务失败时前端可展示失败原因(对齐 ReviewTask ORM)。
+    """
     id: int
     task_name: Optional[str] = None
     project_id: int
@@ -69,6 +75,8 @@ class TaskDetailOut(BaseModel):
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     create_time: datetime
+    # R4 修复:任务失败时返回错误原因,对齐 ReviewTask.error_message
+    error_message: Optional[str] = None
     files: list[TaskFileOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
@@ -87,6 +95,8 @@ class IssueOut(BaseModel):
 
     含 v2/v3 全量漏洞元数据:owasp/cwe/cvss/compliance_mapping/evidence/
     exploit_scenario/remediation/references/confidence/source/static_rule_hits。
+    R2 修复(2026-06-25):补齐 handled_by/handled_at/update_time,
+    使前端能展示问题处理人和处理时间。
     """
     id: int
     task_id: int
@@ -102,6 +112,10 @@ class IssueOut(BaseModel):
     fixed_code: Optional[str] = None
     status: str
     create_time: datetime
+    # R2 修复:补齐处理人/处理时间/更新时间,与 ORM ReviewIssue 字段对齐
+    handled_by: Optional[int] = None
+    handled_at: Optional[datetime] = None
+    update_time: Optional[datetime] = None
 
     # === v2 漏洞元数据 ===
     owasp: Optional[str] = None
@@ -120,6 +134,37 @@ class IssueOut(BaseModel):
     static_rule_hits: int = 0
 
     model_config = {"from_attributes": True}
+
+    @field_validator("references_json", mode="before")
+    @classmethod
+    def parse_references_json(cls, value: Any) -> Optional[list]:
+        """解析 references_json 字段,防御 JSON 字符串边缘情况。
+
+        ORM JSON 列类型通常返回 Python 原生 list,但若数据通过直接 SQL
+        写入 JSON 字符串,此处确保正确解析为 list(与 agent_governance.py 模式一致)。
+
+        Args:
+            value: 数据库字段值,可能是 list/str/None。
+
+        Returns:
+            Optional[list]: 解析后的列表;非 list 类型返回 None。
+        """
+        parsed = parse_json_value(value)
+        return parsed if isinstance(parsed, list) else None
+
+    @field_validator("compliance_mapping", mode="before")
+    @classmethod
+    def parse_compliance_mapping(cls, value: Any) -> Optional[dict]:
+        """解析 compliance_mapping 字段,防御 JSON 字符串边缘情况。
+
+        Args:
+            value: 数据库字段值,可能是 dict/str/None。
+
+        Returns:
+            Optional[dict]: 解析后的字典;非 dict 类型返回 None。
+        """
+        parsed = parse_json_value(value)
+        return parsed if isinstance(parsed, dict) else None
 
 
 class IssueListItemOut(IssueOut):

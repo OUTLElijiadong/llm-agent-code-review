@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.permission_codes import PermissionCode
+from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
 from app.schemas.review import IssueOut, ReviewStartIn, TaskDetailOut, TaskOut
@@ -14,7 +16,8 @@ from app.services import review_service
 router = APIRouter()
 
 
-@router.post("/start", response_model=Resp[dict])
+@router.post("/start", response_model=Resp[dict],
+             dependencies=[Depends(require_permission(PermissionCode.REVIEW_START))])
 def start(payload: ReviewStartIn, db: Session = Depends(get_db),
           user: User = Depends(get_current_user)):
     """启动代码审查(异步):立即返回 running 任务,前端轮询任务详情查看进度/结果"""
@@ -22,7 +25,8 @@ def start(payload: ReviewStartIn, db: Session = Depends(get_db),
     return Resp(data={"task_id": task.id, "status": task.status})
 
 
-@router.get("/tasks", response_model=Resp[PageOut[TaskOut]])
+@router.get("/tasks", response_model=Resp[PageOut[TaskOut]],
+            dependencies=[Depends(require_permission(PermissionCode.REVIEW_VIEW))])
 def list_tasks(
     project_id: int = Query(None),
     status: str = Query(""),
@@ -38,7 +42,8 @@ def list_tasks(
     return Resp(data=PageOut(**result))
 
 
-@router.get("/tasks/{task_id}", response_model=Resp[TaskDetailOut])
+@router.get("/tasks/{task_id}", response_model=Resp[TaskDetailOut],
+            dependencies=[Depends(require_permission(PermissionCode.REVIEW_VIEW))])
 def get_task(task_id: int, db: Session = Depends(get_db),
              user: User = Depends(get_current_user)):
     """审查任务详情"""
@@ -46,7 +51,8 @@ def get_task(task_id: int, db: Session = Depends(get_db),
     return Resp(data=TaskDetailOut(**data))
 
 
-@router.get("/tasks/{task_id}/issues", response_model=Resp[PageOut[IssueOut]])
+@router.get("/tasks/{task_id}/issues", response_model=Resp[PageOut[IssueOut]],
+            dependencies=[Depends(require_permission(PermissionCode.ISSUE_VIEW))])
 def list_task_issues(
     task_id: int,
     file_id: int = Query(None),
@@ -63,7 +69,8 @@ def list_task_issues(
     return Resp(data=PageOut(**result))
 
 
-@router.delete("/tasks/{task_id}", response_model=Resp[None])
+@router.delete("/tasks/{task_id}", response_model=Resp[None],
+               dependencies=[Depends(require_permission(PermissionCode.REVIEW_CANCEL))])
 def delete_task(task_id: int, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """删除审查任务"""
@@ -71,7 +78,8 @@ def delete_task(task_id: int, db: Session = Depends(get_db),
     return Resp(data=None)
 
 
-@router.post("/tasks/{task_id}/cancel", response_model=Resp[None])
+@router.post("/tasks/{task_id}/cancel", response_model=Resp[None],
+             dependencies=[Depends(require_permission(PermissionCode.REVIEW_CANCEL))])
 def cancel_task(task_id: int, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """取消正在运行的审查任务"""

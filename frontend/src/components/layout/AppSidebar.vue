@@ -23,9 +23,13 @@ import {
   Comment,
   Connection,
   Operation,
+  Key,
+  Stamp,
+  UserFilled,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { normalizeRole, type UserRole } from '@/utils/roleHome'
+import type { Menu } from '@/types/rbac'
 
 interface MenuItem {
   path: string
@@ -68,17 +72,53 @@ const menuItems: MenuItem[] = [
 ]
 
 const adminItems: MenuItem[] = [
-  { path: '/admin/users',    title: '用户管理',        icon: User,          admin: true },
-  { path: '/admin/ai-logs',  title: 'Agent 调用日志', icon: ChatDotRound,  admin: true },
-  { path: '/admin/audit',    title: '系统操作审计',    icon: Lock,          admin: true },
-  { path: '/admin/evolution', title: 'Agent 自进化',   icon: MagicStick,    admin: true },
-  { path: '/admin/llm',       title: '大模型配置',      icon: Operation,     admin: true },
-  { path: '/admin/embedding', title: 'RAG 嵌入配置',   icon: Connection,    admin: true },
+  { path: '/admin/users',          title: '用户管理',        icon: User,          admin: true },
+  { path: '/admin/rbac/roles',     title: '角色管理',        icon: Key,           admin: true },
+  { path: '/admin/rbac/permissions', title: '权限点列表',    icon: Stamp,         admin: true },
+  { path: '/admin/rbac/users',     title: '用户角色分配',    icon: UserFilled,    admin: true },
+  { path: '/admin/ai-logs',        title: 'Agent 调用日志', icon: ChatDotRound,  admin: true },
+  { path: '/admin/audit',          title: '系统操作审计',    icon: Lock,          admin: true },
+  { path: '/admin/evolution',      title: 'Agent 自进化',    icon: MagicStick,    admin: true },
+  { path: '/admin/llm',            title: '大模型配置',      icon: Operation,     admin: true },
+  { path: '/admin/embedding',      title: 'RAG 嵌入配置',   icon: Connection,    admin: true },
 ]
 
-const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const isAdmin = computed(() => userStore.isAdmin())
 const currentRole = computed(() => normalizeRole(userStore.profile?.role))
+
+/**
+ * 将用户菜单树扁平化为允许访问的路径集合
+ * @param list - 菜单树
+ * @param paths - 累积路径集合
+ * @returns void
+ */
+function flattenMenuPaths(list: Menu[], paths: Set<string>): void {
+  for (const m of list) {
+    if (m.path) paths.add(m.path)
+    if (m.children && m.children.length > 0) flattenMenuPaths(m.children, paths)
+  }
+}
+
+/** 用户 RBAC 菜单允许访问的路径集合 */
+const allowedMenuPaths = computed<Set<string>>(() => {
+  const paths = new Set<string>()
+  flattenMenuPaths(userStore.menus, paths)
+  return paths
+})
+
+/** RBAC 菜单是否已加载(非空则启用菜单过滤) */
+const menusLoaded = computed(() => allowedMenuPaths.value.size > 0)
+
 const visibleMenuItems = computed(() => {
+  // admin 角色显示全部(管理员可访问的)主菜单,不进行 RBAC 过滤
+  if (isAdmin.value) {
+    return menuItems.filter((item) => !item.roles || item.roles.includes(currentRole.value))
+  }
+  // 普通用户:RBAC 菜单已加载时,仅显示后端返回的允许菜单
+  if (menusLoaded.value) {
+    return menuItems.filter((item) => allowedMenuPaths.value.has(item.path))
+  }
+  // 兜底:RBAC 菜单未加载时,按角色过滤(保持原有行为)
   return menuItems.filter((item) => !item.roles || item.roles.includes(currentRole.value))
 })
 

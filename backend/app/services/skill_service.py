@@ -157,8 +157,8 @@ def invoke_skill_with_record(
         db.add(record)
         db.commit()
         record_id = record.id
-    except Exception as e:
-        logger.exception(f"[skill_service] 写 agent_skill_record 失败")
+    except Exception:
+        logger.exception("[skill_service] 写 agent_skill_record 失败")
         db.rollback()
         record_id = None
 

@@ -9,7 +9,7 @@ v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError
 from app.core.pagination import Pagination
 from app.models.code_file import CodeFile
 from app.models.project import Project

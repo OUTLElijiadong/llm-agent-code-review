@@ -129,6 +129,35 @@ class TestStaticRules:
         assert len(sql_findings) >= 1
         assert sql_findings[0].source == "static"
 
+    def test_sql_injection_plus_concat_execute_detected(self):
+        """v3 补丁验证:cursor.execute("SELECT..." + var) + 拼接应被命中"""
+        code = 'cursor.execute("SELECT * FROM users WHERE id=" + user_id)\n'
+        findings = scan(content=code, file_name="sqli_plus.py")
+        sql_findings = [f for f in findings if f.cwe == "CWE-89"]
+        assert len(sql_findings) >= 1
+        assert sql_findings[0].source == "static"
+
+    def test_sql_injection_plus_concat_query_assignment_detected(self):
+        """v3 补丁验证:query = "SELECT..." + var 赋值拼接应被命中"""
+        code = 'query = "SELECT * FROM users" + condition\n'
+        findings = scan(content=code, file_name="sqli_plus2.py")
+        sql_findings = [f for f in findings if f.cwe == "CWE-89"]
+        assert len(sql_findings) >= 1
+
+    def test_sql_injection_plus_concat_var_first_detected(self):
+        """v3 补丁验证:query = var + " WHERE..." 变量在前的拼接应被命中"""
+        code = 'sql = base_query + " WHERE id=1"\n'
+        findings = scan(content=code, file_name="sqli_plus3.py")
+        sql_findings = [f for f in findings if f.cwe == "CWE-89"]
+        assert len(sql_findings) >= 1
+
+    def test_sql_injection_plus_concat_no_false_positive_on_non_sql(self):
+        """v3 补丁验证:普通字符串 + 拼接(无 SQL 关键字)不应命中 SQL 规则"""
+        code = 'msg = "Hello " + name\n'
+        findings = scan(content=code, file_name="normal.py")
+        sql_findings = [f for f in findings if f.cwe == "CWE-89"]
+        assert len(sql_findings) == 0
+
     def test_pickle_loads_detected(self):
         """pickle.loads 应被命中"""
         code = "import pickle\npickle.loads(data)\n"

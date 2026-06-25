@@ -36,6 +36,10 @@ class AssistIn(BaseModel):
 
 
 class PostListItemOut(BaseModel):
+    """论坛帖子列表项
+
+    R7 修复(2026-06-25):补齐 status 字段,对齐 ForumPost ORM。
+    """
     id: int
     user_id: int
     author_name: str = ""
@@ -44,6 +48,7 @@ class PostListItemOut(BaseModel):
     view_count: int = 0
     reply_count: int = 0
     is_pinned: bool = False
+    status: str = "normal"
     create_time: datetime
     update_time: datetime
 
@@ -51,12 +56,18 @@ class PostListItemOut(BaseModel):
 
 
 class ReplyOut(BaseModel):
+    """论坛回复项
+
+    R6 修复(2026-06-25):补齐 update_time,对齐 ForumReply ORM。
+    """
     id: int
     post_id: int
     user_id: int
     author_name: str = ""
     content: str
     create_time: datetime
+    # R6 修复:补齐 update_time,对齐 ForumReply ORM
+    update_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
