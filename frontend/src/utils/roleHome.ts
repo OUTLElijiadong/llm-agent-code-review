@@ -2,9 +2,8 @@ export type UserRole = 'admin' | 'reviewer' | 'user'
 
 const FALLBACK_ROLE: UserRole = 'user'
 
-// 登录后默认进入「工作台」图表仪表盘(各角色统一:admin 看平台级数据,其余看本人数据)
 const ROLE_HOME_PATHS: Record<UserRole, string> = {
-  admin: '/dashboard',
+  admin: '/admin/overview',
   reviewer: '/dashboard',
   user: '/dashboard',
 }
@@ -59,9 +58,11 @@ export function canAdminOpenPath(path: string): boolean {
 export function canRoleOpenPath(role: string | null | undefined, path: string): boolean {
   const normalizedRole = normalizeRole(role)
   if (!path.startsWith('/')) return false
+  // 拒绝协议相对跳转(//evil.com)与 /admin 路径的角色越权
+  if (path.startsWith('//')) return false
+  if (path.startsWith('/admin')) return normalizedRole === 'admin'
   if (path === '/login' || path === '/register') return false
   if (normalizedRole === 'admin') return canAdminOpenPath(path)
-  if (path.startsWith('/admin')) return false
   return true
 }
 

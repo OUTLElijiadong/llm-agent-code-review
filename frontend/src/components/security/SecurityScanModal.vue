@@ -585,7 +585,7 @@ watch(() => props.refId, () => {
                   :key="r"
                   :href="r"
                   target="_blank"
-                  rel="noopener"
+                  rel="noopener noreferrer"
                   class="ref-link"
                 >
                   {{ r }}

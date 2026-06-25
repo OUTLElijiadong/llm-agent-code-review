@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Check, Lock, Message, User, UserFilled } from '@element-plus/icons-vue'
@@ -18,6 +18,23 @@ const form = reactive({
   confirmPassword: '',
   email: '',
   nickname: '',
+})
+
+/**
+ * 密码强度评估: 依据长度与字符种类给出 0(空)/1(弱)/2(中)/3(强)
+ * @returns 强度等级与中文标签
+ */
+const passwordStrength = computed<{ level: 0 | 1 | 2 | 3; label: string }>(() => {
+  const v = form.password
+  if (!v) return { level: 0, label: '' }
+  let score = 0
+  if (v.length >= 6) score++
+  if (v.length >= 10) score++
+  if (/\d/.test(v)) score++
+  if (/[a-z]/.test(v) && /[A-Z]/.test(v)) score++
+  if (/[^A-Za-z0-9]/.test(v)) score++
+  const level = (score <= 2 ? 1 : score <= 3 ? 2 : 3) as 1 | 2 | 3
+  return { level, label: ['', '弱', '中', '强'][level] }
 })
 
 /**
@@ -194,6 +211,13 @@ function goLogin(): void {
             />
           </el-form-item>
 
+          <div v-if="form.password" class="pwd-strength" :data-level="passwordStrength.level">
+            <span class="pwd-bar"></span>
+            <span class="pwd-bar"></span>
+            <span class="pwd-bar"></span>
+            <span class="pwd-strength-label font-mono">密码强度 · {{ passwordStrength.label }}</span>
+          </div>
+
           <el-form-item prop="confirmPassword" label="确认密码">
             <el-input
               v-model="form.confirmPassword"
@@ -228,7 +252,7 @@ function goLogin(): void {
 <style scoped lang="scss">
 .register-page {
   display: grid;
-  grid-template-columns: minmax(520px, 1fr) 620px;
+  grid-template-columns: 1fr 560px;
   min-height: 100vh;
   width: 100%;
   background: #fff;
@@ -238,41 +262,48 @@ function goLogin(): void {
 .register-brand {
   position: relative;
   overflow: hidden;
-  background:
-    linear-gradient(125deg, rgba(107, 124, 255, 0.24), transparent 42%),
-    linear-gradient(165deg, #161A24 0%, #1A1E2C 54%, #20283A 100%);
+  background: linear-gradient(165deg, #1A1E2C 0%, #161A24 55%, #1F1A3A 100%);
   color: #fff;
   padding: 48px 64px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
 
+  /* 棱镜光晕（与登录页一致） */
   &::before {
     content: '';
     position: absolute;
-    inset: 0;
-    background:
-      linear-gradient(115deg, transparent 0 34%, rgba(255, 255, 255, 0.08) 34.2% 34.8%, transparent 35%),
-      linear-gradient(140deg, transparent 0 58%, rgba(84, 204, 222, 0.16) 58.2% 58.8%, transparent 59%);
+    width: 720px;
+    height: 720px;
+    right: -180px;
+    top: -200px;
+    background: conic-gradient(from 220deg,
+      #6B7CFF, #4B9BFF, #2BBFB9, #4FB87A,
+      #D4A53A, #E08648, #E25C73, #B85AC4, #6B7CFF);
+    filter: blur(80px);
+    opacity: 0.45;
+    border-radius: 50%;
     pointer-events: none;
   }
 
+  /* 光束（与登录页一致） */
   &::after {
     content: '';
     position: absolute;
-    right: 0;
-    bottom: 0;
-    width: 52%;
-    height: 38%;
-    background: linear-gradient(135deg, transparent, rgba(91, 88, 232, 0.2));
-    clip-path: polygon(24% 100%, 100% 0, 100% 100%);
+    width: 2px;
+    height: 60vh;
+    left: 30%;
+    top: 20%;
+    background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+    transform: rotate(15deg);
+    filter: blur(0.5px);
     pointer-events: none;
   }
 }
 
 .register-brand > * {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .brand-top,
@@ -446,6 +477,45 @@ function goLogin(): void {
   gap: 14px;
 }
 
+/* 密码强度指示条 */
+.pwd-strength {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: -8px 0 16px;
+}
+
+.pwd-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--gray-200);
+  transition: background 0.2s ease;
+}
+
+.pwd-strength-label {
+  flex: none;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--gray-400);
+  letter-spacing: 0.02em;
+}
+
+.pwd-strength[data-level='1'] {
+  .pwd-bar:nth-child(1) { background: #E25C73; }
+  .pwd-strength-label { color: #E25C73; }
+}
+
+.pwd-strength[data-level='2'] {
+  .pwd-bar:nth-child(-n + 2) { background: #D4A53A; }
+  .pwd-strength-label { color: #D4A53A; }
+}
+
+.pwd-strength[data-level='3'] {
+  .pwd-bar:nth-child(-n + 3) { background: var(--status-fixed); }
+  .pwd-strength-label { color: var(--status-fixed); }
+}
+
 .prism-form {
   :deep(.el-form-item) {
     margin-bottom: 18px;
@@ -564,9 +634,9 @@ function goLogin(): void {
   font-size: 12px;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1280px) {
   .register-page {
-    grid-template-columns: minmax(460px, 1fr) 540px;
+    grid-template-columns: 1fr 480px;
   }
 
   .register-brand {

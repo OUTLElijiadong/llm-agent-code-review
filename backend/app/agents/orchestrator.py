@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -237,6 +237,146 @@ class Orchestrator(BaseAgent):
 
     def get_agent(self, name: str):
         return self._registry.get(name)
+
+    # ── AgentSkill 自进化与总调度升级:通用工具入口 ──
+
+    def invoke_tool(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """通用工具调用入口(双层调度执行器使用)
+
+        支持:
+        - tool_name 形如 "code_reviewer.self_improve" → 调 SkillRegistry 中的 Skill
+        - tool_name 形如 "list_projects" / "start_review" → 调 Orchestrator 固定方法
+
+        Args:
+            tool_name: 工具名(Skill name 或固定方法名)
+            arguments: 工具参数 dict
+            ctx: 上下文
+
+        Returns:
+            AgentResult: 调用结果
+        """
+        # 1. 优先在 SkillRegistry 中查找(所有已注册 Skill)
+        from app.agents.skills.registry import SkillRegistry
+
+        for skill in SkillRegistry.instance().list_all():
+            if skill.name == tool_name:
+                return self.invoke_skill(
+                    skill.agent_name, tool_name, arguments, ctx
+                )
+
+        # 2. 回退到 Orchestrator 固定方法(动态调用)
+        method = getattr(self, tool_name, None)
+        if method is None or not callable(method):
+            return AgentResult(
+                success=False,
+                error=f"工具 {tool_name} 不存在(既非 Skill 也非固定方法)",
+            )
+        try:
+            # 固定方法多接受位置参数,arguments 作为 kwargs 传入
+            return method(ctx=ctx, **arguments) if arguments else method(ctx=ctx)
+        except TypeError:
+            # 某些方法不接受 ctx 参数,尝试不带 ctx
+            try:
+                return method(**arguments) if arguments else method()
+            except Exception as e:
+                logger.exception(f"[Orchestrator] 固定方法 {tool_name} 调用异常")
+                return AgentResult(success=False, error=f"固定方法 {tool_name} 调用异常: {e}")
+        except Exception as e:
+            logger.exception(f"[Orchestrator] 工具 {tool_name} 调用异常")
+            return AgentResult(success=False, error=f"工具 {tool_name} 调用异常: {e}")
+
+    def invoke_skill(
+        self,
+        agent_name: str,
+        skill_name: str,
+        params: Dict[str, Any],
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """调用指定 Agent 的指定 Skill
+
+        通过 skill_service 统一入口调用,自动写 agent_skill_record 与 audit_log。
+
+        Args:
+            agent_name: Agent name(如 code_reviewer)
+            skill_name: Skill name(如 code_reviewer.self_improve)
+            params: Skill 参数
+            ctx: 上下文
+
+        Returns:
+            AgentResult: data 为 skill_service 返回的 dict
+        """
+        if not self._db:
+            return AgentResult(
+                success=False,
+                error="DB 未注入,无法调用 Skill(请使用 get_request_orchestrator)",
+            )
+        from app.services import skill_service
+
+        user = getattr(self, "_user", None)
+        result = skill_service.invoke_skill_with_record(
+            db=self._db,
+            agent_name=agent_name,
+            skill_name=skill_name,
+            params=params,
+            trigger_type="orchestrator",
+            trigger_source=f"orchestrator.invoke_skill",
+            user=user,
+            ctx=ctx,
+        )
+        return AgentResult(
+            success=result["success"],
+            data=result,
+            error=result["error"],
+            duration_ms=result["duration_ms"],
+        )
+
+    def list_agent_skills(self, agent_name: str) -> List[Dict[str, Any]]:
+        """列出 Agent 挂载的所有 Skill 元数据
+
+        Args:
+            agent_name: Agent name
+
+        Returns:
+            list[dict]: Skill 元数据列表
+                [{"name", "description", "type", "invocable", "agent_name"}]
+        """
+        from app.agents.skills.registry import SkillRegistry
+
+        return SkillRegistry.instance().list_meta(agent_name)
+
+    def trigger_evolution(
+        self,
+        agent_name: str = "evolution",
+        window_days: int = 90,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """触发指定 Agent 的自进化
+
+        调用 invoke_skill(agent_name, "{agent_name}.self_improve", {"action": "evolve", ...})。
+
+        Args:
+            agent_name: Agent name(默认 evolution)
+            window_days: 反馈窗口天数
+            ctx: 上下文
+
+        Returns:
+            AgentResult: 自进化执行结果
+        """
+        skill_name = f"{agent_name}.self_improve"
+        logger.info(
+            f"[Orchestrator] 触发自进化: agent={agent_name} window={window_days}d"
+        )
+        return self.invoke_skill(
+            agent_name,
+            skill_name,
+            {"action": "evolve", "window_days": window_days},
+            ctx,
+        )
 
 
 _orchestrator: Optional[Orchestrator] = None

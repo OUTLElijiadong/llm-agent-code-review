@@ -9,7 +9,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 
 class AgentEventType(str, Enum):
@@ -38,6 +38,9 @@ class AgentEvent:
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
     )
+    # v2.4: 事件归属用户 ID,用于 SSE 按用户隔离
+    # None 表示系统级事件(所有订阅者都能收到)
+    user_id: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

@@ -46,6 +46,7 @@ def _get_http_client() -> httpx.Client:
                         max_connections=40,
                     ),
                     timeout=httpx.Timeout(settings.deepseek_timeout),
+                    trust_env=False,
                 )
     return _SHARED_CLIENT
 
@@ -63,12 +64,14 @@ class DeepSeekAgent:
         api_config: Optional["ApiConfig"] = None,
     ):
         # 用户自定义配置优先
+        from app.utils.api_resolver import validate_ai_base_url
+
         if api_config:
-            self.base_url = api_config.base_url.rstrip("/")
+            self.base_url = validate_ai_base_url(api_config.base_url)
             self.api_key = api_config.api_key
             self.model = api_config.model
         else:
-            self.base_url = (base_url or settings.deepseek_base_url).rstrip("/")
+            self.base_url = validate_ai_base_url(base_url or settings.deepseek_base_url)
             self.api_key = api_key or settings.deepseek_api_key
             self.model = model or settings.deepseek_model
 

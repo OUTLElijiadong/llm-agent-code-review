@@ -10,6 +10,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import ValidationError
 from app.models.api_config import UserApiConfig
 from app.schemas.api_config import (
     ApiConfigOut,
@@ -17,7 +18,7 @@ from app.schemas.api_config import (
     ApiConfigTestIn,
     ApiConfigTestOut,
 )
-from app.utils.api_resolver import decrypt_api_key, encrypt_api_key, mask_api_key
+from app.utils.api_resolver import decrypt_api_key, encrypt_api_key, mask_api_key, validate_ai_base_url
 
 
 def get_config(db: Session, user_id: int) -> ApiConfigOut:
@@ -53,6 +54,7 @@ def get_config(db: Session, user_id: int) -> ApiConfigOut:
 
 def save_config(db: Session, user_id: int, payload: ApiConfigSaveIn) -> ApiConfigOut:
     """保存或更新用户的 API 配置"""
+    safe_base_url = validate_ai_base_url(payload.base_url)
     encrypted = encrypt_api_key(payload.api_key)
 
     row = db.query(UserApiConfig).filter(UserApiConfig.user_id == user_id).first()
@@ -60,7 +62,7 @@ def save_config(db: Session, user_id: int, payload: ApiConfigSaveIn) -> ApiConfi
     if row:
         row.provider = payload.provider
         row.api_key_enc = encrypted
-        row.base_url = payload.base_url
+        row.base_url = safe_base_url
         row.model = payload.model
         row.is_active = True
     else:
@@ -68,7 +70,7 @@ def save_config(db: Session, user_id: int, payload: ApiConfigSaveIn) -> ApiConfi
             user_id=user_id,
             provider=payload.provider,
             api_key_enc=encrypted,
-            base_url=payload.base_url,
+            base_url=safe_base_url,
             model=payload.model,
             is_active=True,
         )
@@ -104,14 +106,24 @@ def test_connection(payload: ApiConfigTestIn) -> ApiConfigTestOut:
     发送一个最小化的请求验证连通性和认证。
     不存储任何数据。
     """
-    base_url = payload.base_url.rstrip("/")
+    try:
+        base_url = validate_ai_base_url(
+            payload.base_url,
+            resolve_host=settings.enforce_ai_base_url_dns_check,
+        )
+    except ValidationError as exc:
+        return ApiConfigTestOut(
+            success=False,
+            message=exc.message,
+            duration_ms=0,
+        )
     test_messages = [
         {"role": "user", "content": "ping"}
     ]
 
     t0 = time.time()
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=15, trust_env=False) as client:
             resp = client.post(
                 f"{base_url}/chat/completions",
                 headers={

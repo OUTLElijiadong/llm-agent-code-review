@@ -16,7 +16,7 @@ import json as json_lib
 import re
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -31,6 +31,9 @@ from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
+
+if TYPE_CHECKING:
+    from app.ai.static_analyzer import Finding
 
 SYSTEM_PROMPT = (
     "你是 PRISM 棱镜平台的网络安全审计 Agent,"
@@ -105,6 +108,96 @@ class SecuritySentinelAgent(BaseAgent):
     def inject(self, db: Session, user: Optional[User] = None) -> None:
         self._db = db
         self._user = user
+
+    # ---- review_service 主流程集成入口(v2 新增 2026-06-25)----
+
+    def scan_file_for_review(
+        self,
+        *,
+        code: str,
+        language: str,
+        file_name: str,
+        line_offset: int = 0,
+        experience_section: str = "",
+        api_config=None,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """供 review_service 主流程调用的安全审查入口(双引擎之引擎2:LLM 安全深度审查)
+
+        与 CodeReviewerAgent.execute_review() 同结构,返回 AgentResult,
+        data["issues"] 为 List[Finding](与 static_analyzer.Finding 同结构)。
+        复用 _build_audit_prompt() 与 _normalize_finding() 逻辑。
+
+        Args:
+            code: 代码内容(单分片)
+            language: 编程语言标识
+            file_name: 文件名(含扩展名)
+            line_offset: 行号偏移(分片时使用)
+            experience_section: 历史经验参考段落(自进化注入,可空,本 Agent 暂不使用)
+            api_config: 可选,用户自定义 API 配置;为 None 时用系统默认
+            ctx: Agent 上下文(含 task_id/user_id/project_id/file_id/trace_id)
+
+        Returns:
+            AgentResult: data["issues"] 为 List[Finding],data["summary"] 为整体评价;
+                         失败时 success=False,error 字段含错误信息
+        """
+        from app.ai.static_analyzer import Finding
+
+        # 1. 复用 _build_audit_prompt 生成安全审查 prompt
+        user_msg = self._build_audit_prompt(code, language, file_name, line_offset)
+
+        # 2. 通过 BaseAgent.call_json 调用 LLM(自动 emit 事件、重试)
+        result = self.call_json(user_msg, ctx=ctx, api_config=api_config)
+        if not result.success:
+            return result
+
+        if not isinstance(result.data, dict):
+            return AgentResult(
+                success=False,
+                error="[security_sentinel] LLM 返回非 JSON 对象",
+                model=result.model,
+                duration_ms=result.duration_ms,
+                tokens=result.tokens,
+            )
+
+        # 3. 解析 findings 数组,转换为 Finding 列表
+        raw_findings = result.data.get("findings") or []
+        if not isinstance(raw_findings, list):
+            raw_findings = []
+
+        findings: List[Finding] = []
+        # 构造一个临时 CodeFile-like 对象供 _normalize_finding 使用
+        class _FileStub:
+            pass
+        file_stub = _FileStub()
+        file_stub.file_path = file_name
+        file_stub.file_name = file_name
+        file_stub.id = (ctx.file_id if ctx and ctx.file_id else 0)
+
+        for raw in raw_findings:
+            if not isinstance(raw, dict):
+                continue
+            normalized = self._normalize_finding(raw, file_stub, line_offset=0)
+            if not normalized:
+                continue
+            findings.append(_normalized_dict_to_finding(normalized))
+
+        # 4. 合并 summary(若 LLM 返回了 summary 字段则用,否则用默认)
+        summary = str(result.data.get("summary") or "") or (
+            f"安全审查完成,共发现 {len(findings)} 条安全问题。"
+        )
+
+        return AgentResult(
+            success=True,
+            data={
+                "issues": findings,
+                "summary": summary,
+                "score": _compute_security_score(findings),
+            },
+            model=result.model,
+            duration_ms=result.duration_ms,
+            tokens=result.tokens,
+        )
 
     def _ensure_db(self) -> Optional[AgentResult]:
         if self._db is None:
@@ -1446,3 +1539,53 @@ class SecuritySentinelAgent(BaseAgent):
             f"严重 {counts['严重']} · 高 {counts['高']} · "
             f"中 {counts['中']} · 低 {counts['低']}。"
         )
+
+
+# ============ 模块级辅助函数(v2 新增 2026-06-25)============
+
+def _normalized_dict_to_finding(normalized: dict) -> "Finding":
+    """将 _normalize_finding 输出的 dict 转换为 Finding 数据类
+
+    Args:
+        normalized: _normalize_finding 输出的标准化字典
+
+    Returns:
+        Finding: static_analyzer.Finding 实例
+    """
+    from app.ai.static_analyzer import Finding
+
+    return Finding(
+        line_number=int(normalized.get("line_number") or 0),
+        end_line=int(normalized.get("end_line") or 0) or None,
+        issue_type="安全漏洞",
+        severity=str(normalized.get("severity") or "中"),
+        title=str(normalized.get("title") or "安全问题"),
+        description=str(normalized.get("exploit_scenario") or normalized.get("fix_suggestion") or ""),
+        suggestion=str(normalized.get("fix_suggestion") or ""),
+        fixed_code="",
+        owasp=str(normalized.get("owasp") or ""),
+        cwe=str(normalized.get("cwe") or ""),
+        evidence=str(normalized.get("evidence") or ""),
+        exploit_scenario=str(normalized.get("exploit_scenario") or ""),
+        references=list(normalized.get("references") or []),
+        confidence=float(normalized.get("confidence") or 0.8),
+        source="llm",
+    )
+
+
+def _compute_security_score(findings: list) -> int:
+    """根据安全问题列表计算安全评分(0-100,越高越安全)
+
+    Args:
+        findings: Finding 列表
+
+    Returns:
+        int: 安全评分 0-100
+    """
+    deduct = {"严重": 15, "高": 8, "中": 3, "低": 1}
+    total_deduct = 0
+    for f in findings:
+        sev = getattr(f, "severity", "中")
+        total_deduct += deduct.get(sev, 3)
+    return max(0, 100 - total_deduct)
+

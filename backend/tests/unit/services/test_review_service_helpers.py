@@ -1,5 +1,6 @@
 from app.ai.multi_agent import get_agent_profiles
-from app.services.review_service import _absolute_line, _build_summary, _issue_fingerprint
+from app.ai.static_analyzer import Finding
+from app.services.review_service import _absolute_line, _build_summary, _finding_fingerprint
 
 
 def test_absolute_line_keeps_file_level_issue_zero():
@@ -13,18 +14,16 @@ def test_absolute_line_adds_chunk_offset():
     assert _absolute_line(3, 200) == 203
 
 
-def test_issue_fingerprint_deduplicates_same_issue():
+def test_finding_fingerprint_deduplicates_same_issue():
     """同一文件同一行同类问题应生成相同去重指纹"""
-    first = _issue_fingerprint(
-        file_id=1,
+    first_finding = Finding(
         line_number=10,
         end_line=12,
         issue_type="安全漏洞",
         title="SQL 注入风险",
         description="字符串拼接构造 SQL,存在注入风险。",
     )
-    second = _issue_fingerprint(
-        file_id=1,
+    second_finding = Finding(
         line_number=10,
         end_line=12,
         issue_type="安全漏洞",
@@ -32,7 +31,23 @@ def test_issue_fingerprint_deduplicates_same_issue():
         description="字符串拼接构造 SQL,存在注入风险。",
     )
 
+    first = _finding_fingerprint(file_id=1, finding=first_finding)
+    second = _finding_fingerprint(file_id=1, finding=second_finding)
+
     assert first == second
+
+
+def test_finding_fingerprint_differs_by_file():
+    """不同文件的同问题应生成不同指纹"""
+    finding = Finding(
+        line_number=10,
+        end_line=12,
+        issue_type="安全漏洞",
+        title="SQL 注入风险",
+        description="字符串拼接构造 SQL,存在注入风险。",
+    )
+
+    assert _finding_fingerprint(file_id=1, finding=finding) != _finding_fingerprint(file_id=2, finding=finding)
 
 
 def test_build_summary_mentions_multi_agent():

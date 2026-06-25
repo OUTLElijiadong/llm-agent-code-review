@@ -16,3 +16,4 @@ python-multipart>=0.0.9,<1.0.0
 slowapi>=0.1.9,<1.0.0
 chardet>=5.0.0,<6.0.0
 cryptography>=41.0.0,<45.0.0
+apscheduler>=3.10.4,<4.0.0

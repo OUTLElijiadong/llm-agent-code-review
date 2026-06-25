@@ -1,6 +1,6 @@
 """多 Agent 讨论 WebSocket 端点 (v2.3 M7)
 
-ws://host:8000/api/ws/discuss/{session_id}?token=xxx
+ws://host:8000/api/ws/discuss/{session_id}
 
 协议:
   服务端 → 客户端: JSON 文本帧
@@ -21,12 +21,13 @@ import asyncio
 import json as json_lib
 from urllib.parse import parse_qs
 
-import jwt
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from app.agents.discussion_bus import DiscussionBus
-from app.core.config import settings
+from app.core.database import SessionLocal
+from app.core.security import decode_token
+from app.models.user import User
 
 
 class PendingDiscussion:
@@ -88,6 +89,42 @@ def _token_from_query(websocket: WebSocket) -> str | None:
     return tokens[0] if tokens else None
 
 
+def _can_access_session(user: User, owner_user_id: int) -> bool:
+    """判断当前用户是否可订阅指定讨论会话。
+
+    Args:
+        user: 当前 WebSocket 认证用户。
+        owner_user_id: 讨论会话创建者 ID。
+
+    Returns:
+        bool: owner 或管理员返回 True。
+    """
+    if owner_user_id <= 0:
+        return False
+    return user.role == "admin" or user.id == owner_user_id
+
+
+def _load_ws_user(token: str) -> User | None:
+    """解析 JWT 并加载当前有效用户。
+
+    Args:
+        token: Bearer JWT。
+
+    Returns:
+        User | None: token 有效且账号启用时返回用户对象。
+    """
+    payload = decode_token(token)
+    db = SessionLocal()
+    try:
+        user = db.get(User, int(payload["sub"]))
+        if not user or user.status != 1:
+            return None
+        db.expunge(user)
+        return user
+    finally:
+        db.close()
+
+
 async def ws_discuss(websocket: WebSocket, session_id: str):
     """WebSocket 讨论连接"""
     client = websocket.client.host if websocket.client else "unknown"
@@ -100,36 +137,41 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
         await websocket.close(code=4001, reason="缺少 token")
         return
     try:
-        claims = jwt.decode(
-            token, settings.jwt_secret, algorithms=[settings.jwt_algorithm],
-            options={"require": ["exp", "sub"]},
-        )
-        ws_user_id = int(claims["sub"])
+        user = _load_ws_user(token)
     except Exception:
+        user = None
+    if not user:
         logger.warning(f"[WS] 讨论连接拒绝: token 无效 session={session_id} client={client}")
         await websocket.close(code=4001, reason="token 无效")
         return
 
-    # 校验用户存在且未禁用,并做会话归属校验:仅会话发起人或管理员可连接。
-    ws_user = _load_active_user(ws_user_id)
-    if ws_user is None:
-        await websocket.close(code=4003, reason="账号不存在或已禁用")
-        return
-    owner_id = _session_owners.get(session_id)
-    if owner_id is not None and owner_id != ws_user_id and ws_user.role != "admin":
-        logger.warning(
-            f"[WS] 讨论连接拒绝: 越权访问 session={session_id} "
-            f"owner={owner_id} user={ws_user_id}"
-        )
-        await websocket.close(code=4003, reason="无权访问该讨论会话")
+    bus = DiscussionBus.instance()
+    pending = _pending.get(session_id)
+    session = bus.get_session(session_id)
+    owner_user_id = 0
+    if pending:
+        owner_user_id = int(pending.kwargs.get("user_id") or 0)
+    elif session:
+        owner_user_id = session.owner_user_id
+    elif session_id in _session_owners:
+        owner_user_id = _session_owners[session_id]
+    else:
+        logger.warning(f"[WS] 讨论连接拒绝: session 不存在 session={session_id} client={client}")
+        await websocket.close(code=4004, reason="session 不存在")
         return
 
-    # 检查是否有待启动的讨论
+    if not _can_access_session(user, owner_user_id):
+        logger.warning(
+            f"[WS] 讨论连接拒绝: 无权访问 session={session_id} user={user.id} owner={owner_user_id}"
+        )
+        await websocket.close(code=4003, reason="无权访问讨论会话")
+        return
+
+    # 检查是否有待启动的讨论。通过鉴权后再 pop,避免越权连接消耗 pending。
     pending = _pending.pop(session_id, None)
 
     await websocket.accept(subprotocol="prism-auth" if use_auth_subprotocol else None)
     logger.info(f"[WS] 讨论连接已接受 session={session_id} pending={bool(pending)} client={client}")
-    bus = DiscussionBus.instance()
     queue: asyncio.Queue = await bus.subscribe(session_id)
 
     # 启动讨论编排

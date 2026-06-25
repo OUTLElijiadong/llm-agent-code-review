@@ -32,6 +32,8 @@ export interface CodeFileOut {
   size_bytes: number
   line_count: number
   version_no: number
+  /** v2: 是否二进制文件(0否 1是),二进制文件不展示编辑器,改用下载接口 */
+  is_binary: number
   create_time: string
   update_time: string
 }

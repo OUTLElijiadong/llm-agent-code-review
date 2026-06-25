@@ -47,12 +47,18 @@ def _ensure_schema() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期: 启动时初始化日志、补齐表结构与Agent注册中心"""
+    """应用生命周期: 启动时初始化日志、补齐表结构、Agent注册中心与治理调度器"""
     setup_logger()
     _ensure_schema()
     from app.agents.orchestrator import get_orchestrator
+    from app.services.agent_scheduler_runtime import start_agent_governance_scheduler, stop_agent_governance_scheduler
+
     get_orchestrator()
-    yield
+    start_agent_governance_scheduler()
+    try:
+        yield
+    finally:
+        stop_agent_governance_scheduler()
 
 
 app = FastAPI(

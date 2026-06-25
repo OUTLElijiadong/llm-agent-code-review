@@ -1,21 +1,35 @@
 """
 项目管理服务模块
+
+v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
+    - list_projects: admin 全量 / 非 admin: owner ∪ member
+    - get/update/delete_project: 通过 require_project_access 校验
+    - create_project: 创建后自动写入 project_member(owner) 记录
 """
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.pagination import Pagination
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
+from app.services.project_member_service import (
+    ensure_owner_member,
+    get_visible_project_ids,
+    require_project_access,
+)
 
 
 def list_projects(db: Session, user: User, keyword: str = "", language: str = "",
                   status: str = "active", page: int = 1, page_size: int = 20) -> dict:
-    """查询当前用户可访问的项目列表
+    """查询当前用户可访问的项目列表(基于 project_member 关系)
+
+    可见范围:
+        - admin: 全部非删除项目
+        - 非 admin: owner 项目 ∪ member 项目
 
     Args:
         db: 数据库会话
@@ -29,9 +43,8 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
     Returns:
         dict: 分页响应
     """
-    q = db.query(Project)
-    if user.role != "admin":
-        q = q.filter(Project.user_id == user.id)
+    visible_ids, _ = get_visible_project_ids(db, user)
+    q = db.query(Project).filter(Project.id.in_(visible_ids))
     if keyword:
         q = q.filter(Project.project_name.contains(keyword))
     if language:
@@ -82,7 +95,7 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
 
 
 def create_project(db: Session, user: User, payload: ProjectIn) -> Project:
-    """创建新项目
+    """创建新项目并写入 project_member(owner) 记录
 
     Args:
         db: 数据库会话
@@ -110,11 +123,19 @@ def create_project(db: Session, user: User, payload: ProjectIn) -> Project:
     db.add(project)
     db.commit()
     db.refresh(project)
+    # 同步写入 project_member(owner) 记录,确保后续数据隔离能查到该项目
+    ensure_owner_member(db, project.id, user.id)
     return project
 
 
 def get_project(db: Session, user: User, project_id: int) -> dict:
     """获取项目详情含最近审查任务
+
+    通过 require_project_access 校验访问权限:
+        - admin: 全部项目可读
+        - owner: 自己的项目可读
+        - reviewer: 被加入为成员的项目可读
+        - 其他: 返回 404(防枚举)
 
     Args:
         db: 数据库会话
@@ -125,14 +146,10 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         dict: 项目详情
 
     Raises:
-        NotFoundError: 项目不存在
-        ForbiddenError: 无访问权限
+        NotFoundError: 项目不存在或无访问权限
     """
+    require_project_access(db, project_id, user, need_write=False)
     project = db.get(Project, project_id)
-    if not project or project.status == "deleted":
-        raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role != "admin":
-        raise ForbiddenError("无访问权限", code=40300)
 
     file_count = db.query(CodeFile.id).filter(
         CodeFile.project_id == project_id, CodeFile.status == "active").count()
@@ -159,7 +176,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
 
 
 def update_project(db: Session, user: User, project_id: int, payload: ProjectUpdateIn) -> Project:
-    """更新项目信息
+    """更新项目信息(需 owner/admin 权限)
 
     Args:
         db: 数据库会话
@@ -169,12 +186,13 @@ def update_project(db: Session, user: User, project_id: int, payload: ProjectUpd
 
     Returns:
         Project: 更新后的项目
+
+    Raises:
+        NotFoundError: 项目不存在或无访问权限
+        ForbiddenError: 仅 owner/admin 可写
     """
+    require_project_access(db, project_id, user, need_write=True)
     project = db.get(Project, project_id)
-    if not project or project.status == "deleted":
-        raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role != "admin":
-        raise ForbiddenError("无访问权限", code=40300)
     if payload.project_name is not None:
         project.project_name = payload.project_name
     if payload.description is not None:
@@ -189,17 +207,18 @@ def update_project(db: Session, user: User, project_id: int, payload: ProjectUpd
 
 
 def delete_project(db: Session, user: User, project_id: int) -> None:
-    """软删除项目
+    """软删除项目(需 owner/admin 权限)
 
     Args:
         db: 数据库会话
         user: 当前用户
         project_id: 项目ID
+
+    Raises:
+        NotFoundError: 项目不存在或无访问权限
+        ForbiddenError: 仅 owner/admin 可删除
     """
+    require_project_access(db, project_id, user, need_write=True)
     project = db.get(Project, project_id)
-    if not project or project.status == "deleted":
-        raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role != "admin":
-        raise ForbiddenError("无访问权限", code=40300)
     project.status = "deleted"
     db.commit()

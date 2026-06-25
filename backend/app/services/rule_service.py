@@ -146,8 +146,6 @@ def delete_rule(db: Session, user: User, rule_id: int) -> None:
     rule = db.get(ReviewRule, rule_id)
     if not rule:
         raise NotFoundError("规则不存在", code=40400)
-    if rule.is_builtin:
-        raise ConflictError("不可删除内置规则", code=40901)
     # 自定义规则仅创建者或管理员可删
     _ensure_can_mutate(user, rule, allow_builtin_for_admin=False)
     db.delete(rule)

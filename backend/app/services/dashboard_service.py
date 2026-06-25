@@ -1,5 +1,10 @@
 """
 仪表盘服务模块: 聚合统计数据
+
+v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
+    - admin 视角: 全平台聚合(scope='global')
+    - 非 admin 视角: owner ∪ member 项目聚合(scope='self')
+    - _scope_filter / _valid_task_ids 统一改用 get_visible_project_ids
 """
 from datetime import datetime, timedelta, timezone
 
@@ -11,37 +16,45 @@ from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from app.services.project_member_service import get_visible_project_ids
 
 
-def _scope_filter(user: User, model):
-    """返回 scope 过滤条件
+def _visible_project_ids(db: Session, user: User) -> list[int]:
+    """返回当前用户可见的项目 ID 列表(基于 project_member 关系)
 
     Args:
+        db: 数据库会话
         user: 当前用户
-        model: ORM 模型类
 
     Returns:
-        过滤条件列表, admin 返回空列表
+        list[int]: 可见项目 ID 列表(admin 为全部非删除项目;非 admin 为 owner ∪ member)
     """
-    if user.role != "admin":
-        return [model.user_id == user.id]
-    return []
+    visible_ids, _ = get_visible_project_ids(db, user)
+    return visible_ids
 
 
 def _valid_task_ids(db: Session, user: User):
-    """非删除审查任务的 id 子查询(按用户 scope)。
+    """非删除审查任务的 id 子查询(限定在用户可见项目范围内)。
 
     问题/风险/类型统计据此排除已删除任务遗留的问题,避免删除报告后
     仪表盘问题数仍被旧问题虚高。
+
+    Args:
+        db: 数据库会话
+        user: 当前用户
+
+    Returns:
+        sqlalchemy.sql.selectable.Select: 任务 ID 子查询
     """
-    query = select(ReviewTask.id).where(ReviewTask.status != "deleted")
-    if user.role != "admin":
-        query = query.where(ReviewTask.user_id == user.id)
-    return query
+    visible_ids = _visible_project_ids(db, user)
+    return select(ReviewTask.id).where(
+        ReviewTask.status != "deleted",
+        ReviewTask.project_id.in_(visible_ids),
+    )
 
 
 def get_summary(db: Session, user: User) -> dict:
-    """获取仪表盘汇总数据
+    """获取仪表盘汇总数据(基于 project_member 关系)
 
     Args:
         db: 数据库会话
@@ -50,24 +63,33 @@ def get_summary(db: Session, user: User) -> dict:
     Returns:
         dict: 含project_count/file_count/review_count等汇总数据
     """
-    scope = _scope_filter(user, Project)
+    visible_ids = _visible_project_ids(db, user)
 
-    project_q = db.query(func.count(Project.id)).filter(
-        Project.status != "deleted", *scope)
-    project_count = project_q.scalar() or 0
+    project_count = (
+        db.query(func.count(Project.id))
+        .filter(Project.status != "deleted", Project.id.in_(visible_ids))
+        .scalar() or 0
+    )
 
-    file_q = db.query(func.count(CodeFile.id)).join(
-        Project, Project.id == CodeFile.project_id).filter(
-        CodeFile.status == "active", Project.status != "deleted")
-    if user.role != "admin":
-        file_q = file_q.filter(Project.user_id == user.id)
-    file_count = file_q.scalar() or 0
+    file_count = (
+        db.query(func.count(CodeFile.id))
+        .join(Project, Project.id == CodeFile.project_id)
+        .filter(
+            CodeFile.status == "active",
+            Project.status != "deleted",
+            Project.id.in_(visible_ids),
+        )
+        .scalar() or 0
+    )
 
-    review_scope = _scope_filter(user, ReviewTask)
-
-    task_q = db.query(func.count(ReviewTask.id)).filter(
-        ReviewTask.status == "success", *review_scope)
-    review_count = task_q.scalar() or 0
+    review_count = (
+        db.query(func.count(ReviewTask.id))
+        .filter(
+            ReviewTask.status == "success",
+            ReviewTask.project_id.in_(visible_ids),
+        )
+        .scalar() or 0
+    )
 
     valid_ids = _valid_task_ids(db, user)
     total_issues = db.query(func.count(ReviewIssue.id)).filter(
@@ -75,15 +97,29 @@ def get_summary(db: Session, user: User) -> dict:
     severe_issues = db.query(func.count(ReviewIssue.id)).filter(
         ReviewIssue.task_id.in_(valid_ids), ReviewIssue.severity == "严重").scalar() or 0
 
-    avg_q = db.query(func.avg(ReviewTask.score)).filter(
-        ReviewTask.status == "success", *review_scope)
-    avg_score = round(avg_q.scalar() or 0, 1)
+    avg_score = round(
+        db.query(func.avg(ReviewTask.score))
+        .filter(
+            ReviewTask.status == "success",
+            ReviewTask.project_id.in_(visible_ids),
+        )
+        .scalar() or 0,
+        1,
+    )
 
-    recent_q = db.query(ReviewTask).filter(
-        ReviewTask.status == "success", *review_scope).order_by(
-        ReviewTask.create_time.desc()).limit(5)
-    recent_tasks = [{"id": t.id, "score": t.score, "create_time": t.create_time.isoformat() if t.create_time else None}
-                    for t in recent_q.all()]
+    recent_q = (
+        db.query(ReviewTask)
+        .filter(
+            ReviewTask.status == "success",
+            ReviewTask.project_id.in_(visible_ids),
+        )
+        .order_by(ReviewTask.create_time.desc())
+        .limit(5)
+    )
+    recent_tasks = [
+        {"id": t.id, "score": t.score, "create_time": t.create_time.isoformat() if t.create_time else None}
+        for t in recent_q.all()
+    ]
 
     return {
         "project_count": project_count,
@@ -97,7 +133,7 @@ def get_summary(db: Session, user: User) -> dict:
 
 
 def get_risk_distribution(db: Session, user: User, days: int = 30) -> list[dict]:
-    """获取风险等级分布(近N天)
+    """获取风险等级分布(近N天,基于 project_member 关系)
 
     Args:
         db: 数据库会话
@@ -119,7 +155,7 @@ def get_risk_distribution(db: Session, user: User, days: int = 30) -> list[dict]
 
 
 def get_issue_type_statistics(db: Session, user: User, days: int = 30) -> list[dict]:
-    """获取问题类型分布(近N天)
+    """获取问题类型分布(近N天,基于 project_member 关系)
 
     Args:
         db: 数据库会话
@@ -138,7 +174,7 @@ def get_issue_type_statistics(db: Session, user: User, days: int = 30) -> list[d
 
 
 def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:
-    """获取评分趋势(最近N次审查)
+    """获取评分趋势(最近N次审查,基于 project_member 关系)
 
     Args:
         db: 数据库会话
@@ -148,18 +184,23 @@ def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:
     Returns:
         list[dict]: [{task_id, score, create_time}, ...]
     """
-    review_scope = _scope_filter(user, ReviewTask)
-
-    base_q = db.query(ReviewTask).filter(
-        ReviewTask.status == "success", *review_scope).order_by(
-        ReviewTask.create_time.desc()).limit(limit)
+    visible_ids = _visible_project_ids(db, user)
+    base_q = (
+        db.query(ReviewTask)
+        .filter(
+            ReviewTask.status == "success",
+            ReviewTask.project_id.in_(visible_ids),
+        )
+        .order_by(ReviewTask.create_time.desc())
+        .limit(limit)
+    )
     rows = base_q.all()
     return [{"task_id": r.id, "score": r.score, "create_time": r.create_time.isoformat() if r.create_time else None}
             for r in reversed(rows)]
 
 
 def get_review_frequency(db: Session, user: User, days: int = 30) -> list[dict]:
-    """获取审查频次趋势(近N天按日统计)
+    """获取审查频次趋势(近N天按日统计,基于 project_member 关系)
 
     Args:
         db: 数据库会话
@@ -172,13 +213,16 @@ def get_review_frequency(db: Session, user: User, days: int = 30) -> list[dict]:
     from sqlalchemy import Date, cast
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    review_scope = _scope_filter(user, ReviewTask)
+    visible_ids = _visible_project_ids(db, user)
 
     base_q = db.query(
         cast(ReviewTask.create_time, Date).label("date"),
         func.count(ReviewTask.id)
-    ).filter(ReviewTask.create_time >= cutoff, ReviewTask.status != "deleted",
-             *review_scope).group_by("date")
+    ).filter(
+        ReviewTask.create_time >= cutoff,
+        ReviewTask.status != "deleted",
+        ReviewTask.project_id.in_(visible_ids),
+    ).group_by("date")
     rows = base_q.all()
     data_map = {str(r[0]): r[1] for r in rows}
     result = []

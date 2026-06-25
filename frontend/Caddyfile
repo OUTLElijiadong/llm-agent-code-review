@@ -8,10 +8,6 @@
 (app_gateway) {
     encode gzip zstd
 
-    header {
-        Strict-Transport-Security "max-age=31536000"
-    }
-
     request_body {
         max_size 50MB
     }
@@ -51,7 +47,12 @@
     }
 }
 
+# 域名 HTTP：只允许跳转到 HTTPS，不直接提供应用或 API
 http://lijiadong.cn {
+    redir https://lijiadong.cn{uri} permanent
+}
+
+http://www.lijiadong.cn {
     redir https://lijiadong.cn{uri} permanent
 }
 
@@ -59,9 +60,17 @@ http:// {
     redir https://lijiadong.cn{uri} permanent
 }
 
+# 域名 HTTPS：自动证书 + HSTS
 lijiadong.cn {
     tls {
         key_type rsa2048
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
     }
     import app_gateway
 }

@@ -4,6 +4,7 @@ API路由聚合模块
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    agent_governance,
     agents,
     ai_chat,
     ai_logs,
@@ -20,6 +21,7 @@ from app.api.v1 import (
     knowledge,
     llm_config,
     maintenance,
+    project_members,
     projects,
     reports,
     review,
@@ -33,6 +35,8 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["鉴权"])
 api_router.include_router(users.router, prefix="/users", tags=["用户管理"])
 api_router.include_router(projects.router, prefix="/projects", tags=["项目"])
+# v2.4: 项目成员管理(挂在 /projects/{project_id}/members 下)
+api_router.include_router(project_members.router, prefix="/projects/{project_id}/members", tags=["项目成员"])
 api_router.include_router(code_files.router, prefix="/code-files", tags=["代码文件"])
 api_router.include_router(rules.router, prefix="/rules", tags=["规则"])
 api_router.include_router(review.router, prefix="/review", tags=["审查"])
@@ -53,3 +57,4 @@ api_router.include_router(forum.router, prefix="/forum", tags=["开发者论坛"
 api_router.include_router(user_profile.router, prefix="/me", tags=["用户画像"])
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["个人知识库"])
 api_router.include_router(llm_config.router, prefix="/admin/llm", tags=["大模型配置"])
+api_router.include_router(agent_governance.router, prefix="/admin", tags=["Agent治理"])

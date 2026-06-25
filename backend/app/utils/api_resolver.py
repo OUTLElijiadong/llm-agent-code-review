@@ -13,14 +13,18 @@ API 配置解析器 —— 统一 API 配置入口
 """
 import base64
 import hashlib
+import ipaddress
+import socket
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import ValidationError
 
 # ── 密钥派生 ────────────────────────────────────────────
 
@@ -59,6 +63,101 @@ def mask_api_key(key: str) -> str:
     if not key or len(key) < 12:
         return "****"
     return key[:5] + "****" + key[-4:]
+
+
+# ── API Base URL 安全校验 ───────────────────────────────
+
+_BLOCKED_HOSTS = {"localhost", "localhost.localdomain"}
+_BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".localdomain", ".internal", ".lan", ".home", ".corp")
+
+
+def _is_blocked_ip(ip_text: str) -> bool:
+    """判断地址是否属于不应被普通用户配置访问的非公网范围。
+
+    Args:
+        ip_text: IPv4 或 IPv6 字符串。
+
+    Returns:
+        bool: True 表示默认应阻止访问。
+    """
+    ip = ipaddress.ip_address(ip_text)
+    return not ip.is_global
+
+
+def _resolve_host(host: str) -> set[str]:
+    """解析主机名为 IP 集合。
+
+    Args:
+        host: URL 中的 hostname。
+
+    Returns:
+        set[str]: 解析到的 IP 地址集合。
+    """
+    rows = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return {row[4][0] for row in rows}
+
+
+def validate_ai_base_url(
+    base_url: str,
+    *,
+    resolve_host: bool = False,
+    allow_private: Optional[bool] = None,
+) -> str:
+    """校验 OpenAI-compatible API base_url,阻止 SSRF 高风险地址。
+
+    Args:
+        base_url: 用户或系统配置的 API 端点。
+        resolve_host: 是否解析 DNS 并校验解析结果。
+        allow_private: 是否允许私有/本机地址;None 时读取配置。
+
+    Returns:
+        str: 去除尾部斜杠后的规范化 URL。
+
+    Raises:
+        ValidationError: URL 非法或指向非公网地址。
+    """
+    allow_private = settings.allow_private_ai_base_url if allow_private is None else allow_private
+    url = (base_url or "").strip().rstrip("/")
+    if not url:
+        raise ValidationError("API 端点不能为空", code=40001)
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValidationError("API 端点必须是 http(s) URL", code=40001)
+    if parsed.username or parsed.password:
+        raise ValidationError("API 端点不能包含用户名或密码", code=40001)
+    if parsed.query or parsed.fragment:
+        raise ValidationError("API 端点不能包含 query 或 fragment", code=40001)
+
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValidationError("API 端点缺少主机名", code=40001)
+
+    if allow_private:
+        return url
+
+    if host in _BLOCKED_HOSTS or host.endswith(_BLOCKED_HOST_SUFFIXES) or "." not in host:
+        raise ValidationError("API 端点不能指向本机或内网主机名", code=40001)
+
+    try:
+        if _is_blocked_ip(host):
+            raise ValidationError("API 端点不能指向内网或保留地址", code=40001)
+    except ValueError:
+        pass
+
+    if resolve_host:
+        try:
+            addresses = _resolve_host(host)
+        except socket.gaierror as exc:
+            raise ValidationError("API 端点域名无法解析", code=40001) from exc
+        for addr in addresses:
+            try:
+                if _is_blocked_ip(addr):
+                    raise ValidationError("API 端点解析到内网或保留地址", code=40001)
+            except ValueError:
+                continue
+
+    return url
 
 
 # ── 解析结果 ────────────────────────────────────────────
@@ -102,9 +201,25 @@ def resolve_api_config(
         if row:
             key = decrypt_api_key(row.api_key_enc)
             if key:
+                try:
+                    base_url = validate_ai_base_url(
+                        row.base_url,
+                        resolve_host=settings.enforce_ai_base_url_dns_check,
+                    )
+                except ValidationError as exc:
+                    logger.warning(f"[api_resolver] 用户 {user_id} 的 API 端点不安全,回退系统默认: {exc.message}")
+                    base_url = ""
+                if not base_url:
+                    return ApiConfig(
+                        api_key=settings.deepseek_api_key,
+                        base_url=validate_ai_base_url(settings.deepseek_base_url),
+                        model=settings.deepseek_model,
+                        provider="deepseek",
+                        source="system",
+                    )
                 return ApiConfig(
                     api_key=key,
-                    base_url=row.base_url,
+                    base_url=base_url,
                     model=row.model,
                     provider=row.provider,
                     source="user",
@@ -137,7 +252,7 @@ def resolve_api_config(
     # 回退系统默认
     return ApiConfig(
         api_key=settings.deepseek_api_key,
-        base_url=settings.deepseek_base_url,
+        base_url=validate_ai_base_url(settings.deepseek_base_url),
         model=settings.deepseek_model,
         provider="deepseek",
         source="system",

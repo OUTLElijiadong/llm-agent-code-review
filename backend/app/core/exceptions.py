@@ -51,6 +51,16 @@ class ValidationError(AppError):
     http_status = 400
 
 
+class BadRequestError(ValidationError):
+    """坏请求异常:客户端请求参数或语义错误(HTTP 400)
+
+    继承 ValidationError,code=40000,用于 project_member_service 等模块
+    区分"通用参数校验失败"与"业务语义坏请求"(如已是项目成员)。
+    """
+
+    code = 40000
+
+
 class ExternalServiceError(AppError):
     """外部服务异常"""
 

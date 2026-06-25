@@ -133,12 +133,12 @@
               </li>
               <li>
                 <strong>DeepSeek 个人 Key</strong>：在
-                <a href="https://platform.deepseek.com" target="_blank">DeepSeek 开放平台</a>
+                <a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer">DeepSeek 开放平台</a>
                 获取 API Key，填入后即刻生效。审查、聊天、安全扫描均使用您的个人配额。
               </li>
               <li>
-                <strong>OpenAI 兼容</strong>：支持所有 OpenAI 兼容接口（如 Ollama、
-                vLLM、OpenRouter 等），填入对应地址和模型名即可。
+                <strong>OpenAI 兼容</strong>：支持公网 OpenAI 兼容接口（如 OpenRouter、
+                DeepSeek 兼容端点等），填入对应地址和模型名即可。
               </li>
             </ul>
             <h4>安全说明</h4>
@@ -146,6 +146,7 @@
               <li>API Key 使用 AES-128-CBC + HMAC 加密存储，密钥由平台 JWT_SECRET 派生。</li>
               <li>页面中显示的 Key 始终脱敏（仅显示前 5 位和后 4 位）。</li>
               <li>测试连接不会存储任何数据，仅验证连通性和认证。</li>
+              <li>为防止 SSRF，默认禁止 API 端点指向 localhost、内网或链路本地地址；如需内网模型服务，请由管理员显式配置后端开关。</li>
               <li>删除配置后立即恢复使用平台默认 API，加密存储的 Key 从数据库彻底删除。</li>
             </ul>
           </div>

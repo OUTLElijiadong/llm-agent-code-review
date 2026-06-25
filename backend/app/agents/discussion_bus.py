@@ -27,6 +27,7 @@ class DiscussionSession:
     session_id: str
     task_id: int
     file_name: str
+    owner_user_id: int = 0
     turns: list[DiscussionTurn] = field(default_factory=list)
     status: str = "active"  # active | paused | concluded
     max_rounds: int = 3
@@ -51,10 +52,12 @@ class DiscussionBus:
     # ── 会话管理 ──
 
     def create_session(self, session_id: str, task_id: int, file_name: str,
+                       owner_user_id: int = 0,
                        max_rounds: int = 3) -> DiscussionSession:
         session = DiscussionSession(
             session_id=session_id, task_id=task_id,
-            file_name=file_name, max_rounds=max_rounds,
+            file_name=file_name, owner_user_id=owner_user_id,
+            max_rounds=max_rounds,
         )
         self._sessions[session_id] = session
         self._queues[session_id] = []

@@ -2,6 +2,11 @@
 
 把"安全态势聚合"从 Agent 中独立出来 — Agent 只负责"扫",
 service 负责"聚",前者依赖 LLM 链路,后者纯 SQL 查询。
+
+v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
+    - admin 视角: 全平台聚合(scope='global')
+    - 非 admin 视角: owner ∪ member 项目聚合(scope='self')
+    - _project_ids_for_user 委托给 project_member_service.get_visible_project_ids
 """
 from __future__ import annotations
 
@@ -16,25 +21,26 @@ from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from app.services.project_member_service import get_visible_project_ids
 
 _SEVERITY_KEYS = ("严重", "高", "中", "低")
 
 
 def _project_ids_for_user(db: Session, user: Optional[User]) -> tuple[list[int], str]:
-    """返回当前用户可见的项目 ID 列表 + 范围标识"""
-    if user is None or user.role == "admin":
-        rows = (
-            db.query(Project.id)
-            .filter(Project.status != "deleted")
-            .all()
-        )
-        return [r[0] for r in rows], "global"
-    rows = (
-        db.query(Project.id)
-        .filter(Project.user_id == user.id, Project.status != "deleted")
-        .all()
-    )
-    return [r[0] for r in rows], "self"
+    """返回当前用户可见的项目 ID 列表 + 范围标识(基于 project_member 关系)
+
+    委托给 project_member_service.get_visible_project_ids 统一实现:
+        - admin / None: 全部非删除项目,scope='global'
+        - 非 admin: owner ∪ member 项目,scope='self'
+
+    Args:
+        db: 数据库会话
+        user: 当前用户(None 视为管理员视角)
+
+    Returns:
+        tuple[list[int], str]: (项目ID列表, scope)
+    """
+    return get_visible_project_ids(db, user)
 
 
 def _infer_owasp_from_issue(issue: ReviewIssue,

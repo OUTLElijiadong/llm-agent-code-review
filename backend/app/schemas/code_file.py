@@ -38,6 +38,7 @@ class CodeFileOut(BaseModel):
     size_bytes: int
     line_count: int
     version_no: int
+    is_binary: int = 0
     create_time: datetime
     update_time: datetime
 
@@ -45,5 +46,9 @@ class CodeFileOut(BaseModel):
 
 
 class CodeFileDetailOut(CodeFileOut):
-    """代码文件详情响应(含内容)"""
+    """代码文件详情响应(含内容)
+
+    v2: 二进制文件(is_binary=1)的 content 字段为空字符串,
+    前端通过 is_binary=1 判断,改用下载接口获取原文件。
+    """
     content: str

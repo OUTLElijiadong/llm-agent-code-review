@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     deepseek_timeout: int = 60
     deepseek_max_retries: int = 2
     deepseek_chunk_threshold: int = 6000
+    allow_private_ai_base_url: bool = False
+    enforce_ai_base_url_dns_check: bool = False
 
     # ── RAG 嵌入(embedding)配置 ──
     # 留空则降级为本地确定性哈希向量,保证无 Key 也能跑通(语义弱)。
@@ -51,6 +53,13 @@ class Settings(BaseSettings):
     embedding_model: str = ""
     embedding_dim: int = 256          # 本地降级向量维度
     embedding_timeout: int = 30
+
+    agent_governance_scheduler_enabled: bool = True
+    agent_knowledge_fetch_timeout: int = 15
+    agent_knowledge_fetch_max_bytes: int = 1024 * 1024
+    agent_knowledge_allow_private_urls: bool = False
+    agent_knowledge_enforce_dns_check: bool = False
+    agent_knowledge_github_token: str = ""
 
     max_upload_size: int = 20 * 1024 * 1024  # 20MB
     allowed_extensions: List[str] = ["*"]

@@ -125,3 +125,17 @@ export async function uploadFolder(
   const r = await httpClient.post('/code-files/upload-folder', formData)
   return r.data.data
 }
+
+/**
+ * 下载二进制文件原始字节
+ * v2 新增:二进制文件(图片/可执行文件等)不通过编辑器展示 base64,
+ * 前端通过此接口下载原文件。
+ * @param fileId 文件ID
+ * @returns Blob(可直接触发浏览器下载)
+ */
+export async function downloadBinary(fileId: number): Promise<Blob> {
+  const r = await httpClient.get(`/code-files/${fileId}/download`, {
+    responseType: 'blob',
+  })
+  return r.data
+}

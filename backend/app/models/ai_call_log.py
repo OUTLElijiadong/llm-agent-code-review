@@ -20,12 +20,16 @@ class AiCallLog(Base, IdMixin):
         Index("ix_ai_call_log_task", "task_id"),
         Index("ix_ai_call_log_user_create", "user_id", "create_time"),
         Index("ix_ai_call_log_status", "status"),
+        Index("ix_ai_call_log_agent_label", "agent_label"),
     )
 
     task_id = Column(BigInteger)
     user_id = Column(BigInteger)
     file_id = Column(BigInteger)
     chunk_index = Column(Integer, comment="分片序号,从0开始")
+    # AgentSkill 升级:标识本次 LLM 调用归属于哪个 Agent,用于 Skill.reflect_from_logs
+    # 默认 NULL 兼容历史数据(由调用方按需写入)
+    agent_label = Column(String(50), nullable=True, comment="调用 Agent 名称,默认 NULL 兼容历史数据")
     model_name = Column(String(50), nullable=False)
     prompt_tokens = Column(Integer)
     completion_tokens = Column(Integer)

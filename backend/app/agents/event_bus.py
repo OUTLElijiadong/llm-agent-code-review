@@ -72,8 +72,19 @@ def emit_event(
     parent: str = "",
     message: str = "",
     payload: Optional[dict] = None,
+    user_id: Optional[int] = None,
 ) -> None:
-    """Agent 内统一 emit 辅助"""
+    """Agent 内统一 emit 辅助
+
+    Args:
+        type_: 事件类型
+        agent: Agent 标识
+        trace_id: 调用链 ID
+        parent: 父事件 ID(可选)
+        message: 事件描述
+        payload: 事件负载数据
+        user_id: 归属用户 ID(用于 SSE 按用户隔离,None 表示系统级事件)
+    """
     AgentEventBus.instance().publish(
         AgentEvent(
             type=type_,
@@ -82,5 +93,6 @@ def emit_event(
             parent=parent,
             message=message,
             payload=payload or {},
+            user_id=user_id,
         ),
     )

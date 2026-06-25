@@ -10,7 +10,6 @@
 """
 import json
 from datetime import datetime, timezone
-from typing import Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -131,7 +130,7 @@ def refresh_implicit(db: Session, user_id: int, force: bool = False) -> UserProf
         .all()
     )
     languages = {lang: cnt for lang, cnt in lang_rows if lang}
-    top_languages = [l for l, _ in sorted(languages.items(), key=lambda x: x[1], reverse=True)[:3]]
+    top_languages = [language for language, _ in sorted(languages.items(), key=lambda x: x[1], reverse=True)[:3]]
 
     # 3) 社区活跃
     forum_posts = db.query(ForumPost).filter(

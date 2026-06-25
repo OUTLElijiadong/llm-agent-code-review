@@ -166,7 +166,7 @@ const securityScanVisible = ref(false)
 const fileInputRef = ref<HTMLInputElement>()
 const folderInputRef = ref<HTMLInputElement>()
 const uploading = ref(false)
-const acceptFileTypes = '.py,.js,.ts,.jsx,.tsx,.vue,.java,.go,.c,.cpp,.h,.hpp,.css,.html,.json,.yaml,.yml,.xml'
+const acceptFileTypes = '.py,.js,.ts,.jsx,.tsx,.vue,.java,.go,.c,.cpp,.h,.hpp,.css,.html,.json,.yaml,.yml,.xml,.zip,.tar,.gz,.tgz,.bz2,.xz'
 
 const statusLabels: Record<string, string> = {
   pending: '待处理',
@@ -221,6 +221,18 @@ function getExtDetail(filename: string): string {
   return m ? '.' + m[1].toLowerCase() : ''
 }
 
+/** v2: 压缩包扩展名集合,后端将自动解压并批量创建文件 */
+const ARCHIVE_EXTS = new Set(['.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz'])
+
+/**
+ * 判断文件是否为压缩包
+ * @param filename - 文件名
+ * @returns 是否压缩包
+ */
+function isArchiveFile(filename: string): boolean {
+  return ARCHIVE_EXTS.has(getExtDetail(filename))
+}
+
 const VALID_EXTS_DETAIL = new Set([
   '.py', '.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs',
   '.vue', '.svelte', '.java', '.kt', '.go', '.rs', '.rb', '.php',
@@ -228,6 +240,8 @@ const VALID_EXTS_DETAIL = new Set([
   '.css', '.scss', '.less', '.sass',
   '.html', '.htm', '.json', '.yaml', '.yml', '.toml', '.xml',
   '.sql', '.sh', '.bash', '.md', '.txt', '.cfg', '.ini',
+  // v2: 压缩包扩展名,后端自动解压
+  '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz',
 ])
 
 async function onFileSelected(e: Event): Promise<void> {
@@ -250,14 +264,41 @@ async function onFileSelected(e: Event): Promise<void> {
       formData.append('file', files[0])
       formData.append('project_id', String(projectId))
       await upload(formData)
-      ElMessage.success('文件上传成功')
-    } else if (files.length > 1) {
-      const result = await uploadFolder(projectId, files)
-      if (result.success_count > 0) {
-        ElMessage.success(`成功上传 ${result.success_count} 个文件`)
+      // v2: 压缩包上传后后端自动解压,提示用户解压结果
+      if (isArchiveFile(files[0].name)) {
+        ElMessage.success(`压缩包 ${files[0].name} 已上传并自动解压,请刷新文件列表查看`)
+      } else {
+        ElMessage.success('文件上传成功')
       }
-      if (result.fail_count > 0) {
-        ElMessage.warning(`${result.fail_count} 个文件上传失败`)
+    } else if (files.length > 1) {
+      // v2: 多文件场景分离压缩包与普通文件
+      const archiveFiles = files.filter(f => isArchiveFile(f.name))
+      const normalFiles = files.filter(f => !isArchiveFile(f.name))
+      let successCount = 0
+      let failCount = 0
+      // 普通文件走批量上传接口
+      if (normalFiles.length > 0) {
+        const result = await uploadFolder(projectId, normalFiles)
+        successCount += result.success_count
+        failCount += result.fail_count
+      }
+      // 压缩包逐个上传(后端自动解压)
+      for (const af of archiveFiles) {
+        try {
+          const formData = new FormData()
+          formData.append('file', af)
+          formData.append('project_id', String(projectId))
+          await upload(formData)
+          successCount += 1
+        } catch {
+          failCount += 1
+        }
+      }
+      if (successCount > 0) {
+        ElMessage.success(`成功上传 ${successCount} 个文件(含压缩包自动解压)`)
+      }
+      if (failCount > 0) {
+        ElMessage.warning(`${failCount} 个文件上传失败`)
       }
     }
     fileListKey.value++

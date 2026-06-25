@@ -10,6 +10,26 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
+from app.models.agent_governance import (  # noqa: F401,E402
+    AgentAlert,
+    AgentArtifactVersion,
+    AgentJob,
+    AgentJobRun,
+    AgentKnowledgeChunk,
+    AgentKnowledgeDoc,
+    AgentKnowledgeSource,
+    AgentMemory,
+    AgentMetricSnapshot,
+    AgentProfile,
+    AgentReflection,
+    AgentRewardEvent,
+    AgentSkillBinding,
+    AgentToolPermission,
+    ApprovalItem,
+    PolicyDecisionLog,
+    PolicyRule,
+    ToolCallLog,
+)
 from app.models.ai_call_log import AiCallLog  # noqa: F401,E402
 from app.models.api_config import UserApiConfig  # noqa: F401,E402  -- v3.1
 from app.models.audit_log import AuditLog  # noqa: F401,E402
@@ -18,6 +38,7 @@ from app.models.code_version import CodeVersion  # noqa: F401,E402
 from app.models.eval_case import EvalCase  # noqa: F401,E402
 from app.models.evolution_proposal import EvolutionProposal  # noqa: F401,E402
 from app.models.project import Project  # noqa: F401,E402
+from app.models.project_member import ProjectMember  # noqa: F401,E402  -- v2.4
 from app.models.review_experience import ReviewExperience  # noqa: F401,E402
 from app.models.review_issue import ReviewIssue  # noqa: F401,E402
 from app.models.review_report import ReviewReport  # noqa: F401,E402

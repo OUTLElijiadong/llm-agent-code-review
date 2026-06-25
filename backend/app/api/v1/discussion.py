@@ -70,6 +70,7 @@ def start_discussion(
         session_id=session_id,
         task_id=0,
         file_name=code_file.file_name,
+        owner_user_id=user.id,
         max_rounds=rounds,
     )
 

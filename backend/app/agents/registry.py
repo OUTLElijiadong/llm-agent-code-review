@@ -49,15 +49,29 @@ class AgentRegistry:
     def list_runtime(self) -> List[Dict]:
         """返回每个 Agent 的完整运行时元数据
 
+        v3.0 AgentSkill 升级:skills 字段从 list[str] 升级为结构化 list[dict]
+        (从 SkillRegistry 取元数据);若 Agent 未挂载 Skill,fallback 到原 tuple of str
+        保持向后兼容。
+
         Returns:
             list[dict]: 字段对齐前端 AgentRuntimeOut Schema
         """
         from app.agents.base import BaseAgent
+        from app.agents.skills.registry import SkillRegistry
 
         items: List[Dict] = []
+        skill_reg = SkillRegistry.instance()
         for name, a in self._agents.items():
             if not isinstance(a, BaseAgent):
                 continue
+            # 优先取 SkillRegistry 结构化元数据;为空则 fallback 到 Agent.skills tuple
+            skills_meta = skill_reg.list_meta(name)
+            if not skills_meta:
+                skills_meta = [
+                    {"name": s, "description": s, "type": "legacy",
+                     "invocable": False, "agent_name": name}
+                    for s in (getattr(a, "skills", ()) or ())
+                ]
             items.append({
                 "code": name,
                 "name": getattr(a, "name", name),
@@ -65,7 +79,7 @@ class AgentRegistry:
                 "icon": getattr(a, "icon", "base"),
                 "color": getattr(a, "color", "#5B58E8"),
                 "category": getattr(a, "category", "general"),
-                "skills": list(getattr(a, "skills", ()) or ()),
+                "skills": skills_meta,
                 "status": "idle",     # M1 阶段统一返回 idle,运行时状态由 EventBus 推送(M2)
                 "model": getattr(a, "_model", ""),
             })
@@ -76,9 +90,19 @@ class AgentRegistry:
 
     def get_metadata(self, name: str) -> Optional[Dict]:
         from app.agents.base import BaseAgent
+        from app.agents.skills.registry import SkillRegistry
+
         a = self._agents.get(name)
         if not isinstance(a, BaseAgent):
             return None
+        # v3.0: skills 字段升级为结构化 list[dict]
+        skills_meta = SkillRegistry.instance().list_meta(name)
+        if not skills_meta:
+            skills_meta = [
+                {"name": s, "description": s, "type": "legacy",
+                 "invocable": False, "agent_name": name}
+                for s in (a.skills or ())
+            ]
         return {
             "code": name,
             "name": a.name,
@@ -86,7 +110,7 @@ class AgentRegistry:
             "icon": a.icon,
             "color": a.color,
             "category": a.category,
-            "skills": list(a.skills or ()),
+            "skills": skills_meta,
         }
 
     def summary(self) -> Dict:

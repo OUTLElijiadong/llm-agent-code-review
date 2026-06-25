@@ -32,3 +32,9 @@ class EvolutionProposal(Base, IdMixin, TimestampMixin):
     reviewed_by = Column(BigInteger, comment="审批人(admin)")
     reviewed_at = Column(DateTime, comment="审批时间(UTC)")
     note = Column(String(500), comment="驳回原因/回滚说明")
+    agent_name = Column(
+        String(50),
+        nullable=False,
+        default="evolution",
+        comment="提案产出 Agent 名称,默认 evolution 兼容旧数据",
+    )

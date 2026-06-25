@@ -60,6 +60,9 @@ class BaseAgent:
         self._api_key = settings.deepseek_api_key
         self._max_retries = settings.deepseek_max_retries
         self._timeout = settings.deepseek_timeout
+        # AgentSkill 自进化与总调度升级:Skill 实例列表,由 _init_skills() 填充
+        self._skills: list = []
+        self._init_skills()
 
     def _trace_id(self, ctx: Optional[AgentContext]) -> str:
         """从 ctx 中读取调用链 trace_id,没有则生成一个孤儿 trace"""
@@ -102,7 +105,9 @@ class BaseAgent:
             AgentResult
         """
         # 解析最终使用的 API 配置：传入 > 实例默认
-        base_url = (api_config.base_url if api_config else self._base_url).rstrip("/")
+        from app.utils.api_resolver import validate_ai_base_url
+
+        base_url = validate_ai_base_url(api_config.base_url if api_config else self._base_url)
         api_key = api_config.api_key if api_config else self._api_key
         model = api_config.model if api_config else self._model
 
@@ -127,7 +132,7 @@ class BaseAgent:
         for attempt in range(self._max_retries + 1):
             t0 = time.time()
             try:
-                with httpx.Client(timeout=self._timeout) as client:
+                with httpx.Client(timeout=self._timeout, trust_env=False) as client:
                     resp = client.post(
                         f"{base_url}/chat/completions",
                         headers={
@@ -203,3 +208,31 @@ class BaseAgent:
                 duration_ms=result.duration_ms,
             )
         return result
+
+    # ── AgentSkill 自进化与总调度升级:Skill 挂载接口 ──
+
+    def attach_skill(self, skill: "BaseSkill") -> None:
+        """挂载 Skill 并注册到 SkillRegistry
+
+        将 Skill 实例加入 self._skills,并同步注册到全局 SkillRegistry,
+        供 Orchestrator.invoke_skill / ChatPlanner 查询调用。
+
+        Args:
+            skill: Skill 实例(BaseSkill 子类)
+        """
+        self._skills.append(skill)
+        from app.agents.skills.registry import SkillRegistry
+
+        SkillRegistry.instance().register(self.name, skill)
+
+    def _init_skills(self) -> None:
+        """子类 override:初始化并挂载专属 Skill
+
+        默认空实现。子类按需 override,在方法内构造 SelfImprovement + Proactive Skill
+        并调用 self.attach_skill() 挂载。此方法在 __init__ 末尾自动调用。
+
+        Note:
+            - 子类 override 时不应调用 super()._init_skills()(基类为空操作)
+            - 挂载顺序建议:先 SelfImprovement,后 Proactive
+        """
+        pass

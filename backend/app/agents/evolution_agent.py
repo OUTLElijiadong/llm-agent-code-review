@@ -164,7 +164,7 @@ class EvolutionAgent(BaseAgent):
         new_rule_min_accepted: int = 3,
         max_new_rules: int = 3,
     ):
-        super().__init__(temperature=0.2, max_tokens=1024)
+        # 先设置子类属性(供 _init_skills 使用,因 BaseAgent.__init__ 末尾会触发 _init_skills)
         self._db: Optional[Session] = None
         self._user = None
         self.min_samples = min_samples
@@ -173,6 +173,35 @@ class EvolutionAgent(BaseAgent):
         self.disable_fp_rate = disable_fp_rate
         self.new_rule_min_accepted = new_rule_min_accepted
         self.max_new_rules = max_new_rules
+        self._self_improve_skill = None
+        # 调 super().__init__(触发 _init_skills 挂载专属 Skill)
+        super().__init__(temperature=0.2, max_tokens=1024)
+
+    def _init_skills(self) -> None:
+        """子类 override:挂载 EvolutionSelfImprovementSkill + EvolutionProactiveSkill
+
+        将七步闭环逻辑下沉到 Skill,EvolutionAgent.run() 委托给 SelfImprovementSkill.evolve()。
+        distiller 传入 self._distill_rule 供新规则蒸馏使用。
+        """
+        from app.agents.skills.evolution import (
+            EvolutionProactiveSkill,
+            EvolutionSelfImprovementSkill,
+        )
+
+        self.attach_skill(
+            EvolutionSelfImprovementSkill(
+                agent_name=self.name,
+                distiller=self._distill_rule,
+                min_samples=self.min_samples,
+                min_distinct_tasks=self.min_distinct_tasks,
+                high_fp_rate=self.high_fp_rate,
+                disable_fp_rate=self.disable_fp_rate,
+                new_rule_min_accepted=self.new_rule_min_accepted,
+                max_new_rules=self.max_new_rules,
+            )
+        )
+        self.attach_skill(EvolutionProactiveSkill(self.name))
+        self._self_improve_skill = self._skills[0]
 
     def inject(self, db: Session, user=None) -> None:
         self._db = db
@@ -186,63 +215,33 @@ class EvolutionAgent(BaseAgent):
         distiller: Optional[Callable] = None,
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
-        """执行一轮进化:聚合反馈 → 生成提案 → 持久化(去重)
+        """执行一轮进化(委托给 SelfImprovementSkill.evolve)
+
+        保持原签名兼容,内部委托给 _self_improve_skill.evolve()。
+        七步闭环逻辑(聚合反馈→生成提案→闸门→持久化)下沉到 Skill。
 
         Args:
             window_days: 反馈滑动窗口天数
             distiller: 可注入的新规则蒸馏器 callable(experience)->dict|None;
-                默认用 self._distill_rule(走 LLM),测试可注入离线实现。
+                传入则临时替换 Skill 的 distiller(测试用),默认用 self._distill_rule
+            ctx: 上下文
 
         Returns:
-            AgentResult: data = {fp_proposals, new_rule_proposals, created, skipped}
+            AgentResult: data = {proposals, created, skipped}
         """
         if not self._db:
             return AgentResult(success=False, error="DB 未注入")
-        db = self._db
-
-        stats = feedback_service.aggregate_by_issue_type(db, window_days)
-        rules = db.query(ReviewRule).filter(ReviewRule.enabled == 1).all()
-
-        fp_proposals = generate_fp_proposals(
-            stats, rules,
-            min_samples=self.min_samples,
-            min_distinct_tasks=self.min_distinct_tasks,
-            high_fp_rate=self.high_fp_rate,
-            disable_fp_rate=self.disable_fp_rate,
+        # 支持测试注入 distiller(临时替换 Skill 的 distiller)
+        if distiller is not None and self._self_improve_skill is not None:
+            self._self_improve_skill.distiller = distiller
+        # 委托给 SelfImprovementSkill.evolve()(七步闭环:聚合→反思→闸门→持久化)
+        skill_result = self._self_improve_skill.evolve(self._db, window_days, ctx)
+        return AgentResult(
+            success=skill_result.success,
+            data=skill_result.data,
+            error=skill_result.error,
+            duration_ms=skill_result.duration_ms,
         )
-
-        new_rule_proposals = self._generate_new_rule_proposals(
-            db, rules, distiller=distiller or self._distill_rule,
-        )
-
-        created, skipped = 0, 0
-        for p in fp_proposals + new_rule_proposals:
-            if self._is_duplicate(db, p):
-                skipped += 1
-                continue
-            db.add(EvolutionProposal(
-                proposal_type=p["proposal_type"],
-                target_rule_id=p.get("target_rule_id"),
-                title=p["title"][:200],
-                payload=json.dumps(p["payload"], ensure_ascii=False),
-                evidence=json.dumps(p.get("evidence", {}), ensure_ascii=False),
-                status="pending",
-                created_by=self.name,
-            ))
-            created += 1
-        db.commit()
-
-        logger.info(
-            f"[evolution] 进化运行完成 window={window_days}d "
-            f"fp={len(fp_proposals)} new_rule={len(new_rule_proposals)} "
-            f"created={created} skipped={skipped}",
-        )
-        return AgentResult(success=True, data={
-            "fp_proposals": len(fp_proposals),
-            "new_rule_proposals": len(new_rule_proposals),
-            "created": created,
-            "skipped": skipped,
-        })
 
     def _is_duplicate(self, db: Session, proposal: dict) -> bool:
         """同类未决提案去重:相同类型+目标规则,或相同新规则 rule_code"""

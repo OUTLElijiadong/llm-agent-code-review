@@ -279,6 +279,7 @@ class ChatAssistantAgent(BaseAgent):
         ClarifyStore.instance().put(clarify_id, {
             "intent": intent_name,
             "payload": payload,
+            "user_id": ctx.user_id if ctx else None,
         })
         self._emit(AgentEventType.CLARIFY, ctx,
                    message=f"等待用户补充: {', '.join(missing)}",

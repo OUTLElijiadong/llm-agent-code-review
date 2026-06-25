@@ -23,7 +23,7 @@
 
 ## 验收结论
 
-初次配置时 `https://lijiadong.cn` 已完成服务器侧与公网验收；2026-06-12 复核发现外部公网链路出现 reset/timeout，最新状态以追加复核记录为准。
+初次配置时 `https://lijiadong.cn` 已完成服务器侧与公网验收；2026-06-12 复核发现外部公网链路出现 reset/timeout。最新一次处理已把服务器恢复为 HTTPS-only 入口并完成部署，但公网域名仍被 DNSPod/Tencent webblock 拦截，需在腾讯云控制台处理备案/域名接入状态。
 
 ## 2026-06-12 HTTPS 强制入口复核
 
@@ -33,11 +33,16 @@
 | 服务器侧 HTTPS 登录 | 已完成 | 服务器本机 `POST https://lijiadong.cn/api/auth/login` 返回 `200` |
 | 证书兼容性 | 已完成 | 已重新签发 Let’s Encrypt RSA 证书，公钥算法 `rsaEncryption` |
 | Caddy HTTPS 策略 | 已完成 | 本地配置已限制协议为 `h1 h2`，HTTP 全量跳 HTTPS，HTTPS 开启 HSTS |
-| API 端口策略 | 已完成 | 本地 Compose 已将 `8000`、`3307` 改为 `127.0.0.1` 绑定，公网 API 统一走 `443` |
+| API 端口策略 | 已完成 | 本地与服务器 Compose 均已将 `8000`、`3307` 改为 `127.0.0.1` 绑定，公网 API 统一走 `443` |
 | 本地配置校验 | 已完成 | `bash -n deploy/deploy.sh`、`cd deploy && docker compose config --quiet` 均通过 |
-| 服务器同步 | 阻塞 | SSH 到 `81.70.251.90:22` TCP 可建立，但卡在 banner 阶段，`rsync` 无法上传最新配置 |
-| 外部公网 HTTPS | 阻塞 | 本机与 Check-Host 多节点对 `https://lijiadong.cn/` 出现 `Connection reset by peer` 或超时 |
+| 服务器同步 | 已完成 | 已同步 `frontend/Caddyfile`、前端源码和 `deploy/docker-compose.yml` 到 `/opt/code-review`，并重建/重启 `cr_frontend` |
+| 服务器端口复核 | 已完成 | `cr_frontend` 暴露 `80/443`；`cr_backend` 为 `127.0.0.1:8000`；`cr_mysql` 为 `127.0.0.1:3307` |
+| 服务器侧 HTTPS 登录 | 已完成 | 服务器本机 `POST https://lijiadong.cn/api/auth/login` 返回 `200`，业务 `code=0` |
+| IP 明文访问策略 | 已完成 | 公网 `http://81.70.251.90/...` 由 Caddy 返回 `301` 到 `https://lijiadong.cn/...` |
+| 外部公网 HTTP Host | 阻塞 | 本机强制解析 `lijiadong.cn:80 -> 81.70.251.90` 时返回 `https://dnspod.qcloud.com/static/webblock.html?d=lijiadong.cn`；服务器抓包显示请求到达容器后收到对端方向 `RST` |
+| 外部公网 HTTPS | 阻塞 | 本机强制解析 `lijiadong.cn:443 -> 81.70.251.90` 后 TCP 可连通，但 TLS ClientHello 后 `SSL_ERROR_SYSCALL`；服务器抓包显示 ClientHello 到达容器后收到对端方向 `RST` |
+| 腾讯云控制台可操作性 | 阻塞 | 本机无腾讯云 CLI 凭证；Chrome 未运行且未安装 Codex Chrome Extension，无法直接代操作控制台 |
 
 ### 阻塞判断
 
-应用侧已完成 HTTPS 强制入口配置；服务器本机 HTTPS 与登录接口曾验证通过。当前剩余问题发生在公网链路/云侧策略层：TCP 端口可建立连接，但 HTTPS/SSH 在应用层握手前后超时或被 reset。需要先恢复 SSH 或通过腾讯云控制台检查实例网络、安全组、云防火墙/主机安全、ICP备案及域名接入策略，然后再执行服务器同步与线上复测。
+应用侧已完成 HTTPS 强制入口配置，服务器本机 HTTPS、健康检查和登录接口均验证通过。当前剩余问题发生在公网域名接入/云侧策略层：HTTP Host 被 DNSPod webblock 伪响应，HTTPS 在 TLS ClientHello 后被对端方向 RST 断开。域名注册状态正常、实名认证通过、DNS 服务器正常不能证明网站访问已备案接入放行；需要通过腾讯云控制台检查并处理 `lijiadong.cn` 的 ICP 备案、接入备案或域名管控状态。若已备案，需要向腾讯云提交工单附上上述 `webblock.html?d=lijiadong.cn` 与服务器抓包 RST 证据。

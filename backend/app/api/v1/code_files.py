@@ -1,9 +1,10 @@
 """
-代码文件管理API路由: 上传、新增、编辑、重命名、删除、版本管理
+代码文件管理API路由: 上传、新增、编辑、重命名、删除、版本管理、二进制下载
 """
 from typing import List
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -168,3 +169,32 @@ def restore_version(file_id: int, version_no: int, db: Session = Depends(get_db)
     """回滚到指定历史版本"""
     ver = code_file_service.restore_version(db, user, file_id, version_no)
     return Resp(data={"version_no": ver})
+
+
+@router.get("/{file_id}/download")
+def download_binary_file(file_id: int, db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """下载二进制文件原始字节
+
+    v2 新增:二进制文件(图片/可执行文件等)不通过编辑器展示 base64,
+    前端通过此接口下载原文件。
+
+    Args:
+        file_id: 文件ID
+        db: 数据库会话
+        user: 当前用户
+
+    Returns:
+        Response: 文件原始字节流(含 Content-Disposition 头)
+    """
+    import urllib.parse
+    raw_bytes, file_name = code_file_service.get_binary_content(db, user, file_id)
+    # RFC 5987 编码中文文件名,避免 Content-Disposition 乱码
+    encoded_name = urllib.parse.quote(file_name)
+    return Response(
+        content=raw_bytes,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+        },
+    )

@@ -2,25 +2,25 @@
 审查服务模块: 核心业务编排
 整合项目/文件/规则/AI模块,完成代码审查全流程
 
-v2.1.2: 多 Agent 协同审查 — 三阶段流水线
-    阶段1 并行感知: 所有专项代理用独立线程并行审查同一分片
-    阶段2 交叉复审: 首席架构师代理对比合并各代理发现
-    阶段3 共识统合: 仲裁官将交叉复审结果转化为最终问题清单
+v2.2(2026-06-25): Agent 集成 + 双引擎漏洞识别
+    - 引擎1: 静态规则前置过滤(正则秘钥 + 静态语义规则,确定性命中,无 LLM 调用)
+    - 引擎2: LLM 深度审查(通过 BaseAgent.call() 调用真实 Agent,统一事件总线/AiCallLog)
+    - 多 Agent 协同审查保留三阶段流水线(并行感知 → 交叉复审 → 共识统合)
 """
 import concurrent.futures
 import json as json_lib
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
-
+from app.agents.base import AgentContext, BaseAgent
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEvent, AgentEventType
+from app.agents.registry import AgentRegistry
 from app.ai.code_chunker import chunk_code
 from app.ai.deepseek_agent import DeepSeekAgent
 from app.ai.multi_agent import (
@@ -37,8 +37,11 @@ from app.ai.multi_agent import (
 from app.ai.prompt_builder import _format_experience, build_prompt
 from app.ai.result_parser import parse
 from app.ai.scoring import compute_score
+from app.ai.static_analyzer import Finding
+from app.ai.static_analyzer import scan_file as static_scan_file
 from app.core.config import settings
-from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.core.database import SessionLocal
+from app.core.exceptions import NotFoundError, ValidationError
 from app.core.pagination import Pagination
 from app.models.code_file import CodeFile
 from app.models.project import Project
@@ -49,7 +52,7 @@ from app.models.user import User
 from app.schemas.review import ReviewStartIn
 from app.services.rule_service import get_enabled_rules
 
-# 多Agent审查画像 → 注册中心BaseAgent code 的映射
+# 多 Agent 审查画像 → 注册中心 BaseAgent name 的映射(v2.2 真实调用 Agent)
 _PROFILE_TO_AGENT_CODE: dict[str, str] = {
     "general": "code_reviewer",
     "security": "security_sentinel",
@@ -102,8 +105,9 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
     project = db.get(Project, payload.project_id)
     if not project:
         raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role != "admin":
-        raise ForbiddenError("无访问权限", code=40300)
+    # v2.4: 改用 project_member 关系校验(owner/admin/reviewer 都可启动审查)
+    from app.services.project_member_service import require_project_access
+    require_project_access(db, project.id, user, need_write=False)
     if not 1 <= len(payload.file_ids) <= 500:
         raise ValidationError("file_ids 需为 1-500 个", code=40001)
 
@@ -208,7 +212,9 @@ def _run_review_task(task_id: int, user_id: int) -> None:
         profiles = get_agent_profiles(task.review_type)
         # 使用解析后的 API 配置(用户自定义 > 管理员全局如 gpt-5.5 > 系统默认 DeepSeek)
         from app.utils.api_resolver import resolve_api_config
-        agent = DeepSeekAgent(api_config=resolve_api_config(db, user.id))
+        api_config = resolve_api_config(db, user.id)
+        # 协同审查仍需 DeepSeekAgent(三阶段流水线需要 system_prompt/user_prompt 灵活传入)
+        collab_agent = DeepSeekAgent(api_config=api_config)
         files = (
             db.query(CodeFile)
             .join(ReviewTaskFile, ReviewTaskFile.file_id == CodeFile.id)
@@ -217,20 +223,69 @@ def _run_review_task(task_id: int, user_id: int) -> None:
             .all()
         )
 
-        _execute_review(db, agent, task, user, files, rules, profiles, experience_section)
+        _execute_review(db, collab_agent, api_config, task, user, files, rules, profiles, experience_section)
     except Exception as e:
         logger.exception(e)
     finally:
         db.close()
 
 
+def _get_agent_for_profile(profile_code: str) -> Optional[BaseAgent]:
+    """根据审查画像 code 从 AgentRegistry 获取真实注册的 BaseAgent
+
+    Args:
+        profile_code: 审查画像 code(general/security/reliability/performance/maintainability)
+
+    Returns:
+        Optional[BaseAgent]: 注册中心中的真实 Agent;未找到返回 None
+    """
+    agent_name = _PROFILE_TO_AGENT_CODE.get(profile_code, "code_reviewer")
+    return AgentRegistry.instance().get(agent_name)
+
+
+def _finding_to_review_issue(task_id: int, code_file: CodeFile, finding: Finding) -> ReviewIssue:
+    """将 Finding 转换为 ReviewIssue ORM 对象(填充所有 v2 新字段)
+
+    Args:
+        task_id: 审查任务 ID
+        code_file: 代码文件 ORM 对象
+        finding: 标准化漏洞发现
+
+    Returns:
+        ReviewIssue: 已填充所有字段的 ORM 对象(未加入 session)
+    """
+    return ReviewIssue(
+        task_id=task_id,
+        file_id=code_file.id,
+        file_name=code_file.file_name,
+        line_number=finding.line_number,
+        end_line=finding.end_line,
+        issue_type=finding.issue_type,
+        severity=finding.severity,
+        title=finding.title or "",
+        description=finding.description,
+        suggestion=finding.suggestion,
+        fixed_code=finding.fixed_code,
+        status="unfixed",
+        # v2 新增漏洞元数据字段
+        owasp=finding.owasp,
+        cwe=finding.cwe,
+        evidence=finding.evidence,
+        exploit_scenario=finding.exploit_scenario,
+        references_json=finding.references if finding.references else None,
+        confidence=finding.confidence,
+        source=finding.source,
+    )
+
+
 def _execute_review(
-    db: Session, agent: DeepSeekAgent, task: ReviewTask, user: User,
+    db: Session, collab_agent: DeepSeekAgent, api_config, task: ReviewTask, user: User,
     files: list, rules: list, profiles: tuple[ReviewAgentProfile, ...],
     experience_section: str,
 ) -> None:
     """执行审查主循环并将统计结果落库。
 
+    v2.2 双引擎:静态规则前置过滤 + LLM 深度审查(通过 BaseAgent.call() 调用真实 Agent)。
     逐文件审查、累计问题、刷新进度,最终汇总评分与摘要;
     捕获取消信号与异常,分别落库为 cancelled / failed 状态,不向上抛出。
     """
@@ -247,7 +302,7 @@ def _execute_review(
         all_issues: list[ReviewIssue] = []
         for code_file in files:
             _check_cancelled(db, task)
-            file_issues = _review_one_file(db, agent, task, code_file, rules, user, profiles,
+            file_issues = _review_one_file(db, collab_agent, api_config, task, code_file, rules, user, profiles,
                                            experience_section=experience_section)
             all_issues.extend(file_issues)
             task.processed_files += 1
@@ -303,64 +358,83 @@ def _execute_review(
                                f"审查任务 #{task.id} 失败", agent_code=ac)
 
 
-def _review_one_file(db: Session, agent: DeepSeekAgent, task: ReviewTask,
-                     code_file: CodeFile, rules: list, user: User,
+def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
+                     task: ReviewTask, code_file: CodeFile, rules: list, user: User,
                      profiles: tuple[ReviewAgentProfile, ...],
                      experience_section: str = "") -> list[ReviewIssue]:
-    """审查单个文件: 分片 → 多代理协同审查 → 入库
+    """审查单个文件:双引擎 — 静态规则前置过滤 + LLM 深度审查 → 入库
 
-    单代理模式(quick/standard): 直接串行审查,无协同开销。
-    多代理模式(security/performance/full): 三阶段协同流水线 —
+    v2.2 双引擎流程:
+      引擎1(静态规则前置过滤):对整个文件应用 scan_secrets + apply_static_rules
+            → 生成 Finding → 转换为 ReviewIssue 入库(无 LLM 调用)
+      引擎2(LLM 深度审查):
+        - 单代理模式(quick/standard):分片 → 通过 BaseAgent.call() 调用真实 Agent
+        - 多代理模式(security/performance/full):分片 → 三阶段协同流水线
+      最终:跨引擎去重(指纹合并),用 _finding_to_review_issue() 统一入库
 
-      阶段1 · 并行感知 — 所有代理用独立线程并行审查同一分片
-      阶段2 · 交叉复审 — 首席架构师 Agent 对比、去重、升级各代理发现
-      阶段3 · 共识统合 — 仲裁官将交叉复审结果转化为最终问题清单
+    Args:
+        db: 数据库会话
+        collab_agent: 协同审查用的 DeepSeekAgent(三阶段流水线需要 system/user prompt 灵活传入)
+        api_config: 用户解析后的 API 配置(用户自定义 > 管理员全局 > 系统默认)
+        task: 当前审查任务
+        code_file: 待审查代码文件 ORM 对象
+        rules: 启用规则列表
+        user: 当前用户
+        profiles: 审查代理画像组合
+        experience_section: 历史经验段落(自进化注入)
+
+    Returns:
+        list[ReviewIssue]: 该文件产生的问题列表(已入库)
     """
-    chunks = chunk_code(code_file.content, code_file.language,
-                        threshold=settings.deepseek_chunk_threshold)
+    # binary 文件直接跳过(LLM 无法审查二进制内容)
+    if getattr(code_file, "is_binary", 0) == 1:
+        logger.info(f"[review] 文件 {code_file.file_name} 为二进制,跳过审查")
+        return []
+
     issues_acc: list[ReviewIssue] = []
     seen: set[tuple] = set()
 
+    # ===== 引擎1:静态规则前置过滤(确定性命中,无 LLM 调用)=====
+    try:
+        static_findings = static_scan_file(code_file)
+        if static_findings:
+            _emit_review_event(
+                AgentEventType.PROGRESS, task, user,
+                f"静态规则引擎:文件 {code_file.file_name} 命中 {len(static_findings)} 条确定性问题",
+                agent_code="static_analyzer",
+            )
+            for finding in static_findings:
+                fp = _finding_fingerprint(code_file.id, finding)
+                if fp in seen:
+                    continue
+                seen.add(fp)
+                issues_acc.append(_finding_to_review_issue(task.id, code_file, finding))
+    except Exception as e:
+        logger.warning(f"[review] 静态规则引擎执行失败,跳过: {e}")
+
+    # ===== 引擎2:LLM 深度审查(分片 + 多代理协同)=====
+    chunks = chunk_code(code_file.content, code_file.language,
+                        threshold=settings.deepseek_chunk_threshold)
     use_collab = len(profiles) >= 2
 
     for idx, chunk in enumerate(chunks):
         if use_collab:
-            collab_issues = _review_chunk_collaborative(
-                db, agent, task, code_file, rules, user,
+            chunk_findings = _review_chunk_collaborative(
+                db, collab_agent, api_config, task, code_file, rules, user,
                 profiles, idx, chunk, experience_section=experience_section,
             )
         else:
-            collab_issues = _review_chunk_sequential(
-                db, agent, task, code_file, rules, user,
+            chunk_findings = _review_chunk_sequential(
+                db, api_config, task, code_file, rules, user,
                 profiles, idx, chunk, experience_section=experience_section,
             )
 
-        for it in collab_issues:
-            fingerprint = _issue_fingerprint(
-                file_id=code_file.id,
-                line_number=it.get("line_number", 0),
-                end_line=it.get("end_line"),
-                issue_type=it.get("issue_type", ""),
-                title=it.get("title", ""),
-                description=it.get("description", ""),
-            )
-            if fingerprint in seen:
+        for finding in chunk_findings:
+            fp = _finding_fingerprint(code_file.id, finding)
+            if fp in seen:
                 continue
-            seen.add(fingerprint)
-            issues_acc.append(ReviewIssue(
-                task_id=task.id,
-                file_id=code_file.id,
-                file_name=code_file.file_name,
-                line_number=it.get("line_number", 0),
-                end_line=it.get("end_line"),
-                issue_type=it.get("issue_type", ""),
-                severity=it.get("severity", "中"),
-                title=it.get("title", ""),
-                description=it.get("description", ""),
-                suggestion=it.get("suggestion", ""),
-                fixed_code=it.get("fixed_code", ""),
-                status="unfixed",
-            ))
+            seen.add(fp)
+            issues_acc.append(_finding_to_review_issue(task.id, code_file, finding))
 
     if issues_acc:
         db.add_all(issues_acc)
@@ -368,77 +442,174 @@ def _review_one_file(db: Session, agent: DeepSeekAgent, task: ReviewTask,
     return issues_acc
 
 
+def _finding_fingerprint(file_id: int, finding: Finding) -> tuple:
+    """生成 Finding 的去重指纹(用于跨引擎去重)
+
+    Args:
+        file_id: 文件 ID
+        finding: 标准化漏洞发现
+
+    Returns:
+        tuple: 可放入 set 的稳定去重键
+    """
+    return (
+        file_id,
+        finding.line_number,
+        finding.end_line or 0,
+        finding.issue_type,
+        (finding.title or "").strip()[:80],
+        (finding.description or "").strip()[:120],
+    )
+
+
 # ═══════════════ 单代理模式 (quick/standard) ═══════════════
 
 def _review_chunk_sequential(
-    db: Session, agent: DeepSeekAgent, task: ReviewTask,
+    db: Session, api_config, task: ReviewTask,
     code_file: CodeFile, rules: list, user: User,
     profiles: tuple[ReviewAgentProfile, ...], chunk_idx: int,
     chunk, experience_section: str = "",
-) -> list[dict]:
-    """单代理串行审查 — 保留原有语义,无协同开销"""
-    issues: list[dict] = []
+) -> List[Finding]:
+    """单代理串行审查(双引擎之引擎2:LLM 深度审查)
+
+    v2.2 改造:
+    - 通过 AgentRegistry 获取真实 Agent(code_reviewer / security_sentinel)
+    - 通过 BaseAgent.call() 调用 LLM(替代 DeepSeekAgent.chat()),统一事件总线/AiCallLog 归因
+    - 返回 List[Finding](替代 list[dict]),由 _review_one_file 统一入库
+
+    Args:
+        db: 数据库会话(用于失败时日志归因,不直接写 AiCallLog)
+        api_config: 用户解析后的 API 配置
+        task: 当前审查任务
+        code_file: 待审查代码文件
+        rules: 启用规则列表
+        user: 当前用户
+        profiles: 审查代理画像组合(单代理模式下只取第一个)
+        chunk_idx: 分片索引
+        chunk: 代码分片对象
+        experience_section: 历史经验段落
+
+    Returns:
+        List[Finding]: 标准化漏洞发现列表(可能为空)
+    """
+    findings: List[Finding] = []
+
     for agent_idx, profile in enumerate(profiles):
-        system_prompt, user_prompt = build_prompt(
-            language=code_file.language,
-            file_name=code_file.file_name,
-            code=chunk.text,
-            rules=rules,
-            line_offset=chunk.start_line,
-            agent_section=format_agent_section(profile),
-            experience_section=experience_section,
-        )
-        target_agent = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
-        try:
-            _emit_review_event(AgentEventType.THINKING, task, user,
-                               f"[{profile.name}] 正在审查 {code_file.file_name}",
-                               agent_code=target_agent)
-            raw, _meta = agent.chat(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                task_id=task.id,
-                user_id=user.id,
-                file_id=code_file.id,
-                chunk_index=chunk_idx * 100 + agent_idx,
-                db=db,
-                agent_label=profile.code,
-            )
-            result = parse(raw)
-            _emit_review_event(AgentEventType.COMPLETE, task, user,
-                               f"[{profile.name}] 审查 {code_file.file_name} 完成,"
-                               f"发现 {len(result.issues)} 个问题",
-                               agent_code=target_agent)
-        except Exception as e:
-            logger.warning(f"文件 {code_file.file_name} chunk {chunk_idx} {profile.code} 失败: {e}")
+        # 从注册中心获取真实 Agent
+        agent = _get_agent_for_profile(profile.code)
+        if agent is None:
+            logger.warning(f"[review] 未找到 profile={profile.code} 对应的 Agent,跳过")
             continue
 
-        for it in result.issues:
-            issues.append({
-                "issue_type": it.issue_type,
-                "severity": it.severity,
-                "title": it.title,
-                "line_number": _absolute_line(it.line_number, chunk.start_line),
-                "end_line": _absolute_line(it.end_line, chunk.start_line) if it.end_line else None,
-                "description": it.description or "",
-                "suggestion": it.suggestion or "",
-                "fixed_code": it.fixed_code or "",
-            })
-    return issues
+        target_agent = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
+        ctx = AgentContext(
+            user_id=user.id,
+            task_id=task.id,
+            project_id=task.project_id,
+            file_id=code_file.id,
+            extra={"trace_id": f"review_{task.id}_f{code_file.id}_c{chunk_idx}_{profile.code}"},
+        )
+
+        _emit_review_event(
+            AgentEventType.THINKING, task, user,
+            f"[{profile.name}] 正在审查 {code_file.file_name}",
+            agent_code=target_agent,
+        )
+
+        try:
+            # 通过真实 Agent 调用 LLM(安全画像用 SecuritySentinelAgent,其他用 CodeReviewerAgent)
+            if profile.code == "security" and hasattr(agent, "scan_file_for_review"):
+                result = agent.scan_file_for_review(
+                    code=chunk.text,
+                    language=code_file.language or "plaintext",
+                    file_name=code_file.file_name,
+                    line_offset=chunk.start_line,
+                    experience_section=experience_section,
+                    api_config=api_config,
+                    ctx=ctx,
+                )
+            elif hasattr(agent, "execute_review"):
+                result = agent.execute_review(
+                    code=chunk.text,
+                    rules=rules,
+                    language=code_file.language or "plaintext",
+                    file_name=code_file.file_name,
+                    line_offset=chunk.start_line,
+                    experience_section=experience_section,
+                    agent_section=format_agent_section(profile),
+                    api_config=api_config,
+                    ctx=ctx,
+                )
+            else:
+                logger.warning(f"[review] Agent {target_agent} 不支持 execute_review/scan_file_for_review,跳过")
+                continue
+
+            if not result.success:
+                logger.warning(f"[review] {profile.code} 审查失败: {result.error}")
+                _emit_review_event(
+                    AgentEventType.FAILED, task, user,
+                    f"[{profile.name}] 审查失败: {result.error}",
+                    agent_code=target_agent,
+                )
+                continue
+
+            chunk_findings: List[Finding] = []
+            if isinstance(result.data, dict):
+                chunk_findings = result.data.get("issues", []) or []
+            findings.extend(chunk_findings)
+
+            _emit_review_event(
+                AgentEventType.COMPLETE, task, user,
+                f"[{profile.name}] 审查 {code_file.file_name} 完成,"
+                f"发现 {len(chunk_findings)} 个问题",
+                agent_code=target_agent,
+            )
+        except Exception as e:
+            logger.warning(f"文件 {code_file.file_name} chunk {chunk_idx} {profile.code} 失败: {e}")
+            _emit_review_event(
+                AgentEventType.FAILED, task, user,
+                f"[{profile.name}] 审查异常: {e}",
+                agent_code=target_agent,
+            )
+            continue
+
+    return findings
 
 
 # ═══════════════ 多 Agent 协同三阶段 ═══════════════
 
 def _review_chunk_collaborative(
-    db: Session, shared_agent: DeepSeekAgent, task: ReviewTask,
+    db: Session, shared_agent: DeepSeekAgent, api_config, task: ReviewTask,
     code_file: CodeFile, rules: list, user: User,
     profiles: tuple[ReviewAgentProfile, ...], chunk_idx: int,
     chunk, experience_section: str = "",
-) -> list[dict]:
+) -> List[Finding]:
     """多 Agent 协同审查 — 三阶段流水线
 
-    阶段1: 并行感知 — ThreadPoolExecutor 并行调用各 Agent
+    阶段1: 并行感知 — ThreadPoolExecutor 并行调用各 Agent(v2.2: agent_label 使用真实 Agent name)
     阶段2: 交叉复审 — 首席架构师对比合并发现
     阶段3: 共识统合 — 仲裁官输出最终问题清单
+
+    v2.2 改造:
+    - agent_label 从 profile.code 改为真实 Agent name(_PROFILE_TO_AGENT_CODE 映射)
+    - 最终返回 List[Finding](替代 list[dict]),由 _review_one_file 统一入库
+    - 阶段1仍然使用 DeepSeekAgent.call_raw()(线程内独立 Agent 实例,避免单例竞态)
+
+    Args:
+        db: 数据库会话
+        shared_agent: 共享 DeepSeekAgent(阶段2/3 用,主线程同步调用)
+        api_config: 用户解析后的 API 配置
+        task: 当前审查任务
+        code_file: 待审查代码文件
+        rules: 启用规则列表
+        user: 当前用户
+        profiles: 审查代理画像组合(多代理模式)
+        chunk_idx: 分片索引
+        chunk: 代码分片对象
+        experience_section: 历史经验段落
+
+    Returns:
+        List[Finding]: 标准化漏洞发现列表(可能为空)
     """
     t0 = time.time()
     file_name = code_file.file_name
@@ -465,13 +636,15 @@ def _review_chunk_collaborative(
                 _call_single_agent,
                 profile, chunk.text, language, file_name, rules, line_offset,
                 experience_section,
-                shared_agent.api_config,
+                api_config,
             )
             future_map[future] = profile
 
         for future, profile in future_map.items():
+            # v2.2: agent_label 使用真实 Agent name
+            agent_label = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
             agent_names[profile.code] = profile.name
-            target = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
+            target = agent_label
             agent_meta = None
             try:
                 raw, agent_meta = future.result(timeout=180)
@@ -488,6 +661,10 @@ def _review_chunk_collaborative(
                         ),
                         "description": it.description or "",
                         "suggestion": it.suggestion or "",
+                        # v2.2: 保留新字段供阶段2/3 传递
+                        "owasp": getattr(it, "owasp", "") or "",
+                        "cwe": getattr(it, "cwe", "") or "",
+                        "evidence": getattr(it, "evidence", "") or "",
                     }
                     for it in parsed.issues
                 ]
@@ -501,7 +678,7 @@ def _review_chunk_collaborative(
                         "chunk_index": chunk_idx * 100 + list(profiles).index(profile),
                     })
             except Exception as e:
-                logger.warning(f"并行审查 {profile.code} 失败: {e}")
+                logger.warning(f"并行审查 {profile.code}({agent_label}) 失败: {e}")
                 agent_findings[profile.code] = []
                 _emit_review_event(AgentEventType.FAILED, task, user,
                                    f"[{profile.name}] 审查失败: {e}",
@@ -633,7 +810,36 @@ def _review_chunk_collaborative(
         f"raw={total_raw} → cross={len(cross_review)} → final={len(final_issues)} "
         f"elapsed={elapsed}ms",
     )
-    return final_issues
+    # v2.2: 将最终问题列表转换为 List[Finding](统一数据结构,便于入库)
+    return [_final_issue_to_finding(it) for it in final_issues]
+
+
+def _final_issue_to_finding(item: dict) -> Finding:
+    """将多代理协同最终问题(dict)转换为 Finding(用于统一入库)
+
+    Args:
+        item: 阶段3 共识统合返回的问题 dict,字段对齐 COLLAB_CONSENSUS_USER 输出 schema
+
+    Returns:
+        Finding: 标准化漏洞发现
+    """
+    return Finding(
+        line_number=int(item.get("line_number", 0) or 0),
+        end_line=int(item["end_line"]) if item.get("end_line") else None,
+        issue_type=item.get("issue_type", "") or "",
+        severity=item.get("severity", "中") or "中",
+        title=item.get("title", "") or "",
+        description=item.get("description", "") or "",
+        suggestion=item.get("suggestion", "") or "",
+        fixed_code=item.get("fixed_code", "") or "",
+        owasp=item.get("owasp", "") or "",
+        cwe=item.get("cwe", "") or "",
+        evidence=item.get("evidence", "") or "",
+        exploit_scenario=item.get("exploit_scenario", "") or "",
+        references=item.get("references", []) if isinstance(item.get("references"), list) else [],
+        confidence=float(item.get("confidence", 0.8) or 0.8),
+        source="llm_collab",
+    )
 
 
 # ═══════════════ 协同辅助函数 ═══════════════
@@ -653,7 +859,22 @@ def _call_single_agent(
     每个线程独立创建 DeepSeekAgent,通过统一的 call_raw() 调用 DeepSeek API。
     返回 (raw_response_text, meta_dict), meta 供主线程事后 log_deferred() 补写 AiCallLog。
 
-    v3.1: 支持 api_config 参数注入用户自定义 API 配置。
+    v2.2 改造:
+    - agent_label 从 profile.code 改为真实 Agent name(_PROFILE_TO_AGENT_CODE 映射)
+    - api_config 注入用户自定义 API 配置
+
+    Args:
+        profile: 审查代理画像
+        code: 代码内容(单分片)
+        language: 编程语言标识
+        file_name: 文件名(含扩展名)
+        rules: 启用规则列表
+        line_offset: 行号偏移(分片时使用)
+        experience_section: 历史经验段落
+        api_config: 用户解析后的 API 配置
+
+    Returns:
+        tuple: (raw_response_text, meta_dict)
     """
     agent = DeepSeekAgent(api_config=api_config)
     system_prompt, user_prompt = build_prompt(
@@ -665,10 +886,12 @@ def _call_single_agent(
         agent_section=format_agent_section(profile),
         experience_section=experience_section,
     )
+    # v2.2: agent_label 使用真实 Agent name,便于 AiCallLog 归因到具体 Agent
+    agent_label = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
     return agent.call_raw(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        agent_label=profile.code,
+        agent_label=agent_label,
     )
 
 
@@ -767,31 +990,6 @@ def _absolute_line(line_number: Optional[int], chunk_start_line: int) -> int:
     return int(line_number) + chunk_start_line
 
 
-def _issue_fingerprint(*, file_id: int, line_number: int, end_line: Optional[int],
-                       issue_type: str, title: Optional[str], description: str) -> tuple:
-    """生成问题去重指纹
-
-    Args:
-        file_id: 文件ID。
-        line_number: 问题起始行号。
-        end_line: 问题结束行号。
-        issue_type: 问题类型。
-        title: 问题标题。
-        description: 问题描述。
-
-    Returns:
-        tuple: 可放入 set 的稳定去重键。
-    """
-    return (
-        file_id,
-        line_number,
-        end_line or 0,
-        issue_type,
-        (title or "").strip()[:80],
-        (description or "").strip()[:120],
-    )
-
-
 def _build_summary(profiles: tuple[ReviewAgentProfile, ...], file_count: int,
                    issue_count: int, score: int) -> str:
     """生成审查任务总体摘要
@@ -811,7 +1009,11 @@ def _build_summary(profiles: tuple[ReviewAgentProfile, ...], file_count: int,
 
 def list_tasks(db: Session, user: User, project_id: int = None, status: str = "",
                start_date: str = "", end_date: str = "", page: int = 1, page_size: int = 20) -> dict:
-    """查询审查任务列表
+    """查询审查任务列表(基于 project_member 关系)
+
+    可见范围:
+        - admin: 全部任务
+        - 非 admin: 可见项目(owner ∪ member)下的任务
 
     Args:
         db: 数据库会话
@@ -826,9 +1028,12 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
     Returns:
         dict: 分页响应
     """
-    q = db.query(ReviewTask).filter(ReviewTask.status != "deleted")
-    if user.role != "admin":
-        q = q.filter(ReviewTask.user_id == user.id)
+    from app.services.project_member_service import get_visible_project_ids
+    visible_ids, _ = get_visible_project_ids(db, user)
+    q = db.query(ReviewTask).filter(
+        ReviewTask.status != "deleted",
+        ReviewTask.project_id.in_(visible_ids),
+    )
     if project_id:
         q = q.filter(ReviewTask.project_id == project_id)
     if status:
@@ -869,6 +1074,9 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
 def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     """获取审查任务详情
 
+    可见性:基于 project_member 关系,reviewer 可见同项目任务,
+    非成员访问返回 404(防枚举)。
+
     Args:
         db: 数据库会话
         user: 当前用户
@@ -876,12 +1084,16 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
 
     Returns:
         dict: 任务详情含关联项目
+
+    Raises:
+        NotFoundError: 任务不存在或无访问权限
     """
+    from app.services.project_member_service import require_project_access
     task = db.get(ReviewTask, task_id)
-    if not task:
+    if not task or task.status == "deleted":
         raise NotFoundError("审查任务不存在", code=40400)
-    if task.user_id != user.id and user.role != "admin":
-        raise NotFoundError("审查任务不存在", code=40400)
+    # v2.4: 用 project_member 关系校验,reviewer 可读同项目任务
+    require_project_access(db, task.project_id, user, need_write=False)
     project = db.get(Project, task.project_id)
     return {
         "id": task.id, "task_name": task.task_name,
@@ -943,7 +1155,9 @@ def _task_file_summaries(db: Session, task_id: int) -> list[dict]:
 def list_task_issues(db: Session, user: User, task_id: int, file_id: int = None,
                      severity: str = "", issue_type: str = "", status: str = "",
                      page: int = 1, page_size: int = 50) -> dict:
-    """查询审查任务的问题列表
+    """查询审查任务的问题列表(基于 project_member 关系)
+
+    可见性:reviewer 可见同项目任务的问题,非成员返回 404。
 
     Args:
         db: 数据库会话
@@ -958,10 +1172,16 @@ def list_task_issues(db: Session, user: User, task_id: int, file_id: int = None,
 
     Returns:
         dict: 分页响应
+
+    Raises:
+        NotFoundError: 任务不存在或无访问权限
     """
+    from app.services.project_member_service import require_project_access
     task = db.get(ReviewTask, task_id)
-    if not task:
+    if not task or task.status == "deleted":
         raise NotFoundError("审查任务不存在", code=40400)
+    # v2.4: 用 project_member 关系校验,reviewer 可读同项目任务的问题
+    require_project_access(db, task.project_id, user, need_write=False)
     q = db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id)
     if file_id:
         q = q.filter(ReviewIssue.file_id == file_id)
@@ -983,18 +1203,7 @@ def list_task_issues(db: Session, user: User, task_id: int, file_id: int = None,
 
 
 def delete_task(db: Session, user: User, task_id: int) -> None:
-    """软删除审查任务"""
-    task = db.get(ReviewTask, task_id)
-    if not task:
-        raise NotFoundError("审查任务不存在", code=40400)
-    if task.user_id != user.id and user.role != "admin":
-        raise ForbiddenError("无权限删除此任务", code=40300)
-    task.status = "deleted"
-    db.commit()
-
-
-def cancel_task(db: Session, user: User, task_id: int) -> None:
-    """取消正在运行的审查任务
+    """软删除审查任务(需 owner/admin 权限)
 
     Args:
         db: 数据库会话
@@ -1002,15 +1211,38 @@ def cancel_task(db: Session, user: User, task_id: int) -> None:
         task_id: 任务ID
 
     Raises:
-        NotFoundError: 任务不存在
-        ForbiddenError: 无操作权限
-        ValidationError: 任务不在运行中
+        NotFoundError: 任务不存在或无访问权限
+        ForbiddenError: 仅 owner/admin 可删除
     """
+    from app.services.project_member_service import require_project_access
     task = db.get(ReviewTask, task_id)
     if not task:
         raise NotFoundError("审查任务不存在", code=40400)
-    if task.user_id != user.id and user.role != "admin":
-        raise ForbiddenError("无权限取消此任务", code=40300)
+    # v2.4: 删除任务视为写操作,仅 owner/admin 可执行
+    require_project_access(db, task.project_id, user, need_write=True)
+    task.status = "deleted"
+    db.commit()
+
+
+def cancel_task(db: Session, user: User, task_id: int) -> None:
+    """取消正在运行的审查任务(需 owner/admin 权限)
+
+    Args:
+        db: 数据库会话
+        user: 当前用户
+        task_id: 任务ID
+
+    Raises:
+        NotFoundError: 任务不存在或无访问权限
+        ForbiddenError: 仅 owner/admin 可取消
+        ValidationError: 任务不在运行中
+    """
+    from app.services.project_member_service import require_project_access
+    task = db.get(ReviewTask, task_id)
+    if not task:
+        raise NotFoundError("审查任务不存在", code=40400)
+    # v2.4: 取消任务视为写操作,仅 owner/admin 可执行
+    require_project_access(db, task.project_id, user, need_write=True)
     if task.status != "running":
         raise ValidationError("只能取消运行中的任务", code=40001)
     task.status = "cancelled"
@@ -1045,6 +1277,8 @@ def _emit_review_event(
 ) -> None:
     """向 EventBus 发布审查过程中的 Agent 事件,供 SSE 实时同步至前端 Agent 办公室
 
+    v2.4: AgentEvent.user_id 显式传入 user.id,使 SSE 端点可按用户隔离。
+
     Args:
         type_: 事件类型(DISPATCH/THINKING/PROGRESS/COMPLETE/FAILED)
         task: 当前审查任务
@@ -1060,6 +1294,7 @@ def _emit_review_event(
             trace_id=trace_id,
             message=message,
             payload={"task_id": task.id, "user_id": user.id},
+            user_id=user.id,
         ))
     except Exception:
         pass

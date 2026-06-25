@@ -27,7 +27,12 @@
       stripe
       empty-text="暂无代码文件"
     >
-      <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip />
+      <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span>{{ row.file_name }}</span>
+          <el-tag v-if="row.is_binary === 1" size="small" type="warning" class="binary-tag">二进制</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="language" label="语言" width="120" align="center">
         <template #default="{ row }">
           <el-tag v-if="row.language" size="small" type="info">{{ row.language }}</el-tag>
@@ -39,7 +44,12 @@
           {{ formatSize(row.size_bytes) }}
         </template>
       </el-table-column>
-      <el-table-column prop="line_count" label="行数" width="100" align="center" />
+      <el-table-column prop="line_count" label="行数" width="100" align="center">
+        <template #default="{ row }">
+          <span v-if="row.is_binary === 1" class="text-muted">-</span>
+          <span v-else>{{ row.line_count }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="version_no" label="版本" width="80" align="center">
         <template #default="{ row }">
           v{{ row.version_no }}
@@ -50,10 +60,15 @@
           {{ formatDate(row.update_time) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="180" align="center" fixed="right">
+      <el-table-column label="操作" width="200" align="center" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="handleView(row)">查看代码</el-button>
-          <el-button link type="primary" @click="handleHistory(row)">版本历史</el-button>
+          <template v-if="row.is_binary === 1">
+            <el-button link type="primary" :loading="downloadingId === row.id" @click="handleDownload(row)">下载文件</el-button>
+          </template>
+          <template v-else>
+            <el-button link type="primary" @click="handleView(row)">查看代码</el-button>
+            <el-button link type="primary" @click="handleHistory(row)">版本历史</el-button>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -79,8 +94,9 @@
  */
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { list } from '@/api/codeFile'
+import { list, downloadBinary } from '@/api/codeFile'
 import type { CodeFileOut } from '@/types/project'
 
 const props = defineProps<{
@@ -99,6 +115,8 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
 const languageFilter = ref('')
+/** v2: 当前正在下载的二进制文件 ID,用于按钮 loading 状态 */
+const downloadingId = ref<number | null>(null)
 
 /**
  * 格式化日期
@@ -154,7 +172,7 @@ function handleFilterChange(): void {
 
 /**
  * 查看代码
- * @param row - 文件�?
+ * @param row - 文件项
  */
 function handleView(row: CodeFileOut): void {
   router.push(`/code/${props.projectId}/file/${row.id}`)
@@ -166,6 +184,32 @@ function handleView(row: CodeFileOut): void {
  */
 function handleHistory(row: CodeFileOut): void {
   router.push(`/code/${props.projectId}/file/${row.id}/versions`)
+}
+
+/**
+ * 下载二进制文件(触发浏览器下载)
+ * v2 新增:二进制文件不进入编辑器,直接下载原文件
+ * @param row - 文件项
+ */
+async function handleDownload(row: CodeFileOut): Promise<void> {
+  if (downloadingId.value !== null) return
+  downloadingId.value = row.id
+  try {
+    const blob = await downloadBinary(row.id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = row.file_name
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('文件下载已开始')
+  } catch {
+    /* 错误已在拦截器处理 */
+  } finally {
+    downloadingId.value = null
+  }
 }
 
 onMounted(() => {
@@ -194,6 +238,11 @@ onMounted(() => {
 
   .text-muted {
     color: var(--el-text-color-placeholder);
+  }
+
+  /* v2: 二进制文件标签 */
+  .binary-tag {
+    margin-left: 8px;
   }
 }
 </style>
