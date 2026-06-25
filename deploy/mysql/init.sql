@@ -317,7 +317,9 @@ CREATE TABLE IF NOT EXISTS forum_post (
     create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    KEY idx_status_pinned (status, is_pinned),
+    -- 列表查询: WHERE status='normal' ORDER BY is_pinned DESC, create_time DESC。
+    -- 把 create_time 并入索引,使排序走索引、消除 filesort(数据量大时显著更快)。
+    KEY idx_status_pinned_time (status, is_pinned, create_time),
     KEY idx_category (category),
     KEY idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开发者论坛-主题帖';
