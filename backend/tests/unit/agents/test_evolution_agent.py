@@ -86,7 +86,7 @@ def test_run_distills_new_rule_and_dedups(db, mk_issue):
     agent = EvolutionAgent()
     agent.inject(db)
     r1 = agent.run(distiller=fake_distiller)
-    assert r1.data["new_rule_proposals"] >= 1
+    assert r1.data["proposals"] >= 1
     assert r1.data["created"] >= 1
 
     # 二次运行:同 rule_code 的未决提案应被去重
