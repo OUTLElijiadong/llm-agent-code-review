@@ -3,7 +3,7 @@
 
 全员(登录用户)可发帖;管理员可置顶/删除。
 """
-from sqlalchemy import BigInteger, Boolean, Column, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, Index, Integer, String, Text
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -11,6 +11,13 @@ from app.models.base import IdMixin, TimestampMixin
 
 class ForumPost(Base, IdMixin, TimestampMixin):
     __tablename__ = "forum_post"
+    __table_args__ = (
+        # 列表 WHERE status ORDER BY is_pinned,create_time(排序走索引、免 filesort)
+        # + 分类筛选 + 作者维度(对应 init.sql idx_status_pinned_time / idx_category / idx_user)
+        Index("ix_forum_post_status_pinned_time", "status", "is_pinned", "create_time"),
+        Index("ix_forum_post_category", "category"),
+        Index("ix_forum_post_user", "user_id"),
+    )
 
     user_id = Column(BigInteger, nullable=False, comment="作者")
     category = Column(

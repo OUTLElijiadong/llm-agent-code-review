@@ -4,7 +4,7 @@
 用户提交的平台问题工单(报障/账号异常/功能报错等),
 由管理员受理并按状态流转: pending → processing → resolved → closed。
 """
-from sqlalchemy import BigInteger, Column, DateTime, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Index, String, Text
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -12,6 +12,11 @@ from app.models.base import IdMixin, TimestampMixin
 
 class MaintenanceTicket(Base, IdMixin, TimestampMixin):
     __tablename__ = "maintenance_ticket"
+    __table_args__ = (
+        # 我的工单(按状态) + 管理员按状态受理(对应 init.sql idx_user_status / idx_status)
+        Index("ix_maintenance_ticket_user_status", "user_id", "status"),
+        Index("ix_maintenance_ticket_status", "status"),
+    )
 
     user_id = Column(BigInteger, nullable=False, comment="提交人")
     title = Column(String(150), nullable=False, comment="工单标题")

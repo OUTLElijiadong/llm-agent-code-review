@@ -5,7 +5,7 @@
 检索时按 user_id 取出该用户的全部切片,在 Python 内做余弦相似度,
 适配小体量个人知识库,避免引入重型向量库(生产服务器内存仅 ~1.9G)。
 """
-from sqlalchemy import BigInteger, Column, Integer, String, Text
+from sqlalchemy import BigInteger, Column, Index, Integer, String, Text
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
@@ -14,6 +14,11 @@ from app.models.base import IdMixin, TimestampMixin
 
 class KnowledgeChunk(Base, IdMixin, TimestampMixin):
     __tablename__ = "knowledge_chunk"
+    __table_args__ = (
+        # 按用户取全部切片做检索 + 删文档时按 doc_id 清切片(对应 init.sql idx_user / idx_doc)
+        Index("ix_knowledge_chunk_user", "user_id"),
+        Index("ix_knowledge_chunk_doc", "doc_id"),
+    )
 
     doc_id = Column(BigInteger, nullable=False, comment="所属文档")
     user_id = Column(BigInteger, nullable=False, comment="所属用户(隔离键)")

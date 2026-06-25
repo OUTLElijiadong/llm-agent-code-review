@@ -5,7 +5,7 @@
 注意: 与 services/feedback_service.py(Agent 自进化的反馈聚合)语义不同,
 此处是「用户 → 管理员」的产品反馈。
 """
-from sqlalchemy import BigInteger, Column, DateTime, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Index, String, Text
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -13,6 +13,11 @@ from app.models.base import IdMixin, TimestampMixin
 
 class UserFeedback(Base, IdMixin, TimestampMixin):
     __tablename__ = "user_feedback"
+    __table_args__ = (
+        # 我的反馈(按状态) + 管理员按状态处理(对应 init.sql idx_user_status / idx_status)
+        Index("ix_user_feedback_user_status", "user_id", "status"),
+        Index("ix_user_feedback_status", "status"),
+    )
 
     user_id = Column(BigInteger, nullable=False, comment="反馈人")
     feedback_type = Column(
