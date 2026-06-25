@@ -40,6 +40,15 @@ export default defineConfig({
     // 无法进一步拆分; 抬高阈值以免对这一已知惰性大包持续误报。
     chunkSizeWarningLimit: 3500,
     rollupOptions: {
+      // element-plus 内置(node_modules 嵌套)的 @vueuse/core 里 /* #__PURE__ */
+      // 注释位置不规范, Rollup 会刷 INVALID_ANNOTATION 提示。该注解仅作摇树优化
+      // 提示, Rollup 自行剔除即可, 不影响产物正确性。这里只静默来自 node_modules
+      // 的 __PURE__ 注解提示, 不会掩盖本项目源码的任何告警。
+      onwarn(warning, defaultHandler) {
+        const msg = warning.message || ''
+        if (msg.includes('__PURE__') && msg.includes('node_modules')) return
+        defaultHandler(warning)
+      },
       output: {
         // 将体积大、变动少的第三方库从主包拆出, 减小首屏 index 体积并改善长期缓存。
         manualChunks(id: string) {
