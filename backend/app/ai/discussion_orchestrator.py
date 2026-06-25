@@ -1,8 +1,14 @@
-"""多 Agent 讨论编排器 (v2.3 M7)
+"""多 Agent 讨论编排器 (v2.3 M7 / v2.4 B1 MetaGPT 接入)
 
 发言式讨论模式: Agent 逐一轮流发言,每个 Agent 能看到之前所有人的发言内容
 (含其他 Agent 和用户的发言),并对前面的观点进行评价、质疑、反驳。讨论收敛时
 由主持人汇总共识,并把讨论结论沉淀为一份可在「报告列表」查询的审查报告。
+
+v2.4 B1 MetaGPT 接入:
+- 在 start_discussion 中构建 MetaGPT Environment,作为讨论消息总线层
+- 每轮发言/用户输入/主持人汇总都通过 env.publish() 广播到 Environment
+- Environment 自动通过 AgentEventBus 发布 DISCUSS 事件,前端 SSE 可见结构化消息流
+- 保留现有发言循环与 LLM 调用(system_prompt 定制),Environment 为非破坏性上层编排
 
 使用方式:
     orch = DiscussionOrchestrator()
@@ -34,6 +40,8 @@ from app.agents.events import (
     DiscussionTurn,
     new_trace_id,
 )
+from app.agents.metagpt import build_discussion_environment, make_discussion_message
+from app.agents.metagpt.environment import Environment
 from app.ai.deepseek_agent import DeepSeekAgent
 from app.ai.multi_agent import ReviewAgentProfile
 from app.ai.result_parser import parse as parse_issues
@@ -95,6 +103,32 @@ class DiscussionOrchestrator:
         agent = DeepSeekAgent()
         loop = asyncio.get_running_loop()
 
+        # ── v2.4 B1: 构建 MetaGPT Environment 作为讨论消息总线层 ──
+        # Environment 接收所有发言/用户输入/主持人汇总的 Message,
+        # 自动通过 AgentEventBus 发布 DISCUSS 事件到 SSE,前端可见结构化消息流。
+        # 不调用 env.run(),避免与现有发言循环重复触发 LLM 调用。
+        agent_codes = [
+            _PROFILE_TO_AGENT_CODE.get(p.code, p.code) for p in profiles
+        ]
+        env: Optional[Environment] = None
+        try:
+            env = build_discussion_environment(
+                trace_id=self._trace_id,
+                user_id=user_id,
+                project_id=project_id,
+                file_id=file_id,
+                agent_codes=list(dict.fromkeys(agent_codes)),  # 去重保序
+                max_depth=max_rounds * len(profiles) + 4,
+            )
+            self._env = env
+            logger.info(
+                f"[Discussion] MetaGPT Environment 已构建: "
+                f"roles={env.list_roles()}, trace_id={self._trace_id}",
+            )
+        except Exception as e:
+            logger.warning(f"[Discussion] 构建 MetaGPT Environment 失败,降级为无总线模式: {e}")
+            self._env = None
+
         # ── 讨论开始即创建 ReviewTask(running),拿到 task_id 供日志/问题/报告 ──
         task_id = 0
         try:
@@ -117,17 +151,27 @@ class DiscussionOrchestrator:
 
         try:
             # ── 开场白 ──
+            opening_text = (
+                f"🎤 欢迎来到代码审查圆桌会议！\n\n"
+                f"审查文件: {file_name} ({language})\n"
+                f"参会Agent: {', '.join(p.name for p in profiles)}\n"
+                f"共 {max_rounds} 轮讨论。请各位 Agent 畅所欲言,"
+                f"对他人的观点不必客气,有不同意见请直接指出并说明理由。"
+            )
             bus.publish_turn(session_id, DiscussionTurn(
                 turn_id=0,
                 agent_code="orchestrator",
                 agent_name="主持人",
                 role="agent",
-                content=f"🎤 欢迎来到代码审查圆桌会议！\n\n"
-                        f"审查文件: {file_name} ({language})\n"
-                        f"参会Agent: {', '.join(p.name for p in profiles)}\n"
-                        f"共 {max_rounds} 轮讨论。请各位 Agent 畅所欲言,"
-                        f"对他人的观点不必客气,有不同意见请直接指出并说明理由。",
+                content=opening_text,
             ))
+            # v2.4 B1: 开场白 publish 到 MetaGPT Environment
+            self._publish_to_env(
+                speaker="orchestrator",
+                content=opening_text,
+                turn_id=0,
+                cause_by="StartDiscussion",
+            )
             await asyncio.sleep(0.5)
 
             for round_idx in range(max_rounds):
@@ -195,6 +239,12 @@ class DiscussionOrchestrator:
                     )
                     all_turns.append(turn)
                     bus.publish_turn(session_id, turn)
+                    # v2.4 B1: Agent 发言 publish 到 MetaGPT Environment
+                    self._publish_to_env(
+                        speaker=profile.code,
+                        content=turn.content,
+                        turn_id=turn_counter,
+                    )
 
                 self._user_inputs = []
 
@@ -221,6 +271,13 @@ class DiscussionOrchestrator:
                 role="agent",
                 content=summary_text,
             ))
+            # v2.4 B1: 主持人汇总 publish 到 MetaGPT Environment
+            self._publish_to_env(
+                speaker="orchestrator",
+                content=summary_text,
+                turn_id=turn_counter + 1,
+                cause_by="DiscussionSummary",
+            )
             self._emit(AgentEventType.COMPLETE, "orchestrator", "主持人已汇总共识")
 
         except Exception:
@@ -394,6 +451,46 @@ class DiscussionOrchestrator:
 
     # ── 事件广播 ──
 
+    def _publish_to_env(
+        self,
+        speaker: str,
+        content: str,
+        turn_id: Optional[int] = None,
+        cause_by: str = "DiscussTurn",
+    ) -> None:
+        """v2.4 B1: 把讨论发言 publish 到 MetaGPT Environment
+
+        Environment 接收 Message 后会:
+            1. 记录到 _history(完整讨论历史)
+            2. 通过 AgentEventBus 发布 DISCUSS 事件(前端 SSE 可见)
+        不调用 env.run(),避免与现有发言循环重复触发 LLM 调用。
+        Environment 构建失败或为 None 时静默降级,不影响讨论主流程。
+
+        Args:
+            speaker: 发言者 code(user / orchestrator / code_reviewer 等)
+            content: 发言内容文本
+            turn_id: 讨论轮次 ID(可选)
+            cause_by: 消息动作类型,默认 "DiscussTurn";
+                      开场白用 "StartDiscussion",汇总用 "DiscussionSummary"
+        """
+        if not self._env or not content:
+            return
+        try:
+            msg = make_discussion_message(
+                speaker=speaker,
+                content=content,
+                user_id=self._user_id or None,
+                project_id=None,
+                file_id=self._file_id or None,
+                trace_id=self._trace_id,
+                turn_id=turn_id,
+            )
+            # 覆盖默认 cause_by(make_discussion_message 默认 "DiscussTurn")
+            msg.cause_by = cause_by
+            self._env.publish(msg)
+        except Exception as e:
+            logger.debug(f"[Discussion] publish 到 Environment 失败(不影响主流程): {e}")
+
     def _emit(self, type_: AgentEventType, agent_code: str, message: str) -> None:
         """向 Agent 办公室广播讨论事件(失败静默,不影响讨论)"""
         try:
@@ -419,12 +516,20 @@ class DiscussionOrchestrator:
     _user_id: int = 0
     _file_id: int = 0
     _trace_id: str = ""
+    # v2.4 B1: MetaGPT Environment 引用(可选,构建失败时为 None)
+    _env: Optional[Environment] = None
 
     def _handle_control(self, action: str, payload: dict):
         if action == "user_input":
             content = payload.get("content", "")
             logger.info(f"[Discussion] 用户发言: {content[:60]}...")
             self._user_inputs.append(content)
+            # v2.4 B1: 用户发言 publish 到 MetaGPT Environment
+            self._publish_to_env(
+                speaker="user",
+                content=content,
+                turn_id=payload.get("turn_id"),
+            )
             # 用户发言不再强制取消暂停; 仅唤醒等待以便尽快读取指示
             if self._paused_event:
                 self._paused_event.set()
