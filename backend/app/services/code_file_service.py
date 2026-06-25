@@ -5,12 +5,18 @@ v2 增强(2026-06-25):
 - 压缩包上传自动解压:zip/tar/gz/bz2/xz → 批量创建文件,带 zip slip 安全防护
 - 二进制文件支持:is_binary=1 时 original_blob 存原始字节,content 存 base64(向后兼容)
 - 编辑器不再展示 base64 字符串:API 层 is_binary=1 时 content 置空,前端走下载接口
+
+T06 增强(2026-06-25):
+- 上传流程串行集成:MIME 白名单 → 单文件 10MB → 项目总 500MB → MalwareScanner 双引擎扫描
+- 压缩包解压后对每个内部文件递归执行恶意软件扫描
+- CodeFile 入库时写入 raw_size 字段(用于项目总大小校验)
 """
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 from fastapi import UploadFile
 from loguru import logger
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.ai.language_detector import detect_language
@@ -23,7 +29,16 @@ from app.models.user import User
 from app.schemas.code_file import CodeFileIn
 from app.utils.archive_extractor import ExtractedFile, extract_archive, is_archive
 from app.utils.encoding_utils import BASE64_PREFIX, to_utf8
-from app.utils.file_validator import validate_filename, validate_size
+from app.utils.file_validator import (
+    MAX_PROJECT_TOTAL_SIZE,
+    MAX_SINGLE_FILE_SIZE,
+    validate_filename,
+    validate_mime,
+    validate_project_total_size,
+    validate_single_file_size,
+    validate_size,
+)
+from app.utils.malware_scanner import ScanResult, get_scanner
 
 
 def list_files(db: Session, user: User, project_id: int = None, language: str = "",
@@ -84,6 +99,10 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
     - 二进制文件(图片/可执行文件等)单独存储 original_blob,content 存 base64(向后兼容)
     - 文本文件按原逻辑处理
 
+    T06 增强:
+    - 上传前串行执行:MIME 白名单 → 单文件 10MB → 项目总 500MB → MalwareScanner 双引擎扫描
+    - 任一校验失败抛出 ValueError 并附带清晰错误信息
+
     Args:
         db: 数据库会话
         user: 当前用户
@@ -100,13 +119,19 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
     Raises:
         NotFoundError: 项目不存在
         ForbiddenError: 无访问权限
-        ValidationError: 文件大小/格式/解压失败
+        ValidationError: 解压失败/扩展名不支持
+        ValueError: MIME 校验/大小校验/恶意软件扫描失败
     """
     _check_project_access(db, user, project_id)
 
     raw = upload_file.file.read()
-    validate_size(len(raw), settings.max_upload_size)
     filename = upload_file.filename or ""
+
+    # === T06 安全校验链:MIME → 单文件大小 → 项目总大小 → 恶意软件扫描 ===
+    _validate_upload_security(db, project_id, filename, raw)
+
+    # 兼容旧的整体大小限制(max_upload_size 默认 20MB)
+    validate_size(len(raw), settings.max_upload_size)
 
     # v2: 压缩包自动解压
     if is_archive(filename):
@@ -115,6 +140,97 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
     # 普通文件:校验扩展名
     safe_name = validate_filename(filename, settings.allowed_extensions)
     return _upload_single_file(db, user, project_id, safe_name, raw, file_path, language)
+
+
+def _validate_upload_security(
+    db: Session, project_id: int, filename: str, raw: bytes,
+) -> None:
+    """上传前安全校验链:MIME → 单文件大小 → 项目总大小 → 恶意软件扫描
+
+    校验顺序严格按 T06 规范执行,任一环节失败立即抛出 ValueError 终止上传。
+
+    Args:
+        db: 数据库会话(用于查询项目当前总大小)
+        project_id: 项目ID
+        filename: 上传文件名(含扩展名)
+        raw: 文件原始字节
+
+    Returns:
+        None: 无返回值,校验通过即静默返回
+
+    Raises:
+        ValueError: MIME 不在白名单 / 单文件超 10MB / 项目总超 500MB / 检测到恶意软件
+    """
+    # 1. MIME 白名单校验(同时拦截可执行文件扩展名)
+    if not validate_mime(filename):
+        raise ValueError(f"不支持的文件类型: {filename}")
+
+    # 2. 单文件大小校验(≤ 10MB)
+    file_size = len(raw)
+    if not validate_single_file_size(file_size):
+        raise ValueError(
+            f"文件大小 {file_size} 字节超过单文件上限 "
+            f"{MAX_SINGLE_FILE_SIZE} 字节(10MB)"
+        )
+
+    # 3. 项目总大小校验(≤ 500MB)
+    current_total = _get_project_total_size(db, project_id)
+    if not validate_project_total_size(current_total, file_size):
+        raise ValueError(
+            f"项目总大小 {current_total + file_size} 字节超过项目上限 "
+            f"{MAX_PROJECT_TOTAL_SIZE} 字节(500MB)"
+        )
+
+    # 4. 恶意软件扫描(ClamAV + YARA 双引擎,降级到启发式)
+    scan_result = get_scanner().scan(raw, filename)
+    if scan_result.result == "infected":
+        raise ValueError(
+            f"检测到恶意软件: {scan_result.threat_name},文件已被拒绝"
+        )
+
+
+def _get_project_total_size(db: Session, project_id: int) -> int:
+    """获取项目当前所有 active 文件的总原始字节数(raw_size 求和)
+
+    用于项目总大小 500MB 上限校验。raw_size 由 T01 引入,二进制文件计入
+    original_blob 真实大小,文本文件计入 UTF-8 编码字节长度。
+
+    Args:
+        db: 数据库会话
+        project_id: 项目ID
+
+    Returns:
+        int: 总字节数;项目无文件或查询异常时返回 0
+    """
+    total = db.query(func.sum(CodeFile.raw_size)).filter(
+        CodeFile.project_id == project_id,
+        CodeFile.status == "active",
+    ).scalar()
+    return int(total or 0)
+
+
+def _scan_extracted_file(filename: str, content_bytes: bytes) -> None:
+    """对压缩包内解压出的单个文件执行恶意软件扫描
+
+    压缩包整体扫描通过后,内部文件仍需逐个扫描,防止攻击者将恶意文件
+    打包进压缩包绕过外层扫描。
+
+    Args:
+        filename: 内部文件名(用于扫描日志与启发式校验)
+        content_bytes: 内部文件字节内容
+
+    Returns:
+        None: 无返回值,扫描通过即静默返回
+
+    Raises:
+        ValueError: 检测到恶意软件,文件已被拒绝
+    """
+    scan_result = get_scanner().scan(content_bytes, filename)
+    if scan_result.result == "infected":
+        raise ValueError(
+            f"压缩包内文件 {filename} 检测到恶意软件: "
+            f"{scan_result.threat_name},文件已被拒绝"
+        )
 
 
 def _upload_single_file(

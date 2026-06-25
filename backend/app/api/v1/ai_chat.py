@@ -2,7 +2,7 @@
 Agent 助手聊天 + 语言检测 + 项目分析 API 路由
 全部通过 Orchestrator 主调度 Agent 委派给专业子 Agent 执行
 """
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -46,6 +46,30 @@ class ClarifyOut(BaseModel):
     questions: List[ClarifyQuestionOut]
 
 
+class PlanStepOut(BaseModel):
+    """v3.0 双层调度单步调用结果(供前端 step tree 展示)
+
+    Attributes:
+        step_index: 步骤序号(0-based)
+        tool_name: 工具名(Skill name 或 Orchestrator 固定方法名)
+        reason: LLM 给出的调用理由
+        arguments: 工具参数 dict
+        success: 是否成功
+        duration_ms: 执行耗时(毫秒)
+        error: 错误信息(success=False 时填充)
+        data_preview: 输出数据预览(截断前 200 字符)
+    """
+
+    step_index: int = Field(..., description="步骤序号(0-based)")
+    tool_name: str = Field(..., description="工具名")
+    reason: str = Field(default="", description="调用理由")
+    arguments: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
+    success: bool = Field(..., description="是否成功")
+    duration_ms: int = Field(default=0, description="执行耗时(毫秒)")
+    error: Optional[str] = Field(default=None, description="错误信息")
+    data_preview: Optional[str] = Field(default=None, description="输出数据预览")
+
+
 class ChatResponse(BaseModel):
     content: str = Field(..., description="Agent回复内容")
     model: str = Field(..., description="实际使用的模型名称")
@@ -53,6 +77,10 @@ class ChatResponse(BaseModel):
     clarify: Optional[ClarifyOut] = Field(
         default=None,
         description="v2.0 Agent 主动追问;前端识别后渲染追问表单",
+    )
+    plan_steps: Optional[List[PlanStepOut]] = Field(
+        default=None,
+        description="v3.0 双层调度调用链(空表示未触发双层调度,前端可折叠展示)",
     )
 
 
@@ -100,13 +128,32 @@ def agent_chat(
         from app.ai.exceptions import AiServiceError
         raise AiServiceError(result.error or "Agent调用失败", code=50201)
     trace_id = (ctx.extra or {}).get("trace_id")
-    # 区分 v1.0 普通字符串响应 vs v2.0 Clarify 字典响应
+    # 区分 v1.0 普通字符串响应 vs v2.0 Clarify 字典响应 vs v3.0 双层调度 plan_steps
     if isinstance(result.data, dict):
+        # v3.0: 透传 plan_steps(双层调度调用链,供前端 step tree 展示)
+        raw_plan_steps = result.data.get("plan_steps")
+        plan_steps_out: Optional[List[PlanStepOut]] = None
+        if isinstance(raw_plan_steps, list) and raw_plan_steps:
+            plan_steps_out = [
+                PlanStepOut(
+                    step_index=s.get("step_index", idx),
+                    tool_name=s.get("tool_name", ""),
+                    reason=s.get("reason", ""),
+                    arguments=s.get("arguments", {}) or {},
+                    success=bool(s.get("success", False)),
+                    duration_ms=int(s.get("duration_ms", 0) or 0),
+                    error=s.get("error"),
+                    data_preview=s.get("data_preview"),
+                )
+                for idx, s in enumerate(raw_plan_steps)
+                if isinstance(s, dict)
+            ]
         return Resp(data=ChatResponse(
             content=result.data.get("content", ""),
             model=result.model,
             trace_id=trace_id,
             clarify=result.data.get("clarify"),
+            plan_steps=plan_steps_out,
         ))
     return Resp(data=ChatResponse(
         content=result.data,

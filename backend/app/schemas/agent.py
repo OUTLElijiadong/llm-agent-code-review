@@ -1,7 +1,7 @@
 """
 Agent 中心相关 Pydantic Schema
 """
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -74,3 +74,94 @@ class AgentSituationOut(BaseModel):
     today_calls: int = Field(0, description="今日累计调用数")
     spectrum: list[dict] = Field(default_factory=list, description="近 N 分钟调用波形")
     hotspots: list[dict] = Field(default_factory=list, description="近期热点 Agent")
+
+
+# === v3.0 AgentSkill 升级: Skill 调用相关 Schema ===
+
+
+class SkillInvokeIn(BaseModel):
+    """手动调用 Skill 请求体
+
+    用于 POST /api/agents/{name}/skills/{skill}/invoke 端点,
+    admin 通过此接口手动触发任意 Agent 的任意 Skill。
+
+    Attributes:
+        action: Skill 子动作(可选), 如 evolve / check_proactive /
+                scan_domain / reflect_from_logs
+        params: 透传给 Skill 的额外参数(可选)
+    """
+    action: Optional[str] = Field(
+        default=None,
+        description="Skill 子动作, 如 evolve/check_proactive/scan_domain/reflect_from_logs",
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="透传给 Skill 的额外参数(action 会合并进去)",
+    )
+
+
+class SkillInvokeOut(BaseModel):
+    """手动调用 Skill 响应体
+
+    Attributes:
+        success: 是否成功
+        data: Skill 调用返回的数据(任意类型)
+        error: 失败原因(success=False 时填充)
+        effect: 效果标签(success/failed/no_op/proposal_created)
+        duration_ms: 执行耗时(毫秒)
+        record_id: agent_skill_record 记录 ID
+    """
+    success: bool
+    data: Optional[Any] = None
+    error: Optional[str] = None
+    effect: str = "success"
+    duration_ms: int = 0
+    record_id: Optional[int] = None
+
+
+class AgentSkillRecordOut(BaseModel):
+    """Skill 调用记录输出
+
+    供 SkillManager 页面展示调用历史使用。
+
+    Attributes:
+        id: 记录 ID
+        agent_name: Agent 名称
+        skill_name: Skill 名称
+        trigger_type: 触发类型(manual/scheduled/event/proactive)
+        trigger_source: 触发来源描述
+        effect: 效果标签
+        success: 是否成功(由 effect == "success" 派生)
+        duration_ms: 执行耗时(毫秒)
+        output_summary: 输出摘要
+        create_time: 创建时间
+    """
+    id: int
+    agent_name: str
+    skill_name: str
+    trigger_type: str
+    trigger_source: str = ""
+    effect: str = "success"
+    success: bool = True
+    duration_ms: int = 0
+    output_summary: str = ""
+    create_time: Optional[str] = None
+
+
+class SkillMetaOut(BaseModel):
+    """Skill 元数据输出
+
+    供 /api/agents/{name}/skills 列出指定 Agent 的 Skill 元数据使用。
+
+    Attributes:
+        name: Skill name(形如 "code_reviewer.self_improve")
+        description: Skill 描述
+        type: Skill 类型(self_improvement / proactive)
+        invocable: 是否可被外部调用
+        agent_name: 所属 Agent name
+    """
+    name: str
+    description: str = ""
+    type: str = ""
+    invocable: bool = True
+    agent_name: str = ""

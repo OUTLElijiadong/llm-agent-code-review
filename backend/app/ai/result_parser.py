@@ -5,15 +5,21 @@ v2 增强(2026-06-25):
 - Issue 数据类新增漏洞元数据字段(owasp/cwe/evidence/exploit_scenario/references/confidence)
 - 新增 _infer_owasp_cwe() 辅助函数,对未填 cwe 的安全类 issue 推断补全
 - 向后兼容:旧格式 JSON(无新字段)仍能解析,用默认值填充
+
+v3 增强(2026-06-25):
+- Issue 数据类新增 CVSS/合规映射/修复方案字段(cvss_score/cvss_vector/compliance_mapping/remediation)
+- compliance_mapping 由后端基于 cwe 反查 CWE_TO_COMPLIANCE 字典填充,LLM 无需输出
+- 向后兼容:旧格式 JSON(无 v3 字段)仍能解析,用默认值填充
 """
 import json
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 
 from app.ai.exceptions import ResultParseError
+from app.constants.compliance import get_compliance_mapping
 
 ALLOWED_TYPES = {
     "代码规范", "潜在Bug", "安全漏洞", "性能问题",
@@ -35,6 +41,13 @@ class Issue:
         exploit_scenario: 攻击场景说明
         references: 参考链接列表
         confidence: 置信度 0.0-1.0
+
+    v3 新增字段(2026-06-25):
+        cvss_score: CVSS v3.1 基础分 0.0-10.0
+        cvss_vector: CVSS v3.1 向量字符串,如 AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
+        compliance_mapping: 合规映射字典,由后端基于 cwe 反查填充
+            {"iso27001":[...], "gdpr":[...], "pci_dss":[...], "hipaa":[...]}
+        remediation: 详细修复方案文本(50-500 字)
     """
     line_number: int = 0
     end_line: Optional[int] = None
@@ -51,6 +64,11 @@ class Issue:
     exploit_scenario: str = ""
     references: List[str] = field(default_factory=list)
     confidence: float = 0.8
+    # v3 新增 CVSS / 合规映射 / 修复方案字段
+    cvss_score: float = 0.0
+    cvss_vector: str = ""
+    compliance_mapping: Dict[str, List[str]] = field(default_factory=dict)
+    remediation: str = ""
 
 
 @dataclass
@@ -107,6 +125,87 @@ def _coerce_float(v, default: float = 0.8) -> float:
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+def _coerce_cvss_score(v) -> float:
+    """安全解析 CVSS v3.1 基础分,强制范围 [0.0, 10.0]
+
+    Args:
+        v: 待转换值(LLM 输出的原始字段)
+
+    Returns:
+        float: 0.0-10.0 之间的浮点数;缺失或非法时返回 0.0
+    """
+    score = _coerce_float(v, 0.0)
+    return max(0.0, min(10.0, round(score, 1)))
+
+
+def _coerce_cvss_vector(v) -> str:
+    """安全解析 CVSS v3.1 向量字符串,做最小合法性校验
+
+    Args:
+        v: 待转换值(LLM 输出的原始字段)
+
+    Returns:
+        str: 合法的 CVSS 向量字符串;非法或空则返回空字符串
+    """
+    if not v:
+        return ""
+    s = str(v).strip().upper()
+    # CVSS v3.1 向量至少包含 AV:/AC:/PR:/UI:/S:/C:/I:/A: 八个度量项
+    required_metrics = ("AV:", "AC:", "PR:", "UI:", "S:", "C:", "I:", "A:")
+    if not all(m in s for m in required_metrics):
+        return ""
+    # 移除可能的前缀 "CVSS:3.1/"
+    if s.startswith("CVSS:"):
+        s = s.split("/", 1)[1] if "/" in s else s
+    return s
+
+
+def _coerce_remediation(v) -> str:
+    """安全解析修复方案文本,去除首尾空白并限制最大长度
+
+    Args:
+        v: 待转换值(LLM 输出的原始字段)
+
+    Returns:
+        str: 规范化后的修复方案文本;空值返回空字符串
+    """
+    if not v:
+        return ""
+    return str(v).strip()[:2000]
+
+
+def _build_compliance_mapping(cwe: str) -> Dict[str, List[str]]:
+    """基于 CWE 编号反查 4 大合规标准映射
+
+    Args:
+        cwe: CWE 编号,如 CWE-89
+
+    Returns:
+        Dict[str, List[str]]: 合规映射字典
+            {"iso27001":[...], "gdpr":[...], "pci_dss":[...], "hipaa":[...]}
+            未匹配到 cwe 或所有标准均为空时返回空字典 {}
+    """
+    if not cwe:
+        return {}
+    try:
+        mapping = get_compliance_mapping(cwe)
+        if not mapping:
+            return {}
+        result = {
+            "iso27001": mapping.get("iso27001", []) or [],
+            "gdpr": mapping.get("gdpr", []) or [],
+            "pci_dss": mapping.get("pci_dss", []) or [],
+            "hipaa": mapping.get("hipaa", []) or [],
+        }
+        # 所有标准都为空列表时视为未命中,返回空字典
+        if not any(result.values()):
+            return {}
+        return result
+    except Exception:
+        # 合规反查失败不应阻断解析主流程
+        return {}
 
 
 def _coerce_references(v) -> List[str]:
@@ -203,6 +302,11 @@ def _normalize_issue(raw: dict) -> Issue:
     # 限制 confidence 在 [0, 1] 范围
     confidence = max(0.0, min(1.0, confidence))
 
+    # 解析 v3 新增字段
+    cvss_score = _coerce_cvss_score(raw.get("cvss_score"))
+    cvss_vector = _coerce_cvss_vector(raw.get("cvss_vector"))
+    remediation = _coerce_remediation(raw.get("remediation"))
+
     # 安全类 issue 缺 cwe 时,基于 title/description 推断补全
     if issue_type == "安全漏洞" and not cwe:
         inferred_owasp, inferred_cwe = _infer_owasp_cwe(title or "", description)
@@ -210,6 +314,14 @@ def _normalize_issue(raw: dict) -> Issue:
             owasp = inferred_owasp
         if not cwe:
             cwe = inferred_cwe
+
+    # 安全类 issue 缺 cvss_score 时,基于 severity 给出经验值
+    if issue_type == "安全漏洞" and cvss_score == 0.0:
+        severity_to_cvss = {"严重": 9.5, "高": 7.5, "中": 5.0, "低": 2.5}
+        cvss_score = severity_to_cvss.get(severity, 5.0)
+
+    # 基于 cwe 反查 4 大合规标准映射(LLM 不输出 compliance_mapping)
+    compliance_mapping = _build_compliance_mapping(cwe) if cwe else {}
 
     return Issue(
         line_number=_coerce_int(raw.get("line_number"), 0),
@@ -226,6 +338,10 @@ def _normalize_issue(raw: dict) -> Issue:
         exploit_scenario=exploit_scenario,
         references=references,
         confidence=confidence,
+        cvss_score=cvss_score,
+        cvss_vector=cvss_vector,
+        compliance_mapping=compliance_mapping,
+        remediation=remediation,
     )
 
 

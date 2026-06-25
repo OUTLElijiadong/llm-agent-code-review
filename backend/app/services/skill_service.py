@@ -12,7 +12,7 @@
 """
 import json
 import time
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -196,3 +196,69 @@ def invoke_skill_with_record(
         "duration_ms": duration_ms,
         "record_id": record_id,
     }
+
+
+def list_recent_records(
+    db: Session,
+    agent_name: Optional[str] = None,
+    skill_name: Optional[str] = None,
+    trigger_type: Optional[str] = None,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """查询最近的 Skill 调用记录(供 SkillManager / agent_status handler 使用)
+
+    支持按 agent_name / skill_name / trigger_type 过滤,默认按 create_time
+    倒序返回最近 limit 条记录。返回 dict 列表,字段已转换为前端友好格式。
+
+    Args:
+        db: 数据库会话
+        agent_name: 按 Agent 过滤(None=全部)
+        skill_name: 按 Skill 过滤(None=全部)
+        trigger_type: 按触发类型过滤(None=全部, manual/scheduled/event/proactive)
+        limit: 返回上限(默认 10,最大 100)
+
+    Returns:
+        list[dict]: 调用记录列表,每条 dict 含:
+            - id (int): 记录 ID
+            - agent_name (str): Agent 名称
+            - skill_name (str): Skill 名称
+            - trigger_type (str): 触发类型
+            - trigger_source (str): 触发来源描述
+            - effect (str): 效果标签(success/failed/no_op/proposal_created)
+            - success (bool): 是否成功(由 effect == "success" 派生)
+            - duration_ms (int): 执行耗时(毫秒)
+            - output_summary (str): 输出摘要
+            - create_time (datetime): 创建时间
+    """
+    if limit <= 0 or limit > 100:
+        limit = 10
+
+    query = db.query(AgentSkillRecord)
+    if agent_name:
+        query = query.filter(AgentSkillRecord.agent_name == agent_name)
+    if skill_name:
+        query = query.filter(AgentSkillRecord.skill_name == skill_name)
+    if trigger_type:
+        query = query.filter(AgentSkillRecord.trigger_type == trigger_type)
+
+    records = (
+        query.order_by(AgentSkillRecord.create_time.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "id": r.id,
+            "agent_name": r.agent_name,
+            "skill_name": r.skill_name,
+            "trigger_type": r.trigger_type,
+            "trigger_source": r.trigger_source or "",
+            "effect": r.effect,
+            "success": r.effect == "success",
+            "duration_ms": r.duration_ms,
+            "output_summary": r.output_summary or "",
+            "create_time": str(r.create_time) if r.create_time else None,
+        }
+        for r in records
+    ]

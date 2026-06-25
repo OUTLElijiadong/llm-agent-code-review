@@ -277,6 +277,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Agent 自进化', role: 'admin' },
       },
       {
+        path: 'skills',
+        name: 'SkillManager',
+        component: () => import('@/views/admin/SkillManager.vue'),
+        meta: { title: 'Skill 管理', role: 'admin' },
+      },
+      {
         path: 'embedding',
         name: 'EmbeddingConfig',
         component: () => import('@/views/admin/EmbeddingConfig.vue'),

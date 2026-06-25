@@ -228,6 +228,7 @@ class DeepSeekAgent:
                     chunk_index=chunk_index, prompt=user_prompt, response=content,
                     status="success", error=None, meta=meta,
                     model_name=model_tag,
+                    agent_label=agent_label,
                 )
                 return content, meta
 
@@ -250,6 +251,7 @@ class DeepSeekAgent:
                 error=str(err)[:500],
                 meta={"duration_ms": duration_ms},
                 model_name=model_tag,
+                agent_label=agent_label,
             )
             if attempt >= self.max_retries:
                 break
@@ -277,13 +279,15 @@ class DeepSeekAgent:
     ):
         """补写 AiCallLog — 并行线程在主线程事后补录
 
-        meta 由 call_raw() 返回, 包含 create_time / model_tag / tokens 全量信息。
+        meta 由 call_raw() 返回, 包含 create_time / model_tag / tokens / agent_label 全量信息。
+        agent_label 从 meta 中读取并写入 AiCallLog.agent_label,实现 Agent 调用归因。
         """
         rec = AiCallLog(
             task_id=task_id,
             user_id=user_id,
             file_id=file_id,
             chunk_index=chunk_index,
+            agent_label=meta.get("agent_label") or None,
             model_name=meta.get("model_tag", meta.get("model_name", "")),
             prompt=(meta.get("user_prompt") or "")[:200_000],
             response=(meta.get("response") or "")[:200_000],
@@ -302,11 +306,17 @@ class DeepSeekAgent:
     def _log(
         db: Session, *, task_id, user_id, file_id, chunk_index,
         prompt, response, status, error, meta, model_name,
+        agent_label: Optional[str] = None,
     ):
-        """chat() 专用的同步日志写入"""
+        """chat() 专用的同步日志写入
+
+        Args:
+            agent_label: Agent 标识码,写入 AiCallLog.agent_label 实现 Agent 调用归因
+        """
         rec = AiCallLog(
             task_id=task_id, user_id=user_id, file_id=file_id,
             chunk_index=chunk_index,
+            agent_label=agent_label or None,
             model_name=model_name,
             prompt=prompt[:200_000] if prompt else None,
             response=response[:200_000] if response else None,

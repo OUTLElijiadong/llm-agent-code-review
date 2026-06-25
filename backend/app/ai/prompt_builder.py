@@ -1,8 +1,13 @@
 """
 Prompt构建模块: 根据模板和参数构建审查Prompt
+
+v3 增强(2026-06-25):
+- 新增 ISSUE_JSON_SCHEMA 常量,声明 LLM 输出的 JSON Schema 约束
+- 新增 get_issue_json_schema() 函数,供调试/日志/校验使用
+- build_prompt() 通过模板已包含 v3 字段约束(cvss_score/cvss_vector/remediation/compliance_mapping)
 """
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Dict, Tuple
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "review.zh.md"
 
@@ -10,6 +15,69 @@ _SYSTEM = (
     "你是一名严谨的代码审查工程师。"
     "你必须严格按照用户消息中要求的 JSON 格式回答,只输出 JSON,不输出任何额外文字。"
 )
+
+
+# === LLM 输出的 Issue JSON Schema(v3 全量字段约束) ===
+# 该 Schema 用于:
+# 1. 文档化 LLM 期望输出的字段结构
+# 2. 在调试/日志中快速查看字段约束
+# 3. 可选地通过 jsonschema 库在解析后做严格校验(当前 result_parser 采用宽松解析)
+ISSUE_JSON_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "required": ["summary", "score", "issues"],
+    "properties": {
+        "summary": {"type": "string", "minLength": 10, "maxLength": 500},
+        "score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "issues": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "line_number", "issue_type", "severity",
+                    "title", "description", "suggestion",
+                    "owasp", "cwe", "evidence", "exploit_scenario",
+                    "references", "confidence",
+                    "cvss_score", "cvss_vector", "remediation",
+                ],
+                "properties": {
+                    "line_number": {"type": "integer", "minimum": 0},
+                    "end_line": {"type": "integer", "minimum": 0},
+                    "issue_type": {
+                        "type": "string",
+                        "enum": [
+                            "代码规范", "潜在Bug", "安全漏洞", "性能问题",
+                            "异常处理", "命名规范", "可维护性", "注释完整性", "其他",
+                        ],
+                    },
+                    "severity": {"type": "string", "enum": ["严重", "高", "中", "低"]},
+                    "title": {"type": "string", "maxLength": 100},
+                    "description": {"type": "string", "minLength": 10, "maxLength": 500},
+                    "suggestion": {"type": "string", "minLength": 10, "maxLength": 500},
+                    "fixed_code": {"type": "string"},
+                    "owasp": {"type": "string"},
+                    "cwe": {"type": "string"},
+                    "evidence": {"type": "string"},
+                    "exploit_scenario": {"type": "string"},
+                    "references": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "cvss_score": {"type": "number", "minimum": 0.0, "maximum": 10.0},
+                    "cvss_vector": {"type": "string"},
+                    "remediation": {"type": "string", "maxLength": 1000},
+                    # compliance_mapping 由后端基于 cwe 反查填充,LLM 不输出
+                },
+            },
+        },
+    },
+}
+
+
+def get_issue_json_schema() -> Dict[str, Any]:
+    """返回 LLM 输出的 Issue JSON Schema(v3 全量字段约束)
+
+    Returns:
+        Dict[str, Any]: JSON Schema 字典,可用于 jsonschema 库校验或文档展示
+    """
+    return ISSUE_JSON_SCHEMA
 
 
 def _load_template() -> str:

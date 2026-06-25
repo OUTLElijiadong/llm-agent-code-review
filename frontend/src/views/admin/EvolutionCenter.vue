@@ -46,6 +46,88 @@
       </el-card>
     </div>
 
+    <!-- v3.0 AgentSkill 升级:per-Agent 自进化控制台 -->
+    <el-card shadow="never" class="per-agent-card">
+      <template #header>
+        <div class="per-agent-head">
+          <div>
+            <h3 class="block-title">per-Agent 自进化控制台</h3>
+            <p class="block-sub">
+              选择单个 Agent 触发其专属 self_improve Skill,查看该 Agent 最近的自进化调用记录;
+              与全局"运行一轮进化"互补,支持细粒度按 Agent 治理
+            </p>
+          </div>
+          <div class="per-agent-actions">
+            <el-select
+              v-model="selectedAgentName"
+              placeholder="选择 Agent"
+              filterable
+              style="width: 220px"
+              @change="onAgentChange"
+            >
+              <el-option
+                v-for="a in runtimeAgents"
+                :key="a.code"
+                :label="`${a.name} (${a.code})`"
+                :value="a.code"
+              />
+            </el-select>
+            <el-button
+              type="warning"
+              :loading="triggering"
+              :disabled="!selectedAgentName"
+              @click="onTriggerAgent"
+            >
+              触发该 Agent 自进化
+            </el-button>
+            <el-button :icon="Refresh" :loading="recordsLoading" :disabled="!selectedAgentName" @click="loadAgentRecords">
+              刷新记录
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-table
+        v-loading="recordsLoading"
+        :data="agentSkillRecords"
+        stripe
+        empty-text="选择 Agent 后展示其 self_improve / proactive Skill 调用记录"
+        max-height="320"
+      >
+        <el-table-column label="Skill" min-width="200">
+          <template #default="{ row }">
+            <code class="rec-skill">{{ row.skill_name }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column label="触发类型" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="triggerTypeTag(row.trigger_type)">
+              {{ triggerTypeLabel(row.trigger_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="效果" width="100">
+          <template #default="{ row }">
+            <span :class="effectClass(row.effect)">{{ row.effect || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="耗时" width="100">
+          <template #default="{ row }">{{ row.duration_ms ? `${row.duration_ms}ms` : '-' }}</template>
+        </el-table-column>
+        <el-table-column label="触发来源" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="text-muted">{{ row.trigger_source || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="输出摘要" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.output_summary || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="时间" width="170">
+          <template #default="{ row }">{{ row.create_time ? formatDateTime(row.create_time) : '-' }}</template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card shadow="never" class="main-card">
       <el-tabs v-model="activeTab">
         <!-- 提案审批台 -->
@@ -213,13 +295,19 @@ import {
   rejectProposal,
   rollbackProposal,
   runEvolution,
+  triggerEvolution,
 } from '@/api/evolution'
+import { listRuntimeAgents, listSkillRecords } from '@/api/agent'
 import type {
   EvalCase,
   EvolutionProposal,
   FeedbackSummary,
   ReviewExperience,
 } from '@/types/evolution'
+import type {
+  AgentRuntimeOut,
+  AgentSkillRecordOut,
+} from '@/types/agent'
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '待评估',
@@ -257,6 +345,113 @@ const detail = ref<EvolutionProposal | null>(null)
 const pendingCount = computed(
   () => proposals.value.filter((p) => ['pending', 'eval_passed', 'eval_failed'].includes(p.status)).length,
 )
+
+// === v3.0 AgentSkill 升级:per-Agent 自进化控制台 ===
+const runtimeAgents = ref<AgentRuntimeOut[]>([])
+const selectedAgentName = ref<string>('')
+const agentSkillRecords = ref<AgentSkillRecordOut[]>([])
+const recordsLoading = ref(false)
+const triggering = ref(false)
+
+/**
+ * 触发类型中文标签
+ * @param t - 触发类型(manual/scheduled/event/orchestrator)
+ * @returns 中文标签
+ */
+function triggerTypeLabel(t: string): string {
+  const map: Record<string, string> = {
+    manual: '手动',
+    scheduled: '定时',
+    event: '事件',
+    orchestrator: '调度',
+  }
+  return map[t] ?? t
+}
+
+/**
+ * 触发类型对应的 el-tag type
+ * @param t - 触发类型
+ * @returns el-tag type
+ */
+function triggerTypeTag(t: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' {
+  const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+    manual: 'warning',
+    scheduled: 'info',
+    event: 'primary',
+    orchestrator: 'success',
+  }
+  return map[t] ?? 'info'
+}
+
+/**
+ * 效果标记样式类
+ * @param e - 效果标记(success/no_change/failed)
+ * @returns CSS 类名
+ */
+function effectClass(e?: string | null): string {
+  if (e === 'success') return 'gate-ok'
+  if (e === 'failed') return 'gate-bad'
+  if (e === 'no_change') return 'text-muted'
+  return ''
+}
+
+/**
+ * Agent 选择变化时加载该 Agent 的 Skill 调用记录
+ */
+function onAgentChange(): void {
+  if (selectedAgentName.value) {
+    loadAgentRecords()
+  } else {
+    agentSkillRecords.value = []
+  }
+}
+
+/**
+ * 加载选中 Agent 的 Skill 调用记录
+ * 查询该 Agent 最近 20 条 self_improve / proactive Skill 记录
+ */
+async function loadAgentRecords(): Promise<void> {
+  if (!selectedAgentName.value) return
+  recordsLoading.value = true
+  try {
+    agentSkillRecords.value = await listSkillRecords({
+      agentName: selectedAgentName.value,
+      limit: 20,
+    })
+  } catch {
+    ElMessage.error('加载 Agent Skill 调用记录失败')
+  } finally {
+    recordsLoading.value = false
+  }
+}
+
+/**
+ * 触发选中 Agent 的自进化 Skill
+ * 调用 POST /api/evolution/trigger?agent_name=xxx&window_days=90
+ */
+async function onTriggerAgent(): Promise<void> {
+  if (!selectedAgentName.value) return
+  triggering.value = true
+  try {
+    const res = await triggerEvolution(selectedAgentName.value, windowDays.value)
+    const effect = (res as Record<string, string>).effect || 'unknown'
+    const duration = (res as Record<string, number>).duration_ms
+    if (effect === 'success') {
+      ElMessage.success(`已触发 ${selectedAgentName.value} 自进化(${duration ?? 0}ms)`)
+    } else if (effect === 'no_change') {
+      ElMessage.info(`${selectedAgentName.value} 自进化完成,本轮无新提案(样本不足或已收敛)`)
+    } else {
+      ElMessage.warning(`${selectedAgentName.value} 自进化效果:${effect}`)
+    }
+    // 刷新记录与全局提案
+    await loadAgentRecords()
+    await loadProposals()
+  } catch {
+    ElMessage.error('触发自进化失败')
+  } finally {
+    triggering.value = false
+  }
+}
 
 function pct(v?: number): string {
   return v === undefined || v === null ? '-' : `${(v * 100).toFixed(1)}%`
@@ -344,9 +539,26 @@ async function loadEvalCases(): Promise<void> {
 async function reloadAll(): Promise<void> {
   loading.value = true
   try {
-    await Promise.all([loadFeedback(), loadProposals(), loadExperiences(), loadEvalCases()])
+    await Promise.all([
+      loadFeedback(),
+      loadProposals(),
+      loadExperiences(),
+      loadEvalCases(),
+      loadRuntimeAgents(),
+    ])
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 加载 AgentRegistry 中的所有 Agent,供 per-Agent 选择器使用
+ */
+async function loadRuntimeAgents(): Promise<void> {
+  try {
+    runtimeAgents.value = await listRuntimeAgents()
+  } catch {
+    // 静默失败,选择器为空时用户仍可使用全局进化
   }
 }
 
@@ -462,6 +674,48 @@ onMounted(reloadAll)
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   margin-bottom: 16px;
+}
+
+/* v3.0 AgentSkill 升级:per-Agent 自进化控制台卡片 */
+.per-agent-card {
+  margin-bottom: 16px;
+  border-left: 3px solid var(--brand-500, #5B58E8);
+}
+
+.per-agent-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.per-agent-head .block-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gray-900, #161A24);
+}
+
+.per-agent-head .block-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary, #909399);
+  max-width: 560px;
+  line-height: 1.5;
+}
+
+.per-agent-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rec-skill {
+  font-size: 11.5px;
+  color: var(--brand-600, #5B58E8);
+  font-family: var(--font-mono, monospace);
 }
 
 .stat-card {

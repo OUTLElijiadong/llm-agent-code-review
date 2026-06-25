@@ -18,6 +18,7 @@ import {
   Tools,
   TrendCharts,
   User,
+  View,
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -47,6 +48,7 @@ const menuItems: AdminMenuItem[] = [
   { path: '/admin/ai-logs', title: 'Agent 调用日志', icon: MagicStick },
   { path: '/admin/audit', title: '系统操作审计', icon: Bell },
   { path: '/admin/evolution', title: 'Agent 自进化', icon: MagicStick },
+  { path: '/admin/skills', title: 'Skill 管理', icon: View },
   { path: '/admin/llm', title: '大模型配置', icon: Setting },
   { path: '/admin/embedding', title: 'RAG 嵌入配置', icon: Key },
 ]

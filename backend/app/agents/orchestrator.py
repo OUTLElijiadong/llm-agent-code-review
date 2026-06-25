@@ -314,6 +314,8 @@ class Orchestrator(BaseAgent):
         skill_name: str,
         params: Dict[str, Any],
         ctx: Optional[AgentContext] = None,
+        trigger_type: str = "orchestrator",
+        trigger_source: str = "",
     ) -> AgentResult:
         """调用指定 Agent 的指定 Skill
 
@@ -324,6 +326,11 @@ class Orchestrator(BaseAgent):
             skill_name: Skill name(如 code_reviewer.self_improve)
             params: Skill 参数
             ctx: 上下文
+            trigger_type: 触发类型(manual/scheduled/event/proactive/orchestrator),
+                默认 "orchestrator"(ChatPlanner 调用),其他场景由调用方显式传入
+            trigger_source: 触发来源描述(如 "api:POST /agents/.../invoke" /
+                "event:REVIEW_ISSUE_STATUS_CHANGED" / "scheduler:cron:0 3 * * *"),
+                留空则按 trigger_type 自动生成默认值
 
         Returns:
             AgentResult: data 为 skill_service 返回的 dict
@@ -335,14 +342,18 @@ class Orchestrator(BaseAgent):
             )
         from app.services import skill_service
 
+        # trigger_source 默认值
+        if not trigger_source:
+            trigger_source = f"orchestrator.invoke_skill:{trigger_type}"
+
         user = getattr(self, "_user", None)
         result = skill_service.invoke_skill_with_record(
             db=self._db,
             agent_name=agent_name,
             skill_name=skill_name,
             params=params,
-            trigger_type="orchestrator",
-            trigger_source=f"orchestrator.invoke_skill",
+            trigger_type=trigger_type,
+            trigger_source=trigger_source,
             user=user,
             ctx=ctx,
         )

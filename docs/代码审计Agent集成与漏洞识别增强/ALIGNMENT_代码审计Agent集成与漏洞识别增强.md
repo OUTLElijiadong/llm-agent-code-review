@@ -3,7 +3,7 @@
 > 任务名: `代码审计Agent集成与漏洞识别增强`
 > 创建时间: 2026-06-25
 > 阶段: Align(对齐)
-> 状态: 已完成需求理解与边界确认,进入 Architect 阶段
+> 状态: 已完成两轮对齐,所有关键决策点已确认,准备生成 CONSENSUS 共识文档
 
 ---
 
@@ -88,6 +88,21 @@
 | 服务器同步 | rsync + deploy.sh 重建 | 本地验证通过后 rsync 同步到 `/opt/code-review`,执行 `deploy/deploy.sh` 重建容器,保留数据库数据 |
 | 编辑器压缩包修复 | **自动解压入库** | 后端识别压缩包(zip/tar/gz/rar)时自动解压并作为多个新文件入库,不作为单个 binary 文件存储 |
 
+### 3.1.1 第二轮对齐新决策(2026-06-25 补充)
+
+本轮在首轮基础上,用户进一步选择了**最高规格全量方案**,需在原 ALIGNMENT 基础上扩充如下决策点:
+
+| 决策点 | 用户选择 | 含义与影响 |
+|-------|---------|-----------|
+| 漏洞分类体系 | **全量(CWE+OWASP+CVSS v3.1+合规映射)** | `ReviewIssue` 表新增字段:`cwe_id`(如 CWE-89)、`owasp_category`(如 A03:2021-Injection)、`cvss_score`(0.0-10.0)、`cvss_vector`(如 AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H)、`severity`(critical/high/medium/low/info)、`confidence`(confirmed/likely/suspected)、`compliance_mapping`(JSON,见下)。Prompt 模板需强制 LLM 输出上述结构化字段 |
+| 合规标准映射 | **ISO 27001 + GDPR + PCI-DSS + HIPAA 全量** | `compliance_mapping` 字段为 JSON,形如 `{"iso27001": ["A.14.2.1"], "gdpr": ["Art.32"], "pci_dss": ["Req-6.2.4"], "hipaa": ["§164.312(b)"]}`。需建立 4 套合规条款字典(独立常量模块),并在 Prompt 中给出对应关系示例 |
+| 评审身份与权限模型 | **RBAC 全量+菜单+数据范围** | 新增 5 张 RBAC 表:`role`、`permission`、`role_permission`、`user_role`、`menu`、`data_scope`。权限点覆盖项目 CRUD、审查启动/查看/审批、问题处理、Agent 配置、规则管理、报告导出、用户管理、菜单可见性、数据可见范围。前端需新增角色管理、权限分配、菜单管理 3 个页面。需 Alembic 迁移脚本 |
+| 单文件上传安全 | **MIME 白名单 + 单文件 10MB + 项目总 500MB + ClamAV+YARA 双引擎扫描** | `file_validator.py` 扩展 MIME 白名单(代码文件扩展名集合),拒绝可执行文件后缀。Docker Compose 新增 ClamAV 容器(freshclam 自动更新)+ YARA 规则集。后端 `code_file_service.upload()` 同步调用双引擎扫描,扫描失败/超时降级为仅启发式校验并告警 |
+| 报告格式与模板 | **PDF + Word + JSON + HTML + 模板可配置** | 保留现有 PDF/Word 导出器,新增 JSON 结构化报告(供 API 消费)与 HTML 在线报告(可分享链接)。前端新增"报告模板管理"页,支持简洁版/详细版/合规版 3 套模板。模板引擎用 Jinja2(后端)+ 动态表单(前端) |
+| 交付策略 | **一次性全量交付** | 不分批,所有能力一次性交付。风险较高,需严格按 6A 工作流推进,每个子任务单测+集成测试+本地全栈验证通过后才推进下一个 |
+| 服务器同步具体对象 | **代码目录 + Alembic 迁移 + 配置(保留线上 .env)** | rsync 同步 `backend/`、`frontend/`、`deploy/`、`docs/`;Alembic 迁移自动升级数据库结构(保留线上数据);`.env` 不覆盖(保留线上现有 DeepSeek Key 与数据库连接) |
+| review/audit/security 三者关系 | **review 为统一入口,security 为子能力,audit 不变** | `audit_service`(操作日志)保持不变;`review_service` 作为唯一审查入口,内部编排 `CodeReviewerAgent`+`SecuritySentinelAgent`;`/api/security/scan*` 独立接口保留但内部复用 `SecuritySentinelAgent` 实例 |
+
 ### 3.2 任务范围(明确做/不做)
 
 **做**:
@@ -120,6 +135,8 @@
 
 ## 四、疑问澄清(已在交互中解决)
 
+### 4.1 第一轮澄清
+
 | 疑问 | 用户回答 |
 |------|---------|
 | "代码审计"具体指哪个模块? | review + security + 编辑器三者 |
@@ -130,6 +147,19 @@
 | LLM API Key 来源? | 用现有 `.env` 中的 DeepSeek Key |
 | 服务器同步方式? | rsync + deploy.sh 重建容器 |
 | 编辑器压缩包修复方式? | 自动解压入库(后端识别压缩包并解压成多个文件) |
+
+### 4.2 第二轮澄清(2026-06-25 补充)
+
+| 疑问 | 用户回答 |
+|------|---------|
+| 漏洞分类体系如何设计? | 全量(CWE+OWASP+CVSS v3.1+合规映射) |
+| 合规标准支持哪些? | ISO 27001 + GDPR + PCI-DSS + HIPAA 全量 |
+| 评审身份与权限模型? | RBAC 全量+菜单+数据范围(5 张新表) |
+| 单文件上传安全策略? | MIME 白名单 + 单文件 10MB + 项目总 500MB + ClamAV+YARA 双引擎 |
+| 报告输出格式与字段? | PDF + Word + JSON + HTML + 模板可配置(简洁版/详细版/合规版) |
+| 时间线与优先级? | 一次性全量交付(不分批) |
+| 服务器同步具体对象? | 代码目录 + Alembic 迁移 + 配置(保留线上 .env) |
+| review/audit/security 三者关系? | review 统一入口,security 子能力,audit 不变 |
 
 ---
 

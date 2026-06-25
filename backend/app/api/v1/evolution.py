@@ -1,8 +1,12 @@
 """Agent 自进化 API 路由
 
 治理类接口,统一要求管理员权限(写入全局规则 + 人工闸门)。
+
+v3.0 AgentSkill 升级新增:
+- POST /evolution/trigger: 通过 Orchestrator.trigger_evolution 触发指定 Agent 的自进化,
+  trigger_type="manual" 写 agent_skill_record
 """
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -23,6 +27,14 @@ router = APIRouter()
 
 
 def _client_ip(request: Request) -> str:
+    """从 Request 提取客户端 IP(优先 x-forwarded-for)
+
+    Args:
+        request: FastAPI Request 对象
+
+    Returns:
+        str: 客户端 IP 字符串
+    """
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
         return fwd.split(",")[0].strip()
@@ -107,3 +119,85 @@ def rollback_proposal(proposal_id: int, payload: RejectIn, request: Request,
     p = evolution_service.rollback_proposal(db, admin, proposal_id, payload.note,
                                             ip=_client_ip(request))
     return Resp(data=ProposalOut.model_validate(p))
+
+
+# =================== v3.0 AgentSkill 升级: per-Agent 自进化触发 ===================
+
+
+@router.post("/trigger", response_model=Resp[dict])
+def trigger_evolution(
+    request: Request,
+    agent_name: str = Query(
+        "evolution",
+        description="目标 Agent name(如 code_reviewer / security_sentinel / evolution)",
+    ),
+    window_days: int = Query(
+        90, ge=1, le=365, description="反馈窗口天数(1-365, 默认 90)",
+    ),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """v3.0: 触发指定 Agent 的自进化(admin only)
+
+    通过 Orchestrator.trigger_evolution 调用 {agent_name}.self_improve action=evolve,
+    trigger_type="manual" 自动写 agent_skill_record 与 audit_log。
+
+    与 /api/evolution/run 的区别:
+        - /run: 调用 evolution_service.run_evolution(全局进化流程, 不区分 Agent)
+        - /trigger: 调用 Orchestrator.trigger_evolution(per-Agent 自进化, 写 skill 记录)
+
+    Args:
+        request: FastAPI Request(用于审计 IP)
+        agent_name: 目标 Agent name(默认 evolution)
+        window_days: 反馈窗口天数(1-365, 默认 90)
+        db: 数据库会话
+        admin: 当前管理员用户(由 require_admin 注入)
+
+    Returns:
+        Resp[dict]: 自进化执行结果, 含 success/data/error/duration_ms
+    """
+    from loguru import logger
+
+    from app.agents.base import AgentContext
+    from app.agents.orchestrator import get_request_orchestrator
+
+    logger.info(
+        f"[evolution.trigger] admin={admin.id} agent={agent_name} "
+        f"window={window_days}d ip={_client_ip(request)}"
+    )
+
+    orch = get_request_orchestrator(db, user=admin)
+    ctx = AgentContext(
+        user_id=admin.id,
+        extra={
+            "api": "evolution.trigger",
+            "admin_id": admin.id,
+            "client_ip": _client_ip(request),
+        },
+    )
+
+    # Orchestrator.trigger_evolution 内部调用 invoke_skill,
+    # 但其 trigger_type 默认为 "orchestrator", 这里需要 "manual" 以便审计归类
+    # 所以直接调用 invoke_skill 而非 trigger_evolution
+    skill_name = f"{agent_name}.self_improve"
+    result = orch.invoke_skill(
+        agent_name=agent_name,
+        skill_name=skill_name,
+        params={"action": "evolve", "window_days": window_days},
+        ctx=ctx,
+        trigger_type="manual",
+        trigger_source=f"api:POST /evolution/trigger?agent_name={agent_name}",
+    )
+
+    data = result.data if isinstance(result.data, dict) else {}
+    return Resp(data={
+        "success": result.success,
+        "data": data.get("data"),
+        "error": result.error or data.get("error"),
+        "effect": data.get("effect", "success" if result.success else "failed"),
+        "duration_ms": data.get("duration_ms", result.duration_ms),
+        "record_id": data.get("record_id"),
+        "agent_name": agent_name,
+        "skill_name": skill_name,
+        "window_days": window_days,
+    })

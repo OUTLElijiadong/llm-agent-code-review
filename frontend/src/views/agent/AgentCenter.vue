@@ -125,6 +125,48 @@
           </div>
         </div>
 
+        <!-- v3.0 AgentSkill 升级:per-Agent 自进化能力展示 -->
+        <div class="detail-section">
+          <div class="detail-label">
+            自进化能力
+            <span class="detail-label-hint">(Self-Improvement + Proactive)</span>
+          </div>
+          <PrismLoading
+            v-if="skillsLoading"
+            label="加载 Skill 元数据"
+            sublabel="从 SkillRegistry 拉取 per-Agent 专属能力"
+            compact
+          />
+          <template v-else-if="agentSkills.length">
+            <div class="skill-cards">
+              <div
+                v-for="sk in agentSkills"
+                :key="sk.name"
+                class="skill-card"
+                :class="`skill-${sk.type}`"
+              >
+                <div class="skill-card-head">
+                  <span class="skill-type-badge" :class="`badge-${sk.type}`">
+                    {{ skillTypeLabel(sk.type) }}
+                  </span>
+                  <code class="skill-name">{{ sk.name }}</code>
+                </div>
+                <p class="skill-desc">{{ sk.description }}</p>
+                <div class="skill-card-foot">
+                  <el-tag size="small" :type="sk.invocable ? 'success' : 'info'" effect="plain">
+                    {{ sk.invocable ? '可手动调用' : '仅自动触发' }}
+                  </el-tag>
+                </div>
+              </div>
+            </div>
+          </template>
+          <EmptyState
+            v-else
+            description="该 Agent 暂未挂载 Skill"
+            compact
+          />
+        </div>
+
         <div class="detail-section">
           <div class="detail-label">调用统计</div>
           <el-descriptions :column="2" border size="small">
@@ -141,6 +183,14 @@
         </div>
 
         <div class="detail-footer">
+          <el-button
+            v-if="isAdmin"
+            type="warning"
+            :loading="triggering"
+            @click="triggerSelfImprove(selectedAgent)"
+          >
+            触发自进化
+          </el-button>
           <el-button type="primary" @click="invokeViaChat(selectedAgent)">
             通过 Agent 助手调用
           </el-button>
@@ -177,17 +227,23 @@ import {
   getRuntimeSummary,
   getSituation,
   listTypeMappings,
+  listAgentSkills,
 } from '@/api/agent'
+import { triggerEvolution } from '@/api/evolution'
+import { useUserStore } from '@/stores/user'
 import type {
   AgentRuntimeOut,
   AgentRuntimeSummaryOut,
   AgentSituationOut,
   AgentStatus,
   ReviewTypeMappingOut,
+  SkillMetaOut,
+  SkillType,
 } from '@/types/agent'
 
 const router = useRouter()
 const route = useRoute()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const runtime = ref<AgentRuntimeOut[]>([])
@@ -198,6 +254,21 @@ const filterCategory = ref<string>('')
 
 const drawerVisible = ref(false)
 const selectedAgent = ref<AgentRuntimeOut | null>(null)
+
+// === v3.0 AgentSkill 升级:per-Agent Skill 元数据 ===
+const agentSkills = ref<SkillMetaOut[]>([])
+const skillsLoading = ref(false)
+const triggering = ref(false)
+const isAdmin = computed(() => userStore.profile?.role === 'admin')
+
+/**
+ * Skill 类型中文标签
+ * @param t - Skill 类型(self_improvement / proactive)
+ * @returns 中文标签
+ */
+function skillTypeLabel(t: SkillType): string {
+  return t === 'self_improvement' ? '自我进化' : '主动监测'
+}
 
 const CATEGORY_LABELS: Record<string, string> = {
   meta: '主控',
@@ -259,6 +330,60 @@ function onAgentSelect(code: string): void {
   selectedAgent.value = runtime.value.find((a) => a.code === code) ?? null
   drawerVisible.value = !!selectedAgent.value
 }
+
+/**
+ * 加载指定 Agent 的 Skill 元数据
+ * 在抽屉打开时调用,从 SkillRegistry 拉取 per-Agent 专属 Skill 列表。
+ * @param agentCode - Agent code
+ */
+async function loadAgentSkills(agentCode: string): Promise<void> {
+  skillsLoading.value = true
+  agentSkills.value = []
+  try {
+    agentSkills.value = await listAgentSkills(agentCode)
+  } catch {
+    // 静默失败,抽屉里会显示 EmptyState
+  } finally {
+    skillsLoading.value = false
+  }
+}
+
+/**
+ * 手动触发指定 Agent 的自进化 Skill(admin only)
+ * 调用 POST /api/evolution/trigger,通过 Orchestrator.invoke_skill
+ * 调用 {agent_name}.self_improve Skill(trigger_type=manual)。
+ * @param agent - 选中的 Agent
+ */
+async function triggerSelfImprove(agent: AgentRuntimeOut): Promise<void> {
+  triggering.value = true
+  try {
+    const res = await triggerEvolution(agent.code, 90)
+    const effect = (res as Record<string, string>).effect || 'unknown'
+    const duration = (res as Record<string, number>).duration_ms
+    if (effect === 'success') {
+      ElMessage.success(`${agent.name} 自进化完成(${duration ?? 0}ms)`)
+    } else if (effect === 'no_change') {
+      ElMessage.info(`${agent.name} 自进化完成,本轮无新提案(样本不足或已收敛)`)
+    } else {
+      ElMessage.warning(`${agent.name} 自进化效果:${effect}`)
+    }
+    // 重新加载 Skill 列表以刷新展示
+    await loadAgentSkills(agent.code)
+  } catch (e) {
+    ElMessage.error('触发自进化失败')
+  } finally {
+    triggering.value = false
+  }
+}
+
+// 选中 Agent 变化时自动加载 Skill 元数据
+watch(selectedAgent, (agent) => {
+  if (agent) {
+    loadAgentSkills(agent.code)
+  } else {
+    agentSkills.value = []
+  }
+})
 
 function invokeViaChat(agent: AgentRuntimeOut): void {
   drawerVisible.value = false
@@ -629,6 +754,88 @@ function initDiscussionFromRoute() {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.detail-label-hint {
+  margin-left: 6px;
+  font-size: 10.5px;
+  color: var(--gray-400);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* v3.0 AgentSkill 升级:per-Agent Skill 卡片样式 */
+.skill-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skill-card {
+  background: var(--surface-1);
+  border: 1px solid var(--gray-150, #EEF0F4);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: var(--brand-300);
+  }
+
+  &.skill-self_improvement {
+    border-left: 3px solid var(--brand-500, #5B58E8);
+  }
+
+  &.skill-proactive {
+    border-left: 3px solid #2BBFB9;
+  }
+}
+
+.skill-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skill-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  &.badge-self_improvement {
+    background: rgba(91, 88, 232, 0.10);
+    color: var(--brand-600, #5B58E8);
+  }
+
+  &.badge-proactive {
+    background: rgba(43, 191, 185, 0.12);
+    color: #1A8F8A;
+  }
+}
+
+.skill-name {
+  font-size: 11.5px;
+  color: var(--gray-600);
+  font-family: var(--font-mono, monospace);
+}
+
+.skill-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--gray-700);
+  line-height: 1.55;
+}
+
+.skill-card-foot {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 .detail-footer {

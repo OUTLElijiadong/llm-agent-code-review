@@ -551,12 +551,24 @@ def _review_chunk_sequential(
                     f"[{profile.name}] 审查失败: {result.error}",
                     agent_code=target_agent,
                 )
+                # 补写 AiCallLog(失败):BaseAgent.call() 不写日志,这里补写实现 Agent 归因
+                _log_sequential_call(
+                    db, task, user, code_file, chunk_idx, agent_idx,
+                    target_agent, result, status="failed",
+                    error=(result.error or "")[:500],
+                )
                 continue
 
             chunk_findings: List[Finding] = []
             if isinstance(result.data, dict):
                 chunk_findings = result.data.get("issues", []) or []
             findings.extend(chunk_findings)
+
+            # 补写 AiCallLog(成功):BaseAgent.call() 不写日志,这里补写实现 Agent 归因
+            _log_sequential_call(
+                db, task, user, code_file, chunk_idx, agent_idx,
+                target_agent, result, status="success",
+            )
 
             _emit_review_event(
                 AgentEventType.COMPLETE, task, user,
@@ -571,9 +583,83 @@ def _review_chunk_sequential(
                 f"[{profile.name}] 审查异常: {e}",
                 agent_code=target_agent,
             )
+            # 异常时也补写一条失败日志(若有 result)
+            try:
+                _log_sequential_call(
+                    db, task, user, code_file, chunk_idx, agent_idx,
+                    target_agent, None, status="failed",
+                    error=str(e)[:500],
+                )
+            except Exception as log_err:
+                logger.debug(f"[review] 补写异常日志失败: {log_err}")
             continue
 
     return findings
+
+
+def _log_sequential_call(
+    db: Session,
+    task: ReviewTask,
+    user: User,
+    code_file: CodeFile,
+    chunk_idx: int,
+    agent_idx: int,
+    agent_label: str,
+    result: Optional["object"],
+    status: str = "success",
+    error: Optional[str] = None,
+) -> None:
+    """补写顺序模式(BaseAgent.call 路径)的 AiCallLog
+
+    BaseAgent.call() 不写 AiCallLog,顺序模式通过此函数补写,
+    使 ai_call_log.agent_label 正确记录真实 Agent name(code_reviewer/security_sentinel)。
+
+    Args:
+        db: 数据库会话
+        task: 当前审查任务
+        user: 当前用户
+        code_file: 待审查代码文件
+        chunk_idx: 分片索引
+        agent_idx: Agent 索引(同一分片内多 Agent 时的序号)
+        agent_label: Agent 标识码(真实 Agent name)
+        result: AgentResult 对象(异常时可为 None)
+        status: 日志状态(success/failed)
+        error: 错误信息(失败时)
+
+    Returns:
+        None
+    """
+    # 构造 meta dict(log_deferred 期望的格式)
+    tokens_dict = {}
+    if result is not None and getattr(result, "tokens", None):
+        tokens_dict = result.tokens if isinstance(result.tokens, dict) else {}
+
+    meta = {
+        "agent_label": agent_label,
+        "model_name": (getattr(result, "model", None) if result else None) or "",
+        "model_tag": (getattr(result, "model", None) if result else None) or "",
+        "user_prompt": "",  # BaseAgent.call 路径不暴露 prompt,留空
+        "response": "" if status != "success" else "",
+        "prompt_tokens": tokens_dict.get("prompt", 0) if tokens_dict else 0,
+        "completion_tokens": tokens_dict.get("completion", 0) if tokens_dict else 0,
+        "total_tokens": tokens_dict.get("total", 0) if tokens_dict else 0,
+        "duration_ms": (getattr(result, "duration_ms", None) if result else None) or 0,
+        "create_time": datetime.now(timezone.utc),
+    }
+
+    try:
+        DeepSeekAgent.log_deferred(
+            db,
+            task_id=task.id,
+            user_id=user.id,
+            file_id=code_file.id,
+            chunk_index=chunk_idx * 100 + agent_idx,
+            meta=meta,
+            status=status,
+            error=error,
+        )
+    except Exception as e:
+        logger.debug(f"[review] 补写 AiCallLog 失败(agent={agent_label}): {e}")
 
 
 # ═══════════════ 多 Agent 协同三阶段 ═══════════════

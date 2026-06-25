@@ -19,6 +19,20 @@ interface StepBubble {
   time: string
 }
 
+/**
+ * v3.0 双层调度单步调用结果(对齐后端 PlanStepOut)
+ */
+interface PlanStep {
+  step_index: number
+  tool_name: string
+  reason: string
+  arguments: Record<string, unknown>
+  success: boolean
+  duration_ms: number
+  error?: string | null
+  data_preview?: string | null
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -26,6 +40,8 @@ interface ChatMessage {
   trace_id?: string
   steps?: StepBubble[]
   clarify?: ClarifyPayload
+  /** v3.0 双层调度调用链(空表示未触发双层调度) */
+  planSteps?: PlanStep[]
 }
 
 const props = defineProps<{ visible: boolean }>()
@@ -207,6 +223,7 @@ async function sendMessage(): Promise<void> {
       model: string
       trace_id?: string
       clarify?: ClarifyPayload | null
+      plan_steps?: PlanStep[] | null
     }>('/ai/chat', { messages: history, stream: false, trace_id: traceId })
 
     modelName.value = res.model || 'deepseek-v4-flash'
@@ -218,6 +235,7 @@ async function sendMessage(): Promise<void> {
       trace_id: tid,
       steps: eventsByTrace.value[tid] ?? [],
       clarify: res.clarify ?? undefined,
+      planSteps: res.plan_steps ?? undefined,
     })
     if (res.clarify) {
       ensureClarifyAnswers(res.clarify.clarify_id, res.clarify.questions)
@@ -241,6 +259,15 @@ function handleKeydown(e: KeyboardEvent): void {
     e.preventDefault()
     sendMessage()
   }
+}
+
+/**
+ * 计算双层调度调用链的总耗时
+ * @param steps - 调用链步骤列表
+ * @returns 总耗时(毫秒)
+ */
+function planTotalMs(steps: PlanStep[]): number {
+  return steps.reduce((sum, s) => sum + (s.duration_ms || 0), 0)
 }
 
 function scrollToBottom(): void {
@@ -348,6 +375,52 @@ onBeforeUnmount(() => {
                         </div>
                         <div class="step-msg">{{ s.message }}</div>
                       </div>
+                    </li>
+                  </ol>
+                </details>
+
+                <!-- v3.0 双层调度 step tree: 展示 LLM 规划的调用链 -->
+                <details
+                  v-if="msg.role === 'assistant' && msg.planSteps && msg.planSteps.length"
+                  class="plan-tree"
+                >
+                  <summary class="plan-summary">
+                    <span class="plan-icon">🌳</span>
+                    双层调度调用链 · LLM 规划 {{ msg.planSteps.length }} 步
+                    <span class="plan-total-ms">
+                      总耗时 {{ planTotalMs(msg.planSteps) }}ms
+                    </span>
+                  </summary>
+                  <ol class="plan-list">
+                    <li
+                      v-for="step in msg.planSteps"
+                      :key="step.step_index"
+                      class="plan-step"
+                      :class="{ 'plan-failed': !step.success }"
+                    >
+                      <div class="plan-step-head">
+                        <span class="plan-step-idx">#{{ step.step_index + 1 }}</span>
+                        <code class="plan-tool">{{ step.tool_name }}</code>
+                        <span
+                          class="plan-step-status"
+                          :class="step.success ? 'plan-ok' : 'plan-bad'"
+                        >
+                          {{ step.success ? '✓' : '✗' }}
+                        </span>
+                        <span class="plan-step-ms">{{ step.duration_ms }}ms</span>
+                      </div>
+                      <p v-if="step.reason" class="plan-reason">{{ step.reason }}</p>
+                      <details v-if="step.arguments && Object.keys(step.arguments).length" class="plan-args">
+                        <summary>参数 ({{ Object.keys(step.arguments).length }})</summary>
+                        <pre class="plan-json">{{ JSON.stringify(step.arguments, null, 2) }}</pre>
+                      </details>
+                      <details v-if="step.data_preview" class="plan-preview">
+                        <summary>输出预览</summary>
+                        <pre class="plan-json">{{ step.data_preview }}</pre>
+                      </details>
+                      <p v-if="!step.success && step.error" class="plan-error">
+                        {{ step.error }}
+                      </p>
                     </li>
                   </ol>
                 </details>
@@ -675,6 +748,134 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-border-light);
   border-radius: 8px;
   font-size: 12px;
+}
+
+/* v3.0 双层调度 step tree 样式 */
+.plan-tree {
+  margin: -4px -6px 8px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(91, 88, 232, 0.04), rgba(43, 191, 185, 0.04));
+  border: 1px solid rgba(91, 88, 232, 0.18);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.plan-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--brand-600, #5B58E8);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.plan-icon { font-size: 14px; }
+
+.plan-total-ms {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--gray-500, #909399);
+  font-weight: 400;
+}
+
+.plan-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-step {
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--color-border-light, #EEF0F4);
+  border-radius: 6px;
+  border-left: 3px solid #2f9e44;
+
+  &.plan-failed {
+    border-left-color: #e5484d;
+    background: rgba(229, 72, 77, 0.04);
+  }
+}
+
+.plan-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.plan-step-idx {
+  font-weight: 600;
+  color: var(--gray-500, #909399);
+  font-size: 10.5px;
+}
+
+.plan-tool {
+  font-family: var(--font-mono, monospace);
+  color: var(--brand-600, #5B58E8);
+  font-size: 11px;
+  background: rgba(91, 88, 232, 0.08);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.plan-step-status {
+  font-weight: 700;
+  font-size: 12px;
+
+  &.plan-ok { color: #2f9e44; }
+  &.plan-bad { color: #e5484d; }
+}
+
+.plan-step-ms {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--gray-500, #909399);
+  font-family: var(--font-mono, monospace);
+}
+
+.plan-reason {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: var(--gray-600, #606266);
+  line-height: 1.5;
+}
+
+.plan-args,
+.plan-preview {
+  margin-top: 4px;
+  font-size: 11px;
+
+  summary {
+    cursor: pointer;
+    color: var(--gray-500, #909399);
+    font-size: 10.5px;
+  }
+}
+
+.plan-json {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: #f6f7f9;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--gray-700, #303133);
+  overflow-x: auto;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.plan-error {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #e5484d;
+  word-break: break-all;
 }
 
 .step-summary {

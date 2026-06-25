@@ -28,7 +28,7 @@ from app.agents.clarify_store import ClarifyStore
 from app.agents.event_bus import AgentEventBus
 from app.agents.orchestrator import get_request_orchestrator
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_admin
 from app.core.exceptions import AuthError, ForbiddenError
 from app.core.security import decode_token
 from app.models.user import User
@@ -38,11 +38,15 @@ from app.schemas.agent import (
     AgentRuntimeOut,
     AgentRuntimeSummaryOut,
     AgentSituationOut,
+    AgentSkillRecordOut,
     AgentUsageOut,
     ReviewTypeMappingOut,
+    SkillInvokeIn,
+    SkillInvokeOut,
+    SkillMetaOut,
 )
 from app.schemas.common import Resp
-from app.services import agent_service
+from app.services import agent_service, skill_service
 
 router = APIRouter()
 
@@ -347,3 +351,129 @@ def preview_metagpt_environment(
         "roles": roles_info,
         "registered_agent_count": len(registry.list()),
     })
+
+
+# =================== v3.0 AgentSkill 升级: Skill 管理路由 ===================
+
+
+@router.get(
+    "/{agent_name}/skills",
+    response_model=Resp[list[SkillMetaOut]],
+)
+def list_agent_skills(
+    agent_name: str,
+    _: User = Depends(get_current_user),
+):
+    """列出指定 Agent 挂载的所有 Skill 元数据
+
+    供前端 SkillManager 页面展示每个 Agent 的 Skill 列表,
+    含 name/description/type/invocable/agent_name 字段。
+
+    Args:
+        agent_name: Agent name(如 code_reviewer)
+
+    Returns:
+        Resp[list[SkillMetaOut]]: Skill 元数据列表
+    """
+    from app.agents.orchestrator import get_orchestrator
+
+    orch = get_orchestrator()
+    skills = orch.list_agent_skills(agent_name)
+    return Resp(data=[SkillMetaOut(**s) for s in skills])
+
+
+@router.post(
+    "/{agent_name}/skills/{skill_name}/invoke",
+    response_model=Resp[SkillInvokeOut],
+)
+def invoke_agent_skill(
+    agent_name: str,
+    skill_name: str,
+    payload: SkillInvokeIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """手动调用指定 Agent 的指定 Skill(admin only, 写 audit_log)
+
+    通过 Orchestrator.invoke_skill 调用 skill_service 统一入口,
+    自动写 agent_skill_record(trigger_type=manual)与 audit_log。
+
+    Args:
+        agent_name: Agent name(如 code_reviewer)
+        skill_name: Skill name(如 code_reviewer.self_improve)
+        payload: SkillInvokeIn 请求体, 含 action 与 params
+        db: 数据库会话
+        admin: 当前管理员用户(由 require_admin 注入)
+
+    Returns:
+        Resp[SkillInvokeOut]: Skill 调用结果, 含 success/data/effect/duration_ms/record_id
+    """
+    from app.agents.base import AgentContext
+
+    orch = get_request_orchestrator(db, user=admin)
+    ctx = AgentContext(user_id=admin.id, extra={"api": "invoke_agent_skill"})
+
+    # 组装 params: action 优先, 合并 payload.params
+    params: dict = {}
+    if payload.action:
+        params["action"] = payload.action
+    if payload.params:
+        params.update(payload.params)
+
+    result = orch.invoke_skill(
+        agent_name=agent_name,
+        skill_name=skill_name,
+        params=params,
+        ctx=ctx,
+        trigger_type="manual",
+        trigger_source=f"api:POST /agents/{agent_name}/skills/{skill_name}/invoke",
+    )
+
+    data = result.data if isinstance(result.data, dict) else {}
+    return Resp(data=SkillInvokeOut(
+        success=result.success,
+        data=data.get("data"),
+        error=result.error or data.get("error"),
+        effect=data.get("effect", "success" if result.success else "failed"),
+        duration_ms=data.get("duration_ms", result.duration_ms),
+        record_id=data.get("record_id"),
+    ))
+
+
+@router.get(
+    "/skill-records",
+    response_model=Resp[list[AgentSkillRecordOut]],
+)
+def list_skill_records(
+    agent_name: Optional[str] = Query(None, description="按 Agent 过滤"),
+    skill_name: Optional[str] = Query(None, description="按 Skill 过滤"),
+    trigger_type: Optional[str] = Query(
+        None, description="按触发类型过滤(manual/scheduled/event/proactive)"
+    ),
+    limit: int = Query(20, ge=1, le=100, description="返回上限,默认 20"),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """查询 Skill 调用记录(admin only)
+
+    供 SkillManager 页面展示调用历史,支持按 Agent/Skill/触发类型过滤。
+
+    Args:
+        agent_name: 按 Agent 过滤(可选)
+        skill_name: 按 Skill 过滤(可选)
+        trigger_type: 按触发类型过滤(可选, manual/scheduled/event/proactive)
+        limit: 返回上限(1-100, 默认 20)
+        db: 数据库会话
+        admin: 当前管理员用户(由 require_admin 注入)
+
+    Returns:
+        Resp[list[AgentSkillRecordOut]]: Skill 调用记录列表(按 create_time 倒序)
+    """
+    records = skill_service.list_recent_records(
+        db=db,
+        agent_name=agent_name,
+        skill_name=skill_name,
+        trigger_type=trigger_type,
+        limit=limit,
+    )
+    return Resp(data=[AgentSkillRecordOut(**r) for r in records])

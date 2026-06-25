@@ -83,7 +83,11 @@ class ProgressOut(BaseModel):
 
 
 class IssueOut(BaseModel):
-    """审查问题输出"""
+    """审查问题输出
+
+    含 v2/v3 全量漏洞元数据:owasp/cwe/cvss/compliance_mapping/evidence/
+    exploit_scenario/remediation/references/confidence/source/static_rule_hits。
+    """
     id: int
     task_id: int
     file_id: Optional[int] = None
@@ -98,6 +102,22 @@ class IssueOut(BaseModel):
     fixed_code: Optional[str] = None
     status: str
     create_time: datetime
+
+    # === v2 漏洞元数据 ===
+    owasp: Optional[str] = None
+    cwe: Optional[str] = None
+    evidence: Optional[str] = None
+    exploit_scenario: Optional[str] = None
+    references_json: Optional[list] = None
+    confidence: Optional[float] = None
+    source: Optional[str] = None
+
+    # === v3 全量漏洞元数据 ===
+    cvss_score: Optional[float] = None
+    cvss_vector: Optional[str] = None
+    compliance_mapping: Optional[dict] = None
+    remediation: Optional[str] = None
+    static_rule_hits: int = 0
 
     model_config = {"from_attributes": True}
 

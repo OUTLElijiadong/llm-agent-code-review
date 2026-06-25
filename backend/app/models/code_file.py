@@ -39,3 +39,6 @@ class CodeFile(Base, IdMixin, TimestampMixin):
     # === v2 二进制文件支持(2026-06-25 新增)===
     is_binary = Column(Integer, nullable=False, default=0, comment="是否二进制文件:0否 1是")
     original_blob = Column(LargeBinary, nullable=True, comment="二进制文件原始字节(仅 is_binary=1 时使用)")
+
+    # === v3 原始大小字段(2026-06-25 006 迁移新增)===
+    raw_size = Column(Integer, nullable=False, default=0, comment="原始字节数(含 binary 真实大小,用于项目总大小校验)")

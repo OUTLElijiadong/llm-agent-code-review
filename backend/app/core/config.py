@@ -61,6 +61,19 @@ class Settings(BaseSettings):
     agent_knowledge_enforce_dns_check: bool = False
     agent_knowledge_github_token: str = ""
 
+    # ── AgentSkill 自进化与总调度升级 ──
+    # 双层调度总开关: True=意图分类+LLM 规划调用链; False=回退单层 handler
+    # 出问题时可设 False 快速降级,不影响主流程
+    chat_double_layer_enabled: bool = True
+    # Skill 定时进化总开关(每日 03:00 跑 evolution,每小时跑 proactive_check)
+    skill_scheduler_enabled: bool = True
+    # Skill 事件触发总开关(订阅 event_bus 事件触发 Skill)
+    skill_event_trigger_enabled: bool = True
+    # Skill 触发全局并发上限(定时+事件共用,防雪崩)
+    skill_trigger_max_concurrency: int = 3
+    # Skill 事件触发去抖窗口(秒,同 key 不重复触发)
+    skill_event_debounce_seconds: int = 300
+
     max_upload_size: int = 20 * 1024 * 1024  # 20MB
     allowed_extensions: List[str] = ["*"]
 

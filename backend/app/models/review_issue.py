@@ -25,6 +25,7 @@ class ReviewIssue(Base, IdMixin, TimestampMixin):
         Index("ix_review_issue_file", "file_id"),
         Index("ix_review_issue_create_time", "create_time"),
         Index("ix_review_issue_task_cwe", "task_id", "cwe"),
+        Index("ix_review_issue_task_severity_cwe", "task_id", "severity", "cwe"),
     )
 
     task_id = Column(BigInteger, nullable=False)
@@ -50,3 +51,10 @@ class ReviewIssue(Base, IdMixin, TimestampMixin):
     references_json = Column(JSON, nullable=True, comment="参考链接列表")
     confidence = Column(Float, nullable=True, comment="置信度 0.0-1.0")
     source = Column(String(16), nullable=True, default="llm", comment="发现来源:llm/static/regex")
+
+    # === v3 全量漏洞元数据(2026-06-25 006 迁移新增)===
+    cvss_score = Column(Float, nullable=True, comment="CVSS v3.1 基础分 0.0-10.0")
+    cvss_vector = Column(String(64), nullable=True, comment="CVSS 向量,如 AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+    compliance_mapping = Column(JSON, nullable=True, comment='合规映射 {"iso27001":[...],"gdpr":[...],"pci_dss":[...],"hipaa":[...]}')
+    remediation = Column(Text, nullable=True, comment="修复建议详细文本")
+    static_rule_hits = Column(Integer, nullable=False, default=0, comment="静态规则命中次数(双引擎统计)")

@@ -20,6 +20,13 @@ class AgentEventType(str, Enum):
     FAILED = "failed"
     CLARIFY = "clarify"
     DISCUSS = "discuss"
+    # v3.0 AgentSkill 升级: Skill 触发类事件(供 event_bus 订阅触发 Skill)
+    # 详见 CONSENSUS §6 事件订阅清单
+    REVIEW_ISSUE_STATUS_CHANGED = "review_issue_status_changed"      # 审查问题状态变更
+    SECURITY_SCAN_COMPLETED = "security_scan_completed"              # 安全扫描完成
+    AI_CALL_THRESHOLD_REACHED = "ai_call_threshold_reached"          # AI 调用量达阈值
+    EVOLUTION_PROPOSAL_PROMOTED = "evolution_proposal_promoted"      # 进化提案被批准生效
+    SKILL_TRIGGER = "skill_trigger"                                  # Skill 触发通用事件
 
 
 def new_trace_id() -> str:

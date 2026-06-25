@@ -65,3 +65,82 @@ def validate_size(size: int, limit: int) -> None:
     if size > limit:
         kb = limit / 1024
         raise ValidationError(f"文件超过 {kb:.0f}KB 大小限制", code=41301)
+
+
+# ============ MIME 白名单与大小上限(T05 文件上传安全模块) ============
+
+# MIME 白名单:允许上传的代码文件扩展名
+ALLOWED_MIME_EXTENSIONS: frozenset = frozenset({
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go", ".rs",
+    ".c", ".cpp", ".h", ".hpp", ".cc", ".php", ".rb", ".vue",
+    ".sql", ".sh", ".bash", ".zsh",
+    ".yml", ".yaml", ".json", ".toml", ".ini", ".cfg", ".conf",
+    ".md", ".txt", ".xml", ".html", ".htm", ".css", ".scss", ".less",
+    ".gitignore", ".dockerignore", ".env.example",
+    ".zip", ".tar", ".gz", ".bz2", ".xz", ".tgz",  # 压缩包由 archive_extractor 处理
+})
+
+# 拒绝的可执行文件扩展名
+BLOCKED_EXECUTABLE_EXTENSIONS: frozenset = frozenset({
+    ".exe", ".dll", ".so", ".dylib", ".bat", ".com", ".scr",
+    ".msi", ".app", ".command", ".sh.bin", ".pif", ".jar",
+})
+
+# 单文件大小上限 10MB
+MAX_SINGLE_FILE_SIZE: int = 10 * 1024 * 1024
+
+# 项目总文件大小上限 500MB
+MAX_PROJECT_TOTAL_SIZE: int = 500 * 1024 * 1024
+
+
+def validate_mime(file_name: str) -> bool:
+    """校验文件扩展名是否在 MIME 白名单内
+
+    Args:
+        file_name: 文件名(含扩展名)
+
+    Returns:
+        bool: True 表示允许上传, False 表示拒绝
+    """
+    if not file_name:
+        return False
+    base = os.path.basename(file_name).strip().lower()
+    if not base:
+        return False
+    ext = os.path.splitext(base)[1]
+    # 优先排除可执行文件(按扩展名与全名双重匹配)
+    if ext in BLOCKED_EXECUTABLE_EXTENSIONS or base in BLOCKED_EXECUTABLE_EXTENSIONS:
+        return False
+    # 命中白名单:扩展名匹配 或 全名匹配(如 .gitignore/.env.example)
+    if ext in ALLOWED_MIME_EXTENSIONS or base in ALLOWED_MIME_EXTENSIONS:
+        return True
+    return False
+
+
+def validate_single_file_size(file_size: int) -> bool:
+    """校验单文件大小是否超限
+
+    Args:
+        file_size: 文件字节数
+
+    Returns:
+        bool: True 表示未超限, False 表示超限
+    """
+    if file_size < 0:
+        return False
+    return file_size <= MAX_SINGLE_FILE_SIZE
+
+
+def validate_project_total_size(current_total: int, new_file_size: int) -> bool:
+    """校验项目总文件大小是否超限
+
+    Args:
+        current_total: 当前项目已有文件总字节数
+        new_file_size: 新上传文件字节数
+
+    Returns:
+        bool: True 表示未超限, False 表示超限
+    """
+    if current_total < 0 or new_file_size < 0:
+        return False
+    return (current_total + new_file_size) <= MAX_PROJECT_TOTAL_SIZE

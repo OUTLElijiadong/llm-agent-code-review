@@ -30,6 +30,24 @@ class ForbiddenError(AppError):
     http_status = 403
 
 
+class PermissionError(ForbiddenError):
+    """RBAC 权限拒绝异常: 当前用户无指定操作权限
+
+    用于 RBAC 体系中 require_permission 依赖校验失败时抛出。
+    继承 ForbiddenError 以复用 403 状态码体系,同时提供独立错误码
+    便于前端区分"通用无权访问"与"RBAC 权限不足"。
+
+    Attributes:
+        error_code: 字符串错误码,固定为 "PERMISSION_DENIED"
+    """
+
+    code = 40303
+    error_code = "PERMISSION_DENIED"
+
+    def __init__(self, message: str = "无操作权限", *, code: Optional[int] = None, detail: Any = None):
+        super().__init__(message, code=code, detail=detail)
+
+
 class NotFoundError(AppError):
     """资源不存在异常"""
 

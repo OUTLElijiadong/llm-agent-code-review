@@ -1,5 +1,5 @@
 import json as json_lib
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from loguru import logger
 
@@ -28,7 +28,10 @@ _INTENT_SYSTEM = (
     "- list_rules: 用户想看审查规则列表\n"
     "- list_reports: 用户想看审查报告列表\n"
     "- generate_ai_prompt: 用户想生成可粘贴给 Cursor/Copilot/ChatGPT/Claude Code 的 AI 修复提示词\n"
-    "- security_audit: 用户想做网络安全审计/漏洞扫描/威胁建模/敏感信息扫描/OWASP 检查\n\n"
+    "- security_audit: 用户想做网络安全审计/漏洞扫描/威胁建模/敏感信息扫描/OWASP 检查\n"
+    "- evolution_trigger: 用户想触发某个 Agent 的自进化(从反馈蒸馏规则/进化策略)\n"
+    "- agent_skill_invoke: 用户想手动调用某个 Agent 的某个 Skill(自进化/主动监测)\n"
+    "- agent_status: 用户想查看 Agent 运行状态/Skill 列表/调用记录\n\n"
     "输出格式: 严格JSON对象:\n"
     '{"intent": "chat", "reason": "简短理由", "payload": {}}\n\n'
     "常用payload:\n"
@@ -50,6 +53,10 @@ _INTENT_SYSTEM = (
     "\"project_id\":数字, \"target_tool\":\"generic|cursor|copilot|chatgpt|claude_code\"}\n"
     "- security_audit: {\"scope\":\"file|task|project\", \"file_id\":数字, \"task_id\":数字, "
     "\"project_id\":数字, \"scan_depth\":\"quick|standard|deep\", \"top_n\":数字, \"trace_dataflow\":布尔}\n"
+    "- evolution_trigger: {\"agent_name\":\"code_reviewer|security_sentinel|evolution|...\", \"window_days\":数字}\n"
+    "- agent_skill_invoke: {\"agent_name\":\"...\", \"skill_name\":\"<agent>.self_improve|<agent>.proactive\", "
+    "\"action\":\"evolve|check_proactive|scan_domain|reflect_from_logs\", \"params\":{...}}\n"
+    "- agent_status: {\"agent_name\":\"...\", \"detail\":\"skills|records|all\"}\n"
     "- chat: {}\n\n"
     "关键判断规则:\n"
     "如果用户消息中包含代码块(```...```), intent=review_code\n"
@@ -70,6 +77,11 @@ _INTENT_SYSTEM = (
     "intent=generate_ai_prompt; 根据上下文推断 scope: 单条问题→issue; 一个任务→task; 一个项目→project\n"
     "如果用户提到'安全扫描''安全审计''漏洞扫描''威胁建模''密钥泄漏''OWASP''渗透测试''敏感信息''CWE',"
     "intent=security_audit; 根据上下文推断 scope: 单个文件→file; 一个任务→task; 一个项目→project\n"
+    "如果用户说'触发进化''自进化''让XX Agent进化''跑一轮进化''蒸馏规则', intent=evolution_trigger; "
+    "payload.agent_name 从消息推断(默认 evolution)\n"
+    "如果用户说'调用XX的Skill''手动触发Skill''跑一下XX.self_improve', intent=agent_skill_invoke; "
+    "payload 需含 agent_name 与 skill_name\n"
+    "如果用户说'Agent状态''有哪些Skill''Skill调用记录''Agent运行情况', intent=agent_status\n"
     "其他情况默认为chat"
 )
 
@@ -94,6 +106,12 @@ class ChatAssistantAgent(BaseAgent):
     def __init__(self):
         super().__init__(temperature=0.7, max_tokens=4096)
         self._orchestrator: Optional["Orchestrator"] = None
+        # 双层调度第二层:LLM 动态规划调用链
+        # 延迟 import 避免循环依赖(ChatPlanner 内部 TYPE_CHECKING 引用 BaseAgent)
+        from app.agents.chat_planner import ChatPlanner
+        self._planner = ChatPlanner(self)
+        # 最近一次规划的 plan_steps(供前端 step tree 展示)
+        self._last_plan_steps: List[dict] = []
 
     def _init_skills(self) -> None:
         """子类 override:挂载 ChatAssistantSelfImprovementSkill + ChatAssistantProactiveSkill
@@ -137,7 +155,24 @@ class ChatAssistantAgent(BaseAgent):
 
     def execute(self, messages: List[dict],
                 ctx: Optional[AgentContext] = None) -> AgentResult:
-        """处理用户消息,先检测意图再决定是否委派给其他Agent"""
+        """处理用户消息,双层调度:意图分类 → LLM 规划 → 顺序执行
+
+        双层调度流程:
+            1. 第一层: LLM 意图分类(已有逻辑)
+            2. 第二层: LLM 动态规划调用链(ChatPlanner.plan)
+            3. 执行器: _execute_plan 顺序执行 ToolCall 链
+
+        降级路径:
+            - CHAT_DOUBLE_LAYER_ENABLED=false → 直接走单层 handler
+            - planner 抛 TimeoutError/ValueError → 降级到单层 handler
+
+        Args:
+            messages: 消息列表(最后一条为用户当前消息)
+            ctx: 上下文
+
+        Returns:
+            AgentResult: data 字段为最终回复内容(字符串)或结构化 dict
+        """
         from app.agents.events import AgentEventType
         if not messages:
             return AgentResult(success=False, error="消息列表为空")
@@ -156,6 +191,59 @@ class ChatAssistantAgent(BaseAgent):
         if clarify is not None:
             return clarify
 
+        # AgentSkill 升级:双层调度总开关
+        # 普通对话(chat intent)不走双层,避免无谓的 LLM 规划开销
+        if self._double_layer_enabled() and handler_name != "chat":
+            try:
+                plan = self._planner.plan(intent, user_message=last_msg, ctx=ctx)
+                self._emit(AgentEventType.DISPATCH, ctx,
+                           message=f"双层调度规划完成,调用链 {len(plan)} 步",
+                           payload={
+                               "plan_steps": [
+                                   {"tool_name": s.tool_name,
+                                    "reason": s.reason,
+                                    "arguments": s.arguments}
+                                   for s in plan
+                               ],
+                           },
+                           parent="orchestrator")
+                return self._execute_plan(plan, messages, ctx)
+            except (TimeoutError, ValueError) as e:
+                logger.warning(
+                    f"[ChatAgent] 双层调度降级到单层 handler: "
+                    f"{type(e).__name__}: {e}"
+                )
+                self._last_plan_steps = []
+            except Exception as e:
+                logger.exception(
+                    f"[ChatAgent] 双层调度未知异常,降级到单层 handler: {e}"
+                )
+                self._last_plan_steps = []
+        else:
+            self._last_plan_steps = []
+
+        # 单层 fallback:走原 handler 路由
+        return self._dispatch_single(intent, messages, ctx)
+
+    def _dispatch_single(
+        self,
+        intent: dict,
+        messages: List[dict],
+        ctx: Optional[AgentContext],
+    ) -> AgentResult:
+        """单层调度 fallback:按 intent 路由到固定 handler
+
+        双层调度关闭或规划失败时使用,保持与升级前完全兼容的路由逻辑。
+
+        Args:
+            intent: 意图 dict {intent, reason, payload}
+            messages: 消息列表(普通对话 intent 用)
+            ctx: 上下文
+
+        Returns:
+            AgentResult: handler 执行结果
+        """
+        handler_name = intent.get("intent", "chat")
         handlers = {
             "list_agents": lambda i, c: self._handle_list_agents(c),
             "detect_language": self._handle_detect_language,
@@ -173,12 +261,175 @@ class ChatAssistantAgent(BaseAgent):
             "list_reports": lambda i, c: self._handle_list_reports(c),
             "generate_ai_prompt": self._handle_generate_ai_prompt,
             "security_audit": self._handle_security_audit,
+            # AgentSkill 升级:3 种新 intent handler
+            "evolution_trigger": self._handle_evolution_trigger,
+            "agent_skill_invoke": self._handle_agent_skill_invoke,
+            "agent_status": self._handle_agent_status,
         }
 
         handler = handlers.get(handler_name, None)
         if handler:
             return handler(intent, ctx)
         return self._handle_chat(messages, ctx)
+
+    def _double_layer_enabled(self) -> bool:
+        """双层调度总开关(读 settings.chat_double_layer_enabled)
+
+        出问题时可在 .env 设 CHAT_DOUBLE_LAYER_ENABLED=false 快速降级,
+        不影响主流程,只走单层 handler。
+
+        Returns:
+            bool: True=启用双层调度, False=回退单层
+        """
+        try:
+            from app.core.config import settings
+            return bool(getattr(settings, "chat_double_layer_enabled", True))
+        except Exception:
+            return True
+
+    def _execute_plan(
+        self,
+        plan: List["ToolCall"],
+        messages: List[dict],
+        ctx: Optional[AgentContext],
+    ) -> AgentResult:
+        """顺序执行 ToolCall 链(双层调度执行器)
+
+        执行规则:
+            - 按 plan 顺序依次调用 Orchestrator.invoke_tool
+            - 上一步输出作为下一步上下文(写入 ctx.extra["prev_output"])
+            - 任一步失败则终止,返回已执行的步骤摘要 + 错误信息
+            - 普通对话(chat intent)不走本方法,直接 _handle_chat
+
+        Args:
+            plan: ChatPlanner 规划的调用链
+            messages: 原始消息列表(用于普通对话兜底)
+            ctx: 上下文
+
+        Returns:
+            AgentResult: 最终结果(含 plan_steps 供前端展示)
+        """
+        if not self._check_orch():
+            return AgentResult(success=False, error="Orchestrator 未注入")
+        if not plan:
+            return self._handle_chat(messages, ctx)
+
+        from app.agents.events import AgentEventType
+        from app.agents.chat_planner import ToolCall  # 仅用于类型提示
+
+        executed_steps: List[dict] = []
+        prev_output: Any = None
+        last_result: Optional[AgentResult] = None
+
+        for idx, step in enumerate(plan):
+            step_label = f"步骤 {idx + 1}/{len(plan)}: {step.tool_name}"
+            self._emit(AgentEventType.DISPATCH, ctx,
+                       message=step_label,
+                       payload={"tool_name": step.tool_name,
+                                "reason": step.reason,
+                                "step_index": idx},
+                       parent="orchestrator")
+            # 把上一步输出注入 ctx.extra,供后续 Tool 参考
+            if ctx is None:
+                ctx = AgentContext()
+            ctx.extra["prev_output"] = prev_output
+            ctx.extra["step_index"] = idx
+
+            t0 = __import__("time").time()
+            try:
+                step_result = self._orchestrator.invoke_tool(
+                    tool_name=step.tool_name,
+                    arguments=step.arguments,
+                    ctx=ctx,
+                )
+            except Exception as e:
+                logger.exception(
+                    f"[ChatAgent] 调用链 {step_label} 异常: {e}"
+                )
+                step_result = AgentResult(success=False, error=str(e))
+
+            duration_ms = int((__import__("time").time() - t0) * 1000)
+            executed_steps.append({
+                "step_index": idx,
+                "tool_name": step.tool_name,
+                "reason": step.reason,
+                "arguments": step.arguments,
+                "success": step_result.success,
+                "duration_ms": duration_ms,
+                "error": step_result.error,
+                "data_preview": (
+                    str(step_result.data)[:200] if step_result.data else None
+                ),
+            })
+
+            if not step_result.success:
+                # 失败终止:返回已执行步骤 + 错误
+                logger.warning(
+                    f"[ChatAgent] 调用链在 {step_label} 失败: {step_result.error}"
+                )
+                self._last_plan_steps = executed_steps
+                return AgentResult(
+                    success=False,
+                    error=f"调用链在 {step.tool_name} 步骤失败: {step_result.error}",
+                    data={"plan_steps": executed_steps,
+                          "failed_at_step": idx + 1},
+                )
+            prev_output = step_result.data
+            last_result = step_result
+
+        self._last_plan_steps = executed_steps
+
+        # 把最后一步结果转换为用户可读回复
+        # 如果最后一步是普通对话工具,直接返回 data 字符串
+        if last_result and isinstance(last_result.data, str):
+            return AgentResult(
+                success=True,
+                data=last_result.data,
+                model=last_result.model,
+                duration_ms=sum(s["duration_ms"] for s in executed_steps),
+            )
+        # 结构化结果:附带 plan_steps 供前端 step tree 展示
+        return AgentResult(
+            success=True,
+            data={
+                "content": self._format_plan_result(executed_steps, last_result),
+                "plan_steps": executed_steps,
+            },
+            model=last_result.model if last_result else "",
+            duration_ms=sum(s["duration_ms"] for s in executed_steps),
+        )
+
+    def _format_plan_result(
+        self, steps: List[dict], last_result: Optional[AgentResult]
+    ) -> str:
+        """把调用链执行结果格式化为用户可读的 Markdown 回复
+
+        Args:
+            steps: 已执行步骤列表
+            last_result: 最后一步的 AgentResult
+
+        Returns:
+            str: Markdown 格式回复
+        """
+        lines = [f"**调用链执行完成** (共 {len(steps)} 步)\n"]
+        for s in steps:
+            icon = "✅" if s["success"] else "❌"
+            lines.append(
+                f"{icon} **步骤 {s['step_index'] + 1}**: `{s['tool_name']}` "
+                f"({s['duration_ms']}ms)"
+            )
+            if s.get("reason"):
+                lines.append(f"   _理由: {s['reason']}_")
+        lines.append("")
+        if last_result and last_result.data:
+            data = last_result.data
+            if isinstance(data, dict) and "content" in data:
+                lines.append(str(data["content"]))
+            elif isinstance(data, str):
+                lines.append(data)
+            else:
+                lines.append(f"```json\n{json_lib.dumps(data, ensure_ascii=False, indent=2)[:500]}\n```")
+        return "\n".join(lines)
 
     # ============ v2.0 Clarify 协议 ============
 
@@ -474,9 +725,283 @@ class ChatAssistantAgent(BaseAgent):
             model=result.model, duration_ms=result.duration_ms,
         )
 
+    # ============ AgentSkill 升级:3 种新 intent handler ============
+
+    def _handle_evolution_trigger(
+        self, intent: dict, ctx: Optional[AgentContext]
+    ) -> AgentResult:
+        """委派 Orchestrator.trigger_evolution 触发指定 Agent 的自进化
+
+        将"触发进化/跑一轮进化/蒸馏规则"等意图路由到对应 Agent 的
+        SelfImprovement Skill(action=evolve),由 Orchestrator 统一调用
+        invoke_skill,自动写入 agent_skill_record 与 audit_log。
+
+        Args:
+            intent: 意图 dict, payload 含:
+                - agent_name (str): 目标 Agent, 默认 "evolution"
+                - window_days (int): 反馈窗口天数, 默认 90
+            ctx: 上下文
+
+        Returns:
+            AgentResult: data 为 Markdown 格式的进化结果摘要
+        """
+        if not self._check_orch():
+            return AgentResult(success=False, error="Orchestrator 未注入")
+
+        payload = intent.get("payload", {}) or {}
+        agent_name = payload.get("agent_name") or "evolution"
+        try:
+            window_days = int(payload.get("window_days", 90))
+        except (TypeError, ValueError):
+            window_days = 90
+        if window_days <= 0:
+            window_days = 90
+
+        result = self._orchestrator.trigger_evolution(
+            agent_name=agent_name,
+            window_days=window_days,
+            ctx=ctx,
+        )
+
+        if not result.success:
+            return result
+
+        data = result.data if isinstance(result.data, dict) else {"raw": result.data}
+        lines = [
+            f"**自进化已触发** 🧬 (Agent: `{agent_name}`, 窗口 {window_days} 天)\n",
+        ]
+        # 兼容 skill_service 返回的多种字段格式
+        summary = (
+            data.get("summary")
+            or data.get("message")
+            or data.get("reason")
+            or ""
+        )
+        if summary:
+            lines.append(str(summary))
+            lines.append("")
+
+        proposals = data.get("proposals") or data.get("rules") or []
+        if isinstance(proposals, list) and proposals:
+            lines.append(f"**生成建议/规则 {len(proposals)} 条:**")
+            for i, item in enumerate(proposals[:5]):
+                if isinstance(item, dict):
+                    title = item.get("title") or item.get("rule_name") or item.get("name", "")
+                    desc = item.get("description") or item.get("summary", "")
+                    lines.append(f"{i + 1}. **{title}** — {desc}")
+                else:
+                    lines.append(f"{i + 1}. {item}")
+            if len(proposals) > 5:
+                lines.append(f"\n...还有 {len(proposals) - 5} 条,详见日志/数据库。")
+
+        applied = data.get("applied") or data.get("applied_count")
+        if applied is not None:
+            lines.append(f"\n已应用: **{applied}** 条")
+
+        lines.append(
+            f"\n由 **`{agent_name}` Agent** 的 SelfImprovement Skill 完成。"
+        )
+        return AgentResult(
+            success=True,
+            data="\n".join(lines),
+            model=result.model,
+            duration_ms=result.duration_ms,
+        )
+
+    def _handle_agent_skill_invoke(
+        self, intent: dict, ctx: Optional[AgentContext]
+    ) -> AgentResult:
+        """委派 Orchestrator.invoke_skill 手动调用任意 Agent 的任意 Skill
+
+        支持"调用 XX 的 Skill/手动触发 Skill/跑一下 XX.self_improve"等意图,
+        通过 Orchestrator.invoke_skill 统一入口调用 skill_service,自动写
+        agent_skill_record 与 audit_log。
+
+        Args:
+            intent: 意图 dict, payload 含:
+                - agent_name (str): 目标 Agent name
+                - skill_name (str): Skill name(形如 "<agent>.self_improve")
+                - action (str, 可选): Skill 子动作, 如 evolve/check_proactive/
+                  scan_domain/reflect_from_logs
+                - params (dict, 可选): 透传给 Skill 的额外参数
+            ctx: 上下文
+
+        Returns:
+            AgentResult: data 为 Markdown 格式的 Skill 调用结果摘要
+        """
+        if not self._check_orch():
+            return AgentResult(success=False, error="Orchestrator 未注入")
+
+        payload = intent.get("payload", {}) or {}
+        agent_name = payload.get("agent_name")
+        skill_name = payload.get("skill_name")
+        if not agent_name or not skill_name:
+            return AgentResult(
+                success=False,
+                error="缺少 agent_name 或 skill_name,无法调用 Skill",
+            )
+
+        # 组装 Skill 参数: action 优先,合并 params
+        params: dict = {}
+        action = payload.get("action")
+        if action:
+            params["action"] = action
+        extra = payload.get("params") or {}
+        if isinstance(extra, dict):
+            params.update(extra)
+
+        result = self._orchestrator.invoke_skill(
+            agent_name=agent_name,
+            skill_name=skill_name,
+            params=params,
+            ctx=ctx,
+        )
+
+        if not result.success:
+            return result
+
+        data = result.data if isinstance(result.data, dict) else {"raw": result.data}
+        lines = [
+            f"**Skill 调用完成** ⚙️ (`{skill_name}` on `{agent_name}`)\n",
+        ]
+        summary = (
+            data.get("summary")
+            or data.get("message")
+            or data.get("reason")
+            or ""
+        )
+        if summary:
+            lines.append(str(summary))
+            lines.append("")
+
+        # 通用字段渲染:proposals / findings / actions / metrics
+        for key in ("proposals", "findings", "actions", "rules", "items"):
+            items = data.get(key)
+            if isinstance(items, list) and items:
+                lines.append(f"**{key} ({len(items)}):**")
+                for i, item in enumerate(items[:5]):
+                    if isinstance(item, dict):
+                        title = (
+                            item.get("title")
+                            or item.get("rule_name")
+                            or item.get("name")
+                            or item.get("type", "")
+                        )
+                        desc = item.get("description") or item.get("summary", "")
+                        lines.append(f"{i + 1}. **{title}** — {desc}")
+                    else:
+                        lines.append(f"{i + 1}. {item}")
+                if len(items) > 5:
+                    lines.append(f"\n...还有 {len(items) - 5} 条。")
+                lines.append("")
+
+        metrics = data.get("metrics") or data.get("stats")
+        if isinstance(metrics, dict) and metrics:
+            lines.append("**指标:**")
+            for k, v in metrics.items():
+                lines.append(f"- `{k}`: {v}")
+
+        skill_type = "SelfImprovement" if "self_improve" in skill_name else "Proactive"
+        lines.append(
+            f"\n由 **`{agent_name}` Agent** 的 {skill_type} Skill 完成。"
+        )
+        return AgentResult(
+            success=True,
+            data="\n".join(lines),
+            model=result.model,
+            duration_ms=result.duration_ms,
+        )
+
+    def _handle_agent_status(
+        self, intent: dict, ctx: Optional[AgentContext]
+    ) -> AgentResult:
+        """委派 Orchestrator.list_agent_skills 展示 Agent 状态/Skill 列表
+
+        支持"Agent 状态/有哪些 Skill/Skill 调用记录/Agent 运行情况"等意图,
+        返回当前已注册的 Skill 元数据列表(name/description/type/invocable/
+        agent_name),便于运维人员快速排查 Skill 挂载是否正常。
+
+        Args:
+            intent: 意图 dict, payload 含:
+                - agent_name (str, 可选): 指定 Agent, None=全部
+                - detail (str, 可选): "skills"|"records"|"all",默认 "skills"
+            ctx: 上下文
+
+        Returns:
+            AgentResult: data 为 Markdown 格式的 Skill 元数据列表
+        """
+        if not self._check_orch():
+            return AgentResult(success=False, error="Orchestrator 未注入")
+
+        payload = intent.get("payload", {}) or {}
+        agent_name = payload.get("agent_name")  # None=全部
+        detail = (payload.get("detail") or "skills").lower()
+        if detail not in ("skills", "records", "all"):
+            detail = "skills"
+
+        # skill 元数据
+        skills = self._orchestrator.list_agent_skills(agent_name)
+        lines: List[str] = []
+        target_label = f"`{agent_name}`" if agent_name else "全部 Agent"
+        lines.append(f"**Agent 状态 · {target_label}** (共 {len(skills)} 个 Skill)\n")
+
+        if not skills:
+            lines.append(
+                "未找到 Skill。请确认 Agent 已注册,Skill 已通过 _init_skills() 挂载。"
+            )
+            return AgentResult(success=True, data="\n".join(lines))
+
+        # 按 agent_name 分组渲染
+        by_agent: dict = {}
+        for sk in skills:
+            by_agent.setdefault(sk.get("agent_name", "?"), []).append(sk)
+        for a_name, group in sorted(by_agent.items()):
+            lines.append(f"### `{a_name}` ({len(group)} Skill)")
+            for sk in group:
+                invocable_icon = "✅" if sk.get("invocable") else "⛔"
+                sk_type = sk.get("type", "?")
+                lines.append(
+                    f"- {invocable_icon} **`{sk.get('name', '?')}`** ({sk_type}) — "
+                    f"{sk.get('description', '')}"
+                )
+            lines.append("")
+
+        # records/all: 追加最近调用记录(若 DB 已注入)
+        if detail in ("records", "all") and getattr(self._orchestrator, "_db", None):
+            try:
+                from app.services import skill_service
+                records = skill_service.list_recent_records(
+                    db=self._orchestrator._db,
+                    agent_name=agent_name,
+                    limit=10,
+                )
+                lines.append(f"**最近调用记录 ({len(records)} 条):**")
+                for r in records:
+                    lines.append(
+                        f"- `{r.get('skill_name', '?')}` on `{r.get('agent_name', '?')}` "
+                        f"· {r.get('trigger_type', '?')} "
+                        f"· {'✅' if r.get('success') else '❌'} "
+                        f"· {r.get('duration_ms', '?')}ms "
+                        f"· {r.get('create_time', '?')}"
+                    )
+            except Exception as e:
+                logger.warning(f"[ChatAgent] 读取 Skill 调用记录失败: {e}")
+                lines.append(f"_读取调用记录失败: {e}_")
+
+        return AgentResult(success=True, data="\n".join(lines))
+
     def dispatch_with_payload(self, intent_name: str, payload: dict,
                               ctx: Optional[AgentContext]) -> AgentResult:
-        """供 /api/agents/clarify 回填后继续执行,统一走 handler"""
+        """供 /api/agents/clarify 回填后继续执行,统一走 handler
+
+        Args:
+            intent_name: 意图名称(与 _dispatch_single 中 handlers key 对齐)
+            payload: 回填后的完整 payload(含已澄清字段)
+            ctx: 上下文
+
+        Returns:
+            AgentResult: handler 执行结果
+        """
         intent = {"intent": intent_name, "payload": payload}
         handlers = {
             "list_agents": lambda i, c: self._handle_list_agents(c),
@@ -495,6 +1020,10 @@ class ChatAssistantAgent(BaseAgent):
             "list_reports": lambda i, c: self._handle_list_reports(c),
             "generate_ai_prompt": self._handle_generate_ai_prompt,
             "security_audit": self._handle_security_audit,
+            # AgentSkill 升级:3 种新 intent handler(与 _dispatch_single 保持一致)
+            "evolution_trigger": self._handle_evolution_trigger,
+            "agent_skill_invoke": self._handle_agent_skill_invoke,
+            "agent_status": self._handle_agent_status,
         }
         handler = handlers.get(intent_name)
         if not handler:
