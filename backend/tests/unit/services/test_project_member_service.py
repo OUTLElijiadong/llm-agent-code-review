@@ -223,6 +223,110 @@ class TestRequireProjectAccess:
             require_project_access(db, 505, stranger, need_write=False)
 
 
+# ============ require_project_access 审计日志测试 ============
+
+
+class TestRequireProjectAccessAudit:
+    """require_project_access 审计日志记录测试(v2.6 B2)"""
+
+    def test_audit_log_recorded_on_write_success(self, db):
+        """写权限校验通过时应记录 status=success 的审计日志"""
+        from app.models.audit_log import AuditLog
+
+        admin = _make_user(db, 1001, "admin", role="admin")
+        _make_project(db, 5101, owner_user_id=1001)
+        # 清空之前可能存在的审计日志
+        db.query(AuditLog).delete()
+        db.commit()
+
+        require_project_access(db, 5101, admin, need_write=True)
+        db.commit()  # success 审计用 commit=False,需外层提交
+
+        logs = db.query(AuditLog).filter(AuditLog.action == "project_access").all()
+        assert len(logs) == 1
+        log = logs[0]
+        assert log.status == "success"
+        assert log.target_type == "project"
+        assert log.target_id == "5101"
+        assert log.actor_id == 1001
+        assert "写权限校验通过" in log.detail
+
+    def test_audit_log_recorded_on_reviewer_write_denied(self, db):
+        """审查员写权限被拒时应记录 status=failed 的审计日志(且能持久化)"""
+        from app.models.audit_log import AuditLog
+
+        owner = _make_user(db, 1002, "owner")
+        reviewer = _make_user(db, 1003, "reviewer")
+        _make_project(db, 5102, owner_user_id=1002)
+        db.add(ProjectMember(project_id=5102, user_id=1003, role_in_project="reviewer"))
+        db.commit()
+        # 清空审计日志
+        db.query(AuditLog).delete()
+        db.commit()
+
+        # 触发 ForbiddenError,但失败审计应已立即持久化
+        with pytest.raises(ForbiddenError, match="需要项目拥有者权限"):
+            require_project_access(db, 5102, reviewer, need_write=True)
+
+        # 失败审计应已持久化(不依赖外层 commit)
+        logs = db.query(AuditLog).filter(AuditLog.action == "project_access").all()
+        assert len(logs) == 1
+        log = logs[0]
+        assert log.status == "failed"
+        assert log.actor_id == 1003
+        assert "审查员写权限被拒绝" in log.detail
+
+    def test_audit_log_recorded_on_non_member_write_denied(self, db):
+        """非成员写权限被拒时应记录 status=failed 的审计日志"""
+        from app.models.audit_log import AuditLog
+
+        owner = _make_user(db, 1004, "owner")
+        stranger = _make_user(db, 1005, "stranger")
+        _make_project(db, 5103, owner_user_id=1004)
+        db.query(AuditLog).delete()
+        db.commit()
+
+        with pytest.raises(NotFoundError):
+            require_project_access(db, 5103, stranger, need_write=True)
+
+        logs = db.query(AuditLog).filter(AuditLog.action == "project_access").all()
+        assert len(logs) == 1
+        assert logs[0].status == "failed"
+        assert "无项目访问权限被拒绝" in logs[0].detail
+
+    def test_no_audit_log_on_read_access(self, db):
+        """读权限校验不应记录审计日志(避免日志膨胀)"""
+        from app.models.audit_log import AuditLog
+
+        admin = _make_user(db, 1006, "admin", role="admin")
+        _make_project(db, 5104, owner_user_id=1006)
+        db.query(AuditLog).delete()
+        db.commit()
+
+        require_project_access(db, 5104, admin, need_write=False)
+        db.commit()
+
+        logs = db.query(AuditLog).filter(AuditLog.action == "project_access").all()
+        assert len(logs) == 0
+
+    def test_audit_failure_does_not_break_main_flow(self, db, monkeypatch):
+        """审计日志记录失败时不应影响主业务流程"""
+        # 让 audit_service.log 抛异常
+        from app.services import audit_service
+
+        def _raise(*args, **kwargs):
+            raise RuntimeError("audit broken")
+
+        monkeypatch.setattr(audit_service, "log", _raise)
+
+        admin = _make_user(db, 1007, "admin", role="admin")
+        _make_project(db, 5105, owner_user_id=1007)
+
+        # 即使审计失败,权限校验应正常返回
+        role = require_project_access(db, 5105, admin, need_write=True)
+        assert role == "admin"
+
+
 # ============ add_member / remove_member / update_member_role 测试 ============
 
 

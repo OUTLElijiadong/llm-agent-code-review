@@ -105,6 +105,11 @@ def require_project_access(
 ) -> str:
     """校验用户对项目的访问权限,失败抛异常。
 
+    审计策略:
+        - 写权限访问(need_write=True): 无论成功/失败都记录审计日志
+        - 读权限访问: 不记录(避免日志量过大)
+        - 权限拒绝(ForbiddenError): 记录失败审计
+
     Args:
         db: 数据库会话
         project_id: 项目ID
@@ -124,12 +129,78 @@ def require_project_access(
 
     can_access, role = is_project_member(db, project_id, user)
     if not can_access:
+        # 无访问权限:对写请求记录失败审计(读请求不记录,避免日志膨胀)
+        if need_write:
+            _audit_project_access(
+                db, user, project_id,
+                mode="write", role="none", status="failed",
+                detail=f"无项目访问权限被拒绝 project_id={project_id}",
+            )
         raise NotFoundError("项目不存在", code=40400)
 
     if need_write and role == "reviewer":
+        # 写权限不足:记录失败审计
+        _audit_project_access(
+            db, user, project_id,
+            mode="write", role=role, status="failed",
+            detail=f"审查员写权限被拒绝 project_id={project_id}",
+        )
         raise ForbiddenError("需要项目拥有者权限", code=40300)
 
+    # 写权限校验通过:记录成功审计
+    if need_write:
+        _audit_project_access(
+            db, user, project_id,
+            mode="write", role=role, status="success",
+            detail=f"写权限校验通过 project_id={project_id}",
+        )
+
     return role
+
+
+def _audit_project_access(
+    db: Session,
+    user: User,
+    project_id: int,
+    *,
+    mode: str,
+    role: str,
+    status: str,
+    detail: str,
+) -> None:
+    """记录项目访问审计日志(内部函数,失败不影响主业务)。
+
+    提交策略:
+        - status="failed": 立即 commit,因为外层即将 raise 异常触发 rollback,
+          若不立即提交审计日志会被回滚丢失
+        - status="success": commit=False,由外层事务统一提交,避免破坏业务事务原子性
+
+    Args:
+        db: 数据库会话
+        user: 当前用户
+        project_id: 项目ID
+        mode: 访问模式("read"/"write")
+        role: 用户角色("admin"/"owner"/"reviewer"/"none")
+        status: 审计状态("success"/"failed")
+        detail: 审计说明文本
+    """
+    try:
+        from app.services import audit_service
+        # 失败审计必须立即提交,否则会被外层异常 rollback 丢失
+        commit_now = (status == "failed")
+        audit_service.log(
+            db,
+            user,
+            action="project_access",
+            target_type="project",
+            target_id=str(project_id),
+            detail=detail,
+            status=status,
+            commit=commit_now,
+        )
+    except Exception:
+        # 审计失败不影响主业务流程
+        pass
 
 
 def add_member(
