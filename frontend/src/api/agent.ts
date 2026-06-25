@@ -7,6 +7,8 @@ import type {
   AgentSituationOut,
   AgentSkillRecordOut,
   AgentUsageOut,
+  MetaGPTEnvironmentPreviewOut,
+  MetaGPTInfoOut,
   ReviewTypeMappingOut,
   SkillInvokeIn,
   SkillInvokeOut,
@@ -129,4 +131,34 @@ export function listSkillRecords(params: {
     trigger_type: params.triggerType,
     limit: params.limit,
   })
+}
+
+// =================== v2.4 MetaGPT 编排层 API ===================
+
+/**
+ * 获取 MetaGPT 编排层信息
+ *
+ * 调用 GET /api/agents/metagpt/info,返回 MetaGPT 模块的版本、核心组件说明、
+ * 可用工厂函数、已注册可适配为 Role 的 Agent 列表,
+ * 供前端展示多 Agent 宏观调控能力面板。
+ *
+ * @returns MetaGPTInfoOut MetaGPT 模块信息
+ */
+export function getMetaGPTInfo(): Promise<MetaGPTInfoOut> {
+  return get<MetaGPTInfoOut>('/agents/metagpt/info')
+}
+
+/**
+ * 预览 MetaGPT Environment 配置(不触发 LLM 调用)
+ *
+ * 调用 GET /api/agents/metagpt/preview,根据模式构建 Environment,
+ * 返回角色列表与配置信息,用于前端展示编排拓扑。
+ *
+ * @param mode - 环境模式,'review'=审查环境,'discussion'=讨论环境
+ * @returns MetaGPTEnvironmentPreviewOut Environment 预览结果
+ */
+export function previewMetaGPTEnvironment(
+  mode: 'review' | 'discussion' = 'review',
+): Promise<MetaGPTEnvironmentPreviewOut> {
+  return get<MetaGPTEnvironmentPreviewOut>('/agents/metagpt/preview', { mode })
 }

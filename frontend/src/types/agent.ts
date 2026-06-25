@@ -144,3 +144,88 @@ export interface AgentSkillRecordOut {
   /** 创建时间(ISO8601 字符串) */
   create_time?: string | null
 }
+
+// === v2.4 MetaGPT 编排层 ===
+
+/**
+ * MetaGPT 模块信息,对齐后端 GET /api/agents/metagpt/info 返回结构
+ * 用于前端展示多 Agent 宏观调控能力面板
+ */
+export interface MetaGPTInfoOut {
+  /** 模块版本(如 "v2.4") */
+  version: string
+  /** 模块描述 */
+  description: string
+  /** 核心组件说明(Environment/Role/RoleAdapter/Message) */
+  components: Record<string, string>
+  /** 可用工厂函数说明 */
+  factories: Record<string, string>
+  /** 已注册可适配为 Role 的 Agent 列表 */
+  adaptable_agents: MetaGPTAdaptableAgent[]
+  /** 默认参与审查环境的 Agent name 列表 */
+  default_review_agents: string[]
+  /** 默认参与讨论环境的 Agent name 列表 */
+  default_discussion_agents: string[]
+}
+
+/**
+ * 可适配为 MetaGPT Role 的 Agent 元数据
+ */
+export interface MetaGPTAdaptableAgent {
+  name: string
+  description: string
+  category: string
+  icon: string
+  color: string
+}
+
+/**
+ * MetaGPT Environment 预览角色信息
+ * 对齐后端 RoleAdapter.to_dict() + 补充字段
+ */
+export interface MetaGPTRoleInfo {
+  /** 角色 code(等于 Agent name) */
+  name: string
+  /** 角色显示名 */
+  profile: string
+  /** 角色目标 */
+  goal: string
+  /** 角色约束 */
+  constraints: string
+  /** 角色当前状态(idle/thinking/acting/done/error) */
+  state: string
+  /** 本地记忆消息数 */
+  memory_size: number
+  /** 关联 Agent name */
+  agent_name: string
+  /** 关联 Agent 描述 */
+  agent_description: string
+  /** 反应时发出的 cause_by */
+  react_action: string
+  /** 订阅的 cause_by 列表(空列表表示接收所有消息) */
+  watch_actions: string[]
+  /** Agent 图标(补充字段) */
+  agent_icon?: string
+  /** Agent 颜色(补充字段) */
+  agent_color?: string
+  /** Agent 分类(补充字段) */
+  agent_category?: string
+}
+
+/**
+ * MetaGPT Environment 预览结果,对齐后端 GET /api/agents/metagpt/preview 返回结构
+ */
+export interface MetaGPTEnvironmentPreviewOut {
+  /** 环境模式(review / discussion) */
+  mode: string
+  /** 环境名称 */
+  env_name: string
+  /** 追踪 ID */
+  trace_id: string
+  /** 最大对话深度 */
+  max_depth: number
+  /** 角色列表 */
+  roles: MetaGPTRoleInfo[]
+  /** 已注册 Agent 总数 */
+  registered_agent_count: number
+}

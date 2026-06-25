@@ -11,6 +11,7 @@
       </div>
       <div class="page-actions">
         <el-select
+          v-if="activeTab === 'office'"
           v-model="filterCategory"
           placeholder="按角色筛选"
           clearable
@@ -24,68 +25,76 @@
             :value="opt.value"
           />
         </el-select>
-        <el-button :loading="loading" @click="refreshAll">刷新</el-button>
-        <el-button type="primary" @click="goRules">查看审查规则</el-button>
+        <el-button v-if="activeTab === 'office'" :loading="loading" @click="refreshAll">刷新</el-button>
+        <el-button v-if="activeTab === 'office'" type="primary" @click="goRules">查看审查规则</el-button>
       </div>
     </header>
 
-    <SituationPanel :data="situation" :loading="loading" />
+    <el-tabs v-model="activeTab" class="agent-tabs">
+      <el-tab-pane label="Agent 办公室" name="office">
+        <SituationPanel :data="situation" :loading="loading" />
 
-    <PrismLoading
-      v-if="loading && !runtime.length"
-      label="正在同步 Agent 办公室"
-      sublabel="正在从 AgentRegistry 拉取实时元数据"
-    />
-
-    <template v-else>
-      <section class="overview-strip">
-        <article
-          v-for="bucket in summary.by_category"
-          :key="bucket.category"
-          class="bucket-card"
-          :class="{ active: filterCategory === bucket.category }"
-          @click="toggleCategory(bucket.category)"
-        >
-          <span class="bucket-num">{{ bucket.count }}</span>
-          <span class="bucket-label">{{ categoryLabel(bucket.category) }}</span>
-        </article>
-      </section>
-
-      <section class="desk-grid">
-        <AgentDeskCard
-          v-for="agent in filteredAgents"
-          :key="agent.code"
-          :agent="agent"
-          @select="onAgentSelect"
+        <PrismLoading
+          v-if="loading && !runtime.length"
+          label="正在同步 Agent 办公室"
+          sublabel="正在从 AgentRegistry 拉取实时元数据"
         />
-        <EmptyState
-          v-if="!filteredAgents.length"
-          description="当前筛选下没有匹配的 Agent"
-          compact
-        />
-      </section>
 
-      <section class="type-mapping-card">
-        <h3 class="block-title">审查类型 → 代理组合映射</h3>
-        <el-descriptions :column="1" border size="small">
-          <el-descriptions-item
-            v-for="m in typeMappings"
-            :key="m.review_type"
-            :label="m.label"
-          >
-            <el-tag
-              v-for="code in m.agent_codes"
-              :key="code"
-              size="small"
-              type="info"
-              style="margin-right: 6px"
+        <template v-else>
+          <section class="overview-strip">
+            <article
+              v-for="bucket in summary.by_category"
+              :key="bucket.category"
+              class="bucket-card"
+              :class="{ active: filterCategory === bucket.category }"
+              @click="toggleCategory(bucket.category)"
             >
-              {{ code }}
-            </el-tag>
-          </el-descriptions-item>
-        </el-descriptions>
-      </section>
-    </template>
+              <span class="bucket-num">{{ bucket.count }}</span>
+              <span class="bucket-label">{{ categoryLabel(bucket.category) }}</span>
+            </article>
+          </section>
+
+          <section class="desk-grid">
+            <AgentDeskCard
+              v-for="agent in filteredAgents"
+              :key="agent.code"
+              :agent="agent"
+              @select="onAgentSelect"
+            />
+            <EmptyState
+              v-if="!filteredAgents.length"
+              description="当前筛选下没有匹配的 Agent"
+              compact
+            />
+          </section>
+
+          <section class="type-mapping-card">
+            <h3 class="block-title">审查类型 → 代理组合映射</h3>
+            <el-descriptions :column="1" border size="small">
+              <el-descriptions-item
+                v-for="m in typeMappings"
+                :key="m.review_type"
+                :label="m.label"
+              >
+                <el-tag
+                  v-for="code in m.agent_codes"
+                  :key="code"
+                  size="small"
+                  type="info"
+                  style="margin-right: 6px"
+                >
+                  {{ code }}
+                </el-tag>
+              </el-descriptions-item>
+            </el-descriptions>
+          </section>
+        </template>
+      </el-tab-pane>
+
+      <el-tab-pane label="MetaGPT 编排" name="metagpt">
+        <MetaGPTOrchestrationPanel />
+      </el-tab-pane>
+    </el-tabs>
 
     <el-drawer
       v-model="drawerVisible"
@@ -220,6 +229,7 @@ import SituationPanel from '@/components/agent/SituationPanel.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import AgentDiscussionPanel from '@/components/agent/AgentDiscussionPanel.vue'
+import MetaGPTOrchestrationPanel from '@/components/agent/MetaGPTOrchestrationPanel.vue'
 import { subscribeAgentEvents } from '@/utils/agentEventStream'
 import type { AgentEvent, AgentEventType } from '@/types/agentEvent'
 import {
@@ -251,6 +261,9 @@ const summary = ref<AgentRuntimeSummaryOut>({ total: 0, by_category: [] })
 const situation = ref<AgentSituationOut | null>(null)
 const typeMappings = ref<ReviewTypeMappingOut[]>([])
 const filterCategory = ref<string>('')
+
+// === v2.4 F2: Agent 中心 Tab 切换(办公室 / MetaGPT 编排) ===
+const activeTab = ref<'office' | 'metagpt'>('office')
 
 const drawerVisible = ref(false)
 const selectedAgent = ref<AgentRuntimeOut | null>(null)
@@ -604,6 +617,17 @@ function initDiscussionFromRoute() {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* v2.4 F2: Agent 中心 Tab 切换 */
+.agent-tabs {
+  :deep(.el-tabs__header) {
+    margin-bottom: 16px;
+  }
+
+  :deep(.el-tabs__content) {
+    overflow: visible;
+  }
 }
 
 .page-head {
