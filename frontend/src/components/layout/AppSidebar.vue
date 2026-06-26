@@ -114,11 +114,9 @@ const visibleMenuItems = computed(() => {
   if (isAdmin.value) {
     return menuItems.filter((item) => !item.roles || item.roles.includes(currentRole.value))
   }
-  // 普通用户:RBAC 菜单已加载时,仅显示后端返回的允许菜单
-  if (menusLoaded.value) {
-    return menuItems.filter((item) => allowedMenuPaths.value.has(item.path))
-  }
-  // 兜底:RBAC 菜单未加载时,按角色过滤(保持原有行为)
+  // 主菜单统一按静态 roles 分角色显示。后端 RBAC 菜单种子的 path 与前端路由
+  // 不一致(如 /review vs /reviews、缺 /forum),做交集会误删论坛等入口;
+  // 实际访问权限仍由路由守卫 + 后端 require_permission 强制,侧边栏仅负责展示。
   return menuItems.filter((item) => !item.roles || item.roles.includes(currentRole.value))
 })
 

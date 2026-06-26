@@ -90,7 +90,7 @@ async function logout(): Promise<void> {
   <div class="admin-layout">
     <aside class="admin-sidebar">
       <div class="admin-brand">
-        <span class="admin-mark"></span>
+        <span class="prism-mark"></span>
         <div>
           <div class="admin-logo font-display">Prism Admin</div>
           <div class="admin-sub font-mono">AGENT GOVERNANCE</div>
@@ -145,8 +145,8 @@ async function logout(): Promise<void> {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #151A23;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--side-bg);
+  border-right: 1px solid var(--side-border);
 }
 
 .admin-brand {

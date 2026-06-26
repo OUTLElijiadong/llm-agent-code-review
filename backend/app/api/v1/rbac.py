@@ -30,7 +30,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.exceptions import BadRequestError, NotFoundError
+from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.core.dependencies import get_current_user
 from app.core.rbac_dependency import require_admin
 from app.models.rbac import DataScope, Menu, Role, RolePermission, UserRole
 from app.models.user import User
@@ -193,7 +194,7 @@ def list_user_roles(
 def list_user_permissions(
     user_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current: User = Depends(get_current_user),
 ):
     """查询用户权限点列表
 
@@ -209,6 +210,8 @@ def list_user_permissions(
     Returns:
         Resp[List[str]]: 权限编码字符串列表
     """
+    if current.id != user_id and not rbac_service.is_admin_user(db, current.id):
+        raise ForbiddenError("无权查看他人权限", code=40301)
     codes = rbac_service.get_user_permissions(db, user_id)
     return Resp(data=sorted(codes))
 
@@ -217,7 +220,7 @@ def list_user_permissions(
 def list_user_menus(
     user_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current: User = Depends(get_current_user),
 ):
     """查询用户可见菜单(树形)
 
@@ -232,6 +235,8 @@ def list_user_menus(
     Returns:
         Resp[List[MenuOut]]: 用户可见菜单树
     """
+    if current.id != user_id and not rbac_service.is_admin_user(db, current.id):
+        raise ForbiddenError("无权查看他人菜单", code=40301)
     menus = rbac_service.get_user_menus(db, user_id)
     return Resp(data=_build_menu_tree(menus))
 
