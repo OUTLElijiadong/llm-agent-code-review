@@ -172,7 +172,7 @@ def assign_user_roles(
 def list_user_roles(
     user_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current: User = Depends(get_current_user),
 ):
     """查询用户角色列表
 
@@ -186,6 +186,8 @@ def list_user_roles(
     Returns:
         Resp[List[RoleOut]]: 用户有效角色列表
     """
+    if current.id != user_id and not rbac_service.is_admin_user(db, current.id):
+        raise ForbiddenError("无权查看他人角色", code=40301)
     roles = rbac_service.get_user_roles(db, user_id)
     return Resp(data=[_role_to_out(r) for r in roles])
 
@@ -245,7 +247,7 @@ def list_user_menus(
 def get_user_data_scope(
     user_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current: User = Depends(get_current_user),
 ):
     """查询用户数据范围
 
@@ -260,6 +262,8 @@ def get_user_data_scope(
     Returns:
         Resp[DataScopeOut]: 用户数据范围信息
     """
+    if current.id != user_id and not rbac_service.is_admin_user(db, current.id):
+        raise ForbiddenError("无权查看他人数据范围", code=40301)
     scope = rbac_service.get_user_data_scope(db, user_id)
     # 服务层在用户无数据范围记录时返回虚拟 DataScope(无 id/role_id/create_time),
     # 此处补齐默认值以适配 DataScopeOut 的必填字段约束。
