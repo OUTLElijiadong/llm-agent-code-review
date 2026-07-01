@@ -64,6 +64,10 @@ _PROFILE_TO_AGENT_CODE: dict[str, str] = {
 
 _COLLAB_PARALLEL_THREADS = 4
 
+# 全局审查并发上限:限制同时进行的后台审查任务数,防止 2C2G 机器上线程/内存放大
+# 及撞 LLM 侧限流。超出上限的任务会在后台线程内排队等待(任务状态先入库为 running)。
+_REVIEW_SEMAPHORE = threading.BoundedSemaphore(max(1, settings.review_max_concurrency))
+
 
 def _safe_commit(db: Session, task: Optional[ReviewTask] = None) -> None:
     """安全提交 — 在长时间审查中防止 MySQL 连接断开导致 Session 脏状态
@@ -171,6 +175,7 @@ def _run_review_task(task_id: int, user_id: int) -> None:
         task_id: 审查任务 ID(已在请求线程中入库)
         user_id: 发起用户 ID
     """
+    _REVIEW_SEMAPHORE.acquire()
     db = SessionLocal()
     try:
         task = db.get(ReviewTask, task_id)
@@ -229,6 +234,7 @@ def _run_review_task(task_id: int, user_id: int) -> None:
         logger.exception(e)
     finally:
         db.close()
+        _REVIEW_SEMAPHORE.release()
 
 
 def _get_agent_for_profile(profile_code: str) -> Optional[BaseAgent]:
@@ -367,7 +373,10 @@ def _execute_review(
 
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
         for it in all_issues:
-            sev_count[it.severity] = sev_count.get(it.severity, 0) + 1
+            # 归一化:LLM 偶发返回四类之外的 severity 时归入「中」,
+            # 保证四级计数之和恒等于 total_issues,评分与统计口径自洽。
+            key = it.severity if it.severity in sev_count else "中"
+            sev_count[key] += 1
         task.total_issues = len(all_issues)
         task.severe_issues = sev_count["严重"]
         task.high_issues = sev_count["高"]
