@@ -3,6 +3,8 @@ services:
     image: mysql:8.0
     container_name: cr_mysql
     restart: unless-stopped
+    # 内存上限:防止任一容器吃爆 2C2G 整机内存触发内核 OOM 误杀其它服务
+    mem_limit: 512m
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -28,6 +30,9 @@ services:
     build: ../backend
     container_name: cr_backend
     restart: unless-stopped
+    # 内存上限:审查任务在后台线程跑,极端负载下封顶后只会重启 backend(orphan 回收兜底),
+    # 而不会让内核 OOM 误杀 mysql,保护数据与演示稳定。正常占用 ~120M,768m 有充足余量。
+    mem_limit: 768m
     depends_on:
       mysql:
         condition: service_healthy
@@ -50,6 +55,8 @@ services:
       dockerfile: Dockerfile
     container_name: cr_frontend
     restart: unless-stopped
+    # nginx 静态服务,占用极小(~7M),128m 足够
+    mem_limit: 128m
     depends_on:
       - backend
     ports:
@@ -64,6 +71,8 @@ services:
     image: clamav/clamav:latest
     container_name: cr_clamav
     restart: unless-stopped
+    # 有意不设 mem_limit:clamd 病毒库常驻,定期并发重载会短时翻倍(~1.2G),
+    # 强行封顶会在重载瞬间被 OOM 杀掉;其内存有上界(库大小)且稳定,故放行。
     ports:
       - "3310:3310"
     volumes:
