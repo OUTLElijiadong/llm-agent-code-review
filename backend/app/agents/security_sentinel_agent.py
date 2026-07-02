@@ -189,7 +189,9 @@ class SecuritySentinelAgent(BaseAgent):
         for raw in raw_findings:
             if not isinstance(raw, dict):
                 continue
-            normalized = self._normalize_finding(raw, file_stub, line_offset=0)
+            normalized = self._normalize_finding(
+                raw, file_stub, line_offset=0, code=code,
+            )
             if not normalized:
                 continue
             findings.append(_normalized_dict_to_finding(normalized))
@@ -1275,6 +1277,7 @@ class SecuritySentinelAgent(BaseAgent):
             for raw in parsed.get("findings") or []:
                 normalized = self._normalize_finding(
                     raw, file=file, line_offset=chunk.start_line,
+                    code=chunk.text,
                 )
                 if normalized:
                     out.findings.append(normalized)
@@ -1309,16 +1312,22 @@ class SecuritySentinelAgent(BaseAgent):
     def _build_audit_prompt(self, code: str, language: str,
                             file_path: str, line_offset: int) -> str:
         return (
-            "请对以下代码做网络安全审查。\n\n"
-            "## 检查范围(若不适用则跳过,不要硬凑)\n"
-            "1. 注入类:SQL/Command/LDAP/XPath/模板注入\n"
-            "2. 跨站脚本 XSS / CSRF / SSRF / Open Redirect\n"
-            "3. 反序列化 / RCE / 文件上传 / 路径遍历\n"
-            "4. 越权:水平/垂直越权,IDOR\n"
-            "5. 认证授权:弱密码、会话固定、JWT 缺陷、OAuth 配置错误\n"
-            "6. 加密:弱算法、ECB 模式、未校验证书、随机数不安全\n"
-            "7. 敏感信息:硬编码秘钥、日志泄露 PII、错误堆栈泄露\n"
-            "8. 业务逻辑:竞态条件、整数溢出、订单价格篡改\n\n"
+            "请对以下代码做系统化网络安全审查,尽量把每一类真实存在的风险都找全,"
+            "宁可多给低置信度线索,也不要漏报。\n\n"
+            "## 覆盖面:逐项对照 OWASP Top10 2021 排查(命中才报,不适用就跳过,不硬凑)\n"
+            "- A01 失效的访问控制:水平/垂直越权、IDOR、路径遍历、强制浏览、CORS 过宽\n"
+            "- A02 加密失败:明文存储、弱哈希(MD5/SHA1)、弱算法(DES/ECB)、硬编码密钥、"
+            "证书不校验、随机数不安全\n"
+            "- A03 注入:SQL/NoSQL/命令/LDAP/XPath/模板注入、XSS、HTTP 响应拆分、Open Redirect\n"
+            "- A04 不安全设计:缺少限流/风控、可被滥用的业务流程、TOCTOU 竞态\n"
+            "- A05 安全配置错误:调试开关、默认口令、目录列举、危险 CORS/安全头缺失、错误堆栈泄露\n"
+            "- A06 易受攻击与过时组件:已知漏洞依赖、过时框架、危险反序列化库\n"
+            "- A07 认证与会话失败:弱口令策略、会话固定、JWT 缺陷(alg=none/弱密钥)、"
+            "验证码绕过、越权重置\n"
+            "- A08 软件与数据完整性失败:不受信反序列化、未校验的自动更新/插件、CI 供应链\n"
+            "- A09 日志与监控失败:关键操作无审计、日志泄露 PII/凭据\n"
+            "- A10 SSRF:用户可控 URL 发起请求、云元数据地址(169.254.169.254)可达\n"
+            "另含业务逻辑漏洞:整数溢出、价格/数量篡改、条件竞争。\n\n"
             "## 严格按此 JSON Schema 输出(只输出 JSON,无其他文字):\n"
             "{\n"
             '  "findings": [{\n'
@@ -1327,9 +1336,9 @@ class SecuritySentinelAgent(BaseAgent):
             '    "owasp": "A03:2021-Injection",\n'
             '    "cwe": "CWE-89",\n'
             '    "severity": "严重|高|中|低",\n'
-            '    "line_start": 12,\n'
-            '    "line_end": 18,\n'
-            '    "evidence": "关键代码片段(1-3 行)",\n'
+            '    "line_start": 12,    // 必填:问题起始行(当前代码块相对行号)\n'
+            '    "line_end": 18,      // 必填:问题结束行,单行时与 line_start 相同\n'
+            '    "evidence": "从下方代码原样摘录的 1-3 行触发代码",  // 必填,不得改写\n'
             '    "exploit_scenario": "30-200 字攻击场景",\n'
             '    "fix_suggestion": "30-200 字修复方案",\n'
             '    "references": ["https://owasp.org/..."],\n'
@@ -1340,9 +1349,11 @@ class SecuritySentinelAgent(BaseAgent):
             '  "dangerous_sinks": [{"name": "<函数名>", "line": 数字, '
             '"sink_type": "SQL | exec | open | requests"}]\n'
             "}\n\n"
-            "## 严格约束\n"
-            "- 不报告代码风格/命名/注释类问题\n"
-            "- 不臆造漏洞;不确定的标记 confidence < 0.6\n"
+            "## 硬约束\n"
+            "- 每条 finding 必须给出 line_start 和 evidence:它们是「漏洞点」的定位依据,缺一不可;"
+            "evidence 必须是下方代码里真实出现的原文,便于交叉校验行号。\n"
+            "- 不报告代码风格/命名/注释类问题(那是 code_reviewer 的活)\n"
+            "- 不臆造漏洞;不确定的把 confidence 标到 0.6 以下,但仍要给出 line_start 与 evidence\n"
             "- 行号是当前代码块的相对行号(后端会自动加偏移)\n"
             "- 输出纯 JSON,不要 markdown 围栏,不要解释\n\n"
             f"## 代码信息\n"
@@ -1400,15 +1411,32 @@ class SecuritySentinelAgent(BaseAgent):
         return flows
 
     def _normalize_finding(self, raw: dict, file: CodeFile,
-                           line_offset: int) -> Optional[dict]:
-        """把 LLM 原始 finding 标准化"""
+                           line_offset: int,
+                           code: Optional[str] = None) -> Optional[dict]:
+        """把 LLM 原始 finding 标准化。
+
+        Args:
+            raw: LLM 返回的单条 finding。
+            file: 所属代码文件(取 file_path/file_id)。
+            line_offset: 分片行号偏移(相对行号 + 偏移 = 绝对行号)。
+            code: 本次送审的代码块原文;当 LLM 漏给 line_start 时,用 evidence
+                在其中反查真实行号,保证每条 finding 都有可定位的「漏洞点」。
+        """
         if not isinstance(raw, dict):
             return None
         severity = raw.get("severity") or "中"
         if severity not in _ALLOWED_SEVERITY:
             severity = "中"
+        evidence = str(raw.get("evidence") or "")[:500]
         line_start = self._coerce_int(raw.get("line_start"), 0)
         line_end = self._coerce_int(raw.get("line_end"), 0)
+        # 兜底:模型漏给行号时,用 evidence 在代码块里定位,relative → +offset
+        if not line_start and evidence and code:
+            located = self._locate_evidence_line(code, evidence)
+            if located:
+                line_start = located
+                if not line_end:
+                    line_end = located
         if line_start:
             line_start += line_offset
         if line_end:
@@ -1435,13 +1463,40 @@ class SecuritySentinelAgent(BaseAgent):
             ),
             "line_number": line_start,
             "end_line": line_end,
-            "evidence": str(raw.get("evidence") or "")[:500],
+            "evidence": evidence,
             "exploit_scenario": str(raw.get("exploit_scenario") or ""),
             "fix_suggestion": str(raw.get("fix_suggestion") or ""),
             "references": [str(r) for r in (raw.get("references") or []) if r][:5],
             "confidence": confidence,
             "source": "llm",
         }
+
+    @staticmethod
+    def _locate_evidence_line(code: str, evidence: str) -> int:
+        """用 evidence 原文在代码块里反查行号(1-based 相对行号),找不到返回 0。
+
+        LLM(尤其小模型)常漏给 line_start,导致漏洞只有描述、没有定位。
+        这里取 evidence 中最有辨识度的一行,在代码里做子串匹配兜底。
+        """
+        if not code or not evidence:
+            return 0
+        code_lines = code.splitlines()
+        ev_lines = [ln.strip() for ln in evidence.splitlines() if ln.strip()]
+        if not ev_lines:
+            return 0
+        needle = max(ev_lines, key=len).strip("`. ").strip()
+        if len(needle) < 4:
+            return 0
+        for idx, ln in enumerate(code_lines, start=1):
+            if needle in ln:
+                return idx
+        # 放宽:用前若干字符再试一次(应对 evidence 带省略号/尾部差异)
+        compact = needle[:16]
+        if len(compact) >= 6:
+            for idx, ln in enumerate(code_lines, start=1):
+                if compact in ln:
+                    return idx
+        return 0
 
     def _infer_owasp_cwe(self, title: str, description: str) -> tuple[str, str]:
         """基于关键词推断 OWASP/CWE(任务复审用,无 LLM 调用)"""

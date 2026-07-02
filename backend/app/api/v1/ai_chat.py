@@ -32,12 +32,22 @@ class ChatRequest(BaseModel):
     )
 
 
+class ClarifyOptionOut(BaseModel):
+    value: Any
+    label: str
+
+
 class ClarifyQuestionOut(BaseModel):
     key: str
     label: str
     type: str
     hint: str = ""
     required: bool = True
+    # v3.1: 后端直接下发候选项(如项目/任务下拉、scope/深度枚举),
+    # 前端不再依赖二次拉取,追问下拉永不为空。
+    options: Optional[List[ClarifyOptionOut]] = None
+    # v3.1: 模糊命中项目时预填的默认值(供前端预选,用户一键确认)。
+    default: Optional[Any] = None
 
 
 class ClarifyOut(BaseModel):

@@ -18,6 +18,8 @@ export interface ClarifyQuestion {
   hint?: string
   required?: boolean
   options?: { value: string | number; label: string }[]
+  /** v3.1: 后端模糊命中项目时预填的默认值,前端预选供用户一键确认 */
+  default?: string | number
 }
 
 export interface ClarifyPayload {

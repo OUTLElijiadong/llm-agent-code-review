@@ -131,12 +131,14 @@ const clarifyAnswers = ref<Record<string, Record<string, string | number>>>({})
 function ensureClarifyAnswers(clarifyId: string, questions: ClarifyQuestion[]): void {
   if (!clarifyAnswers.value[clarifyId]) {
     const init: Record<string, string | number> = {}
-    for (const q of questions) init[q.key] = ''
+    // v3.1: 后端模糊命中项目时会下发 default,预填后用户一键即可确认
+    for (const q of questions) init[q.key] = q.default ?? ''
     clarifyAnswers.value[clarifyId] = init
   }
+  // 仅当后端未随问题下发候选项时,才回退到前端二次拉取列表
   for (const q of questions) {
-    if (q.type === 'select_project') void ensureProjectOptions()
-    if (q.type === 'select_task') void ensureTaskOptions()
+    if (q.type === 'select_project' && !(q.options && q.options.length)) void ensureProjectOptions()
+    if (q.type === 'select_task' && !(q.options && q.options.length)) void ensureTaskOptions()
   }
 }
 
@@ -162,6 +164,10 @@ async function submitClarify(message: ChatMessage): Promise<void> {
       time: dayjs().format('HH:mm'),
       clarify: res.clarify ?? undefined,
     })
+    // v3.1: 多轮追问 — 为新一轮 clarify 初始化答案与候选项
+    if (res.clarify) {
+      ensureClarifyAnswers(res.clarify.clarify_id, res.clarify.questions)
+    }
   } catch {
     ElMessage.error('提交追问失败,请重试')
   } finally {
@@ -488,8 +494,8 @@ onBeforeUnmount(() => {
                       style="width: 100%"
                     >
                       <el-option
-                        v-for="opt in projectOptions"
-                        :key="opt.value"
+                        v-for="opt in (q.options && q.options.length ? q.options : projectOptions)"
+                        :key="String(opt.value)"
                         :label="opt.label"
                         :value="opt.value"
                       />
@@ -505,8 +511,8 @@ onBeforeUnmount(() => {
                       style="width: 100%"
                     >
                       <el-option
-                        v-for="opt in taskOptions"
-                        :key="opt.value"
+                        v-for="opt in (q.options && q.options.length ? q.options : taskOptions)"
+                        :key="String(opt.value)"
                         :label="opt.label"
                         :value="opt.value"
                       />

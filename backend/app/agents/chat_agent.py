@@ -1,3 +1,4 @@
+import difflib
 import json as json_lib
 from typing import TYPE_CHECKING, Any, List, Optional
 
@@ -10,79 +11,49 @@ if TYPE_CHECKING:
 
 
 _INTENT_SYSTEM = (
-    "你是一个意图分类器。分析用户消息,判断用户意图并输出JSON。\n\n"
-    "支持的意图类型:\n"
-    "- chat: 普通对话/问答/咨询\n"
-    "- detect_language: 用户想识别项目或代码的编程语言\n"
-    "- analyze_project: 用户想根据文件列表分析项目信息\n"
-    "- review_code: 用户发送了代码片段要求审查\n"
-    "- list_agents: 用户想查看有哪些可用的Agent\n"
-    "- list_projects: 用户想看项目列表/有哪些项目\n"
-    "- create_project: 用户要创建新项目(提供项目名/语言/描述)\n"
-    "- delete_project: 用户要删除某个项目\n"
-    "- start_review: 用户要对项目启动代码审查\n"
-    "- list_review_tasks: 用户想看审查任务记录\n"
-    "- list_review_issues: 用户想看审查发现的问题\n"
-    "- list_code_files: 用户想看某个项目的代码文件\n"
-    "- dashboard: 用户想看平台统计数据/仪表盘\n"
-    "- list_rules: 用户想看审查规则列表\n"
-    "- list_reports: 用户想看审查报告列表\n"
-    "- generate_ai_prompt: 用户想生成可粘贴给 Cursor/Copilot/ChatGPT/Claude Code 的 AI 修复提示词\n"
-    "- security_audit: 用户想做网络安全审计/漏洞扫描/威胁建模/敏感信息扫描/OWASP 检查\n"
-    "- evolution_trigger: 用户想触发某个 Agent 的自进化(从反馈蒸馏规则/进化策略)\n"
-    "- agent_skill_invoke: 用户想手动调用某个 Agent 的某个 Skill(自进化/主动监测)\n"
-    "- agent_status: 用户想查看 Agent 运行状态/Skill 列表/调用记录\n\n"
-    "输出格式: 严格JSON对象:\n"
-    '{"intent": "chat", "reason": "简短理由", "payload": {}}\n\n'
-    "常用payload:\n"
-    "- detect_language: {\"project_name\":\"...\",\"description\":\"...\"}\n"
-    "- analyze_project: {\"folder_name\":\"...\",\"file_names\":[...]}\n"
-    "- review_code: {\"code\":\"...\",\"language\":\"...\"}\n"
-    "- create_project: {\"project_name\":\"...\",\"description\":\"...\",\"language\":\"...\"}\n"
-    "- delete_project: {\"project_id\": 数字}\n"
-    "- start_review: {\"project_id\": 数字, \"review_type\": \"quick\"}\n"
-    "- list_review_tasks: {\"project_id\": 数字或null}\n"
-    "- list_review_issues: {\"task_id\": 数字}\n"
-    "- list_code_files: {\"project_id\": 数字}\n"
-    "- dashboard: {}\n"
-    "- list_rules: {}\n"
-    "- list_reports: {}\n"
-    "- list_projects: {}\n"
-    "- list_agents: {}\n"
-    "- generate_ai_prompt: {\"scope\":\"issue|task|project\", \"issue_id\":数字, \"task_id\":数字, "
-    "\"project_id\":数字, \"target_tool\":\"generic|cursor|copilot|chatgpt|claude_code\"}\n"
-    "- security_audit: {\"scope\":\"file|task|project\", \"file_id\":数字, \"task_id\":数字, "
-    "\"project_id\":数字, \"scan_depth\":\"quick|standard|deep\", \"top_n\":数字, \"trace_dataflow\":布尔}\n"
-    "- evolution_trigger: {\"agent_name\":\"code_reviewer|security_sentinel|evolution|...\", \"window_days\":数字}\n"
-    "- agent_skill_invoke: {\"agent_name\":\"...\", \"skill_name\":\"<agent>.self_improve|<agent>.proactive\", "
-    "\"action\":\"evolve|check_proactive|scan_domain|reflect_from_logs\", \"params\":{...}}\n"
-    "- agent_status: {\"agent_name\":\"...\", \"detail\":\"skills|records|all\"}\n"
-    "- chat: {}\n\n"
-    "关键判断规则:\n"
-    "如果用户消息中包含代码块(```...```), intent=review_code\n"
-    "如果用户说'项目列表''有哪些项目''我的项目', intent=list_projects\n"
-    "如果用户说'创建项目''新建项目', intent=create_project\n"
-    "如果用户说'删除项目''删掉项目', intent=delete_project\n"
-    "如果用户说'审查项目''开始审查''代码审查', intent=start_review\n"
-    "如果用户说'审查记录''审查任务''审查列表', intent=list_review_tasks\n"
-    "如果用户说'审查问题''存在的问题', intent=list_review_issues\n"
-    "如果用户说'代码文件''文件列表''有什么文件', intent=list_code_files\n"
-    "如果用户说'仪表盘''统计数据''情况怎么样''概览', intent=dashboard\n"
-    "如果用户说'规则''审查规则''有哪些规则', intent=list_rules\n"
-    "如果用户说'报告''审查报告''报告列表', intent=list_reports\n"
-    "如果用户问'语言是什么''什么语言', intent=detect_language\n"
-    "如果用户问'有哪些Agent''有什么功能''能做什么', intent=list_agents\n"
-    "如果用户提到'分析项目''分析文件夹', intent=analyze_project\n"
-    "如果用户提到'AI提示词''Cursor修复''Copilot修复''让ChatGPT修''让Claude修''AI修复包',"
-    "intent=generate_ai_prompt; 根据上下文推断 scope: 单条问题→issue; 一个任务→task; 一个项目→project\n"
-    "如果用户提到'安全扫描''安全审计''漏洞扫描''威胁建模''密钥泄漏''OWASP''渗透测试''敏感信息''CWE',"
-    "intent=security_audit; 根据上下文推断 scope: 单个文件→file; 一个任务→task; 一个项目→project\n"
-    "如果用户说'触发进化''自进化''让XX Agent进化''跑一轮进化''蒸馏规则', intent=evolution_trigger; "
-    "payload.agent_name 从消息推断(默认 evolution)\n"
-    "如果用户说'调用XX的Skill''手动触发Skill''跑一下XX.self_improve', intent=agent_skill_invoke; "
-    "payload 需含 agent_name 与 skill_name\n"
-    "如果用户说'Agent状态''有哪些Skill''Skill调用记录''Agent运行情况', intent=agent_status\n"
-    "其他情况默认为chat"
+    "你是 PRISM 平台的意图分类器。职责:把用户最新一句话归类到下列意图之一,"
+    "并抽取结构化 payload。\n\n"
+    "# 意图清单(每条已界定覆盖范围,按语义归类,而不是死记关键词)\n"
+    "- chat: 普通对话 / 知识问答 / 最佳实践咨询,以及无法明确归入其它意图时的兜底\n"
+    "- detect_language: 想知道某项目或代码用的是什么编程语言\n"
+    "- analyze_project: 给出文件列表,想据此推断项目元信息\n"
+    "- review_code: 消息里直接贴了代码(通常含 ``` 代码块)要求审查\n"
+    "- list_projects / create_project / delete_project: 查看 / 新建 / 删除项目\n"
+    "- start_review: 对某个项目发起代码审查\n"
+    "- list_review_tasks: 查看审查任务 / 记录 / 历史\n"
+    "- list_review_issues: 查看某一次审查发现的问题清单\n"
+    "- list_code_files: 查看某项目下的代码文件\n"
+    "- dashboard: 查看平台统计 / 概览 / 仪表盘\n"
+    "- list_rules: 查看审查规则   - list_reports: 查看审查报告   - list_agents: 查看可用 Agent\n"
+    "- generate_ai_prompt: 生成可粘贴给 Cursor/Copilot/ChatGPT/Claude Code 的修复提示词\n"
+    "- security_audit: 网络安全审计 / 漏洞扫描 / 威胁建模 / 敏感信息 / OWASP / CWE / 渗透\n"
+    "- evolution_trigger: 触发某个 Agent 的自进化(从反馈蒸馏规则)\n"
+    "- agent_skill_invoke: 手动调用某个 Agent 的某个 Skill\n"
+    "- agent_status: 查看 Agent 运行状态 / Skill 列表 / 调用记录\n\n"
+    "# 输出契约(只输出一个 JSON 对象,无解释、无 markdown 围栏)\n"
+    '{"intent": "<上表之一>", "reason": "一句话依据", "payload": {…}}\n\n'
+    "# payload 字段(只填你有把握的,其余留空)\n"
+    "- detect_language: {project_name, description}\n"
+    "- analyze_project: {folder_name, file_names[]}\n"
+    "- review_code: {code, language}\n"
+    "- create_project: {project_name, description, language}\n"
+    "- delete_project / start_review / list_code_files / list_review_tasks: {project_id?}"
+    "(start_review 另含 review_type:quick)\n"
+    "- list_review_issues: {task_id?}\n"
+    "- generate_ai_prompt: {scope: issue|task|project, issue_id?, task_id?, project_id?, target_tool?}\n"
+    "- security_audit: {scope: file|task|project, file_id?, task_id?, project_id?, "
+    "scan_depth?, top_n?, trace_dataflow?}\n"
+    "- evolution_trigger: {agent_name, window_days?}\n"
+    "- agent_skill_invoke: {agent_name, skill_name, action, params?}\n"
+    "- agent_status: {agent_name?, detail?}\n\n"
+    "# 硬约束(违反即为错误)\n"
+    "1. 只输出 JSON 对象,不得有任何多余字符。\n"
+    "2. 信息不足或意图模糊时一律归 chat,不要强行归类。\n"
+    "3. 绝不臆造 project_id / task_id / file_id / issue_id 等数字;用户没给数字就把该字段留空。\n"
+    "4. 用户用名称 / 昵称 / 近义说法点名一个项目(如「皮卡丘」「商城那个」)时,把原文名称"
+    "原样放进 payload.project_query(字符串),交给系统去用户的项目库里匹配;同理任务放 task_hint。"
+    "不要自己把名称换算成数字 ID。\n"
+    "5. scope 按语义推断:针对单个文件→file;针对一次审查任务→task;针对整个项目→project。\n"
 )
 
 
@@ -187,7 +158,10 @@ class ChatAssistantAgent(BaseAgent):
                    parent="orchestrator")
 
         # v2.0: 关键 intent 缺字段时主动追问,不再猜测
-        clarify = self._maybe_clarify(handler_name, intent.get("payload", {}), ctx)
+        # v3.1: 追问前先尝试用「项目名/昵称」在用户项目库里模糊解析,命中则改为一句确认
+        clarify = self._maybe_clarify(
+            handler_name, intent.get("payload", {}), ctx, user_message=last_msg,
+        )
         if clarify is not None:
             return clarify
 
@@ -513,8 +487,15 @@ class ChatAssistantAgent(BaseAgent):
     }
 
     def _maybe_clarify(self, intent_name: str, payload: dict,
-                       ctx: Optional[AgentContext]) -> Optional[AgentResult]:
-        """v2.0: 若关键字段缺失,主动追问而非猜测;返回非空表示需要追问"""
+                       ctx: Optional[AgentContext],
+                       user_message: str = "") -> Optional[AgentResult]:
+        """v2.0: 若关键字段缺失,主动追问而非猜测;返回非空表示需要追问。
+
+        v3.1 优化逻辑链路:
+          - project_id 缺失时,先用 payload.project_query 或用户原话在**当前用户**的
+            项目库里模糊匹配。命中且足够确信 → 预填该项目并把追问改成一句「确认」;
+            否则把匹配到的候选项目排好塞进下拉选项,保证选择框永不为空。
+        """
         from app.agents.events import AgentEventType
 
         # v2.0 A1 / v2.1: scope-动态意图按 scope 推导必填字段
@@ -527,16 +508,44 @@ class ChatAssistantAgent(BaseAgent):
         missing = [k for k in required if not payload.get(k)]
         if not missing:
             return None
+
+        # --- 项目名模糊解析(仅当缺 project_id 时)---
+        confirm_message: Optional[str] = None
+        project_options: Optional[List[dict]] = None
+        project_default: Optional[int] = None
+        if "project_id" in missing:
+            query = str(payload.get("project_query") or "").strip() or user_message
+            best, candidates, confident = self._resolve_project(query, ctx)
+            project_options = candidates or None
+            if confident and best is not None:
+                project_default = int(best["id"])
+                confirm_message = (
+                    f"我理解你要操作的是 **#{best['id']} {best['project_name']}**,对吗?\n\n"
+                    f"确认无误就点「提交并继续」;如果不是,在下面的下拉里改选正确的项目。"
+                )
+
         questions = []
         for k in missing:
             tpl = self.QUESTION_TEMPLATES.get(k, {})
-            questions.append({
+            q: dict = {
                 "key": k,
                 "label": tpl.get("label", f"请补充 {k}"),
                 "type": tpl.get("type", "text"),
                 "hint": tpl.get("hint", ""),
                 "required": True,
-            })
+            }
+            if tpl.get("options"):
+                q["options"] = tpl["options"]
+            if k == "project_id":
+                if project_options:
+                    q["options"] = [
+                        {"value": c["value"], "label": c["label"]}
+                        for c in project_options
+                    ]
+                if project_default is not None:
+                    q["default"] = project_default
+            questions.append(q)
+
         import uuid as _uuid
         clarify_id = f"clr_{_uuid.uuid4().hex[:12]}"
         from app.agents.clarify_store import ClarifyStore
@@ -548,7 +557,7 @@ class ChatAssistantAgent(BaseAgent):
         self._emit(AgentEventType.CLARIFY, ctx,
                    message=f"等待用户补充: {', '.join(missing)}",
                    payload={"clarify_id": clarify_id, "missing": missing})
-        message = (
+        message = confirm_message or (
             "我想确认一下信息后再执行,这样不会做错决定。请回答下面的问题:"
         )
         return AgentResult(
@@ -563,6 +572,91 @@ class ChatAssistantAgent(BaseAgent):
             },
             model=self._model,
         )
+
+    def _resolve_project(self, query: str,
+                         ctx: Optional[AgentContext]) -> tuple:
+        """在当前用户的项目库里按名称/昵称/近义模糊匹配。
+
+        Args:
+            query: 用户原话或抽取出的项目名(可能为空)。
+            ctx: 上下文(实际按 orchestrator 注入的当前用户过滤,天然隔离越权)。
+
+        Returns:
+            (best, candidates, confident):
+              best: 最佳匹配项目 dict {id, project_name, ...} 或 None
+              candidates: 排好序的候选 [{value, label, project_name}](最多 8 条)
+              confident: 是否足够确信,可直接进入「确认」而非让用户多选
+        """
+        if not self._check_orch():
+            return None, [], False
+        res = self._orchestrator.list_projects(page_size=200)
+        if not res.success:
+            return None, [], False
+        items = (res.data or {}).get("items", []) or []
+        if not items:
+            return None, [], False
+
+        q = (query or "").strip().lower()
+        scored: List[tuple] = [
+            (self._name_match_score(q, str(it.get("project_name") or "").lower()), it)
+            for it in items
+            if str(it.get("project_name") or "").strip()
+        ]
+        if not scored:
+            return None, [], False
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        candidates = [
+            {"value": int(it["id"]),
+             "label": f"#{it['id']} {it['project_name']}",
+             "project_name": it["project_name"]}
+            for _, it in scored[:8]
+        ]
+        best_score, best_it = scored[0]
+        second = scored[1][0] if len(scored) > 1 else 0.0
+        confident = bool(q) and best_score >= 0.8 and (best_score - second) >= 0.12
+        return (best_it if confident else None), candidates, confident
+
+    @staticmethod
+    def _lcs_len(a: str, b: str) -> int:
+        """最长公共连续子串长度(用于识别昵称/近义:如「皮卡丘」↔「皮卡丘商城」)。"""
+        if not a or not b:
+            return 0
+        prev = [0] * (len(b) + 1)
+        best = 0
+        for i in range(len(a)):
+            cur = [0] * (len(b) + 1)
+            for j in range(len(b)):
+                if a[i] == b[j]:
+                    cur[j + 1] = prev[j] + 1
+                    if cur[j + 1] > best:
+                        best = cur[j + 1]
+            prev = cur
+        return best
+
+    def _name_match_score(self, q: str, nl: str) -> float:
+        """给「用户原话 q」与「项目名 nl(均小写)」打匹配分 [0,1]。
+
+        既支持整体子串,也支持「点了项目名里最有辨识度那几个字」的昵称匹配——
+        用户往往只说「皮卡丘」,而项目全名是「皮卡丘商城」。
+        """
+        if not q:
+            return 0.0
+        if nl == q:
+            return 1.0
+        if nl in q:                      # 项目名整体出现在用户原话里 = 明确点名
+            return min(0.9 + len(nl) / 40.0, 0.99)
+        if q in nl:                      # 用户输入整体是项目名的一部分
+            return 0.82
+        lcs = self._lcs_len(q, nl)
+        cov = lcs / len(nl)              # 用户点到了项目名的多大一部分
+        has_cjk = any('一' <= ch <= '鿿' for ch in nl)
+        strong = lcs >= 3 or (lcs >= 2 and has_cjk)
+        if strong and cov >= 0.5:
+            return min(0.8 + 0.18 * cov, 0.97)
+        if strong:
+            return 0.6 + 0.2 * cov
+        return difflib.SequenceMatcher(None, q, nl).ratio()
 
     def _ai_prompt_required(self, payload: dict) -> List[str]:
         """根据 scope 推导 generate_ai_prompt 的必填字段"""
@@ -1001,6 +1095,12 @@ class ChatAssistantAgent(BaseAgent):
         Returns:
             AgentResult: handler 执行结果
         """
+        # v3.1: 回填后如仍缺必填字段,继续追问(支持多轮 clarify),避免直接
+        # 拿着不完整 payload 进 handler 抛 KeyError。
+        clarify = self._maybe_clarify(intent_name, payload, ctx)
+        if clarify is not None:
+            return clarify
+
         intent = {"intent": intent_name, "payload": payload}
         handlers = {
             "list_agents": lambda i, c: self._handle_list_agents(c),
