@@ -78,6 +78,8 @@ ALLOWED_MIME_EXTENSIONS: frozenset = frozenset({
     ".md", ".txt", ".xml", ".html", ".htm", ".css", ".scss", ".less",
     ".gitignore", ".dockerignore", ".env.example",
     ".zip", ".tar", ".gz", ".bz2", ".xz", ".tgz",  # 压缩包由 archive_extractor 处理
+    # T06: 图片资源文件(项目可能包含图片资源,需作为二进制文件入库)
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".bmp", ".webp",
 })
 
 # 拒绝的可执行文件扩展名

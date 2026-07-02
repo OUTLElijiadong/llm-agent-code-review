@@ -45,11 +45,52 @@ def _ensure_schema() -> None:
         logger.warning(f"[schema] token_version 自动补列检查失败(忽略): {e}")
 
 
+def _reconcile_orphan_reviews() -> None:
+    """启动时回收孤儿审查任务。
+
+    审查在后台守护线程中执行,进程重启/崩溃会让线程随进程消失,但 DB 中任务仍停留在
+    status='running',在前端表现为永远「运行中」。新进程刚启动尚未派生任何审查线程,
+    因此此刻所有 running 任务都是上一个进程遗留的孤儿,统一标记为 failed,闭合数据状态。
+    """
+    from datetime import datetime, timezone
+
+    from loguru import logger
+    from sqlalchemy import inspect
+
+    from app.core.database import SessionLocal, engine
+
+    try:
+        insp = inspect(engine)
+        if "review_task" not in insp.get_table_names():
+            return
+        db = SessionLocal()
+        try:
+            from app.models.review_task import ReviewTask
+
+            orphans = db.query(ReviewTask).filter(ReviewTask.status == "running").all()
+            if not orphans:
+                return
+            now = datetime.now(timezone.utc)
+            for t in orphans:
+                t.status = "failed"
+                t.error_message = "进程重启导致审查中断(启动时自动回收)"
+                t.end_time = now
+            db.commit()
+            logger.warning(
+                f"[reconcile] 启动回收 {len(orphans)} 个孤儿审查任务(running→failed)"
+            )
+        finally:
+            db.close()
+    except Exception as e:  # 回收失败不应阻断启动
+        logger.warning(f"[reconcile] 孤儿审查任务回收失败(忽略): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期: 启动时初始化日志、补齐表结构、Agent注册中心与治理调度器"""
     setup_logger()
     _ensure_schema()
+    _reconcile_orphan_reviews()
     from app.agents.orchestrator import get_orchestrator
     from app.services.agent_scheduler_runtime import start_agent_governance_scheduler, stop_agent_governance_scheduler
 

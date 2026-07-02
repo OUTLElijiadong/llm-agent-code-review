@@ -96,6 +96,7 @@ def _to_traceable_dict(db: Session, log: AiCallLog, include_detail: bool = False
         "file_name": code_file.file_name if code_file else None,
         "chunk_index": log.chunk_index,
         "model_name": log.model_name,
+        "agent_label": log.agent_label,
         "prompt_tokens": log.prompt_tokens,
         "completion_tokens": log.completion_tokens,
         "total_tokens": log.total_tokens,

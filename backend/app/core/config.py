@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     deepseek_timeout: int = 60
     deepseek_max_retries: int = 2
     deepseek_chunk_threshold: int = 6000
+    # 全局审查并发上限:同时进行的后台审查任务数上限(2C2G 生产机默认 2)
+    review_max_concurrency: int = 2
     allow_private_ai_base_url: bool = False
     enforce_ai_base_url_dns_check: bool = False
 

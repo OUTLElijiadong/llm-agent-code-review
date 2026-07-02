@@ -48,6 +48,8 @@ class Issue:
         compliance_mapping: 合规映射字典,由后端基于 cwe 反查填充
             {"iso27001":[...], "gdpr":[...], "pci_dss":[...], "hipaa":[...]}
         remediation: 详细修复方案文本(50-500 字)
+        source: 发现来源(llm/static/regex/hybrid),由 issue_merger 填充
+        static_rule_hits: 静态规则命中次数(双引擎统计,hybrid 时 ≥1)
     """
     line_number: int = 0
     end_line: Optional[int] = None
@@ -69,6 +71,9 @@ class Issue:
     cvss_vector: str = ""
     compliance_mapping: Dict[str, List[str]] = field(default_factory=dict)
     remediation: str = ""
+    # v3 新增来源标识与静态命中统计(由 issue_merger 填充,默认 llm/0 向后兼容)
+    source: str = "llm"
+    static_rule_hits: int = 0
 
 
 @dataclass

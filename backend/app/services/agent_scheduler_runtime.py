@@ -210,6 +210,7 @@ def stop_agent_governance_scheduler() -> None:
     # v3.0 AgentSkill: 先停止 Skill 事件触发后台 task
     try:
         import asyncio
+
         from app.agents.event_bus import stop_skill_event_subscriber
         try:
             loop = asyncio.get_event_loop()

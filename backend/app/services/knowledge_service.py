@@ -179,6 +179,8 @@ def list_docs(db: Session, user_id: int, source_type: str = "",
         "id": d.id, "title": d.title, "source_type": d.source_type,
         "source_ref": d.source_ref, "char_count": d.char_count,
         "chunk_count": d.chunk_count, "create_time": d.create_time,
+        # R6/R7 修复:补齐 status/update_time,对齐 DocOut schema
+        "status": d.status, "update_time": d.update_time,
     } for d in rows]
     return pg.to_dict(items)
 

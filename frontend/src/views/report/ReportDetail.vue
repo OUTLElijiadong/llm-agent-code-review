@@ -19,6 +19,62 @@
       </div>
     </header>
 
+    <!-- ============ T15 报告操作工具栏(模板类型 / 生成 / 预览 / 导出)============ -->
+    <section v-if="report" class="report-toolbar no-print">
+      <div class="toolbar-left">
+        <span class="toolbar-label font-mono">模板类型</span>
+        <el-select v-model="templateType" size="small" style="width: 200px">
+          <el-option
+            v-for="opt in templateTypeOptions"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
+          />
+        </el-select>
+      </div>
+      <div class="toolbar-right">
+        <el-button-group>
+          <el-button
+            size="small"
+            :loading="generatingFormat === 'json'"
+            @click="handleGenerate('json')"
+          >生成 JSON</el-button>
+          <el-button
+            size="small"
+            :loading="generatingFormat === 'html'"
+            @click="handleGenerate('html')"
+          >生成 HTML</el-button>
+          <el-button
+            size="small"
+            :loading="generatingFormat === 'pdf'"
+            @click="handleGenerate('pdf')"
+          >生成 PDF</el-button>
+          <el-button
+            size="small"
+            :loading="generatingFormat === 'word'"
+            @click="handleGenerate('word')"
+          >生成 Word</el-button>
+        </el-button-group>
+        <el-button size="small" :loading="previewing" @click="handlePreview">
+          <el-icon><View /></el-icon>预览 HTML
+        </el-button>
+        <el-dropdown trigger="click" @command="handleExport">
+          <el-button size="small" :loading="exportingFormat !== null">
+            <el-icon><Download /></el-icon>导出报告
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item :command="'json'">JSON</el-dropdown-item>
+              <el-dropdown-item :command="'html'">HTML</el-dropdown-item>
+              <el-dropdown-item :command="'pdf'">PDF</el-dropdown-item>
+              <el-dropdown-item :command="'word'">Word</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
+    </section>
+
     <div v-if="report" class="report-paper">
       <!-- ============ 暗色封面 ============ -->
       <section class="cover">
@@ -189,6 +245,131 @@
         </div>
       </section>
 
+      <!-- ============ T15 v3 字段:CVSS 评分分布 ============ -->
+      <section v-if="hasV3Data" class="card v3-card no-break" v-loading="issuesLoading">
+        <header class="card-head">
+          <h3 class="font-display">
+            <span class="prism-mark sm"></span>CVSS 评分分布
+          </h3>
+          <p class="card-desc">基于 CVSS 3.x 基础评分的四档分布(共 {{ cvssTotal }} 个有评分的问题)</p>
+        </header>
+        <div v-if="cvssTotal > 0" class="cvss-rows">
+          <div v-for="r in cvssRows" :key="r.key" class="cvss-row">
+            <span class="cv-label">
+              <span class="cv-dot" :style="{ background: r.color }"></span>{{ r.label }}
+            </span>
+            <div class="cv-bar">
+              <div class="cv-fill" :style="{ width: `${r.percent}%`, background: r.color }"></div>
+            </div>
+            <span class="cv-val font-mono">{{ r.value }}</span>
+          </div>
+        </div>
+        <EmptyState v-else description="暂无 CVSS 评分数据" compact />
+      </section>
+
+      <!-- ============ T15 v3 字段:合规映射概览 ============ -->
+      <section v-if="hasV3Data" class="card v3-card no-break">
+        <header class="card-head">
+          <h3 class="font-display">
+            <span class="prism-mark sm"></span>合规映射概览
+          </h3>
+          <p class="card-desc">ISO 27001 / GDPR / PCI DSS / HIPAA 四大标准命中条目数</p>
+        </header>
+        <div v-if="hasCompliance" class="compliance-grid">
+          <el-statistic title="ISO 27001" :value="complianceStats.iso27001" />
+          <el-statistic title="GDPR" :value="complianceStats.gdpr" />
+          <el-statistic title="PCI DSS" :value="complianceStats.pci_dss" />
+          <el-statistic title="HIPAA" :value="complianceStats.hipaa" />
+        </div>
+        <EmptyState v-else description="暂无合规映射数据" compact />
+      </section>
+
+      <!-- ============ T15 v3 字段:Top 10 高危漏洞 ============ -->
+      <section v-if="top10Issues.length > 0" class="card v3-card no-break">
+        <header class="card-head">
+          <h3 class="font-display">
+            <span class="prism-mark sm"></span>Top 10 高危漏洞
+          </h3>
+          <p class="card-desc">按 CVSS 评分降序排列,点击行查看详细修复方案</p>
+        </header>
+        <table class="paper-table top10-table">
+          <thead>
+            <tr>
+              <th class="col-rank">#</th>
+              <th>漏洞标题</th>
+              <th class="col-num">CVSS</th>
+              <th class="col-num">CWE</th>
+              <th class="col-num">严重度</th>
+              <th class="col-num">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(it, idx) in top10Issues"
+              :key="it.id"
+              :class="{ 'row-selected': selectedRemediationIssue?.id === it.id }"
+              @click="selectRemediation(it.id)"
+            >
+              <td class="font-mono col-rank">{{ idx + 1 }}</td>
+              <td class="issue-title">
+                <span class="it-name">{{ it.title || it.issue_type }}</span>
+                <span v-if="it.file_name" class="it-file font-mono">{{ it.file_name }}:{{ it.line_number ?? '?' }}</span>
+              </td>
+              <td class="font-mono col-num" :style="{ color: cvssSeverityColor(it.cvss_score), fontWeight: 600 }">
+                {{ it.cvss_score?.toFixed(1) ?? '-' }}
+              </td>
+              <td class="font-mono col-num">{{ it.cwe || it.issue_type || '-' }}</td>
+              <td class="col-num">
+                <span
+                  class="sev-tag"
+                  :style="{ color: cvssSeverityColor(it.cvss_score), borderColor: cvssSeverityColor(it.cvss_score) }"
+                >{{ cvssSeverityLabel(it.cvss_score) }}</span>
+              </td>
+              <td class="col-num">
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  @click.stop="selectRemediation(it.id)"
+                >查看修复方案</el-button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ============ T15 v3 字段:详细修复方案 ============ -->
+      <section v-if="selectedRemediationIssue" class="card v3-card no-break">
+        <header class="card-head">
+          <h3 class="font-display">
+            <span class="prism-mark sm"></span>详细修复方案
+          </h3>
+          <p class="card-desc">
+            {{ selectedRemediationIssue.title || selectedRemediationIssue.issue_type }}
+            <span v-if="selectedRemediationIssue.cvss_score" class="card-desc-meta font-mono">
+              · CVSS {{ selectedRemediationIssue.cvss_score.toFixed(1) }}
+              <span v-if="selectedRemediationIssue.cvss_vector"> · {{ selectedRemediationIssue.cvss_vector }}</span>
+            </span>
+          </p>
+        </header>
+        <div class="remediation-block">
+          <div v-if="selectedRemediationIssue.remediation" class="remediation-content">
+            <pre>{{ selectedRemediationIssue.remediation }}</pre>
+          </div>
+          <div v-else class="remediation-empty">
+            <EmptyState description="该漏洞暂无详细修复方案" compact />
+          </div>
+          <div v-if="selectedRemediationIssue.suggestion" class="remediation-suggestion">
+            <div class="rs-label font-mono">建议</div>
+            <pre>{{ selectedRemediationIssue.suggestion }}</pre>
+          </div>
+          <div v-if="selectedRemediationIssue.fixed_code" class="remediation-code">
+            <div class="rs-label font-mono">修复代码</div>
+            <pre>{{ selectedRemediationIssue.fixed_code }}</pre>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ AI 总结 ============ -->
       <section v-if="report.summary" class="card ai-card no-break">
         <header class="card-head">
@@ -217,14 +398,22 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Document, Download, Printer } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowDown, Document, Download, Printer, View } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import type { EChartsOption } from 'echarts'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
-import { getReportDetail, exportWord as apiExportWord, exportPdf as apiExportPdf } from '@/api/report'
-import type { ReportDetailOut } from '@/types/report'
+import {
+  getReportDetail,
+  exportWord as apiExportWord,
+  exportPdf as apiExportPdf,
+  generateReport as apiGenerateReport,
+  previewReport as apiPreviewReport,
+  exportReport as apiExportReport,
+} from '@/api/report'
+import { getTaskIssues } from '@/api/review'
+import type { ReportDetailOut, ReportIssue, ReportFormat, ReportTemplateType } from '@/types/report'
 import { PRISM_SEVERITY_COLORS, PRISM_DIM_COLORS } from '@/components/chart/prismTheme'
 import { reviewTypeLabel } from '@/constants/reviewType'
 
@@ -235,6 +424,27 @@ const loading = ref(true)
 const report = ref<ReportDetailOut | null>(null)
 const exportingWord = ref(false)
 const exportingPdf = ref(false)
+
+// ===== T15 新增:报告生成 / 预览 / 导出状态 =====
+/** 当前选择的模板类型(simple/detailed/compliance),影响生成/预览/导出 */
+const templateType = ref<ReportTemplateType>('detailed')
+/** 当前正在生成的格式(用于按钮 loading 态),null 表示无操作 */
+const generatingFormat = ref<ReportFormat | null>(null)
+/** 预览 HTML 报告的 loading 状态 */
+const previewing = ref(false)
+/** 当前正在导出的格式(用于导出下拉按钮 loading 态),null 表示无操作 */
+const exportingFormat = ref<ReportFormat | null>(null)
+/** 报告关联的全部问题列表(含 v3 字段,用于 CVSS/合规/Top10/修复方案展示) */
+const issues = ref<ReportIssue[]>([])
+/** issues 是否正在加载 */
+const issuesLoading = ref(false)
+
+/** 模板类型下拉选项 */
+const templateTypeOptions: Array<{ label: string; value: ReportTemplateType }> = [
+  { label: '简洁模板 (Simple)', value: 'simple' },
+  { label: '详细模板 (Detailed)', value: 'detailed' },
+  { label: '合规模板 (Compliance)', value: 'compliance' },
+]
 
 const stats = computed<Record<string, unknown>>(() => report.value?.stats ?? {})
 
@@ -418,8 +628,228 @@ function onPrint() {
   window.print()
 }
 
+// ===== T15 新增:加载 issues(含 v3 字段)=====
+
+/**
+ * 加载审查任务关联的全部问题(含 CVSS / 合规映射 / 修复方案 v3 字段)。
+ * 后端报告详情不含 issues,需单独调用 review API 获取。
+ */
+async function loadIssues(): Promise<void> {
+  issuesLoading.value = true
+  try {
+    // 一次取足够多,Top10 与分布统计需要全量数据
+    const data = await getTaskIssues(taskId, { page: 1, page_size: 1000 })
+    issues.value = (data.items as unknown as ReportIssue[]) ?? []
+  } catch {
+    // v3 字段展示为增强信息,加载失败不阻塞主报告
+    issues.value = []
+  } finally {
+    issuesLoading.value = false
+  }
+}
+
+// ===== T15 新增:v3 字段计算属性 =====
+
+/** CVSS 评分四档分布(0-3.9 低 / 4-6.9 中 / 7-8.9 高 / 9-10 危急) */
+const cvssDistribution = computed(() => {
+  const dist = { low: 0, medium: 0, high: 0, critical: 0 }
+  for (const it of issues.value) {
+    const s = it.cvss_score
+    if (typeof s !== 'number') continue
+    if (s >= 9) dist.critical += 1
+    else if (s >= 7) dist.high += 1
+    else if (s >= 4) dist.medium += 1
+    else dist.low += 1
+  }
+  return dist
+})
+
+/** CVSS 分布总数(仅统计有评分的问题) */
+const cvssTotal = computed(() =>
+  cvssDistribution.value.low + cvssDistribution.value.medium
+  + cvssDistribution.value.high + cvssDistribution.value.critical,
+)
+
+/** CVSS 四档分布行(带颜色与百分比,用于进度条展示) */
+const cvssRows = computed(() => {
+  const total = Math.max(1, cvssTotal.value)
+  return [
+    {
+      key: 'critical', label: '危急 (9.0-10.0)', value: cvssDistribution.value.critical,
+      percent: (cvssDistribution.value.critical / total) * 100, color: '#DC4961',
+    },
+    {
+      key: 'high', label: '高 (7.0-8.9)', value: cvssDistribution.value.high,
+      percent: (cvssDistribution.value.high / total) * 100, color: '#E27C4A',
+    },
+    {
+      key: 'medium', label: '中 (4.0-6.9)', value: cvssDistribution.value.medium,
+      percent: (cvssDistribution.value.medium / total) * 100, color: '#D9A857',
+    },
+    {
+      key: 'low', label: '低 (0-3.9)', value: cvssDistribution.value.low,
+      percent: (cvssDistribution.value.low / total) * 100, color: '#4FB87A',
+    },
+  ]
+})
+
+/** 合规映射概览:四个标准各自的命中条目数 */
+const complianceStats = computed(() => {
+  const counts = { iso27001: 0, gdpr: 0, pci_dss: 0, hipaa: 0 }
+  for (const it of issues.value) {
+    const m = it.compliance_mapping
+    if (!m) continue
+    counts.iso27001 += Array.isArray(m.iso27001) ? m.iso27001.length : 0
+    counts.gdpr += Array.isArray(m.gdpr) ? m.gdpr.length : 0
+    counts.pci_dss += Array.isArray(m.pci_dss) ? m.pci_dss.length : 0
+    counts.hipaa += Array.isArray(m.hipaa) ? m.hipaa.length : 0
+  }
+  return counts
+})
+
+/** 是否有任何合规映射数据 */
+const hasCompliance = computed(() => {
+  const s = complianceStats.value
+  return s.iso27001 + s.gdpr + s.pci_dss + s.hipaa > 0
+})
+
+/** Top 10 高危漏洞列表(按 cvss_score 降序,无评分的排除) */
+const top10Issues = computed<ReportIssue[]>(() => {
+  return issues.value
+    .filter((it) => typeof it.cvss_score === 'number')
+    .slice()
+    .sort((a, b) => (b.cvss_score ?? 0) - (a.cvss_score ?? 0))
+    .slice(0, 10)
+})
+
+/** 选中展示修复方案的 issue(默认 Top1,可点击切换) */
+const selectedRemediationId = ref<number | null>(null)
+
+/** 当前展示修复方案的 issue 对象 */
+const selectedRemediationIssue = computed<ReportIssue | null>(() => {
+  if (!top10Issues.value.length) return null
+  const id = selectedRemediationId.value
+  if (id !== null) {
+    return top10Issues.value.find((it) => it.id === id) ?? top10Issues.value[0]
+  }
+  return top10Issues.value[0]
+})
+
+/** 是否有 v3 字段数据(决定整个 v3 区块是否显示) */
+const hasV3Data = computed(() => {
+  return cvssTotal.value > 0 || hasCompliance.value || top10Issues.value.length > 0
+})
+
+// ===== T15 新增:报告生成 / 预览 / 导出方法 =====
+
+/**
+ * 根据 cvss_score 返回严重度标签文本。
+ * @param score - CVSS 评分
+ * @returns 严重度中文标签
+ */
+function cvssSeverityLabel(score?: number): string {
+  if (typeof score !== 'number') return '-'
+  if (score >= 9) return '危急'
+  if (score >= 7) return '高'
+  if (score >= 4) return '中'
+  return '低'
+}
+
+/**
+ * 根据 cvss_score 返回严重度颜色(与 cvssRows 颜色一致)。
+ * @param score - CVSS 评分
+ * @returns 颜色十六进制字符串
+ */
+function cvssSeverityColor(score?: number): string {
+  if (typeof score !== 'number') return '#909399'
+  if (score >= 9) return '#DC4961'
+  if (score >= 7) return '#E27C4A'
+  if (score >= 4) return '#D9A857'
+  return '#4FB87A'
+}
+
+/**
+ * 生成报告(JSON/HTML/PDF/Word)。
+ * JSON/HTML 返回字符串(触发下载为文本文件),PDF/Word 返回 Blob 触发下载。
+ * @param format - 报告格式
+ */
+async function handleGenerate(format: ReportFormat): Promise<void> {
+  generatingFormat.value = format
+  try {
+    const result = await apiGenerateReport(taskId, format, templateType.value)
+    if (result instanceof Blob) {
+      // pdf / word
+      const ext = format === 'pdf' ? 'pdf' : 'docx'
+      downloadBlob(result, `review_report_${taskId}.${ext}`)
+      ElMessage.success(`${format.toUpperCase()} 报告生成成功`)
+    } else {
+      // json / html 返回字符串
+      const ext = format === 'json' ? 'json' : 'html'
+      const blob = new Blob([result], {
+        type: format === 'json' ? 'application/json' : 'text/html',
+      })
+      downloadBlob(blob, `review_report_${taskId}.${ext}`)
+      ElMessage.success(`${format.toUpperCase()} 报告生成成功`)
+    }
+  } catch {
+    ElMessage.error(`${format.toUpperCase()} 报告生成失败`)
+  } finally {
+    generatingFormat.value = null
+  }
+}
+
+/**
+ * 预览 HTML 报告(在新窗口打开)。
+ * 调用 previewReport 获取 HTML 字符串,通过 Blob URL 在新窗口打开。
+ */
+async function handlePreview(): Promise<void> {
+  previewing.value = true
+  try {
+    const html = await apiPreviewReport(taskId, templateType.value)
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener,noreferrer')
+    // 延迟回收 URL,避免新窗口尚未加载完
+    setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
+    ElMessage.success('HTML 报告已在新窗口打开')
+  } catch {
+    ElMessage.error('预览报告失败')
+  } finally {
+    previewing.value = false
+  }
+}
+
+/**
+ * 导出报告(调用 exportReport 接口下载文件)。
+ * @param format - 导出格式
+ */
+async function handleExport(format: ReportFormat): Promise<void> {
+  exportingFormat.value = format
+  try {
+    const blob = await apiExportReport(taskId, format, templateType.value)
+    const extMap: Record<ReportFormat, string> = {
+      json: 'json', html: 'html', pdf: 'pdf', word: 'docx',
+    }
+    downloadBlob(blob, `review_report_${taskId}.${extMap[format]}`)
+    ElMessage.success(`${format.toUpperCase()} 报告导出成功`)
+  } catch {
+    ElMessage.error(`${format.toUpperCase()} 报告导出失败`)
+  } finally {
+    exportingFormat.value = null
+  }
+}
+
+/**
+ * 选中某个 issue 展示其修复方案。
+ * @param id - issue ID
+ */
+function selectRemediation(id: number): void {
+  selectedRemediationId.value = id
+}
+
 onMounted(() => {
   loadReport()
+  loadIssues()
 })
 </script>
 
@@ -811,6 +1241,206 @@ onMounted(() => {
   line-height: 1.85;
   color: var(--gray-800);
   white-space: pre-wrap;
+}
+
+/* ============ T15 报告操作工具栏 ============ */
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid var(--gray-100);
+  border-radius: 12px;
+  box-shadow: var(--shadow-1);
+  flex-wrap: wrap;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-label {
+  font-size: 12px;
+  color: var(--gray-600);
+  letter-spacing: 0.04em;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ============ T15 v3 字段卡片 ============ */
+.v3-card {
+  background: linear-gradient(180deg, #FAFCFE 0%, #FFFFFF 100%);
+}
+
+.card-desc-meta {
+  margin-left: 6px;
+  font-size: 11.5px;
+  color: var(--gray-500);
+}
+
+/* ============ CVSS 评分分布 ============ */
+.cvss-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cvss-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 48px;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+}
+
+.cv-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gray-700);
+}
+
+.cv-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cv-bar {
+  height: 10px;
+  background: var(--gray-100);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.cv-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.6s ease;
+}
+
+.cv-val {
+  text-align: right;
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+/* ============ 合规映射概览 ============ */
+.compliance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .compliance-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ============ Top 10 高危漏洞 ============ */
+.top10-table {
+  .col-rank {
+    width: 48px;
+    text-align: center;
+    color: var(--gray-500);
+  }
+
+  .issue-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .it-name {
+    font-weight: 500;
+    color: var(--gray-800);
+  }
+
+  .it-file {
+    font-size: 11px;
+    color: var(--gray-500);
+  }
+
+  tbody tr {
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+      background: var(--gray-50);
+    }
+  }
+
+  .row-selected {
+    background: rgba(91, 88, 232, 0.06) !important;
+  }
+}
+
+.sev-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+/* ============ 详细修复方案 ============ */
+.remediation-block {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.remediation-content,
+.remediation-suggestion,
+.remediation-code {
+  pre {
+    margin: 8px 0 0;
+    padding: 14px 16px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-100);
+    border-radius: 8px;
+    font-family: var(--font-mono, 'SFMono-Regular', Consolas, monospace);
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--gray-800);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+  }
+}
+
+.remediation-content pre {
+  background: #FFFBF5;
+  border-color: #F5E8D0;
+}
+
+.remediation-code pre {
+  background: #F6F8FA;
+  border-color: var(--gray-100);
+}
+
+.rs-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--gray-500);
+  text-transform: uppercase;
+}
+
+.remediation-empty {
+  padding: 12px 0;
 }
 
 /* ============ 页脚 ============ */

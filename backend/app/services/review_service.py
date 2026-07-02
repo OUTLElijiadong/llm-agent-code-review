@@ -35,7 +35,7 @@ from app.ai.multi_agent import (
     get_model_label,
 )
 from app.ai.prompt_builder import _format_experience, build_prompt
-from app.ai.result_parser import parse
+from app.ai.result_parser import Issue, parse
 from app.ai.scoring import compute_score
 from app.ai.static_analyzer import Finding
 from app.ai.static_analyzer import scan_file as static_scan_file
@@ -50,6 +50,7 @@ from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.schemas.review import ReviewStartIn
+from app.services.issue_merger import finding_to_issue, merge_findings_and_issues
 from app.services.rule_service import get_enabled_rules
 
 # 多 Agent 审查画像 → 注册中心 BaseAgent name 的映射(v2.2 真实调用 Agent)
@@ -62,6 +63,10 @@ _PROFILE_TO_AGENT_CODE: dict[str, str] = {
 }
 
 _COLLAB_PARALLEL_THREADS = 4
+
+# 全局审查并发上限:限制同时进行的后台审查任务数,防止 2C2G 机器上线程/内存放大
+# 及撞 LLM 侧限流。超出上限的任务会在后台线程内排队等待(任务状态先入库为 running)。
+_REVIEW_SEMAPHORE = threading.BoundedSemaphore(max(1, settings.review_max_concurrency))
 
 
 def _safe_commit(db: Session, task: Optional[ReviewTask] = None) -> None:
@@ -170,6 +175,7 @@ def _run_review_task(task_id: int, user_id: int) -> None:
         task_id: 审查任务 ID(已在请求线程中入库)
         user_id: 发起用户 ID
     """
+    _REVIEW_SEMAPHORE.acquire()
     db = SessionLocal()
     try:
         task = db.get(ReviewTask, task_id)
@@ -228,6 +234,7 @@ def _run_review_task(task_id: int, user_id: int) -> None:
         logger.exception(e)
     finally:
         db.close()
+        _REVIEW_SEMAPHORE.release()
 
 
 def _get_agent_for_profile(profile_code: str) -> Optional[BaseAgent]:
@@ -244,7 +251,7 @@ def _get_agent_for_profile(profile_code: str) -> Optional[BaseAgent]:
 
 
 def _finding_to_review_issue(task_id: int, code_file: CodeFile, finding: Finding) -> ReviewIssue:
-    """将 Finding 转换为 ReviewIssue ORM 对象(填充所有 v2 新字段)
+    """将 Finding 转换为 ReviewIssue ORM 对象(填充所有 v2/v3 字段)
 
     Args:
         task_id: 审查任务 ID
@@ -275,6 +282,56 @@ def _finding_to_review_issue(task_id: int, code_file: CodeFile, finding: Finding
         references_json=finding.references if finding.references else None,
         confidence=finding.confidence,
         source=finding.source,
+        # v3 新增 CVSS / 合规映射 / 修复方案 / 静态命中统计
+        cvss_score=finding.cvss_score,
+        cvss_vector=finding.cvss_vector,
+        compliance_mapping=finding.compliance_mapping if finding.compliance_mapping else None,
+        remediation=finding.remediation,
+        static_rule_hits=finding.static_rule_hits,
+    )
+
+
+def _issue_to_review_issue(task_id: int, code_file: CodeFile, issue: Issue) -> ReviewIssue:
+    """将合并后的 Issue 转换为 ReviewIssue ORM 对象(填充全量 v2/v3 字段)
+
+    T08 双引擎合并后的 Issue 携带 source(static/llm/hybrid)和 static_rule_hits,
+    此函数将其 1:1 映射到 ReviewIssue ORM,确保 v3 字段全部持久化。
+
+    Args:
+        task_id: 审查任务 ID
+        code_file: 代码文件 ORM 对象
+        issue: 合并去重后的问题对象(来自 issue_merger)
+
+    Returns:
+        ReviewIssue: 已填充全量 v2/v3 字段的 ORM 对象(未加入 session)
+    """
+    return ReviewIssue(
+        task_id=task_id,
+        file_id=code_file.id,
+        file_name=code_file.file_name,
+        line_number=issue.line_number,
+        end_line=issue.end_line,
+        issue_type=issue.issue_type,
+        severity=issue.severity,
+        title=issue.title or "",
+        description=issue.description,
+        suggestion=issue.suggestion,
+        fixed_code=issue.fixed_code,
+        status="unfixed",
+        # v2 漏洞元数据
+        owasp=issue.owasp,
+        cwe=issue.cwe,
+        evidence=issue.evidence,
+        exploit_scenario=issue.exploit_scenario,
+        references_json=issue.references if issue.references else None,
+        confidence=issue.confidence,
+        source=issue.source,
+        # v3 CVSS / 合规映射 / 修复方案 / 静态命中统计
+        cvss_score=issue.cvss_score,
+        cvss_vector=issue.cvss_vector,
+        compliance_mapping=issue.compliance_mapping if issue.compliance_mapping else None,
+        remediation=issue.remediation,
+        static_rule_hits=issue.static_rule_hits,
     )
 
 
@@ -316,7 +373,10 @@ def _execute_review(
 
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
         for it in all_issues:
-            sev_count[it.severity] = sev_count.get(it.severity, 0) + 1
+            # 归一化:LLM 偶发返回四类之外的 severity 时归入「中」,
+            # 保证四级计数之和恒等于 total_issues,评分与统计口径自洽。
+            key = it.severity if it.severity in sev_count else "中"
+            sev_count[key] += 1
         task.total_issues = len(all_issues)
         task.severe_issues = sev_count["严重"]
         task.high_issues = sev_count["高"]
@@ -362,15 +422,18 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                      task: ReviewTask, code_file: CodeFile, rules: list, user: User,
                      profiles: tuple[ReviewAgentProfile, ...],
                      experience_section: str = "") -> list[ReviewIssue]:
-    """审查单个文件:双引擎 — 静态规则前置过滤 + LLM 深度审查 → 入库
+    """审查单个文件:双引擎 — 静态规则前置过滤 + LLM 深度审查 → 合并去重 → 入库
 
-    v2.2 双引擎流程:
+    T08 v3 双引擎流程:
       引擎1(静态规则前置过滤):对整个文件应用 scan_secrets + apply_static_rules
-            → 生成 Finding → 转换为 ReviewIssue 入库(无 LLM 调用)
+            → 生成 List[Finding](确定性命中,无 LLM 调用)
       引擎2(LLM 深度审查):
         - 单代理模式(quick/standard):分片 → 通过 BaseAgent.call() 调用真实 Agent
         - 多代理模式(security/performance/full):分片 → 三阶段协同流水线
-      最终:跨引擎去重(指纹合并),用 _finding_to_review_issue() 统一入库
+            → 生成 List[Finding]
+      合并去重:静态 Findings + LLM Findings(转 Issue)→ issue_merger 合并去重
+            → List[Issue](source=static/llm/hybrid, static_rule_hits 已填充)
+      持久化:用 _issue_to_review_issue() 将合并后 Issue 写入 ReviewIssue(全量 v3 字段)
 
     Args:
         db: 数据库会话
@@ -391,10 +454,8 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
         logger.info(f"[review] 文件 {code_file.file_name} 为二进制,跳过审查")
         return []
 
-    issues_acc: list[ReviewIssue] = []
-    seen: set[tuple] = set()
-
     # ===== 引擎1:静态规则前置过滤(确定性命中,无 LLM 调用)=====
+    static_findings: List[Finding] = []
     try:
         static_findings = static_scan_file(code_file)
         if static_findings:
@@ -403,16 +464,11 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                 f"静态规则引擎:文件 {code_file.file_name} 命中 {len(static_findings)} 条确定性问题",
                 agent_code="static_analyzer",
             )
-            for finding in static_findings:
-                fp = _finding_fingerprint(code_file.id, finding)
-                if fp in seen:
-                    continue
-                seen.add(fp)
-                issues_acc.append(_finding_to_review_issue(task.id, code_file, finding))
     except Exception as e:
         logger.warning(f"[review] 静态规则引擎执行失败,跳过: {e}")
 
     # ===== 引擎2:LLM 深度审查(分片 + 多代理协同)=====
+    llm_findings: List[Finding] = []
     chunks = chunk_code(code_file.content, code_file.language,
                         threshold=settings.deepseek_chunk_threshold)
     use_collab = len(profiles) >= 2
@@ -428,14 +484,19 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                 db, api_config, task, code_file, rules, user,
                 profiles, idx, chunk, experience_section=experience_section,
             )
+        llm_findings.extend(chunk_findings)
 
-        for finding in chunk_findings:
-            fp = _finding_fingerprint(code_file.id, finding)
-            if fp in seen:
-                continue
-            seen.add(fp)
-            issues_acc.append(_finding_to_review_issue(task.id, code_file, finding))
+    # ===== 双引擎合并去重(T08 核心)=====
+    # 将 LLM Findings 转换为 Issues(source="llm"),与静态 Findings 合并
+    llm_issues: List[Issue] = [finding_to_issue(f) for f in llm_findings]
+    merged_issues: List[Issue] = merge_findings_and_issues(
+        static_findings, llm_issues, code_file.id,
+    )
 
+    # ===== v3 字段持久化 =====
+    issues_acc: list[ReviewIssue] = [
+        _issue_to_review_issue(task.id, code_file, issue) for issue in merged_issues
+    ]
     if issues_acc:
         db.add_all(issues_acc)
         db.commit()
@@ -556,6 +617,7 @@ def _review_chunk_sequential(
                     db, task, user, code_file, chunk_idx, agent_idx,
                     target_agent, result, status="failed",
                     error=(result.error or "")[:500],
+                    agent=agent,
                 )
                 continue
 
@@ -568,6 +630,7 @@ def _review_chunk_sequential(
             _log_sequential_call(
                 db, task, user, code_file, chunk_idx, agent_idx,
                 target_agent, result, status="success",
+                agent=agent,
             )
 
             _emit_review_event(
@@ -589,6 +652,7 @@ def _review_chunk_sequential(
                     db, task, user, code_file, chunk_idx, agent_idx,
                     target_agent, None, status="failed",
                     error=str(e)[:500],
+                    agent=agent,
                 )
             except Exception as log_err:
                 logger.debug(f"[review] 补写异常日志失败: {log_err}")
@@ -608,11 +672,13 @@ def _log_sequential_call(
     result: Optional["object"],
     status: str = "success",
     error: Optional[str] = None,
+    agent: Optional[BaseAgent] = None,
 ) -> None:
     """补写顺序模式(BaseAgent.call 路径)的 AiCallLog
 
-    BaseAgent.call() 不写 AiCallLog,顺序模式通过此函数补写,
-    使 ai_call_log.agent_label 正确记录真实 Agent name(code_reviewer/security_sentinel)。
+    T08 v3 改造:
+    - 优先使用 agent._log_call() 写入 AiCallLog,agent_label 自动填充为 agent.name(AC6)
+    - agent 为 None 时降级到 DeepSeekAgent.log_deferred()(兼容旧路径)
 
     Args:
         db: 数据库会话
@@ -621,15 +687,33 @@ def _log_sequential_call(
         code_file: 待审查代码文件
         chunk_idx: 分片索引
         agent_idx: Agent 索引(同一分片内多 Agent 时的序号)
-        agent_label: Agent 标识码(真实 Agent name)
+        agent_label: Agent 标识码(真实 Agent name,降级路径用)
         result: AgentResult 对象(异常时可为 None)
         status: 日志状态(success/failed)
         error: 错误信息(失败时)
+        agent: 真实 BaseAgent 对象(优先路径,为 None 时降级)
 
     Returns:
         None
     """
-    # 构造 meta dict(log_deferred 期望的格式)
+    # 优先路径:通过 BaseAgent._log_call() 写入,agent_label 自动填充为 self.name
+    if agent is not None and hasattr(agent, "_log_call"):
+        try:
+            agent._log_call(
+                db,
+                task_id=task.id,
+                user_id=user.id,
+                file_id=code_file.id,
+                chunk_index=chunk_idx * 100 + agent_idx,
+                result=result,
+                status=status,
+                error=error,
+            )
+            return
+        except Exception as e:
+            logger.debug(f"[review] agent._log_call 失败,降级到 log_deferred: {e}")
+
+    # 降级路径:DeepSeekAgent.log_deferred()(兼容 agent 未传入的场景)
     tokens_dict = {}
     if result is not None and getattr(result, "tokens", None):
         tokens_dict = result.tokens if isinstance(result.tokens, dict) else {}
@@ -1194,6 +1278,8 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "model_name": task.model_name, "duration_ms": task.duration_ms,
         "start_time": task.start_time, "end_time": task.end_time,
         "create_time": task.create_time,
+        # R4 修复:任务失败时返回错误原因,对齐 TaskDetailOut schema
+        "error_message": task.error_message,
         "files": _task_file_summaries(db, task.id),
     }
 

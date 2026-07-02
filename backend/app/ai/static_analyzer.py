@@ -20,7 +20,6 @@ from app.ai.security_patterns import SecretMatch, scan_secrets
 from app.ai.security_static_rules import StaticMatch, apply_static_rules
 from app.constants.compliance import get_compliance_mapping
 
-
 # === 严重度到 CVSS 基础分的经验映射(覆盖静态规则的常见漏洞类型) ===
 _SEVERITY_TO_CVSS: Dict[str, float] = {
     "严重": 9.8,

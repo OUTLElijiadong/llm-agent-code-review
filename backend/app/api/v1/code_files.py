@@ -9,8 +9,17 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.permission_codes import PermissionCode
+from app.core.rbac_dependency import require_permission
 from app.models.user import User
-from app.schemas.code_file import CodeFileDetailOut, CodeFileIn, CodeFileOut, CodeFileUpdateIn, RenameIn
+from app.schemas.code_file import (
+    CodeFileDetailOut,
+    CodeFileIn,
+    CodeFileMetaOut,
+    CodeFileOut,
+    CodeFileUpdateIn,
+    RenameIn,
+)
 from app.schemas.code_version import VersionDetailOut, VersionOut
 from app.schemas.common import PageOut, Resp
 from app.services import code_file_service
@@ -18,7 +27,8 @@ from app.services import code_file_service
 router = APIRouter()
 
 
-@router.get("", response_model=Resp[PageOut[CodeFileOut]])
+@router.get("", response_model=Resp[PageOut[CodeFileOut]],
+            dependencies=[Depends(require_permission(PermissionCode.FILE_VIEW))])
 def list_files(
     project_id: int = Query(...),
     language: str = Query(""),
@@ -36,7 +46,8 @@ def list_files(
     return Resp(data=PageOut(**result))
 
 
-@router.post("/upload", response_model=Resp[dict])
+@router.post("/upload", response_model=Resp[dict],
+             dependencies=[Depends(require_permission(PermissionCode.FILE_UPLOAD))])
 def upload_code(
     project_id: int = Form(...),
     file: UploadFile = File(...),
@@ -53,7 +64,8 @@ def upload_code(
     return Resp(data={"file_id": file_id, "language": lang, "version_no": ver})
 
 
-@router.post("/upload-folder", response_model=Resp[dict])
+@router.post("/upload-folder", response_model=Resp[dict],
+             dependencies=[Depends(require_permission(PermissionCode.FILE_UPLOAD))])
 def upload_folder(
     project_id: int = Form(...),
     files: List[UploadFile] = File(...),
@@ -106,7 +118,8 @@ def upload_folder(
     })
 
 
-@router.post("", response_model=Resp[dict])
+@router.post("", response_model=Resp[dict],
+             dependencies=[Depends(require_permission(PermissionCode.FILE_UPLOAD))])
 def create_file(payload: CodeFileIn, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """在线新增代码文件"""
@@ -114,7 +127,8 @@ def create_file(payload: CodeFileIn, db: Session = Depends(get_db),
     return Resp(data={"file_id": file_id, "language": lang, "version_no": ver})
 
 
-@router.get("/{file_id}", response_model=Resp[CodeFileDetailOut])
+@router.get("/{file_id}", response_model=Resp[CodeFileDetailOut],
+            dependencies=[Depends(require_permission(PermissionCode.FILE_VIEW))])
 def get_file(file_id: int, db: Session = Depends(get_db),
              user: User = Depends(get_current_user)):
     """文件详情(含代码内容)"""
@@ -122,7 +136,29 @@ def get_file(file_id: int, db: Session = Depends(get_db),
     return Resp(data=CodeFileDetailOut.model_validate(code_file))
 
 
-@router.put("/{file_id}", response_model=Resp[dict])
+@router.get("/{file_id}/meta", response_model=Resp[CodeFileMetaOut],
+            dependencies=[Depends(require_permission(PermissionCode.FILE_VIEW))])
+def get_file_meta(file_id: int, db: Session = Depends(get_db),
+                  user: User = Depends(get_current_user)):
+    """获取文件元信息(不含内容,含 MIME/MD5/SHA-256)
+
+    v3 新增:二进制文件展示提示卡片时,通过此接口获取文件元数据,
+    避免下载完整文件内容。MD5/SHA-256 后端实时计算,不入库存储。
+
+    Args:
+        file_id: 文件ID
+        db: 数据库会话
+        user: 当前用户
+
+    Returns:
+        Resp[CodeFileMetaOut]: 文件元信息(不含 content 字段)
+    """
+    meta = code_file_service.get_file_meta(db, user, file_id)
+    return Resp(data=CodeFileMetaOut.model_validate(meta))
+
+
+@router.put("/{file_id}", response_model=Resp[dict],
+            dependencies=[Depends(require_permission(PermissionCode.FILE_EDIT))])
 def update_file(file_id: int, payload: CodeFileUpdateIn,
                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """更新文件内容(生成新版本)"""
@@ -130,7 +166,8 @@ def update_file(file_id: int, payload: CodeFileUpdateIn,
     return Resp(data={"version_no": ver})
 
 
-@router.post("/{file_id}/rename", response_model=Resp[None])
+@router.post("/{file_id}/rename", response_model=Resp[None],
+             dependencies=[Depends(require_permission(PermissionCode.FILE_EDIT))])
 def rename_file(file_id: int, payload: RenameIn,
                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """重命名文件"""
@@ -138,7 +175,8 @@ def rename_file(file_id: int, payload: RenameIn,
     return Resp(data=None)
 
 
-@router.delete("/{file_id}", response_model=Resp[None])
+@router.delete("/{file_id}", response_model=Resp[None],
+               dependencies=[Depends(require_permission(PermissionCode.FILE_DELETE))])
 def delete_file(file_id: int, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """删除文件(软删除)"""
@@ -146,7 +184,8 @@ def delete_file(file_id: int, db: Session = Depends(get_db),
     return Resp(data=None)
 
 
-@router.get("/{file_id}/versions", response_model=Resp[PageOut[VersionOut]])
+@router.get("/{file_id}/versions", response_model=Resp[PageOut[VersionOut]],
+            dependencies=[Depends(require_permission(PermissionCode.FILE_VIEW))])
 def list_versions(file_id: int, page: int = Query(1, ge=1),
                   page_size: int = Query(20, ge=1, le=100),
                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -155,7 +194,8 @@ def list_versions(file_id: int, page: int = Query(1, ge=1),
     return Resp(data=PageOut(**result))
 
 
-@router.get("/{file_id}/versions/{version_no}", response_model=Resp[VersionDetailOut])
+@router.get("/{file_id}/versions/{version_no}", response_model=Resp[VersionDetailOut],
+            dependencies=[Depends(require_permission(PermissionCode.FILE_VIEW))])
 def get_version(file_id: int, version_no: int, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """查看指定版本内容"""
@@ -163,7 +203,8 @@ def get_version(file_id: int, version_no: int, db: Session = Depends(get_db),
     return Resp(data=VersionDetailOut.model_validate(version))
 
 
-@router.post("/{file_id}/versions/{version_no}/restore", response_model=Resp[dict])
+@router.post("/{file_id}/versions/{version_no}/restore", response_model=Resp[dict],
+             dependencies=[Depends(require_permission(PermissionCode.FILE_EDIT))])
 def restore_version(file_id: int, version_no: int, db: Session = Depends(get_db),
                     user: User = Depends(get_current_user)):
     """回滚到指定历史版本"""
@@ -171,7 +212,8 @@ def restore_version(file_id: int, version_no: int, db: Session = Depends(get_db)
     return Resp(data={"version_no": ver})
 
 
-@router.get("/{file_id}/download")
+@router.get("/{file_id}/download",
+            dependencies=[Depends(require_permission(PermissionCode.FILE_DOWNLOAD))])
 def download_binary_file(file_id: int, db: Session = Depends(get_db),
                          user: User = Depends(get_current_user)):
     """下载二进制文件原始字节

@@ -150,7 +150,10 @@ def _post_dict(p: ForumPost, author_name: str) -> dict:
         "id": p.id, "user_id": p.user_id, "author_name": author_name,
         "category": p.category, "title": p.title,
         "view_count": p.view_count, "reply_count": p.reply_count,
-        "is_pinned": bool(p.is_pinned), "create_time": p.create_time,
+        "is_pinned": bool(p.is_pinned),
+        # R7 修复:补齐 status,对齐 PostListItemOut schema
+        "status": p.status,
+        "create_time": p.create_time,
         "update_time": p.update_time,
     }
 
@@ -160,4 +163,6 @@ def _reply_dict(r: ForumReply, author_name: str) -> dict:
         "id": r.id, "post_id": r.post_id, "user_id": r.user_id,
         "author_name": author_name, "content": r.content,
         "create_time": r.create_time,
+        # R6 修复:补齐 update_time,对齐 ReplyOut schema
+        "update_time": r.update_time,
     }

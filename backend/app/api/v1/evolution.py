@@ -159,11 +159,14 @@ def trigger_evolution(
     from loguru import logger
 
     from app.agents.base import AgentContext
+    from app.agents.events import new_trace_id
     from app.agents.orchestrator import get_request_orchestrator
 
+    # 生成 trace_id 写入 ctx.extra,供 Skill 日志透传(tid=xxx 前缀)
+    trace_id = new_trace_id()
     logger.info(
         f"[evolution.trigger] admin={admin.id} agent={agent_name} "
-        f"window={window_days}d ip={_client_ip(request)}"
+        f"window={window_days}d ip={_client_ip(request)} trace_id={trace_id}"
     )
 
     orch = get_request_orchestrator(db, user=admin)
@@ -173,6 +176,7 @@ def trigger_evolution(
             "api": "evolution.trigger",
             "admin_id": admin.id,
             "client_ip": _client_ip(request),
+            "trace_id": trace_id,
         },
     )
 

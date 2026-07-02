@@ -38,7 +38,7 @@ from app.utils.file_validator import (
     validate_single_file_size,
     validate_size,
 )
-from app.utils.malware_scanner import ScanResult, get_scanner
+from app.utils.malware_scanner import get_scanner
 
 
 def list_files(db: Session, user: User, project_id: int = None, language: str = "",
@@ -272,6 +272,10 @@ def _upload_archive(
 ) -> tuple:
     """处理压缩包上传:解压 + 批量创建文件
 
+    T06 增强:
+    - 解压后对每个内部文件执行恶意软件扫描,任一命中即拒绝整批上传。
+    - 解压失败(含 zip slip/超限/损坏)统一转为 ValueError 抛出,符合 T06 规范。
+
     Args:
         db: 数据库会话
         user: 当前用户
@@ -283,17 +287,26 @@ def _upload_archive(
         tuple[int, str, int]: (首个解压文件ID, 语言, 版本号)
 
     Raises:
-        ValidationError: 解压失败/文件为空/路径不安全
+        ValueError: 解压失败/文件为空/路径不安全/压缩包内文件检测到恶意软件
     """
-    extracted_files: list[ExtractedFile] = extract_archive(raw, archive_name)
+    try:
+        extracted_files: list[ExtractedFile] = extract_archive(raw, archive_name)
+    except ValidationError as e:
+        # T06: 将 archive_extractor 的 ValidationError 统一转为 ValueError
+        raise ValueError(f"压缩包解压失败: {e.message}") from e
+
     if not extracted_files:
-        raise ValidationError("压缩包内没有可用文件", code=40001)
+        raise ValueError("压缩包解压失败: 压缩包内没有可用文件")
 
     first_id: Optional[int] = None
     first_lang: str = "plaintext"
     first_version: int = 1
 
     for ef in extracted_files:
+        # T06: 对解压出的每个内部文件做恶意软件扫描(防止打包绕过)
+        scan_bytes = ef.raw_bytes if ef.is_binary else ef.content.encode("utf-8")
+        _scan_extracted_file(ef.name, scan_bytes)
+
         # 压缩包内文件已通过 archive_extractor 的安全过滤,跳过扩展名校验
         # (压缩包可能包含无扩展名的配置文件、Dockerfile 等)
         if ef.is_binary:
@@ -379,6 +392,7 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
     """内部: 创建文件及其初始版本
 
     v2 增强:支持 is_binary/original_blob 参数,二进制文件单独存储原始字节。
+    T06 增强:写入 raw_size 字段(用于项目总大小 500MB 校验)。
 
     Args:
         db: 数据库会话
@@ -397,6 +411,8 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
     """
     # 二进制文件按原始字节计算大小,文本文件按 UTF-8 编码字节计算
     size_bytes = len(original_blob) if original_blob is not None else len(content.encode("utf-8"))
+    # T06: raw_size 用于项目总大小校验(二进制文件用原始字节,文本用 UTF-8 编码字节)
+    raw_size = len(original_blob) if original_blob is not None else len(content.encode("utf-8"))
     # 二进制文件不计行数
     line_count = 0 if is_binary else content.count("\n") + 1
 
@@ -412,6 +428,7 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
         status="active",
         is_binary=is_binary,
         original_blob=original_blob,
+        raw_size=raw_size,
     )
     db.add(code_file)
     db.flush()
@@ -488,6 +505,76 @@ def get_binary_content(db: Session, user: User, file_id: int) -> Tuple[bytes, st
     return b"", code_file.file_name
 
 
+def get_file_meta(db: Session, user: User, file_id: int) -> dict:
+    """获取代码文件元信息(不含内容,含实时计算的摘要)
+
+    v3 新增:用于二进制文件展示提示卡片。返回文件元数据 + MIME 类型(按扩展名推断)
+    + MD5/SHA-256 摘要(实时计算,不入库)。
+
+    Args:
+        db: 数据库会话
+        user: 当前用户
+        file_id: 文件ID
+
+    Returns:
+        dict: 元信息字典,字段对齐 CodeFileMetaOut schema
+
+    Raises:
+        NotFoundError: 文件不存在
+        ForbiddenError: 无访问权限
+    """
+    import hashlib
+    import mimetypes
+
+    code_file = db.get(CodeFile, file_id)
+    if not code_file or code_file.status == "deleted":
+        raise NotFoundError("文件不存在", code=40400)
+    project = db.get(Project, code_file.project_id)
+    if project.user_id != user.id and user.role != "admin":
+        raise ForbiddenError("无访问权限", code=40300)
+
+    # MIME 类型按文件名扩展名推断;mimetypes 未知时回退到 application/octet-stream
+    mime_type, _ = mimetypes.guess_type(code_file.file_name)
+    if not mime_type:
+        mime_type = "application/octet-stream" if code_file.is_binary == 1 else "text/plain"
+
+    # 实时计算摘要:二进制文件从 original_blob 计算,文本文件从 content 编码计算
+    md5_hash = ""
+    sha256_hash = ""
+    try:
+        if code_file.is_binary == 1:
+            if code_file.original_blob is not None:
+                raw_bytes = code_file.original_blob
+            else:
+                # 兼容旧数据:从 base64 还原
+                import base64
+                content_str = code_file.content or ""
+                raw_bytes = base64.b64decode(content_str[len(BASE64_PREFIX):]) if content_str.startswith(BASE64_PREFIX) else b""
+        else:
+            raw_bytes = (code_file.content or "").encode("utf-8")
+        md5_hash = hashlib.md5(raw_bytes).hexdigest()
+        sha256_hash = hashlib.sha256(raw_bytes).hexdigest()
+    except Exception as e:  # pragma: no cover - 摘要计算失败不应阻塞 meta 接口
+        logger.warning(f"计算文件摘要失败 file_id={file_id}: {e}")
+
+    return {
+        "id": code_file.id,
+        "file_name": code_file.file_name,
+        "file_path": code_file.file_path,
+        "language": code_file.language,
+        "size_bytes": code_file.size_bytes,
+        "raw_size": code_file.raw_size or 0,
+        "line_count": code_file.line_count,
+        "version_no": code_file.version_no,
+        "is_binary": code_file.is_binary,
+        "mime_type": mime_type,
+        "md5_hash": md5_hash or None,
+        "sha256_hash": sha256_hash or None,
+        "create_time": code_file.create_time,
+        "update_time": code_file.update_time,
+    }
+
+
 def update_content(db: Session, user: User, file_id: int, content: str, change_desc: Optional[str] = None) -> int:
     """更新文件内容并生成新版本
 
@@ -509,6 +596,8 @@ def update_content(db: Session, user: User, file_id: int, content: str, change_d
         raise ValidationError("二进制文件不支持在线编辑", code=40001)
     code_file.content = content
     code_file.size_bytes = len(content.encode("utf-8"))
+    # T06: 同步更新 raw_size,保持项目总大小校验准确性
+    code_file.raw_size = len(content.encode("utf-8"))
     code_file.line_count = content.count("\n") + 1
     code_file.version_no += 1
     db.add(CodeVersion(

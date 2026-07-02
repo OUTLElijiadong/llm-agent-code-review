@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.agents.skills.self_improvement import SelfImprovementSkill
 from app.agents.skills.proactive import ProactiveAction, ProactiveSkill
+from app.agents.skills.self_improvement import SelfImprovementSkill
 
 if TYPE_CHECKING:
     from app.agents.base import AgentContext

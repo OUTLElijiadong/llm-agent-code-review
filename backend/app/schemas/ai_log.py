@@ -28,6 +28,7 @@ class AiLogOut(BaseModel):
     file_name: Optional[str] = None
     chunk_index: Optional[int] = None
     model_name: str
+    agent_label: Optional[str] = None
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
@@ -53,6 +54,7 @@ class AiLogDetailOut(BaseModel):
     file_name: Optional[str] = None
     chunk_index: Optional[int] = None
     model_name: str
+    agent_label: Optional[str] = None
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None

@@ -1,0 +1,113 @@
+{# 简洁版 HTML 报告模板 (T11)
+   用途: 适合快速浏览的简洁报告,聚焦问题列表与统计摘要。
+   渲染上下文变量:
+     - task_info: dict,含 task_name / project_name / review_type / create_time / start_time / end_time / model_name / total_files / total_issues 等
+     - summary: str,AI 总体评价
+     - score: int,综合评分 0-100
+     - issues: list[dict],已按严重度(严重>高>中>低)排序的 issue 字典
+     - statistics: dict,含 total_issues / fixed_count / severity_count / type_count / cwe_count
+   说明: 使用内联 CSS,无外部依赖;表格按严重度排序展示。
+#}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>代码审查报告 · {{ task_info.task_name or "未命名任务" }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+      margin: 0; padding: 24px; color: #1f2937; background: #f5f7fa; line-height: 1.6;
+    }
+    .container { max-width: 960px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    h1 { font-size: 24px; margin: 0 0 8px 0; color: #111827; }
+    h2 { font-size: 18px; margin: 28px 0 12px 0; color: #1f2937; border-left: 4px solid #2563eb; padding-left: 10px; }
+    .meta { color: #6b7280; font-size: 13px; margin-bottom: 8px; }
+    .score-badge { display: inline-block; padding: 4px 14px; border-radius: 16px; font-weight: 600; font-size: 14px; color: #fff; }
+    .score-good { background: #10b981; }
+    .score-warn { background: #f59e0b; }
+    .score-bad { background: #ef4444; }
+    .summary-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px 16px; border-radius: 6px; margin: 16px 0; white-space: pre-wrap; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; font-weight: 600; color: #374151; }
+    tr:nth-child(even) td { background: #fafbfc; }
+    .sev { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
+    .sev-严重 { background: #dc2626; }
+    .sev-高 { background: #ea580c; }
+    .sev-中 { background: #ca8a04; }
+    .sev-低 { background: #2563eb; }
+    .sev-其他 { background: #6b7280; }
+    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
+    .stat-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; text-align: center; }
+    .stat-num { font-size: 22px; font-weight: 700; color: #111827; }
+    .stat-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .empty { color: #9ca3af; font-style: italic; padding: 16px 0; }
+    .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #9ca3af; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>代码审查报告</h1>
+    <div class="meta">任务名称:{{ task_info.task_name or "未命名任务" }}</div>
+    <div class="meta">项目:{{ task_info.project_name or "-" }} · 审查类型:{{ task_info.review_type or "-" }}</div>
+    <div class="meta">审查模型:{{ task_info.model_name or "-" }} · 生成时间:{{ task_info.create_time or "-" }}</div>
+    <div class="meta">
+      综合评分:
+      {% if score >= 80 %}
+        <span class="score-badge score-good">{{ score }}/100</span>
+      {% elif score >= 60 %}
+        <span class="score-badge score-warn">{{ score }}/100</span>
+      {% else %}
+        <span class="score-badge score-bad">{{ score }}/100</span>
+      {% endif %}
+    </div>
+
+    {% if summary %}
+    <h2>总体评价</h2>
+    <div class="summary-box">{{ summary }}</div>
+    {% endif %}
+
+    <h2>统计摘要</h2>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-num">{{ statistics.total_issues }}</div><div class="stat-label">问题总数</div></div>
+      <div class="stat-card"><div class="stat-num">{{ statistics.severity_count["严重"] }}</div><div class="stat-label">严重</div></div>
+      <div class="stat-card"><div class="stat-num">{{ statistics.severity_count["高"] }}</div><div class="stat-label">高</div></div>
+      <div class="stat-card"><div class="stat-num">{{ statistics.fixed_count }}</div><div class="stat-label">已修复</div></div>
+    </div>
+
+    <h2>问题列表</h2>
+    {% if issues %}
+    <table>
+      <thead>
+        <tr>
+          <th style="width:48px;">#</th>
+          <th style="width:90px;">严重度</th>
+          <th style="width:120px;">类型</th>
+          <th>标题</th>
+          <th style="width:160px;">文件</th>
+          <th style="width:70px;">行号</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for issue in issues %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td><span class="sev sev-{{ issue.severity or '其他' }}">{{ issue.severity or "-" }}</span></td>
+          <td>{{ issue.issue_type or "-" }}</td>
+          <td>{{ issue.title or issue.description[:40] }}</td>
+          <td>{{ issue.file_name or "-" }}</td>
+          <td>{{ issue.line_number or "-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">本次审查未发现问题。</div>
+    {% endif %}
+
+    <div class="footer">本报告由基于大模型智能体的代码审查平台自动生成 · 简洁版</div>
+  </div>
+</body>
+</html>

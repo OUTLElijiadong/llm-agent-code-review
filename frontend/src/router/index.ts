@@ -79,6 +79,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '报告详情' },
       },
       {
+        path: 'report/templates',
+        name: 'ReportTemplateManage',
+        component: () => import('@/views/report/ReportTemplateManage.vue'),
+        meta: { title: '报告模板管理', permissions: ['report:template_manage'] },
+      },
+      {
         path: 'code/:projectId',
         name: 'CodeFileList',
         component: () => import('@/views/code/CodeFileList.vue'),
@@ -186,7 +192,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/admin',
     component: () => import('@/components/admin/AdminLayout.vue'),
-    meta: { role: 'admin' },
+    meta: { role: 'admin', roles: ['admin'] },
     children: [
       {
         path: '',
@@ -196,7 +202,7 @@ const routes: RouteRecordRaw[] = [
         path: 'overview',
         name: 'AdminOverview',
         component: () => import('@/views/admin/AdminOverview.vue'),
-        meta: { title: '总览大屏', role: 'admin' },
+        meta: { title: '总览大屏', role: 'admin', roles: ['admin'] },
       },
       {
         path: 'agents',
@@ -256,7 +262,25 @@ const routes: RouteRecordRaw[] = [
         path: 'users',
         name: 'UserManage',
         component: () => import('@/views/admin/UserManage.vue'),
-        meta: { title: '用户管理', role: 'admin' },
+        meta: { title: '用户管理', role: 'admin', roles: ['admin'], permissions: ['user:manage'] },
+      },
+      {
+        path: 'rbac/roles',
+        name: 'RoleManage',
+        component: () => import('@/views/admin/RoleManage.vue'),
+        meta: { title: '角色管理', role: 'admin', roles: ['admin'], permissions: ['role:manage'] },
+      },
+      {
+        path: 'rbac/permissions',
+        name: 'PermissionList',
+        component: () => import('@/views/admin/PermissionList.vue'),
+        meta: { title: '权限点列表', role: 'admin', roles: ['admin'], permissions: ['role:manage'] },
+      },
+      {
+        path: 'rbac/users',
+        name: 'UserRoleAssign',
+        component: () => import('@/views/admin/UserRoleAssign.vue'),
+        meta: { title: '用户角色分配', role: 'admin', roles: ['admin'], permissions: ['user:manage'] },
       },
       {
         path: 'ai-logs',
@@ -268,7 +292,7 @@ const routes: RouteRecordRaw[] = [
         path: 'audit',
         name: 'SystemAudit',
         component: () => import('@/views/admin/SystemAudit.vue'),
-        meta: { title: '系统操作审计', role: 'admin' },
+        meta: { title: '系统操作审计', role: 'admin', permissions: ['audit:view'] },
       },
       {
         path: 'evolution',

@@ -43,7 +43,11 @@ def parse_json_value(value: Any) -> Optional[Union[dict, list]]:
 
 
 class AgentProfileOut(BaseModel):
-    """Agent 治理画像输出。"""
+    """Agent 治理画像输出。
+
+    R5 修复(2026-06-25):补齐 config_json 字段,
+    使管理员可查看 Agent 扩展配置(对齐 AgentProfile ORM 与 AgentProfileUpdateIn)。
+    """
 
     code: str
     name: str
@@ -57,6 +61,8 @@ class AgentProfileOut(BaseModel):
     priority: int = 50
     auto_approval_threshold: float = 0.75
     is_enabled: int = 1
+    # R5 修复:补齐 config_json,使管理员可查看扩展配置
+    config_json: Optional[Union[dict, list]] = None
     skills: list[str] = Field(default_factory=list)
     tool_count: int = 0
     memory_count: int = 0
@@ -65,6 +71,19 @@ class AgentProfileOut(BaseModel):
     update_time: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+    @field_validator("config_json", mode="before")
+    @classmethod
+    def parse_config(cls, value: Any) -> Optional[Union[dict, list]]:
+        """解析 Agent 扩展配置 JSON。
+
+        Args:
+            value: 数据库 JSON 字段。
+
+        Returns:
+            Optional[Union[dict, list]]: 解析后的 JSON。
+        """
+        return parse_json_value(value)
 
     @field_validator("create_time", "update_time", mode="before")
     @classmethod

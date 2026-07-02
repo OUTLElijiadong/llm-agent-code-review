@@ -44,8 +44,9 @@ class ReviewIssue(Base, IdMixin, TimestampMixin):
     handled_at = Column(DateTime)
 
     # === v2 漏洞元数据字段(2026-06-25 新增)===
-    owasp = Column(String(32), nullable=True, comment="OWASP 编号,如 A03:2021-Injection")
-    cwe = Column(String(32), nullable=True, comment="CWE 编号,如 CWE-89")
+    # owasp 扩大为 128:OWASP Top10 完整标题如 "A07:2021-Identification and Authentication Failures" 长度约 46
+    owasp = Column(String(128), nullable=True, comment="OWASP 编号,如 A03:2021-Injection")
+    cwe = Column(String(64), nullable=True, comment="CWE 编号,如 CWE-89")
     evidence = Column(Text, nullable=True, comment="漏洞证据代码片段(1-3 行)")
     exploit_scenario = Column(Text, nullable=True, comment="攻击场景说明,30-200 字")
     references_json = Column(JSON, nullable=True, comment="参考链接列表")

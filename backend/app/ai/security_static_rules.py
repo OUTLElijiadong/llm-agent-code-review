@@ -187,7 +187,7 @@ _WEAK_CRYPTO_RULES: Tuple[StaticRule, ...] = (
         cwe="CWE-89",
         owasp="A03:2021-Injection",
         severity="严重",
-        description="使用字符串拼接 / f-string / 格式化构造 SQL 语句,存在 SQL 注入风险。",
+        description="使用字符串拼接 / f-string / 格式化 / + 拼接构造 SQL 语句,存在 SQL 注入风险。",
         fix_suggestion="改用参数化查询: cursor.execute(sql, params) 或 ORM 查询构造器。",
         pattern=re.compile(
             r"""(?ix)
@@ -196,6 +196,18 @@ _WEAK_CRYPTO_RULES: Tuple[StaticRule, ...] = (
               | cursor\.execute\s*\(\s*["'].*?\{.*?\}.*?["']\s*\.format
               | execute\s*\(\s*f["']
               | query\s*=\s*f["'].*?\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE)\b
+              # v3 补丁: 覆盖 + 拼接形式(要求拼接字符串含 SQL 关键字,避免误报)
+              # 分支 A: execute("SELECT..." + var) 形式
+              | (?:cursor\.execute|execute)\s*\(\s*
+                ["']\s*(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP)\b
+                [^"']*["']\s*\+
+              # 分支 B: query = "SELECT..." + var 形式
+              | \b(?:query|sql|stmt|q)\s*=\s*
+                ["']\s*(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP)\b
+                [^"']*["']\s*\+
+              # 分支 C: query = var + "...WHERE..." 形式(变量在前)
+              | \b(?:query|sql|stmt|q)\s*=\s*\w+\s*\+\s*
+                ["'][^"']*\b(?:WHERE|VALUES|SET|AND|OR|FROM|JOIN)\b
             )
             """,
         ),

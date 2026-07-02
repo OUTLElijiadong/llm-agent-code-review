@@ -1,6 +1,7 @@
 """Agent 治理画像服务。"""
 import json
 from datetime import datetime, timezone
+from typing import Optional, Union
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -170,6 +171,9 @@ def profile_to_dict(db: Session, profile: AgentProfile) -> dict:
         "priority": profile.priority,
         "auto_approval_threshold": profile.auto_approval_threshold,
         "is_enabled": profile.is_enabled,
+        # R5 修复:返回 config_json,使管理员可查看扩展配置
+        # 数据库存储为 JSON 字符串,这里解析后返回(dict/list),非 dict 时返回 None
+        "config_json": _safe_json_parse(profile.config_json),
         "skills": skills,
         "tool_count": db.query(AgentToolPermission).filter(AgentToolPermission.agent_code == profile.code).count(),
         "memory_count": db.query(AgentMemory).filter(AgentMemory.agent_code == profile.code).count(),
@@ -177,6 +181,24 @@ def profile_to_dict(db: Session, profile: AgentProfile) -> dict:
         "create_time": profile.create_time,
         "update_time": profile.update_time,
     }
+
+
+def _safe_json_parse(value: Optional[str]) -> Optional[Union[dict, list]]:
+    """安全解析 JSON 字符串字段。
+
+    Args:
+        value: 数据库 JSON 文本字段值。
+
+    Returns:
+        Optional[Union[dict, list]]: 解析后的 dict/list;空值或解析失败返回 None。
+    """
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
 
 
 def governance_overview(db: Session) -> dict:
@@ -235,7 +257,14 @@ def _sync_skills(db: Session, agent_code: str, skills: list[str]) -> None:
     Returns:
         None。
     """
-    base_skills = set(skills or [])
+    # v3.0 起 AgentRegistry 的 skills 已升级为结构化 list[dict]
+    # (形如 {"name": "orchestrator.self_improve", ...})。这里兼容性地
+    # 归一化为技能名字符串,避免对 dict 取 set 触发 unhashable type 报错。
+    normalized = [
+        (item.get("name") if isinstance(item, dict) else item)
+        for item in (skills or [])
+    ]
+    base_skills = {name for name in normalized if name}
     base_skills.update({"selfimprovingagent", "reflection"})
     for skill in sorted(base_skills):
         existing = db.query(AgentSkillBinding).filter(

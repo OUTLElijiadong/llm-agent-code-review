@@ -147,7 +147,7 @@ def _build_role_permission_rows() -> list[dict]:
         "project:create", "project:view", "project:update", "project:delete",
         "project:member:manage",
         "file:upload", "file:view", "file:edit", "file:delete", "file:download",
-        "review:view", "review:cancel",
+        "review:view", "review:cancel", "review:start", "review:rerun",
         "issue:view", "issue:export",
         "rule:view",
         "report:view", "report:export:pdf", "report:export:word",

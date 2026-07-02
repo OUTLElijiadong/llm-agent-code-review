@@ -1,0 +1,195 @@
+{# 详细版 HTML 报告模板 (T11)
+   用途: 适合开发人员详细排查,卡片式展示每个问题的完整元数据。
+   渲染上下文变量:
+     - task_info: dict,含 task_name / project_name / review_type / create_time / start_time / end_time / model_name / total_files / total_issues / duration_ms 等
+     - summary: str,AI 总体评价
+     - score: int,综合评分 0-100
+     - issues: list[dict],已按严重度(严重>高>中>低)排序;每条含 title / description / suggestion / fixed_code / owasp / cwe / evidence / exploit_scenario / references_json / cvss_score / compliance_mapping / remediation 等
+     - statistics: dict,含 total_issues / fixed_count / severity_count / type_count / cwe_count / compliance_summary / top_vulnerabilities
+   说明: 使用内联 CSS;每个问题有锚点(id)便于跳转;修复代码使用 <pre><code>;严重度颜色编码(严重:红/高:橙/中:黄/低:蓝)。
+#}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>代码审查报告(详细) · {{ task_info.task_name or "未命名任务" }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+      margin: 0; padding: 24px; color: #1f2937; background: #f5f7fa; line-height: 1.65;
+    }
+    .container { max-width: 1100px; margin: 0 auto; background: #ffffff; padding: 36px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    h1 { font-size: 26px; margin: 0 0 8px 0; color: #111827; }
+    h2 { font-size: 20px; margin: 32px 0 14px 0; color: #1f2937; border-left: 4px solid #2563eb; padding-left: 12px; }
+    h3 { font-size: 16px; margin: 0 0 8px 0; color: #111827; }
+    .meta { color: #6b7280; font-size: 13px; margin-bottom: 6px; }
+    .score-badge { display: inline-block; padding: 4px 14px; border-radius: 16px; font-weight: 600; font-size: 14px; color: #fff; }
+    .score-good { background: #10b981; }
+    .score-warn { background: #f59e0b; }
+    .score-bad { background: #ef4444; }
+    .summary-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px 16px; border-radius: 6px; margin: 16px 0; white-space: pre-wrap; }
+    .overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0 24px 0; }
+    .stat-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 14px; text-align: center; }
+    .stat-num { font-size: 22px; font-weight: 700; color: #111827; }
+    .stat-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .toc { background: #fafbfc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 16px; margin: 16px 0; }
+    .toc-title { font-weight: 600; margin-bottom: 6px; color: #374151; }
+    .toc a { color: #2563eb; text-decoration: none; margin-right: 12px; font-size: 13px; }
+    .toc a:hover { text-decoration: underline; }
+    .issue-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 18px; margin: 16px 0; background: #fff; }
+    .issue-card.sev-border-严重 { border-left: 4px solid #dc2626; }
+    .issue-card.sev-border-高 { border-left: 4px solid #ea580c; }
+    .issue-card.sev-border-中 { border-left: 4px solid #ca8a04; }
+    .issue-card.sev-border-低 { border-left: 4px solid #2563eb; }
+    .issue-card.sev-border-其他 { border-left: 4px solid #6b7280; }
+    .issue-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .sev { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
+    .sev-严重 { background: #dc2626; }
+    .sev-高 { background: #ea580c; }
+    .sev-中 { background: #ca8a04; }
+    .sev-低 { background: #2563eb; }
+    .sev-其他 { background: #6b7280; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; background: #eef2ff; color: #4338ca; }
+    .field { margin: 8px 0; font-size: 14px; }
+    .field-label { font-weight: 600; color: #374151; margin-right: 6px; }
+    .field-value { color: #1f2937; word-break: break-word; }
+    pre { background: #1e293b; color: #e2e8f0; padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.5; margin: 8px 0; }
+    code { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; }
+    .inline-code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; color: #be123c; }
+    .evidence-box { background: #fef2f2; border-left: 3px solid #dc2626; padding: 8px 12px; margin: 8px 0; font-size: 13px; }
+    .exploit-box { background: #fff7ed; border-left: 3px solid #ea580c; padding: 8px 12px; margin: 8px 0; font-size: 13px; }
+    .refs { margin: 8px 0; }
+    .refs a { color: #2563eb; text-decoration: none; font-size: 13px; margin-right: 10px; word-break: break-all; }
+    .refs a:hover { text-decoration: underline; }
+    .empty { color: #9ca3af; font-style: italic; padding: 16px 0; }
+    .footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #9ca3af; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>代码审查报告(详细版)</h1>
+    <div class="meta">任务名称:{{ task_info.task_name or "未命名任务" }}</div>
+    <div class="meta">项目:{{ task_info.project_name or "-" }} · 审查类型:{{ task_info.review_type or "-" }}</div>
+    <div class="meta">审查模型:{{ task_info.model_name or "-" }} · 耗时:{{ task_info.duration_ms or 0 }} ms</div>
+    <div class="meta">生成时间:{{ task_info.create_time or "-" }}</div>
+    <div class="meta">
+      综合评分:
+      {% if score >= 80 %}
+        <span class="score-badge score-good">{{ score }}/100</span>
+      {% elif score >= 60 %}
+        <span class="score-badge score-warn">{{ score }}/100</span>
+      {% else %}
+        <span class="score-badge score-bad">{{ score }}/100</span>
+      {% endif %}
+    </div>
+
+    {% if summary %}
+    <h2>总体评价</h2>
+    <div class="summary-box">{{ summary }}</div>
+    {% endif %}
+
+    <h2>任务概览</h2>
+    <div class="overview">
+      <div class="stat-card"><div class="stat-num">{{ task_info.total_files or 0 }}</div><div class="stat-label">审查文件数</div></div>
+      <div class="stat-card"><div class="stat-num">{{ statistics.total_issues }}</div><div class="stat-label">问题总数</div></div>
+      <div class="stat-card"><div class="stat-num">{{ statistics.severity_count["严重"] + statistics.severity_count["高"] }}</div><div class="stat-label">严重+高</div></div>
+      <div class="stat-card"><div class="stat-num">{{ statistics.fixed_count }}</div><div class="stat-label">已修复</div></div>
+    </div>
+
+    <h2>问题详情</h2>
+    {% if issues %}
+    <div class="toc">
+      <div class="toc-title">问题索引</div>
+      {% for issue in issues %}
+      <a href="#issue-{{ issue.id or loop.index }}">#{{ loop.index }} {{ issue.title or "未命名问题" }}</a>
+      {% endfor %}
+    </div>
+
+    {% for issue in issues %}
+    <div class="issue-card sev-border-{{ issue.severity or '其他' }}" id="issue-{{ issue.id or loop.index }}">
+      <div class="issue-head">
+        <span class="sev sev-{{ issue.severity or '其他' }}">{{ issue.severity or "-" }}</span>
+        <h3 style="margin:0;flex:1;">{{ issue.title or "未命名问题" }}</h3>
+        <span class="tag">{{ issue.issue_type or "-" }}</span>
+      </div>
+
+      <div class="field">
+        <span class="field-label">文件位置:</span>
+        <span class="field-value">
+          <span class="inline-code">{{ issue.file_name or "-" }}</span>
+          {% if issue.line_number %}:L{{ issue.line_number }}{% if issue.end_line %}-L{{ issue.end_line }}{% endif %}{% endif %}
+        </span>
+      </div>
+
+      {% if issue.cwe or issue.owasp %}
+      <div class="field">
+        <span class="field-label">分类:</span>
+        {% if issue.cwe %}<span class="tag">CWE: {{ issue.cwe }}</span>{% endif %}
+        {% if issue.owasp %}<span class="tag">OWASP: {{ issue.owasp }}</span>{% endif %}
+        {% if issue.cvss_score is not none %}<span class="tag">CVSS: {{ issue.cvss_score }}</span>{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="field">
+        <span class="field-label">问题描述:</span>
+        <div class="field-value" style="margin-top:4px;white-space:pre-wrap;">{{ issue.description or "-" }}</div>
+      </div>
+
+      {% if issue.evidence %}
+      <div class="evidence-box">
+        <strong>证据:</strong>
+        <pre><code>{{ issue.evidence }}</code></pre>
+      </div>
+      {% endif %}
+
+      {% if issue.exploit_scenario %}
+      <div class="exploit-box">
+        <strong>攻击场景:</strong> {{ issue.exploit_scenario }}
+      </div>
+      {% endif %}
+
+      {% if issue.suggestion %}
+      <div class="field">
+        <span class="field-label">修复建议:</span>
+        <div class="field-value" style="margin-top:4px;white-space:pre-wrap;">{{ issue.suggestion }}</div>
+      </div>
+      {% endif %}
+
+      {% if issue.fixed_code %}
+      <div class="field">
+        <span class="field-label">修复代码:</span>
+        <pre><code>{{ issue.fixed_code }}</code></pre>
+      </div>
+      {% endif %}
+
+      {% if issue.remediation %}
+      <div class="field">
+        <span class="field-label">详细修复方案:</span>
+        <div class="field-value" style="margin-top:4px;white-space:pre-wrap;">{{ issue.remediation }}</div>
+      </div>
+      {% endif %}
+
+      {% if issue.references_json %}
+      <div class="field refs">
+        <span class="field-label">参考链接:</span>
+        {% for ref in issue.references_json %}
+          {% if ref %}<a href="{{ ref }}" target="_blank" rel="noopener noreferrer">{{ ref }}</a>{% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if issue.confidence is not none %}
+      <div class="field"><span class="field-label">置信度:</span><span class="field-value">{{ "%.0f" | format(issue.confidence * 100) }}%</span></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty">本次审查未发现问题。</div>
+    {% endif %}
+
+    <div class="footer">本报告由基于大模型智能体的代码审查平台自动生成 · 详细版</div>
+  </div>
+</body>
+</html>
