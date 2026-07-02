@@ -31,3 +31,7 @@ code_review.db
 logs/
 # Let's Encrypt 证书与 ACME 校验目录（含私钥，绝不入库）
 deploy/certbot/
+
+# 本地备份与论文文档不入库
+/backups/
+/*.docx

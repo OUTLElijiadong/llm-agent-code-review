@@ -275,23 +275,27 @@ T8 阶段已验证:`npm run build` 通过,vue-tsc 零错误。
 
 | 容器 | 操作 | 状态 |
 |------|------|------|
-| cr_backend | docker compose build + up -d | ✅ 镜像重建并重启 |
-| cr_frontend | docker compose build(进行中) | ⏳ 构建中(npm install + vite build) |
-| cr_mysql | 无需重建 | ✅ Up 2 days (healthy) |
+| cr_backend | docker compose build + up -d --force-recreate | ✅ 镜像重建并重启 |
+| cr_frontend | docker cp dist + nginx reload(避免 OOM) | ✅ 前端文件已更新 |
+| cr_mysql | 无需重建 | ✅ Up (healthy) |
 | cr_clamav | 无需重建 | ✅ Up (healthy) |
 
-### 8.3 后端健康验证
+> **注意**:前端容器通过 `docker cp` 更新 dist 目录 + `nginx -s reload` 方式部署,
+> 避免在 1.9GB 内存服务器上执行 `docker compose build frontend`(npm install + vite build 会 OOM)。
+> 后续如需持久化镜像,可在服务器资源充足时执行 `docker compose build frontend`。
 
-- alembic current: 009 (head) ✅
-- 容器状态: Up 47 seconds ✅
-- SSH 可达性: 前端构建期间 SSH 超时(docker build 占用资源),待构建完成后复验
+### 8.3 服务器健康验证(全部通过)
 
-### 8.4 待完成项(已全部完成 ✅)
-
-- [x] 前端容器构建完成后重启 `docker compose up -d frontend`(服务器重启后 cr_frontend 已 Up)
-- [x] SSH 恢复后执行健康检查 `curl http://81.70.251.90/healthz`(返回 200)
-- [x] 验证前端页面可访问 `http://81.70.251.90`(HTML 正常返回)
-- [x] 验证 `/code-files/{id}/meta` 端点在服务器可用
+| 检查项 | 结果 | 详情 |
+|--------|------|------|
+| 前端页面 | ✅ HTTP 200 | http://81.70.251.90/ |
+| 后端 /healthz | ✅ HTTP 200 | {"status":"ok"} |
+| 后端 /docs | ✅ HTTP 200 | Swagger UI 可访问 |
+| /api/code-files/{id}/meta | ✅ HTTP 400 | 路由存在,返回"需认证"(正常) |
+| /api/rbac/roles | ✅ HTTP 400 | 路由存在,返回"需认证"(正常) |
+| 容器状态 | ✅ 全部 Up | cr_backend / cr_frontend / cr_clamav / cr_mysql |
+| alembic | ✅ 009 (head) | 数据库迁移最新 |
+| 14 个 Agent | ✅ 已注册 | 启动日志确认 14 个 Agent 注册成功 |
 
 ## 九、全项目 schema 字段遗漏风险扫描与修复(R1-R8,2026-06-25)
 
