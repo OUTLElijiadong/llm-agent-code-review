@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json as json_lib
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -32,6 +33,12 @@ class DiscussionSession:
     status: str = "active"  # active | paused | concluded
     max_rounds: int = 3
     report_task_id: int = 0  # 讨论沉淀的审查报告 task_id(收尾时回填)
+    closed_at: float = 0.0  # concluded 时间戳,供过期清理判断
+
+
+# 结束后的会话保留时长(秒): 期间刷新页面仍可回放全部发言,超时后随下次
+# create/close 机会性清理,防止 _sessions(含全部 LLM 发言)随讨论次数无限增长
+_CONCLUDED_SESSION_TTL = 3600.0
 
 
 class DiscussionBus:
@@ -61,14 +68,19 @@ class DiscussionBus:
         )
         self._sessions[session_id] = session
         self._queues[session_id] = []
+        self._purge_expired()
         return session
 
     def get_session(self, session_id: str) -> Optional[DiscussionSession]:
         return self._sessions.get(session_id)
 
     def close_session(self, session_id: str):
-        if session_id in self._sessions:
-            self._sessions[session_id].status = "concluded"
+        session = self._sessions.get(session_id)
+        if session:
+            session.status = "concluded"
+            session.closed_at = time.time()
+        # 编排循环已退出,pause/resume/user_input 回调随之失效,立即摘除
+        self._control_callbacks.pop(session_id, None)
         # 通知所有订阅者结束 — 必须是 JSON 字符串, 与其它帧一致,
         # 否则 WebSocket.send_text() 会因收到 dict 抛错并中断推送任务。
         end_msg = json_lib.dumps({"type": "session_end"}, ensure_ascii=False)
@@ -77,6 +89,23 @@ class DiscussionBus:
                 q.put_nowait(end_msg)
             except asyncio.QueueFull:
                 pass
+        self._purge_expired()
+
+    def _purge_expired(self):
+        """清理已结束且超过保留期、当前无订阅者的会话。"""
+        now = time.time()
+        expired = [
+            sid for sid, s in self._sessions.items()
+            if s.status == "concluded"
+            and s.closed_at
+            and now - s.closed_at > _CONCLUDED_SESSION_TTL
+            and not self._queues.get(sid)
+        ]
+        for sid in expired:
+            self._sessions.pop(sid, None)
+            self._queues.pop(sid, None)
+            self._control_callbacks.pop(sid, None)
+            logger.debug(f"[DiscussBus] 过期会话已清理 session={sid}")
 
     def request_stop(self, session_id: str):
         """标记会话为终止 — 编排循环在下一次检查时退出。"""

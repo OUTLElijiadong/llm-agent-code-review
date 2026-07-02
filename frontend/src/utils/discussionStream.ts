@@ -27,6 +27,7 @@ export type WsMessage =
   | { type: 'control'; session_id: string; action: string; payload: Record<string, unknown> }
   | { type: 'session_end' }
   | { type: 'pong' }
+  | { type: 'server_ping'; ts: number }
 
 export interface DiscussionStream {
   send: (action: string, payload?: Record<string, unknown>) => void
@@ -43,6 +44,14 @@ interface SubOpts {
 const HEARTBEAT_INTERVAL = 30_000
 /** 最大未响应次数 - 连续 3 次未收到 pong 认为连接断开 */
 const MAX_MISSED_PONGS = 3
+/**
+ * 连续重连失败上限 - 超过后停止重连并置 error 状态,由用户刷新页面重试。
+ * 鉴权被拒/会话不存在时后端在 accept 前 close,浏览器只能看到 1006,
+ * 无法从 close code 区分"网络抖动"与"永远不会成功",故用次数上限兜底。
+ */
+const MAX_RECONNECT_ATTEMPTS = 10
+/** 服务端 accept 后主动拒绝的应用级关闭码(token 无效/无权/会话不存在) - 重连必然再被拒,直接放弃 */
+const FATAL_CLOSE_CODES = new Set([4001, 4003, 4004])
 
 /**
  * 把后端返回的相对/绝对 ws_url 解析为当前页面可用的 WebSocket 地址。
@@ -80,6 +89,7 @@ export function subscribeDiscussion(
   let closed = false
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let backoff = 2000
+  let reconnectAttempts = 0
 
   // 心跳状态变量
   let heartbeatTimer: ReturnType<typeof setTimeout> | null = null
@@ -142,6 +152,7 @@ export function subscribeDiscussion(
     ws.onopen = () => {
       opts.onStatus?.('connected')
       backoff = 2000
+      reconnectAttempts = 0
       // 连接建立后启动心跳
       startHeartbeat()
     }
@@ -155,16 +166,24 @@ export function subscribeDiscussion(
           missedPongs = 0
           return
         }
+        // 服务端保活探测帧,仅用于刷新 NAT 会话,不进业务回调
+        if (msg.type === 'server_ping') return
         onMessage(msg)
       } catch {
         // ignore malformed frame
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (closed) return
       // 连接关闭时停止心跳
       stopHeartbeat()
+      if (FATAL_CLOSE_CODES.has(event.code)) {
+        closed = true
+        opts.onError?.(`连接被服务端拒绝(${event.code}): ${event.reason || '鉴权失败或会话不存在'}`)
+        opts.onStatus?.('error')
+        return
+      }
       opts.onStatus?.('disconnected')
       scheduleReconnect()
     }
@@ -177,6 +196,13 @@ export function subscribeDiscussion(
 
   function scheduleReconnect() {
     if (closed) return
+    reconnectAttempts++
+    if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+      closed = true
+      opts.onError?.('多次重连失败,已停止自动重连;请刷新页面重试')
+      opts.onStatus?.('error')
+      return
+    }
     backoff = Math.min(30000, backoff * 1.5)
     reconnectTimer = setTimeout(connect, backoff)
   }

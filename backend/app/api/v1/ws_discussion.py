@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json as json_lib
+import time
 from urllib.parse import parse_qs
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -42,18 +43,43 @@ class PendingDiscussion:
     def __init__(self, session_id: str, **kwargs):
         self.session_id = session_id
         self.kwargs = kwargs
+        self.created_at = time.time()
 
 
 _pending: dict[str, PendingDiscussion] = {}
 # session_id → 发起讨论的用户 id,用于 WebSocket 连接时的归属校验。
 _session_owners: dict[str, int] = {}
+# session_id → 归属记录注册时间,供过期清理判断(与 _session_owners 同生共死)。
+_owner_registered_at: dict[str, float] = {}
+
+# preflight 后一直没有 WebSocket 来消费的 pending、以及会话已从总线清除的
+# 归属记录,超过此时长即视为废弃 — 防止两个模块级 dict 随讨论次数无限增长。
+_STALE_TTL = 3600.0
+
+
+def _purge_stale():
+    """机会性清理:每次 register_pending 时顺带扫一遍过期条目。"""
+    now = time.time()
+    for sid in [s for s, p in _pending.items() if now - p.created_at > _STALE_TTL]:
+        _pending.pop(sid, None)
+        _session_owners.pop(sid, None)
+        _owner_registered_at.pop(sid, None)
+    bus = DiscussionBus.instance()
+    for sid in [
+        s for s, ts in _owner_registered_at.items()
+        if now - ts > _STALE_TTL and s not in _pending and bus.get_session(s) is None
+    ]:
+        _session_owners.pop(sid, None)
+        _owner_registered_at.pop(sid, None)
 
 
 def register_pending(session_id: str, **kwargs):
+    _purge_stale()
     _pending[session_id] = PendingDiscussion(session_id, **kwargs)
     owner = kwargs.get("user_id")
     if owner is not None:
         _session_owners[session_id] = int(owner)
+        _owner_registered_at[session_id] = time.time()
 
 
 def _load_active_user(user_id: int):
