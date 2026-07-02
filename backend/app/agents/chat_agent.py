@@ -692,24 +692,24 @@ class ChatAssistantAgent(BaseAgent):
             return AgentResult(success=False, error="Orchestrator 未注入")
         p = intent.get("payload", {}) or {}
         scope = (p.get("scope") or "").lower()
-        target_tool = p.get("target_tool", "generic")
+        target_tool = p.get("target_tool") or "generic"
         if scope == "issue":
             result = self._orchestrator.generate_ai_prompt_for_issue(
-                issue_id=int(p["issue_id"]),
+                issue_id=self._int_or(p.get("issue_id"), 0),
                 target_tool=target_tool, use_llm=True, ctx=ctx,
             )
         elif scope == "task":
             result = self._orchestrator.generate_ai_prompt_for_task(
-                task_id=int(p["task_id"]),
+                task_id=self._int_or(p.get("task_id"), 0),
                 target_tool=target_tool,
                 severity_filter=p.get("severity"),
                 use_llm=True, ctx=ctx,
             )
         elif scope == "project":
             result = self._orchestrator.generate_ai_prompt_for_project(
-                project_id=int(p["project_id"]),
+                project_id=self._int_or(p.get("project_id"), 0),
                 target_tool=target_tool,
-                top_n=int(p.get("top_n", 30)),
+                top_n=self._int_or(p.get("top_n"), 30),
                 use_llm=True, ctx=ctx,
             )
         else:
@@ -738,6 +738,16 @@ class ChatAssistantAgent(BaseAgent):
             model=result.model, duration_ms=result.duration_ms,
         )
 
+    @staticmethod
+    def _int_or(value: Any, default: int) -> int:
+        """把可能为 None / 字符串的字段安全转 int(意图分类器常把可选字段填成 null)。"""
+        if value is None or value == "":
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     def _handle_security_audit(self, intent: dict,
                                 ctx: Optional[AgentContext]) -> AgentResult:
         """委派 Orchestrator → SecuritySentinelAgent (v2.1)"""
@@ -745,23 +755,25 @@ class ChatAssistantAgent(BaseAgent):
             return AgentResult(success=False, error="Orchestrator 未注入")
         p = intent.get("payload", {}) or {}
         scope = (p.get("scope") or "").lower()
+        # 意图分类器可能把可选字段填成 null,统一做 None-safe 兜底
+        trace_df = p.get("trace_dataflow")
         if scope == "file":
             result = self._orchestrator.audit_security_for_file(
-                file_id=int(p["file_id"]),
-                scan_depth=p.get("scan_depth", "standard"),
+                file_id=self._int_or(p.get("file_id"), 0),
+                scan_depth=(p.get("scan_depth") or "standard"),
                 ctx=ctx,
             )
             target = f"文件 #{p['file_id']}"
         elif scope == "task":
             result = self._orchestrator.audit_security_for_task(
-                task_id=int(p["task_id"]), ctx=ctx,
+                task_id=self._int_or(p.get("task_id"), 0), ctx=ctx,
             )
             target = f"任务 #{p['task_id']}"
         elif scope == "project":
             result = self._orchestrator.audit_security_for_project(
-                project_id=int(p["project_id"]),
-                top_n=int(p.get("top_n", 50)),
-                trace_dataflow=bool(p.get("trace_dataflow", True)),
+                project_id=self._int_or(p.get("project_id"), 0),
+                top_n=self._int_or(p.get("top_n"), 50),
+                trace_dataflow=(True if trace_df is None else bool(trace_df)),
                 ctx=ctx,
             )
             target = f"项目 #{p['project_id']}"

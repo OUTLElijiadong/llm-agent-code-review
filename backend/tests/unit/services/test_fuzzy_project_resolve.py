@@ -12,11 +12,20 @@ from app.agents.clarify_store import ClarifyStore
 class _FakeOrch:
     def __init__(self, items):
         self._items = items
+        self.audit_calls = []
 
     def list_projects(self, *a, **k):
         return AgentResult(
             success=True,
             data={"total": len(self._items), "items": self._items},
+        )
+
+    def audit_security_for_project(self, **kw):
+        # 记录被 handler 传入的参数,验证 None 字段被安全兜底
+        self.audit_calls.append(kw)
+        return AgentResult(
+            success=True,
+            data={"findings": [], "risk_score": 100, "summary": "ok"},
         )
 
 
@@ -86,3 +95,46 @@ def test_no_orchestrator_falls_back_gracefully():
     q = result.data["clarify"]["questions"][0]
     assert q["key"] == "project_id"
     assert q["type"] == "select_project"
+
+
+def test_int_or_none_safe():
+    agent = ChatAssistantAgent()
+    assert agent._int_or(None, 50) == 50
+    assert agent._int_or("", 50) == 50
+    assert agent._int_or("7", 50) == 7
+    assert agent._int_or(7, 50) == 7
+    assert agent._int_or("bad", 50) == 50
+
+
+def test_security_audit_handler_survives_null_payload():
+    """回归:意图分类器把 top_n/scan_depth/trace_dataflow 填成 null 时不得 500。
+
+    复现线上 clarify 提交 500(int(None) TypeError)。
+    """
+    agent = _agent()
+    intent = {
+        "intent": "security_audit",
+        "payload": {
+            "scope": "project", "project_id": 3, "project_query": "皮卡丘",
+            "task_id": None, "file_id": None, "scan_depth": None,
+            "top_n": None, "trace_dataflow": None,
+        },
+    }
+    result = agent._handle_security_audit(intent, ctx=None)
+    assert result.success is True                       # 不再抛 TypeError
+    call = agent._orchestrator.audit_calls[-1]
+    assert call["project_id"] == 3
+    assert call["top_n"] == 50                          # None → 默认 50
+    assert call["trace_dataflow"] is True               # None → 默认 True
+
+
+def test_dispatch_with_payload_null_fields_no_crash():
+    """dispatch_with_payload 回填 null 字段后走到 handler 不崩。"""
+    agent = _agent()
+    result = agent.dispatch_with_payload(
+        "security_audit",
+        {"scope": "project", "project_id": 5, "top_n": None,
+         "scan_depth": None, "trace_dataflow": None},
+        ctx=None,
+    )
+    assert result.success is True
