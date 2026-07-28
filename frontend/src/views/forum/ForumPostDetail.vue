@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { useUserStore } from '@/stores/user'
 import { formatDate } from '@/utils/format'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import {
   getPost, createReply, deletePost, deleteReply, pinPost, type ForumPostDetail,
 } from '@/api/forum'
@@ -66,7 +68,9 @@ async function removePost() {
 
 async function togglePin() {
   if (!post.value) return
-  await pinPost(postId, !post.value.is_pinned)
+  const target = !post.value.is_pinned
+  await pinPost(postId, target)
+  ElMessage.success(target ? '已置顶' : '已取消置顶')
   await load()
 }
 

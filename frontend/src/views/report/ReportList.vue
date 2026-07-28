@@ -97,13 +97,15 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { ArrowDown } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import { getReports, deleteReport, exportReport } from '@/api/report'
 import { getProjects } from '@/api/project'
 import type { ReportListItem, ReportFormat } from '@/types/report'
 import type { ProjectOut } from '@/types/project'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 
@@ -159,8 +161,8 @@ function goDetail(taskId: number) {
 }
 
 /**
- * 跳转到报告详情页并触发生成(通过 query 参数 generate=1 标记,
- * 详情页可据此自动滚动到报告操作工具栏)。
+ * 跳转到报告详情页并自动触发生成(通过 query 参数 generate=1,
+ * 详情页 onMounted 时检测并调用 handleGenerate 自动生成 HTML 报告)。
  * @param taskId - 审查任务 ID
  */
 function goGenerate(taskId: number): void {

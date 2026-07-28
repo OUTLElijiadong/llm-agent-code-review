@@ -116,11 +116,12 @@
  */
 import { ref, onMounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+
 import { Picture, Files, Document, Download } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { list, downloadBinary } from '@/api/codeFile'
 import type { CodeFileOut } from '@/types/project'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 /** 文件分类信息 */
 interface FileCategory {
@@ -136,10 +137,6 @@ interface FileCategory {
 
 const props = defineProps<{
   projectId: number
-}>()
-
-const emit = defineEmits<{
-  uploaded: []
 }>()
 
 const router = useRouter()

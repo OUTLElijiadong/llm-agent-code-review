@@ -146,11 +146,13 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { getRules, toggleRule, createRule, updateRule, deleteRule } from '@/api/rule'
 import type { RuleOut } from '@/types/rule'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const loading = ref(false)
 const submitting = ref(false)

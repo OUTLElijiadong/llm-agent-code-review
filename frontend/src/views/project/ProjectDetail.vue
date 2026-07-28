@@ -1,7 +1,7 @@
 <template>
   <div class="project-detail" v-loading="loading">
     <div class="page-header">
-      <el-page-header @back="router.back()">
+      <el-page-header @back="goBack(router, '/projects')">
         <template #content>
           <span class="header-title">{{ project?.project_name || '项目详情' }}</span>
         </template>
@@ -259,7 +259,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { goBack } from '@/utils/navigation'
+
 import { Lock, MagicStick, Plus } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { getProjectDetail } from '@/api/project'
@@ -279,6 +280,8 @@ import CodeFileList from '@/views/code/CodeFileList.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import AiPromptModal from '@/components/issue/AiPromptModal.vue'
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const route = useRoute()
 const router = useRouter()

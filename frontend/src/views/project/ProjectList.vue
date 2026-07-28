@@ -220,13 +220,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import dayjs from 'dayjs'
 import { getProjects, deleteProject, createProject, updateProject } from '@/api/project'
 import { uploadFolder } from '@/api/codeFile'
 import type { ProjectOut } from '@/types/project'
 import ProjectForm from './ProjectForm.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 

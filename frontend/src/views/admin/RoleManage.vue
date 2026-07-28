@@ -96,11 +96,11 @@
         <el-form-item label="范围类型">
           <el-radio-group v-model="scopeForm.scope_type">
             <el-radio value="all">全部数据</el-radio>
-            <el-radio value="project">指定项目</el-radio>
-            <el-radio value="self">仅本人</el-radio>
+            <el-radio value="custom">指定项目</el-radio>
+            <el-radio value="project_own">仅本人</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="scopeForm.scope_type === 'project'" label="项目列表">
+        <el-form-item v-if="scopeForm.scope_type === 'custom'" label="项目列表">
           <el-select
             v-model="scopeForm.project_ids"
             multiple
@@ -127,7 +127,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import type { FormInstance, FormRules } from 'element-plus'
 import {
   listRoles,
@@ -142,6 +142,8 @@ import {
 import { getProjects } from '@/api/project'
 import type { Role, Permission, DataScopeType, DataScopeUpdateIn } from '@/types/rbac'
 import type { ProjectOut } from '@/types/project'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 /** 权限树节点 */
 interface PermTreeNode {
@@ -201,7 +203,7 @@ const allPermissions = ref<Permission[]>([])
 const scopeDialogVisible = ref(false)
 const scopeLoading = ref(false)
 const scopeForm = reactive<{ scope_type: DataScopeType; project_ids: number[] }>({
-  scope_type: 'self',
+  scope_type: 'project_own',
   project_ids: [],
 })
 const projectOptions = ref<ProjectOut[]>([])
@@ -401,7 +403,7 @@ async function onSetDataScope(row: Role): Promise<void> {
   currentRole.value = row
   scopeDialogVisible.value = true
   scopeLoading.value = true
-  scopeForm.scope_type = 'self'
+  scopeForm.scope_type = 'project_own'
   scopeForm.project_ids = []
   try {
     // 加载项目选项(仅加载前 200 条用于选择)
@@ -420,7 +422,7 @@ async function onSetDataScope(row: Role): Promise<void> {
  */
 async function onConfirmScope(): Promise<void> {
   if (!currentRole.value) return
-  if (scopeForm.scope_type === 'project' && scopeForm.project_ids.length === 0) {
+  if (scopeForm.scope_type === 'custom' && scopeForm.project_ids.length === 0) {
     ElMessage.warning('请选择至少一个项目')
     return
   }
@@ -428,7 +430,7 @@ async function onConfirmScope(): Promise<void> {
   try {
     const payload: DataScopeUpdateIn = {
       scope_type: scopeForm.scope_type,
-      project_ids: scopeForm.scope_type === 'project' ? scopeForm.project_ids : undefined,
+      project_ids: scopeForm.scope_type === 'custom' ? scopeForm.project_ids : undefined,
     }
     await updateRoleDataScope(currentRole.value.id, payload)
     ElMessage.success('数据范围已更新')

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { formatDate } from '@/utils/format'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import {
   getDocs, addDoc, deleteDoc, searchKnowledge, syncKnowledge, getKbStats,
   type KnowledgeDoc, type SearchHit, type KbStats,
@@ -24,6 +26,7 @@ const pageSize = ref(10)
 const sourceFilter = ref('')
 const loading = ref(false)
 const syncing = ref(false)
+const adding = ref(false)
 
 const addVisible = ref(false)
 const addForm = reactive({ title: '', content: '' })
@@ -54,12 +57,18 @@ async function submitAdd() {
     ElMessage.warning('请填写标题和内容')
     return
   }
-  const res = await addDoc({ ...addForm })
-  ElMessage.success(`已入库,切片 ${res.chunk_count} 段`)
-  addVisible.value = false
-  Object.assign(addForm, { title: '', content: '' })
-  page.value = 1
-  await Promise.all([loadDocs(), loadStats()])
+  if (adding.value) return
+  adding.value = true
+  try {
+    const res = await addDoc({ ...addForm })
+    ElMessage.success(`已入库,切片 ${res.chunk_count} 段`)
+    addVisible.value = false
+    Object.assign(addForm, { title: '', content: '' })
+    page.value = 1
+    await Promise.all([loadDocs(), loadStats()])
+  } finally {
+    adding.value = false
+  }
 }
 
 async function remove(d: KnowledgeDoc) {
@@ -190,7 +199,7 @@ onMounted(() => {
       </el-form>
       <template #footer>
         <el-button @click="addVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitAdd">入库</el-button>
+        <el-button type="primary" :loading="adding" @click="submitAdd">入库</el-button>
       </template>
     </el-dialog>
   </div>

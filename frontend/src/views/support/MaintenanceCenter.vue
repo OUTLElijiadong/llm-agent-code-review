@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { useUserStore } from '@/stores/user'
 import { formatDate } from '@/utils/format'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import {
   createTicket, getTickets, handleTicket, closeTicket, type Ticket,
 } from '@/api/maintenance'
@@ -29,6 +31,7 @@ const pageSize = ref(10)
 const statusFilter = ref('')
 const scope = ref<'mine' | 'all'>('mine')
 const loading = ref(false)
+const submitting = ref(false)
 
 const submitVisible = ref(false)
 const form = reactive({ title: '', description: '', category: 'bug', priority: 'medium' })
@@ -56,12 +59,18 @@ async function submit() {
     ElMessage.warning('请填写标题和问题描述')
     return
   }
-  await createTicket({ ...form })
-  ElMessage.success('工单已提交')
-  submitVisible.value = false
-  Object.assign(form, { title: '', description: '', category: 'bug', priority: 'medium' })
-  page.value = 1
-  load()
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    await createTicket({ ...form })
+    ElMessage.success('工单已提交')
+    submitVisible.value = false
+    Object.assign(form, { title: '', description: '', category: 'bug', priority: 'medium' })
+    page.value = 1
+    load()
+  } finally {
+    submitting.value = false
+  }
 }
 
 function openHandle(t: Ticket) {
@@ -173,7 +182,7 @@ onMounted(load)
       </el-form>
       <template #footer>
         <el-button @click="submitVisible = false">取消</el-button>
-        <el-button type="primary" @click="submit">提交</el-button>
+        <el-button type="primary" :loading="submitting" @click="submit">提交</el-button>
       </template>
     </el-dialog>
 

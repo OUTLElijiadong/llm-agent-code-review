@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { getEmbeddingConfig, updateEmbeddingConfig } from '@/api/knowledge'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const form = reactive({ base_url: '', model: '', api_key: '', enabled: false })
 const apiKeySet = ref(false)

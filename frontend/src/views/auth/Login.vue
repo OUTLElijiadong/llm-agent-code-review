@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+
 import { User, Lock } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { resolvePostLoginPath } from '@/utils/roleHome'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 const route = useRoute()

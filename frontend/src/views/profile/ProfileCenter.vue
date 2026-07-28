@@ -80,9 +80,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import dayjs from 'dayjs'
 import { useUserStore } from '@/stores/user'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 const userStore = useUserStore()

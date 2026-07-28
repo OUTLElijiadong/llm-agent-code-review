@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { UserOut, LoginIn, RegisterIn } from '@/types/auth'
-import type { Menu, DataScope, DataScopeType } from '@/types/rbac'
+import type { Menu, DataScope } from '@/types/rbac'
 import { login as authLogin, register as authRegister, me as authMe } from '@/api/auth'
 import {
   fetchUserRoles as apiFetchUserRoles,
@@ -12,16 +12,6 @@ import {
 import { setToken, clearToken, getToken } from '@/utils/token'
 
 let authExpiredListenerRegistered = false
-
-/**
- * 数据范围优先级权重,用于多角色数据范围合并
- * all(全部) > project(指定项目) > self(仅本人)
- */
-const DATA_SCOPE_WEIGHT: Record<DataScopeType, number> = {
-  all: 3,
-  project: 2,
-  self: 1,
-}
 
 /**
  * 用户状态管理 Store,管理认证状态、用户信息、RBAC 权限与 Token 持久化
@@ -64,7 +54,8 @@ export const useUserStore = defineStore('user', () => {
     if (!profile.value) return
     try {
       const list = await apiFetchUserPermissions(profile.value.id)
-      permissions.value = new Set(list.map((p) => p.code))
+      // 后端返回权限编码字符串数组(List[str]),直接入 Set
+      permissions.value = new Set(list)
     } catch {
       permissions.value = new Set()
     }
@@ -85,36 +76,14 @@ export const useUserStore = defineStore('user', () => {
 
   /**
    * 拉取用户数据范围并填充 dataScope 状态
-   * 多角色数据范围取最宽范围(all > project > self)
+   * 后端已聚合多角色数据范围(取最宽范围 all > project > self),返回单个对象
    * @returns void
    */
   async function fetchDataScope(): Promise<void> {
     if (!profile.value) return
     try {
-      const list = await apiFetchUserDataScope(profile.value.id)
-      if (!list.length) {
-        dataScope.value = null
-        return
-      }
-      // 多角色数据范围合并:取优先级最高的一项;project 类型合并项目 ID
-      const sorted = [...list].sort(
-        (a, b) => DATA_SCOPE_WEIGHT[b.scope_type] - DATA_SCOPE_WEIGHT[a.scope_type],
-      )
-      const top = sorted[0]
-      if (top.scope_type === 'project') {
-        const projectSet = new Set<number>()
-        for (const item of list) {
-          if (item.scope_type === 'project') {
-            item.project_ids?.forEach((id) => projectSet.add(id))
-          }
-        }
-        dataScope.value = {
-          ...top,
-          project_ids: Array.from(projectSet),
-        }
-      } else {
-        dataScope.value = top
-      }
+      const scope = await apiFetchUserDataScope(profile.value.id)
+      dataScope.value = scope ?? null
     } catch {
       dataScope.value = null
     }
@@ -157,12 +126,14 @@ export const useUserStore = defineStore('user', () => {
 
   /**
    * 判断是否为 admin 角色
-   * 同时检查 RBAC roles 数组与历史 profile.role 字段,保证向后兼容
+   * 同时检查 RBAC roles 数组与历史 profile.role 字段;
+   * super_admin 与后端 _ADMIN_LEGACY_ROLES 保持一致,视为管理员
    * @returns 是否为管理员
    */
   function isAdmin(): boolean {
-    if (roles.value.includes('admin')) return true
-    return profile.value?.role === 'admin'
+    if (roles.value.includes('admin') || roles.value.includes('super_admin')) return true
+    const legacy = profile.value?.role
+    return legacy === 'admin' || legacy === 'super_admin'
   }
 
   /**

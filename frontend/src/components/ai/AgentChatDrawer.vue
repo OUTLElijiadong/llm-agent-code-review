@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Close, Promotion } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import MarkdownIt from 'markdown-it'
+
+import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { subscribeAgentEvents } from '@/utils/agentEventStream'
@@ -11,6 +11,13 @@ import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
 import type { AgentStatus } from '@/types/agent'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import {
+  CUSTOM_PROJECT_OPTION_VALUE,
+  prepareClarifyAnswers,
+  resolveProjectClarifyOptions,
+  type ClarifyProjectOption,
+} from '@/utils/clarifyProjectOptions'
 
 interface StepBubble {
   agent: string
@@ -53,8 +60,6 @@ const loading = ref(false)
 const modelName = ref('deepseek-v4-flash')
 const chatBody = ref<HTMLElement>()
 
-const md = new MarkdownIt({ breaks: true })
-
 // === SSE: 全局事件流 ===
 let stream: ReturnType<typeof subscribeAgentEvents> | null = null
 const eventsByTrace = ref<Record<string, StepBubble[]>>({})
@@ -89,28 +94,74 @@ function teardownStream(): void {
 }
 
 // === Clarify 选项加载 ===
-const projectOptions = ref<{ value: number; label: string }[]>([])
+const projectOptions = ref<ClarifyProjectOption[]>([])
+const projectSearchOptions = ref<ClarifyProjectOption[]>([])
+const projectSearchKeyword = ref('')
 const taskOptions = ref<{ value: number; label: string }[]>([])
+const projectOptionsLoading = ref(false)
 
 let optionsPromise: Promise<void> | null = null
+let projectSearchTimer: number | undefined
+let projectSearchRequestId = 0
 
+/**
+ * 从项目 API 加载当前用户可见的项目选项。
+ * @param keyword - 可选项目名称关键词，后端使用 contains 做模糊查询。
+ * @returns 请求完成后更新项目候选，无直接返回值。
+ */
+async function loadProjectOptions(keyword = ''): Promise<void> {
+  const normalizedKeyword = keyword.trim()
+  const requestId = ++projectSearchRequestId
+  projectOptionsLoading.value = true
+  try {
+    const data = await getProjects({
+      page: 1,
+      page_size: 100,
+      keyword: normalizedKeyword,
+    })
+    if (requestId !== projectSearchRequestId) return
+    const options = (data.items ?? []).map((p) => ({
+      value: p.id,
+      label: `#${p.id} ${p.project_name}`,
+    }))
+    if (normalizedKeyword) projectSearchOptions.value = options
+    else projectOptions.value = options
+  } catch {
+    if (requestId === projectSearchRequestId) {
+      if (normalizedKeyword) projectSearchOptions.value = []
+      else projectOptions.value = []
+    }
+  } finally {
+    if (requestId === projectSearchRequestId) projectOptionsLoading.value = false
+  }
+}
+
+/**
+ * 确保项目选择器至少加载一次项目 API 首屏。
+ * @returns 首次加载中的共享 Promise。
+ */
 async function ensureProjectOptions(): Promise<void> {
   if (projectOptions.value.length) return
   if (optionsPromise) return optionsPromise
   optionsPromise = (async () => {
-    try {
-      const data = await getProjects({ page: 1, page_size: 100 })
-      projectOptions.value = (data.items ?? []).map((p) => ({
-        value: p.id,
-        label: `#${p.id} ${p.project_name}`,
-      }))
-    } catch {
-      projectOptions.value = []
-    } finally {
-      optionsPromise = null
-    }
+    await loadProjectOptions()
+    optionsPromise = null
   })()
   return optionsPromise
+}
+
+/**
+ * 对项目选择器输入做防抖远程查询，避免项目较多时只搜索本地候选子集。
+ * @param query - 用户在选择器内输入的项目名称关键词。
+ * @returns 无返回值，防抖结束后更新项目候选。
+ */
+function searchProjectOptions(query: string): void {
+  projectSearchKeyword.value = query.trim()
+  if (!projectSearchKeyword.value) projectSearchOptions.value = []
+  window.clearTimeout(projectSearchTimer)
+  projectSearchTimer = window.setTimeout(() => {
+    void loadProjectOptions(query)
+  }, 250)
 }
 
 async function ensureTaskOptions(): Promise<void> {
@@ -127,7 +178,14 @@ async function ensureTaskOptions(): Promise<void> {
 }
 
 const clarifyAnswers = ref<Record<string, Record<string, string | number>>>({})
+const clarifyCustomProjectInputs = ref<Record<string, Record<string, string>>>({})
 
+/**
+ * 初始化 Clarify 答案、自定义项目输入和异步候选项。
+ * @param clarifyId - Clarify 会话 ID。
+ * @param questions - 当前追问问题列表。
+ * @returns 无返回值。
+ */
 function ensureClarifyAnswers(clarifyId: string, questions: ClarifyQuestion[]): void {
   if (!clarifyAnswers.value[clarifyId]) {
     const init: Record<string, string | number> = {}
@@ -135,29 +193,71 @@ function ensureClarifyAnswers(clarifyId: string, questions: ClarifyQuestion[]): 
     for (const q of questions) init[q.key] = q.default ?? ''
     clarifyAnswers.value[clarifyId] = init
   }
-  // 仅当后端未随问题下发候选项时,才回退到前端二次拉取列表
+  if (!clarifyCustomProjectInputs.value[clarifyId]) {
+    const customInputs: Record<string, string> = {}
+    for (const q of questions) {
+      if (q.type === 'select_project') customInputs[q.key] = ''
+    }
+    clarifyCustomProjectInputs.value[clarifyId] = customInputs
+    projectSearchKeyword.value = ''
+    projectSearchOptions.value = []
+  }
+  // 推荐候选只用于排序，完整项目列表始终从项目 API 加载并合并。
   for (const q of questions) {
-    if (q.type === 'select_project' && !(q.options && q.options.length)) void ensureProjectOptions()
+    if (q.type === 'select_project') void ensureProjectOptions()
     if (q.type === 'select_task' && !(q.options && q.options.length)) void ensureTaskOptions()
   }
 }
 
+/**
+ * 合并单个项目追问的推荐项、远程查询结果和自定义入口。
+ * @param question - 项目类型 Clarify 问题。
+ * @returns 可渲染的完整项目选项列表。
+ */
+function clarifyProjectOptions(question: ClarifyQuestion): ClarifyProjectOption[] {
+  return resolveProjectClarifyOptions(
+    question.options ?? [],
+    projectOptions.value,
+    projectSearchOptions.value,
+    projectSearchKeyword.value,
+  )
+}
+
+/**
+ * 判断当前项目问题是否已选择“其他（自定义输入）”。
+ * @param clarifyId - Clarify 会话 ID。
+ * @param questionKey - 项目问题字段名。
+ * @returns 需要展示自定义输入框时返回 true。
+ */
+function isCustomProjectSelected(clarifyId: string, questionKey: string): boolean {
+  return clarifyAnswers.value[clarifyId]?.[questionKey] === CUSTOM_PROJECT_OPTION_VALUE
+}
+
+/**
+ * 提交 Clarify 回答并继续原 Agent 意图。
+ * @param message - 携带 Clarify 协议的助手消息。
+ * @returns 请求完成后更新对话消息，无直接返回值。
+ */
 async function submitClarify(message: ChatMessage): Promise<void> {
   const clarify = message.clarify
   if (!clarify) return
-  const answers = clarifyAnswers.value[clarify.clarify_id] ?? {}
-  const missing = clarify.questions.find((q) => q.required && !answers[q.key])
-  if (missing) {
-    ElMessage.warning(`请先回答: ${missing.label}`)
+  const prepared = prepareClarifyAnswers(
+    clarify.questions,
+    clarifyAnswers.value[clarify.clarify_id] ?? {},
+    clarifyCustomProjectInputs.value[clarify.clarify_id] ?? {},
+  )
+  if (prepared.missing) {
+    ElMessage.warning(`请先回答: ${prepared.missing.label}`)
     return
   }
   loading.value = true
   try {
     const res = await post<{ content: string; clarify?: ClarifyPayload; model?: string }>(
       '/agents/clarify',
-      { clarify_id: clarify.clarify_id, answers },
+      { clarify_id: clarify.clarify_id, answers: prepared.answers },
     )
     message.clarify = undefined
+    delete clarifyCustomProjectInputs.value[clarify.clarify_id]
     messages.value.push({
       role: 'assistant',
       content: res.content,
@@ -307,7 +407,6 @@ watch(() => props.visible, (val) => {
   }
 })
 
-const supportPrefill = computed(() => true)
 function handlePrefill(e: CustomEvent<{ prefill?: string }>): void {
   if (!props.visible) emit('update:visible', true)
   if (e.detail?.prefill) inputText.value = e.detail.prefill
@@ -319,6 +418,7 @@ if (typeof window !== 'undefined') {
 
 onBeforeUnmount(() => {
   teardownStream()
+  window.clearTimeout(projectSearchTimer)
   if (typeof window !== 'undefined') {
     window.removeEventListener('prism:open-agent-chat', handlePrefill as EventListener)
   }
@@ -434,7 +534,7 @@ onBeforeUnmount(() => {
                 <div
                   v-if="msg.role === 'assistant'"
                   class="msg-content markdown-body"
-                  v-html="md.render(msg.content)"
+                  v-html="renderMarkdown(msg.content)"
                 />
                 <div v-else class="msg-content">{{ msg.content }}</div>
 
@@ -474,6 +574,7 @@ onBeforeUnmount(() => {
                       v-else-if="q.type === 'select'"
                       v-model="clarifyAnswers[msg.clarify.clarify_id][q.key]"
                       size="small"
+                      popper-class="agent-clarify-popper"
                       style="width: 100%"
                     >
                       <el-option
@@ -488,18 +589,30 @@ onBeforeUnmount(() => {
                       v-model="clarifyAnswers[msg.clarify.clarify_id][q.key]"
                       size="small"
                       filterable
-                      allow-create
+                      remote
+                      reserve-keyword
                       default-first-option
-                      placeholder="选择或输入项目 ID"
+                      :remote-method="searchProjectOptions"
+                      :loading="projectOptionsLoading"
+                      popper-class="agent-clarify-popper"
+                      placeholder="搜索并选择项目"
                       style="width: 100%"
                     >
                       <el-option
-                        v-for="opt in (q.options && q.options.length ? q.options : projectOptions)"
+                        v-for="opt in clarifyProjectOptions(q)"
                         :key="String(opt.value)"
                         :label="opt.label"
                         :value="opt.value"
                       />
                     </el-select>
+                    <el-input
+                      v-if="q.type === 'select_project' && isCustomProjectSelected(msg.clarify.clarify_id, q.key)"
+                      v-model="clarifyCustomProjectInputs[msg.clarify.clarify_id][q.key]"
+                      class="clarify-custom-input"
+                      size="small"
+                      clearable
+                      placeholder="输入项目名称或项目 ID"
+                    />
                     <el-select
                       v-else-if="q.type === 'select_task'"
                       v-model="clarifyAnswers[msg.clarify.clarify_id][q.key]"
@@ -507,6 +620,7 @@ onBeforeUnmount(() => {
                       filterable
                       allow-create
                       default-first-option
+                      popper-class="agent-clarify-popper"
                       placeholder="选择或输入任务 ID"
                       style="width: 100%"
                     >
@@ -987,6 +1101,14 @@ onBeforeUnmount(() => {
   margin-left: 6px;
   font-size: 10.5px;
   color: var(--gray-500);
+}
+
+.clarify-custom-input {
+  margin-top: 8px;
+}
+
+:global(.agent-clarify-popper) {
+  z-index: 3100 !important;
 }
 
 .clarify-foot {

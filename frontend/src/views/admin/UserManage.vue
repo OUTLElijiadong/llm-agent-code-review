@@ -47,10 +47,10 @@
           </template>
         </el-table-column>
         <el-table-column prop="last_login" label="最后登录" width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.last_login || '-' }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.last_login) }}</template>
         </el-table-column>
         <el-table-column prop="create_time" label="注册时间" width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.create_time || '-' }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.create_time) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
@@ -96,9 +96,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { getUsers, setUserRole, toggleUserStatus, resetPassword } from '@/api/user'
 import type { UserListItem } from '@/types/user'
+import { formatDateTime } from '@/utils/format'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const loading = ref(false)
 const submitting = ref(false)

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { useUserStore } from '@/stores/user'
 import { formatDate } from '@/utils/format'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import {
   createFeedback, getFeedbackList, replyFeedback, type Feedback,
 } from '@/api/feedback'
@@ -26,6 +27,7 @@ const page = ref(1)
 const pageSize = ref(10)
 const scope = ref<'mine' | 'all'>('mine')
 const loading = ref(false)
+const submitting = ref(false)
 
 const submitVisible = ref(false)
 const form = reactive({ feedback_type: 'suggestion', content: '', contact: '' })
@@ -53,12 +55,18 @@ async function submit() {
     ElMessage.warning('请填写反馈内容')
     return
   }
-  await createFeedback({ ...form })
-  ElMessage.success('反馈已提交,感谢你的建议')
-  submitVisible.value = false
-  Object.assign(form, { feedback_type: 'suggestion', content: '', contact: '' })
-  page.value = 1
-  load()
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    await createFeedback({ ...form })
+    ElMessage.success('反馈已提交,感谢你的建议')
+    submitVisible.value = false
+    Object.assign(form, { feedback_type: 'suggestion', content: '', contact: '' })
+    page.value = 1
+    load()
+  } finally {
+    submitting.value = false
+  }
 }
 
 function openReply(f: Feedback) {
@@ -142,7 +150,7 @@ onMounted(load)
       </el-form>
       <template #footer>
         <el-button @click="submitVisible = false">取消</el-button>
-        <el-button type="primary" @click="submit">提交</el-button>
+        <el-button type="primary" :loading="submitting" @click="submit">提交</el-button>
       </template>
     </el-dialog>
 

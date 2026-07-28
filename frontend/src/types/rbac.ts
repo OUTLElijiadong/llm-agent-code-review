@@ -66,10 +66,11 @@ export interface Menu {
 /**
  * 数据范围类型
  * - all: 全部数据
- * - project: 指定项目
- * - self: 仅本人数据
+ * - project_member: 参与项目数据
+ * - custom: 自定义指定项目(配合 project_ids)
+ * - project_own: 仅本人数据
  */
-export type DataScopeType = 'all' | 'project' | 'self'
+export type DataScopeType = 'all' | 'project_member' | 'custom' | 'project_own'
 
 /**
  * 数据范围定义
@@ -79,9 +80,9 @@ export interface DataScope {
   id: number
   /** 角色 ID */
   role_id: number
-  /** 范围类型: all/project/self */
+  /** 范围类型: all/project_member/custom/project_own */
   scope_type: DataScopeType
-  /** 项目 ID 列表(scope_type 为 project 时有效) */
+  /** 项目 ID 列表(scope_type 为 custom 时有效) */
   project_ids?: number[]
 }
 
@@ -129,9 +130,9 @@ export interface RolePermissionAssignIn {
  * 数据范围更新入参
  */
 export interface DataScopeUpdateIn {
-  /** 范围类型: all/project/self */
+  /** 范围类型: all/project_member/custom/project_own */
   scope_type: DataScopeType
-  /** 项目 ID 列表(scope_type 为 project 时必填) */
+  /** 项目 ID 列表(scope_type 为 custom 时必填) */
   project_ids?: number[]
 }
 

@@ -52,6 +52,7 @@
           placeholder="搜索标题或描述"
           clearable
           style="width: 220px"
+          @input="reloadDebounced"
           @change="reload"
         />
         <el-button type="primary" :disabled="!selected.length" @click="onBatchMarkFixed">
@@ -123,7 +124,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+
 import { ArrowDown } from '@element-plus/icons-vue'
 import { list as listIssues, updateStatus, batchUpdateStatus } from '@/api/issue'
 import { getProjects } from '@/api/project'
@@ -131,6 +132,8 @@ import type { IssueListItemOut } from '@/types/review'
 import type { ProjectOut } from '@/types/project'
 import { severityClass, severityDisplayLabel } from '@/constants/severity'
 import { dimLabel } from '@/constants/dim'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 
@@ -213,6 +216,15 @@ function reload(): void {
   loadIssues()
 }
 
+// 关键词搜索防抖:输入停顿 400ms 后才触发,避免每次击键都请求
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+function reloadDebounced(): void {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    reload()
+  }, 400)
+}
+
 function onSelectionChange(rows: IssueListItemOut[]): void {
   selected.value = rows
 }
@@ -233,6 +245,16 @@ async function onSetStatus(row: IssueListItemOut, status: string): Promise<void>
 
 async function onBatchMarkFixed(): Promise<void> {
   if (!selected.value.length) return
+  try {
+    // 二次确认,避免误点一次批量改几十条状态
+    await ElMessageBox.confirm(
+      `确定将选中的 ${selected.value.length} 条问题标记为已修复吗?`,
+      '批量标记已修复',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return // 用户取消
+  }
   try {
     await batchUpdateStatus({
       ids: selected.value.map((r) => r.id),

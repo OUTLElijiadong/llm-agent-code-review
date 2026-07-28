@@ -19,7 +19,7 @@
                   第 {{ currentRound }} / {{ totalRounds }} 轮
                 </span>
                 <span v-if="currentSpeaker" class="speaker-info">
-                  · {{ currentSpeaker }} 发言中
+                  · {{ currentSpeaker }} 决策中
                 </span>
                 <span v-else-if="phase === 'concluded'" class="speaker-info done">
                   · 讨论已结束
@@ -41,6 +41,7 @@
                 circle
                 :disabled="!canControl"
                 :type="isPaused ? 'success' : 'default'"
+                :aria-label="isPaused ? '继续讨论' : '暂停讨论'"
                 @click="togglePause"
               >
                 <span class="btn-emoji">{{ isPaused ? '▶' : '⏸' }}</span>
@@ -52,13 +53,14 @@
                 type="danger"
                 plain
                 :disabled="!canControl"
+                aria-label="终止讨论"
                 @click="onStop"
               >
                 <span class="btn-emoji">⏹</span>
               </el-button>
             </el-tooltip>
             <el-tooltip content="关闭" placement="bottom">
-              <el-button circle @click="onClose">
+              <el-button circle aria-label="关闭讨论" @click="onClose">
                 <span class="btn-emoji">✕</span>
               </el-button>
             </el-tooltip>
@@ -73,9 +75,13 @@
             v-for="a in agents"
             :key="a.code"
             class="part-chip"
+            :class="participantClass(a.code)"
             :style="{ '--chip-color': themeOf(a.code).color }"
           >
             {{ themeOf(a.code).icon }} {{ a.name }}
+            <span v-if="participantStateLabel(a.code)" class="part-state">
+              {{ participantStateLabel(a.code) }}
+            </span>
           </span>
           <span class="part-chip user">🙋 你</span>
         </div>
@@ -107,13 +113,28 @@
                   <span class="msg-name" :style="{ color: nameColor(turn) }">
                     {{ turn.role === 'user' ? '你' : turn.agent_name }}
                   </span>
+                  <span
+                    v-if="showStance(turn)"
+                    class="stance-badge"
+                    :class="`stance-${turn.stance || 'neutral'}`"
+                  >
+                    {{ stanceLabel(turn.stance) }}
+                  </span>
+                  <span v-if="turn.action === 'silent'" class="silent-badge">静音</span>
+                  <span v-if="turn.reply_to" class="reply-target">
+                    回应 {{ agentName(turn.reply_to) }}
+                  </span>
                   <span class="msg-time">{{ formatTime(turn.timestamp) }}</span>
                 </div>
                 <div
                   class="msg-bubble"
                   :class="bubbleClass(turn)"
-                  v-html="render(turn.content)"
-                />
+                >
+                  <span v-if="turn.action === 'silent'" class="silent-reason">
+                    {{ turn.content }}
+                  </span>
+                  <div v-else v-html="render(turn.content)" />
+                </div>
               </div>
             </div>
           </TransitionGroup>
@@ -174,10 +195,12 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import MarkdownIt from 'markdown-it'
+
+import { renderMarkdown } from '@/utils/markdown'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import {
   subscribeDiscussion,
   type WsMessage,
@@ -221,8 +244,6 @@ const msgContainer = ref<HTMLElement>()
 let stream: ReturnType<typeof subscribeDiscussion> | null = null
 let autoScroll = true
 
-const md = new MarkdownIt({ breaks: true, linkify: true })
-
 const AGENT_THEME: Record<string, { icon: string; color: string }> = {
   security: { icon: '🛡️', color: '#DC4961' },
   reliability: { icon: '🔒', color: '#5B58E8' },
@@ -232,8 +253,92 @@ const AGENT_THEME: Record<string, { icon: string; color: string }> = {
   orchestrator: { icon: '🎤', color: '#8B5CF6' },
   user: { icon: '🙋', color: '#0EA5E9' },
 }
-function themeOf(code: string) {
+/**
+ * 返回指定 Agent 的头像图标和强调色。
+ * @param code - Agent 机器编码。
+ * @returns Agent 主题；未知编码使用中性兜底主题。
+ */
+function themeOf(code: string): { icon: string; color: string } {
   return AGENT_THEME[code] ?? { icon: '🤖', color: '#6B7280' }
+}
+
+type Stance = NonNullable<DiscussionTurn['stance']>
+type DecisionAction = NonNullable<DiscussionTurn['action']>
+
+const STANCE_LABELS: Record<Stance, string> = {
+  propose: '提出',
+  agree: '赞同',
+  oppose: '否认',
+  question: '质疑',
+  supplement: '补充',
+  neutral: '中立',
+}
+
+const participantStates = computed<Record<string, { action: DecisionAction; stance: Stance }>>(() => {
+  const states: Record<string, { action: DecisionAction; stance: Stance }> = {}
+  for (const turn of turns.value) {
+    if (turn.role !== 'agent' || turn.agent_code === 'orchestrator') continue
+    states[turn.agent_code] = {
+      action: turn.action || 'speak',
+      stance: turn.stance || 'neutral',
+    }
+  }
+  return states
+})
+
+/**
+ * 返回参会 Agent 当前应展示的状态文案。
+ * @param code - Agent 机器编码。
+ * @returns 决策中、静音、已发言或空字符串。
+ */
+function participantStateLabel(code: string): string {
+  if (currentSpeakerCode.value === code) return '决策中'
+  const state = participantStates.value[code]
+  if (!state) return ''
+  return state.action === 'silent' ? '静音' : '已发言'
+}
+
+/**
+ * 返回参会 Agent 状态对应的 CSS 类。
+ * @param code - Agent 机器编码。
+ * @returns 用于参会者标签的状态类对象。
+ */
+function participantClass(code: string): Record<string, boolean> {
+  const state = participantStates.value[code]
+  return {
+    deciding: currentSpeakerCode.value === code,
+    silent: currentSpeakerCode.value !== code && state?.action === 'silent',
+    spoke: currentSpeakerCode.value !== code && state?.action === 'speak',
+  }
+}
+
+/**
+ * 将结构化立场转换为中文标签。
+ * @param stance - 后端返回的立场枚举。
+ * @returns 对应中文标签。
+ */
+function stanceLabel(stance?: DiscussionTurn['stance']): string {
+  return STANCE_LABELS[stance || 'neutral']
+}
+
+/**
+ * 判断一条消息是否需要展示立场标签。
+ * @param turn - 当前讨论消息。
+ * @returns 普通 Agent 的有效发言返回 true。
+ */
+function showStance(turn: DiscussionTurn): boolean {
+  return turn.role === 'agent'
+    && turn.agent_code !== 'orchestrator'
+    && turn.action !== 'silent'
+}
+
+/**
+ * 把回应目标编码转换为参会者名称。
+ * @param code - 被回应者 Agent 编码。
+ * @returns 参会者名称；未知编码保留原值。
+ */
+function agentName(code: string): string {
+  return props.agents.find((agent) => agent.code === code)?.name || code
 }
 
 const quickPrompts = [
@@ -257,18 +362,30 @@ const canSend = computed(() => status.value === 'connected' && phase.value === '
 const typingColor = computed(() => themeOf(currentSpeakerCode.value).color)
 const typingIcon = computed(() => themeOf(currentSpeakerCode.value).icon)
 
+// 长讨论中每条消息每次重渲染都会重新 markdown 渲染,导致卡顿。
+// 用 Map 缓存渲染结果,key 为原文,命中即返回,避免重复渲染。
+const renderCache = new Map<string, string>()
 function render(text: string): string {
-  return md.render(text || '')
+  const key = text || ''
+  const cached = renderCache.get(key)
+  if (cached !== undefined) return cached
+  const html = renderMarkdown(key)
+  // 缓存上限,防止超长讨论内存膨胀
+  if (renderCache.size > 500) renderCache.clear()
+  renderCache.set(key, html)
+  return html
 }
 
 function rowClass(t: DiscussionTurn) {
   if (t.role === 'user') return 'user'
   if (t.agent_code === 'orchestrator') return 'orchestrator'
+  if (t.action === 'silent') return 'agent decision-silent'
   return 'agent'
 }
 function bubbleClass(t: DiscussionTurn) {
   if (t.role === 'user') return 'bubble-user'
   if (t.agent_code === 'orchestrator') return 'bubble-orch'
+  if (t.action === 'silent') return 'bubble-silent'
   return 'bubble-agent'
 }
 function avatarIcon(t: DiscussionTurn) {
@@ -526,6 +643,13 @@ connectWs()
   color: #444; display: inline-flex; align-items: center; gap: 4px;
   border-left: 3px solid var(--chip-color, #d8d8e2);
 }
+.part-chip.deciding { background: #eef7ff; box-shadow: inset 0 0 0 1px var(--chip-color); }
+.part-chip.silent { opacity: 0.68; background: #f3f4f6; }
+.part-chip.spoke { background: #f5fbf7; }
+.part-state {
+  margin-left: 2px; padding-left: 6px; border-left: 1px solid #d8d8e2;
+  font-size: 10px; color: #6b7280;
+}
 .part-chip.orchestrator { border-color: #8B5CF6; border-left-color: #8B5CF6; color: #6D28D9; }
 .part-chip.user { border-color: #0EA5E9; border-left-color: #0EA5E9; color: #0369A1; }
 
@@ -560,12 +684,30 @@ connectWs()
 .msg-row.user .msg-meta { flex-direction: row-reverse; }
 .msg-name { font-size: 13px; font-weight: 600; }
 .msg-time { font-size: 11px; color: var(--color-text-placeholder, #aaa); }
+.stance-badge, .silent-badge, .reply-target {
+  font-size: 10px; line-height: 18px; padding: 0 6px; border-radius: 4px;
+  white-space: nowrap;
+}
+.stance-badge { color: #374151; background: #eef2f7; }
+.stance-agree { color: #166534; background: #dcfce7; }
+.stance-oppose { color: #991b1b; background: #fee2e2; }
+.stance-question { color: #92400e; background: #fef3c7; }
+.stance-supplement { color: #075985; background: #e0f2fe; }
+.stance-propose { color: #3730a3; background: #e0e7ff; }
+.silent-badge { color: #4b5563; background: #e5e7eb; }
+.reply-target { color: #6b7280; background: #f3f4f6; }
 
 .msg-bubble {
   padding: 10px 14px; border-radius: 12px; font-size: 13.5px; line-height: 1.7;
   word-break: break-word; color: #2b2b3a;
 }
 .bubble-agent { background: #fff; border: 1px solid #e9e9f2; border-top-left-radius: 4px; }
+.bubble-silent {
+  padding: 7px 11px; color: #6b7280; background: #f3f4f6;
+  border: 1px dashed #d1d5db; border-top-left-radius: 4px;
+}
+.decision-silent .msg-avatar { filter: grayscale(0.75); opacity: 0.68; }
+.silent-reason { font-size: 12px; font-style: italic; }
 .bubble-orch {
   background: linear-gradient(135deg, #f3efff, #fbf7ff);
   border: 1px solid #e3d8ff; border-top-left-radius: 4px;

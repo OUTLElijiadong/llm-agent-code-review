@@ -152,9 +152,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+
 import type { FormInstance } from 'element-plus'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
@@ -163,6 +163,7 @@ import { list as getCodeFiles } from '@/api/codeFile'
 import { startReview } from '@/api/review'
 import { startDiscussion } from '@/api/discussion'
 import type { ProjectOut, CodeFileOut } from '@/types/project'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 /** 后端单任务文件数上限 (与 ReviewStartIn.file_ids 校验一致) */
 const MAX_FILES = 500
@@ -269,8 +270,9 @@ async function submitSingleProject(): Promise<void> {
   })
   reviewingSublabel.value = '已提交至 Agent 调度器'
   reviewingVisible.value = true
-  // 后端异步执行,跳转任务详情页查看实时进度(无 task_id 时退回列表)
-  setTimeout(() => {
+  // 后端异步执行,跳转任务详情页查看实时进度(无 task_id 时退回列表);
+  // 记录定时器,组件卸载时清理,避免卸载后回调操作已销毁组件
+  navTimer = setTimeout(() => {
     reviewingVisible.value = false
     router.push(res?.task_id ? `/reviews/${res.task_id}` : '/reviews')
   }, 1500)
@@ -341,6 +343,12 @@ function onReset() {
 }
 
 onMounted(() => { loadProjects() })
+
+// 跳转定时器,卸载时清理
+let navTimer: ReturnType<typeof setTimeout> | null = null
+onBeforeUnmount(() => {
+  if (navTimer) clearTimeout(navTimer)
+})
 </script>
 
 <style scoped lang="scss">

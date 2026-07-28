@@ -2,9 +2,15 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, SwitchButton, UserFilled, Search, MagicStick, Menu } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
+
 import { useUserStore } from '@/stores/user'
-import { canRoleOpenPath, normalizeRole, type UserRole } from '@/utils/roleHome'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import {
+  canRoleOpenPath,
+  canRoleSeeNavigationItem,
+  normalizeRole,
+  type UserRole,
+} from '@/utils/roleHome'
 
 const route = useRoute()
 const router = useRouter()
@@ -52,10 +58,15 @@ const searchItems = computed<SearchItem[]>(() => {
   const items: SearchItem[] = [
     { title: '工作台', description: '查看审查任务、风险分布和最近活动', path: '/dashboard', roles: ['admin', 'user', 'reviewer'] },
     { title: '项目管理', description: '管理项目、上传代码文件和编辑项目信息', path: '/projects', roles: ['user'] },
+    { title: '代码中心', description: '按项目浏览、编辑和管理代码文件', path: '/code', roles: ['user'] },
     { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start', roles: ['user', 'reviewer'] },
     { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'] },
     { title: '审查规则', description: '配置代码规范、性能、安全等审查维度', path: '/rules', roles: ['user', 'reviewer'] },
     { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['user', 'reviewer'] },
+    { title: '开发者论坛', description: '提问、分享经验和交流审查实践', path: '/forum', roles: ['admin', 'user', 'reviewer'] },
+    { title: '个人知识库', description: '管理个人 RAG 文档、同步与检索', path: '/knowledge', roles: ['user', 'reviewer'] },
+    { title: '个性化画像', description: '配置技术栈、目标和 AI 偏好', path: '/profile/personalization', roles: ['user', 'reviewer'] },
+    { title: '申请维修', description: '提交平台故障工单并跟踪处理进度', path: '/support/maintenance', roles: ['admin', 'user', 'reviewer'] },
     { title: '修改密码', description: '更新当前账号登录密码', path: '/profile/password', roles: ['admin', 'user', 'reviewer'] },
     { title: 'Agent 助手', description: '打开智能助手咨询代码审查问题', action: 'agent' },
     { title: '用户管理', description: '管理平台用户和角色权限', path: '/admin/users', admin: true },
@@ -65,7 +76,7 @@ const searchItems = computed<SearchItem[]>(() => {
   ]
   return items.filter((item) => {
     if (item.admin && !isAdmin.value) return false
-    if (item.roles && !item.roles.includes(currentRole.value)) return false
+    if (!canRoleSeeNavigationItem(currentRole.value, item.roles)) return false
     if (item.path && !canRoleOpenPath(currentRole.value, item.path)) return false
     return true
   })
@@ -145,7 +156,8 @@ async function handleLogout(): Promise<void> {
       type: 'warning',
     })
     userStore.logout()
-    router.push('/login')
+    // 用 replace 避免历史残留,防止后退键回到内页触发异常/数据泄露
+    router.replace('/login')
   } catch {
     /* 用户取消 */
   }
@@ -239,6 +251,7 @@ onBeforeUnmount(() => {
       <el-input
         v-model="searchKeyword"
         placeholder="搜索页面、功能或 Agent 助手"
+        aria-label="全局搜索"
         clearable
         autofocus
         :prefix-icon="Search"

@@ -186,10 +186,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+
 import { getAiLogs, getAiLogDetail } from '@/api/aiLog'
 import type { AiLogOut, AiLogDetailOut } from '@/types/aiLog'
 import { formatDateTime } from '@/utils/format'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 const loading = ref(false)

@@ -222,7 +222,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import dayjs from 'dayjs'
-import { ElMessage } from 'element-plus'
+
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import AgentDeskCard from '@/components/agent/AgentDeskCard.vue'
 import SituationPanel from '@/components/agent/SituationPanel.vue'
@@ -241,6 +241,7 @@ import {
 } from '@/api/agent'
 import { triggerEvolution } from '@/api/evolution'
 import { useUserStore } from '@/stores/user'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import type {
   AgentRuntimeOut,
   AgentRuntimeSummaryOut,
@@ -382,7 +383,7 @@ async function triggerSelfImprove(agent: AgentRuntimeOut): Promise<void> {
     }
     // 重新加载 Skill 列表以刷新展示
     await loadAgentSkills(agent.code)
-  } catch (e) {
+  } catch {
     ElMessage.error('触发自进化失败')
   } finally {
     triggering.value = false
@@ -407,9 +408,6 @@ function invokeViaChat(agent: AgentRuntimeOut): void {
 
 function goRules(): void {
   router.push('/rules')
-}
-function goReview(): void {
-  router.push('/reviews/start')
 }
 
 async function loadAll(): Promise<void> {
@@ -450,7 +448,7 @@ const STATUS_BY_EVENT: Record<AgentEventType, AgentStatus> = {
 
 const ERROR_TIMEOUT_MS = 6_000
 const STATS_REFRESH_DELAY_MS = 800
-const HEARTBEAT_REFRESH_MS = 15_000
+const HEARTBEAT_REFRESH_MS = 60_000
 const errorTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let stream: ReturnType<typeof subscribeAgentEvents> | null = null
 
@@ -529,6 +527,7 @@ async function refreshAgentStats(): Promise<void> {
 }
 
 // === 60s 心跳定期全量刷新 (兜底) ===
+// SSE 事件流已驱动统计增量刷新,此轮询仅作断流兜底,60s 足够,无需更密
 
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 

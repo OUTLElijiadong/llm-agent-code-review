@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+
 import { Lock } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { changePassword } from '@/api/auth'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { goBack as safeGoBack } from '@/utils/navigation'
 
 const router = useRouter()
 const formRef = ref<FormInstance>()
@@ -65,7 +67,8 @@ async function handleSubmit() {
 }
 
 function goBack() {
-  router.back()
+  // 安全返回:直接 URL 进入(无站内历史)时回到个人中心而非离开应用
+  safeGoBack(router, '/profile')
 }
 </script>
 

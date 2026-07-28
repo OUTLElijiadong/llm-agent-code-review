@@ -51,8 +51,8 @@ export function subscribeAgentEvents(
     try {
       const ev: AgentEvent = JSON.parse(dataLines.join('\n'))
       onEvent(ev)
-    } catch (err) {
-      console.warn('[agentEventStream] 解析事件失败', err)
+    } catch {
+      // 单条事件解析失败不影响整个流,静默跳过(生产环境不刷 console)
     }
   }
 

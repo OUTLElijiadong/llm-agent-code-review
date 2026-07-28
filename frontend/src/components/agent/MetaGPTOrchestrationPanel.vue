@@ -13,10 +13,11 @@
  *   - GET /api/agents/metagpt/preview?mode=review|discussion
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import { getMetaGPTInfo, previewMetaGPTEnvironment } from '@/api/agent'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import type {
   MetaGPTEnvironmentPreviewOut,
   MetaGPTInfoOut,

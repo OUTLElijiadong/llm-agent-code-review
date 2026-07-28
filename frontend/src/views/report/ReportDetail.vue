@@ -2,7 +2,7 @@
   <div class="report-detail-page">
     <!-- ============ 顶部操作栏（打印时隐藏）============ -->
     <header class="page-head no-print">
-      <el-button link class="back-btn" @click="$router.back()">
+      <el-button link class="back-btn" @click="goBack(router, '/reports')">
         <el-icon><ArrowLeft /></el-icon>返回列表
       </el-button>
       <h1 class="font-display">审查报告</h1>
@@ -396,11 +396,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+
 import { ArrowLeft, ArrowDown, Document, Download, Printer, View } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
-import type { EChartsOption } from 'echarts'
+import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
@@ -416,8 +416,10 @@ import { getTaskIssues } from '@/api/review'
 import type { ReportDetailOut, ReportIssue, ReportFormat, ReportTemplateType } from '@/types/report'
 import { PRISM_SEVERITY_COLORS, PRISM_DIM_COLORS } from '@/components/chart/prismTheme'
 import { reviewTypeLabel } from '@/constants/reviewType'
+import { goBack } from '@/utils/navigation'
 
 const route = useRoute()
+const router = useRouter()
 const taskId = Number(route.params.id)
 
 const loading = ref(true)
@@ -501,6 +503,7 @@ const severityRows = computed(() => {
 })
 
 import { DIM_KEYS, DIM_LABELS, normalizeDimKey } from '@/constants/dim'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const dimKeys = DIM_KEYS
 const dimLabels = dimKeys.map((k) => DIM_LABELS[k])
@@ -850,6 +853,12 @@ function selectRemediation(id: number): void {
 onMounted(() => {
   loadReport()
   loadIssues()
+  // 报告列表"生成报告"按钮跳转携带 ?generate=1,此处消费该 query 自动触发生成
+  if (route.query.generate === '1') {
+    // 消费后立即清掉 query,避免刷新/前进后退时重复触发生成
+    router.replace({ query: {} })
+    handleGenerate('html')
+  }
 })
 </script>
 

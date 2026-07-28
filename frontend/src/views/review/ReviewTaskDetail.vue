@@ -28,7 +28,7 @@
 
     <!-- ============ 顶部摘要条 ============ -->
     <header class="task-head">
-      <el-button link class="back-btn" @click="$router.back()">
+      <el-button link class="back-btn" @click="goBack(router, '/reviews')">
         <el-icon><ArrowLeft /></el-icon>返回
       </el-button>
 
@@ -274,8 +274,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { goBack } from '@/utils/navigation'
 import { ArrowLeft, Lock, MagicStick, ZoomIn, ZoomOut, RefreshRight } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+
 import CodeViewer from '@/components/code/CodeViewer.vue'
 import IssueDetailDrawer from '@/components/issue/IssueDetailDrawer.vue'
 import AiPromptModal from '@/components/issue/AiPromptModal.vue'
@@ -291,6 +292,7 @@ import { PRISM_SEVERITY_COLORS } from '@/components/chart/prismTheme'
 import { SEVERITY_OPTIONS, severityClass, severityDisplayLabel } from '@/constants/severity'
 import { DIM_META, normalizeDimKey, dimColor as resolveDimColor, dimLabel as resolveDimLabel } from '@/constants/dim'
 import { reviewTypeLabel } from '@/constants/reviewType'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const route = useRoute()
 const router = useRouter()

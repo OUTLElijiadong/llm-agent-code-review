@@ -123,7 +123,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { formatDateTime } from '@/utils/format'
 import { Plus } from '@element-plus/icons-vue'
 import { getReviewTasks, deleteReviewTask, cancelReviewTask } from '@/api/review'
@@ -131,6 +131,8 @@ import { getProjects } from '@/api/project'
 import type { TaskOut } from '@/types/review'
 import type { ProjectOut } from '@/types/project'
 import { reviewTypeLabel } from '@/constants/reviewType'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 

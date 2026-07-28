@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+
 import { ArrowRight, Lock, TrendCharts } from '@element-plus/icons-vue'
 import { getSecurityChecklist, getSecurityDashboard } from '@/api/security'
 import type {
@@ -11,8 +11,11 @@ import type {
 } from '@/types/security'
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { OWASP_TOP10, type OwaspDoc } from './owasp-knowledge'
+import { useUserStore } from '@/stores/user'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const checklist = ref<SecurityChecklistOut | null>(null)
@@ -83,7 +86,13 @@ async function loadDashboardSummary(): Promise<void> {
 }
 
 function gotoProjects(): void {
-  router.push('/projects')
+  // 无项目管理权限的角色(如 reviewer)访问 /projects 会 403,引导到审查任务页
+  if (userStore.isAdmin() || userStore.hasPermission('project:view')) {
+    router.push('/projects')
+  } else {
+    ElMessage.warning('当前角色无项目管理权限,已为你跳转到审查任务')
+    router.push('/reviews')
+  }
 }
 
 function openAllProjectScan(): void {

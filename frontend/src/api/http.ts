@@ -1,7 +1,8 @@
 import axios, { AxiosError, AxiosResponse } from 'axios'
-import { ElMessage } from 'element-plus'
+
 import router from '@/router'
 import { getToken, clearToken } from '@/utils/token'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 export interface Resp<T = unknown> {
   code: number
@@ -13,7 +14,7 @@ export interface Resp<T = unknown> {
 
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
-  // 慢推理模型(如 gpt-5.5)单次调用可达 ~90s+,聊天为多次调用串联;
+  // 慢推理模型单次调用可达 ~90s+,聊天为多次调用串联;
   // 放宽到 10 分钟,与 nginx proxy_read_timeout(600s)对齐,避免前端提前中断。
   timeout: 600_000,
 })
@@ -33,12 +34,15 @@ http.interceptors.response.use(
     return Promise.reject(data)
   },
   (err: AxiosError<Resp>) => {
+    // 主动取消属于正常交互，不弹全局错误，也不触发鉴权跳转。
+    if (axios.isCancel(err)) return Promise.reject(err)
     const status = err.response?.status
     const data = err.response?.data
     if (status === 401) {
       clearToken()
       window.dispatchEvent(new Event('prism:auth-expired'))
-      router.push('/login')
+      // 用 replace 避免历史残留,防止后退键回到已失效的内页
+      router.replace('/login')
     }
     ElMessage.error(data?.message || err.message || '网络错误')
     return Promise.reject(data || err)

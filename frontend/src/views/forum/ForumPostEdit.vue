@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { goBack } from '@/utils/navigation'
+
 import { MagicStick } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import {
   assistDraft, createPost, getPost, updatePost, type AssistResult,
 } from '@/api/forum'
@@ -70,7 +72,7 @@ onMounted(async () => {
   <div class="post-edit-page">
     <div class="page-header">
       <h2>{{ isEdit ? '编辑帖子' : '发布新帖' }}</h2>
-      <el-button link @click="router.back()">返回</el-button>
+      <el-button link @click="goBack(router, '/forum')">返回</el-button>
     </div>
 
     <el-card shadow="never">

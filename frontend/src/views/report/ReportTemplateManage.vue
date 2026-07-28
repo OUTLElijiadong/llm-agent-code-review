@@ -197,9 +197,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, Plus, Search, View, Edit, Delete } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import {
   listTemplates,
   createTemplate,

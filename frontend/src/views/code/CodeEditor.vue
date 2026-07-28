@@ -1,7 +1,7 @@
 <template>
   <div class="code-editor-page">
     <div class="page-header">
-      <el-page-header @back="router.back()">
+      <el-page-header @back="goBack(router)">
         <template #content>
           <span class="header-title">{{ fileDetail?.file_name || '代码编辑器' }}</span>
           <el-tag v-if="isBinary" size="small" type="warning" class="binary-tag">二进制</el-tag>
@@ -92,13 +92,15 @@
  */
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { goBack } from '@/utils/navigation'
+
 import { Document, Download } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import MonacoEditor from '@/components/editor/MonacoEditor.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getDetail, update, downloadBinary } from '@/api/codeFile'
 import type { CodeFileDetailOut } from '@/types/project'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const route = useRoute()
 const router = useRouter()

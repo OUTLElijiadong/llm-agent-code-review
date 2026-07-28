@@ -47,10 +47,10 @@ export function fetchUserRoles(userId: number): Promise<UserRoleItem[]> {
 /**
  * 查询用户权限点
  * @param userId - 用户 ID
- * @returns 用户拥有的权限点列表
+ * @returns 用户拥有的权限编码字符串列表(后端返回 List[str],非对象)
  */
-export function fetchUserPermissions(userId: number): Promise<Permission[]> {
-  return get<Permission[]>(`${BASE}/users/${userId}/permissions`)
+export function fetchUserPermissions(userId: number): Promise<string[]> {
+  return get<string[]>(`${BASE}/users/${userId}/permissions`)
 }
 
 /**
@@ -65,10 +65,10 @@ export function fetchUserMenus(userId: number): Promise<Menu[]> {
 /**
  * 查询用户数据范围
  * @param userId - 用户 ID
- * @returns 用户的数据范围配置
+ * @returns 用户的数据范围配置(后端聚合多角色后返回单个对象)
  */
-export function fetchUserDataScope(userId: number): Promise<DataScope[]> {
-  return get<DataScope[]>(`${BASE}/users/${userId}/data-scope`)
+export function fetchUserDataScope(userId: number): Promise<DataScope> {
+  return get<DataScope>(`${BASE}/users/${userId}/data-scope`)
 }
 
 /* ------------------------------------------------------------------ */

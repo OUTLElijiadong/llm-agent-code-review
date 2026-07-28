@@ -158,8 +158,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
-import { ElMessage } from 'element-plus'
-import type { EChartsOption } from 'echarts'
+
+import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
@@ -174,7 +174,8 @@ import {
   getScoreTrend,
   getReviewFrequency,
 } from '@/api/dashboard'
-import type { RiskItem, IssueTypeItem, ScoreTrendItem, FrequencyItem, SummaryOut } from '@/types/dashboard'
+import type { RiskItem, IssueTypeItem, ScoreTrendItem, FrequencyItem, SummaryOut, RecentTaskOut } from '@/types/dashboard'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 const timeRange = ref(30)
@@ -392,25 +393,16 @@ interface ActivityItem {
 }
 
 const activityFeed = computed<ActivityItem[]>(() => {
-  const tasks = (summary.value.recent_tasks ?? []) as Array<Record<string, unknown>>
-  if (tasks.length === 0) {
-    return [{
-      id: 0,
-      icon: 'Cpu',
-      color: 'var(--brand-500)',
-      title: '正在等待 Agent 审查任务上线',
-      meta: 'DeepSeek V4 · 待命中',
-      when: '刚刚',
-      live: true,
-    }]
-  }
+  const tasks = (summary.value.recent_tasks ?? []) as RecentTaskOut[]
   return tasks.slice(0, 6).map((t, i) => {
-    const id = (t.id as number) ?? i
-    const score = (t.score as number) ?? 0
-    const status = (t.status as string) ?? 'pending'
-    const projectName = (t.project_name as string) ?? (t.task_name as string) ?? `任务 #${id}`
-    const safeProjectName = escapeHtml(projectName)
-    const created = t.create_time ? dayjs(t.create_time as string).fromNow?.() ?? dayjs(t.create_time as string).format('M/D HH:mm') : ''
+    const id = t.id ?? i
+    const score = t.score ?? 0
+    const status = t.status || 'pending'
+    const taskName = t.task_name || `任务 #${id}`
+    const projectName = t.project_name || ''
+    const displayName = projectName ? `${projectName} · ${taskName}` : taskName
+    const safeDisplayName = escapeHtml(displayName)
+    const created = t.create_time ? dayjs(t.create_time).fromNow?.() ?? dayjs(t.create_time).format('M/D HH:mm') : ''
     const live = status === 'running' && i === 0
     const ok = status === 'success'
     return {
@@ -418,10 +410,10 @@ const activityFeed = computed<ActivityItem[]>(() => {
       icon: live ? 'Cpu' : ok ? 'Select' : 'Warning',
       color: live ? 'var(--brand-500)' : ok ? 'var(--status-fixed)' : 'var(--dim-bug)',
       title: live
-        ? `正在审查 <b>${safeProjectName}</b>`
+        ? `正在审查 <b>${safeDisplayName}</b>`
         : ok
-          ? `完成 <b>${safeProjectName}</b>，评分 <b style="color: var(--status-fixed);">${score}</b>`
-          : `<b>${safeProjectName}</b> 检出问题`,
+          ? `完成 <b>${safeDisplayName}</b>，评分 <b style="color: var(--status-fixed);">${score}</b>`
+          : `<b>${safeDisplayName}</b> 检出问题`,
       meta: `状态：${status}${ok ? ` · 评分 ${score}` : ''}`,
       when: created || '近期',
       live,
@@ -473,12 +465,16 @@ async function loadReviewFrequency() {
 }
 
 async function loadCharts() {
-  await Promise.all([
+  // 用 allSettled 让单个图表接口失败不拖垮整屏,失败的图表显示空态而非全空
+  const results = await Promise.allSettled([
     loadRiskDistribution(),
     loadIssueTypeStatistics(),
     loadScoreTrend(),
     loadReviewFrequency(),
   ])
+  if (results.some((r) => r.status === 'rejected')) {
+    ElMessage.warning('部分图表数据加载失败,请稍后刷新重试')
+  }
 }
 
 function onWeeklyReport() {
@@ -491,8 +487,8 @@ function onWeeklyReport() {
       : '<tr><td colspan="2" style="color:#999">暂无数据</td></tr>'
   const taskRows = (s.recent_tasks || []).length
     ? (s.recent_tasks || []).map((t) =>
-        `<tr><td>#${esc(t.id)}</td><td style="text-align:right">${esc(t.score)}</td><td>${esc(String(t.create_time || '').slice(0, 10))}</td></tr>`).join('')
-    : '<tr><td colspan="3" style="color:#999">暂无审查记录</td></tr>'
+        `<tr><td>#${esc(t.id)}</td><td>${esc(t.project_name)}</td><td>${esc(t.task_name)}</td><td style="text-align:right">${esc(t.score)}</td><td>${esc(String(t.create_time || '').slice(0, 10))}</td></tr>`).join('')
+    : '<tr><td colspan="5" style="color:#999">暂无审查记录</td></tr>'
 
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>棱镜 Prism 代码审查周报</title>
@@ -519,20 +515,23 @@ function onWeeklyReport() {
   </div>
   <h2>风险等级分布</h2><table><thead><tr><th>等级</th><th style="text-align:right">数量</th></tr></thead><tbody>${rows(riskData.value)}</tbody></table>
   <h2>问题类型分布</h2><table><thead><tr><th>类型</th><th style="text-align:right">数量</th></tr></thead><tbody>${rows(issueTypeData.value)}</tbody></table>
-  <h2>最近审查任务</h2><table><thead><tr><th>任务</th><th style="text-align:right">评分</th><th>日期</th></tr></thead><tbody>${taskRows}</tbody></table>
+  <h2>最近审查任务</h2><table><thead><tr><th>ID</th><th>项目</th><th>任务</th><th style="text-align:right">评分</th><th>日期</th></tr></thead><tbody>${taskRows}</tbody></table>
   <p style="margin-top:32px;color:#aaa;font-size:12px">— 由棱镜 Prism 智能代码审查平台生成 —</p>
 </body></html>`
 
-  const w = window.open('', '_blank')
+  // 用 Blob URL 承载周报 HTML,比 document.write 更安全(不经过父文档解析,
+  // 内容作为独立文档加载),且所有动态字段已经过 esc() 转义
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const w = window.open(url, '_blank', 'noopener,noreferrer')
   if (!w) {
+    window.URL.revokeObjectURL(url)
     ElMessage.warning('请允许弹出窗口以导出周报')
     return
   }
-  w.document.write(html)
-  w.document.close()
-  w.focus()
-  setTimeout(() => w.print(), 300)
-  ElMessage.success('周报已生成,可在打印窗口保存为 PDF')
+  // 延迟回收 URL,确保新窗口加载完成
+  setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
+  ElMessage.success('周报已在新窗口打开,可通过浏览器打印保存为 PDF')
 }
 
 function onNewReview() {
@@ -550,7 +549,11 @@ function goReviewList() {
 async function loadDashboard(): Promise<void> {
   loading.value = true
   try {
-    await Promise.all([loadSummary(), loadCharts()])
+    // allSettled: 摘要或图表任一失败不影响另一方渲染
+    const results = await Promise.allSettled([loadSummary(), loadCharts()])
+    if (results[0]?.status === 'rejected') {
+      ElMessage.error('工作台摘要数据加载失败')
+    }
   } finally {
     loading.value = false
   }

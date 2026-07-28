@@ -88,6 +88,7 @@ _PERMISSIONS: list[tuple[str, str, str, str]] = [
     ("report:export:word", "导出Word", "report", "导出 Word 格式报告"),
     ("report:export:json", "导出JSON", "report", "导出 JSON 格式报告"),
     ("report:export:html", "导出HTML", "report", "导出 HTML 格式报告"),
+    ("report:template_manage", "管理报告模板", "report", "管理报告模板"),
     # agent 模块 (3)
     ("agent:view", "查看Agent", "agent", "查看 Agent 信息"),
     ("agent:chat", "Agent对话", "agent", "与 Agent 进行对话"),
@@ -167,10 +168,11 @@ def _build_role_permission_rows() -> list[dict]:
         "report:export:pdf", "report:export:word", "report:export:json", "report:export:html",
         "agent:view", "security:view", "audit:view",
     }
-    # admin (role_id=4): reviewer 基础 + 审批/规则管理/Agent配置/用户管理
+    # admin (role_id=4): reviewer 基础 + 审批/规则管理/Agent配置/用户管理/报告模板管理
     admin_codes = reviewer_codes | {
         "review:approve", "rule:create", "rule:update", "rule:delete",
         "agent:configure", "user:view", "user:update", "ai_log:view",
+        "report:template_manage",
     }
     # super_admin (role_id=5): 全部权限点
     super_admin_codes = {code for code, *_rest in _PERMISSIONS}
@@ -261,8 +263,8 @@ def _build_menu_rows() -> list[dict]:
         # 系统管理子菜单: AI 调用日志 (id=15, parent=10)
         {"parent_id": 10, "name": "AI 调用日志", "path": "/admin/ai-logs", "component": None,
          "icon": None, "sort": 85, "permission_code": "ai_log:view", "visible": 1, "is_builtin": 1},
-        # 系统管理子菜单: 报告模板 (id=16, parent=10)
-        {"parent_id": 10, "name": "报告模板", "path": "/admin/report-templates", "component": None,
+        # 系统管理子菜单: 报告模板 (id=16, parent=10);路径对齐前端真实路由 /report/templates
+        {"parent_id": 10, "name": "报告模板", "path": "/report/templates", "component": None,
          "icon": None, "sort": 86, "permission_code": "report:view", "visible": 1, "is_builtin": 1},
         # 系统管理子菜单: 扫描记录 (id=17, parent=10)
         {"parent_id": 10, "name": "扫描记录", "path": "/admin/malware-scans", "component": None,

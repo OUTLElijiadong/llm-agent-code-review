@@ -282,7 +282,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { Refresh } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import {
@@ -298,6 +298,8 @@ import {
   triggerEvolution,
 } from '@/api/evolution'
 import { listRuntimeAgents, listSkillRecords } from '@/api/agent'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import type {
   EvalCase,
   EvolutionProposal,

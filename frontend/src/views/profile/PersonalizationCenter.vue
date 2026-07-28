@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { formatDate } from '@/utils/format'
 import { getProfile, updateProfile, relearnProfile, type UserProfile } from '@/api/profile'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const LEVELS: Record<string, string> = {
   beginner: '入门', intermediate: '进阶', advanced: '资深',

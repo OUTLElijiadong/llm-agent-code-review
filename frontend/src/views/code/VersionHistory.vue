@@ -1,7 +1,7 @@
 <template>
   <div class="version-history-page">
     <div class="page-header">
-      <el-page-header @back="router.back()">
+      <el-page-header @back="goBack(router, '/code')">
         <template #content>
           <span class="header-title">版本历史</span>
         </template>
@@ -85,11 +85,13 @@
  */
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { goBack } from '@/utils/navigation'
+
 import dayjs from 'dayjs'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { listVersions, getVersion, restoreVersion } from '@/api/codeFile'
 import type { VersionOut, VersionDetailOut } from '@/types/project'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const route = useRoute()
 const router = useRouter()

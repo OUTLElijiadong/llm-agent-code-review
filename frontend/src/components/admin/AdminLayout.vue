@@ -5,6 +5,7 @@ import {
   Bell,
   Cpu,
   DataAnalysis,
+  Document,
   Files,
   Histogram,
   Key,
@@ -20,8 +21,9 @@ import {
   User,
   View,
 } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
+
 import { useUserStore } from '@/stores/user'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
 interface AdminMenuItem {
   path: string
@@ -46,6 +48,7 @@ const menuItems: AdminMenuItem[] = [
   { path: '/admin/rollback', title: '回滚中心', icon: Refresh },
   { path: '/admin/users', title: '用户管理', icon: User },
   { path: '/admin/ai-logs', title: 'Agent 调用日志', icon: MagicStick },
+  { path: '/report/templates', title: '报告模板', icon: Document },
   { path: '/admin/audit', title: '系统操作审计', icon: Bell },
   { path: '/admin/evolution', title: 'Agent 自进化', icon: MagicStick },
   { path: '/admin/skills', title: 'Skill 管理', icon: View },

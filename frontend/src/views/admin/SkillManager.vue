@@ -233,11 +233,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { Refresh } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import {
   listRuntimeAgents,
   listAgentSkills,
@@ -417,7 +418,7 @@ async function onInvokeSkill(sk: SkillMetaOut): Promise<void> {
     }
     // 刷新调用记录
     await loadRecords()
-  } catch (e) {
+  } catch {
     ElMessage.error('Skill 调用异常')
   } finally {
     invoking[sk.name] = false

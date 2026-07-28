@@ -115,7 +115,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { getUsers } from '@/api/user'
 import {
   listRoles,
@@ -124,6 +124,7 @@ import {
   assignUserRoles,
 } from '@/api/rbac'
 import type { Role, UserRoleItem } from '@/types/rbac'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 /** 表格行数据(统一数据源形态) */
 interface UserRow {

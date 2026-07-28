@@ -262,7 +262,7 @@ const routes: RouteRecordRaw[] = [
         path: 'users',
         name: 'UserManage',
         component: () => import('@/views/admin/UserManage.vue'),
-        meta: { title: '用户管理', role: 'admin', roles: ['admin'], permissions: ['user:manage'] },
+        meta: { title: '用户管理', role: 'admin', roles: ['admin'], permissions: ['user:view'] },
       },
       {
         path: 'rbac/roles',
@@ -280,7 +280,7 @@ const routes: RouteRecordRaw[] = [
         path: 'rbac/users',
         name: 'UserRoleAssign',
         component: () => import('@/views/admin/UserRoleAssign.vue'),
-        meta: { title: '用户角色分配', role: 'admin', roles: ['admin'], permissions: ['user:manage'] },
+        meta: { title: '用户角色分配', role: 'admin', roles: ['admin'], permissions: ['user:view'] },
       },
       {
         path: 'ai-logs',

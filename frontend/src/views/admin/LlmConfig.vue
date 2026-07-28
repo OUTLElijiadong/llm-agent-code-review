@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { getLlmConfig, updateLlmConfig, testLlmConfig, type LlmConfig } from '@/api/llmConfig'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const mode = ref<'deepseek' | 'custom'>('deepseek')
 const cfg = ref<LlmConfig | null>(null)
@@ -17,12 +18,6 @@ async function load() {
   form.base_url = c.base_url
   form.model = c.model
   form.api_key = ''
-}
-
-function fillExample() {
-  form.base_url = 'https://api.wenrugouai.com/v1'
-  form.model = 'gpt-5.5'
-  ElMessage.info('已填入示例端点与模型,请补充 API Key')
 }
 
 function buildPayload(active: boolean) {
@@ -103,17 +98,14 @@ onMounted(load)
       <template v-if="mode === 'custom'">
         <el-form label-width="120px" style="max-width: 680px; margin-top: 20px">
           <el-form-item label="端点 Base URL">
-            <el-input v-model="form.base_url" placeholder="如 https://api.wenrugouai.com/v1" />
+            <el-input v-model="form.base_url" placeholder="请输入 OpenAI 兼容 Base URL" />
           </el-form-item>
           <el-form-item label="模型名称">
-            <el-input v-model="form.model" placeholder="如 gpt-5.5" />
+            <el-input v-model="form.model" placeholder="请输入模型名称" />
           </el-form-item>
           <el-form-item label="API Key">
             <el-input v-model="form.api_key" type="password" show-password
               :placeholder="cfg?.is_set ? `已配置(${cfg.api_key_masked},留空则不修改)` : '请输入 API Key'" />
-          </el-form-item>
-          <el-form-item>
-            <el-button link type="primary" @click="fillExample">填入 gpt-5.5 示例</el-button>
           </el-form-item>
           <el-form-item v-if="testResult" label=" ">
             <el-tag :type="testResult.success ? 'success' : 'danger'" size="large">

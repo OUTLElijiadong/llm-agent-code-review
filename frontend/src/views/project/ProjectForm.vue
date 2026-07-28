@@ -125,9 +125,10 @@
 import { ref, reactive, computed } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Loading, FolderOpened } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+
 import { analyzeFolder } from '@/api/project'
 import type { ProjectOut } from '@/types/project'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 interface Props {
   visible: boolean
@@ -242,7 +243,6 @@ function extractFiles(fileList: FileList): { files: File[]; names: string[]; fol
   const allFiles: File[] = []
   const allNames: string[] = []
   let folderName = ''
-  let skipped = 0
 
   for (let i = 0; i < fileList.length; i++) {
     const f = fileList[i]
@@ -251,7 +251,6 @@ function extractFiles(fileList: FileList): { files: File[]; names: string[]; fol
     }
     const relativePath = f.webkitRelativePath || f.name
     if (SYSTEM_DIRS.test(relativePath)) {
-      skipped++
       continue
     }
     allFiles.push(f)
