@@ -8,6 +8,8 @@ export interface RegisterIn {
   password: string
   email?: string
   nickname?: string
+  captcha_id?: string
+  captcha_answer?: string
 }
 
 export interface UserOut {

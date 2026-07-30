@@ -422,7 +422,7 @@ onMounted(loadData)
         <section class="panel">
           <h3>Agent 状态</h3>
           <el-table :data="agents" height="360">
-            <el-table-column prop="name" label="Agent" min-width="140" />
+            <el-table-column prop="name" label="Agent(智能体)" min-width="140" />
             <el-table-column prop="category" label="分类" width="110" />
             <el-table-column prop="status" label="状态" width="100" />
             <el-table-column prop="priority" label="优先级" width="90" />
@@ -441,10 +441,10 @@ onMounted(loadData)
 
     <section v-else-if="mode === 'agents'" class="panel">
       <el-table :data="agents" stripe>
-        <el-table-column prop="name" label="Agent" min-width="150" />
+        <el-table-column prop="name" label="Agent(智能体)" min-width="150" />
         <el-table-column prop="code" label="编码" min-width="140" />
         <el-table-column prop="category" label="分类" width="120" />
-        <el-table-column label="Skill" min-width="220">
+        <el-table-column label="Skill(技能)" min-width="220">
           <template #default="{ row }">{{ row.skills.join(', ') }}</template>
         </el-table-column>
         <el-table-column prop="priority" label="优先级" width="90" />
@@ -457,7 +457,7 @@ onMounted(loadData)
     <section v-else-if="mode === 'approvals'" class="panel">
       <el-table :data="approvals" stripe>
         <el-table-column prop="title" label="审批事项" min-width="220" />
-        <el-table-column prop="agent_code" label="Agent" width="120" />
+        <el-table-column prop="agent_code" label="Agent(智能体)" width="120" />
         <el-table-column prop="action" label="动作" min-width="150" />
         <el-table-column prop="risk_level" label="风险" width="90" />
         <el-table-column prop="status" label="状态" width="120" />
@@ -492,15 +492,15 @@ onMounted(loadData)
           <el-input v-model="policyEditor.action" placeholder="动作" />
           <el-input v-model="policyEditor.resource" placeholder="资源" />
           <el-select v-model="policyEditor.effect">
-            <el-option label="allow" value="allow" />
-            <el-option label="deny" value="deny" />
-            <el-option label="escalate" value="escalate" />
+            <el-option label="允许(allow)" value="allow" />
+            <el-option label="拒绝(deny)" value="deny" />
+            <el-option label="升级审批(escalate)" value="escalate" />
           </el-select>
           <el-select v-model="policyEditor.risk_level">
-            <el-option label="low" value="low" />
-            <el-option label="medium" value="medium" />
-            <el-option label="high" value="high" />
-            <el-option label="critical" value="critical" />
+            <el-option label="低(low)" value="low" />
+            <el-option label="中(medium)" value="medium" />
+            <el-option label="高(high)" value="high" />
+            <el-option label="严重(critical)" value="critical" />
           </el-select>
           <el-input-number v-model="policyEditor.priority" :min="0" :max="10000" controls-position="right" />
           <el-select v-model="policyEditor.enabled">
@@ -540,15 +540,15 @@ onMounted(loadData)
           <el-input v-model="toolPermissionForm.agent_code" placeholder="Agent 编码" />
           <el-input v-model="toolPermissionForm.tool_code" placeholder="工具编码" />
           <el-select v-model="toolPermissionForm.permission">
-            <el-option label="allow" value="allow" />
-            <el-option label="deny" value="deny" />
-            <el-option label="escalate" value="escalate" />
+            <el-option label="允许(allow)" value="allow" />
+            <el-option label="拒绝(deny)" value="deny" />
+            <el-option label="升级审批(escalate)" value="escalate" />
           </el-select>
           <el-select v-model="toolPermissionForm.risk_level">
-            <el-option label="low" value="low" />
-            <el-option label="medium" value="medium" />
-            <el-option label="high" value="high" />
-            <el-option label="critical" value="critical" />
+            <el-option label="低(low)" value="low" />
+            <el-option label="中(medium)" value="medium" />
+            <el-option label="高(high)" value="high" />
+            <el-option label="严重(critical)" value="critical" />
           </el-select>
           <el-select v-model="toolPermissionForm.enabled">
             <el-option label="启用" :value="1" />
@@ -561,7 +561,7 @@ onMounted(loadData)
       <div class="panel">
         <h3>权限列表</h3>
         <el-table :data="toolPermissions" stripe>
-          <el-table-column prop="agent_code" label="Agent" width="130" />
+          <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
           <el-table-column prop="tool_code" label="工具" width="130" />
           <el-table-column prop="permission" label="权限" width="110" />
           <el-table-column prop="risk_level" label="风险" width="90" />
@@ -572,7 +572,7 @@ onMounted(loadData)
       <div class="panel">
         <h3>工具调用日志</h3>
         <el-table :data="tools" stripe>
-          <el-table-column prop="agent_code" label="Agent" width="130" />
+          <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
           <el-table-column prop="tool_code" label="工具" width="130" />
           <el-table-column prop="action" label="动作" min-width="160" />
           <el-table-column prop="decision" label="决策" width="90" />
@@ -601,9 +601,9 @@ onMounted(loadData)
             <el-input v-model="memoryForm.content" type="textarea" :rows="4" placeholder="内容" />
             <div class="form-row two">
               <el-select v-model="memoryForm.memory_type">
-                <el-option label="long_term" value="long_term" />
-                <el-option label="short_term" value="short_term" />
-                <el-option label="reflection" value="reflection" />
+                <el-option label="长期记忆(long_term)" value="long_term" />
+                <el-option label="短期记忆(short_term)" value="short_term" />
+                <el-option label="反思(reflection)" value="reflection" />
               </el-select>
               <el-input-number v-model="memoryForm.weight" :min="0" :max="10" controls-position="right" />
               <el-button type="primary" @click="onCreateMemory">沉淀记忆</el-button>
@@ -617,10 +617,10 @@ onMounted(loadData)
             <el-input v-model="knowledgeDocForm.content" type="textarea" :rows="4" placeholder="内容" />
             <div class="form-row two">
               <el-select v-model="knowledgeDocForm.risk_level">
-                <el-option label="low" value="low" />
-                <el-option label="medium" value="medium" />
-                <el-option label="high" value="high" />
-                <el-option label="critical" value="critical" />
+                <el-option label="低(low)" value="low" />
+                <el-option label="中(medium)" value="medium" />
+                <el-option label="高(high)" value="high" />
+                <el-option label="严重(critical)" value="critical" />
               </el-select>
               <el-input-number v-model="knowledgeDocForm.confidence" :min="0" :max="1" :step="0.1" />
               <el-button type="primary" @click="onCreateKnowledgeDoc">提交知识</el-button>
@@ -632,11 +632,11 @@ onMounted(loadData)
         <h3>知识来源</h3>
         <div class="toolbar-grid source-grid">
           <el-select v-model="knowledgeSourceForm.source_type">
-            <el-option label="inline" value="inline" />
-            <el-option label="project" value="project" />
-            <el-option label="url" value="url" />
-            <el-option label="official" value="official" />
-            <el-option label="github" value="github" />
+            <el-option label="内联(inline)" value="inline" />
+            <el-option label="项目(project)" value="project" />
+            <el-option label="链接(url)" value="url" />
+            <el-option label="官方(official)" value="official" />
+            <el-option label="GitHub(github)" value="github" />
           </el-select>
           <el-input v-model="knowledgeSourceForm.source_uri" placeholder="来源 URI" />
           <el-select v-model="knowledgeSourceForm.whitelist">
@@ -690,7 +690,7 @@ onMounted(loadData)
       <el-table :data="jobs" stripe>
         <el-table-column prop="job_code" label="任务" min-width="220" />
         <el-table-column prop="job_type" label="类型" width="110" />
-        <el-table-column prop="agent_code" label="Agent" width="150" />
+        <el-table-column prop="agent_code" label="Agent(智能体)" width="150" />
         <el-table-column label="计划" width="190">
           <template #default="{ row }">
             <el-input v-if="jobEdit[row.id]" v-model="jobEdit[row.id].schedule" size="small" />
@@ -699,8 +699,8 @@ onMounted(loadData)
         <el-table-column label="状态" width="130">
           <template #default="{ row }">
             <el-select v-if="jobEdit[row.id]" v-model="jobEdit[row.id].status" size="small">
-              <el-option label="enabled" value="enabled" />
-              <el-option label="disabled" value="disabled" />
+              <el-option label="启用(enabled)" value="enabled" />
+              <el-option label="停用(disabled)" value="disabled" />
             </el-select>
           </template>
         </el-table-column>
@@ -739,8 +739,8 @@ onMounted(loadData)
         <div class="toolbar-grid">
           <el-input v-model="rewardForm.agent_code" placeholder="Agent 编码" />
           <el-select v-model="rewardForm.event_type">
-            <el-option label="reward" value="reward" />
-            <el-option label="penalty" value="penalty" />
+            <el-option label="奖励(reward)" value="reward" />
+            <el-option label="惩罚(penalty)" value="penalty" />
           </el-select>
           <el-input-number v-model="rewardForm.score" :min="-100" :max="100" controls-position="right" />
           <el-input v-model="rewardForm.reason" placeholder="原因" />
@@ -750,7 +750,7 @@ onMounted(loadData)
       <div class="panel">
         <h3>奖惩事件</h3>
         <el-table :data="rewardEvents" stripe>
-          <el-table-column prop="agent_code" label="Agent" width="140" />
+          <el-table-column prop="agent_code" label="Agent(智能体)" width="140" />
           <el-table-column prop="event_type" label="类型" width="100" />
           <el-table-column prop="score" label="分数" width="90" />
           <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
@@ -764,17 +764,17 @@ onMounted(loadData)
         <div class="toolbar-grid">
           <el-input v-model="artifactForm.agent_code" placeholder="Agent 编码" />
           <el-select v-model="artifactForm.artifact_type">
-            <el-option label="policy" value="policy" />
-            <el-option label="prompt" value="prompt" />
-            <el-option label="skill" value="skill" />
-            <el-option label="knowledge" value="knowledge" />
-            <el-option label="code" value="code" />
+            <el-option label="策略(policy)" value="policy" />
+            <el-option label="提示词(prompt)" value="prompt" />
+            <el-option label="技能(skill)" value="skill" />
+            <el-option label="知识(knowledge)" value="knowledge" />
+            <el-option label="代码(code)" value="code" />
           </el-select>
           <el-input v-model="artifactForm.version" placeholder="版本" />
           <el-select v-model="artifactForm.status">
-            <el-option label="draft" value="draft" />
-            <el-option label="gray" value="gray" />
-            <el-option label="stable" value="stable" />
+            <el-option label="草稿(draft)" value="draft" />
+            <el-option label="灰度(gray)" value="gray" />
+            <el-option label="稳定(stable)" value="stable" />
           </el-select>
           <el-input v-model="artifactForm.content" placeholder="内容" />
           <el-input v-model="artifactForm.snapshot" placeholder="回滚快照" />
@@ -784,7 +784,7 @@ onMounted(loadData)
       <div class="panel">
         <h3>版本列表</h3>
         <el-table :data="artifactVersions" stripe>
-          <el-table-column prop="agent_code" label="Agent" width="130" />
+          <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
           <el-table-column prop="artifact_type" label="类型" width="110" />
           <el-table-column prop="version" label="版本" min-width="160" />
           <el-table-column prop="status" label="状态" width="120" />

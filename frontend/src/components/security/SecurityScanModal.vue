@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { Download, Lock, RefreshRight, View } from '@element-plus/icons-vue'
 import { scanAllProjects, scanFile, scanProject, scanTask } from '@/api/security'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { renderMarkdown } from '@/utils/markdown'
 import type {
   ApiEndpointOut,
   CodeLinkOut,
@@ -394,9 +395,7 @@ watch(() => props.refId, () => {
         </div>
       </div>
 
-      <div class="sec-summary" v-if="result.summary">
-        {{ result.summary }}
-      </div>
+      <div class="sec-summary" v-if="result.summary" v-html="renderMarkdown(result.summary)" />
 
       <!-- 接口、联动和多 Agent 讨论 -->
       <div
@@ -482,7 +481,7 @@ watch(() => props.refId, () => {
               class="discussion-turn"
             >
               <span class="agent-name">{{ turn.agent_name }}</span>
-              <span class="agent-content">{{ turn.content }}</span>
+              <span class="agent-content" v-html="renderMarkdown(turn.content)" />
             </li>
           </ul>
           <ul
@@ -608,9 +607,7 @@ watch(() => props.refId, () => {
             {{ result.threat_model.data_flows.length }}
           </span>
         </header>
-        <div class="flow-summary" v-if="result.threat_model.attack_surface_summary">
-          {{ result.threat_model.attack_surface_summary }}
-        </div>
+        <div class="flow-summary" v-if="result.threat_model.attack_surface_summary" v-html="renderMarkdown(result.threat_model.attack_surface_summary)" />
         <ul class="flow-list">
           <li
             v-for="(flow, idx) in result.threat_model.data_flows"
@@ -789,6 +786,12 @@ watch(() => props.refId, () => {
   font-size: 12.5px;
   color: var(--gray-800);
   margin-bottom: 12px;
+
+  :deep(p) { margin: 0 0 6px; }
+  :deep(p:last-child) { margin-bottom: 0; }
+  :deep(ul), :deep(ol) { padding-left: 18px; margin: 4px 0; }
+  :deep(strong) { font-weight: 600; }
+  :deep(code) { background: var(--gray-100); padding: 0 4px; border-radius: 3px; font-size: 11.5px; }
 }
 
 .block-head {
@@ -1110,6 +1113,12 @@ watch(() => props.refId, () => {
 .agent-content {
   color: var(--gray-600);
   line-height: 1.5;
+
+  :deep(p) { margin: 0 0 6px; }
+  :deep(p:last-child) { margin-bottom: 0; }
+  :deep(ul), :deep(ol) { padding-left: 18px; margin: 4px 0; }
+  :deep(strong) { font-weight: 600; }
+  :deep(code) { background: var(--gray-100); padding: 0 4px; border-radius: 3px; font-size: 11.5px; }
 }
 
 .action-list {
@@ -1146,6 +1155,12 @@ watch(() => props.refId, () => {
   font-size: 12px;
   color: var(--gray-600);
   margin-bottom: 6px;
+
+  :deep(p) { margin: 0 0 6px; }
+  :deep(p:last-child) { margin-bottom: 0; }
+  :deep(ul), :deep(ol) { padding-left: 18px; margin: 4px 0; }
+  :deep(strong) { font-weight: 600; }
+  :deep(code) { background: var(--gray-100); padding: 0 4px; border-radius: 3px; font-size: 11.5px; }
 }
 
 .flow-list {

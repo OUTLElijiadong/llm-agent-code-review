@@ -20,9 +20,12 @@
 @use 'element-plus/theme-chalk/src/message-box.scss';
 @use 'element-plus/theme-chalk/src/loading.scss';
 
-// 通用底层(弹层/滚动条/过渡,被多数组件依赖)
+// 通用底层(弹层/滚动条/过渡/遮罩,被多数组件依赖)
 @use 'element-plus/theme-chalk/src/popper.scss';
 @use 'element-plus/theme-chalk/src/scrollbar.scss';
+// overlay 遮罩层(position:fixed + z-index + 背景),dialog/drawer/message-box 都依赖它,
+// 缺失会导致遮罩无定位、弹窗内容裸露被页面元素盖住
+@use 'element-plus/theme-chalk/src/overlay.scss';
 
 // 表单与输入
 @use 'element-plus/theme-chalk/src/form.scss';

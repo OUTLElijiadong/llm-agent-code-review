@@ -9,6 +9,7 @@ from app.core.exceptions import AuthError, ConflictError, ForbiddenError
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
 from app.schemas.auth import RegisterIn
+from app.utils.sanitize import sanitize_text
 
 
 def register(db: Session, payload: RegisterIn) -> User:
@@ -31,7 +32,8 @@ def register(db: Session, payload: RegisterIn) -> User:
         username=payload.username,
         password=hash_password(payload.password),
         email=payload.email,
-        nickname=payload.nickname or payload.username,
+        # 昵称剥纯文本,防存储型 XSS
+        nickname=sanitize_text(payload.nickname) or payload.username,
         role="user",
         status=1,
     )

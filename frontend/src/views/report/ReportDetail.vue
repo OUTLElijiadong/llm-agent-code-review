@@ -121,7 +121,7 @@
           </div>
         </div>
 
-        <p v-if="report.summary" class="cover-summary">{{ report.summary }}</p>
+        <p v-if="report.summary" class="cover-summary">{{ summaryText }}</p>
       </section>
 
       <!-- ============ 严重度 + 修复进度 + 评分历史 ============ -->
@@ -377,9 +377,8 @@
             <span class="prism-mark sm"></span>AI 智能体总结建议
           </h3>
         </header>
-        <div class="ai-summary">{{ report.summary }}</div>
+        <div class="ai-summary" v-html="summaryHtml"></div>
       </section>
-
       <footer class="paper-foot font-mono">
         PRISM v1.0 · 基于大模型智能体的代码质量审查管理系统 · 生成于 {{ formatDate(new Date().toISOString()) }}
       </footer>
@@ -417,6 +416,7 @@ import type { ReportDetailOut, ReportIssue, ReportFormat, ReportTemplateType } f
 import { PRISM_SEVERITY_COLORS, PRISM_DIM_COLORS } from '@/components/chart/prismTheme'
 import { reviewTypeLabel } from '@/constants/reviewType'
 import { goBack } from '@/utils/navigation'
+import { renderMarkdown, stripMarkdown } from '@/utils/markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -449,6 +449,10 @@ const templateTypeOptions: Array<{ label: string; value: ReportTemplateType }> =
 ]
 
 const stats = computed<Record<string, unknown>>(() => report.value?.stats ?? {})
+
+// AI 总结:封面用纯文本(剥离 markdown 符号),AI 总结卡片用消毒后的 markdown 渲染
+const summaryText = computed(() => stripMarkdown((report.value?.summary as string) ?? ''))
+const summaryHtml = computed(() => renderMarkdown((report.value?.summary as string) ?? ''))
 
 const projectName = computed(() => (report.value?.project?.project_name as string) ?? '未命名项目')
 const taskName    = computed(() => (report.value?.task?.task_name as string) ?? `任务 #${taskId}`)
@@ -1249,7 +1253,33 @@ onMounted(() => {
   font-size: 13.5px;
   line-height: 1.85;
   color: var(--gray-800);
-  white-space: pre-wrap;
+
+  :deep(p) { margin: 0 0 10px; }
+  :deep(p:last-child) { margin-bottom: 0; }
+  :deep(h1), :deep(h2), :deep(h3), :deep(h4) {
+    margin: 14px 0 8px;
+    font-weight: 600;
+    color: var(--gray-900);
+  }
+  :deep(h1), :deep(h2) { font-size: 16px; }
+  :deep(h3), :deep(h4) { font-size: 14px; }
+  :deep(ul), :deep(ol) { padding-left: 20px; margin: 6px 0; }
+  :deep(li) { margin: 3px 0; }
+  :deep(strong) { font-weight: 600; color: var(--gray-900); }
+  :deep(code) {
+    background: var(--gray-100);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  :deep(pre) {
+    background: var(--gray-100);
+    padding: 10px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 8px 0;
+  }
+  :deep(pre code) { background: transparent; padding: 0; }
 }
 
 /* ============ T15 报告操作工具栏 ============ */

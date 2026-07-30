@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.captcha import create_captcha, verify_captcha
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import ValidationError
 from app.core.rate_limit import limiter
 from app.models.user import User
 from app.schemas.auth import ChangePasswordIn, LoginIn, LoginOut, RegisterIn, UserOut
@@ -24,10 +26,20 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+@router.get("/captcha", response_model=Resp[dict])
+@limiter.limit("30/minute")
+def get_captcha(request: Request):
+    """获取注册验证码(数学题)。返回 captcha_id 与题目,不返回答案。"""
+    return Resp(data=create_captcha())
+
+
 @router.post("/register", response_model=Resp[dict])
 @limiter.limit("10/minute")
 def register(payload: RegisterIn, request: Request, db: Session = Depends(get_db)):
-    """用户注册"""
+    """用户注册(生产环境需先通过一次性验证码)"""
+    if settings.register_captcha_enabled:
+        if not payload.captcha_id or not verify_captcha(payload.captcha_id, payload.captcha_answer or ""):
+            raise ValidationError("验证码错误或已过期,请刷新后重试", code=42210)
     user = auth_service.register(db, payload)
     audit_service.log(
         db, user, "user",

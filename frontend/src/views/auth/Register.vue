@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { Check, Lock, Message, User, UserFilled } from '@element-plus/icons-vue'
+import { Check, Lock, Message, Refresh, User, UserFilled } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { getCaptcha } from '@/api/auth'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
@@ -19,7 +20,26 @@ const form = reactive({
   confirmPassword: '',
   email: '',
   nickname: '',
+  captcha_answer: '',
 })
+
+// 注册验证码(防批量注册)
+const captcha = ref<{ captcha_id: string; question: string }>({ captcha_id: '', question: '' })
+const captchaLoading = ref(false)
+
+async function refreshCaptcha(): Promise<void> {
+  captchaLoading.value = true
+  form.captcha_answer = ''
+  try {
+    captcha.value = await getCaptcha()
+  } catch {
+    captcha.value = { captcha_id: '', question: '加载失败,请重试' }
+  } finally {
+    captchaLoading.value = false
+  }
+}
+
+onMounted(refreshCaptcha)
 
 /**
  * 密码强度评估: 依据长度与字符种类给出 0(空)/1(弱)/2(中)/3(强)
@@ -69,6 +89,9 @@ const rules: FormRules = {
   email: [
     { type: 'email', message: '请输入有效的邮箱地址', trigger: 'blur' },
   ],
+  captcha_answer: [
+    { required: true, message: '请输入人机验证结果', trigger: 'blur' },
+  ],
 }
 
 /**
@@ -86,11 +109,15 @@ async function handleRegister(): Promise<void> {
         password: form.password,
         email: form.email || undefined,
         nickname: form.nickname || undefined,
+        captcha_id: captcha.value.captcha_id,
+        captcha_answer: form.captcha_answer,
       })
       ElMessage.success('注册成功，请登录')
       router.replace('/login')
     } catch {
       /* 请求拦截器会展示后端返回的错误信息，避免重复 toast。 */
+      // 验证码一次性失效,失败后刷新一题
+      refreshCaptcha()
     } finally {
       loading.value = false
     }
@@ -231,6 +258,28 @@ function goLogin(): void {
             />
           </el-form-item>
 
+          <el-form-item prop="captcha_answer" label="人机验证">
+            <div class="captcha-row">
+              <div class="captcha-q font-mono" :class="{ loading: captchaLoading }">
+                {{ captcha.question || '…' }}
+              </div>
+              <el-input
+                v-model="form.captcha_answer"
+                placeholder="请输入计算结果"
+                size="large"
+                autocomplete="off"
+                style="flex: 1"
+              />
+              <el-button
+                :icon="Refresh"
+                circle
+                aria-label="刷新验证码"
+                :loading="captchaLoading"
+                @click="refreshCaptcha"
+              />
+            </div>
+          </el-form-item>
+
           <button
             type="button"
             class="btn-register font-display"
@@ -251,6 +300,31 @@ function goLogin(): void {
 </template>
 
 <style scoped lang="scss">
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.captcha-q {
+  flex-shrink: 0;
+  min-width: 96px;
+  padding: 0 14px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gray-100, #f5f7fa);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--gray-800, #303133);
+  user-select: none;
+
+  &.loading { opacity: 0.5; }
+}
+
 .register-page {
   display: grid;
   grid-template-columns: 1fr 560px;

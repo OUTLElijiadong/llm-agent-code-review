@@ -81,7 +81,7 @@
     </el-card>
 
     <!-- 分配角色对话框 -->
-    <el-dialog v-model="assignDialogVisible" title="分配角色" width="480px">
+    <el-dialog v-model="assignDialogVisible" title="分配角色" width="480px" append-to-body>
       <el-form label-width="90px" v-loading="assignLoading">
         <el-form-item label="用户">{{ selectedUser?.username }}</el-form-item>
         <el-form-item label="邮箱">

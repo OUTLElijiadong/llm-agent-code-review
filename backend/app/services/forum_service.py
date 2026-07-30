@@ -13,6 +13,7 @@ from app.core.pagination import Pagination
 from app.models.forum_post import ForumPost
 from app.models.forum_reply import ForumReply
 from app.models.user import User
+from app.utils.sanitize import sanitize_rich_text, sanitize_text
 
 _CATEGORIES = ("qa", "tech", "share", "announce", "other")
 
@@ -67,8 +68,9 @@ def get_post(db: Session, post_id: int, *, with_replies: bool = True) -> dict:
 
 
 def create_post(db: Session, user: User, payload: dict) -> ForumPost:
-    title = (payload.get("title") or "").strip()
-    content = (payload.get("content") or "").strip()
+    # 写入前消毒:标题剥纯文本,正文白名单过滤,防存储型 XSS
+    title = sanitize_text(payload.get("title"))
+    content = sanitize_rich_text(payload.get("content"))
     if not title or not content:
         raise ValidationError("标题和内容不能为空", code=42201)
     category = payload.get("category") if payload.get("category") in _CATEGORIES else "qa"
@@ -86,9 +88,9 @@ def update_post(db: Session, user: User, post_id: int, payload: dict) -> dict:
     if post.user_id != user.id and user.role != "admin":
         raise ForbiddenError("只能编辑自己的帖子", code=40300)
     if payload.get("title"):
-        post.title = payload["title"].strip()[:200]
+        post.title = sanitize_text(payload["title"])[:200]
     if payload.get("content"):
-        post.content = payload["content"].strip()
+        post.content = sanitize_rich_text(payload["content"])
     if payload.get("category") in _CATEGORIES:
         post.category = payload["category"]
     db.commit()
@@ -118,7 +120,7 @@ def pin_post(db: Session, admin: User, post_id: int, pinned: bool) -> dict:
 
 
 def create_reply(db: Session, user: User, post_id: int, content: str) -> ForumReply:
-    content = (content or "").strip()
+    content = sanitize_rich_text(content)
     if not content:
         raise ValidationError("回复内容不能为空", code=42201)
     post = db.get(ForumPost, post_id)

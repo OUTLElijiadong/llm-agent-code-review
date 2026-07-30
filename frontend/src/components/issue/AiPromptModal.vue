@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { CopyDocument, Download, MagicStick } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { renderMarkdown } from '@/utils/markdown'
 import {
   listAiPromptTools,
   generatePromptForIssue,
@@ -230,7 +231,7 @@ watch([() => props.source, () => props.refId, targetTool, useLlm], resetGenerate
         : '当前关闭 AI 润色：点击生成后仅使用本地模板，不调用模型服务。' }}
     </div>
 
-    <div class="prompt-summary" v-if="bundle?.summary">{{ bundle.summary }}</div>
+    <div class="prompt-summary" v-if="bundle?.summary" v-html="renderMarkdown(bundle.summary)" />
 
     <div v-if="loading" class="prompt-loading">
       正在为你生成可粘贴的 AI 修复提示词…
@@ -326,6 +327,12 @@ watch([() => props.source, () => props.refId, targetTool, useLlm], resetGenerate
   font-size: 12.5px;
   color: var(--brand-700);
   margin-bottom: 12px;
+
+  :deep(p) { margin: 0 0 6px; }
+  :deep(p:last-child) { margin-bottom: 0; }
+  :deep(ul), :deep(ol) { padding-left: 18px; margin: 4px 0; }
+  :deep(strong) { font-weight: 600; }
+  :deep(code) { background: var(--gray-100); padding: 0 4px; border-radius: 3px; font-size: 11.5px; }
 }
 
 .prompt-loading,

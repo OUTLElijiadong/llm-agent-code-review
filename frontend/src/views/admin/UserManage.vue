@@ -75,16 +75,38 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="roleDialogVisible" title="设置角色" width="400px">
+    <el-dialog v-model="roleDialogVisible" title="设置角色" width="460px" append-to-body>
       <el-form label-width="80px">
         <el-form-item label="用户">{{ selectedUser?.username }}</el-form-item>
         <el-form-item label="角色">
           <el-select v-model="selectedRole" placeholder="选择角色" style="width: 100%">
-            <el-option label="普通用户" value="user" />
-            <el-option label="审查员" value="reviewer" />
-            <el-option label="管理员" value="admin" />
+            <el-option label="普通用户(可管理自己的项目)" value="user" />
+            <el-option label="审查员(可审查,不管理项目)" value="reviewer" />
+            <el-option label="管理员(全部权限)" value="admin" />
           </el-select>
         </el-form-item>
+        <!-- 项目影响说明:角色变更不影响已建项目归属,仅改变后续可见范围 -->
+        <el-alert
+          v-if="selectedRole === 'admin'"
+          type="success"
+          :closable="false"
+          show-icon
+          title="该用户创建的项目与代码会保留,且变为管理员后可查看/管理全部用户的项目"
+        />
+        <el-alert
+          v-else-if="selectedRole === 'reviewer'"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="该用户创建的项目会保留(仍归其所有),但审查员侧重审查,不再显示「项目管理」入口;如需管理项目请改回普通用户"
+        />
+        <el-alert
+          v-else
+          type="info"
+          :closable="false"
+          show-icon
+          title="该用户创建的项目会保留,仅可管理自己的项目"
+        />
       </el-form>
       <template #footer>
         <el-button @click="roleDialogVisible = false">取消</el-button>

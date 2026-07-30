@@ -95,8 +95,8 @@ async function logout(): Promise<void> {
       <div class="admin-brand">
         <span class="prism-mark"></span>
         <div>
-          <div class="admin-logo font-display">Prism Admin</div>
-          <div class="admin-sub font-mono">AGENT GOVERNANCE</div>
+          <div class="admin-logo font-display">Prism 管理后台</div>
+          <div class="admin-sub font-mono">智能体治理</div>
         </div>
       </div>
       <nav class="admin-nav">
@@ -117,7 +117,7 @@ async function logout(): Promise<void> {
     <section class="admin-main">
       <header class="admin-header">
         <div>
-          <div class="admin-kicker font-mono">ADMIN CONSOLE</div>
+          <div class="admin-kicker font-mono">管理控制台</div>
           <h1>{{ route.meta.title || '管理后台' }}</h1>
         </div>
         <div class="admin-user">

@@ -190,12 +190,12 @@
         empty-text="暂无 Skill 调用记录"
         max-height="480"
       >
-        <el-table-column label="Agent" width="160">
+        <el-table-column label="Agent(智能体)" width="160">
           <template #default="{ row }">
             <code class="rec-agent">{{ row.agent_name }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="Skill" min-width="200">
+        <el-table-column label="Skill(技能)" min-width="200">
           <template #default="{ row }">
             <code class="rec-skill">{{ row.skill_name }}</code>
           </template>

@@ -1,6 +1,8 @@
 fastapi>=0.110.0,<1.0.0
 uvicorn[standard]>=0.27.0,<1.0.0
 sqlalchemy>=2.0.0,<3.0.0
+# SQLAlchemy 在 Linux x86_64 运行时依赖 greenlet；显式声明以确保在 macOS 上生成的跨平台 lock 完整。
+greenlet>=3.2.0,<4.0.0
 alembic>=1.13.0,<2.0.0
 pydantic[email]>=2.6.0,<3.0.0
 pydantic-settings>=2.2.0,<3.0.0
@@ -15,8 +17,11 @@ reportlab>=4.0.0,<5.0.0
 python-multipart>=0.0.9,<1.0.0
 slowapi>=0.1.9,<1.0.0
 chardet>=5.0.0,<6.0.0
-cryptography>=41.0.0,<45.0.0
+cryptography>=48.0.1,<49.0.0
 apscheduler>=3.10.4,<4.0.0
 clamd>=0.4.0
 yara-python>=4.3.0
 jinja2>=3.1.0,<4.0.0
+
+prometheus-client>=0.20.0,<1.0.0
+bleach>=6.1.0,<7.0.0

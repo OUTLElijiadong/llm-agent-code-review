@@ -94,7 +94,7 @@
         empty-text="选择 Agent 后展示其 self_improve / proactive Skill 调用记录"
         max-height="320"
       >
-        <el-table-column label="Skill" min-width="200">
+        <el-table-column label="Skill(技能)" min-width="200">
           <template #default="{ row }">
             <code class="rec-skill">{{ row.skill_name }}</code>
           </template>

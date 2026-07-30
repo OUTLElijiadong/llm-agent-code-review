@@ -13,6 +13,9 @@ class RegisterIn(BaseModel):
     password: str = Field(min_length=6, max_length=32)
     email: Optional[EmailStr] = None
     nickname: Optional[str] = Field(default=None, max_length=50)
+    # 防批量注册:一次性数学验证码
+    captcha_id: Optional[str] = Field(default=None, max_length=64)
+    captcha_answer: Optional[str] = Field(default=None, max_length=16)
 
 
 class LoginIn(BaseModel):

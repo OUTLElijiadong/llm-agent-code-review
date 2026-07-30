@@ -21,3 +21,16 @@ export function renderMarkdown(source: string): string {
   const html = md.render(source ?? '')
   return DOMPurify.sanitize(html)
 }
+
+/**
+ * 提取 markdown 的纯文本(剥离 ** ## ` > - 等标记)。
+ * 用于报告摘要等需要纯文本、而非 HTML 渲染的场景,
+ * 避免 AI 产出的 markdown 符号直接裸露在界面上。
+ * @param source - markdown 原文
+ * @returns 纯文本
+ */
+export function stripMarkdown(source: string): string {
+  const html = md.render(source ?? '')
+  const text = DOMPurify.sanitize(html, { ALLOWED_TAGS: [], KEEP_CONTENT: true })
+  return text.replace(/\s+\n/g, '\n').trim()
+}

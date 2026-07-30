@@ -25,6 +25,17 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     log_level: str = "INFO"
     openapi_enabled: bool = True
+    app_release: str = "dev"
+    # 注册验证码开关:生产默认开(dev/test 可关以便自动化测试)
+    register_captcha_enabled: bool = True
+
+    # ── 恶意文件扫描 ──
+    clamav_host: str = "clamav"
+    clamav_port: int = 3310
+    clamav_timeout: float = 5.0
+    clamav_recheck_seconds: int = 30
+    yara_rules_dir: str = "deploy/yara/rules"
+    malware_scan_fail_closed: bool = False
 
     db_host: str = "127.0.0.1"
     db_port: int = 3306
@@ -35,6 +46,8 @@ class Settings(BaseSettings):
     jwt_secret: str = "code-review-platform-dev-secret-key"
     jwt_algorithm: str = "HS256"
     jwt_expire_seconds: int = 7 * 24 * 3600
+    # 第一项用于新写入，后续项仅用于解密旧密文；生产必须配置独立于 JWT 的随机密钥。
+    api_key_encryption_keys: List[str] = []
 
     deepseek_api_key: str = "sk-xxxxx"
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -105,6 +118,13 @@ class Settings(BaseSettings):
             problems.append("JWT_SECRET 仍为默认/空值,请设置为足够随机的字符串")
         if self.deepseek_api_key in _INSECURE_API_KEYS:
             problems.append("DEEPSEEK_API_KEY 未正确配置")
+        encryption_keys = [key.strip() for key in self.api_key_encryption_keys if key.strip()]
+        if not encryption_keys:
+            problems.append("API_KEY_ENCRYPTION_KEYS 未配置独立密钥")
+        elif len(encryption_keys[0]) < 32 or encryption_keys[0].lower().startswith("change_me"):
+            problems.append("API_KEY_ENCRYPTION_KEYS 第一项必须是至少 32 字符的随机密钥")
+        elif encryption_keys[0] == self.jwt_secret:
+            problems.append("API_KEY_ENCRYPTION_KEYS 第一项必须与 JWT_SECRET 不同")
         if problems:
             raise ValueError(
                 f"检测到不安全的生产配置(APP_ENV={self.app_env}): "

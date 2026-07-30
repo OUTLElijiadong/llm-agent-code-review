@@ -16,6 +16,7 @@ from app.models.project import Project
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
+from app.utils.sanitize import sanitize_text
 from app.services.project_member_service import (
     ensure_owner_member,
     get_visible_project_ids,
@@ -115,8 +116,9 @@ def create_project(db: Session, user: User, payload: ProjectIn) -> Project:
         raise ConflictError("项目名重复", code=40901)
     project = Project(
         user_id=user.id,
-        project_name=payload.project_name,
-        description=payload.description,
+        # 项目名/描述剥纯文本,防存储型 XSS
+        project_name=sanitize_text(payload.project_name),
+        description=sanitize_text(payload.description),
         language=payload.language,
         status="active",
     )
@@ -194,9 +196,9 @@ def update_project(db: Session, user: User, project_id: int, payload: ProjectUpd
     require_project_access(db, project_id, user, need_write=True)
     project = db.get(Project, project_id)
     if payload.project_name is not None:
-        project.project_name = payload.project_name
+        project.project_name = sanitize_text(payload.project_name)
     if payload.description is not None:
-        project.description = payload.description
+        project.description = sanitize_text(payload.description)
     if payload.language is not None:
         project.language = payload.language
     if payload.status is not None:
