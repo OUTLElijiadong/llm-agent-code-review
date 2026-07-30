@@ -52,12 +52,12 @@ def _agent_activity(db: Session) -> list[dict]:
 
     result = []
     for p in profiles:
-        calls = today_map.get(p.agent_code, 0)
+        calls = today_map.get(p.code, 0)
         db_status = getattr(p, "status", "idle") or "idle"
         # 综合状态:DB 状态优先,其次按近期调用推断活跃
         if db_status in ("working", "error", "disabled"):
             status = db_status
-        elif p.agent_code in recent_codes or calls > 0:
+        elif p.code in recent_codes or calls > 0:
             status = "working"
         else:
             status = "idle"
@@ -66,15 +66,15 @@ def _agent_activity(db: Session) -> list[dict]:
         if calls:
             top_action = (
                 db.query(ToolCallLog.action, func.count(ToolCallLog.id).label("c"))
-                .filter(func.date(ToolCallLog.create_time) == today, ToolCallLog.agent_code == p.agent_code)
+                .filter(func.date(ToolCallLog.create_time) == today, ToolCallLog.agent_code == p.code)
                 .group_by(ToolCallLog.action)
                 .order_by(func.count(ToolCallLog.id).desc())
                 .first()
             )
             purpose = top_action[0] if top_action else ""
         result.append({
-            "agent_code": p.agent_code,
-            "name": getattr(p, "name", p.agent_code),
+            "agent_code": p.code,
+            "name": getattr(p, "name", p.code),
             "status": status,
             "calls_today": calls,
             "purpose": purpose,

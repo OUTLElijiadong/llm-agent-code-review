@@ -75,7 +75,7 @@ def admin_list_agents(db: Session, user: Optional[User],
         return _deny()
     profiles = agent_governance_service.list_profiles(db)
     return AgentResult(success=True, data=[
-        {"agent_code": p.agent_code, "name": p.name, "status": p.status, "is_enabled": p.is_enabled}
+        {"agent_code": p.code, "name": p.name, "status": p.status, "is_enabled": p.is_enabled}
         for p in profiles
     ])
 
