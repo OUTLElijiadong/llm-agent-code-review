@@ -1,4 +1,4 @@
-import { get, post } from './http'
+import { get, post, del } from './http'
 import type { Page } from '@/types/common'
 import type { UserListItem } from '@/types/user'
 
@@ -16,4 +16,8 @@ export function toggleUserStatus(userId: number, status: number) {
 
 export function setUserRole(userId: number, role: string) {
   return post<null>(`/users/${userId}/role`, { role })
+}
+
+export function deleteUser(userId: number) {
+  return del<null>(`/users/${userId}`)
 }

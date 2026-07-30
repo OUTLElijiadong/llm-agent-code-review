@@ -78,3 +78,21 @@ def set_role(user_id: int, payload: RoleIn, request: Request,
         ip=_client_ip(request),
     )
     return Resp(data=None)
+
+
+@router.delete("/{user_id}", response_model=Resp[None])
+def delete_user(user_id: int, request: Request,
+                db: Session = Depends(get_db),
+                admin: User = Depends(require_admin)):
+    """软删除用户(管理员)。
+
+    软删保留项目与历史数据,仅禁止登录;不能删除自己或最后一个可用管理员。
+    """
+    user_service.delete_user(db, user_id, admin.id)
+    audit_service.log(
+        db, admin, "user",
+        target_type="user", target_id=user_id,
+        detail=f"管理员软删除用户 {user_id}",
+        ip=_client_ip(request),
+    )
+    return Resp(data=None)

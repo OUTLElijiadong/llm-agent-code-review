@@ -6,5 +6,6 @@ export interface UserListItem {
   role: string
   status: number
   last_login?: string
+  last_login_ip?: string
   create_time?: string
 }

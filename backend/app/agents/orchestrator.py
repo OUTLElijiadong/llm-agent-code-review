@@ -20,6 +20,12 @@ from app.agents.review_agent import CodeReviewerAgent
 from app.agents.review_orchestrator_agent import ReviewOrchestratorAgent
 from app.agents.rule_agent import RuleManagerAgent
 from app.agents.security_sentinel_agent import SecuritySentinelAgent
+from app.agents.tool_contracts import (
+    FixedToolArgumentError,
+    fixed_tool_accepts_ctx,
+    is_fixed_tool,
+    validate_fixed_tool_arguments,
+)
 from app.models.user import User
 from app.utils.api_resolver import ApiConfig, resolve_api_config
 
@@ -51,6 +57,7 @@ class Orchestrator(BaseAgent):
         self._registry = AgentRegistry.instance()
         self._api_config: Optional[ApiConfig] = None
         self._db: Optional[Session] = None
+        self._user: Optional[User] = None
         self._init_agents()
 
     def _init_skills(self) -> None:
@@ -136,26 +143,31 @@ class Orchestrator(BaseAgent):
         return self._api_config
 
     def inject_db(self, db: Session, user: Optional[User] = None) -> None:
-        inject_user = user or self._make_dummy_user()
+        """注入请求级数据库会话与真实登录用户。
+
+        Args:
+            db: 当前请求使用的数据库会话。
+            user: 当前认证用户;请求级 Agent 操作必须显式传入。
+
+        Raises:
+            ValueError: 未传入真实用户,避免回退为伪 admin 身份。
+        """
+        if user is None:
+            raise ValueError("请求级 Orchestrator 必须注入真实用户,禁止使用演示/兜底身份")
         for a in [
             self.project_mgr, self.review_orch, self.file_mgr,
             self.dashboard_agent, self.rule_mgr, self.reporter,
             self.ai_prompt, self.security_sentinel, self.evolution_agent,
         ]:
-            a.inject(db, user=inject_user)
+            a.inject(db, user=user)
         self._db = db
+        self._user = user
 
         # v3.1: 自动解析用户 API 配置
-        if user:
-            cfg = resolve_api_config(db, user.id)
-            self.set_api_config(cfg)
+        cfg = resolve_api_config(db, user.id)
+        self.set_api_config(cfg)
 
         logger.info("[Orchestrator] DB 已注入到所有操作类 Agent")
-
-    @staticmethod
-    def _make_dummy_user():
-        from app.models.user import User
-        return User(id=1, role="admin", status=1, username="agent")
 
     def detect_language(self, *args, **kw) -> AgentResult:
         kw.pop("ctx", None)
@@ -166,6 +178,7 @@ class Orchestrator(BaseAgent):
         return self.project_agent.execute(*args, **kw)
 
     def review_code(self, *args, **kw) -> AgentResult:
+        kw.pop("ctx", None)
         return self.code_reviewer.execute(*args, **kw)
 
     def create_project(self, *args, **kw) -> AgentResult:
@@ -177,12 +190,49 @@ class Orchestrator(BaseAgent):
     def delete_project(self, *args, **kw) -> AgentResult:
         return self.project_mgr.delete_project(*args, **kw)
 
-    def start_review(self, project_id: int, file_ids: List[int],
+    def start_review(self, project_id: int, file_ids: Optional[List[int]] = None,
                      review_type: str = "quick", task_name: str = "",
                      user: Optional[User] = None,
                      ctx: Optional[AgentContext] = None) -> AgentResult:
+        """通过统一入口启动项目审查并补齐缺省文件列表。
+
+        ChatAssistant 直接 handler、ChatPlanner 固定工具和其他调用方都经过此
+        方法。显式文件列表原样下传；缺失或为空时查询请求级数据库，仅选择同
+        项目 `status="active"` 的文件并按 ID 升序。ReviewService 继续负责最终
+        权限、归属和数量校验。
+
+        Args:
+            project_id: 待审查项目 ID。
+            file_ids: 可选文件 ID 列表；为空时自动解析 active 文件。
+            review_type: 审查类型，默认 quick。
+            task_name: 可选任务名称。
+            user: 可选显式用户；通常由已注入的专业 Agent 使用请求用户。
+            ctx: 当前 Agent 调用上下文。
+
+        Returns:
+            AgentResult: 成功时返回下游任务结果；无数据库、无 active 文件或
+            查询异常时返回安全失败且不调用下游。
+        """
+        resolved_file_ids = list(file_ids or [])
+        if not resolved_file_ids:
+            try:
+                if self._db is not None:
+                    from app.models.code_file import CodeFile
+                    rows = self._db.query(CodeFile.id).filter(
+                        CodeFile.project_id == project_id,
+                        CodeFile.status == "active",
+                    ).order_by(CodeFile.id.asc()).all()
+                    resolved_file_ids = [row[0] for row in rows]
+            except Exception as exc:
+                logger.warning(f"[Orchestrator] 自动获取审查文件失败: {exc}")
+
+        if not resolved_file_ids:
+            return AgentResult(
+                success=False,
+                error=f"项目 #{project_id} 下没有可审查的代码文件，请先上传代码文件后再发起审查。",
+            )
         return self.review_orch.start_review(
-            project_id, file_ids, review_type, task_name, user, ctx)
+            project_id, resolved_file_ids, review_type, task_name, user, ctx)
 
     def list_review_tasks(self, *args, **kw) -> AgentResult:
         return self.review_orch.list_tasks(*args, **kw)
@@ -234,6 +284,60 @@ class Orchestrator(BaseAgent):
         return self.security_sentinel.scan_project(
             project_id, top_n, trace_dataflow, ctx)
 
+    # ── 管理员 AI 代管后台工具(仅管理员;写操作强制审批)──
+
+    def _require_admin_db(self) -> tuple:
+        """校验请求级 DB 与用户已注入,返回 (db, user)。"""
+        if self._db is None or self._user is None:
+            raise RuntimeError("管理员代管工具需要请求级 DB 与用户上下文")
+        return self._db, self._user
+
+    def admin_list_users(self, keyword: str = "", role: str = "", page: int = 1,
+                         page_size: int = 20, ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_list_users(db, user, keyword, role, page, page_size, ctx)
+
+    def admin_list_roles(self, ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_list_roles(db, user, ctx)
+
+    def admin_governance_overview(self, ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_governance_overview(db, user, ctx)
+
+    def admin_list_agents(self, ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_list_agents(db, user, ctx)
+
+    def admin_list_approvals(self, status: str = "pending", ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_list_approvals(db, user, status, ctx)
+
+    def admin_system_status(self, ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_system_status(db, user, ctx)
+
+    def admin_set_user_role(self, user_id: int, role: str, ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_set_user_role(db, user, user_id, role, ctx)
+
+    def admin_delete_user(self, user_id: int, ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_delete_user(db, user, user_id, ctx)
+
+    def admin_toggle_agent(self, agent_code: str, enable: bool, ctx: Optional[AgentContext] = None) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_toggle_agent(db, user, agent_code, enable, ctx)
+
     def chat(self, messages: List[dict],
              ctx: Optional[AgentContext] = None) -> AgentResult:
         """v2.0: 主控分发聊天调用,生成 trace_id 并广播 DISPATCH 事件"""
@@ -251,6 +355,7 @@ class Orchestrator(BaseAgent):
         return self.chat_agent.execute(messages, ctx)
 
     def list_agents(self) -> dict:
+        """列出全局注册中心中的 Agent 元数据。"""
         return self._registry.list()
 
     def get_agent(self, name: str):
@@ -287,26 +392,42 @@ class Orchestrator(BaseAgent):
                     skill.agent_name, tool_name, arguments, ctx
                 )
 
-        # 2. 回退到 Orchestrator 固定方法(动态调用)
+        # 2. 固定工具只允许调用 tool_contracts 注册表中的显式白名单。
+        if not is_fixed_tool(tool_name):
+            return AgentResult(
+                success=False,
+                error=f"工具 {tool_name} 不存在(既非 Skill 也非固定工具)",
+            )
+
+        try:
+            validated_arguments = validate_fixed_tool_arguments(tool_name, arguments)
+        except FixedToolArgumentError as exc:
+            return AgentResult(
+                success=False,
+                data={"tool_name": tool_name, "validation_errors": exc.issues},
+                error=str(exc),
+            )
+
         method = getattr(self, tool_name, None)
         if method is None or not callable(method):
             return AgentResult(
                 success=False,
-                error=f"工具 {tool_name} 不存在(既非 Skill 也非固定方法)",
+                error=f"固定工具 {tool_name} 未实现或不可调用",
             )
+
+        if fixed_tool_accepts_ctx(tool_name):
+            validated_arguments["ctx"] = ctx
+
         try:
-            # 固定方法多接受位置参数,arguments 作为 kwargs 传入
-            return method(ctx=ctx, **arguments) if arguments else method(ctx=ctx)
-        except TypeError:
-            # 某些方法不接受 ctx 参数,尝试不带 ctx
-            try:
-                return method(**arguments) if arguments else method()
-            except Exception as e:
-                logger.exception(f"[Orchestrator] 固定方法 {tool_name} 调用异常")
-                return AgentResult(success=False, error=f"固定方法 {tool_name} 调用异常: {e}")
+            result = method(**validated_arguments)
         except Exception as e:
-            logger.exception(f"[Orchestrator] 工具 {tool_name} 调用异常")
-            return AgentResult(success=False, error=f"工具 {tool_name} 调用异常: {e}")
+            # 不再把 handler 内部 TypeError 误判为签名问题并重试，避免重复副作用。
+            logger.exception(f"[Orchestrator] 固定工具 {tool_name} 调用异常")
+            return AgentResult(success=False, error=f"固定工具 {tool_name} 调用异常: {e}")
+
+        if isinstance(result, AgentResult):
+            return result
+        return AgentResult(success=True, data=result)
 
     def invoke_skill(
         self,
@@ -364,11 +485,11 @@ class Orchestrator(BaseAgent):
             duration_ms=result["duration_ms"],
         )
 
-    def list_agent_skills(self, agent_name: str) -> List[Dict[str, Any]]:
+    def list_agent_skills(self, agent_name: Optional[str] = None) -> List[Dict[str, Any]]:
         """列出 Agent 挂载的所有 Skill 元数据
 
         Args:
-            agent_name: Agent name
+            agent_name: 可选 Agent name；为空时返回全部 Skill
 
         Returns:
             list[dict]: Skill 元数据列表

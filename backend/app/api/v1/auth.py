@@ -56,7 +56,7 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
     """用户登录"""
     ip = _client_ip(request)
     try:
-        token, user = auth_service.login(db, payload.username, payload.password)
+        token, user = auth_service.login(db, payload.username, payload.password, ip=ip)
     except Exception as exc:
         audit_service.log(
             db, None, "login",

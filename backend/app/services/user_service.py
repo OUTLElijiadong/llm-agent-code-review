@@ -3,7 +3,7 @@
 """
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.core.pagination import Pagination
 from app.core.security import hash_password
 from app.models.user import User
@@ -24,13 +24,13 @@ def list_users(db: Session, keyword: str = "", role: str = "", status: str = "",
     Returns:
         dict: 分页响应
     """
-    q = db.query(User)
+    q = db.query(User).filter(User.status != -1)  # 软删用户默认不显示
     if keyword:
         q = q.filter(User.username.contains(keyword) | User.nickname.contains(keyword))
     if role:
         q = q.filter(User.role == role)
     if status != "":
-        q = q.filter(User.status == int(status) if status.isdigit() else 1)
+        q = q.filter(User.status == (int(status) if status.lstrip("-").isdigit() else 1))
     total = q.count()
     pagination = Pagination(page, page_size, total)
     items = q.order_by(User.id.asc()).offset(pagination.offset).limit(pagination.page_size).all()
@@ -91,4 +91,40 @@ def set_role(db: Session, user_id: int, role: str) -> None:
     if not user:
         raise NotFoundError("用户不存在", code=40400)
     user.role = role
+    db.commit()
+
+
+def delete_user(db: Session, user_id: int, admin_id: int) -> None:
+    """管理员软删除用户(status=-1)。
+
+    软删保留项目与历史数据(审计/帖子/项目仍可读,操作者显示为快照名),
+    仅禁止该账号再登录;同时吊销其全部 JWT。
+
+    Args:
+        db: 数据库会话
+        user_id: 目标用户ID
+        admin_id: 操作的管理员ID
+
+    Raises:
+        NotFoundError: 用户不存在
+        ValidationError: 不能删除自己
+        ForbiddenError: 不能删除最后一个可用管理员
+    """
+    user = db.get(User, user_id)
+    if not user or user.status == -1:
+        raise NotFoundError("用户不存在", code=40400)
+    if user.id == admin_id:
+        raise ValidationError("不能删除当前登录的管理员账号", code=42220)
+    if user.role in ("admin", "super_admin"):
+        # 保护:不允许删掉最后一个可用管理员,否则系统失去管理入口
+        remaining = (
+            db.query(User)
+            .filter(User.role.in_(["admin", "super_admin"]), User.status == 1, User.id != user_id)
+            .count()
+        )
+        if remaining == 0:
+            raise ForbiddenError("不能删除最后一个可用管理员账号", code=40320)
+    user.status = -1
+    # 吊销该用户全部 JWT,删除后立即无法再访问
+    user.token_version = (user.token_version or 0) + 1
     db.commit()

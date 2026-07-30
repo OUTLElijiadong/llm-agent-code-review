@@ -7,8 +7,9 @@ import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 // 按需引入 echarts,替代整库 import,缩减图表 chunk 体积。
 // 新增图表类型/组件时需在此处补登记。
 import * as echarts from 'echarts/core'
-import { BarChart, LineChart, PieChart, RadarChart } from 'echarts/charts'
+import { BarChart, LineChart, PieChart, RadarChart, ScatterChart, EffectScatterChart } from 'echarts/charts'
 import {
+  GeoComponent,
   GridComponent,
   LegendComponent,
   PolarComponent,
@@ -26,6 +27,9 @@ echarts.use([
   LineChart,
   PieChart,
   RadarChart,
+  ScatterChart,
+  EffectScatterChart,
+  GeoComponent,
   GridComponent,
   LegendComponent,
   PolarComponent,

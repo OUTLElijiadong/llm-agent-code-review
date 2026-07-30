@@ -49,16 +49,20 @@
         <el-table-column prop="last_login" label="最后登录" width="160" show-overflow-tooltip>
           <template #default="{ row }">{{ formatDateTime(row.last_login) }}</template>
         </el-table-column>
+        <el-table-column prop="last_login_ip" label="最后登录 IP" width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.last_login_ip || '-' }}</template>
+        </el-table-column>
         <el-table-column prop="create_time" label="注册时间" width="160" show-overflow-tooltip>
           <template #default="{ row }">{{ formatDateTime(row.create_time) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="onSetRole(row)">设置角色</el-button>
             <el-button link :type="row.status ? 'warning' : 'success'" size="small" @click="onToggleStatus(row)">
               {{ row.status ? '禁用' : '启用' }}
             </el-button>
             <el-button link type="danger" size="small" @click="onResetPassword(row.id)">重置密码</el-button>
+            <el-button link type="danger" size="small" @click="onDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -119,7 +123,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 
-import { getUsers, setUserRole, toggleUserStatus, resetPassword } from '@/api/user'
+import { getUsers, setUserRole, toggleUserStatus, resetPassword, deleteUser } from '@/api/user'
 import type { UserListItem } from '@/types/user'
 import { formatDateTime } from '@/utils/format'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -213,6 +217,21 @@ async function onResetPassword(userId: number) {
     await ElMessageBox.confirm('确定要重置该用户的密码吗？', '确认重置密码', { type: 'warning' })
     const data = await resetPassword(userId)
     ElMessage.success(`密码已重置为: ${data.password}`)
+  } catch {
+    /* canceled */
+  }
+}
+
+async function onDelete(row: UserListItem) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除用户「${row.username}」吗?\n删除为软删除:该账号将无法登录,但其项目与历史数据会保留。`,
+      '确认删除用户',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+    await deleteUser(row.id)
+    ElMessage.success(`用户「${row.username}」已删除`)
+    loadData()
   } catch {
     /* canceled */
   }

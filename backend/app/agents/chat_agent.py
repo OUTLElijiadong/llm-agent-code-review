@@ -7,6 +7,7 @@ from loguru import logger
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 
 if TYPE_CHECKING:
+    from app.agents.chat_planner import ToolCall
     from app.agents.orchestrator import Orchestrator
 
 
@@ -29,7 +30,9 @@ _INTENT_SYSTEM = (
     "- security_audit: 网络安全审计 / 漏洞扫描 / 威胁建模 / 敏感信息 / OWASP / CWE / 渗透\n"
     "- evolution_trigger: 触发某个 Agent 的自进化(从反馈蒸馏规则)\n"
     "- agent_skill_invoke: 手动调用某个 Agent 的某个 Skill\n"
-    "- agent_status: 查看 Agent 运行状态 / Skill 列表 / 调用记录\n\n"
+    "- agent_status: 查看 Agent 运行状态 / Skill 列表 / 调用记录\n"
+    "- admin_manage: 仅管理员——代管后台:查询用户/角色/Agent治理/审批/服务器状态,"
+    "以及申请调整角色/删除用户/启停Agent(写操作会生成审批,需管理员在审批中心人工通过)\n\n"
     "# 输出契约(只输出一个 JSON 对象,无解释、无 markdown 围栏)\n"
     '{"intent": "<上表之一>", "reason": "一句话依据", "payload": {…}}\n\n'
     "# payload 字段(只填你有把握的,其余留空)\n"
@@ -45,7 +48,10 @@ _INTENT_SYSTEM = (
     "scan_depth?, top_n?, trace_dataflow?}\n"
     "- evolution_trigger: {agent_name, window_days?}\n"
     "- agent_skill_invoke: {agent_name, skill_name, action, params?}\n"
-    "- agent_status: {agent_name?, detail?}\n\n"
+    "- agent_status: {agent_name?, detail?}\n"
+    "- admin_manage: {action, params?} — action 可选: list_users/list_roles/governance_overview/\n"
+    "  list_agents/list_approvals/system_status(只读直接执行);set_user_role/delete_user/\n"
+    "  toggle_agent(写操作,一律转审批)。params 对应 {keyword?,role?,user_id?,agent_code?,enable?,status?}\n\n"
     "# 硬约束(违反即为错误)\n"
     "1. 只输出 JSON 对象,不得有任何多余字符。\n"
     "2. 信息不足或意图模糊时一律归 chat,不要强行归类。\n"
@@ -1484,6 +1490,21 @@ class ChatAssistantAgent(BaseAgent):
 
     def _handle_start_review(self, intent: dict,
                               ctx: Optional[AgentContext]) -> AgentResult:
+        """根据对话意图启动项目代码审查。
+
+        调用方已提供 `file_ids` 时直接沿用；只提供项目 ID 时传递空列表，由
+        Orchestrator 统一查询该项目全部 active 文件。最终仍由 ReviewService
+        校验用户权限、文件归属和数量边界。
+
+        Args:
+            intent: 意图分类结果，payload 包含 project_id、可选 file_ids、
+                review_type 和 task_name。
+            ctx: 当前 Agent 调用上下文，用于向下游透传用户和调用链信息。
+
+        Returns:
+            AgentResult: 成功时返回审查任务摘要；缺少项目、没有 active 文件、
+            自动文件解析失败或下游启动失败时返回明确错误。
+        """
         if not self._check_orch():
             return AgentResult(success=False, error="Orchestrator 未注入")
         p = intent.get("payload", {})
@@ -1494,8 +1515,9 @@ class ChatAssistantAgent(BaseAgent):
         if not pid:
             return AgentResult(success=False, error="请指定要审查的项目ID")
 
+        file_ids = p.get("file_ids") or []
         result = self._orchestrator.start_review(
-            project_id=pid, file_ids=[],
+            project_id=pid, file_ids=file_ids,
             review_type=review_type, task_name=name, ctx=ctx,
         )
         if not result.success:

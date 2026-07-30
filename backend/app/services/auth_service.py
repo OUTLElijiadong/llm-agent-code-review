@@ -50,27 +50,32 @@ def register(db: Session, payload: RegisterIn) -> User:
     return user
 
 
-def login(db: Session, username: str, password: str):
-    """用户登录: 验证密码,更新最后登录时间,签发JWT
+def login(db: Session, username: str, password: str, ip: str = ""):
+    """用户登录: 验证密码,更新最后登录时间与来源IP,签发JWT
 
     Args:
         db: 数据库会话
         username: 用户名
         password: 明文密码
+        ip: 登录来源 IP(用于审计与用户管理展示)
 
     Returns:
         tuple[str, User]: (JWT令牌, 用户ORM对象)
 
     Raises:
         AuthError: 用户名或密码错误
-        ForbiddenError: 账号已禁用
+        ForbiddenError: 账号已禁用或已删除
     """
     user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(password, user.password):
         raise AuthError("用户名或密码错误", code=40001)
+    if user.status == -1:
+        raise ForbiddenError("账号已被删除", code=40302)
     if user.status != 1:
         raise ForbiddenError("账号已禁用", code=40301)
     user.last_login = datetime.now(timezone.utc)
+    if ip:
+        user.last_login_ip = ip
     db.commit()
     token = create_access_token(user.id, user.role, getattr(user, "token_version", 0) or 0)
     return token, user

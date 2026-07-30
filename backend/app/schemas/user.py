@@ -19,6 +19,7 @@ class UserListItem(BaseModel):
     role: str
     status: int
     last_login: Optional[datetime] = None
+    last_login_ip: Optional[str] = None
     create_time: Optional[datetime] = None
     # R6 修复:补齐 update_time,对齐 User ORM
     update_time: Optional[datetime] = None

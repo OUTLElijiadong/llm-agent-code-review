@@ -4,6 +4,7 @@ API路由聚合模块
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    admin_overview,
     agent_governance,
     agents,
     ai_chat,
@@ -59,5 +60,6 @@ api_router.include_router(user_profile.router, prefix="/me", tags=["用户画像
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["个人知识库"])
 api_router.include_router(llm_config.router, prefix="/admin/llm", tags=["大模型配置"])
 api_router.include_router(agent_governance.router, prefix="/admin", tags=["Agent治理"])
+api_router.include_router(admin_overview.router, prefix="/admin", tags=["管理员总览"])
 # RBAC 权限管理(角色/权限/菜单/数据范围,全部要求管理员身份)
 api_router.include_router(rbac.router, prefix="/rbac", tags=["RBAC权限管理"])

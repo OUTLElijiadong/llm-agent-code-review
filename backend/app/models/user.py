@@ -18,8 +18,9 @@ class User(Base, IdMixin, TimestampMixin):
     email = Column(String(100))
     nickname = Column(String(50))
     role = Column(String(20), nullable=False, default="user")
-    status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=禁用")
+    status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=禁用,-1=已删除(软删)")
     last_login = Column(DateTime)
+    last_login_ip = Column(String(64), comment="最后登录来源 IP")
     token_version = Column(
         Integer, nullable=False, default=0, server_default="0",
         comment="令牌版本: 改密/禁用/重置时递增,使此前签发的JWT失效",
