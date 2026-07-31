@@ -1,10 +1,16 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-20m}
+    max-file: "${LOG_MAX_FILES:-5}"
+
 services:
   mysql:
-    image: mysql:8.0
+    image: ${MYSQL_IMAGE:-mysql:8.0}
     container_name: cr_mysql
     restart: unless-stopped
-    # 内存上限:防止任一容器吃爆 2C2G 整机内存触发内核 OOM 误杀其它服务
-    mem_limit: 512m
+    mem_limit: ${MYSQL_MEM_LIMIT:-640m}
+    cpus: ${MYSQL_CPUS:-1.0}
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -16,67 +22,135 @@ services:
       - --collation-server=utf8mb4_unicode_ci
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./mysql/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./mysql/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
     ports:
-      - "127.0.0.1:3307:3306"
+      - "127.0.0.1:${MYSQL_BIND_PORT:-3307}:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h 127.0.0.1 -uroot --silent"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 20s
+    logging: *default-logging
+    networks:
+      - code_review_net
+
+  clamav:
+    image: ${CLAMAV_IMAGE:-clamav/clamav:stable}
+    container_name: cr_clamav
+    restart: unless-stopped
+    mem_limit: ${CLAMAV_MEM_LIMIT:-1400m}
+    cpus: ${CLAMAV_CPUS:-1.5}
+    expose:
+      - "3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping=1 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    logging: *default-logging
+    networks:
+      - code_review_net
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: cr_redis
+    restart: unless-stopped
+    mem_limit: ${REDIS_MEM_LIMIT:-128m}
+    cpus: ${REDIS_CPUS:-0.25}
+    command: ["redis-server", "--appendonly", "no", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    logging: *default-logging
+    networks:
+      - code_review_net
 
   backend:
-    build: ../backend
+    image: prism-backend:${BACKEND_RELEASE:-local}
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
     container_name: cr_backend
+    user: "10001:991"
     restart: unless-stopped
-    # 内存上限:审查任务在后台线程跑,极端负载下封顶后只会重启 backend(orphan 回收兜底),
-    # 而不会让内核 OOM 误杀 mysql,保护数据与演示稳定。正常占用 ~120M,768m 有充足余量。
-    mem_limit: 768m
+    mem_limit: ${BACKEND_MEM_LIMIT:-768m}
+    cpus: ${BACKEND_CPUS:-1.5}
     depends_on:
       mysql:
         condition: service_healthy
-    # JWT_SECRET / DEEPSEEK_* / CORS_ORIGINS 等从 .env 整体注入
-    env_file: .env
+      clamav:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: ${DEPLOY_ENV_FILE:-.env}
     environment:
       APP_ENV: prod
-      # 数据库连接固定指向 mysql 容器，账号直接复用 MYSQL_* 这套，避免填两遍
+      APP_RELEASE: ${APP_RELEASE:-local}
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: ${MYSQL_USER}
       DB_PASSWORD: ${MYSQL_PASSWORD}
       DB_NAME: ${MYSQL_DATABASE}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_TIMEOUT: ${CLAMAV_TIMEOUT:-5}
+      CLAMAV_RECHECK_SECONDS: ${CLAMAV_RECHECK_SECONDS:-30}
+      YARA_RULES_DIR: /app/deploy/yara/rules
+      MALWARE_SCAN_FAIL_CLOSED: ${MALWARE_SCAN_FAIL_CLOSED:-true}
+      REDIS_URL: redis://redis:6379/0
+      OPS_EXECUTOR_SOCKET: /run/prism-ops/agent.sock
+    volumes:
+      - ./yara/rules:/app/deploy/yara/rules:ro
+      - /run/prism-ops:/run/prism-ops
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${BACKEND_BIND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --max-time 5 http://127.0.0.1:8000/healthz >/dev/null"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 30s
+    logging: *default-logging
+    networks:
+      - code_review_net
 
   frontend:
+    image: prism-frontend:${FRONTEND_RELEASE:-local}
     build:
       context: ../frontend
       dockerfile: Dockerfile
     container_name: cr_frontend
     restart: unless-stopped
-    # nginx 静态服务,占用极小(~7M),128m 足够
-    mem_limit: 128m
+    mem_limit: ${FRONTEND_MEM_LIMIT:-128m}
+    cpus: ${FRONTEND_CPUS:-0.5}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      APP_DOMAIN_ALIASES: ${APP_DOMAIN_ALIASES:-}
+      SERVER_IP: ${SERVER_IP:-}
+      NGINX_ENVSUBST_FILTER: ^(APP_DOMAIN|APP_DOMAIN_ALIASES|SERVER_IP)$$
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      # Let's Encrypt 证书（只读给 nginx 用）+ ACME 续期校验 webroot
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
-
-  clamav:
-    image: clamav/clamav:latest
-    container_name: cr_clamav
-    restart: unless-stopped
-    # 有意不设 mem_limit:clamd 病毒库常驻,定期并发重载会短时翻倍(~1.2G),
-    # 强行封顶会在重载瞬间被 OOM 杀掉;其内存有上界(库大小)且稳定,故放行。
-    ports:
-      - "3310:3310"
-    volumes:
-      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -q --spider https://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging: *default-logging
     networks:
       - code_review_net
 

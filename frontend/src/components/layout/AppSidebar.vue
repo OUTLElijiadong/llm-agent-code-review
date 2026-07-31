@@ -10,6 +10,7 @@ import {
   List,
   DataBoard,
   Cpu,
+  EditPen,
   Avatar,
   User,
   ChatDotRound,
@@ -28,8 +29,11 @@ import {
   UserFilled,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
-import { normalizeRole, type UserRole } from '@/utils/roleHome'
-import type { Menu } from '@/types/rbac'
+import {
+  canRoleSeeNavigationItem,
+  normalizeRole,
+  type UserRole,
+} from '@/utils/roleHome'
 
 interface MenuItem {
   path: string
@@ -61,6 +65,7 @@ const menuItems: MenuItem[] = [
   { path: '/issues',    title: '问题追踪',   icon: Warning,          roles: ['user', 'reviewer'] },
   { path: '/reports',   title: '审查报告',   icon: DataBoard,        roles: ['user', 'reviewer'] },
   { path: '/agents',    title: 'Agent 中心', icon: Cpu,              roles: ['admin', 'user', 'reviewer'] },
+  { path: '/agent-studio', title: 'Agent 工坊', icon: EditPen,       roles: ['admin', 'reviewer'] },
   { path: '/security',  title: '安全中心',   icon: Aim,              roles: ['admin', 'user', 'reviewer'] },
   { path: '/rules',     title: '审查规则',   icon: List,             roles: ['user', 'reviewer'] },
   { path: '/forum',     title: '开发者论坛', icon: ChatLineSquare,   roles: ['admin', 'user', 'reviewer'] },
@@ -86,38 +91,13 @@ const adminItems: MenuItem[] = [
 const isAdmin = computed(() => userStore.isAdmin())
 const currentRole = computed(() => normalizeRole(userStore.profile?.role))
 
-/**
- * 将用户菜单树扁平化为允许访问的路径集合
- * @param list - 菜单树
- * @param paths - 累积路径集合
- * @returns void
- */
-function flattenMenuPaths(list: Menu[], paths: Set<string>): void {
-  for (const m of list) {
-    if (m.path) paths.add(m.path)
-    if (m.children && m.children.length > 0) flattenMenuPaths(m.children, paths)
-  }
-}
-
-/** 用户 RBAC 菜单允许访问的路径集合 */
-const allowedMenuPaths = computed<Set<string>>(() => {
-  const paths = new Set<string>()
-  flattenMenuPaths(userStore.menus, paths)
-  return paths
-})
-
-/** RBAC 菜单是否已加载(非空则启用菜单过滤) */
-const menusLoaded = computed(() => allowedMenuPaths.value.size > 0)
-
 const visibleMenuItems = computed(() => {
-  // admin 角色显示全部(管理员可访问的)主菜单,不进行 RBAC 过滤
-  if (isAdmin.value) {
-    return menuItems.filter((item) => !item.roles || item.roles.includes(currentRole.value))
-  }
   // 主菜单统一按静态 roles 分角色显示。后端 RBAC 菜单种子的 path 与前端路由
   // 不一致(如 /review vs /reviews、缺 /forum),做交集会误删论坛等入口;
-  // 实际访问权限仍由路由守卫 + 后端 require_permission 强制,侧边栏仅负责展示。
-  return menuItems.filter((item) => !item.roles || item.roles.includes(currentRole.value))
+  // 管理员由统一函数作为超级用户放行;数据权限仍由后端强制。
+  return menuItems.filter((item) => (
+    canRoleSeeNavigationItem(currentRole.value, item.roles)
+  ))
 })
 
 /**

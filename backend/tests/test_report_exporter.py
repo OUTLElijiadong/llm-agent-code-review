@@ -27,7 +27,6 @@ from app.services.report_exporter import (
     load_builtin_template,
 )
 
-
 # ============ 测试数据工厂 ============
 
 def _make_task(**overrides: Any) -> Dict[str, Any]:
@@ -473,10 +472,7 @@ def test_empty_issues_does_not_raise_and_statistics_zero():
     """空问题列表场景下导出函数不应报错,统计字段为 0。"""
     task = _make_task()
     for fn in (export_to_json, export_to_dict):
-        if fn is export_to_json:
-            result = fn(task, [], None, 100)
-        else:
-            result = fn(task, [], None, 100)
+        fn(task, [], None, 100)
     # HTML 也应能渲染空场景
     tpl = load_builtin_template("simple")
     html = export_to_html(task, [], "", 100, tpl)

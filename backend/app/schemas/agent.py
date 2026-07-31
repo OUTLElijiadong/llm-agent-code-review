@@ -1,9 +1,17 @@
 """
 Agent 中心相关 Pydantic Schema
 """
+from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+
+def _datetime_to_iso(v: Any) -> Optional[str]:
+    """把 datetime 或字符串统一转为 ISO 字符串;其余原样返回。"""
+    if isinstance(v, datetime):
+        return v.isoformat()
+    return v if v is None or isinstance(v, str) else str(v)
 
 
 class AgentProfileOut(BaseModel):
@@ -24,6 +32,11 @@ class AgentUsageOut(BaseModel):
     success_count: int = 0
     failed_count: int = 0
     last_called_at: Optional[str] = None
+
+    @field_validator("last_called_at", mode="before")
+    @classmethod
+    def _normalize_last_called_at(cls, v: Any) -> Optional[str]:
+        return _datetime_to_iso(v)
 
 
 class ReviewTypeMappingOut(BaseModel):
@@ -58,6 +71,11 @@ class AgentRuntimeOut(BaseModel):
     success_count: int = 0
     failed_count: int = 0
     last_called_at: Optional[str] = None
+    source: str = "builtin"
+    owner_id: Optional[int] = None
+    version_id: Optional[int] = None
+    version_number: Optional[int] = None
+    release_id: Optional[int] = None
 
     @field_validator("skills", mode="before")
     @classmethod
@@ -74,6 +92,11 @@ class AgentRuntimeOut(BaseModel):
             (item.get("name", "") if isinstance(item, dict) else item)
             for item in v
         ]
+
+    @field_validator("last_called_at", mode="before")
+    @classmethod
+    def _normalize_last_called_at(cls, v: Any) -> Optional[str]:
+        return _datetime_to_iso(v)
 
 
 class AgentRuntimeSummaryOut(BaseModel):
@@ -162,6 +185,11 @@ class AgentSkillRecordOut(BaseModel):
     duration_ms: int = 0
     output_summary: str = ""
     create_time: Optional[str] = None
+
+    @field_validator("create_time", mode="before")
+    @classmethod
+    def _normalize_create_time(cls, v: Any) -> Optional[str]:
+        return _datetime_to_iso(v)
 
 
 class SkillMetaOut(BaseModel):

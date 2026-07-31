@@ -1,64 +1,168 @@
 #!/usr/bin/env bash
-# ============================================================
-# 一键部署 / 更新脚本（在服务器 deploy/ 目录里运行）
-#   用法：
-#     ./deploy.sh            全量更新（前后端都重建，首次部署 / 后端有改动时用）
-#     ./deploy.sh frontend   只更新前端（--no-deps：不重建、不重启 backend / mysql）
-#     ./deploy.sh backend    只更新后端（不动 frontend / mysql）
-# 幂等，重复跑安全。零停机：新镜像构建成功前旧容器不停。
-# ============================================================
-set -euo pipefail
+# 按精确 Git SHA 执行带备份、迁移、健康门禁和应用回滚的发布事务。
+set -Eeuo pipefail
 
 cd "$(dirname "$0")"
+# shellcheck source=lib/common.sh
+source "lib/common.sh"
 
-TARGET="${1:-all}"
+# 输出命令帮助。
+# 参数: 无。
+# 返回: 始终返回 0。
+usage() {
+  cat <<'USAGE'
+用法: ./deploy.sh [all|backend|frontend] --revision <commit-ish>
 
-echo "📥 [1/4] 同步最新代码 (origin/main)..."
-# /opt/code-review 是 --depth 1 浅克隆：git pull --ff-only 会“静默不前进”，
-# 必须 fetch + reset --hard。.env 是 gitignored，reset 不会动它。
-if git -C .. rev-parse --git-dir >/dev/null 2>&1; then
-  git -C .. fetch origin main
-  git -C .. reset --hard origin/main
-  echo "   当前代码 = $(git -C .. rev-parse --short HEAD)  ($(git -C .. log -1 --format=%s))"
+说明:
+  - revision 会解析为完整 SHA，并且必须等于当前干净工作区 HEAD；脚本不 pull/reset。
+  - backend/all 发布前自动备份，随后由目标 Backend 镜像执行 Alembic。
+  - 健康或冒烟失败时尝试切回 previous.env 记录的应用镜像，不自动降级数据库。
+USAGE
+}
+
+target="all"
+revision="HEAD"
+target_seen=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    all|backend|frontend)
+      [[ "$target_seen" == "0" ]] || fatal "只能指定一个发布目标"
+      target="$1"
+      target_seen=1
+      shift
+      ;;
+    --revision)
+      [[ $# -ge 2 ]] || fatal "--revision 缺少值"
+      revision="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fatal "未知参数: $1"
+      ;;
+  esac
+done
+
+require_commands docker git curl awk grep
+validate_compose_environment
+repo_dir="$(cd .. && pwd)"
+git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1 || fatal "上级目录不是 Git 仓库"
+assert_deploy_sources_clean "$repo_dir" || fatal "拒绝从脏构建上下文发布"
+target_sha="$(resolve_git_revision "$repo_dir" "$revision")" || fatal "无法解析 revision: $revision"
+head_sha="$(current_git_sha "$repo_dir")"
+[[ "$target_sha" == "$head_sha" ]] || fatal "revision=$target_sha 与当前 HEAD=$head_sha 不一致；请先安全 checkout 精确提交"
+[[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || fatal "目标 SHA 格式非法"
+
+release_dir="${RELEASE_STATE_DIR:-.releases}"
+current_state="$release_dir/current.env"
+previous_state="$release_dir/previous.env"
+pending_state="$release_dir/pending.env"
+mkdir -p "$release_dir"
+chmod 700 "$release_dir"
+lock_dir="$release_dir/.deploy.lock"
+acquire_directory_lock "$lock_dir"
+trap 'release_directory_lock "$lock_dir"' EXIT
+
+rollback_ready=0
+
+# 发布异常时尝试切回上一应用镜像，并保留原始失败状态码。
+# 参数: ERR trap 自动传入失败状态。
+# 返回: 以原始失败状态退出。
+on_deploy_error() {
+  local rc=$?
+  trap - ERR
+  log_warn "发布事务失败(rc=$rc, target=$target, sha=$target_sha)"
+  if [[ "$rollback_ready" == "1" && -f "$previous_state" ]]; then
+    log_warn "开始应用层自动回滚；数据库不会自动 downgrade/restore"
+    if ! ./rollback.sh "$target" --confirm ROLLBACK_APPLICATION --from-deploy-failure; then
+      log_warn "应用自动回滚失败，请保持维护窗口并人工检查 current/previous/pending 状态"
+    fi
+  else
+    log_warn "尚无可验证的上一镜像，未执行自动回滚"
+  fi
+  exit "$rc"
+}
+trap on_deploy_error ERR
+
+bootstrap_tag="rollback-$(date -u '+%Y%m%d%H%M%S')"
+if [[ -f "$current_state" ]]; then
+  cp "$current_state" "$previous_state"
+  current_sha="$(read_release_value "$current_state" RELEASE_SHA)"
+  current_backend="$(read_release_value "$current_state" BACKEND_RELEASE)"
+  current_frontend="$(read_release_value "$current_state" FRONTEND_RELEASE)"
 else
-  echo "⚠️  非 git 目录，跳过同步，用当前代码部署"
+  current_sha="$head_sha"
+  current_backend="$(capture_running_image backend prism-backend "$bootstrap_tag" || printf 'local\n')"
+  current_frontend="$(capture_running_image frontend prism-frontend "$bootstrap_tag" || printf 'local\n')"
+  write_release_state \
+    "$previous_state" "$current_sha" "$current_backend" "$current_frontend" \
+    bootstrap none "$(current_alembic_revision)"
 fi
 
-echo "🔎 [2/4] 检查 .env..."
-if [ ! -f .env ]; then
-  echo "❌ 缺少 deploy/.env"
-  echo "   请先执行：  cp .env.example .env   然后填写密码 / DeepSeek Key / JWT_SECRET"
-  exit 1
-fi
-
-echo "🔨 [3/4] 构建并启动容器（target=$TARGET，首次会比较久）..."
-case "$TARGET" in
-  frontend)
-    # 只构建前端镜像；--no-deps 确保不重建、不重启 backend / mysql（后端零波及）。
-    # 注意：用 `up --build frontend`（不带 --no-deps）会把 backend 当依赖一起重建，
-    # 导致后端无谓 recreate 抖动；这里分两步并显式 --no-deps 规避。
-    docker compose build frontend
-    docker compose up -d --no-deps frontend
+case "$target" in
+  all)
+    desired_backend="$target_sha"
+    desired_frontend="$target_sha"
     ;;
   backend)
-    docker compose build backend
-    docker compose up -d --no-deps backend
+    desired_backend="$target_sha"
+    desired_frontend="$current_frontend"
     ;;
-  all|*)
-    docker compose up -d --build
+  frontend)
+    desired_backend="$current_backend"
+    desired_frontend="$target_sha"
     ;;
 esac
 
-echo "🧹 [4/4] 清理悬空镜像..."
-docker image prune -f >/dev/null 2>&1 || true
+if [[ "$target" == "all" || "$target" == "backend" ]]; then
+  release_image_exists prism-backend "$current_backend" && rollback_ready=1 || true
+else
+  release_image_exists prism-frontend "$current_frontend" && rollback_ready=1 || true
+fi
 
-echo ""
-echo "✅ 部署完成！容器状态："
-docker compose ps
-echo ""
-# 说明：公网 443/HTTPS 被云侧（腾讯云/运营商边界）RST 注入，对外仅经 HTTP/80 访问。
-SERVER_IP=$(awk -F= '/^SERVER_IP=/{print $2}' .env 2>/dev/null | tail -n 1 | tr -d "\"'")
-SERVER_IP=${SERVER_IP:-81.70.251.90}
-echo "🌐 前端访问:  http://$SERVER_IP"
-echo "📖 接口文档:  http://$SERVER_IP/docs"
-echo "📜 查看日志:  docker compose logs -f backend"
+export APP_RELEASE="$target_sha"
+export BACKEND_RELEASE="$desired_backend"
+export FRONTEND_RELEASE="$desired_frontend"
+write_release_state \
+  "$pending_state" "$target_sha" "$desired_backend" "$desired_frontend" \
+  "$target" none "$(current_alembic_revision)"
+validate_compose_environment
+log_info "发布预检通过(target=$target, sha=$target_sha)"
+
+backup_file="none"
+if [[ "$target" == "all" || "$target" == "backend" ]]; then
+  compose up -d mysql clamav
+  wait_for_service_health mysql "${MYSQL_HEALTH_TIMEOUT:-180}" || fatal "MySQL 未就绪"
+  wait_for_service_health clamav "${CLAMAV_HEALTH_TIMEOUT:-420}" || fatal "ClamAV 未就绪"
+  backup_file="$(./backup.sh --reason pre_deploy | tail -n 1)"
+  [[ -f "$backup_file" ]] || fatal "发布前备份未生成"
+  log_info "发布前备份已完成"
+  compose build backend
+  compose run --rm --no-deps backend alembic upgrade head
+  assert_alembic_at_head || fatal "Alembic 未位于唯一 head"
+  compose up -d --no-deps backend
+  wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || fatal "Backend 未恢复健康"
+  smoke_backend "$target_sha" || fatal "Backend 冒烟失败"
+fi
+
+if [[ "$target" == "frontend" ]]; then
+  wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-180}" || fatal "现有 Backend 不健康"
+fi
+if [[ "$target" == "all" || "$target" == "frontend" ]]; then
+  compose build frontend
+  compose up -d --no-deps frontend
+  wait_for_service_health frontend "${FRONTEND_HEALTH_TIMEOUT:-120}" || fatal "Frontend 未恢复健康"
+fi
+
+smoke_https "$desired_backend" || fatal "HTTPS/同源冒烟失败"
+alembic_revision="$(current_alembic_revision)"
+write_release_state \
+  "$current_state" "$target_sha" "$desired_backend" "$desired_frontend" \
+  "$target" "$backup_file" "$alembic_revision"
+rm -f "$pending_state"
+trap - ERR
+log_info "发布完成(target=$target, sha=$target_sha, alembic=$alembic_revision)"
+compose ps

@@ -27,6 +27,7 @@ _HIGH_RISK_ACTION_TOKENS = (
     "truncate",
     "production_config",
     "prod_config",
+    "agent.toggle",
 )
 _WRITE_SHELL_TOKENS = (
     "shell.write",

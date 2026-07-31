@@ -138,3 +138,24 @@ def test_dispatch_with_payload_null_fields_no_crash():
         ctx=None,
     )
     assert result.success is True
+
+
+def test_dispatch_custom_project_name_returns_fuzzy_confirmation():
+    """前端选择“其他”提交项目名称后，应进入后端模糊确认而非强转 ID。"""
+    agent = _agent()
+
+    result = agent.dispatch_with_payload(
+        "security_audit",
+        {
+            "scope": "project",
+            "project_id": "",
+            "project_query": "皮卡丘",
+        },
+        ctx=None,
+    )
+
+    assert result.success is True
+    clarify = result.data["clarify"]
+    assert clarify["questions"][0]["key"] == "project_id"
+    assert clarify["questions"][0]["default"] == 3
+    assert "对吗" in result.data["content"]

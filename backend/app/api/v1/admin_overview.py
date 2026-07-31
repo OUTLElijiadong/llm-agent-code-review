@@ -3,12 +3,13 @@
 汇总服务器状态、安全态势、登录来源地理分布、Agent 活跃状态,
 供管理员总览大屏一次拉取渲染。
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.agents.event_bus import AgentEventBus
 from app.core.database import get_db
 from app.core.dependencies import require_admin
 from app.models.agent_governance import AgentProfile, ToolCallLog
@@ -23,13 +24,15 @@ router = APIRouter()
 
 
 def _agent_activity(db: Session) -> list[dict]:
-    """各 Agent 活跃状态:状态/今日调用/主要用途。
+    """返回各 Agent 的当前阶段、今日调用量与主要用途。
 
-    ToolCallLog 无 actor 维度,并发用户数暂不可精确统计,以"近30分钟有调用"
-    标记该 Agent 当前是否处于活跃;今日调用量与高频动作反映负载与用途。
+    优先使用本进程事件总线的最新阶段事件；事件超过 90 秒自动过期，
+    防止历史任务长期显示为运行中。跨进程或短暂无事件时，以最近 15 秒
+    的真实工具网关日志作为兜底活动信号。
     """
-    now = datetime.utcnow()
-    recent = now - timedelta(minutes=30)
+    now = datetime.now(timezone.utc)
+    recent_tool_cutoff = now - timedelta(seconds=15)
+    active_event_cutoff = now - timedelta(seconds=90)
     today = now.date()
 
     profiles = db.query(AgentProfile).all()
@@ -41,29 +44,80 @@ def _agent_activity(db: Session) -> list[dict]:
         .all()
     )
     today_map = {r[0]: r[1] for r in today_rows}
-    # 近30分钟有调用的 agent(近似活跃)
-    recent_codes = {
-        r[0]
-        for r in db.query(ToolCallLog.agent_code)
-        .filter(ToolCallLog.create_time >= recent)
-        .distinct()
-        .all()
+    profiles_by_code = {profile.code: profile for profile in profiles}
+    event_status_map = {
+        "dispatch": "thinking",
+        "thinking": "thinking",
+        "progress": "working",
+        "complete": "idle",
+        "failed": "error",
+        "clarify": "blocked",
     }
+    latest_events: dict[str, tuple[datetime, str, str]] = {}
+    for event in AgentEventBus.instance().recent(limit=500):
+        if event.agent not in profiles_by_code or event.type is None:
+            continue
+        event_type = event.type.value if hasattr(event.type, "value") else str(event.type)
+        mapped_status = event_status_map.get(event_type)
+        if not mapped_status:
+            continue
+        try:
+            event_time = datetime.fromisoformat(event.timestamp.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        if event_time.tzinfo is None:
+            event_time = event_time.replace(tzinfo=timezone.utc)
+        else:
+            event_time = event_time.astimezone(timezone.utc)
+        previous = latest_events.get(event.agent)
+        if previous is None or event_time >= previous[0]:
+            latest_events[event.agent] = (event_time, mapped_status, event.message or "")
+
+    # 工具网关日志是跨进程的事实来源；在没有事件总线事件时仅用极短窗口兜底。
+    recent_tool_rows = (
+        db.query(ToolCallLog)
+        .filter(ToolCallLog.create_time >= recent_tool_cutoff)
+        .order_by(ToolCallLog.create_time.desc(), ToolCallLog.id.desc())
+        .all()
+    )
+    latest_tools: dict[str, ToolCallLog] = {}
+    for row in recent_tool_rows:
+        latest_tools.setdefault(row.agent_code, row)
 
     result = []
     for p in profiles:
         calls = today_map.get(p.code, 0)
         db_status = getattr(p, "status", "idle") or "idle"
-        # 综合状态:DB 状态优先,其次按近期调用推断活跃
-        if db_status in ("working", "error", "disabled"):
-            status = db_status
-        elif p.code in recent_codes or calls > 0:
-            status = "working"
-        else:
-            status = "idle"
-        # 用途:取该 agent 今日最常见的调用动作
+        latest_event = latest_events.get(p.code)
+        latest_tool = latest_tools.get(p.code)
+        status = "disabled" if not getattr(p, "is_enabled", 1) else "idle"
         purpose = ""
-        if calls:
+        last_seen_at = None
+        activity_source = "none"
+        if db_status == "error":
+            status = "error"
+        elif latest_event and latest_event[0] >= active_event_cutoff:
+            status = latest_event[1]
+            purpose = latest_event[2]
+            last_seen_at = latest_event[0].isoformat()
+            activity_source = "event_bus"
+        elif latest_tool and latest_tool.create_time:
+            tool_time = latest_tool.create_time
+            if tool_time.tzinfo is None:
+                tool_time = tool_time.replace(tzinfo=timezone.utc)
+            if tool_time >= recent_tool_cutoff:
+                status = "error" if latest_tool.status == "failed" else "working"
+                purpose = latest_tool.action or latest_tool.tool_code or ""
+                last_seen_at = tool_time.isoformat()
+                activity_source = "tool_log"
+
+        # 用途:实时事件/工具没有用途时，回退到今日最常见动作
+        purpose = ""
+        if latest_event and latest_event[0] >= active_event_cutoff and latest_event[2]:
+            purpose = latest_event[2]
+        elif latest_tool and latest_tool.action:
+            purpose = latest_tool.action
+        elif calls:
             top_action = (
                 db.query(ToolCallLog.action, func.count(ToolCallLog.id).label("c"))
                 .filter(func.date(ToolCallLog.create_time) == today, ToolCallLog.agent_code == p.code)
@@ -79,8 +133,10 @@ def _agent_activity(db: Session) -> list[dict]:
             "calls_today": calls,
             "purpose": purpose,
             "is_enabled": getattr(p, "is_enabled", 1),
+            "last_seen_at": last_seen_at,
+            "activity_source": activity_source,
         })
-    return result
+    return sorted(result, key=lambda row: (row["status"] not in {"working", "thinking", "blocked"}, row["name"]))
 
 
 def _login_geo(db: Session, days: int = 30) -> list[dict]:

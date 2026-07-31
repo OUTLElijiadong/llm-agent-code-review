@@ -1,6 +1,7 @@
 """
 Alembic环境配置
 """
+
 from importlib import import_module
 from logging.config import fileConfig
 
@@ -11,12 +12,16 @@ from app.core.config import settings
 from app.core.database import Base
 
 _MODEL_MODULES = (
+    "app.models.admin_chat",
+    "app.models.agent_response_run",
     "app.models.agent_governance",
     "app.models.ai_call_log",
     "app.models.api_config",
     "app.models.audit_log",
+    "app.models.beta_invite_code",
     "app.models.code_file",
     "app.models.code_version",
+    "app.models.custom_agent",
     "app.models.project",
     "app.models.review_issue",
     "app.models.review_report",

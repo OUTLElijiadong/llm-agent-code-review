@@ -4,8 +4,13 @@ API路由聚合模块
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    admin_agent_releases,
+    admin_copilot,
     admin_overview,
+    agent_catalog,
     agent_governance,
+    agent_responses,
+    agent_studio,
     agents,
     ai_chat,
     ai_logs,
@@ -13,6 +18,7 @@ from app.api.v1 import (
     api_config,
     audit,
     auth,
+    beta_invites,
     code_files,
     dashboard,
     evolution,
@@ -61,5 +67,11 @@ api_router.include_router(knowledge.router, prefix="/knowledge", tags=["个人�
 api_router.include_router(llm_config.router, prefix="/admin/llm", tags=["大模型配置"])
 api_router.include_router(agent_governance.router, prefix="/admin", tags=["Agent治理"])
 api_router.include_router(admin_overview.router, prefix="/admin", tags=["管理员总览"])
+api_router.include_router(admin_copilot.router, prefix="/admin/copilot", tags=["管理员副驾驶"])
+api_router.include_router(agent_studio.router, prefix="/agent-studio", tags=["Agent 工坊"])
+api_router.include_router(agent_responses.router, prefix="/agent-responses", tags=["Responses Agent"])
+api_router.include_router(agent_catalog.router, prefix="/agent-catalog", tags=["Agent 目录"])
+api_router.include_router(admin_agent_releases.router, prefix="/admin/agent-releases", tags=["Agent 发布审批"])
+api_router.include_router(beta_invites.router, prefix="/admin/beta-codes", tags=["内测码管理"])
 # RBAC 权限管理(角色/权限/菜单/数据范围,全部要求管理员身份)
 api_router.include_router(rbac.router, prefix="/rbac", tags=["RBAC权限管理"])

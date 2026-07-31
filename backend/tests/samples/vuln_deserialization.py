@@ -12,8 +12,8 @@ OWASP 分类: A08:2021-Software and Data Integrity Failures
     静态分析器的 pickle_load 规则应命中此样本。
     攻击者可构造恶意 pickle 数据,反序列化时执行任意代码(RCE)。
 """
-import pickle
 import base64
+import pickle
 
 
 def load_user_session(session_data: str):

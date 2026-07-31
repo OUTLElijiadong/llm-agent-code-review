@@ -8,6 +8,23 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+case "${1:-}" in
+  -h|--help)
+    cat <<'USAGE'
+用法: ./renew-cert.sh
+
+使用 webroot 模式检查并续期 Let's Encrypt 证书；续期后重新加载前端 Nginx。
+USAGE
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    printf '未知参数: %s\n' "$1" >&2
+    exit 2
+    ;;
+esac
+
 echo "[$(date '+%F %T')] 检查/续期证书 ..."
 docker run --rm \
   -v "$PWD/certbot/conf:/etc/letsencrypt" \

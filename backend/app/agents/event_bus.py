@@ -14,7 +14,10 @@ v3.0 新增:
 from __future__ import annotations
 
 import asyncio
+import json
+import threading
 import time
+import uuid
 from collections import deque
 from typing import AsyncIterator, Deque, Dict, List, Optional, Tuple
 
@@ -27,9 +30,10 @@ class AgentEventBus:
     _instance: Optional["AgentEventBus"] = None
 
     def __init__(self, history_size: int = 200, queue_size: int = 64):
-        self._subscribers: List[asyncio.Queue] = []
+        self._subscribers: List[Tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = []
         self._history: Deque[AgentEvent] = deque(maxlen=history_size)
         self._queue_size = queue_size
+        self._relay: Optional[_RedisEventRelay] = None
 
     @classmethod
     def instance(cls) -> "AgentEventBus":
@@ -37,46 +41,227 @@ class AgentEventBus:
             cls._instance = cls()
         return cls._instance
 
-    def publish(self, event: AgentEvent) -> None:
+    def publish(self, event: AgentEvent, *, relay: bool = True) -> None:
         """同步发布事件,任何超出队列容量的订阅者会被静默丢弃这一条"""
         self._history.append(event)
-        for q in list(self._subscribers):
-            try:
-                q.put_nowait(event)
-            except asyncio.QueueFull:
-                logger.warning(
-                    f"[EventBus] 队列已满,丢弃事件 trace={event.trace_id} type={event.type}",
-                )
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        for loop, q in list(self._subscribers):
+            if current_loop is loop:
+                self._deliver(q, event)
+            else:
+                loop.call_soon_threadsafe(self._deliver, q, event)
+        if relay and self._relay:
+            self._relay.publish(event)
+
+    @staticmethod
+    def _deliver(q: asyncio.Queue, event: AgentEvent) -> None:
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            logger.warning(
+                f"[EventBus] 队列已满,丢弃事件 trace={event.trace_id} type={event.type}",
+            )
+
+    def start_relay(self) -> None:
+        if self._relay is None:
+            self._relay = _RedisEventRelay(self)
+        self._relay.start()
+
+    def stop_relay(self) -> None:
+        if self._relay:
+            self._relay.stop()
 
     def recent(self, limit: int = 50) -> List[AgentEvent]:
-        """获取最近 N 条历史事件
+        """合并本进程缓存与 Redis Stream，获取最近 N 条去重事件。"""
+        if limit <= 0:
+            return []
+        events: List[AgentEvent] = []
+        if self._relay:
+            events.extend(self._relay.recent(limit))
+        events.extend(list(self._history)[-limit:])
+        deduplicated: Dict[tuple, AgentEvent] = {}
+        for event in events:
+            deduplicated[self._fingerprint(event)] = event
+        return sorted(deduplicated.values(), key=lambda item: item.timestamp)[-limit:]
 
-        Args:
-            limit: 返回上限
-
-        Returns:
-            List[AgentEvent]: 最近的 N 条事件(按时间正序)
-        """
-        return list(self._history)[-limit:]
+    @staticmethod
+    def _fingerprint(event: AgentEvent) -> tuple:
+        return (
+            event.type.value if isinstance(event.type, AgentEventType) else str(event.type),
+            event.agent,
+            event.trace_id,
+            event.timestamp,
+            event.message,
+            json.dumps(event.payload, ensure_ascii=False, sort_keys=True, default=str),
+            event.user_id,
+        )
 
     async def subscribe(self, replay: int = 0) -> AsyncIterator[AgentEvent]:
         """订阅事件流。replay>0 时先回放最近 N 条历史。"""
+        loop = asyncio.get_running_loop()
         q: asyncio.Queue = asyncio.Queue(maxsize=self._queue_size)
-        self._subscribers.append(q)
-        logger.debug(
-            f"[EventBus] 新订阅者加入,当前总数={len(self._subscribers)}",
-        )
+        subscriber = (loop, q)
+        self._subscribers.append(subscriber)
+        replayed: set[tuple] = set()
         try:
             if replay > 0:
-                for ev in self.recent(replay):
+                replay_events = (
+                    await asyncio.to_thread(self.recent, replay)
+                    if self._relay else self.recent(replay)
+                )
+                for ev in replay_events:
+                    replayed.add(self._fingerprint(ev))
                     yield ev
             while True:
-                yield await q.get()
+                event = await q.get()
+                fingerprint = self._fingerprint(event)
+                if fingerprint in replayed:
+                    replayed.remove(fingerprint)
+                    continue
+                yield event
         finally:
-            self._subscribers.remove(q)
-            logger.debug(
-                f"[EventBus] 订阅者退出,当前总数={len(self._subscribers)}",
+            if subscriber in self._subscribers:
+                self._subscribers.remove(subscriber)
+
+
+class _RedisEventRelay:
+    """Redis Pub/Sub + Stream 中继；Redis 不可用时保持本地 SSE 可用。"""
+
+    channel = "prism:agent-events"
+    stream = "prism:agent-events:history"
+
+    def __init__(self, bus: AgentEventBus):
+        self._bus = bus
+        self._client = None
+        self._pubsub = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop = threading.Event()
+        self._source_id = uuid.uuid4().hex
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        try:
+            from app.core.config import settings
+            if not settings.redis_url:
+                return
+            import redis
+            self._client = redis.Redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=1)
+            self._client.ping()
+        except Exception as exc:  # Redis 是实时增强，不阻断业务 Agent
+            self._client = None
+            logger.warning(f"[EventBus] Redis 事件中继不可用，降级本地 SSE：{exc}")
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._listen, name="agent-event-redis", daemon=True)
+        self._thread.start()
+        logger.info("[EventBus] Redis 事件中继已启动")
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._pubsub:
+            try:
+                self._pubsub.close()
+            except Exception:
+                pass
+        if self._thread:
+            self._thread.join(timeout=2)
+        self._thread = None
+        self._pubsub = None
+        if self._client:
+            try:
+                self._client.close()
+            except Exception:
+                pass
+        self._client = None
+
+    def publish(self, event: AgentEvent) -> None:
+        if not self._client:
+            return
+        try:
+            from app.core.config import settings
+            encoded = json.dumps(
+                {"source": self._source_id, "event": event.to_dict()},
+                ensure_ascii=False,
             )
+            pipe = self._client.pipeline(transaction=False)
+            pipe.xadd(
+                self.stream,
+                {"event": encoded},
+                maxlen=max(100, settings.agent_event_stream_maxlen),
+                approximate=True,
+            )
+            pipe.publish(self.channel, encoded)
+            pipe.execute()
+        except Exception as exc:
+            logger.warning(f"[EventBus] Redis 发布失败，事件仅在本进程可见：{exc}")
+
+    def recent(self, limit: int) -> List[AgentEvent]:
+        """从 Redis Stream 读取最近事件，Redis 异常时返回空列表。"""
+        if not self._client or limit <= 0:
+            return []
+        try:
+            rows = self._client.xrevrange(self.stream, count=limit)
+            events: List[AgentEvent] = []
+            for _, fields in reversed(rows):
+                raw = fields.get("event") if isinstance(fields, dict) else None
+                if not isinstance(raw, str):
+                    continue
+                _, event = self._decode(raw)
+                if event is not None:
+                    events.append(event)
+            return events
+        except Exception as exc:
+            logger.warning(f"[EventBus] Redis 回放失败，降级本地历史：{exc}")
+            return []
+
+    @staticmethod
+    def _decode(raw: str) -> Tuple[Optional[str], Optional[AgentEvent]]:
+        """兼容旧版裸事件和新版带 source 的事件信封。"""
+        data = json.loads(raw)
+        source: Optional[str] = None
+        if isinstance(data, dict) and isinstance(data.get("event"), dict):
+            source = str(data.get("source") or "") or None
+            data = data["event"]
+        if not isinstance(data, dict):
+            return source, None
+        kwargs = {
+            "type": AgentEventType(data["type"]),
+            "agent": data["agent"],
+            "trace_id": data["trace_id"],
+            "parent": data.get("parent", ""),
+            "message": data.get("message", ""),
+            "payload": data.get("payload") or {},
+            "user_id": data.get("user_id"),
+        }
+        if data.get("timestamp"):
+            kwargs["timestamp"] = data["timestamp"]
+        return source, AgentEvent(**kwargs)
+
+    def _listen(self) -> None:
+        if not self._client:
+            return
+        try:
+            self._pubsub = self._client.pubsub(ignore_subscribe_messages=True)
+            self._pubsub.subscribe(self.channel)
+            for message in self._pubsub.listen():
+                if self._stop.is_set():
+                    break
+                raw = message.get("data")
+                if not isinstance(raw, str):
+                    continue
+                try:
+                    source, event = self._decode(raw)
+                    if event is not None and source != self._source_id:
+                        self._bus.publish(event, relay=False)
+                except Exception as exc:
+                    logger.warning(f"[EventBus] Redis 事件解析失败：{exc}")
+        except Exception as exc:
+            if not self._stop.is_set():
+                logger.warning(f"[EventBus] Redis 订阅中断：{exc}")
 
 
 def emit_event(
@@ -233,9 +418,12 @@ async def _invoke_skill_async(
                 orch = Orchestrator(register=False)
                 orch._db = db  # 直接注入 db,跳过 inject_db 的 user 依赖
                 ctx = AgentContext(
-                    trace_id=event.trace_id,
                     user_id=event.user_id,
-                    extra={"event_type": event.type.value, "event_payload": event.payload},
+                    extra={
+                        "trace_id": event.trace_id,
+                        "event_type": event.type.value,
+                        "event_payload": event.payload,
+                    },
                 )
                 # asyncio.to_thread 避免阻塞事件循环
                 # trigger_type="event" 确保 agent_skill_record 正确归类

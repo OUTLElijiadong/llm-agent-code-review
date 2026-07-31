@@ -238,7 +238,8 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
             while True:
                 await asyncio.sleep(60)
                 if websocket.client_state.value == 1:  # CONNECTED
-                    await websocket.send_text('{"type":"server_ping","ts":' + str(int(asyncio.get_event_loop().time())) + '}')
+                    ts = str(int(asyncio.get_event_loop().time()))
+                    await websocket.send_text('{"type":"server_ping","ts":' + ts + '}')
         except asyncio.CancelledError:
             pass
         except Exception:

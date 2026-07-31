@@ -38,6 +38,30 @@ class TestGetConfig:
         assert "sk-personal-key" not in cfg.api_key_masked
         assert "****" in cfg.api_key_masked
 
+    def test_get_config_disables_corrupted_ciphertext(self, db, admin_user):
+        """坏密文不应继续显示为已启用的自定义配置。"""
+        from app.models.api_config import UserApiConfig
+        from app.services.api_config_service import get_config
+
+        row = UserApiConfig(
+            user_id=admin_user.id,
+            provider="custom",
+            api_key_enc="corrupted-user-ciphertext",
+            base_url="https://llm.example.com",
+            model="example-model",
+            is_active=True,
+        )
+        db.add(row)
+        db.commit()
+
+        config = get_config(db, admin_user.id)
+        db.refresh(row)
+
+        assert config.is_custom is True
+        assert config.is_active is False
+        assert config.api_key_masked == "****"
+        assert row.is_active is False
+
 
 class TestSaveConfig:
     """保存配置测试"""

@@ -21,6 +21,7 @@ Environment 是多 Agent 编排的"舞台":
     env.publish(make_message(role="user", content="开始审查", cause_by="StartReview"))
     history = env.run(max_depth=4)
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -28,9 +29,10 @@ from typing import Deque, Dict, List, Optional
 
 from loguru import logger
 
+from app.agents.contracts import collaboration_allowed
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEvent, AgentEventType, new_trace_id
-from app.agents.metagpt.messages import Message
+from app.agents.metagpt.messages import Message, validate_message
 from app.agents.metagpt.role import Role
 
 
@@ -125,6 +127,10 @@ class Environment:
             msg.role = "system"
         if not msg.sent_from:
             msg.sent_from = msg.role
+        msg.metadata.setdefault("trace_id", self.trace_id)
+        validate_message(msg, set(self._roles))
+        if msg.send_to and not collaboration_allowed(msg.sent_from, msg.send_to):
+            raise ValueError(f"Agent 协作越界: {msg.sent_from} -> {msg.send_to}")
         self._history.append(msg)
         self._queue.append(msg)
         self._emit_discuss_event(msg)
@@ -148,14 +154,16 @@ class Environment:
                 "content_preview": (msg.content or "")[:200],
                 "metadata": msg.metadata,
             }
-            AgentEventBus.instance().publish(AgentEvent(
-                type=AgentEventType.DISCUSS,
-                agent=msg.role or "system",
-                trace_id=self.trace_id,
-                message=f"[{self.name}] {msg.role} → {msg.send_to or 'all'}: {msg.cause_by}",
-                payload=payload,
-                user_id=user_id,
-            ))
+            AgentEventBus.instance().publish(
+                AgentEvent(
+                    type=AgentEventType.DISCUSS,
+                    agent=msg.role or "system",
+                    trace_id=self.trace_id,
+                    message=f"[{self.name}] {msg.role} → {msg.send_to or 'all'}: {msg.cause_by}",
+                    payload=payload,
+                    user_id=user_id,
+                )
+            )
         except Exception as e:
             logger.warning(f"[Env:{self.name}] emit DISCUSS 事件失败: {e}")
 
@@ -181,10 +189,7 @@ class Environment:
             current_msg = self._queue.popleft()
             self._dispatch_to_roles(current_msg)
         if self._queue:
-            logger.warning(
-                f"[Env:{self.name}] 达到最大深度 {depth_limit},"
-                f"剩余 {len(self._queue)} 条消息未处理"
-            )
+            logger.warning(f"[Env:{self.name}] 达到最大深度 {depth_limit},剩余 {len(self._queue)} 条消息未处理")
         return self._history[start_history_len:]
 
     def _dispatch_to_roles(self, msg: Message) -> None:
@@ -205,12 +210,13 @@ class Environment:
             # 跳过自己发出的消息,避免自循环
             if msg.sent_from == role_name:
                 continue
+            if not collaboration_allowed(msg.sent_from, role_name):
+                logger.warning(f"[Env:{self.name}] 拒绝越界消息 {msg.sent_from} -> {role_name}")
+                continue
             try:
                 role._handle(msg)
             except Exception as e:
-                logger.warning(
-                    f"[Env:{self.name}] 角色 {role_name} 处理消息 {msg.id} 异常: {e}"
-                )
+                logger.warning(f"[Env:{self.name}] 角色 {role_name} 处理消息 {msg.id} 异常: {e}")
 
     # ────────────────── 查询 ──────────────────
 

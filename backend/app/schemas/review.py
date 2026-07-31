@@ -78,6 +78,7 @@ class TaskDetailOut(BaseModel):
     # R4 修复:任务失败时返回错误原因,对齐 ReviewTask.error_message
     error_message: Optional[str] = None
     files: list[TaskFileOut] = Field(default_factory=list)
+    agent_releases: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

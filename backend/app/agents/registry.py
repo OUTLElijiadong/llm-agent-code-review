@@ -57,6 +57,7 @@ class AgentRegistry:
             list[dict]: 字段对齐前端 AgentRuntimeOut Schema
         """
         from app.agents.base import BaseAgent
+        from app.agents.contracts import domain_skill_meta
         from app.agents.skills.registry import SkillRegistry
 
         items: List[Dict] = []
@@ -72,6 +73,10 @@ class AgentRegistry:
                      "invocable": False, "agent_name": name}
                     for s in (getattr(a, "skills", ()) or ())
                 ]
+            known = {item["name"] for item in skills_meta}
+            skills_meta.extend(
+                item for item in domain_skill_meta(name) if item["name"] not in known
+            )
             items.append({
                 "code": name,
                 "name": getattr(a, "name", name),
@@ -90,6 +95,7 @@ class AgentRegistry:
 
     def get_metadata(self, name: str) -> Optional[Dict]:
         from app.agents.base import BaseAgent
+        from app.agents.contracts import domain_skill_meta
         from app.agents.skills.registry import SkillRegistry
 
         a = self._agents.get(name)
@@ -103,6 +109,10 @@ class AgentRegistry:
                  "invocable": False, "agent_name": name}
                 for s in (a.skills or ())
             ]
+        known = {item["name"] for item in skills_meta}
+        skills_meta.extend(
+            item for item in domain_skill_meta(name) if item["name"] not in known
+        )
         return {
             "code": name,
             "name": a.name,

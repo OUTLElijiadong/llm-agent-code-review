@@ -12,6 +12,7 @@ from app.agents.events import AgentEventType, new_trace_id
 from app.agents.evolution_agent import EvolutionAgent
 from app.agents.file_agent import CodeFileManagerAgent
 from app.agents.language_agent import LanguageDetectorAgent
+from app.agents.operations_agent import OperationsAgent
 from app.agents.project_agent import ProjectAnalyzerAgent
 from app.agents.project_manager_agent import ProjectManagerAgent
 from app.agents.registry import AgentRegistry
@@ -92,6 +93,7 @@ class Orchestrator(BaseAgent):
         self.ai_prompt = AiPromptAgent()
         self.security_sentinel = SecuritySentinelAgent()
         self.evolution_agent = EvolutionAgent()
+        self.operations_agent = OperationsAgent()
 
         self.chat_agent = ChatAssistantAgent()
         self.chat_agent.set_orchestrator(self)
@@ -105,7 +107,7 @@ class Orchestrator(BaseAgent):
             self.project_mgr, self.review_orch, self.file_mgr,
             self.dashboard_agent, self.rule_mgr, self.reporter,
             self.ai_prompt, self.security_sentinel, self.evolution_agent,
-            self.chat_agent,
+            self.operations_agent, self.chat_agent,
         ]:
             self._registry.register(a)
         self._registry.register(self)
@@ -169,25 +171,47 @@ class Orchestrator(BaseAgent):
 
         logger.info("[Orchestrator] DB 已注入到所有操作类 Agent")
 
+    def _disabled_result(self, agent_code: str) -> Optional[AgentResult]:
+        """返回停用结果；未注入 DB 或未配置画像时保持历史兼容。"""
+        if self._db is None or not hasattr(self._db, "query"):
+            return None
+        from app.services import agent_governance_service
+
+        if agent_governance_service.is_runtime_enabled(self._db, agent_code):
+            return None
+        return AgentResult(success=False, error=f"Agent {agent_code} 已停用，操作未执行")
+
     def detect_language(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("language_detector"):
+            return disabled
         kw.pop("ctx", None)
         return self.lang_agent.execute(*args, **kw)
 
     def analyze_project(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("project_analyzer"):
+            return disabled
         kw.pop("ctx", None)
         return self.project_agent.execute(*args, **kw)
 
     def review_code(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("code_reviewer"):
+            return disabled
         kw.pop("ctx", None)
         return self.code_reviewer.execute(*args, **kw)
 
     def create_project(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("project_manager"):
+            return disabled
         return self.project_mgr.create_project(*args, **kw)
 
     def list_projects(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("project_manager"):
+            return disabled
         return self.project_mgr.list_projects(*args, **kw)
 
     def delete_project(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("project_manager"):
+            return disabled
         return self.project_mgr.delete_project(*args, **kw)
 
     def start_review(self, project_id: int, file_ids: Optional[List[int]] = None,
@@ -213,6 +237,8 @@ class Orchestrator(BaseAgent):
             AgentResult: 成功时返回下游任务结果；无数据库、无 active 文件或
             查询异常时返回安全失败且不调用下游。
         """
+        if disabled := self._disabled_result("review_orchestrator"):
+            return disabled
         resolved_file_ids = list(file_ids or [])
         if not resolved_file_ids:
             try:
@@ -235,52 +261,76 @@ class Orchestrator(BaseAgent):
             project_id, resolved_file_ids, review_type, task_name, user, ctx)
 
     def list_review_tasks(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("review_orchestrator"):
+            return disabled
         return self.review_orch.list_tasks(*args, **kw)
 
     def list_review_issues(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("review_orchestrator"):
+            return disabled
         return self.review_orch.list_issues(*args, **kw)
 
     def list_code_files(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("code_file_manager"):
+            return disabled
         return self.file_mgr.list_files(*args, **kw)
 
     def dashboard_summary(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("dashboard"):
+            return disabled
         return self.dashboard_agent.summary(*args, **kw)
 
     def list_rules(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("rule_manager"):
+            return disabled
         return self.rule_mgr.list_rules(*args, **kw)
 
     def list_reports(self, *args, **kw) -> AgentResult:
+        if disabled := self._disabled_result("reporter"):
+            return disabled
         return self.reporter.list_reports(*args, **kw)
 
     def generate_ai_prompt_for_issue(self, issue_id: int, target_tool: str = "generic",
                                      use_llm: bool = True,
                                      ctx: Optional[AgentContext] = None) -> AgentResult:
+        if disabled := self._disabled_result("ai_prompt"):
+            return disabled
         return self.ai_prompt.execute_for_issue(issue_id, target_tool, use_llm, ctx)
 
     def generate_ai_prompt_for_task(self, task_id: int, target_tool: str = "generic",
                                     severity_filter: Optional[List[str]] = None,
                                     use_llm: bool = True,
                                     ctx: Optional[AgentContext] = None) -> AgentResult:
+        if disabled := self._disabled_result("ai_prompt"):
+            return disabled
         return self.ai_prompt.execute_for_task(
             task_id, target_tool, severity_filter, use_llm, ctx)
 
     def generate_ai_prompt_for_project(self, project_id: int, target_tool: str = "generic",
                                        top_n: int = 30, use_llm: bool = True,
                                        ctx: Optional[AgentContext] = None) -> AgentResult:
+        if disabled := self._disabled_result("ai_prompt"):
+            return disabled
         return self.ai_prompt.execute_for_project(
             project_id, target_tool, top_n, use_llm, ctx)
 
     def audit_security_for_file(self, file_id: int, scan_depth: str = "standard",
                                 ctx: Optional[AgentContext] = None) -> AgentResult:
+        if disabled := self._disabled_result("security_sentinel"):
+            return disabled
         return self.security_sentinel.scan_file(file_id, scan_depth, ctx)
 
     def audit_security_for_task(self, task_id: int,
                                 ctx: Optional[AgentContext] = None) -> AgentResult:
+        if disabled := self._disabled_result("security_sentinel"):
+            return disabled
         return self.security_sentinel.scan_task(task_id, ctx)
 
     def audit_security_for_project(self, project_id: int, top_n: int = 50,
                                    trace_dataflow: bool = True,
                                    ctx: Optional[AgentContext] = None) -> AgentResult:
+        if disabled := self._disabled_result("security_sentinel"):
+            return disabled
         return self.security_sentinel.scan_project(
             project_id, top_n, trace_dataflow, ctx)
 
@@ -318,6 +368,24 @@ class Orchestrator(BaseAgent):
         db, user = self._require_admin_db()
         return admin_agent_tools.admin_list_approvals(db, user, status, ctx)
 
+    def admin_list_agent_release_approvals(
+        self,
+        approval_id: Optional[int] = None,
+        status: str = "pending",
+        limit: int = 50,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        from app.services import admin_agent_tools
+        db, user = self._require_admin_db()
+        return admin_agent_tools.admin_list_agent_release_approvals(
+            db,
+            user,
+            approval_id=approval_id,
+            status=status,
+            limit=limit,
+            ctx=ctx,
+        )
+
     def admin_system_status(self, ctx: Optional[AgentContext] = None) -> AgentResult:
         from app.services import admin_agent_tools
         db, user = self._require_admin_db()
@@ -333,14 +401,88 @@ class Orchestrator(BaseAgent):
         db, user = self._require_admin_db()
         return admin_agent_tools.admin_delete_user(db, user, user_id, ctx)
 
+    def admin_delete_users(
+        self,
+        user_ids: List[int],
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        del user_ids, ctx
+        return AgentResult(success=False, error="批量删除只能通过 Responses 审批执行器调用")
+
     def admin_toggle_agent(self, agent_code: str, enable: bool, ctx: Optional[AgentContext] = None) -> AgentResult:
         from app.services import admin_agent_tools
         db, user = self._require_admin_db()
         return admin_agent_tools.admin_toggle_agent(db, user, agent_code, enable, ctx)
 
+    def admin_decide_agent_release(
+        self,
+        approval_id: int,
+        decision: str,
+        note: str = "",
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        del approval_id, decision, note, ctx
+        return AgentResult(success=False, error="发布审批决策只能通过 Responses 审批执行器调用")
+
+    def search_published_agents(
+        self,
+        query: str = "",
+        limit: int = 8,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        del ctx
+        from app.services import published_agent_tools
+        db, user = self._require_admin_db()
+        try:
+            return AgentResult(
+                success=True,
+                data=published_agent_tools.search_published_agents(
+                    db,
+                    user,
+                    query=query,
+                    limit=limit,
+                ),
+            )
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
+    def invoke_published_agent(
+        self,
+        agent_code: str,
+        code: str,
+        language: str = "plaintext",
+        file_name: str = "snippet.txt",
+        rules: Optional[List[Dict[str, Any]]] = None,
+        line_offset: int = 0,
+        experience: str = "",
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        del ctx
+        from app.services import published_agent_tools
+        db, user = self._require_admin_db()
+        try:
+            return AgentResult(
+                success=True,
+                data=published_agent_tools.invoke_published_agent(
+                    db,
+                    user,
+                    agent_code=agent_code,
+                    code=code,
+                    language=language,
+                    file_name=file_name,
+                    rules=rules or [],
+                    line_offset=line_offset,
+                    experience=experience,
+                ),
+            )
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
     def chat(self, messages: List[dict],
              ctx: Optional[AgentContext] = None) -> AgentResult:
         """v2.0: 主控分发聊天调用,生成 trace_id 并广播 DISPATCH 事件"""
+        if disabled := self._disabled_result("chat_assistant"):
+            return disabled
         if ctx is None:
             ctx = AgentContext()
         trace_id = (ctx.extra or {}).get("trace_id") or new_trace_id()

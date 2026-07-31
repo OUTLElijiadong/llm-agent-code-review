@@ -108,17 +108,27 @@ def get_summary(db: Session, user: User) -> dict:
     )
 
     recent_q = (
-        db.query(ReviewTask)
+        db.query(ReviewTask, Project.project_name)
+        .join(Project, Project.id == ReviewTask.project_id)
         .filter(
             ReviewTask.status == "success",
             ReviewTask.project_id.in_(visible_ids),
+            Project.status != "deleted",
         )
         .order_by(ReviewTask.create_time.desc())
         .limit(5)
     )
     recent_tasks = [
-        {"id": t.id, "score": t.score, "create_time": t.create_time.isoformat() if t.create_time else None}
-        for t in recent_q.all()
+        {
+            "id": task.id,
+            "task_name": task.task_name or f"审查任务 #{task.id}",
+            "project_id": task.project_id,
+            "project_name": project_name,
+            "status": task.status,
+            "score": task.score,
+            "create_time": task.create_time.isoformat() if task.create_time else None,
+        }
+        for task, project_name in recent_q.all()
     ]
 
     return {

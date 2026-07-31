@@ -1,0 +1,16 @@
+[Unit]
+Description=Prism production operations health check
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+Environment=DEPLOY_ENV_FILE=.env
+ExecStart=@DEPLOY_DIR@/ops-check.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+TimeoutStartSec=5min
+StandardOutput=journal
+StandardError=journal

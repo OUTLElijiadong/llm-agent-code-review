@@ -19,7 +19,6 @@ from app.services.issue_merger import (
     merge_findings_and_issues,
 )
 
-
 # ============ 辅助函数 ============
 
 def _make_finding(

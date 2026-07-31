@@ -1,4 +1,7 @@
 node_modules
-dist
+# Runtime releases package the pre-built static bundle. The regular Dockerfile
+# overwrites it during its build stage, while Dockerfile.runtime serves it.
+!dist/
+!dist/**
 .gstack
 *.log

@@ -1,0 +1,18 @@
+[Unit]
+Description=Prism isolated backup restore verification
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+Environment=DEPLOY_ENV_FILE=.env
+ExecStart=@DEPLOY_DIR@/verify-backup.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+TimeoutStartSec=60min

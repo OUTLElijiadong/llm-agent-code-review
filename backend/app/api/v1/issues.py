@@ -28,7 +28,7 @@ def list_issues(
     status: str = Query(""),
     keyword: str = Query(""),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

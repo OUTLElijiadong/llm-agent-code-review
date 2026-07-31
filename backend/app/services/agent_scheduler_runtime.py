@@ -15,7 +15,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.services import scheduler_service
+from app.services import agent_governance_service, scheduler_service
 
 _scheduler = None
 
@@ -71,6 +71,21 @@ def _parse_hourly_schedule(schedule: str) -> Optional[int]:
     if not (0 <= minute <= 59):
         return None
     return minute
+
+
+def _parse_interval_schedule(schedule: str) -> Optional[int]:
+    """解析 ``interval@Nm``，返回分钟数。"""
+    prefix = "interval@"
+    if not schedule or not schedule.startswith(prefix):
+        return None
+    value = schedule[len(prefix):].strip().lower()
+    if not value.endswith("m"):
+        return None
+    try:
+        minutes = int(value[:-1])
+    except ValueError:
+        return None
+    return minutes if 1 <= minutes <= 1440 else None
 
 
 def _run_scheduled_job(job_id: int) -> None:
@@ -138,6 +153,20 @@ def _register_job_to_scheduler(scheduler, job) -> bool:
         )
         return True
 
+    interval_minutes = _parse_interval_schedule(job.schedule)
+    if interval_minutes is not None:
+        scheduler.add_job(
+            _run_scheduled_job,
+            "interval",
+            id=f"agent-governance-{job.id}",
+            args=[job.id],
+            minutes=interval_minutes,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        return True
+
     logger.warning(
         "[agent-governance-scheduler] unsupported schedule job_code={} schedule={}",
         job.job_code,
@@ -164,20 +193,23 @@ def start_agent_governance_scheduler() -> None:
     if _scheduler and getattr(_scheduler, "running", False):
         return
 
-    try:
-        from apscheduler.schedulers.background import BackgroundScheduler
-    except Exception as exc:  # noqa: BLE001 - 缺依赖时降级为手动触发
-        logger.warning("[agent-governance-scheduler] APScheduler unavailable, manual jobs only: {}", exc)
-        return
-
     db = SessionLocal()
     try:
+        # Orchestrator 已在应用 lifespan 中先完成运行时注册；此处把运行时、
+        # 治理及独立运维 Agent 同步到持久化画像，保证后台重启后立即可见、可委派。
+        agent_governance_service.sync_profiles(db)
         jobs = scheduler_service.ensure_default_jobs(db)
     except Exception as exc:  # noqa: BLE001 - 迁移未完成时不阻断主应用
         logger.warning("[agent-governance-scheduler] default jobs unavailable, scheduler skipped: {}", exc)
         return
     finally:
         db.close()
+
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+    except Exception as exc:  # noqa: BLE001 - 缺依赖时降级为手动触发
+        logger.warning("[agent-governance-scheduler] APScheduler unavailable, manual jobs only: {}", exc)
+        return
 
     scheduler = BackgroundScheduler()
     registered = 0

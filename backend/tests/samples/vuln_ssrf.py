@@ -16,7 +16,6 @@ OWASP 分类: A10:2021-Server-Side Request Forgery
 """
 import requests
 
-
 # 次级漏洞: 硬编码 API 密钥(确保静态扫描命中,CWE-798)
 api_key = "sk-proj-ssrf-vulnerability-test-key-12345678"
 

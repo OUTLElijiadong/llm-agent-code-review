@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Close, Promotion } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { CircleCheck, Close, Promotion, WarningFilled } from '@element-plus/icons-vue'
 
 import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
-import { subscribeAgentEvents } from '@/utils/agentEventStream'
+import { getAgentResponseSession } from '@/api/agentResponses'
 import { getProjects } from '@/api/project'
 import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
+import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
+import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
+import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
 import type { AgentStatus } from '@/types/agent'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -18,6 +21,28 @@ import {
   resolveProjectClarifyOptions,
   type ClarifyProjectOption,
 } from '@/utils/clarifyProjectOptions'
+import { streamResponses } from '@/utils/responsesStream'
+import {
+  AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS,
+  isAgentResponseSessionActive,
+  isAgentResponseSessionOccupied,
+} from '@/utils/agentResponseSession'
+import {
+  applyResponseToolEvent,
+  attachApprovalToToolCall,
+  attachInputToToolCall,
+  finishResponseToolCalls,
+  isResponseToolEvent,
+  setResponseToolCallStatus,
+  type ResponseToolCall,
+  type ResponseToolCallStatus,
+} from '@/utils/responsesTimeline'
+import type {
+  ResponseApprovalRequiredEvent,
+  ResponseInputRequiredEvent,
+  ResponsesStreamHandle,
+  ResponseStreamEvent,
+} from '@/types/responses'
 
 interface StepBubble {
   agent: string
@@ -41,6 +66,7 @@ interface PlanStep {
 }
 
 interface ChatMessage {
+  id?: string
   role: 'user' | 'assistant'
   content: string
   time: string
@@ -49,48 +75,361 @@ interface ChatMessage {
   clarify?: ClarifyPayload
   /** v3.0 双层调度调用链(空表示未触发双层调度) */
   planSteps?: PlanStep[]
+  approval?: ResponseApprovalRequiredEvent & {
+    status: 'pending' | 'submitting' | 'approved' | 'rejected'
+  }
+  inputRequest?: ResponseInputRequiredEvent & {
+    answer: string
+    answerSent?: boolean
+    status: 'pending' | 'submitting' | 'answered'
+  }
+  toolCalls?: ResponseToolCall[]
 }
 
-const props = defineProps<{ visible: boolean }>()
-const emit = defineEmits<{ 'update:visible': [value: boolean] }>()
+const props = defineProps<{ visible: boolean; prefill?: string }>()
+const emit = defineEmits<{ 'update:visible': [value: boolean]; 'consumed-prefill': [] }>()
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const loading = ref(false)
+const showTyping = ref(false)
 const modelName = ref('deepseek-v4-flash')
 const chatBody = ref<HTMLElement>()
+const SESSION_KEY = 'prism-user-agent-session'
+const sessionId = getOrCreateSessionId()
+let activeResponse: ResponsesStreamHandle | null = null
+let sessionRestoreStarted = false
+let sessionPollTimer: number | undefined
+let sessionPollStopped = false
+let sessionPollGeneration = 0
+let sessionSnapshotSignature = ''
+const sessionRun = ref<Awaited<ReturnType<typeof getAgentResponseSession>>['run']>(null)
+const sessionRestoring = ref(true)
+const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
+const canSend = computed(() => (
+  inputText.value.trim().length > 0
+  && !loading.value
+  && !sessionRestoring.value
+  && !sessionBusy.value
+))
 
-// === SSE: 全局事件流 ===
-let stream: ReturnType<typeof subscribeAgentEvents> | null = null
-const eventsByTrace = ref<Record<string, StepBubble[]>>({})
-
-function ensureStream(): void {
-  if (stream) return
-  stream = subscribeAgentEvents((ev: AgentEvent) => {
-    if (!ev.trace_id) return
-    const bubble: StepBubble = {
-      agent: ev.agent,
-      type: ev.type,
-      message: ev.message,
-      time: dayjs(ev.timestamp).format('HH:mm:ss'),
-    }
-    const list = eventsByTrace.value[ev.trace_id] ?? []
-    list.push(bubble)
-    eventsByTrace.value[ev.trace_id] = list
-    // 把步骤同步到对应消息
-    const target = messages.value.find((m) => m.trace_id === ev.trace_id)
-    if (target) target.steps = [...list]
-  }, {
-    replay: 0,
-    onError: () => {
-      stream = null
-    },
-  })
+function getOrCreateSessionId(): string {
+  const current = window.localStorage.getItem(SESSION_KEY)
+  if (current) return current
+  const id = `user-${crypto.randomUUID()}`
+  window.localStorage.setItem(SESSION_KEY, id)
+  return id
 }
 
-function teardownStream(): void {
-  stream?.close()
-  stream = null
+function messageId(): string {
+  return crypto.randomUUID()
+}
+
+async function restoreSession(): Promise<void> {
+  if (sessionRestoreStarted) return
+  sessionRestoreStarted = true
+  try {
+    const session = await getAgentResponseSession('user', sessionId)
+    sessionRun.value = session.run
+    if (session.run?.model) modelName.value = session.run.model
+    const restoredTime = session.run?.updated_at
+      ? dayjs(session.run.updated_at).format('HH:mm')
+      : dayjs().format('HH:mm')
+    messages.value = session.messages.map((message) => ({
+      id: messageId(),
+      role: message.role,
+      content: message.role === 'assistant'
+        ? compactOutsideCodeBlocks(message.content)
+        : message.content,
+      time: restoredTime,
+    }))
+    sessionSnapshotSignature = JSON.stringify({
+      run: session.run,
+      messages: session.messages,
+      pending: session.pending,
+    })
+    const pending = session.pending
+    if (!pending) {
+      showTyping.value = isAgentResponseSessionActive(session.run?.status)
+      scheduleSessionPoll()
+      return
+    }
+    const toolCalls: ResponseToolCall[] = []
+    const target: ChatMessage = {
+      id: messageId(),
+      role: 'assistant',
+      content: '',
+      time: restoredTime,
+      toolCalls,
+    }
+    if (pending.type === 'response.approval.required') {
+      attachApprovalToToolCall(toolCalls, pending.call_id, pending.tool_name, pending.arguments)
+      target.approval = { ...pending, status: 'pending' }
+    } else {
+      attachInputToToolCall(toolCalls, pending)
+      target.inputRequest = { ...pending, answer: '', status: 'pending' }
+    }
+    messages.value.push(target)
+    clearSessionPoll()
+  } catch {
+    // HTTP 层已给出错误提示；保留本地会话不覆盖用户输入。
+  } finally {
+    sessionRestoring.value = false
+    await nextTick()
+    scrollToBottom()
+  }
+}
+
+function clearSessionPoll(): void {
+  if (sessionPollTimer !== undefined) {
+    window.clearTimeout(sessionPollTimer)
+    sessionPollTimer = undefined
+  }
+}
+
+function invalidateSessionPoll(): void {
+  sessionPollGeneration += 1
+  clearSessionPoll()
+}
+
+function scheduleSessionPoll(): void {
+  clearSessionPoll()
+  if (sessionPollStopped || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  const generation = sessionPollGeneration
+  sessionPollTimer = window.setTimeout(() => {
+    sessionPollTimer = undefined
+    void pollSessionSnapshot(generation)
+  }, AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS)
+}
+
+async function pollSessionSnapshot(generation: number): Promise<void> {
+  if (sessionPollStopped || generation !== sessionPollGeneration || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  try {
+    const session = await getAgentResponseSession('user', sessionId)
+    if (sessionPollStopped || generation !== sessionPollGeneration) return
+    sessionRun.value = session.run
+    if (session.run?.model) modelName.value = session.run.model
+    if (!loading.value) {
+      const signature = JSON.stringify({ run: session.run, messages: session.messages, pending: session.pending })
+      if (signature !== sessionSnapshotSignature) {
+        sessionSnapshotSignature = signature
+        const restoredTime = session.run?.updated_at ? dayjs(session.run.updated_at).format('HH:mm') : dayjs().format('HH:mm')
+        messages.value = session.messages.map((message) => ({
+          id: messageId(),
+          role: message.role,
+          content: message.role === 'assistant' ? compactOutsideCodeBlocks(message.content) : message.content,
+          time: restoredTime,
+        }))
+        const pending = session.pending
+        if (pending) {
+          const toolCalls: ResponseToolCall[] = []
+          const target: ChatMessage = { id: messageId(), role: 'assistant', content: '', time: restoredTime, toolCalls }
+          if (pending.type === 'response.approval.required') {
+            attachApprovalToToolCall(toolCalls, pending.call_id, pending.tool_name, pending.arguments)
+            target.approval = { ...pending, status: 'pending' }
+          } else {
+            attachInputToToolCall(toolCalls, pending)
+            target.inputRequest = { ...pending, answer: '', status: 'pending' }
+          }
+          messages.value.push(target)
+        }
+      }
+    }
+  } catch {
+    // SSE remains the primary channel; transient recovery errors are retried.
+  } finally {
+    if (
+      !sessionPollStopped
+      && generation === sessionPollGeneration
+      && isAgentResponseSessionActive(sessionRun.value?.status)
+    ) scheduleSessionPoll()
+  }
+}
+
+/** 删除代码围栏之外的空白行，围栏内文本保持原样。 */
+function compactOutsideCodeBlocks(value: string): string {
+  const lines = value.replace(/\r\n?/g, '\n').split('\n')
+  const output: string[] = []
+  let fence: '```' | '~~~' | null = null
+  for (const line of lines) {
+    const marker = line.trimStart().startsWith('```')
+      ? '```'
+      : line.trimStart().startsWith('~~~') ? '~~~' : null
+    if (marker) {
+      if (!fence) fence = marker
+      else if (fence === marker) fence = null
+      output.push(line)
+      continue
+    }
+    if (!fence && line.trim() === '') continue
+    output.push(line)
+  }
+  return output.join('\n')
+}
+
+function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
+  return messages.value
+    .filter((message) => message.content.trim().length > 0)
+    .map((message) => ({ role: message.role, content: message.content }))
+}
+
+function eventErrorMessage(event: ResponseStreamEvent): string {
+  if (event.type === 'error') return event.error?.message || event.message || ''
+  if (event.type === 'response.incomplete') return '模型响应未完整结束，请重新发起任务'
+  if (event.type === 'response.cancelled') return 'Agent 任务已取消'
+  if (event.type !== 'response.failed') return ''
+  const error = event.response.error
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object') {
+    const message = (error as Record<string, unknown>).message
+    if (typeof message === 'string') return message
+  }
+  return ''
+}
+
+function requestErrorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : 'Agent 请求失败'
+}
+
+function setTimelineCallStatus(
+  callId: string | undefined,
+  status: ResponseToolCallStatus,
+  error?: string,
+): void {
+  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+    const calls = messages.value[index].toolCalls
+    if (calls && setResponseToolCallStatus(calls, callId, status, error)) return
+  }
+}
+
+async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
+  invalidateSessionPoll()
+  loading.value = true
+  showTyping.value = true
+  let rawText = ''
+  let textTarget: ChatMessage | null = null
+  let timelineTarget: ChatMessage | null = null
+  const runToolCalls: ResponseToolCall[] = []
+  let protocolError = ''
+
+  const syncTimeline = (): ChatMessage | null => {
+    if (!runToolCalls.length) return null
+    if (!timelineTarget) {
+      timelineTarget = {
+        id: messageId(),
+        role: 'assistant',
+        content: '',
+        time: dayjs().format('HH:mm'),
+        toolCalls: [...runToolCalls],
+      }
+      messages.value.push(timelineTarget)
+    } else {
+      timelineTarget.toolCalls = [...runToolCalls]
+    }
+    return timelineTarget
+  }
+
+  const handle = streamResponses(payload, {
+    onEvent(event) {
+      if (event.type === 'response.created') {
+        const model = event.response.model
+        if (typeof model === 'string' && model) modelName.value = model
+        sessionRun.value = {
+          run_id: typeof event.response.id === 'string' ? event.response.id : sessionRun.value?.run_id ?? '',
+          status: 'running', model: modelName.value, rounds: sessionRun.value?.rounds ?? 0, error: '', updated_at: new Date().toISOString(),
+        }
+      } else if (isResponseToolEvent(event)) {
+        showTyping.value = false
+        applyResponseToolEvent(runToolCalls, event)
+        syncTimeline()
+      } else if (event.type === 'response.output_text.delta') {
+        rawText += event.delta
+        const content = compactOutsideCodeBlocks(rawText)
+        if (!content.trim()) return
+        showTyping.value = false
+        if (!textTarget) {
+          messages.value.push({
+            id: messageId(),
+            role: 'assistant',
+            content,
+            time: dayjs().format('HH:mm'),
+          })
+          textTarget = messages.value[messages.value.length - 1]
+        } else {
+          textTarget.content = content
+        }
+      } else if (event.type === 'response.approval.required') {
+        showTyping.value = false
+        sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, status: 'running', model: modelName.value, rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_approval' }
+        clearSessionPoll()
+        attachApprovalToToolCall(runToolCalls, event.call_id, event.tool_name, event.arguments)
+        const target = syncTimeline()
+        const duplicate = messages.value.some((message) => (
+          message.approval?.run_id === event.run_id && message.approval.call_id === event.call_id
+        ))
+        if (!duplicate && target) {
+          target.approval = { ...event, status: 'pending' }
+        }
+      } else if (event.type === 'response.input.required') {
+        showTyping.value = false
+        sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, status: 'running', model: modelName.value, rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_input' }
+        clearSessionPoll()
+        attachInputToToolCall(runToolCalls, event)
+        const target = syncTimeline()
+        const duplicate = messages.value.some((message) => (
+          message.inputRequest?.run_id === event.run_id
+          && message.inputRequest.call_id === event.call_id
+        ))
+        if (!duplicate && target) {
+          target.inputRequest = { ...event, answer: '', status: 'pending' }
+        }
+      } else if (
+        event.type === 'response.completed'
+        || event.type === 'response.incomplete'
+        || event.type === 'response.failed'
+        || event.type === 'response.cancelled'
+        || event.type === 'error'
+      ) {
+        showTyping.value = false
+        if (sessionRun.value) {
+          sessionRun.value = {
+            ...sessionRun.value,
+            status: event.type === 'response.completed'
+              ? 'completed'
+              : event.type === 'response.cancelled' ? 'cancelled' : 'failed',
+          }
+        }
+        invalidateSessionPoll()
+        protocolError ||= eventErrorMessage(event)
+        const failed = event.type !== 'response.completed'
+        finishResponseToolCalls(runToolCalls, failed ? 'failed' : 'completed', protocolError)
+        syncTimeline()
+      }
+      void nextTick().then(scrollToBottom)
+    },
+  })
+  activeResponse = handle
+
+  try {
+    await handle.done
+    if (protocolError) {
+      ElMessage.error(protocolError)
+      return false
+    }
+    return true
+  } catch (error) {
+    if (!(error instanceof Error && error.name === 'AbortError')) {
+      ElMessage.error(requestErrorMessage(error))
+      if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
+    }
+    return false
+  } finally {
+    if (activeResponse === handle) activeResponse = null
+    loading.value = false
+    showTyping.value = false
+    await nextTick()
+    scrollToBottom()
+  }
 }
 
 // === Clarify 选项加载 ===
@@ -233,6 +572,22 @@ function isCustomProjectSelected(clarifyId: string, questionKey: string): boolea
   return clarifyAnswers.value[clarifyId]?.[questionKey] === CUSTOM_PROJECT_OPTION_VALUE
 }
 
+function confirmationQuestion(message: ChatMessage): ClarifyQuestion | undefined {
+  return message.clarify?.questions.find((question) => (
+    question.type === 'confirm' || question.type === 'danger_confirm'
+  ))
+}
+
+function submitConfirmation(message: ChatMessage, answer: '确认' | '取消'): void {
+  const clarify = message.clarify
+  const question = confirmationQuestion(message)
+  if (!clarify || !question) return
+  clarifyAnswers.value[clarify.clarify_id][question.key] = (
+    question.type === 'danger_confirm' && answer === '确认' ? '确认执行' : answer
+  )
+  void submitClarify(message)
+}
+
 /**
  * 提交 Clarify 回答并继续原 Agent 意图。
  * @param message - 携带 Clarify 协议的助手消息。
@@ -305,58 +660,76 @@ function stepLabel(s: StepBubble): string {
 
 async function sendMessage(): Promise<void> {
   const text = inputText.value.trim()
-  if (!text || loading.value) return
+  if (!text || loading.value || sessionRestoring.value || sessionBusy.value) return
 
-  const traceId = `c_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`
-  ensureStream()
-  eventsByTrace.value[traceId] = []
-  messages.value.push({ role: 'user', content: text, time: dayjs().format('HH:mm') })
+  messages.value.push({ id: messageId(), role: 'user', content: text, time: dayjs().format('HH:mm') })
   inputText.value = ''
-  loading.value = true
 
   await nextTick()
   scrollToBottom()
+  await runResponse({
+    action: 'start',
+    surface: 'user',
+    session_id: sessionId,
+    messages: conversationHistory(),
+  })
+}
 
-  const history = messages.value
-    .filter((m) => !m.clarify)
-    .slice(0, -1)
-    .map((m) => ({ role: m.role, content: m.content }))
-  history.push({ role: 'user', content: text })
+async function decideApproval(
+  message: ChatMessage,
+  action: 'approve' | 'reject',
+): Promise<void> {
+  const approval = message.approval
+  if (!approval || approval.status !== 'pending' || loading.value) return
+  approval.status = 'submitting'
+  setTimelineCallStatus(approval.call_id, action === 'approve' ? 'running' : 'rejected')
+  const succeeded = await runResponse({
+    action,
+    surface: 'user',
+    session_id: sessionId,
+    messages: conversationHistory(),
+    run_id: approval.run_id,
+    call_id: approval.call_id,
+  })
+  approval.status = succeeded ? (action === 'approve' ? 'approved' : 'rejected') : 'pending'
+  setTimelineCallStatus(
+    approval.call_id,
+    succeeded ? (action === 'approve' ? 'completed' : 'rejected') : 'failed',
+    succeeded ? undefined : '审批续跑失败，可重试',
+  )
+}
 
-  try {
-    const res = await post<{
-      content: string
-      model: string
-      trace_id?: string
-      clarify?: ClarifyPayload | null
-      plan_steps?: PlanStep[] | null
-    }>('/ai/chat', { messages: history, stream: false, trace_id: traceId })
-
-    modelName.value = res.model || 'deepseek-v4-flash'
-    const tid = res.trace_id || traceId
+async function submitInput(message: ChatMessage, selectedAnswer?: string): Promise<void> {
+  const request = message.inputRequest
+  if (request && selectedAnswer !== undefined) request.answer = selectedAnswer
+  const answer = request?.answer.trim() ?? ''
+  if (!request || request.status !== 'pending' || !answer || loading.value) return
+  request.status = 'submitting'
+  if (!request.answerSent) {
     messages.value.push({
-      role: 'assistant',
-      content: res.content,
-      time: dayjs().format('HH:mm'),
-      trace_id: tid,
-      steps: eventsByTrace.value[tid] ?? [],
-      clarify: res.clarify ?? undefined,
-      planSteps: res.plan_steps ?? undefined,
-    })
-    if (res.clarify) {
-      ensureClarifyAnswers(res.clarify.clarify_id, res.clarify.questions)
-    }
-  } catch {
-    messages.value.push({
-      role: 'assistant',
-      content: '抱歉,Agent 助手暂时无法响应,请稍后重试。',
+      id: messageId(),
+      role: 'user',
+      content: answer,
       time: dayjs().format('HH:mm'),
     })
-  } finally {
-    loading.value = false
-    await nextTick()
-    scrollToBottom()
+    request.answerSent = true
   }
+  setTimelineCallStatus(request.call_id, 'running')
+  const succeeded = await runResponse({
+    action: 'answer',
+    surface: 'user',
+    session_id: sessionId,
+    messages: conversationHistory(),
+    run_id: request.run_id,
+    call_id: request.call_id ?? '',
+    answer,
+  })
+  request.status = succeeded ? 'answered' : 'pending'
+  setTimelineCallStatus(
+    request.call_id,
+    succeeded ? 'completed' : 'failed',
+    succeeded ? undefined : '提交答案后续跑失败，可重试',
+  )
 }
 
 function handleKeydown(e: KeyboardEvent): void {
@@ -388,47 +761,41 @@ function close(): void {
 
 watch(() => props.visible, (val) => {
   if (val) {
-    ensureStream()
-    void ensureProjectOptions()
-    void ensureTaskOptions()
-    if (messages.value.length === 0) {
-      messages.value.push({
-        role: 'assistant',
-        content:
-          '你好!我是 PRISM 平台的 Agent 助手,由 DeepSeek V4 驱动。\n\n'
-          + '我会**实时展示**自己每一步的调度过程,遇到不确定的字段会**主动追问**,'
-          + '不会基于猜测做决定。可以问我项目列表、启动审查、生成 AI 修复提示词等。',
-        time: dayjs().format('HH:mm'),
-      })
-    }
     nextTick(() => scrollToBottom())
-  } else {
-    teardownStream()
   }
 })
 
-function handlePrefill(e: CustomEvent<{ prefill?: string }>): void {
-  if (!props.visible) emit('update:visible', true)
-  if (e.detail?.prefill) inputText.value = e.detail.prefill
+watch(() => props.prefill, (prefill) => {
+  if (!prefill) return
+  inputText.value = prefill
+  emit('consumed-prefill')
+}, { immediate: true })
+
+function handleEscape(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && props.visible) close()
 }
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('prism:open-agent-chat', handlePrefill as EventListener)
-}
+onMounted(() => {
+  window.addEventListener('keydown', handleEscape)
+  void restoreSession()
+})
 
 onBeforeUnmount(() => {
-  teardownStream()
+  sessionPollStopped = true
+  invalidateSessionPoll()
+  activeResponse?.abort()
   window.clearTimeout(projectSearchTimer)
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('prism:open-agent-chat', handlePrefill as EventListener)
-  }
+  window.removeEventListener('keydown', handleEscape)
 })
 </script>
 
 <template>
   <Teleport to="body">
+    <button v-if="!visible" class="chat-fab" type="button" aria-label="打开棱镜小助" title="棱镜小助" @click="emit('update:visible', true)">
+      <el-icon><Promotion /></el-icon>
+    </button>
     <Transition name="drawer">
-      <div v-if="visible" class="chat-overlay" @click.self="close">
+      <div v-if="visible" class="chat-overlay">
         <div class="chat-drawer">
           <div class="chat-header">
             <div class="chat-title">
@@ -448,9 +815,9 @@ onBeforeUnmount(() => {
           </div>
 
           <div ref="chatBody" class="chat-body">
-            <div v-for="(msg, i) in messages" :key="i" class="msg-row" :class="msg.role">
+            <div v-for="(msg, i) in messages" :key="msg.id ?? i" class="msg-row" :class="msg.role">
               <div class="msg-avatar">{{ msg.role === 'user' ? 'U' : 'AG' }}</div>
-              <div class="msg-bubble">
+              <div class="msg-bubble" :class="{ 'has-response-control': msg.toolCalls?.length || msg.approval || msg.inputRequest }">
                 <!-- 步骤气泡: 仅对 assistant + 有 steps 时展示 -->
                 <details
                   v-if="msg.role === 'assistant' && msg.steps && msg.steps.length"
@@ -532,17 +899,41 @@ onBeforeUnmount(() => {
                 </details>
 
                 <div
-                  v-if="msg.role === 'assistant'"
+                  v-if="msg.role === 'assistant' && msg.content"
                   class="msg-content markdown-body"
                   v-html="renderMarkdown(msg.content)"
                 />
-                <div v-else class="msg-content">{{ msg.content }}</div>
+                <div v-else-if="msg.role === 'user'" class="msg-content">{{ msg.content }}</div>
+
+                <ResponseToolTimeline v-if="msg.toolCalls?.length" :calls="msg.toolCalls" />
+
+                <ResponseApprovalCard
+                  v-if="msg.approval"
+                  :approval="msg.approval"
+                  :loading="loading"
+                  @decide="decideApproval(msg, $event)"
+                />
+
+                <ResponseInputCard
+                  v-if="msg.inputRequest"
+                  :request="msg.inputRequest"
+                  :loading="loading"
+                  @update:answer="msg.inputRequest.answer = $event"
+                  @submit="submitInput(msg, $event)"
+                />
 
                 <!-- Clarify 主动追问表单 -->
-                <div v-if="msg.clarify" class="clarify-card">
+                <div
+                  v-if="msg.clarify"
+                  class="clarify-card"
+                  :class="{ 'is-danger': confirmationQuestion(msg)?.type === 'danger_confirm' }"
+                >
                   <header class="clarify-head">
-                    <span class="clarify-icon">🤔</span>
-                    <span>请补充以下信息,我再继续执行</span>
+                    <el-icon class="clarify-icon">
+                      <WarningFilled v-if="confirmationQuestion(msg)?.type === 'danger_confirm'" />
+                      <CircleCheck v-else />
+                    </el-icon>
+                    <span>{{ confirmationQuestion(msg) ? '请确认本次操作' : '请补充以下信息,我再继续执行' }}</span>
                   </header>
                   <div
                     v-for="q in msg.clarify.questions"
@@ -633,7 +1024,25 @@ onBeforeUnmount(() => {
                     </el-select>
                   </div>
                   <footer class="clarify-foot">
+                    <template v-if="confirmationQuestion(msg)">
+                      <el-button
+                        size="small"
+                        :disabled="loading"
+                        @click="submitConfirmation(msg, '取消')"
+                      >
+                        取消
+                      </el-button>
+                      <el-button
+                        size="small"
+                        :type="confirmationQuestion(msg)?.type === 'danger_confirm' ? 'danger' : 'primary'"
+                        :loading="loading"
+                        @click="submitConfirmation(msg, '确认')"
+                      >
+                        {{ confirmationQuestion(msg)?.type === 'danger_confirm' ? '执行' : '批准' }}
+                      </el-button>
+                    </template>
                     <el-button
+                      v-else
                       size="small"
                       type="primary"
                       :loading="loading"
@@ -648,7 +1057,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-if="loading" class="msg-row assistant">
+            <div v-if="showTyping" class="msg-row assistant">
               <div class="msg-avatar">AG</div>
               <div class="msg-bubble typing">
                 <span class="typing-dot" />
@@ -662,15 +1071,15 @@ onBeforeUnmount(() => {
             <textarea
               v-model="inputText"
               class="chat-input"
-              placeholder="输入问题,Enter 发送,Shift+Enter 换行"
+              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? '请先处理当前 Agent 任务' : '输入问题,Enter 发送,Shift+Enter 换行'"
               rows="2"
-              :disabled="loading"
+              :disabled="loading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
             />
             <button
               class="send-btn"
               type="button"
-              :disabled="loading || !inputText.trim()"
+              :disabled="!canSend"
               @click="sendMessage"
             >
               发送
@@ -685,22 +1094,30 @@ onBeforeUnmount(() => {
 <style scoped>
 .chat-overlay {
   position: fixed;
-  inset: 0;
+  right: 24px;
+  bottom: 24px;
   z-index: 3000;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  justify-content: flex-end;
 }
 
 .chat-drawer {
-  width: 460px;
-  max-width: 92vw;
-  height: 100%;
+  width: min(380px, calc(100vw - 32px));
+  height: min(600px, calc(100dvh - 48px));
   background: #fff;
   display: flex;
   flex-direction: column;
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--color-border-light);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
 }
+
+.chat-fab {
+  position: fixed; right: 24px; bottom: 24px; z-index: 3000;
+  width: 56px; height: 56px; border: 0; border-radius: 50%;
+  background: var(--brand-500); color: #fff; font-size: 22px; cursor: pointer;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); transition: transform .16s ease;
+}
+.chat-fab:hover { transform: scale(1.05); }
 
 .chat-header {
   display: flex;
@@ -796,6 +1213,8 @@ onBeforeUnmount(() => {
   font-size: 13.5px;
   line-height: 1.6;
 }
+
+.msg-bubble.has-response-control { width: calc(100% - 48px); }
 
 .msg-row.user .msg-bubble {
   background: var(--brand-50);
@@ -1067,8 +1486,18 @@ onBeforeUnmount(() => {
   margin-top: 10px;
   border: 1px dashed #D9A857;
   background: #FFFBF0;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 12px 14px;
+}
+
+.clarify-card.is-danger {
+  border-style: solid;
+  border-color: #D54941;
+  background: #FFF6F5;
+}
+
+.clarify-card.is-danger .clarify-head {
+  color: #B42318;
 }
 
 .clarify-head {
@@ -1115,7 +1544,46 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 6px;
+  gap: 8px;
 }
+
+.response-control-card {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.response-control-card.is-danger { border-color: #d54941; }
+.response-control-head { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.response-control-card p { margin: 7px 0; color: var(--gray-600); }
+.response-tool-name { display: block; overflow-wrap: anywhere; color: var(--brand-600); }
+.response-control-actions { display: flex; gap: 8px; margin-top: 10px; }
+.response-control-actions button,
+.response-answer-submit {
+  min-width: 64px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.response-approve,
+.response-answer-submit { border: 1px solid var(--brand-500); color: #fff; background: var(--brand-500); }
+.response-reject { border: 1px solid var(--color-border-light); color: var(--gray-700); background: #fff; }
+.response-control-actions button:disabled,
+.response-answer-submit:disabled { opacity: .5; cursor: not-allowed; }
+.response-question { display: block; margin-bottom: 8px; color: var(--gray-700); font-weight: 600; }
+.response-answer {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  font: inherit;
+}
+.response-answer-submit { margin-top: 8px; }
+.response-control-result { margin-top: 9px; color: var(--gray-600); font-size: 12px; }
 
 .chat-input-area {
   display: flex;
@@ -1167,5 +1635,11 @@ onBeforeUnmount(() => {
 .drawer-leave-to { opacity: 0; }
 
 .drawer-enter-from .chat-drawer,
-.drawer-leave-to .chat-drawer { transform: translateX(100%); }
+.drawer-leave-to .chat-drawer { transform: translateY(8px) scale(.98); }
+
+@media (max-width: 520px) {
+  .chat-overlay { right: 16px; bottom: 16px; }
+  .chat-fab { right: 16px; bottom: 16px; }
+  .chat-drawer { width: calc(100vw - 32px); height: min(600px, calc(100dvh - 32px)); }
+}
 </style>

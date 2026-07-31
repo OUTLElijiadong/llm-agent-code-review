@@ -14,7 +14,7 @@ export interface AgentEvent {
 export interface ClarifyQuestion {
   key: string
   label: string
-  type: 'text' | 'textarea' | 'select_project' | 'select_task' | 'code' | 'select' | 'number'
+  type: 'text' | 'textarea' | 'select_project' | 'select_task' | 'code' | 'select' | 'number' | 'confirm' | 'danger_confirm'
   hint?: string
   required?: boolean
   options?: { value: string | number; label: string }[]

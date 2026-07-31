@@ -25,10 +25,10 @@ from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.user import User
 from app.services import code_file_service
+from app.utils.archive_extractor import MAX_EXTRACTED_FILES
+from app.utils.archive_extractor import MAX_SINGLE_FILE_SIZE as ARCHIVE_MAX_SINGLE
 from app.utils.file_validator import MAX_SINGLE_FILE_SIZE
-from app.utils.archive_extractor import MAX_EXTRACTED_FILES, MAX_SINGLE_FILE_SIZE as ARCHIVE_MAX_SINGLE
 from app.utils.malware_scanner import ScanResult
-
 
 # ============ 辅助函数 ============
 
@@ -407,7 +407,6 @@ class TestUploadMalwareScan:
         """压缩包内含恶意文件应被拒绝"""
         # 外层扫描通过,内层扫描命中
         outer_scanner = _make_clean_scanner()
-        inner_scanner = _make_infected_scanner("Webshell.PHP.Shell")
         # scan 第一次(外层)返回 clean,第二次(内层)返回 infected
         outer_scanner.scan.side_effect = [
             ScanResult(engine="heuristic", result="clean", degraded=True),
@@ -792,3 +791,46 @@ class TestEndToEnd:
         # 验证项目总 raw_size 累积正确
         total = code_file_service._get_project_total_size(db, project.id)
         assert total == len(content1) + len(content2)
+
+
+def test_fail_closed_rejects_degraded_scan_result(db, monkeypatch):
+    """生产 fail-closed 开启时，主扫描能力降级必须拒绝上传。"""
+    monkeypatch.setattr(code_file_service.settings, "malware_scan_fail_closed", True)
+    monkeypatch.setattr(
+        "app.services.code_file_service.get_scanner",
+        _make_clean_scanner,
+    )
+    user, project = _setup_project(db)
+
+    with pytest.raises(ValueError, match="恶意软件扫描服务暂不可用"):
+        code_file_service.upload(
+            db=db,
+            user=user,
+            project_id=project.id,
+            upload_file=_make_upload_file("safe.py", b"print('safe')\n"),
+        )
+
+
+def test_fail_closed_rejects_scanner_timeout(db, monkeypatch):
+    """生产 fail-closed 开启时，扫描超时必须拒绝上传。"""
+    scanner = MagicMock()
+    scanner.scan.return_value = ScanResult(
+        engine="clamav",
+        result="timeout",
+        degraded=True,
+        detail="clamav scan timed out",
+    )
+    monkeypatch.setattr(code_file_service.settings, "malware_scan_fail_closed", True)
+    monkeypatch.setattr(
+        "app.services.code_file_service.get_scanner",
+        lambda: scanner,
+    )
+    user, project = _setup_project(db)
+
+    with pytest.raises(ValueError, match="恶意软件扫描服务暂不可用"):
+        code_file_service.upload(
+            db=db,
+            user=user,
+            project_id=project.id,
+            upload_file=_make_upload_file("safe.py", b"print('safe')\n"),
+        )

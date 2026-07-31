@@ -91,6 +91,8 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         ReviewIssue.status == "fixed",
     ).scalar() or 0
 
+    from app.services.review_service import _task_agent_release_summaries
+
     return {
         "project": {"id": project.id, "project_name": project.project_name,
                      "language": project.language} if project else {},
@@ -98,7 +100,8 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
                  "total_files": task.total_files,
                  "duration_ms": task.duration_ms,
                  "score": task.score, "status": task.status,
-                 "create_time": task.create_time.isoformat() if task.create_time else None},
+                 "create_time": task.create_time.isoformat() if task.create_time else None,
+                 "agent_releases": _task_agent_release_summaries(db, task_id)},
         "stats": {
             "total_files": task.total_files, "total_issues": task.total_issues,
             "score": task.score,

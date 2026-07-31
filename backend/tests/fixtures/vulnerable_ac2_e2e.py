@@ -9,7 +9,6 @@
 import os
 import sqlite3
 
-
 # 漏洞1:硬编码密码 (CWE-259)
 # 正则规则要求前缀非字母数字下划线,password= 形式可命中
 password = "admin123456"

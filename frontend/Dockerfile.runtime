@@ -1,0 +1,12 @@
+ARG RUNTIME_BASE=nginx:1.27-alpine
+FROM ${RUNTIME_BASE}
+
+# The frontend is built and type-checked before deployment. Keeping this
+# runtime image free of Node avoids exhausting a small production host during
+# an otherwise static-site release. The production base already contains the
+# validated Nginx configuration and certificate wiring, so only the bundle is
+# replaced here.
+COPY dist/ /usr/share/nginx/html/
+
+EXPOSE 80 443
+CMD ["nginx", "-g", "daemon off;"]

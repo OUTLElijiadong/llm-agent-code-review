@@ -95,15 +95,17 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     )
     task_ids_by_project: dict[int, list[int]] = defaultdict(list)
     score_by_project: dict[int, int] = {}
+    latest_scored_task_by_project: dict[int, int] = {}
     for task_id, pid, score in task_rows:
         task_ids_by_project[pid].append(task_id)
-        # 取每个项目最近一次有效评分(任务按 id desc 近似时间序)
-        if score is not None and score > 0 and (
-            pid not in score_by_project or task_id > _last_task_id(task_rows, pid)
+        # 任务 id 单调递增；只保留每个项目最新一条有效评分。
+        if (
+            score is not None
+            and score > 0
+            and task_id > latest_scored_task_by_project.get(pid, -1)
         ):
-            # 简化策略: 直接覆盖,因为任务 id 单调递增
-            if score_by_project.get(pid, -1) < score or pid not in score_by_project:
-                score_by_project[pid] = score
+            score_by_project[pid] = score
+            latest_scored_task_by_project[pid] = task_id
 
     all_task_ids = [tid for ids in task_ids_by_project.values() for tid in ids]
     if not all_task_ids:

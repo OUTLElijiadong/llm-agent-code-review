@@ -122,6 +122,8 @@ class DeepSeekAgent:
         user_prompt: str,
         agent_label: str = "",
         json_mode: bool = True,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
     ) -> tuple:
         """线程安全的 DeepSeek 调用 — 不写 AiCallLog
 
@@ -149,6 +151,10 @@ class DeepSeekAgent:
         url, headers, payload = self._build_request(
             system_prompt, user_prompt, json_mode=json_mode,
         )
+        if temperature is not None:
+            payload["temperature"] = max(0.0, min(1.0, float(temperature)))
+        if max_tokens is not None:
+            payload["max_tokens"] = max(128, min(4096, int(max_tokens)))
 
         for attempt in range(self.max_retries + 1):
             resp, duration_ms = self._do_request(url, headers, payload)

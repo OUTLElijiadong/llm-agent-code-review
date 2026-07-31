@@ -74,7 +74,7 @@ useTilt(cardRef, { max: 7, scale: 1.015 })
         :label="agent.name"
       />
       <div class="head-meta">
-        <div class="card-title">{{ agent.name }}</div>
+        <div class="card-title">{{ agent.name }} <span v-if="agent.source === 'custom'" class="custom-mark">自定义</span></div>
         <code class="card-code">{{ agent.code }}</code>
       </div>
       <span class="status-pill" :class="`status-${agent.status}`">
@@ -151,6 +151,8 @@ useTilt(cardRef, { max: 7, scale: 1.015 })
     transform: translateY(-1px);
   }
 }
+
+.custom-mark { display: inline-block; margin-left: 5px; padding: 1px 5px; border: 1px solid #2F7D6D; border-radius: 4px; color: #2F7D6D; font-size: 10px; vertical-align: 2px; }
 
 .card-head {
   display: grid;

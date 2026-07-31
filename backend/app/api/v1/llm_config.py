@@ -1,7 +1,7 @@
 """
 全局大模型(LLM)提供商配置 API 路由(管理员)
 
-管理员可在「系统默认 DeepSeek」与「自定义 OpenAI 兼容端点(如 gpt-5.5)」间切换,
+管理员可在「系统默认 DeepSeek」与「自定义 OpenAI 兼容端点」间切换,
 切换后对全平台生效(用户自定义 API 配置仍优先于此全局设置)。
 """
 from fastapi import APIRouter, Depends

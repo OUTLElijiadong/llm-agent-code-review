@@ -1,0 +1,22 @@
+[Unit]
+Description=Prism allowlisted AI operations executor
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+Group=prism-ops
+WorkingDirectory=@DEPLOY_DIR@
+EnvironmentFile=@DEPLOY_DIR@/.env
+Environment=OPS_EXECUTOR_SOCKET=/run/prism-ops/agent.sock
+RuntimeDirectory=prism-ops
+RuntimeDirectoryMode=0770
+UMask=0007
+ExecStart=/usr/bin/python3 @DEPLOY_DIR@/prism_ops_executor.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

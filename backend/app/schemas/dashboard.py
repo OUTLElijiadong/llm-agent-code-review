@@ -2,8 +2,20 @@
 仪表盘模块Pydantic Schema
 """
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel
+
+
+class RecentTaskOut(BaseModel):
+    """仪表盘最近审查任务项"""
+    id: int
+    task_name: str
+    project_id: int
+    project_name: str
+    status: str
+    score: int
+    create_time: Optional[datetime] = None
 
 
 class SummaryOut(BaseModel):
@@ -14,7 +26,7 @@ class SummaryOut(BaseModel):
     total_issues: int
     severe_issues: int
     avg_score: float
-    recent_tasks: list[dict]
+    recent_tasks: list[RecentTaskOut]
 
 
 class RiskItem(BaseModel):

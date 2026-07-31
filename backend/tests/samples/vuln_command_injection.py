@@ -14,8 +14,6 @@ OWASP 分类: A03:2021-Injection
     攻击者可通过 ; rm -rf / 或 | cat /etc/passwd 注入任意命令。
 """
 import os
-import subprocess
-
 
 # 次级漏洞: 硬编码 API 密钥(确保静态扫描命中,CWE-798)
 api_key = "sk-proj-command-injection-test-key-123456"

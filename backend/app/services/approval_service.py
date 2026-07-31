@@ -1,4 +1,5 @@
 """Agent 治理审批服务。"""
+
 import json
 from datetime import datetime, timezone
 from typing import Optional
@@ -34,6 +35,7 @@ def create_or_auto_decide(
     agent_code: str = "",
     request: Optional[dict] = None,
     actor: Optional[User] = None,
+    copilot_request_id: str = "",
 ) -> ApprovalItem:
     """创建审批事项并按风险自动决策。
 
@@ -63,6 +65,7 @@ def create_or_auto_decide(
         decision=decision if status == "auto_approved" else None,
         decision_reason=reason,
         request_json=json.dumps(request or {}, ensure_ascii=False),
+        copilot_request_id=copilot_request_id or None,
         decided_by=actor.id if actor and status == "auto_approved" else None,
         decided_at=_utcnow() if status == "auto_approved" else None,
     )
@@ -114,10 +117,14 @@ def decide_item(db: Session, admin: User, item_id: int, approve: bool, note: str
         NotFoundError: 审批事项不存在。
         ValidationError: 审批事项已终结。
     """
-    item = db.get(ApprovalItem, item_id)
+    item = db.query(ApprovalItem).filter(ApprovalItem.id == item_id).with_for_update().first()
     if not item:
         raise NotFoundError("审批事项不存在", code=40400)
     if item.status in ("approved", "rejected", "auto_approved"):
+        if item.action == "agent_package.publish" and (
+            (approve and item.status == "approved") or (not approve and item.status == "rejected")
+        ):
+            return item
         raise ValidationError("审批事项已处理", code=40001)
 
     item.status = "approved" if approve else "rejected"
@@ -125,10 +132,22 @@ def decide_item(db: Session, admin: User, item_id: int, approve: bool, note: str
     item.decision_reason = note or ("管理员审批通过" if approve else "管理员审批拒绝")
     item.decided_by = admin.id
     item.decided_at = _utcnow()
-    if approve:
-        _apply_approval_side_effect(db, item)
-    db.commit()
+    try:
+        if approve:
+            _apply_approval_side_effect(db, item)
+        elif item.action == "agent_package.publish":
+            from app.services import agent_studio_service
+
+            agent_studio_service.reject_for_approval(db, item)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(item)
+    if approve and item.action == "agent_package.publish":
+        from app.services.declarative_agent_runtime import publish_catalog_invalidation
+
+        publish_catalog_invalidation("publish", item.agent_code or "")
     audit_service.log(
         db,
         admin,
@@ -150,17 +169,53 @@ def _apply_approval_side_effect(db: Session, item: ApprovalItem) -> None:
     Returns:
         None。
     """
-    if item.action != "knowledge.activate":
-        return
     payload = {}
     if item.request_json:
         try:
             payload = json.loads(item.request_json)
         except json.JSONDecodeError:
             payload = {}
-    doc_id = payload.get("doc_id")
-    if not doc_id:
-        return
-    from app.services import agent_knowledge_service
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else payload
+    if item.action == "agent_package.publish":
+        from app.services import agent_studio_service
 
-    agent_knowledge_service.activate_document(db, int(doc_id))
+        agent_studio_service.publish_for_approval(db, item)
+        return
+    if item.action == "knowledge.activate":
+        doc_id = payload.get("doc_id")
+        if doc_id:
+            from app.services import agent_knowledge_service
+
+            agent_knowledge_service.activate_document(db, int(doc_id), commit=False)
+        return
+    if item.action == "user.set_role":
+        from app.services import user_service
+
+        user_service.set_role(
+            db,
+            int(context["user_id"]),
+            str(context["role"]),
+            admin_id=int(item.decided_by or 0),
+            commit=False,
+        )
+        return
+    if item.action == "user.delete":
+        from app.services import user_service
+
+        user_service.delete_user(
+            db,
+            int(context["user_id"]),
+            int(item.decided_by or 0),
+            commit=False,
+        )
+        return
+    if item.action == "agent.toggle":
+        from app.services import agent_governance_service
+
+        enable = bool(context["enable"])
+        agent_governance_service.update_profile(
+            db,
+            str(context["agent_code"]),
+            {"is_enabled": 1 if enable else 0, "status": "idle" if enable else "disabled"},
+            commit=False,
+        )

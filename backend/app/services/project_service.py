@@ -16,12 +16,12 @@ from app.models.project import Project
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
-from app.utils.sanitize import sanitize_text
 from app.services.project_member_service import (
     ensure_owner_member,
     get_visible_project_ids,
     require_project_access,
 )
+from app.utils.sanitize import sanitize_text
 
 
 def list_projects(db: Session, user: User, keyword: str = "", language: str = "",

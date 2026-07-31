@@ -92,7 +92,12 @@ def security_posture(db: Session) -> dict:
     # ── 登录来源 TOP(近24h)──
     top_rows = (
         db.query(AuditLog.ip, func.count(AuditLog.id).label("cnt"))
-        .filter(AuditLog.action == "login", AuditLog.create_time >= since_24h, AuditLog.ip.isnot(None), AuditLog.ip != "")
+        .filter(
+            AuditLog.action == "login",
+            AuditLog.create_time >= since_24h,
+            AuditLog.ip.isnot(None),
+            AuditLog.ip != "",
+        )
         .group_by(AuditLog.ip)
         .order_by(func.count(AuditLog.id).desc())
         .limit(10)

@@ -114,6 +114,9 @@
             <div class="detail-title">{{ selectedAgent.name }}</div>
             <code class="detail-code">{{ selectedAgent.code }}</code>
             <div class="detail-cat">{{ categoryLabel(selectedAgent.category) }}</div>
+            <el-tag v-if="selectedAgent.source === 'custom'" size="small" type="success" effect="plain">
+              自定义 · v{{ selectedAgent.version_number }} · 发布 #{{ selectedAgent.release_id }}
+            </el-tag>
           </div>
         </div>
 

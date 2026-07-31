@@ -63,8 +63,10 @@ def locate_ip(ip: str) -> dict | None:
         return None
     if not rec:
         return None
-    country = (rec.get("country") or {}).get("names", {}).get("zh-CN") or (rec.get("country") or {}).get("names", {}).get("en")
-    city = (rec.get("city") or {}).get("names", {}).get("zh-CN") or (rec.get("city") or {}).get("names", {}).get("en")
+    country_names = (rec.get("country") or {}).get("names", {})
+    city_names = (rec.get("city") or {}).get("names", {})
+    country = country_names.get("zh-CN") or country_names.get("en")
+    city = city_names.get("zh-CN") or city_names.get("en")
     loc = rec.get("location") or {}
     lat, lng = loc.get("latitude"), loc.get("longitude")
     if lat is None or lng is None:

@@ -8,6 +8,7 @@ Key 不直接回显给前端(仅返回是否已配置)。
 import json
 from typing import Optional
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -109,6 +110,29 @@ def update_embedding_config(
 # ──────────────────────────────────────────────────────────
 # 全局大模型(LLM)提供商配置 — 管理员可在 DeepSeek 与自定义 OpenAI 兼容端点间切换
 # ──────────────────────────────────────────────────────────
+def _persist_llm_security_change(db: Session, data: dict, action: str) -> bool:
+    """持久化全局 LLM Key 的轮换或失效结果。
+
+    Args:
+        db: SQLAlchemy 数据库会话。
+        data: 不会写入日志的完整全局 LLM 配置。
+        action: 不含敏感值的操作标识。
+
+    Returns:
+        bool: 提交成功为 True；回滚后为 False。
+    """
+    try:
+        _set_raw(db, LLM_KEY, json.dumps(data, ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.warning(
+            f"[system_config] 全局 LLM API Key 安全变更提交失败("
+            f"action={action}, error_type={type(exc).__name__})",
+        )
+        return False
+    return True
+
+
 def get_llm_config(db: Session) -> Optional[dict]:
     """获取生效的全局 LLM 覆盖配置(含解密后的真实 Key,仅供后端内部使用)
 
@@ -125,17 +149,35 @@ def get_llm_config(db: Session) -> Optional[dict]:
         return None
 
     api_key = ""
+    active = bool(data.get("active"))
     enc = data.get("api_key_enc")
     if enc:
-        from app.utils.api_resolver import decrypt_api_key
-        api_key = decrypt_api_key(enc)
+        from app.utils.api_resolver import (
+            decrypt_api_key_with_metadata,
+            encrypt_api_key,
+        )
+
+        decryption = decrypt_api_key_with_metadata(enc)
+        if decryption is None:
+            if active:
+                data["active"] = False
+                _persist_llm_security_change(db, data, "deactivate_global")
+                logger.warning("[system_config] 全局 LLM API Key 无法解密，配置已停用")
+            active = False
+        else:
+            api_key = decryption.plaintext
+            if decryption.needs_rotation:
+                data["api_key_enc"] = encrypt_api_key(api_key)
+                if not _persist_llm_security_change(db, data, "rotate_global"):
+                    api_key = ""
+                    active = False
 
     return {
         "provider": data.get("provider") or "custom",
         "base_url": (data.get("base_url") or "").strip(),
         "model": (data.get("model") or "").strip(),
         "api_key": api_key,
-        "active": bool(data.get("active")),
+        "active": active,
     }
 
 

@@ -19,6 +19,10 @@ export interface DiscussionTurn {
   agent_name: string
   role: 'agent' | 'user'
   content: string
+  action?: 'speak' | 'silent'
+  stance?: 'propose' | 'agree' | 'oppose' | 'question' | 'supplement' | 'neutral'
+  reply_to?: string | null
+  round_index?: number
   timestamp: string
 }
 

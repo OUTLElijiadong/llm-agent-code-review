@@ -51,6 +51,12 @@ class Message:
     content: str = ""
     cause_by: str = ""
     sent_from: str = ""
+    schema_version: str = "1.0"
+    message_type: str = "event"
+    correlation_id: str = ""
+    payload: Dict[str, Any] = field(default_factory=dict)
+    artifacts: list[Dict[str, Any]] = field(default_factory=list)
+    errors: list[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(default_factory=_now_iso)
 
@@ -79,6 +85,12 @@ class Message:
             content=data.get("content", ""),
             cause_by=data.get("cause_by", ""),
             sent_from=data.get("sent_from", data.get("role", "")),
+            schema_version=data.get("schema_version", "1.0"),
+            message_type=data.get("message_type", "event"),
+            correlation_id=data.get("correlation_id", ""),
+            payload=data.get("payload", {}) or {},
+            artifacts=data.get("artifacts", []) or [],
+            errors=data.get("errors", []) or [],
             metadata=data.get("metadata", {}) or {},
             timestamp=data.get("timestamp", _now_iso()),
         )
@@ -100,6 +112,12 @@ class Message:
             content=self.content,
             cause_by=self.cause_by,
             sent_from=self.sent_from,
+            schema_version=self.schema_version,
+            message_type=self.message_type,
+            correlation_id=self.correlation_id,
+            payload=dict(self.payload),
+            artifacts=list(self.artifacts),
+            errors=list(self.errors),
             metadata=new_meta,
             timestamp=self.timestamp,
         )
@@ -111,6 +129,12 @@ def make_message(
     send_to: str = "",
     cause_by: str = "",
     metadata: Optional[Dict[str, Any]] = None,
+    *,
+    message_type: str = "event",
+    correlation_id: str = "",
+    payload: Optional[Dict[str, Any]] = None,
+    artifacts: Optional[list[Dict[str, Any]]] = None,
+    errors: Optional[list[Dict[str, Any]]] = None,
 ) -> Message:
     """便捷构造消息
 
@@ -130,5 +154,26 @@ def make_message(
         content=content,
         cause_by=cause_by,
         sent_from=role,
+        message_type=message_type,
+        correlation_id=correlation_id,
+        payload=payload or {},
+        artifacts=artifacts or [],
+        errors=errors or [],
         metadata=metadata or {},
     )
+
+
+def validate_message(msg: Message, known_targets: Optional[set[str]] = None) -> None:
+    """Validate the lossless cross-agent envelope without breaking legacy broadcasts."""
+    if msg.schema_version != "1.0":
+        raise ValueError(f"不支持的 Agent 消息协议版本: {msg.schema_version}")
+    if not msg.role or not msg.sent_from:
+        raise ValueError("Agent 消息必须包含 role 和 sent_from")
+    if not msg.message_type or not msg.cause_by:
+        raise ValueError("Agent 消息必须包含 message_type 和 cause_by")
+    if msg.send_to and known_targets is not None and msg.send_to not in known_targets:
+        raise ValueError(f"Agent 消息目标不存在: {msg.send_to}")
+    if not isinstance(msg.payload, dict) or not isinstance(msg.metadata, dict):
+        raise ValueError("Agent 消息 payload 和 metadata 必须为对象")
+    if not isinstance(msg.artifacts, list) or not isinstance(msg.errors, list):
+        raise ValueError("Agent 消息 artifacts 和 errors 必须为数组")

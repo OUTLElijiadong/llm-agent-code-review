@@ -2,6 +2,7 @@
 FastAPI应用核心配置模块
 使用pydantic-settings从环境变量/.env文件加载所有配置项
 """
+
 from pathlib import Path
 from typing import List
 
@@ -28,6 +29,9 @@ class Settings(BaseSettings):
     app_release: str = "dev"
     # 注册验证码开关:生产默认开(dev/test 可关以便自动化测试)
     register_captcha_enabled: bool = True
+    # 内测注册: 开启后注册必须携带管理员生成的一次性内测码。
+    beta_registration_enabled: bool = False
+    beta_code_pepper: str = ""
 
     # ── 恶意文件扫描 ──
     clamav_host: str = "clamav"
@@ -55,6 +59,11 @@ class Settings(BaseSettings):
     deepseek_timeout: int = 60
     deepseek_max_retries: int = 2
     deepseek_chunk_threshold: int = 6000
+    # DeepSeek V4 上下文窗口与内部 Agent 投影预算。完整 transcript 仍持久化供审计。
+    deepseek_context_window_tokens: int = 1_000_000
+    deepseek_max_output_tokens: int = 32_768
+    deepseek_compaction_threshold_tokens: int = 850_000
+    deepseek_compaction_keep_recent_tokens: int = 200_000
     # 全局审查并发上限:同时进行的后台审查任务数上限(2C2G 生产机默认 2)
     review_max_concurrency: int = 2
     allow_private_ai_base_url: bool = False
@@ -66,7 +75,7 @@ class Settings(BaseSettings):
     embedding_base_url: str = ""
     embedding_api_key: str = ""
     embedding_model: str = ""
-    embedding_dim: int = 256          # 本地降级向量维度
+    embedding_dim: int = 256  # 本地降级向量维度
     embedding_timeout: int = 30
 
     agent_governance_scheduler_enabled: bool = True
@@ -88,6 +97,20 @@ class Settings(BaseSettings):
     skill_trigger_max_concurrency: int = 3
     # Skill 事件触发去抖窗口(秒,同 key 不重复触发)
     skill_event_debounce_seconds: int = 300
+    # Agent SSE 跨 worker 广播。留空时自动降级为当前进程内事件总线。
+    redis_url: str = ""
+
+    # MCP Server 由平台在本地发现并转换为 function tools。DeepSeek 当前会忽略
+    # 原生 type=mcp，因此不能把配置直接透传给上游。
+    mcp_servers_json: str = "[]"
+    mcp_allow_private_urls: bool = False
+    mcp_timeout: float = 30.0
+    agent_event_stream_maxlen: int = 500
+
+    # 宿主机运维白名单执行器；仅 Unix Socket，不开放 TCP。
+    ops_executor_socket: str = "/run/prism-ops/agent.sock"
+    ops_executor_token: str = ""
+    ops_automation_enabled: bool = True
 
     max_upload_size: int = 20 * 1024 * 1024  # 20MB
     allowed_extensions: List[str] = ["*"]
@@ -105,6 +128,27 @@ class Settings(BaseSettings):
         )
 
     @model_validator(mode="after")
+    def _guard_deepseek_context_budget(self) -> "Settings":
+        problems: List[str] = []
+        if not 100_000 <= self.deepseek_context_window_tokens <= 1_000_000:
+            problems.append("DEEPSEEK_CONTEXT_WINDOW_TOKENS 必须在 100000 到 1000000 之间")
+        if not 128 <= self.deepseek_max_output_tokens <= 384_000:
+            problems.append("DEEPSEEK_MAX_OUTPUT_TOKENS 必须在 128 到 384000 之间")
+        input_budget = self.deepseek_context_window_tokens - self.deepseek_max_output_tokens
+        if input_budget <= 0:
+            problems.append("DEEPSEEK_MAX_OUTPUT_TOKENS 必须小于上下文窗口")
+        elif not 1_000 <= self.deepseek_compaction_threshold_tokens <= input_budget:
+            problems.append("DEEPSEEK_COMPACTION_THRESHOLD_TOKENS 必须在 1000 到可用输入预算之间")
+        if not 1_000 <= self.deepseek_compaction_keep_recent_tokens <= max(
+            self.deepseek_compaction_threshold_tokens,
+            0,
+        ):
+            problems.append("DEEPSEEK_COMPACTION_KEEP_RECENT_TOKENS 必须在 1000 到压缩阈值之间")
+        if problems:
+            raise ValueError("检测到无效的 DeepSeek 上下文预算: " + "; ".join(problems))
+        return self
+
+    @model_validator(mode="after")
     def _guard_production_secrets(self) -> "Settings":
         """非 dev 环境下,拒绝使用不安全的默认密钥/API Key 启动。
 
@@ -118,6 +162,12 @@ class Settings(BaseSettings):
             problems.append("JWT_SECRET 仍为默认/空值,请设置为足够随机的字符串")
         if self.deepseek_api_key in _INSECURE_API_KEYS:
             problems.append("DEEPSEEK_API_KEY 未正确配置")
+        if self.beta_registration_enabled:
+            beta_pepper = self.beta_code_pepper.strip()
+            if len(beta_pepper) < 32 or beta_pepper.lower().startswith(("change_me", "please-change-me")):
+                problems.append("BETA_CODE_PEPPER 必须配置至少 32 字符的独立随机密钥")
+            elif beta_pepper == self.jwt_secret.strip():
+                problems.append("BETA_CODE_PEPPER 必须与 JWT_SECRET 不同")
         encryption_keys = [key.strip() for key in self.api_key_encryption_keys if key.strip()]
         if not encryption_keys:
             problems.append("API_KEY_ENCRYPTION_KEYS 未配置独立密钥")
@@ -125,10 +175,11 @@ class Settings(BaseSettings):
             problems.append("API_KEY_ENCRYPTION_KEYS 第一项必须是至少 32 字符的随机密钥")
         elif encryption_keys[0] == self.jwt_secret:
             problems.append("API_KEY_ENCRYPTION_KEYS 第一项必须与 JWT_SECRET 不同")
+        if self.ops_automation_enabled and len(self.ops_executor_token.strip()) < 32:
+            problems.append("OPS_EXECUTOR_TOKEN 必须配置至少 32 字符的独立随机令牌")
         if problems:
             raise ValueError(
-                f"检测到不安全的生产配置(APP_ENV={self.app_env}): "
-                + "; ".join(problems),
+                f"检测到不安全的生产配置(APP_ENV={self.app_env}): " + "; ".join(problems),
             )
         return self
 

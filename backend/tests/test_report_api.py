@@ -10,7 +10,6 @@
 - 无权限用户访问返回 403
 - 导出报告(PDF/Word/JSON/HTML)成功
 """
-import json
 from datetime import datetime, timezone
 
 import pytest
@@ -27,7 +26,6 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services.report_exporter import load_builtin_template
-
 
 # ============ 测试数据工厂 ============
 

@@ -23,8 +23,12 @@ export function register(body: RegisterIn): Promise<{ user_id: number; username:
  * 获取注册验证码(数学题)
  * @returns captcha_id 与题目
  */
-export function getCaptcha(): Promise<{ captcha_id: string; question: string }> {
-  return get<{ captcha_id: string; question: string }>('/auth/captcha')
+export function getCaptcha(): Promise<{
+  captcha_id: string
+  question: string
+  beta_registration_enabled: boolean
+}> {
+  return get<{ captcha_id: string; question: string; beta_registration_enabled: boolean }>('/auth/captcha')
 }
 
 /**

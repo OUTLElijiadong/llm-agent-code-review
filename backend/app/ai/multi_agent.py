@@ -25,6 +25,12 @@ class ReviewAgentProfile:
     focus: str
     issue_types: tuple[str, ...]
     instruction: str
+    system_prompt: str = ""
+    is_custom: bool = False
+    release_id: int = 0
+    version_id: int = 0
+    temperature: float = 0.2
+    max_tokens: int = 4096
 
 
 GENERAL_AGENT = ReviewAgentProfile(
@@ -75,6 +81,16 @@ _PROFILE_MAP: dict[str, tuple[ReviewAgentProfile, ...]] = {
     "full": (SECURITY_AGENT, RELIABILITY_AGENT, PERFORMANCE_AGENT, MAINTAINABILITY_AGENT),
 }
 
+# 圆桌讨论强调观点互补，固定邀请全部代码审查画像。该集合与普通 full
+# 审查分离，避免改变既有并行审查的调用次数和成本口径。
+_DISCUSSION_PROFILES: tuple[ReviewAgentProfile, ...] = (
+    GENERAL_AGENT,
+    SECURITY_AGENT,
+    RELIABILITY_AGENT,
+    PERFORMANCE_AGENT,
+    MAINTAINABILITY_AGENT,
+)
+
 
 def get_agent_profiles(review_type: Optional[str]) -> tuple[ReviewAgentProfile, ...]:
     """根据审查类型返回代理组合
@@ -87,6 +103,16 @@ def get_agent_profiles(review_type: Optional[str]) -> tuple[ReviewAgentProfile, 
     """
     normalized = (review_type or "standard").lower()
     return _PROFILE_MAP.get(normalized, _PROFILE_MAP["standard"])
+
+
+def get_discussion_agent_profiles() -> tuple[ReviewAgentProfile, ...]:
+    """返回圆桌讨论的完整代码审查子 Agent 集合。
+
+    Returns:
+        tuple[ReviewAgentProfile, ...]: 按通用、安全、可靠性、性能和可维护性
+        排列的稳定参会画像集合。
+    """
+    return _DISCUSSION_PROFILES
 
 
 def format_agent_section(profile: ReviewAgentProfile) -> str:

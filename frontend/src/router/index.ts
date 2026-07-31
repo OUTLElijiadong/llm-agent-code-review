@@ -122,6 +122,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Agent 中心' },
       },
       {
+        path: 'agent-studio',
+        name: 'AgentStudio',
+        component: () => import('@/views/agent/AgentStudio.vue'),
+        meta: { title: 'Agent 工坊', roles: ['reviewer', 'admin'], permissions: ['agent_asset:create'] },
+      },
+      {
         path: 'forum',
         name: 'ForumList',
         component: () => import('@/views/forum/ForumList.vue'),
@@ -215,6 +221,18 @@ const routes: RouteRecordRaw[] = [
         name: 'ApprovalCenter',
         component: () => import('@/views/admin/ApprovalCenter.vue'),
         meta: { title: '审批中心', role: 'admin' },
+      },
+      {
+        path: 'agent-releases',
+        name: 'AgentReleaseAdmin',
+        component: () => import('@/views/admin/AgentReleaseAdmin.vue'),
+        meta: { title: 'Agent 发布审批', role: 'admin', permissions: ['agent_asset:approve'] },
+      },
+      {
+        path: 'beta-codes',
+        name: 'BetaCodeAdmin',
+        component: () => import('@/views/admin/BetaCodeAdmin.vue'),
+        meta: { title: '内测码管理', role: 'admin' },
       },
       {
         path: 'policies',

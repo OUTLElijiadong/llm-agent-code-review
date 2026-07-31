@@ -49,8 +49,16 @@ from app.schemas.agent import (
 )
 from app.schemas.common import Resp
 from app.services import agent_service, skill_service
+from app.services.declarative_agent_runtime import PublishedAgentCatalog
 
 router = APIRouter()
+
+
+def _custom_runtime_metadata(db: Session) -> list[dict]:
+    """真实请求合并数据库目录；轻量测试桩没有 query 时返回空目录。"""
+    if not hasattr(db, "query"):
+        return []
+    return PublishedAgentCatalog.runtime_metadata(db)
 
 
 @router.get("", response_model=Resp[list[AgentProfileOut]],
@@ -106,14 +114,26 @@ def list_runtime_agents(
     """
     user_id = None if user.role == "admin" else user.id
     rows = agent_service.get_runtime_agents(db, user_id)
+    rows.extend(_custom_runtime_metadata(db))
     return Resp(data=[AgentRuntimeOut(**r) for r in rows])
 
 
 @router.get("/runtime/summary", response_model=Resp[AgentRuntimeSummaryOut],
             dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
-def get_runtime_summary(_: User = Depends(get_current_user)):
-    """v2.0: 注册中心汇总,仅做计数,不查 DB"""
-    return Resp(data=AgentRuntimeSummaryOut(**agent_service.get_runtime_summary()))
+def get_runtime_summary(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """返回内置注册中心与已发布自定义 Agent 的合并汇总。"""
+    summary = agent_service.get_runtime_summary()
+    custom = _custom_runtime_metadata(db)
+    buckets = {item["category"]: item["count"] for item in summary["by_category"]}
+    if custom:
+        buckets["custom_review"] = buckets.get("custom_review", 0) + len(custom)
+    return Resp(data=AgentRuntimeSummaryOut(
+        total=summary["total"] + len(custom),
+        by_category=[{"category": key, "count": value} for key, value in sorted(buckets.items())],
+    ))
 
 
 @router.get("/situation", response_model=Resp[AgentSituationOut],
@@ -247,7 +267,12 @@ def submit_clarification(
     if owner_user_id is not None and owner_user_id != user.id and user.role != "admin":
         raise ForbiddenError("无权回填此追问", code=40300)
     intent_name = pending["intent"]
-    merged = {**pending.get("payload", {}), **(payload.answers or {})}
+    answers = payload.answers or {}
+    question_keys = pending.get("question_keys")
+    if isinstance(question_keys, list):
+        allowed = {str(key) for key in question_keys}
+        answers = {key: value for key, value in answers.items() if key in allowed}
+    merged = {**pending.get("payload", {}), **answers}
 
     orch = get_request_orchestrator(db, user=user)
     ctx = AgentContext(user_id=user.id, extra={})
@@ -437,11 +462,9 @@ def invoke_agent_skill(
     )
 
     # 组装 params: action 优先, 合并 payload.params
-    params: dict = {}
+    params: dict = dict(payload.params or {})
     if payload.action:
         params["action"] = payload.action
-    if payload.params:
-        params.update(payload.params)
 
     result = orch.invoke_skill(
         agent_name=agent_name,

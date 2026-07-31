@@ -89,11 +89,14 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
 
 /**
  * 根据文件名检测对应的Monaco Editor语言ID
- * @param filename - 文件名（如 "main.py"）
+ * @param filename - 文件名或路径（如 "main.py"、"/app/Dockerfile"）
  * @returns Monaco Editor语言ID（如 "python"），无法识别时返回 "plaintext"
  */
 export function detectLanguage(filename: string): string {
-  const parts = filename.toLowerCase().split('.')
+  const basename = filename.toLowerCase().split(/[\\/]/).pop() || ''
+  if (basename === 'dockerfile') return 'dockerfile'
+
+  const parts = basename.split('.')
   if (parts.length < 2) return 'plaintext'
   const ext = parts.pop() || ''
   return EXT_TO_LANGUAGE[ext] || 'plaintext'

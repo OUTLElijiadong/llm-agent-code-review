@@ -1,7 +1,7 @@
 """
 RBAC 权限点常量定义
 
-集中定义全部 42 个权限编码字符串常量,便于在路由、服务、依赖注入中
+集中定义全部 56 个权限编码字符串常量,便于在路由、服务、依赖注入中
 以符号方式引用权限点,避免硬编码字符串带来的拼写错误与维护成本。
 
 权限点按模块分组,与 alembic 迁移 007_rbac_tables.py 中预置的权限点一一对应:
@@ -11,10 +11,11 @@ RBAC 权限点常量定义
 - issue 模块(4): 审查问题处理
 - rule 模块(4): 审查规则管理
 - report 模块(5): 审查报告与导出
-- agent 模块(3): Agent 中心
+- agent 模块(14): Agent 中心与 Agent 工坊
 - security 模块(2): 安全扫描
 - user 模块(6): 用户与角色菜单管理
 - audit 模块(2): 审计日志
+- server_ops 模块(3): 服务器运维
 """
 from __future__ import annotations
 
@@ -68,10 +69,21 @@ class PermissionCode:
     REPORT_EXPORT_JSON = "report:export:json"  # 导出 JSON 格式报告
     REPORT_EXPORT_HTML = "report:export:html"  # 导出 HTML 格式报告
 
-    # === agent 模块(3): Agent 中心 ===
+    # === agent 模块(14): Agent 中心与 Agent 工坊 ===
     AGENT_VIEW = "agent:view"  # 查看 Agent 信息
     AGENT_CHAT = "agent:chat"  # 与 Agent 进行对话
     AGENT_CONFIGURE = "agent:configure"  # 配置 Agent 参数
+    AGENT_ASSET_CREATE = "agent_asset:create"
+    AGENT_ASSET_UPDATE_OWN = "agent_asset:update_own"
+    AGENT_ASSET_TEST = "agent_asset:test"
+    AGENT_ASSET_SUBMIT = "agent_asset:submit"
+    SKILL_ASSET_CREATE = "skill_asset:create"
+    SKILL_ASSET_UPDATE_OWN = "skill_asset:update_own"
+    CUSTOM_AGENT_INVOKE = "custom_agent:invoke"
+    AGENT_ASSET_APPROVE = "agent_asset:approve"
+    AGENT_ASSET_PUBLISH = "agent_asset:publish"
+    AGENT_ASSET_DISABLE = "agent_asset:disable"
+    AGENT_ASSET_ROLLBACK = "agent_asset:rollback"
 
     # === security 模块(2): 安全扫描 ===
     SECURITY_SCAN = "security:scan"  # 执行安全扫描
@@ -88,6 +100,11 @@ class PermissionCode:
     # === audit 模块(2): 审计日志 ===
     AUDIT_VIEW = "audit:view"  # 查看操作审计日志
     AI_LOG_VIEW = "ai_log:view"  # 查看 AI 调用日志
+
+    # === server_ops 模块(3): 服务器运维 ===
+    SERVER_OPS_VIEW = "server_ops:view"  # 查看服务器状态和日志
+    SERVER_OPS_EXECUTE = "server_ops:execute"  # 执行需要批准的运维变更
+    SERVER_OPS_CRITICAL = "server_ops:critical"  # 执行完全权限高危变更
 
 
 # 模块 → 权限编码列表的映射,便于按模块批量校验或前端渲染
@@ -137,6 +154,17 @@ PERMISSIONS_BY_MODULE: dict[str, list[str]] = {
         PermissionCode.AGENT_VIEW,
         PermissionCode.AGENT_CHAT,
         PermissionCode.AGENT_CONFIGURE,
+        PermissionCode.AGENT_ASSET_CREATE,
+        PermissionCode.AGENT_ASSET_UPDATE_OWN,
+        PermissionCode.AGENT_ASSET_TEST,
+        PermissionCode.AGENT_ASSET_SUBMIT,
+        PermissionCode.SKILL_ASSET_CREATE,
+        PermissionCode.SKILL_ASSET_UPDATE_OWN,
+        PermissionCode.CUSTOM_AGENT_INVOKE,
+        PermissionCode.AGENT_ASSET_APPROVE,
+        PermissionCode.AGENT_ASSET_PUBLISH,
+        PermissionCode.AGENT_ASSET_DISABLE,
+        PermissionCode.AGENT_ASSET_ROLLBACK,
     ],
     "security": [
         PermissionCode.SECURITY_SCAN,
@@ -154,10 +182,15 @@ PERMISSIONS_BY_MODULE: dict[str, list[str]] = {
         PermissionCode.AUDIT_VIEW,
         PermissionCode.AI_LOG_VIEW,
     ],
+    "server_ops": [
+        PermissionCode.SERVER_OPS_VIEW,
+        PermissionCode.SERVER_OPS_EXECUTE,
+        PermissionCode.SERVER_OPS_CRITICAL,
+    ],
 }
 
 
-# 全部权限编码集合(42 个),用于快速校验或 admin 全量授权
+# 全部权限编码集合(56 个),用于快速校验或 admin 全量授权
 ALL_PERMISSION_CODES: list[str] = [
     code for codes in PERMISSIONS_BY_MODULE.values() for code in codes
 ]

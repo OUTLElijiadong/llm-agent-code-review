@@ -47,6 +47,11 @@ export interface AgentRuntimeOut {
   success_count: number
   failed_count: number
   last_called_at?: string | null
+  source?: 'builtin' | 'custom'
+  owner_id?: number | null
+  version_id?: number | null
+  version_number?: number | null
+  release_id?: number | null
 }
 
 export interface AgentRuntimeSummaryOut {

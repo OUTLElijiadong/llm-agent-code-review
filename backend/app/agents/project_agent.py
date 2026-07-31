@@ -1,6 +1,7 @@
 from typing import List
 
 from app.agents.base import AgentResult, BaseAgent
+from app.agents.contracts import compose_system_prompt
 
 
 class ProjectAnalyzerAgent(BaseAgent):
@@ -27,7 +28,11 @@ class ProjectAnalyzerAgent(BaseAgent):
             "支持的语言标识: python/javascript/typescript/java/go/cpp/vue/html/css/php/c/sql/plaintext\n\n"
             "输出格式: 严格JSON对象, 包含 project_name, description, language, language_name 四个字段。"
         )
-        super().__init__(system_prompt=system_prompt, temperature=0.3, max_tokens=500)
+        super().__init__(
+            system_prompt=compose_system_prompt(self.name, system_prompt),
+            temperature=0.3,
+            max_tokens=500,
+        )
 
     def _init_skills(self) -> None:
         """子类 override:挂载 ProjectAnalyzerSelfImprovementSkill + ProjectAnalyzerProactiveSkill

@@ -25,8 +25,10 @@ v2.4 B1 MetaGPT 接入:
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -61,9 +63,115 @@ _PROFILE_TO_AGENT_CODE: dict[str, str] = {
     "maintainability": "code_reviewer",
 }
 
+_VALID_DECISION_ACTIONS = {"speak", "silent"}
+_VALID_DECISION_STANCES = {
+    "propose", "agree", "oppose", "question", "supplement", "neutral",
+}
+_ACTION_ALIASES = {
+    "发言": "speak", "说话": "speak", "静音": "silent", "不发言": "silent",
+}
+_STANCE_ALIASES = {
+    "提出": "propose", "提议": "propose",
+    "赞同": "agree", "同意": "agree",
+    "否认": "oppose", "反对": "oppose", "不同意": "oppose", "反驳": "oppose",
+    "质疑": "question", "提问": "question",
+    "补充": "supplement", "中立": "neutral",
+}
+_SILENT_DEFAULT = "本轮没有新增证据或不同观点，选择静音。"
+
+
+@dataclass(frozen=True)
+class SpeakerDecision:
+    """单个审查 Agent 在一轮中的自主决策。
+
+    Attributes:
+        action: `speak` 表示发言，`silent` 表示本轮静音。
+        stance: 发言立场；静音时固定为 `neutral`。
+        reply_to: 可选的回应目标 Agent code。
+        content: 发言正文或静音原因。
+    """
+
+    action: str
+    stance: str
+    reply_to: Optional[str]
+    content: str
+
+
+def _strip_json_fence(raw: str) -> str:
+    """移除模型响应外层 Markdown 代码围栏。
+
+    Args:
+        raw: DeepSeek 返回的原始文本。
+
+    Returns:
+        str: 可交给 JSON 解析器的候选文本。
+    """
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _parse_speaker_decision(raw: str) -> SpeakerDecision:
+    """把模型响应规范化为可执行的发言或静音决策。
+
+    Args:
+        raw: 模型返回的 JSON 或兼容旧版本的纯文本发言。
+
+    Returns:
+        SpeakerDecision: 经过枚举校验和空值兜底的决策。JSON 解析失败时
+        将原始文本降级为中立发言，空文本降级为静音。
+    """
+    text = _strip_json_fence(raw)
+    data: object
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        data = None
+
+    if not isinstance(data, dict):
+        if text:
+            return SpeakerDecision("speak", "neutral", None, text[:2000])
+        return SpeakerDecision("silent", "neutral", None, _SILENT_DEFAULT)
+
+    action_raw = str(data.get("action") or "speak").strip().lower()
+    action = _ACTION_ALIASES.get(action_raw, action_raw)
+    if action not in _VALID_DECISION_ACTIONS:
+        action = "speak"
+
+    stance_raw = str(data.get("stance") or "neutral").strip().lower()
+    stance = _STANCE_ALIASES.get(stance_raw, stance_raw)
+    if stance not in _VALID_DECISION_STANCES:
+        stance = "neutral"
+
+    content_value = data.get("content")
+    content = content_value.strip() if isinstance(content_value, str) else ""
+    reply_value = data.get("reply_to")
+    reply_to = reply_value.strip()[:64] if isinstance(reply_value, str) else None
+    reply_to = reply_to or None
+
+    if action == "silent" or not content:
+        return SpeakerDecision(
+            action="silent",
+            stance="neutral",
+            reply_to=None,
+            content=(content or _SILENT_DEFAULT)[:500],
+        )
+    return SpeakerDecision(
+        action="speak",
+        stance=stance,
+        reply_to=reply_to,
+        content=content[:2000],
+    )
+
 
 class DiscussionOrchestrator:
-    """发言式讨论编排器 — 每个 Agent 讲话时能看到前面所有发言并可反驳"""
+    """共享群聊编排器，每个 Agent 可发言、静音并回应其他参会者。"""
 
     def __init__(self):
         self._bus = DiscussionBus.instance()
@@ -97,6 +205,7 @@ class DiscussionOrchestrator:
         self._file_id = file_id
         self._trace_id = new_trace_id()
         all_turns: list[DiscussionTurn] = []
+        self._all_turns = all_turns
         deferred_logs: list[dict] = []
         turn_counter = 0
         summary_text = ""
@@ -155,8 +264,8 @@ class DiscussionOrchestrator:
                 f"🎤 欢迎来到代码审查圆桌会议！\n\n"
                 f"审查文件: {file_name} ({language})\n"
                 f"参会Agent: {', '.join(p.name for p in profiles)}\n"
-                f"共 {max_rounds} 轮讨论。请各位 Agent 畅所欲言,"
-                f"对他人的观点不必客气,有不同意见请直接指出并说明理由。"
+                f"共 {max_rounds} 轮讨论。每位 Agent 都会读取共享聊天记录,"
+                f"可选择发言或静音;发言时可赞同、否认、质疑或补充他人观点。"
             )
             bus.publish_turn(session_id, DiscussionTurn(
                 turn_id=0,
@@ -205,7 +314,7 @@ class DiscussionOrchestrator:
                         f"({speaker_idx+1}/{len(profiles)}) 发言",
                     )
 
-                    content, meta, ok = await self._speaker_turn(
+                    decision, meta, ok = await self._speaker_turn(
                         agent=agent,
                         profile=profile,
                         code=code,
@@ -226,7 +335,11 @@ class DiscussionOrchestrator:
                     self._emit(
                         AgentEventType.COMPLETE if ok else AgentEventType.FAILED,
                         target_code,
-                        f"{profile.name} 完成第 {round_idx+1} 轮发言",
+                        (
+                            f"{profile.name} 第 {round_idx+1} 轮选择静音"
+                            if decision.action == "silent" and ok
+                            else f"{profile.name} 完成第 {round_idx+1} 轮发言"
+                        ),
                     )
 
                     turn_counter += 1
@@ -235,7 +348,11 @@ class DiscussionOrchestrator:
                         agent_code=profile.code,
                         agent_name=profile.name,
                         role="agent",
-                        content=content.strip() or "(本轮未发现问题)",
+                        content=decision.content,
+                        action=decision.action,
+                        stance=decision.stance,
+                        reply_to=decision.reply_to,
+                        round_index=round_idx + 1,
                     )
                     all_turns.append(turn)
                     bus.publish_turn(session_id, turn)
@@ -325,31 +442,46 @@ class DiscussionOrchestrator:
         user_inputs: list[str],
         round_idx: int,
         speaker_idx: int,
-    ) -> tuple[str, Optional[dict], bool]:
-        """一个 Agent 的一轮发言 — 能看到之前全部发言并可反驳
+    ) -> tuple[SpeakerDecision, Optional[dict], bool]:
+        """让一个 Agent 基于共享历史自主决定发言或静音。
+
+        Args:
+            agent: 当前讨论共用的 DeepSeek 调用客户端。
+            profile: 当前审查子 Agent 画像。
+            code: 待审查源代码。
+            language: 代码语言。
+            file_name: 文件名。
+            all_turns: 此前全部 Agent 决策与用户发言。
+            user_inputs: 尚未完成一轮消费的用户最新指示。
+            round_idx: 从零开始的讨论轮次。
+            speaker_idx: 从零开始的本轮发言顺序。
 
         Returns:
-            (发言文本, AiCallLog meta, 是否成功)
+            tuple[SpeakerDecision, Optional[dict], bool]: 自主决策、日志元数据和
+            模型调用是否成功。
         """
         loop = asyncio.get_running_loop()
-        is_first = not all_turns or all(t.role == "user" for t in all_turns)
+        is_first = not any(
+            t.role == "agent" and getattr(t, "action", "speak") == "speak"
+            for t in all_turns
+        )
 
         system = (
             f"你是代码审查专家「{profile.name}」,正在参加代码审查圆桌讨论。\n\n"
             f"文件: {file_name}({language})\n"
             f"你的专业领域: {profile.focus}\n"
             f"你的重点问题类型: {' / '.join(profile.issue_types)}\n\n"
-            f"发言规则:\n"
-            f"1. 每次只输出一段中文发言(100-300字),用自然语言说出你的观点;\n"
-            f"2. 如果你是第一个发言者: 直接报告你发现的 ≤3 个最严重的问题,带上代码行号;\n"
-            f"3. 如果前面已有其他人发言: **必须先对他们的观点表态** —— 明确指出你"
-            f"「同意 / 补充 / 质疑 / 反驳」其中哪一个,并给出理由(例如「我不同意XX代理"
-            f"把这条定为严重,因为…」「XX代理漏掉了…」);然后再补充你的独立发现;\n"
-            f"4. 鼓励良性争论: 发现别人的判断有误、严重度评估过高或过低、定位不准时,"
-            f"请直接反驳并说明依据,不要为了客气而附和;\n"
-            f"5. 用具体代码行号和内容支撑你的观点;\n"
-            f"6. 不要逐字重复别人已说清的问题,可在其基础上深化;\n"
-            f"7. 输出纯文本,不要 JSON,不要 Markdown 标题。"
+            f"决策规则:\n"
+            f"1. 先自主选择发言或静音。存在独立发现、新证据、不同判断或需要回应用户时"
+            f"选择 speak;现有观点已完整覆盖且没有新增价值时选择 silent;\n"
+            f"2. 发言时从 propose/agree/oppose/question/supplement/neutral 中选择立场。"
+            f"发现判断有误时直接 oppose,不要为了客气附和;\n"
+            f"3. reply_to 填被回应者的 agent_code;没有明确对象时填 null;\n"
+            f"4. speak 的 content 使用 100-300 字中文自然语言,报告不超过 3 个关键问题,"
+            f"并用代码行号和内容支撑;silent 的 content 简述静音原因;\n"
+            f"5. 只输出 JSON 对象,格式为:"
+            f'{{"action":"speak|silent","stance":"propose|agree|oppose|question|'
+            f'supplement|neutral","reply_to":"agent_code或null","content":"正文或静音原因"}}。'
         )
 
         history_text = self._build_history(all_turns)
@@ -360,9 +492,9 @@ class DiscussionOrchestrator:
             ) + "\n请优先回应用户的指示。"
 
         stance_hint = (
-            "你是第一位发言者,请直接给出你的发现。"
+            "你是第一位有效发言者;有独立发现时用 propose 发言,未发现问题也可静音。"
             if is_first
-            else "请先对上面其他人的发言表态(同意/补充/质疑/反驳并说明理由),再补充你的独立发现。"
+            else "请基于完整记录选择发言或静音;发言时明确赞同、否认、质疑或补充及回应对象。"
         )
         user_prompt = (
             f"## 待审查代码\n```{language}\n{code}\n```\n\n"
@@ -378,23 +510,45 @@ class DiscussionOrchestrator:
                     system_prompt=system,
                     user_prompt=user_prompt,
                     agent_label=profile.code,
-                    json_mode=False,
+                    json_mode=True,
                 ),
             )
-            return content.strip(), meta, True
+            return _parse_speaker_decision(content), meta, True
         except Exception as e:
             logger.warning(f"[Discuss] {profile.code} 发言失败: {e}")
-            return f"(抱歉,发言时遇到技术问题: {str(e)[:80]})", None, False
+            return SpeakerDecision(
+                action="speak",
+                stance="neutral",
+                reply_to=None,
+                content=f"(抱歉,发言时遇到技术问题: {str(e)[:80]})",
+            ), None, False
 
     def _build_history(self, turns: list[DiscussionTurn]) -> str:
+        """按时间顺序构造所有参会者共享的聊天记录。
+
+        Args:
+            turns: 此前的 Agent 决策和用户发言。
+
+        Returns:
+            str: 包含发言、静音、立场和回应对象的 Markdown 上下文。
+        """
         if not turns:
             return "## 讨论记录\n(你是第一位发言者,开始你的表演吧！)"
 
         parts = ["## 讨论记录 (按发言时间顺序)"]
         for t in turns:
             role_label = "用户" if t.role == "user" else f"{t.agent_name}({t.agent_code})"
+            action = getattr(t, "action", "speak")
+            stance = getattr(t, "stance", "neutral")
+            reply_to = getattr(t, "reply_to", None)
+            metadata = ""
+            if t.role == "agent":
+                metadata = f" [动作:{action}; 立场:{stance}"
+                if reply_to:
+                    metadata += f"; 回应:{reply_to}"
+                metadata += "]"
             parts.append(
-                f"\n### {role_label}\n{t.content}",
+                f"\n### {role_label}{metadata}\n{t.content}",
             )
         return "\n".join(parts)
 
@@ -403,14 +557,14 @@ class DiscussionOrchestrator:
                    stopped: bool = False) -> tuple[str, Optional[dict]]:
         """生成主持人共识小结。Returns (文本, AiCallLog meta)。"""
         prefix = "🛑 讨论已被用户终止。\n\n" if stopped else ""
-        agent_turns = [t for t in turns if t.role == "agent"]
+        agent_turns = [
+            t for t in turns
+            if t.role == "agent" and getattr(t, "action", "speak") == "speak"
+        ]
         if not agent_turns:
             return prefix + "本次讨论没有产生有效发言。", None
 
-        history = "\n\n".join(
-            f"【{'用户' if t.role == 'user' else t.agent_name}】{t.content}"
-            for t in turns
-        )
+        history = self._build_history(turns)
         try:
             raw, meta = agent.call_raw(
                 system_prompt=(
@@ -419,8 +573,10 @@ class DiscussionOrchestrator:
                     "1. 先用一句话给出代码总体评价;\n"
                     "2. 然后用 Markdown 有序列表列出大家达成共识的关键问题"
                     "(每条注明所属维度、严重程度,并尽量带上代码行号);\n"
-                    "3. 如讨论中存在分歧,用一句话说明争议点与结论;\n"
-                    "4. 最后给出 1-2 句改进优先级建议。\n"
+                    "3. 单列尚未解决的分歧,说明赞同、否认或质疑双方的依据;\n"
+                    "4. 明确回应用户在群聊中的关注点;没有用户插话时省略此项;\n"
+                    "5. 最后给出 1-2 句改进优先级建议。\n"
+                    "静音记录只表示该 Agent 没有新增观点,不得当成问题或共识。\n"
                     "总长度控制在 450 字以内。"
                 ),
                 user_prompt=(
@@ -492,8 +648,18 @@ class DiscussionOrchestrator:
             logger.debug(f"[Discussion] publish 到 Environment 失败(不影响主流程): {e}")
 
     def _emit(self, type_: AgentEventType, agent_code: str, message: str) -> None:
-        """向 Agent 办公室广播讨论事件(失败静默,不影响讨论)"""
+        """向 Agent 办公室广播当前用户所属的讨论事件。
+
+        Args:
+            type_: 事件类型。
+            agent_code: 产生事件的 Agent 编码。
+            message: 面向前端展示的事件说明。
+
+        Returns:
+            None: 事件发布失败时静默降级，不影响讨论主流程。
+        """
         try:
+            user_id = getattr(self, "_user_id", 0) or None
             AgentEventBus.instance().publish(AgentEvent(
                 type=type_,
                 agent=agent_code,
@@ -502,6 +668,7 @@ class DiscussionOrchestrator:
                 payload={"task_id": getattr(self, "_task_id", 0),
                          "user_id": getattr(self, "_user_id", 0),
                          "source": "discussion"},
+                user_id=user_id,
             ))
         except Exception:
             pass
@@ -512,6 +679,7 @@ class DiscussionOrchestrator:
     _paused: bool = False
     _paused_event: Optional[asyncio.Event] = None
     _user_inputs: list[str] = []
+    _all_turns: list[DiscussionTurn] = []
     _task_id: int = 0
     _user_id: int = 0
     _file_id: int = 0
@@ -524,6 +692,16 @@ class DiscussionOrchestrator:
             content = payload.get("content", "")
             logger.info(f"[Discussion] 用户发言: {content[:60]}...")
             self._user_inputs.append(content)
+            if content:
+                self._all_turns.append(DiscussionTurn(
+                    turn_id=int(payload.get("turn_id") or -1),
+                    agent_code="user",
+                    agent_name="你",
+                    role="user",
+                    content=content,
+                    action="speak",
+                    stance="neutral",
+                ))
             # v2.4 B1: 用户发言 publish 到 MetaGPT Environment
             self._publish_to_env(
                 speaker="user",
@@ -682,11 +860,17 @@ def _extract_issues(all_turns, code, language, file_name, agent, db,
                     task_id, user_id, file_id):
     """用 LLM 把讨论共识抽取为结构化问题列表(复用 result_parser)。"""
     agent_turns = [t for t in all_turns if t.role == "agent"
-                   and t.agent_code != "orchestrator"]
+                   and t.agent_code != "orchestrator"
+                   and getattr(t, "action", "speak") == "speak"]
     if not agent_turns:
         return []
+    relevant_turns = [
+        t for t in all_turns
+        if t.role == "user" or getattr(t, "action", "speak") == "speak"
+    ]
     history = "\n\n".join(
-        f"【{t.agent_name}】{t.content}" for t in all_turns
+        f"【{'用户' if t.role == 'user' else t.agent_name}】{t.content}"
+        for t in relevant_turns
     )
     system = (
         "你是代码审查记录员。请把下面圆桌讨论中各专家达成共识的问题,整理成结构化 "

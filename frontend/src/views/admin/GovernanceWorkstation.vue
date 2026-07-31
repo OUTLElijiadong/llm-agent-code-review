@@ -124,19 +124,77 @@ const artifactForm = ref({
 
 const pageTitle = computed(() => {
   const titles: Record<Mode, string> = {
-    overview: 'Agent 治理总览',
-    agents: 'Agent 管理',
-    approvals: '审批中心',
-    policies: '策略中心',
-    tools: '工具权限',
-    knowledge: '知识与记忆',
-    jobs: '任务调度',
-    observability: '监控告警',
-    rewards: '奖惩趋势',
-    rollback: '回滚中心',
+    overview: '运行总览',
+    agents: 'Agent 团队',
+    approvals: '待办审批',
+    policies: '策略与权限',
+    tools: '工具使用',
+    knowledge: '知识沉淀',
+    jobs: '任务计划',
+    observability: '系统观测',
+    rewards: '学习效果',
+    rollback: '版本回退',
   }
   return titles[props.mode]
 })
+
+const pageSubtitle = computed(() => {
+  const subtitles: Record<Mode, string> = {
+    overview: '先看运行状况、待办和风险，再进入具体处理。',
+    agents: '查看每个 Agent 的职责、能力、知识和运行优先级。',
+    approvals: '只保留需要人工确认的高风险事项。',
+    policies: '用业务动作描述规则；内部编码仅用于高级配置。',
+    tools: '查看工具实际执行结果，并控制高风险能力。',
+    knowledge: '每条知识都保留来源、风险等级和生效状态。',
+    jobs: '查看自动任务的计划和最近一次执行，不需要理解调度代码。',
+    observability: '用执行结果、审批和风险分布解释系统状态。',
+    rewards: '基于实际任务结果调整 Agent 的优先级和阈值。',
+    rollback: '每次变更都有版本和快照，必要时可以恢复。',
+  }
+  return subtitles[props.mode]
+})
+
+function statusText(value: string | number | null | undefined): string {
+  const labels: Record<string, string> = {
+    active: '生效', idle: '空闲', working: '运行中', disabled: '已停用', error: '异常',
+    enabled: '已启用', pending: '待处理', approved: '已通过', rejected: '已驳回',
+    auto_approved: '自动通过', success: '成功', failed: '失败', denied: '已阻断',
+    escalated: '等待审批', draft: '草稿', gray: '灰度中', stable: '稳定', rolled_back: '已回退',
+    pending_approval: '等待审批', allow: '允许', deny: '阻断', escalate: '升级审批',
+  }
+  return labels[String(value)] || String(value || '-')
+}
+
+function riskText(value: string | null | undefined): string {
+  return ({ low: '低风险', medium: '中风险', high: '高风险', critical: '严重风险' } as Record<string, string>)[value || ''] || (value || '-')
+}
+
+function alertSeverityText(value: string | null | undefined): string {
+  return ({ info: '提示', warning: '警告', high: '高等级', critical: '严重' } as Record<string, string>)[value || ''] || (value || '-')
+}
+
+function agentBoundaryText(agent: GovernanceAgent): string {
+  const config = agent.config_json
+  const boundary = config && !Array.isArray(config) && typeof config === 'object'
+    ? (config as Record<string, unknown>).governance_boundary
+    : null
+  if (!boundary || typeof boundary !== 'object' || Array.isArray(boundary)) return '未配置（兼容模式）'
+  const scope = String((boundary as Record<string, unknown>).scope || '职责域')
+  const allowed = Array.isArray((boundary as Record<string, unknown>).allowed_tools)
+    ? ((boundary as Record<string, unknown>).allowed_tools as unknown[]).length
+    : 0
+  const approval = Array.isArray((boundary as Record<string, unknown>).approval_tools)
+    ? ((boundary as Record<string, unknown>).approval_tools as unknown[]).length
+    : 0
+  return `${scope} · 允许 ${allowed} 项 · 审批 ${approval} 项 · 其余拒绝`
+}
+
+const observabilityCards = computed(() => [
+  { label: '开放告警', value: Number(observability.value.open_alerts || 0) },
+  { label: '调度执行', value: Number(observability.value.job_runs || 0) },
+  { label: '累计奖惩分', value: Number(observability.value.reward_score_total || 0) },
+  { label: '工具状态类型', value: Array.isArray(observability.value.tool_status) ? observability.value.tool_status.length : 0 },
+])
 
 /**
  * 加载当前模式所需的管理端数据。
@@ -404,7 +462,7 @@ onMounted(loadData)
     <div class="page-head">
       <div>
         <h2>{{ pageTitle }}</h2>
-        <p>集中治理 Agent、策略、审批、工具、知识、调度和观测数据。</p>
+        <p>{{ pageSubtitle }}</p>
       </div>
       <el-button @click="loadData">刷新</el-button>
     </div>
@@ -424,7 +482,7 @@ onMounted(loadData)
           <el-table :data="agents" height="360">
             <el-table-column prop="name" label="Agent(智能体)" min-width="140" />
             <el-table-column prop="category" label="分类" width="110" />
-            <el-table-column prop="status" label="状态" width="100" />
+            <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small">{{ statusText(row.status) }}</el-tag></template></el-table-column>
             <el-table-column prop="priority" label="优先级" width="90" />
           </el-table>
         </section>
@@ -432,8 +490,8 @@ onMounted(loadData)
           <h3>待处理审批</h3>
           <el-table :data="approvals" height="360">
             <el-table-column prop="title" label="事项" min-width="180" />
-            <el-table-column prop="risk_level" label="风险" width="90" />
-            <el-table-column prop="status" label="状态" width="110" />
+            <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="row.risk_level === 'high' ? 'danger' : 'warning'">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
+            <el-table-column label="状态" width="110"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           </el-table>
         </section>
       </div>
@@ -442,8 +500,11 @@ onMounted(loadData)
     <section v-else-if="mode === 'agents'" class="panel">
       <el-table :data="agents" stripe>
         <el-table-column prop="name" label="Agent(智能体)" min-width="150" />
-        <el-table-column prop="code" label="编码" min-width="140" />
+        <el-table-column prop="code" label="内部编码" min-width="140" />
         <el-table-column prop="category" label="分类" width="120" />
+        <el-table-column label="职责边界" min-width="260" show-overflow-tooltip>
+          <template #default="{ row }">{{ agentBoundaryText(row) }}</template>
+        </el-table-column>
         <el-table-column label="Skill(技能)" min-width="220">
           <template #default="{ row }">{{ row.skills.join(', ') }}</template>
         </el-table-column>
@@ -459,8 +520,8 @@ onMounted(loadData)
         <el-table-column prop="title" label="审批事项" min-width="220" />
         <el-table-column prop="agent_code" label="Agent(智能体)" width="120" />
         <el-table-column prop="action" label="动作" min-width="150" />
-        <el-table-column prop="risk_level" label="风险" width="90" />
-        <el-table-column prop="status" label="状态" width="120" />
+        <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="row.risk_level === 'high' ? 'danger' : 'warning'">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
+        <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button v-if="row.status === 'pending'" link type="success" @click="onApprove(row)">通过</el-button>
@@ -474,13 +535,13 @@ onMounted(loadData)
       <div class="panel">
         <h3>策略试算</h3>
         <div class="form-row">
-          <el-input v-model="policyForm.subject" placeholder="主体" />
-          <el-input v-model="policyForm.action" placeholder="动作" />
-          <el-input v-model="policyForm.resource" placeholder="资源" />
+          <label class="form-control"><span>执行主体</span><el-input v-model="policyForm.subject" placeholder="例如：Agent 团队" /></label>
+          <label class="form-control"><span>业务动作</span><el-input v-model="policyForm.action" placeholder="例如：读取知识" /></label>
+          <label class="form-control"><span>目标资源</span><el-input v-model="policyForm.resource" placeholder="例如：项目知识库" /></label>
           <el-button type="primary" @click="onEvaluatePolicy">试算</el-button>
         </div>
         <div v-if="policyResult" class="decision-line">
-          {{ policyResult.decision }} · {{ policyResult.risk_level }} · {{ policyResult.reason }}
+          结果：{{ statusText(policyResult.decision) }} · {{ riskText(policyResult.risk_level) }} · {{ policyResult.reason }}
         </div>
       </div>
       <div class="panel">
@@ -516,9 +577,9 @@ onMounted(loadData)
           <el-table-column prop="name" label="规则" min-width="180" />
           <el-table-column prop="subject" label="主体" width="130" />
           <el-table-column prop="action" label="动作" width="140" />
-          <el-table-column prop="effect" label="效果" width="90" />
-          <el-table-column prop="risk_level" label="风险" width="90" />
-          <el-table-column prop="enabled" label="启用" width="80" />
+          <el-table-column label="处理方式" width="110"><template #default="{ row }">{{ statusText(row.effect) }}</template></el-table-column>
+          <el-table-column label="风险" width="100"><template #default="{ row }">{{ riskText(row.risk_level) }}</template></el-table-column>
+          <el-table-column label="状态" width="80"><template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template></el-table-column>
         </el-table>
       </div>
       <div class="panel">
@@ -526,8 +587,8 @@ onMounted(loadData)
         <el-table :data="decisions" stripe>
           <el-table-column prop="subject" label="主体" width="150" />
           <el-table-column prop="action" label="动作" min-width="160" />
-          <el-table-column prop="decision" label="决策" width="90" />
-          <el-table-column prop="risk_level" label="风险" width="90" />
+          <el-table-column label="决策" width="110"><template #default="{ row }">{{ statusText(row.decision) }}</template></el-table-column>
+          <el-table-column label="风险" width="100"><template #default="{ row }">{{ riskText(row.risk_level) }}</template></el-table-column>
           <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
         </el-table>
       </div>
@@ -715,15 +776,29 @@ onMounted(loadData)
 
     <section v-else-if="mode === 'observability'" class="content-grid">
       <div class="panel">
-        <h3>观测指标</h3>
-        <pre>{{ JSON.stringify(observability, null, 2) }}</pre>
+        <h3>运行指标</h3>
+        <div class="metric-grid compact-metrics">
+          <div v-for="item in observabilityCards" :key="item.label" class="metric">
+            <span>{{ item.label }}</span><strong>{{ item.value }}</strong>
+          </div>
+        </div>
+        <h4>工具执行结果</h4>
+        <el-table :data="Array.isArray(observability.tool_status) ? observability.tool_status : []" size="small">
+          <el-table-column prop="status" label="结果"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
+          <el-table-column prop="count" label="次数" width="100" />
+        </el-table>
+        <h4>审批处理结果</h4>
+        <el-table :data="Array.isArray(observability.approval_status) ? observability.approval_status : []" size="small">
+          <el-table-column prop="status" label="结果"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
+          <el-table-column prop="count" label="次数" width="100" />
+        </el-table>
       </div>
       <div class="panel">
         <h3>开放告警</h3>
         <el-table :data="alerts" height="360">
           <el-table-column prop="title" label="告警" min-width="180" />
-          <el-table-column prop="severity" label="级别" width="90" />
-          <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column label="级别" width="110"><template #default="{ row }">{{ alertSeverityText(row.severity) }}</template></el-table-column>
+          <el-table-column label="状态" width="100"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="90">
             <template #default="{ row }">
               <el-button v-if="row.status === 'open'" link type="primary" @click="onResolveAlert(row)">关闭</el-button>
@@ -737,13 +812,13 @@ onMounted(loadData)
       <div class="panel">
         <h3>记录奖惩</h3>
         <div class="toolbar-grid">
-          <el-input v-model="rewardForm.agent_code" placeholder="Agent 编码" />
+          <label class="form-control"><span>Agent</span><el-input v-model="rewardForm.agent_code" placeholder="选择或输入 Agent 编码" /></label>
           <el-select v-model="rewardForm.event_type">
             <el-option label="奖励(reward)" value="reward" />
             <el-option label="惩罚(penalty)" value="penalty" />
           </el-select>
           <el-input-number v-model="rewardForm.score" :min="-100" :max="100" controls-position="right" />
-          <el-input v-model="rewardForm.reason" placeholder="原因" />
+          <label class="form-control"><span>依据</span><el-input v-model="rewardForm.reason" placeholder="关联真实任务或验收结果" /></label>
           <el-button type="primary" @click="onCreateReward">记录</el-button>
         </div>
       </div>
@@ -751,7 +826,7 @@ onMounted(loadData)
         <h3>奖惩事件</h3>
         <el-table :data="rewardEvents" stripe>
           <el-table-column prop="agent_code" label="Agent(智能体)" width="140" />
-          <el-table-column prop="event_type" label="类型" width="100" />
+          <el-table-column label="类型" width="100"><template #default="{ row }">{{ row.event_type === 'reward' ? '奖励' : '惩罚' }}</template></el-table-column>
           <el-table-column prop="score" label="分数" width="90" />
           <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
         </el-table>
@@ -762,7 +837,7 @@ onMounted(loadData)
       <div class="panel">
         <h3>创建版本</h3>
         <div class="toolbar-grid">
-          <el-input v-model="artifactForm.agent_code" placeholder="Agent 编码" />
+          <label class="form-control"><span>归属 Agent</span><el-input v-model="artifactForm.agent_code" placeholder="例如：策略 Agent" /></label>
           <el-select v-model="artifactForm.artifact_type">
             <el-option label="策略(policy)" value="policy" />
             <el-option label="提示词(prompt)" value="prompt" />
@@ -770,14 +845,14 @@ onMounted(loadData)
             <el-option label="知识(knowledge)" value="knowledge" />
             <el-option label="代码(code)" value="code" />
           </el-select>
-          <el-input v-model="artifactForm.version" placeholder="版本" />
+          <label class="form-control"><span>版本名称</span><el-input v-model="artifactForm.version" placeholder="例如：2026-07-30 验证版" /></label>
           <el-select v-model="artifactForm.status">
             <el-option label="草稿(draft)" value="draft" />
             <el-option label="灰度(gray)" value="gray" />
             <el-option label="稳定(stable)" value="stable" />
           </el-select>
-          <el-input v-model="artifactForm.content" placeholder="内容" />
-          <el-input v-model="artifactForm.snapshot" placeholder="回滚快照" />
+          <label class="form-control"><span>本次内容</span><el-input v-model="artifactForm.content" placeholder="本次调整的内容" /></label>
+          <label class="form-control"><span>恢复快照</span><el-input v-model="artifactForm.snapshot" placeholder="回退时恢复的内容" /></label>
           <el-button type="primary" @click="onCreateArtifactVersion">创建版本</el-button>
         </div>
       </div>
@@ -787,7 +862,7 @@ onMounted(loadData)
           <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
           <el-table-column prop="artifact_type" label="类型" width="110" />
           <el-table-column prop="version" label="版本" min-width="160" />
-          <el-table-column prop="status" label="状态" width="120" />
+          <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="90">
             <template #default="{ row }">
               <el-button link type="primary" @click="onRollbackArtifact(row)">回滚</el-button>
@@ -854,6 +929,30 @@ onMounted(loadData)
   display: block;
   margin-top: 6px;
   font-size: 24px;
+}
+
+.compact-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.panel h4 {
+  margin: 18px 0 8px;
+  font-size: 13px;
+  color: var(--gray-700);
+}
+
+.form-control {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--gray-700);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form-control :deep(.el-input),
+.form-control :deep(.el-select) {
+  width: 100%;
 }
 
 .content-grid {

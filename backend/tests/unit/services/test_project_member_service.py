@@ -26,7 +26,6 @@ from app.services.project_member_service import (
     update_member_role,
 )
 
-
 # ============ 辅助函数 ============
 
 def _make_user(db, uid, username, role="user"):
@@ -90,7 +89,7 @@ class TestGetVisibleProjectIds:
     def test_normal_user_sees_owner_and_member_projects(self, db):
         """普通用户视角应看到 owner 项目 ∪ member 项目,scope='self'"""
         user = _make_user(db, 10, "user1")
-        other = _make_user(db, 11, "user2")
+        _make_user(db, 11, "user2")
 
         # user 是 201 的 owner
         _make_project(db, 201, owner_user_id=10, name="own")
@@ -139,7 +138,7 @@ class TestIsProjectMember:
 
     def test_reviewer_member_has_access(self, db):
         """reviewer 对被加入的项目有访问权,返回 (True, 'reviewer')"""
-        owner = _make_user(db, 3, "owner3")
+        _make_user(db, 3, "owner3")
         reviewer = _make_user(db, 4, "reviewer4")
         _make_project(db, 403, owner_user_id=3)
         db.add(ProjectMember(project_id=403, user_id=4, role_in_project="reviewer"))
@@ -150,7 +149,7 @@ class TestIsProjectMember:
 
     def test_non_member_no_access(self, db):
         """非成员对项目无访问权,返回 (False, '')"""
-        owner = _make_user(db, 5, "owner5")
+        _make_user(db, 5, "owner5")
         stranger = _make_user(db, 6, "stranger")
         _make_project(db, 404, owner_user_id=5)
         can, role = is_project_member(db, 404, stranger)
@@ -190,7 +189,7 @@ class TestRequireProjectAccess:
 
     def test_reviewer_fails_write(self, db):
         """reviewer 不能通过写权限校验,抛 ForbiddenError"""
-        owner = _make_user(db, 3, "owner")
+        _make_user(db, 3, "owner")
         reviewer = _make_user(db, 4, "reviewer")
         _make_project(db, 503, owner_user_id=3)
         db.add(ProjectMember(project_id=503, user_id=4, role_in_project="reviewer"))
@@ -200,7 +199,7 @@ class TestRequireProjectAccess:
 
     def test_reviewer_passes_read(self, db):
         """reviewer 通过读权限校验,返回 'reviewer'"""
-        owner = _make_user(db, 5, "owner")
+        _make_user(db, 5, "owner")
         reviewer = _make_user(db, 6, "reviewer")
         _make_project(db, 504, owner_user_id=5)
         db.add(ProjectMember(project_id=504, user_id=6, role_in_project="reviewer"))
@@ -216,7 +215,7 @@ class TestRequireProjectAccess:
 
     def test_non_member_raises_not_found(self, db):
         """非成员访问项目抛 NotFoundError(防枚举,不暴露项目存在性)"""
-        owner = _make_user(db, 8, "owner")
+        _make_user(db, 8, "owner")
         stranger = _make_user(db, 9, "stranger")
         _make_project(db, 505, owner_user_id=8)
         with pytest.raises(NotFoundError):
@@ -255,7 +254,7 @@ class TestRequireProjectAccessAudit:
         """审查员写权限被拒时应记录 status=failed 的审计日志(且能持久化)"""
         from app.models.audit_log import AuditLog
 
-        owner = _make_user(db, 1002, "owner")
+        _make_user(db, 1002, "owner")
         reviewer = _make_user(db, 1003, "reviewer")
         _make_project(db, 5102, owner_user_id=1002)
         db.add(ProjectMember(project_id=5102, user_id=1003, role_in_project="reviewer"))
@@ -280,7 +279,7 @@ class TestRequireProjectAccessAudit:
         """非成员写权限被拒时应记录 status=failed 的审计日志"""
         from app.models.audit_log import AuditLog
 
-        owner = _make_user(db, 1004, "owner")
+        _make_user(db, 1004, "owner")
         stranger = _make_user(db, 1005, "stranger")
         _make_project(db, 5103, owner_user_id=1004)
         db.query(AuditLog).delete()
@@ -336,7 +335,7 @@ class TestMemberCRUD:
     def test_add_member_success(self, db):
         """owner 成功添加 reviewer 成员"""
         owner = _make_user(db, 1, "owner")
-        target = _make_user(db, 2, "target")
+        _make_user(db, 2, "target")
         _make_project(db, 601, owner_user_id=1)
         member = add_member(db, project_id=601, user_id=2, role="reviewer", operator=owner)
         assert member.user_id == 2
@@ -345,7 +344,7 @@ class TestMemberCRUD:
     def test_add_member_duplicate_raises(self, db):
         """重复添加成员抛 BadRequestError"""
         owner = _make_user(db, 3, "owner")
-        target = _make_user(db, 4, "target")
+        _make_user(db, 4, "target")
         _make_project(db, 602, owner_user_id=3)
         add_member(db, project_id=602, user_id=4, role="reviewer", operator=owner)
         with pytest.raises(BadRequestError, match="已是项目成员"):
@@ -355,7 +354,7 @@ class TestMemberCRUD:
         """reviewer 不能添加成员"""
         owner = _make_user(db, 5, "owner")
         reviewer = _make_user(db, 6, "reviewer")
-        target = _make_user(db, 7, "target")
+        _make_user(db, 7, "target")
         _make_project(db, 603, owner_user_id=5)
         add_member(db, project_id=603, user_id=6, role="reviewer", operator=owner)
         with pytest.raises(ForbiddenError):
@@ -364,7 +363,7 @@ class TestMemberCRUD:
     def test_remove_member_success(self, db):
         """owner 成功移除 reviewer 成员"""
         owner = _make_user(db, 8, "owner")
-        target = _make_user(db, 9, "target")
+        _make_user(db, 9, "target")
         _make_project(db, 604, owner_user_id=8)
         add_member(db, project_id=604, user_id=9, role="reviewer", operator=owner)
         assert remove_member(db, project_id=604, user_id=9, operator=owner) is True
@@ -381,7 +380,7 @@ class TestMemberCRUD:
     def test_update_member_role(self, db):
         """owner 更新成员角色"""
         owner = _make_user(db, 11, "owner")
-        target = _make_user(db, 12, "target")
+        _make_user(db, 12, "target")
         _make_project(db, 606, owner_user_id=11)
         add_member(db, project_id=606, user_id=12, role="reviewer", operator=owner)
         updated = update_member_role(db, project_id=606, user_id=12, new_role="owner", operator=owner)
@@ -390,7 +389,7 @@ class TestMemberCRUD:
     def test_list_members(self, db):
         """list_members 返回成员列表含用户基本信息"""
         owner = _make_user(db, 13, "owner13", role="user")
-        reviewer = _make_user(db, 14, "reviewer14", role="user")
+        _make_user(db, 14, "reviewer14", role="user")
         _make_project(db, 607, owner_user_id=13)
         ensure_owner_member(db, 607, 13)
         add_member(db, project_id=607, user_id=14, role="reviewer", operator=owner)
@@ -429,7 +428,7 @@ class TestEnsureOwnerMember:
 
     def test_upgrades_reviewer_to_owner(self, db):
         """已存在的 reviewer 记录应被升级为 owner"""
-        owner = _make_user(db, 3, "u3")
+        _make_user(db, 3, "u3")
         _make_project(db, 703, owner_user_id=3)
         # 先以 reviewer 身份加入(模拟异常状态)
         db.add(ProjectMember(project_id=703, user_id=3, role_in_project="reviewer"))

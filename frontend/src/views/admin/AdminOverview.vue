@@ -93,12 +93,15 @@
       <section class="card">
         <header class="card-head">
           <h3><el-icon><Cpu /></el-icon>Agent 活跃状态</h3>
-          <span class="muted sm">{{ workingCount }} 个运行中</span>
+          <div class="live-status" :class="`live-${eventStreamStatus}`">
+            <span class="live-dot"></span>{{ liveStatusText }} · {{ workingCount }} 个运行中
+          </div>
         </header>
         <ul class="agent-list">
-          <li v-for="a in agents" :key="a.agent_code" class="agent-item">
+          <li v-for="a in agents" :key="a.agent_code" class="agent-item" :class="a.status">
             <span class="a-avatar" :class="a.status">
-              <span v-if="a.status === 'working'" class="ring"></span>
+              <span v-if="['working', 'thinking', 'blocked'].includes(a.status)" class="ring"></span>
+              <span v-if="['working', 'thinking'].includes(a.status)" class="activity-bars" aria-hidden="true"><i></i><i></i><i></i></span>
               {{ agentEmoji(a) }}
             </span>
             <div class="a-info">
@@ -135,6 +138,8 @@ import {
   type SecurityPosture,
   type SystemStatus,
 } from '@/api/adminOverview'
+import { subscribeAgentEvents } from '@/utils/agentEventStream'
+import type { AgentEvent } from '@/types/agentEvent'
 
 echarts.use([GeoComponent, TooltipComponent, VisualMapComponent, ScatterChart, EffectScatterChart, CanvasRenderer])
 
@@ -145,6 +150,9 @@ const agents = ref<AgentActivity[]>([])
 const mapRef = ref<HTMLElement | null>(null)
 let mapChart: echarts.EChartsType | null = null
 let timer: ReturnType<typeof setInterval> | null = null
+let eventStream: { close: () => void } | null = null
+const eventStreamStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'closed'>('connecting')
+let refreshing = false
 
 const postureLabel = computed(() => {
   const lv = posture.value?.level
@@ -152,13 +160,18 @@ const postureLabel = computed(() => {
   if (lv === 'suspicious') return '存在可疑活动'
   return '系统正常'
 })
-const workingCount = computed(() => agents.value.filter((a) => a.status === 'working').length)
+const workingCount = computed(() => agents.value.filter((a) => ['working', 'thinking', 'blocked'].includes(a.status)).length)
+const liveStatusText = computed(() => ({
+  connecting: '正在连接', connected: '实时连接', reconnecting: '重连中', closed: '已断开',
+} as Record<string, string>)[eventStreamStatus.value])
 
 function statusText(s: string): string {
-  return { idle: '待命', working: '运行中', error: '异常', disabled: '已停用' }[s] || s
+  return { idle: '待命', thinking: '思考中', working: '执行中', blocked: '等待输入', error: '异常', disabled: '已停用' }[s] || s
 }
 function agentEmoji(a: AgentActivity): string {
+  if (a.status === 'thinking') return '◌'
   if (a.status === 'working') return '⚙️'
+  if (a.status === 'blocked') return '⏸️'
   if (a.status === 'error') return '🔴'
   if (a.is_enabled === 0) return '⏸️'
   return '🤖'
@@ -226,26 +239,52 @@ function renderMap(): void {
 }
 
 async function loadAll(): Promise<void> {
-  const [sys, sec, geo, ag] = await Promise.allSettled([
-    getSystemStatus(), getSecurityPosture(), getLoginGeo(), getAgentsActivity(),
-  ])
-  if (sys.status === 'fulfilled') system.value = sys.value
-  if (sec.status === 'fulfilled') posture.value = sec.value
-  if (geo.status === 'fulfilled') geoPoints.value = geo.value
-  if (ag.status === 'fulfilled') agents.value = ag.value
-  renderMap()
+  if (refreshing) return
+  refreshing = true
+  try {
+    const [sys, sec, geo, ag] = await Promise.allSettled([
+      getSystemStatus(), getSecurityPosture(), getLoginGeo(), getAgentsActivity(),
+    ])
+    if (sys.status === 'fulfilled') system.value = sys.value
+    if (sec.status === 'fulfilled') posture.value = sec.value
+    if (geo.status === 'fulfilled') geoPoints.value = geo.value
+    if (ag.status === 'fulfilled') agents.value = ag.value
+    renderMap()
+  } finally {
+    refreshing = false
+  }
+}
+
+function applyAgentEvent(event: AgentEvent): void {
+  const statusMap: Record<string, AgentActivity['status']> = {
+    dispatch: 'thinking', thinking: 'thinking', progress: 'working',
+    complete: 'idle', failed: 'error', clarify: 'blocked',
+  }
+  const status = statusMap[event.type]
+  if (!status) return
+  const agent = agents.value.find((item) => item.agent_code === event.agent)
+  if (!agent) return
+  agent.status = status
+  agent.purpose = event.message || agent.purpose
+  agent.last_seen_at = event.timestamp
+  agent.activity_source = 'event_bus'
 }
 
 function onResize(): void { mapChart?.resize() }
 
 onMounted(() => {
   loadAll()
+  eventStream = subscribeAgentEvents(applyAgentEvent, {
+    replay: 10,
+    onStatus: (status) => { eventStreamStatus.value = status },
+  })
   window.addEventListener('resize', onResize)
-  timer = setInterval(loadAll, 30_000) // 30s 轻量刷新态势
+  timer = setInterval(loadAll, 5_000) // SSE 实时事件 + 5s 数据兜底
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   if (timer) clearInterval(timer)
+  eventStream?.close()
   mapChart?.dispose()
 })
 </script>
@@ -279,6 +318,12 @@ onBeforeUnmount(() => {
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
   h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--gray-900); display: flex; align-items: center; gap: 7px; }
 }
+.live-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--gray-500); white-space: nowrap;
+  &.live-connected { color: #2F8F5B; }
+  &.live-reconnecting, &.live-connecting { color: #B9832F; }
+  &.live-closed { color: #C92A4E; }
+}
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.2s infinite; }
 .uptime { font-size: 11.5px; color: var(--gray-500); }
 .muted { color: var(--gray-400); font-size: 12.5px; &.sm { font-size: 11.5px; } &.center { text-align: center; padding: 24px 0; } }
 
@@ -317,17 +362,27 @@ onBeforeUnmount(() => {
 }
 .a-avatar { position: relative; width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
   font-size: 18px; background: var(--gray-100, #EFF1F6); flex-shrink: 0;
-  &.working { background: rgba(91,88,232,.12); }
+  &.working, &.thinking { background: rgba(91,88,232,.12); }
+  &.blocked { background: rgba(217,168,87,.14); }
   &.error { background: rgba(220,73,97,.12); }
   .ring { position: absolute; inset: -3px; border-radius: 12px; border: 2px solid #5B58E8; border-top-color: transparent; animation: spin 1.1s linear infinite; }
 }
+.agent-item.working, .agent-item.thinking { background: linear-gradient(90deg, rgba(91,88,232,.06), transparent 72%); }
+.agent-item.blocked { background: linear-gradient(90deg, rgba(217,168,87,.08), transparent 72%); }
+.activity-bars { position: absolute; right: 4px; bottom: 4px; display: flex; align-items: flex-end; gap: 2px; height: 9px;
+  i { display: block; width: 2px; height: 4px; border-radius: 2px; background: #5B58E8; animation: activity-bar 1s ease-in-out infinite alternate; }
+  i:nth-child(2) { height: 8px; animation-delay: .18s; }
+  i:nth-child(3) { height: 6px; animation-delay: .36s; }
+}
+@keyframes activity-bar { from { transform: scaleY(.45); opacity: .45; } to { transform: scaleY(1); opacity: 1; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 .a-info { flex: 1; min-width: 0; }
 .a-name { font-size: 13.5px; font-weight: 600; color: var(--gray-900); }
 .a-purpose { font-size: 11.5px; color: var(--gray-500); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .a-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .a-status { font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600;
-  &.working { background: rgba(91,88,232,.12); color: #4B48D8; }
+  &.working, &.thinking { background: rgba(91,88,232,.12); color: #4B48D8; }
+  &.blocked { background: rgba(217,168,87,.14); color: #B9832F; }
   &.idle { background: var(--gray-100, #EFF1F6); color: var(--gray-500); }
   &.error { background: rgba(220,73,97,.12); color: #C92A4E; }
   &.disabled { background: var(--gray-100); color: var(--gray-400); }

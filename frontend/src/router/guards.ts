@@ -5,7 +5,7 @@
 
 import type { Router, RouteLocationNormalized, RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { canAdminOpenPath, getRoleHomePath, normalizeRole } from '@/utils/roleHome'
+import { getRoleHomePath } from '@/utils/roleHome'
 
 /**
  * 路由 meta 扩展字段,用于 RBAC 鉴权
@@ -70,11 +70,6 @@ export function setupGuards(router: Router): void {
     // 历史单角色字段检查(向后兼容)
     if (to.meta.role && to.meta.role !== user.profile?.role) {
       return { path: '/403' }
-    }
-
-    // 管理员只能进入「管理相关」页面;访问开发/用户页面一律回到工作台。
-    if (normalizeRole(user.profile?.role) === 'admin' && !canAdminOpenPath(to.path)) {
-      return { path: '/dashboard', replace: true }
     }
 
     // RBAC 角色列表检查:meta.roles 非空时,用户需拥有其中任一角色

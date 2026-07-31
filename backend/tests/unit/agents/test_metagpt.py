@@ -9,11 +9,9 @@
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
-from app.agents.base import AgentContext, AgentResult, BaseAgent
+from app.agents.base import AgentResult, BaseAgent
 from app.agents.metagpt import (
     Environment,
     Message,
@@ -25,7 +23,6 @@ from app.agents.metagpt import (
     make_message,
     make_start_review_message,
 )
-
 
 # ============ Message 测试 ============
 
@@ -61,7 +58,8 @@ class TestMessage:
         d = msg.to_dict()
         assert set(d.keys()) == {
             "id", "role", "send_to", "content", "cause_by",
-            "sent_from", "metadata", "timestamp",
+            "sent_from", "schema_version", "message_type", "correlation_id",
+            "payload", "artifacts", "errors", "metadata", "timestamp",
         }
         assert d["role"] == "agent_a"
         assert d["metadata"]["user_id"] == 1
@@ -226,6 +224,21 @@ class TestEnvironment:
         with pytest.raises(ValueError, match="已存在"):
             env.add_role(_MockRole("dup"))
 
+    def test_unknown_target_and_out_of_boundary_route_are_rejected(self):
+        """定向消息必须命中已注册目标且通过双向协作白名单。"""
+        env = Environment(name="boundary", trace_id="boundary")
+        env.add_role(_MockRole("project_manager"))
+        with pytest.raises(ValueError, match="目标不存在"):
+            env.publish(make_message(
+                role="code_reviewer", content="x", cause_by="Delegate",
+                send_to="missing_agent",
+            ))
+        with pytest.raises(ValueError, match="协作越界"):
+            env.publish(make_message(
+                role="code_reviewer", content="x", cause_by="Delegate",
+                send_to="project_manager",
+            ))
+
 
 # ============ RoleAdapter 测试 ============
 
@@ -273,6 +286,9 @@ class TestRoleAdapter:
         assert result_msg.sent_from == "reviewer"
         assert result_msg.cause_by == "ReviewDone"
         assert result_msg.content == "审查通过"
+        assert result_msg.message_type == "task.result"
+        assert result_msg.correlation_id == env.history[0].id
+        assert result_msg.payload == {"data": "审查通过"}
         # metadata 透传
         assert result_msg.metadata["user_id"] == 1
         assert result_msg.metadata["task_id"] == 10
@@ -298,6 +314,9 @@ class TestRoleAdapter:
         assert result_msg.cause_by == "AgentError"
         assert "API 超时" in result_msg.content
         assert result_msg.metadata["error"] == "API 超时"
+        assert result_msg.message_type == "task.error"
+        assert result_msg.correlation_id == env.history[0].id
+        assert result_msg.errors == [{"code": "agent_call_failed", "message": "API 超时"}]
 
 
 # ============ factory 函数测试 ============

@@ -560,7 +560,7 @@ flowchart TB
 - **目标**: rsync 同步到服务器 + deploy.sh 重建容器 + 健康检查
 - **输入契约**:
   - 前置依赖: T24
-  - 服务器: `81.70.251.90`, root, 密码 `Lijd20041107`, 路径 `/opt/code-review`
+  - 服务器: `81.70.251.90`, root, 认证方式 `SSH 公钥（敏感凭据不得写入仓库）`, 路径 `/opt/code-review`
 - **输出契约**:
   - 验收: rsync 同步成功; `deploy/deploy.sh` 重建成功; 数据库迁移成功; `https://lijiadong.cn/api/health` 返回 200; 关键 API 抽测通过
 - **实现约束**:

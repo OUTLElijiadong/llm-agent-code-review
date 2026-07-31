@@ -136,7 +136,12 @@ def add_document(
     return doc
 
 
-def activate_document(db: Session, doc_id: int) -> AgentKnowledgeDoc:
+def activate_document(
+    db: Session,
+    doc_id: int,
+    *,
+    commit: bool = True,
+) -> AgentKnowledgeDoc:
     """将待审批 Agent 知识文档激活。
 
     Args:
@@ -153,8 +158,9 @@ def activate_document(db: Session, doc_id: int) -> AgentKnowledgeDoc:
     if not doc:
         raise NotFoundError("Agent 知识文档不存在", code=40400)
     doc.status = "active"
-    db.commit()
-    db.refresh(doc)
+    if commit:
+        db.commit()
+        db.refresh(doc)
     return doc
 
 

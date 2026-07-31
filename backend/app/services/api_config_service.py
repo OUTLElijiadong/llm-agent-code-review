@@ -18,7 +18,34 @@ from app.schemas.api_config import (
     ApiConfigTestIn,
     ApiConfigTestOut,
 )
-from app.utils.api_resolver import decrypt_api_key, encrypt_api_key, mask_api_key, validate_ai_base_url
+from app.utils.api_resolver import (
+    decrypt_api_key_with_metadata,
+    encrypt_api_key,
+    mask_api_key,
+    validate_ai_base_url,
+)
+
+
+def _commit_config_security_change(db: Session, action: str) -> bool:
+    """提交用户 API Key 轮换/失效，失败时回滚并记录安全摘要。
+
+    Args:
+        db: SQLAlchemy 数据库会话。
+        action: 不含密钥内容的操作标识。
+
+    Returns:
+        bool: 提交成功为 True；回滚后为 False。
+    """
+    try:
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.warning(
+            f"[api_config] API Key 安全变更提交失败(action={action}, "
+            f"error_type={type(exc).__name__})",
+        )
+        return False
+    return True
 
 
 def get_config(db: Session, user_id: int) -> ApiConfigOut:
@@ -29,13 +56,28 @@ def get_config(db: Session, user_id: int) -> ApiConfigOut:
     row = db.query(UserApiConfig).filter(UserApiConfig.user_id == user_id).first()
 
     if row:
-        decrypted = decrypt_api_key(row.api_key_enc)
+        decryption = decrypt_api_key_with_metadata(row.api_key_enc)
+        decrypted = ""
+        effective_active = bool(row.is_active)
+        if decryption is None:
+            row.is_active = False
+            _commit_config_security_change(db, f"deactivate_user:{user_id}")
+            effective_active = False
+            logger.warning(f"[api_config] 用户 {user_id} 的 API Key 无法解密，配置已停用")
+        else:
+            decrypted = decryption.plaintext
+            if decryption.needs_rotation:
+                row.api_key_enc = encrypt_api_key(decrypted)
+                if not _commit_config_security_change(db, f"rotate_user:{user_id}"):
+                    decrypted = ""
+                    effective_active = False
+
         return ApiConfigOut(
             provider=row.provider,
             api_key_masked=mask_api_key(decrypted) if decrypted else "****",
             base_url=row.base_url,
             model=row.model,
-            is_active=row.is_active,
+            is_active=effective_active,
             is_custom=True,
             created_at=row.created_at,
             updated_at=row.updated_at,

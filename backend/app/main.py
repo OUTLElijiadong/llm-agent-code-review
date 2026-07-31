@@ -5,15 +5,22 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from slowapi.errors import RateLimitExceeded
 
 from app.api import api_router
+from app.api.responses import router as responses_router
 from app.api.v1 import discussion as discussion_router
 from app.api.v1.ws_discussion import ws_discuss
 from app.core.config import settings
 from app.core.error_handlers import register_handlers
 from app.core.logger import setup_logger
+from app.core.observability import (
+    RequestContextMiddleware,
+    database_is_ready,
+    get_request_id,
+    render_metrics,
+)
 from app.core.rate_limit import limiter
 
 
@@ -91,14 +98,17 @@ async def lifespan(app: FastAPI):
     setup_logger()
     _ensure_schema()
     _reconcile_orphan_reviews()
+    from app.agents.event_bus import AgentEventBus
     from app.agents.orchestrator import get_orchestrator
     from app.services.agent_scheduler_runtime import start_agent_governance_scheduler, stop_agent_governance_scheduler
 
     get_orchestrator()
+    AgentEventBus.instance().start_relay()
     start_agent_governance_scheduler()
     try:
         yield
     finally:
+        AgentEventBus.instance().stop_relay()
         stop_agent_governance_scheduler()
 
 
@@ -107,6 +117,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs" if settings.openapi_enabled else None,
     redoc_url="/redoc" if settings.openapi_enabled else None,
+    openapi_url="/openapi.json" if settings.openapi_enabled else None,
     lifespan=lifespan,
 )
 
@@ -117,6 +128,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestContextMiddleware)
 
 # 接口限流: 注册 Limiter 与 429 处理器(返回项目统一的 Resp 信封)
 app.state.limiter = limiter
@@ -125,24 +137,60 @@ app.state.limiter = limiter
 @app.exception_handler(RateLimitExceeded)
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
     """命中限流时返回 429 + 统一错误结构"""
+    request_id = get_request_id(request)
     return JSONResponse(
         status_code=429,
+        headers={"X-Request-Id": request_id},
         content={
             "code": 42900,
             "message": "请求过于频繁,请稍后再试",
             "detail": str(exc.detail) if getattr(exc, "detail", None) else None,
-            "request_id": request.headers.get("X-Request-Id"),
+            "request_id": request_id,
         },
     )
 
 
 register_handlers(app)
 app.include_router(api_router, prefix="/api")
+app.include_router(responses_router)
 app.add_api_websocket_route("/api/ws/discuss/{session_id}", ws_discuss)
 app.include_router(discussion_router.router, prefix="/api")
 
 
-@app.get("/healthz")
-def healthz():
-    """健康检查接口"""
-    return {"status": "ok"}
+@app.get("/healthz", include_in_schema=False)
+def healthz() -> dict[str, str]:
+    """返回进程存活状态与不可变发布标识。
+
+    Returns:
+        dict[str, str]: 存活状态和当前应用 release。
+    """
+    return {"status": "ok", "release": settings.app_release}
+
+
+@app.get("/readyz", include_in_schema=False)
+def readyz() -> JSONResponse:
+    """检查数据库连接并返回应用就绪状态。
+
+    Returns:
+        JSONResponse: 数据库可用时 200，否则返回不含凭据的 503。
+    """
+    if database_is_ready():
+        return JSONResponse(
+            status_code=200,
+            content={"status": "ready", "release": settings.app_release},
+        )
+    return JSONResponse(
+        status_code=503,
+        content={"status": "not_ready", "release": settings.app_release},
+    )
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    """返回 Prometheus 文本指标；公网网关不得代理此端点。
+
+    Returns:
+        Response: Prometheus exposition format 响应。
+    """
+    payload, content_type = render_metrics()
+    return Response(content=payload, media_type=content_type)

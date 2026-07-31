@@ -25,13 +25,16 @@ from app.ai.result_parser import (
 )
 from app.ai.static_analyzer import (
     Finding,
-    _build_compliance_mapping as _static_build_compliance_mapping,
-    _build_remediation as _static_build_remediation,
     _cwe_to_cvss_vector,
     _severity_to_cvss_score,
     scan,
 )
-
+from app.ai.static_analyzer import (
+    _build_compliance_mapping as _static_build_compliance_mapping,
+)
+from app.ai.static_analyzer import (
+    _build_remediation as _static_build_remediation,
+)
 
 # ============ CVSS 字段解析 ============
 

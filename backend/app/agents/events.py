@@ -59,12 +59,20 @@ class AgentEvent:
 
 @dataclass
 class DiscussionTurn:
-    """一轮 Agent 讨论发言"""
+    """一轮 Agent 讨论决策或用户发言。
+
+    `action/stance/reply_to/round_index` 均提供默认值，保证历史 WebSocket
+    消息和旧调用方仍可按普通中立发言处理。
+    """
     turn_id: int
     agent_code: str
     agent_name: str
     role: str          # "agent" | "user"
     content: str
+    action: str = "speak"       # speak | silent
+    stance: str = "neutral"     # propose | agree | oppose | question | supplement | neutral
+    reply_to: Optional[str] = None
+    round_index: int = 0
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
     )

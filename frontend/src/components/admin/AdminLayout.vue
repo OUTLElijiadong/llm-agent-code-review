@@ -23,6 +23,7 @@ import {
 } from '@element-plus/icons-vue'
 
 import { useUserStore } from '@/stores/user'
+import AdminCopilot from '@/components/admin/AdminCopilot.vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
 interface AdminMenuItem {
@@ -39,6 +40,8 @@ const menuItems: AdminMenuItem[] = [
   { path: '/admin/overview', title: '总览大屏', icon: Histogram },
   { path: '/admin/agents', title: 'Agent 管理', icon: Cpu },
   { path: '/admin/approvals', title: '审批中心', icon: Lock },
+  { path: '/admin/agent-releases', title: 'Agent 发布审批', icon: Cpu },
+  { path: '/admin/beta-codes', title: '内测码管理', icon: Key },
   { path: '/admin/policies', title: '策略中心', icon: Operation },
   { path: '/admin/tools', title: '工具权限', icon: Tools },
   { path: '/admin/knowledge', title: '知识与记忆', icon: Files },
@@ -130,6 +133,7 @@ async function logout(): Promise<void> {
         <router-view />
       </main>
     </section>
+    <AdminCopilot />
   </div>
 </template>
 

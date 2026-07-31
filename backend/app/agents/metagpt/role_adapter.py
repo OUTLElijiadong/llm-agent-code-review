@@ -174,6 +174,10 @@ class RoleAdapter(Role):
                 role=self.name,
                 content=content,
                 cause_by=self._react_action,
+                message_type="task.result",
+                correlation_id=origin_msg.id,
+                payload={"data": result.data},
+                artifacts=(result.data.get("artifacts", []) if isinstance(result.data, dict) else []),
                 metadata=out_meta,
             )
         out_meta["error"] = result.error or "未知错误"
@@ -181,6 +185,9 @@ class RoleAdapter(Role):
             role=self.name,
             content=f"Agent {self.name} 调用失败: {result.error}",
             cause_by="AgentError",
+            message_type="task.error",
+            correlation_id=origin_msg.id,
+            errors=[{"code": "agent_call_failed", "message": result.error or "未知错误"}],
             metadata=out_meta,
         )
 

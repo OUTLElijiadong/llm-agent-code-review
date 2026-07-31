@@ -100,15 +100,14 @@ def test_frontend_admin_governance_api_paths_match_backend_routes():
         frontend_calls.add((method, path))
 
     backend_routes: set[tuple[str, str]] = set()
-    for route in app.routes:
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", set()) or set()
+    for path, path_item in app.openapi().get("paths", {}).items():
         if not path.startswith("/api/admin"):
             continue
         normalized_path = re.sub(r"\{[^}]+\}", "{param}", path[4:])
-        for method in methods:
-            if method in {"GET", "POST", "PUT", "DELETE"}:
-                backend_routes.add((method, normalized_path))
+        for method in path_item:
+            normalized_method = method.upper()
+            if normalized_method in {"GET", "POST", "PUT", "DELETE"}:
+                backend_routes.add((normalized_method, normalized_path))
 
     missing = sorted(frontend_calls - backend_routes)
     assert not missing

@@ -1,0 +1,16 @@
+ARG RUNTIME_BASE
+FROM ${RUNTIME_BASE}
+
+# Build a narrow, auditable production hotfix on top of the currently running
+# backend image. Every copied path is covered by the Responses/Agent test suite.
+COPY backend/app/api/responses.py /app/app/api/responses.py
+COPY backend/app/api/v1/admin_agent_releases.py /app/app/api/v1/admin_agent_releases.py
+COPY backend/app/api/v1/admin_copilot.py /app/app/api/v1/admin_copilot.py
+COPY backend/app/api/v1/agent_catalog.py /app/app/api/v1/agent_catalog.py
+COPY backend/app/api/v1/agent_responses.py /app/app/api/v1/agent_responses.py
+COPY backend/app/agents/orchestrator.py /app/app/agents/orchestrator.py
+COPY backend/app/agents/tool_contracts.py /app/app/agents/tool_contracts.py
+COPY backend/app/services/admin_agent_tools.py /app/app/services/admin_agent_tools.py
+COPY backend/app/services/agent_responses_service.py /app/app/services/agent_responses_service.py
+COPY backend/app/services/deepseek_responses_runtime.py /app/app/services/deepseek_responses_runtime.py
+COPY backend/app/services/published_agent_tools.py /app/app/services/published_agent_tools.py

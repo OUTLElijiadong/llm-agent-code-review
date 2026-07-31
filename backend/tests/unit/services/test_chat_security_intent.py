@@ -42,18 +42,20 @@ def test_security_audit_clarify_when_scope_project_missing_project_id():
     assert "project_id" in keys
 
 
-def test_security_audit_no_clarify_when_payload_complete():
-    """scope+对应 id 齐全时不再追问"""
+def test_security_audit_requires_confirmation_after_parameters_complete():
+    """scope+对应 id 齐全后进入操作确认，确认后才执行。"""
     agent = ChatAssistantAgent()
-    assert agent._maybe_clarify(
-        "security_audit", {"scope": "task", "task_id": 7}, ctx=None,
-    ) is None
-    assert agent._maybe_clarify(
-        "security_audit", {"scope": "project", "project_id": 11}, ctx=None,
-    ) is None
-    assert agent._maybe_clarify(
-        "security_audit", {"scope": "file", "file_id": 3}, ctx=None,
-    ) is None
+    for payload in (
+        {"scope": "task", "task_id": 7},
+        {"scope": "project", "project_id": 11},
+        {"scope": "file", "file_id": 3},
+    ):
+        result = agent._maybe_clarify("security_audit", payload, ctx=None)
+        assert result is not None
+        assert result.data["clarify"]["questions"][0]["type"] == "confirm"
+        assert agent._maybe_clarify(
+            "security_audit", {**payload, "_write_confirmation": "确认"}, ctx=None,
+        ) is None
 
 
 def test_security_audit_required_helper():

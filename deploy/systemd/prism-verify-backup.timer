@@ -1,0 +1,11 @@
+[Unit]
+Description=Verify the latest Prism backup weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 03:15:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=prism-verify-backup.service
+
+[Install]
+WantedBy=timers.target

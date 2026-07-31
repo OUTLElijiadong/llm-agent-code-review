@@ -9,9 +9,9 @@ from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.agent_governance import AgentToolPermission, PolicyDecisionLog, ToolCallLog
+from app.models.agent_governance import AgentProfile, AgentToolPermission, PolicyDecisionLog, ToolCallLog
 from app.models.user import User
-from app.services import approval_service, policy_engine
+from app.services import approval_service, observability_service, policy_engine
 
 
 @dataclass
@@ -89,6 +89,7 @@ def execute(
             agent_code=agent_code,
             request={"tool_code": tool_code, "input_summary": input_summary, "context": context or {}},
             actor=actor,
+            copilot_request_id=str((context or {}).get("copilot_request_id") or ""),
         )
         approval_id = approval.id
         log = _write_log(
@@ -106,6 +107,13 @@ def execute(
             duration_ms=_elapsed_ms(t0),
             policy_decision_id=decision.log_id,
             approval_id=approval_id,
+        )
+        observability_service.create_alert(
+            db,
+            alert_type="tool_approval_required",
+            severity="high",
+            title=f"{agent_code} 的高风险工具操作等待审批",
+            detail={"tool_call_id": log.id, "approval_id": approval_id, "action": action, "resource": resource},
         )
         return ToolGatewayResult(
             success=False,
@@ -133,6 +141,13 @@ def execute(
             duration_ms=_elapsed_ms(t0),
             policy_decision_id=decision.log_id,
             approval_id=None,
+        )
+        observability_service.create_alert(
+            db,
+            alert_type="tool_operation_blocked",
+            severity="warning",
+            title=f"{agent_code} 的工具操作已被策略阻断",
+            detail={"tool_call_id": log.id, "action": action, "resource": resource, "reason": decision.reason},
         )
         return ToolGatewayResult(
             success=False,
@@ -186,6 +201,13 @@ def execute(
             policy_decision_id=decision.log_id,
             approval_id=None,
         )
+        observability_service.create_alert(
+            db,
+            alert_type="tool_execution_failed",
+            severity="high",
+            title=f"{agent_code} 的工具执行失败",
+            detail={"tool_call_id": log.id, "action": action, "resource": resource, "error": str(exc)},
+        )
         return ToolGatewayResult(
             success=False,
             status="failed",
@@ -194,6 +216,38 @@ def execute(
             error=str(exc),
             log_id=log.id,
         )
+
+
+def authorize(
+    db: Session,
+    *,
+    agent_code: str,
+    tool_code: str,
+    action: str,
+    resource: str = "",
+    actor: Optional[User] = None,
+    context: Optional[dict] = None,
+) -> policy_engine.PolicyDecision:
+    """只执行统一策略与工具权限判断，供已有持久化审批运行时复用。"""
+    del actor  # 身份由调用入口 RBAC 校验；此处只处理 Agent 策略与工具边界。
+    subject = f"agent:{agent_code}"
+    decision = policy_engine.evaluate(
+        db,
+        subject=subject,
+        action=action,
+        resource=resource or "*",
+        context=context or {},
+    )
+    return _apply_tool_permission(
+        db,
+        agent_code=agent_code,
+        tool_code=tool_code,
+        action=action,
+        resource=resource or "*",
+        subject=subject,
+        decision=decision,
+        context=context or {},
+    )
 
 
 def _elapsed_ms(start: float) -> int:
@@ -251,6 +305,51 @@ def _apply_tool_permission(
     Returns:
         policy_engine.PolicyDecision: 应用工具权限后的决策。
     """
+    # A configured governance boundary is a default-deny capability boundary.
+    # It only restricts the policy decision; it never turns an explicit policy
+    # deny into an allow or an escalation into an allow.
+    boundary = _load_governance_boundary(db, agent_code)
+    if boundary is not None:
+        blocked_tools = boundary["blocked_tools"]
+        approval_tools = boundary["approval_tools"]
+        allowed_tools = boundary["allowed_tools"]
+        if tool_code in blocked_tools:
+            decision = _restrict_decision(
+                db,
+                decision=decision,
+                subject=subject,
+                action=action,
+                resource=resource,
+                context=context,
+                target=policy_engine.DENY,
+                risk_level=policy_engine.CRITICAL,
+                reason=f"职责边界阻断工具: {tool_code}",
+            )
+        elif tool_code in approval_tools:
+            decision = _restrict_decision(
+                db,
+                decision=decision,
+                subject=subject,
+                action=action,
+                resource=resource,
+                context=context,
+                target=policy_engine.ESCALATE,
+                risk_level=policy_engine.HIGH,
+                reason=f"职责边界要求审批: {tool_code}",
+            )
+        elif tool_code not in allowed_tools:
+            decision = _restrict_decision(
+                db,
+                decision=decision,
+                subject=subject,
+                action=action,
+                resource=resource,
+                context=context,
+                target=policy_engine.DENY,
+                risk_level=policy_engine.HIGH,
+                reason=f"工具不在职责边界内: {tool_code}",
+            )
+
     permission = (
         db.query(AgentToolPermission)
         .filter(
@@ -263,10 +362,63 @@ def _apply_tool_permission(
     if not permission or permission.permission == policy_engine.ALLOW:
         return decision
 
-    decision.decision = permission.permission
-    decision.risk_level = permission.risk_level
-    decision.risk_score = _permission_risk_score(permission.risk_level)
-    decision.reason = f"命中工具权限配置: {permission.tool_code} -> {permission.permission}"
+    decision = _restrict_decision(
+        db,
+        decision=decision,
+        subject=subject,
+        action=action,
+        resource=resource,
+        context=context,
+        target=permission.permission,
+        risk_level=permission.risk_level,
+        reason=f"命中工具权限配置: {permission.tool_code} -> {permission.permission}",
+    )
+    return decision
+
+
+def _load_governance_boundary(db: Session, agent_code: str) -> Optional[dict]:
+    """读取已配置的职责边界；未配置的旧 Agent 保持兼容。"""
+    profile = db.query(AgentProfile).filter(AgentProfile.code == agent_code).first()
+    if not profile or not profile.config_json:
+        return None
+    try:
+        config = json.loads(profile.config_json)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    boundary = config.get("governance_boundary") if isinstance(config, dict) else None
+    if not isinstance(boundary, dict):
+        return None
+    return {
+        "allowed_tools": {str(value) for value in boundary.get("allowed_tools", []) if value},
+        "approval_tools": {str(value) for value in boundary.get("approval_tools", []) if value},
+        "blocked_tools": {str(value) for value in boundary.get("blocked_tools", []) if value},
+    }
+
+
+def _restrict_decision(
+    db: Session,
+    *,
+    decision: policy_engine.PolicyDecision,
+    subject: str,
+    action: str,
+    resource: str,
+    context: dict,
+    target: str,
+    risk_level: str,
+    reason: str,
+) -> policy_engine.PolicyDecision:
+    """只允许权限边界收紧决策，并记录每一次实际收紧。"""
+    priority = {
+        policy_engine.ALLOW: 0,
+        policy_engine.ESCALATE: 1,
+        policy_engine.DENY: 2,
+    }
+    if priority.get(target, 2) <= priority.get(decision.decision, 2):
+        return decision
+    decision.decision = target
+    decision.risk_level = risk_level
+    decision.risk_score = _permission_risk_score(risk_level)
+    decision.reason = reason
     row = PolicyDecisionLog(
         subject=subject,
         action=action,

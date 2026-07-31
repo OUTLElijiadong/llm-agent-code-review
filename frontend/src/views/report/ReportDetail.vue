@@ -95,6 +95,11 @@
               <span class="cover-tag">{{ totalFiles }} 文件</span>
               <span class="cover-tag">{{ formatDuration(durationMs) }}</span>
               <span class="cover-tag">{{ ruleCount }} 规则</span>
+              <span
+                v-for="agent in agentReleases"
+                :key="Number(agent.release_id)"
+                class="cover-tag"
+              >{{ agent.agent_name }} v{{ agent.agent_version }}</span>
             </div>
           </div>
 
@@ -461,6 +466,9 @@ const language    = computed(() => (report.value?.project?.language as string) ?
 const totalFiles  = computed(() => Number(report.value?.task?.total_files ?? 0))
 const durationMs  = computed(() => Number(report.value?.task?.duration_ms ?? 0))
 const ruleCount   = computed(() => report.value?.rules_snapshot?.length ?? 0)
+const agentReleases = computed<Array<Record<string, unknown>>>(() => (
+  (report.value?.task?.agent_releases as Array<Record<string, unknown>>) ?? []
+))
 
 const score        = computed(() => Math.round(Number(stats.value.score ?? 0)))
 const animatedScore = ref(0)

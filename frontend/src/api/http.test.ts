@@ -1,6 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ElMessage } from 'element-plus/es/components/message/index'
-
 const harness = vi.hoisted(() => {
   const createConfigs: Record<string, any>[] = []
   const state: {

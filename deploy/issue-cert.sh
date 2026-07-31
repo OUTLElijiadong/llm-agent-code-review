@@ -8,6 +8,18 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+case "${1:-}" in
+  -h|--help)
+    cat <<'USAGE'
+用法: ./issue-cert.sh [域名] [邮箱]
+
+首次使用 standalone 模式签发 Let's Encrypt 证书。该操作会短暂停止前端容器，
+仅应在已确认域名解析、80 端口和维护窗口后执行。
+USAGE
+    exit 0
+    ;;
+esac
+
 DOMAIN="${1:-lijiadong.cn}"
 EMAIL="${2:-outlejackson@gmail.com}"
 

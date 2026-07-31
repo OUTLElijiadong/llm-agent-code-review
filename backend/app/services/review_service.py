@@ -44,6 +44,7 @@ from app.core.database import SessionLocal
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.pagination import Pagination
 from app.models.code_file import CodeFile
+from app.models.custom_agent import CustomAgent, CustomAgentVersion, ReviewTaskAgentRelease
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
@@ -67,6 +68,23 @@ _COLLAB_PARALLEL_THREADS = 4
 # 全局审查并发上限:限制同时进行的后台审查任务数,防止 2C2G 机器上线程/内存放大
 # 及撞 LLM 侧限流。超出上限的任务会在后台线程内排队等待(任务状态先入库为 running)。
 _REVIEW_SEMAPHORE = threading.BoundedSemaphore(max(1, settings.review_max_concurrency))
+
+
+def _enabled_review_profiles(
+    db: Session,
+    profiles: tuple[ReviewAgentProfile, ...],
+) -> tuple[ReviewAgentProfile, ...]:
+    """过滤被治理后台停用的真实审查 Agent。"""
+    from app.services import agent_governance_service
+
+    return tuple(
+        profile
+        for profile in profiles
+        if agent_governance_service.is_runtime_enabled(
+            db,
+            _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code),
+        )
+    )
 
 
 def _safe_commit(db: Session, task: Optional[ReviewTask] = None) -> None:
@@ -215,8 +233,32 @@ def _run_review_task(task_id: int, user_id: int) -> None:
         except Exception as e:
             logger.warning(f"[personalization] 审查画像注入失败,降级: {e}")
 
-        profiles = get_agent_profiles(task.review_type)
-        # 使用解析后的 API 配置(用户自定义 > 管理员全局如 gpt-5.5 > 系统默认 DeepSeek)
+        profiles = _enabled_review_profiles(db, get_agent_profiles(task.review_type))
+        from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
+
+        custom_profiles = (
+            DeclarativeReviewAgentFactory.snapshot_profiles(db, task.id, user=user)
+            if isinstance(db, Session)
+            else ()
+        )
+        profiles = profiles + custom_profiles
+        if isinstance(db, Session):
+            db.commit()
+        if not profiles:
+            task.status = "failed"
+            task.error_message = "本次审查所需 Agent 均已停用，任务未执行"
+            task.end_time = datetime.now(timezone.utc)
+            task.duration_ms = int((task.end_time - task.start_time).total_seconds() * 1000) if task.start_time else 0
+            _safe_commit(db, task)
+            _emit_review_event(
+                AgentEventType.FAILED,
+                task,
+                user,
+                task.error_message,
+                agent_code="review_orchestrator",
+            )
+            return
+        # 使用解析后的 API 配置(用户自定义 > 管理员全局配置 > 系统默认 DeepSeek)
         from app.utils.api_resolver import resolve_api_config
         api_config = resolve_api_config(db, user.id)
         # 协同审查仍需 DeepSeekAgent(三阶段流水线需要 system_prompt/user_prompt 灵活传入)
@@ -471,7 +513,9 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
     llm_findings: List[Finding] = []
     chunks = chunk_code(code_file.content, code_file.language,
                         threshold=settings.deepseek_chunk_threshold)
-    use_collab = len(profiles) >= 2
+    # 自定义 Agent 也必须进入协同执行器；即使内置画像被治理停用，单个自定义
+    # Agent 仍应获得一次独立调用，而不是被静态 Agent 注册表路径吞掉。
+    use_collab = len(profiles) >= 2 or any(profile.is_custom for profile in profiles)
 
     for idx, chunk in enumerate(chunks):
         if use_collab:
@@ -1056,12 +1100,21 @@ def _call_single_agent(
         agent_section=format_agent_section(profile),
         experience_section=experience_section,
     )
+    if profile.is_custom and profile.system_prompt:
+        system_prompt = (
+            f"{profile.system_prompt.strip()}\n\n"
+            "平台强制契约：只审查用户提供的代码，严格输出现有 Issue JSON 结构；"
+            "不得执行命令、访问网络、写文件或修改数据。\n\n"
+            f"{system_prompt}"
+        )
     # v2.2: agent_label 使用真实 Agent name,便于 AiCallLog 归因到具体 Agent
     agent_label = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
     return agent.call_raw(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         agent_label=agent_label,
+        temperature=profile.temperature,
+        max_tokens=profile.max_tokens,
     )
 
 
@@ -1281,7 +1334,28 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         # R4 修复:任务失败时返回错误原因,对齐 TaskDetailOut schema
         "error_message": task.error_message,
         "files": _task_file_summaries(db, task.id),
+        "agent_releases": _task_agent_release_summaries(db, task.id),
     }
+
+
+def _task_agent_release_summaries(db: Session, task_id: int) -> list[dict]:
+    """返回任务启动时冻结的自定义 Agent 版本，供报告归因与复现。"""
+    rows = (
+        db.query(ReviewTaskAgentRelease, CustomAgent, CustomAgentVersion)
+        .join(CustomAgentVersion, CustomAgentVersion.id == ReviewTaskAgentRelease.agent_version_id)
+        .join(CustomAgent, CustomAgent.id == CustomAgentVersion.agent_id)
+        .filter(ReviewTaskAgentRelease.task_id == task_id)
+        .order_by(ReviewTaskAgentRelease.id.asc())
+        .all()
+    )
+    return [{
+        "release_id": snapshot.release_id,
+        "agent_code": agent.code,
+        "agent_name": agent.name,
+        "agent_version_id": version.id,
+        "agent_version": version.version_number,
+        "status": snapshot.status,
+    } for snapshot, agent, version in rows]
 
 
 def _task_file_summaries(db: Session, task_id: int) -> list[dict]:

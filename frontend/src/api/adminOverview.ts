@@ -48,10 +48,12 @@ export interface GeoPoint {
 export interface AgentActivity {
   agent_code: string
   name: string
-  status: 'idle' | 'working' | 'error' | 'disabled'
+  status: 'idle' | 'thinking' | 'working' | 'blocked' | 'error' | 'disabled'
   calls_today: number
   purpose: string
   is_enabled: number
+  last_seen_at?: string | null
+  activity_source?: 'event_bus' | 'tool_log' | 'none' | string
 }
 
 export function getSystemStatus(): Promise<SystemStatus> {

@@ -1,3 +1,13 @@
+export interface RecentTaskOut {
+  id: number
+  task_name: string
+  project_id: number
+  project_name: string
+  status: string
+  score: number
+  create_time: string | null
+}
+
 export interface SummaryOut {
   project_count: number
   file_count: number
@@ -5,7 +15,7 @@ export interface SummaryOut {
   total_issues: number
   severe_issues: number
   avg_score: number
-  recent_tasks: Record<string, unknown>[]
+  recent_tasks: RecentTaskOut[]
 }
 
 export interface RiskItem {

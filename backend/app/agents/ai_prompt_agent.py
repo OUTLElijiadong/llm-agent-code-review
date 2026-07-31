@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
+from app.agents.contracts import compose_system_prompt
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
@@ -117,7 +118,11 @@ class AiPromptAgent(BaseAgent):
             "4. 末尾必须保留模板自带的'提示:'小段(如有)\n"
             "5. 输出纯文本,不要带 Markdown 代码块包裹整个提示词"
         )
-        super().__init__(system_prompt=system_prompt, temperature=0.3, max_tokens=1200)
+        super().__init__(
+            system_prompt=compose_system_prompt(self.name, system_prompt),
+            temperature=0.3,
+            max_tokens=1200,
+        )
         self._db: Optional[Session] = None
         self._user: Optional[User] = None
 

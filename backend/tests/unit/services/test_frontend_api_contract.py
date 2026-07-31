@@ -79,21 +79,23 @@ def _resolve_template_variables(path: str, constants: dict[str, str]) -> str:
 
 
 def _backend_http_routes() -> set[tuple[str, str]]:
-    """读取 FastAPI 已注册的 HTTP API 路由。
+    """从 OpenAPI 读取 FastAPI 已注册的 HTTP API 路由。
+
+    FastAPI 0.139 对 ``include_router`` 使用延迟路由节点，直接遍历
+    ``app.routes`` 无法再看到嵌套的 APIRoute；OpenAPI 是稳定且已展开的契约。
 
     Returns:
         set[tuple[str, str]]: 方法与归一化路径集合，路径不包含 `/api` 前缀。
     """
     routes: set[tuple[str, str]] = set()
-    for route in app.routes:
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", set()) or set()
+    for path, path_item in app.openapi().get("paths", {}).items():
         if not path.startswith("/api"):
             continue
         normalized_path = _normalize_path(path[4:])
-        for method in methods:
-            if method in HTTP_METHODS:
-                routes.add((method, normalized_path))
+        for method in path_item:
+            normalized_method = method.upper()
+            if normalized_method in HTTP_METHODS:
+                routes.add((normalized_method, normalized_path))
     return routes
 
 
@@ -104,7 +106,11 @@ def _frontend_http_calls() -> set[tuple[str, str, str]]:
         set[tuple[str, str, str]]: 方法、归一化路径、来源文件集合。
     """
     src_root = _repo_root() / "frontend/src"
-    files = list((src_root / "api").glob("*.ts")) + [
+    files = [
+        file_path
+        for file_path in (src_root / "api").glob("*.ts")
+        if not file_path.name.endswith(".test.ts")
+    ] + [
         src_root / "components/ai/AgentChatDrawer.vue",
     ]
     patterns = [
@@ -149,6 +155,24 @@ def test_frontend_http_api_calls_match_backend_routes():
     )
 
     assert not missing
+
+
+def test_named_user_feature_entry_apis_are_explicitly_connected():
+    """验证六类用户功能首屏 API 在前端封装与后端路由中同时存在。"""
+    frontend_calls = _frontend_http_calls()
+    backend_routes = _backend_http_routes()
+    expected_calls = {
+        ("GET", "/projects", "api/project.ts"),
+        ("GET", "/rules", "api/rule.ts"),
+        ("GET", "/forum/posts", "api/forum.ts"),
+        ("GET", "/knowledge/docs", "api/knowledge.ts"),
+        ("GET", "/knowledge/stats", "api/knowledge.ts"),
+        ("GET", "/me/profile", "api/profile.ts"),
+        ("GET", "/maintenance", "api/maintenance.ts"),
+    }
+
+    assert expected_calls <= frontend_calls
+    assert {(method, path) for method, path, _ in expected_calls} <= backend_routes
 
 
 def test_frontend_stream_endpoints_match_backend_routes():

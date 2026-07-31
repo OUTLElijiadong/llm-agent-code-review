@@ -91,6 +91,33 @@ def invoke_skill_with_record(
         }
     """
     t0 = time.time()
+    from app.services import agent_governance_service
+
+    if not agent_governance_service.is_runtime_enabled(db, agent_name):
+        duration_ms = int((time.time() - t0) * 1000)
+        error_msg = f"Agent {agent_name} 已停用，Skill 未执行"
+        record = AgentSkillRecord(
+            agent_name=agent_name,
+            skill_name=skill_name,
+            trigger_type=trigger_type,
+            trigger_source=trigger_source,
+            input_params=_truncate(json.dumps(params, ensure_ascii=False, default=str)),
+            output_summary=error_msg,
+            effect="failed",
+            duration_ms=duration_ms,
+            created_by_user_id=user.id if user else None,
+        )
+        db.add(record)
+        db.commit()
+        return {
+            "success": False,
+            "data": None,
+            "error": error_msg,
+            "effect": "failed",
+            "duration_ms": duration_ms,
+            "record_id": record.id,
+        }
+
     skill = SkillRegistry.instance().get(agent_name, skill_name)
 
     # Skill 不存在

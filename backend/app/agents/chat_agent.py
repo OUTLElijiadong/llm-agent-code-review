@@ -116,8 +116,8 @@ class ChatAssistantAgent(BaseAgent):
                 agents_desc += f"- {name}: {desc}\n"
 
         return (
-            "你是PRISM智能代码审查平台的Agent助手,"
-            "你是连接用户和所有专业Agent的统一入口。\n\n"
+            "你是「棱镜小助」，棱镜 Prism 智能代码审查平台的官方 AI 助手。"
+            "你只服务当前已登录用户，是平台使用向导、代码审查顾问和受控操作入口。\n\n"
             "你可以:\n"
             "1. 与用户对话,解答代码审查、代码质量、最佳实践等问题\n"
             "2. **调度专业Agent执行任务**: 你的背后有多个专业Agent,"
@@ -126,8 +126,12 @@ class ChatAssistantAgent(BaseAgent):
             "4. 当用户询问项目语言时,自动调度「语言检测Agent」识别\n"
             "5. 当用户提供文件列表时,自动调度「项目分析Agent」生成项目元数据\n\n"
             f"{agents_desc}"
-            "请用专业、简洁、友好的方式回答问题。使用Markdown格式组织回复。"
-            "当任务被委派给其他Agent执行后,用自然语言向用户解释结果。"
+            "平台范围仅限项目、代码、五类审查、圆桌讨论、审查记录、问题闭环、报告、安全、规则、"
+            "AI 修复提示词、Agent、知识库、论坛、反馈、工单和个人配置。不要虚构不存在的能力。\n"
+            "查询必须基于工具/服务返回；用户以名称指代对象时不得臆造 ID。操作类回答固定为结论、步骤、"
+            "页面入口（Markdown 链接）。仅当用户明确下达操作指令才进入执行流程，缺参先追问；"
+            "删除和覆盖必须说明后果并要求明确确认。绝不访问其他用户数据、管理员治理数据、密钥或模型端点。\n"
+            "中文回答，专业简洁，通常不超过 200 字；代码问题先给可执行的技术建议，再引导到审查或 AI 修复提示词。"
         )
 
     def execute(self, messages: List[dict],
@@ -156,6 +160,9 @@ class ChatAssistantAgent(BaseAgent):
 
         last_msg = messages[-1]["content"]
         intent = self._classify_intent(last_msg, messages)
+        intent_payload = dict(intent.get("payload") or {})
+        intent_payload.pop(self.WRITE_CONFIRMATION_KEY, None)
+        intent["payload"] = intent_payload
 
         handler_name = intent.get("intent", "chat")
         self._emit(AgentEventType.DISPATCH, ctx,
@@ -267,6 +274,23 @@ class ChatAssistantAgent(BaseAgent):
         except Exception:
             return True
 
+    def _guard_planned_write(
+        self,
+        tool_name: str,
+        arguments: dict,
+        ctx: Optional[AgentContext],
+    ) -> Optional[AgentResult]:
+        """在执行器边界拦截 Planner 产生的普通成员写工具。"""
+        mapping = self.PLANNER_WRITE_INTENTS.get(tool_name)
+        if mapping is None:
+            return None
+        intent_name, scope = mapping
+        payload = dict(arguments)
+        payload.pop(self.WRITE_CONFIRMATION_KEY, None)
+        if scope:
+            payload["scope"] = scope
+        return self._maybe_clarify(intent_name, payload, ctx)
+
     def _execute_plan(
         self,
         plan: List["ToolCall"],
@@ -301,6 +325,12 @@ class ChatAssistantAgent(BaseAgent):
         last_result: Optional[AgentResult] = None
 
         for idx, step in enumerate(plan):
+            write_gate = self._guard_planned_write(
+                step.tool_name, step.arguments, ctx,
+            )
+            if write_gate is not None:
+                self._last_plan_steps = executed_steps
+                return write_gate
             step_label = f"步骤 {idx + 1}/{len(plan)}: {step.tool_name}"
             self._emit(AgentEventType.DISPATCH, ctx,
                        message=step_label,
@@ -426,6 +456,38 @@ class ChatAssistantAgent(BaseAgent):
         "security_audit": [],
     }
 
+    WRITE_INTENT_CONFIRMATIONS = {
+        "create_project": {
+            "operation": "创建项目",
+            "impact": "将在你的账号下新增一个项目。",
+            "danger": False,
+        },
+        "start_review": {
+            "operation": "发起代码审查",
+            "impact": "将创建审查任务并调用审查 Agent。",
+            "danger": False,
+        },
+        "security_audit": {
+            "operation": "发起安全审计",
+            "impact": "将创建安全审计记录并消耗模型额度。",
+            "danger": False,
+        },
+        "delete_project": {
+            "operation": "删除项目",
+            "impact": "项目及其代码、审查历史将一并删除，且不可恢复。",
+            "danger": True,
+        },
+    }
+    WRITE_CONFIRMATION_KEY = "_write_confirmation"
+    PLANNER_WRITE_INTENTS = {
+        "create_project": ("create_project", None),
+        "delete_project": ("delete_project", None),
+        "start_review": ("start_review", None),
+        "audit_security_for_file": ("security_audit", "file"),
+        "audit_security_for_task": ("security_audit", "task"),
+        "audit_security_for_project": ("security_audit", "project"),
+    }
+
     QUESTION_TEMPLATES = {
         "project_id": {
             "label": "请告诉我具体是哪个项目?",
@@ -513,7 +575,7 @@ class ChatAssistantAgent(BaseAgent):
             required = self.INTENT_REQUIRED_FIELDS.get(intent_name, [])
         missing = [k for k in required if not payload.get(k)]
         if not missing:
-            return None
+            return self._maybe_confirm_write(intent_name, payload, ctx)
 
         # --- 项目名模糊解析(仅当缺 project_id 时)---
         confirm_message: Optional[str] = None
@@ -559,6 +621,7 @@ class ChatAssistantAgent(BaseAgent):
             "intent": intent_name,
             "payload": payload,
             "user_id": ctx.user_id if ctx else None,
+            "question_keys": [q["key"] for q in questions],
         })
         self._emit(AgentEventType.CLARIFY, ctx,
                    message=f"等待用户补充: {', '.join(missing)}",
@@ -574,6 +637,81 @@ class ChatAssistantAgent(BaseAgent):
                     "clarify_id": clarify_id,
                     "intent": intent_name,
                     "questions": questions,
+                },
+            },
+            model=self._model,
+        )
+
+    def _maybe_confirm_write(
+        self,
+        intent_name: str,
+        payload: dict,
+        ctx: Optional[AgentContext],
+    ) -> Optional[AgentResult]:
+        """对有副作用的普通成员操作执行服务端强制确认。"""
+        from app.agents.events import AgentEventType
+
+        config = self.WRITE_INTENT_CONFIRMATIONS.get(intent_name)
+        if not config:
+            return None
+        answer = str(payload.get(self.WRITE_CONFIRMATION_KEY) or "").strip()
+        if answer == "取消":
+            return AgentResult(
+                success=True,
+                data="操作已取消，没有修改任何数据。",
+                model=self._model,
+            )
+        accepted = answer == "确认执行" if config["danger"] else answer in {
+            "确认", "执行", "确认执行",
+        }
+        if accepted:
+            return None
+
+        import uuid as _uuid
+
+        from app.agents.clarify_store import ClarifyStore
+
+        clarify_id = f"clr_{_uuid.uuid4().hex[:12]}"
+        question_type = "danger_confirm" if config["danger"] else "confirm"
+        question = {
+            "key": self.WRITE_CONFIRMATION_KEY,
+            "label": f"我将执行：{config['operation']}。确认吗？",
+            "type": question_type,
+            "hint": config["impact"],
+            "required": True,
+        }
+        ClarifyStore.instance().put(clarify_id, {
+            "intent": intent_name,
+            "payload": {
+                key: value for key, value in payload.items()
+                if key != self.WRITE_CONFIRMATION_KEY
+            },
+            "user_id": ctx.user_id if ctx else None,
+            "question_keys": [self.WRITE_CONFIRMATION_KEY],
+        })
+        self._emit(
+            AgentEventType.CLARIFY,
+            ctx,
+            message=f"等待用户确认：{config['operation']}",
+            payload={
+                "clarify_id": clarify_id,
+                "operation": intent_name,
+                "danger": config["danger"],
+            },
+        )
+        content = (
+            f"该操作不可撤销：{config['impact']}请输入“确认执行”后继续。"
+            if config["danger"]
+            else f"{question['label']}\n\n影响范围：{config['impact']}"
+        )
+        return AgentResult(
+            success=True,
+            data={
+                "content": content,
+                "clarify": {
+                    "clarify_id": clarify_id,
+                    "intent": intent_name,
+                    "questions": [question],
                 },
             },
             model=self._model,
@@ -1119,7 +1257,11 @@ class ChatAssistantAgent(BaseAgent):
         if clarify is not None:
             return clarify
 
-        intent = {"intent": intent_name, "payload": payload}
+        clean_payload = {
+            key: value for key, value in payload.items()
+            if key != self.WRITE_CONFIRMATION_KEY
+        }
+        intent = {"intent": intent_name, "payload": clean_payload}
         handlers = {
             "list_agents": lambda i, c: self._handle_list_agents(c),
             "detect_language": self._handle_detect_language,

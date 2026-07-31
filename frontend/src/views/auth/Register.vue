@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { Check, Lock, Message, Refresh, User, UserFilled } from '@element-plus/icons-vue'
+import { Check, Key, Lock, Message, Refresh, User, UserFilled } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getCaptcha } from '@/api/auth'
@@ -20,11 +20,16 @@ const form = reactive({
   confirmPassword: '',
   email: '',
   nickname: '',
+  beta_code: '',
   captcha_answer: '',
 })
 
 // 注册验证码(防批量注册)
-const captcha = ref<{ captcha_id: string; question: string }>({ captcha_id: '', question: '' })
+const captcha = ref<{ captcha_id: string; question: string; beta_registration_enabled: boolean }>({
+  captcha_id: '',
+  question: '',
+  beta_registration_enabled: false,
+})
 const captchaLoading = ref(false)
 
 async function refreshCaptcha(): Promise<void> {
@@ -33,7 +38,11 @@ async function refreshCaptcha(): Promise<void> {
   try {
     captcha.value = await getCaptcha()
   } catch {
-    captcha.value = { captcha_id: '', question: '加载失败,请重试' }
+    captcha.value = {
+      captcha_id: '',
+      question: '加载失败,请重试',
+      beta_registration_enabled: false,
+    }
   } finally {
     captchaLoading.value = false
   }
@@ -92,6 +101,14 @@ const rules: FormRules = {
   captcha_answer: [
     { required: true, message: '请输入人机验证结果', trigger: 'blur' },
   ],
+  beta_code: [
+    { required: true, message: '请输入管理员提供的内测码', trigger: 'blur' },
+    {
+      pattern: /^PRISM(?:-[A-Z2-9]{5}){4}$/i,
+      message: '内测码格式不正确',
+      trigger: 'blur',
+    },
+  ],
 }
 
 /**
@@ -109,6 +126,9 @@ async function handleRegister(): Promise<void> {
         password: form.password,
         email: form.email || undefined,
         nickname: form.nickname || undefined,
+        beta_code: captcha.value.beta_registration_enabled
+          ? form.beta_code.trim().toUpperCase()
+          : undefined,
         captcha_id: captcha.value.captcha_id,
         captcha_answer: form.captcha_answer,
       })
@@ -258,6 +278,19 @@ function goLogin(): void {
             />
           </el-form-item>
 
+          <el-form-item v-if="captcha.beta_registration_enabled" prop="beta_code" label="内测码">
+            <el-input
+              v-model="form.beta_code"
+              placeholder="PRISM-XXXXX-XXXXX-XXXXX-XXXXX"
+              :prefix-icon="Key"
+              size="large"
+              autocomplete="off"
+              maxlength="29"
+              class="beta-code-input"
+              @blur="form.beta_code = form.beta_code.trim().toUpperCase()"
+            />
+          </el-form-item>
+
           <el-form-item prop="captcha_answer" label="人机验证">
             <div class="captcha-row">
               <div class="captcha-q font-mono" :class="{ loading: captchaLoading }">
@@ -331,7 +364,7 @@ function goLogin(): void {
   min-height: 100vh;
   width: 100%;
   background: #fff;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 .register-brand {
@@ -497,6 +530,12 @@ function goLogin(): void {
   padding: 48px;
   background:
     linear-gradient(180deg, #fff 0%, var(--app-bg-soft) 68%, var(--app-bg) 100%);
+  overflow-y: auto;
+}
+
+.beta-code-input :deep(input) {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
 }
 
 .form-panel {

@@ -120,6 +120,14 @@ export interface TaskDetailOut {
   end_time?: string
   create_time: string
   files: TaskFileOut[]
+  agent_releases: Array<{
+    release_id: number
+    agent_code: string
+    agent_name: string
+    agent_version_id: number
+    agent_version: number
+    status: string
+  }>
 }
 
 export interface ReviewStartIn {

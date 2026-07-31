@@ -79,22 +79,54 @@ def toggle_status(db: Session, user_id: int, status: int) -> None:
     db.commit()
 
 
-def set_role(db: Session, user_id: int, role: str) -> None:
+def set_role(
+    db: Session,
+    user_id: int,
+    role: str,
+    admin_id: int = 0,
+    *,
+    commit: bool = True,
+) -> None:
     """管理员设置用户角色
 
     Args:
         db: 数据库会话
         user_id: 目标用户ID
         role: 角色(admin/user/reviewer)
+        admin_id: 当前审批管理员 ID；用于阻止系统失去最后一个管理员
     """
     user = db.get(User, user_id)
     if not user:
         raise NotFoundError("用户不存在", code=40400)
+    if role not in ("admin", "user", "reviewer"):
+        raise ValidationError("角色不合法", code=40001)
+    if user.role in ("admin", "super_admin") and role not in ("admin", "super_admin"):
+        remaining = (
+            db.query(User)
+            .filter(User.role.in_(["admin", "super_admin"]), User.status == 1, User.id != user_id)
+            .count()
+        )
+        if remaining == 0:
+            raise ForbiddenError("不能降级最后一个可用管理员账号", code=40320)
     user.role = role
-    db.commit()
+    # 同步新版 RBAC 关联，避免 legacy role 与 user_role 两套事实源分裂。
+    from app.models.rbac import Role, UserRole
+
+    target_role = db.query(Role).filter(Role.code == role, Role.status == "active").first()
+    if target_role:
+        db.query(UserRole).filter(UserRole.user_id == user_id).delete()
+        db.add(UserRole(user_id=user_id, role_id=target_role.id))
+    if commit:
+        db.commit()
 
 
-def delete_user(db: Session, user_id: int, admin_id: int) -> None:
+def delete_user(
+    db: Session,
+    user_id: int,
+    admin_id: int,
+    *,
+    commit: bool = True,
+) -> None:
     """管理员软删除用户(status=-1)。
 
     软删保留项目与历史数据(审计/帖子/项目仍可读,操作者显示为快照名),
@@ -127,4 +159,5 @@ def delete_user(db: Session, user_id: int, admin_id: int) -> None:
     user.status = -1
     # 吊销该用户全部 JWT,删除后立即无法再访问
     user.token_version = (user.token_version or 0) + 1
-    db.commit()
+    if commit:
+        db.commit()

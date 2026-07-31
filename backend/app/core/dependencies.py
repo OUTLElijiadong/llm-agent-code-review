@@ -13,7 +13,7 @@ from app.models.user import User
 
 
 def get_current_user(
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ) -> User:
     """从请求头解析JWT令牌并返回当前登录用户

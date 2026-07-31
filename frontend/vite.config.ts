@@ -17,6 +17,12 @@ export default defineConfig({
         timeout: 0,
         proxyTimeout: 0,
       },
+      '/v1': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
     },
   },
   css: {

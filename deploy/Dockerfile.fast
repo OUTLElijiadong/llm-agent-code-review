@@ -1,0 +1,13 @@
+FROM prism-backend:local
+
+USER root
+COPY deploy/requirements-ops.lock /tmp/requirements-ops.lock
+RUN python -m pip install --no-cache-dir --require-hashes --index-url https://pypi.org/simple \
+    -r /tmp/requirements-ops.lock
+
+COPY backend/app /app/app
+COPY backend/alembic /app/alembic
+COPY backend/alembic.ini /app/alembic.ini
+COPY backend/requirements.txt /app/requirements.txt
+COPY backend/requirements.lock /app/requirements.lock
+COPY backend/GeoLite2-City.mmdb /app/GeoLite2-City.mmdb

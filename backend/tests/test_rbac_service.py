@@ -52,7 +52,6 @@ from app.services.rbac_service import (
     update_role,
 )
 
-
 # ============================================================================
 # 辅助工厂函数
 # ============================================================================
@@ -482,7 +481,7 @@ class TestRoleManagement:
         role = _make_role(db, 10, "custom", "自定义")
         p1 = _make_permission(db, 101, "review:start", "review")
         p2 = _make_permission(db, 102, "review:view", "review")
-        p3 = _make_permission(db, 103, "review:cancel", "review")
+        _make_permission(db, 103, "review:cancel", "review")
         # 初始分配 p1, p2
         _link_role_permission(db, role.id, p1.id)
         _link_role_permission(db, role.id, p2.id)
@@ -802,8 +801,8 @@ class TestPermissionCodes:
     """权限点常量定义测试"""
 
     def test_all_permission_codes_count(self):
-        """ALL_PERMISSION_CODES 应包含 42 个权限点"""
-        assert len(ALL_PERMISSION_CODES) == 42
+        """ALL_PERMISSION_CODES 应包含 56 个权限点"""
+        assert len(ALL_PERMISSION_CODES) == 56
 
     def test_permission_code_values_unique(self):
         """所有权限编码应唯一"""
@@ -815,4 +814,6 @@ class TestPermissionCodes:
         assert PermissionCode.PROJECT_CREATE == "project:create"
         assert PermissionCode.REVIEW_START == "review:start"
         assert PermissionCode.AGENT_VIEW == "agent:view"
+        assert PermissionCode.AGENT_ASSET_CREATE == "agent_asset:create"
+        assert PermissionCode.CUSTOM_AGENT_INVOKE == "custom_agent:invoke"
         assert PermissionCode.AUDIT_VIEW == "audit:view"

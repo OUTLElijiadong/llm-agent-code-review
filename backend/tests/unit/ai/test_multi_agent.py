@@ -1,4 +1,9 @@
-from app.ai.multi_agent import build_agent_summary, get_agent_profiles, get_model_label
+from app.ai.multi_agent import (
+    build_agent_summary,
+    get_agent_profiles,
+    get_discussion_agent_profiles,
+    get_model_label,
+)
 
 
 def test_get_agent_profiles_returns_standard_for_unknown_type():
@@ -15,6 +20,23 @@ def test_get_agent_profiles_full_uses_multiple_agents():
     codes = {profile.code for profile in profiles}
 
     assert {"security", "reliability", "performance", "maintainability"} <= codes
+
+
+def test_get_discussion_agent_profiles_returns_every_review_specialist():
+    """圆桌讨论应固定邀请全部五个代码审查子 Agent。
+
+    Returns:
+        None: 断言参会集合完整且顺序稳定。
+    """
+    profiles = get_discussion_agent_profiles()
+
+    assert [profile.code for profile in profiles] == [
+        "general",
+        "security",
+        "reliability",
+        "performance",
+        "maintainability",
+    ]
 
 
 def test_build_agent_summary_marks_multi_agent_mode():

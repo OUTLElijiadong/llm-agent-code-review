@@ -80,7 +80,7 @@ class SelfImprovementSkill(BaseSkill):
 
         1. Aggregate: 调 aggregate_feedback 聚合信号
         2. Reflect: 调 evolve_target 产出候选提案
-        3. Gate: 调 evaluate_gate 跑闸门(可选,失败不阻塞)
+        3. Gate: 调 evaluate_gate 跑闸门(失败时保持待人工评估)
         4. Persist: 通过闸门的提案写入 evolution_proposal(默认 pending,带 agent_name)
 
         Args:
@@ -148,7 +148,7 @@ class SelfImprovementSkill(BaseSkill):
                 proposal_title = proposal.get("title", "")[:80]
                 proposal_type = proposal.get("proposal_type")
 
-                # 闸门评估(失败不阻塞,标记 eval_failed)
+                # 闸门评估失败时不放行,提案保持 pending 等待人工评估。
                 gate_result = self._safe_evaluate_gate(db, proposal)
                 gate_passed = gate_result.get("passed")
                 gate_reason = gate_result.get("reason", "")
@@ -288,8 +288,7 @@ class SelfImprovementSkill(BaseSkill):
     ) -> Dict[str, Any]:
         """评估闸门(默认实现复用 eval_gate,子类可 override)
 
-        默认行为:延迟 import eval_gate 跑闸门;若 eval_case 为空或评估失败,
-        默认返回 passed=True(不阻塞,交人工闸门定夺)。
+        默认实现不具备评测能力,因此必须 fail-closed 并交人工评估。
 
         Args:
             db: 数据库会话
@@ -299,15 +298,15 @@ class SelfImprovementSkill(BaseSkill):
             dict: {passed: bool, score: {before: {...}, after: {...}}, reason: str}
         """
         return {
-            "passed": True,
+            "passed": False,
             "score": None,
-            "reason": "默认通过(无 eval_case 或子类未 override)",
+            "reason": "未配置评测闸门,候选不得自动进入可生效状态",
         }
 
     def _safe_evaluate_gate(
         self, db: Session, proposal: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """安全评估闸门(捕获异常,失败不阻塞)
+        """安全评估闸门(捕获异常并默认拒绝)
 
         Args:
             db: 数据库会话
@@ -333,13 +332,13 @@ class SelfImprovementSkill(BaseSkill):
         except Exception as e:
             gate_ms = int((time.time() - t_gate) * 1000)
             logger.warning(
-                f"[{self.name}] [Gate/Exception] 异常,默认通过: {e} "
+                f"[{self.name}] [Gate/Exception] 异常,默认拒绝: {e} "
                 f"duration={gate_ms}ms"
             )
-            return {"passed": True, "score": None, "reason": f"闸门异常: {e}"}
+            return {"passed": False, "score": None, "reason": f"闸门异常: {e}"}
 
     def rollback_proposal(self, db: Session, proposal_id: int) -> bool:
-        """回滚提案(默认实现调用 evolution_service.rollback,子类可 override)
+        """拒绝 Skill 直接回滚,回滚必须通过管理员审批服务。
 
         Args:
             db: 数据库会话
@@ -348,27 +347,11 @@ class SelfImprovementSkill(BaseSkill):
         Returns:
             bool: 是否回滚成功
         """
-        t_rb = time.time()
-        logger.info(
-            f"[{self.name}] [Rollback/Start] proposal_id={proposal_id}"
+        logger.warning(
+            f"[{self.name}] [Rollback/Denied] proposal_id={proposal_id} "
+            "必须通过管理员进化提案回滚接口"
         )
-        try:
-            from app.services import evolution_service
-
-            evolution_service.rollback(db, proposal_id)
-            rb_ms = int((time.time() - t_rb) * 1000)
-            logger.info(
-                f"[{self.name}] [Rollback/Done] proposal_id={proposal_id} "
-                f"成功 duration={rb_ms}ms"
-            )
-            return True
-        except Exception as e:
-            rb_ms = int((time.time() - t_rb) * 1000)
-            logger.exception(
-                f"[{self.name}] [Rollback/Failed] proposal_id={proposal_id} "
-                f"异常 duration={rb_ms}ms: {e}"
-            )
-            return False
+        return False
 
     # ── 持久化与去重(复用 EvolutionAgent 逻辑) ──
 
@@ -470,8 +453,8 @@ class SelfImprovementSkill(BaseSkill):
         Args:
             params: 调用参数,支持:
                 - {"action": "evolve", "window_days": 90} → 跑一轮进化
-                - {"action": "apply", "proposal_id": 123} → 应用已审批提案
-                - {"action": "rollback", "proposal_id": 123} → 回滚
+                - {"action": "reflect_from_logs", "window_days": 7} → 只读反思
+                - apply / rollback 明确拒绝,必须通过管理员审批接口
             ctx: Agent 上下文
 
         Returns:
@@ -508,72 +491,41 @@ class SelfImprovementSkill(BaseSkill):
                 f"duration={result.duration_ms}ms"
             )
             return result
-        if action == "rollback":
+        if action == "reflect_from_logs":
             db = params.get("_db")
-            proposal_id = int(params.get("proposal_id", 0))
-            if db is None or proposal_id <= 0:
+            reflect = getattr(self, "reflect_from_logs", None)
+            if db is None or not callable(reflect):
                 logger.warning(
-                    f"[{self.name}] {tid}[Run/rollback] 失败:缺少 _db 或 proposal_id "
-                    f"proposal_id={proposal_id}"
+                    f"[{self.name}] {tid}[Run/reflect_from_logs] "
+                    "失败:缺少 _db 或 Skill 未实现反思能力"
                 )
                 return SkillResult(
                     success=False,
-                    error="rollback 动作需要 _db 与 proposal_id 参数",
+                    error="reflect_from_logs 需要 _db 且 Skill 必须实现反思能力",
                     effect="failed",
                 )
-            ok = self.rollback_proposal(db, proposal_id)
+            window_days = int(params.get("window_days", 7))
+            reflections = reflect(db, window_days)
             run_ms = int((time.time() - t_run) * 1000)
             logger.info(
-                f"[{self.name}] {tid}[Run/Done] action=rollback "
-                f"proposal_id={proposal_id} success={ok} duration={run_ms}ms"
-            )
-            return SkillResult(success=ok, effect="success" if ok else "failed")
-        if action == "apply":
-            db = params.get("_db")
-            proposal_id = int(params.get("proposal_id", 0))
-            if db is None or proposal_id <= 0:
-                logger.warning(
-                    f"[{self.name}] {tid}[Run/apply] 失败:缺少 _db 或 proposal_id "
-                    f"proposal_id={proposal_id}"
-                )
-                return SkillResult(
-                    success=False,
-                    error="apply 动作需要 _db 与 proposal_id 参数",
-                    effect="failed",
-                )
-            from app.models.evolution_proposal import EvolutionProposal
-
-            logger.info(
-                f"[{self.name}] {tid}[Apply/Start] proposal_id={proposal_id}"
-            )
-            proposal_row = db.query(EvolutionProposal).filter(
-                EvolutionProposal.id == proposal_id
-            ).first()
-            if proposal_row is None:
-                logger.warning(
-                    f"[{self.name}] {tid}[Apply/Failed] proposal_id={proposal_id} 不存在"
-                )
-                return SkillResult(success=False, error="提案不存在", effect="failed")
-            proposal_dict = {
-                "proposal_type": proposal_row.proposal_type,
-                "target_rule_id": proposal_row.target_rule_id,
-                "payload": json.loads(proposal_row.payload or "{}"),
-            }
-            logger.debug(
-                f"[{self.name}] {tid}[Apply/Detail] type={proposal_row.proposal_type} "
-                f"target_rule_id={proposal_row.target_rule_id}"
-            )
-            affected_id = self.apply_proposal(db, proposal_dict)
-            run_ms = int((time.time() - t_run) * 1000)
-            logger.info(
-                f"[{self.name}] {tid}[Run/Done] action=apply "
-                f"proposal_id={proposal_id} affected_id={affected_id} "
-                f"duration={run_ms}ms"
+                f"[{self.name}] {tid}[Run/Done] action=reflect_from_logs "
+                f"items={len(reflections)} duration={run_ms}ms"
             )
             return SkillResult(
                 success=True,
-                data={"affected_id": affected_id},
-                effect="success",
+                data={"reflections": reflections},
+                effect="observed" if reflections else "no_op",
+                duration_ms=run_ms,
+            )
+        if action in {"apply", "rollback"}:
+            logger.info(
+                f"[{self.name}] {tid}[Run/Denied] action={action} "
+                "必须通过管理员进化提案审批接口"
+            )
+            return SkillResult(
+                success=False,
+                error=f"{action} 动作仅允许通过管理员进化提案审批接口执行",
+                effect="denied",
             )
         logger.warning(
             f"[{self.name}] {tid}[Run/Failed] 未知 action={action}"
@@ -595,18 +547,14 @@ class SelfImprovementSkill(BaseSkill):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["evolve", "apply", "rollback"],
-                    "description": "动作:evolve 跑进化 / apply 应用提案 / rollback 回滚",
+                    "enum": ["evolve", "reflect_from_logs"],
+                    "description": "动作:evolve 生成候选提案 / reflect_from_logs 只读反思",
                     "default": "evolve",
                 },
                 "window_days": {
                     "type": "integer",
                     "description": "反馈窗口天数(evolve 动作)",
                     "default": 90,
-                },
-                "proposal_id": {
-                    "type": "integer",
-                    "description": "提案 ID(apply/rollback 动作)",
                 },
             },
         }

@@ -118,6 +118,7 @@ class ApprovalItem(Base, IdMixin, TimestampMixin):
         Index("ix_approval_item_status", "status"),
         Index("ix_approval_item_risk", "risk_level"),
         Index("ix_approval_item_agent", "agent_code"),
+        Index("ix_approval_item_copilot_request", "copilot_request_id", unique=True),
     )
 
     title = Column(String(200), nullable=False, comment="审批标题")
@@ -128,7 +129,8 @@ class ApprovalItem(Base, IdMixin, TimestampMixin):
     status = Column(String(30), nullable=False, default="pending", comment="pending/approved/rejected/auto_approved")
     decision = Column(String(30), comment="allow/deny/escalate")
     decision_reason = Column(String(500), comment="决策原因")
-    request_json = Column(Text, comment="请求 JSON")
+    request_json = Column(LONGTEXT().with_variant(Text, "sqlite"), comment="请求 JSON")
+    copilot_request_id = Column(String(64), comment="管理员副驾驶确认请求唯一标识")
     decided_by = Column(BigInteger, comment="审批人")
     decided_at = Column(DateTime, comment="审批时间")
 
@@ -141,6 +143,7 @@ class ToolCallLog(Base, IdMixin, TimestampMixin):
         Index("ix_tool_call_agent", "agent_code"),
         Index("ix_tool_call_status", "status"),
         Index("ix_tool_call_risk", "risk_level"),
+        Index("ix_tool_call_copilot_request", "copilot_request_id", unique=True),
     )
 
     agent_code = Column(String(80), nullable=False, comment="Agent 编码")
@@ -156,6 +159,7 @@ class ToolCallLog(Base, IdMixin, TimestampMixin):
     duration_ms = Column(Integer, nullable=False, default=0, comment="耗时")
     policy_decision_id = Column(BigInteger, comment="策略决策日志 ID")
     approval_id = Column(BigInteger, comment="审批事项 ID")
+    copilot_request_id = Column(String(64), comment="管理员副驾驶直接执行请求唯一标识")
 
 
 class AgentMemory(Base, IdMixin, TimestampMixin):

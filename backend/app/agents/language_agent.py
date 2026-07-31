@@ -1,4 +1,5 @@
 from app.agents.base import AgentResult, BaseAgent
+from app.agents.contracts import compose_system_prompt
 
 
 class LanguageDetectorAgent(BaseAgent):
@@ -26,7 +27,11 @@ class LanguageDetectorAgent(BaseAgent):
             '- reason: 简短说明判断理由\n\n'
             "严格JSON格式输出,不包含其他内容。"
         )
-        super().__init__(system_prompt=system_prompt, temperature=0.1, max_tokens=200)
+        super().__init__(
+            system_prompt=compose_system_prompt(self.name, system_prompt),
+            temperature=0.1,
+            max_tokens=200,
+        )
 
     def _init_skills(self) -> None:
         """子类 override:挂载 LanguageDetectorSelfImprovementSkill + LanguageDetectorProactiveSkill

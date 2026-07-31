@@ -45,13 +45,30 @@ def test_chat_agent_clarify_for_missing_project_id():
     assert saved["intent"] == "delete_project"
 
 
-def test_chat_agent_no_clarify_when_payload_complete():
-    """payload 完整时不应触发 Clarify,返回 None 进入正常 handler"""
+def test_delete_project_requires_exact_danger_confirmation():
+    """删除项目参数完整后仍须危险确认，且只接受“确认执行”。"""
     agent = ChatAssistantAgent()
     result = agent._maybe_clarify(
         "delete_project", {"project_id": 42}, ctx=None,
     )
-    assert result is None
+    assert result is not None
+    question = result.data["clarify"]["questions"][0]
+    assert question["type"] == "danger_confirm"
+    assert agent._maybe_clarify(
+        "delete_project", {"project_id": 42, "_write_confirmation": "确认"}, ctx=None,
+    ) is not None
+    assert agent._maybe_clarify(
+        "delete_project", {"project_id": 42, "_write_confirmation": "确认执行"}, ctx=None,
+    ) is None
+
+
+def test_create_project_confirmation_can_be_cancelled_without_execution():
+    agent = ChatAssistantAgent()
+    result = agent._maybe_clarify(
+        "create_project", {"project_name": "demo", "_write_confirmation": "取消"}, ctx=None,
+    )
+    assert result is not None
+    assert result.data == "操作已取消，没有修改任何数据。"
 
 
 def test_chat_agent_clarify_for_intent_without_required_fields():

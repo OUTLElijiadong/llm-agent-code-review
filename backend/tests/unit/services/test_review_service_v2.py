@@ -8,7 +8,9 @@
 """
 from __future__ import annotations
 
+from app.ai.multi_agent import get_agent_profiles
 from app.ai.static_analyzer import Finding
+from app.models.agent_governance import AgentProfile
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
@@ -16,6 +18,7 @@ from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services.review_service import (
     _PROFILE_TO_AGENT_CODE,
+    _enabled_review_profiles,
     _finding_fingerprint,
     _finding_to_review_issue,
     _get_agent_for_profile,
@@ -110,6 +113,25 @@ class TestGetAgentForProfile:
         agent = _get_agent_for_profile("general")
         # 测试环境下可能为 None(未调用 get_orchestrator),不应抛异常
         assert agent is None or hasattr(agent, "name")
+
+
+def test_review_profiles_exclude_disabled_runtime_agents(db):
+    """真实审查流水线不得调用治理后台已停用的 Agent。"""
+    db.add_all([
+        AgentProfile(
+            code="code_reviewer", name="代码审查 Agent", category="quality",
+            status="disabled", is_enabled=0,
+        ),
+        AgentProfile(
+            code="security_sentinel", name="安全 Agent", category="security",
+            status="idle", is_enabled=1,
+        ),
+    ])
+    db.commit()
+
+    filtered = _enabled_review_profiles(db, get_agent_profiles("full"))
+
+    assert [profile.code for profile in filtered] == ["security"]
 
 
 # ============ _finding_to_review_issue ============

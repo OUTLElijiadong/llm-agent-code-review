@@ -181,11 +181,50 @@ def _validate_upload_security(
             f"{MAX_PROJECT_TOTAL_SIZE} 字节(500MB)"
         )
 
-    # 4. 恶意软件扫描(ClamAV + YARA 双引擎,降级到启发式)
+    # 4. 恶意软件扫描(ClamAV + YARA 双引擎,生产默认 fail-closed)
     scan_result = get_scanner().scan(raw, filename)
+    _enforce_scan_result(scan_result, filename)
+
+
+def _enforce_scan_result(
+    scan_result, filename: str, archive_member: bool = False,
+) -> None:
+    """根据扫描结论和环境策略决定是否允许文件继续入库。
+
+    Args:
+        scan_result: MalwareScanner 返回的 ScanResult。
+        filename: 当前文件名，仅用于可操作的拒绝提示。
+        archive_member: 是否为压缩包内部文件。
+
+    Returns:
+        None: 允许继续上传时静默返回。
+
+    Raises:
+        ValueError: 检测到威胁，或生产 fail-closed 下扫描能力不可信。
+    """
+    prefix = f"压缩包内文件 {filename} " if archive_member else ""
     if scan_result.result == "infected":
         raise ValueError(
-            f"检测到恶意软件: {scan_result.threat_name},文件已被拒绝"
+            f"{prefix}检测到恶意软件: {scan_result.threat_name},文件已被拒绝"
+        )
+
+    scan_untrusted = (
+        scan_result.result in {"degraded", "error", "timeout"}
+        or bool(scan_result.degraded)
+        or scan_result.result != "clean"
+    )
+    if settings.malware_scan_fail_closed and scan_untrusted:
+        logger.error(
+            "[upload] 恶意软件扫描不可用，按 fail-closed 拒绝 "
+            f"(file={filename}, engine={scan_result.engine}, result={scan_result.result})"
+        )
+        raise ValueError(
+            f"{prefix}恶意软件扫描服务暂不可用,为保证安全已拒绝上传"
+        )
+    if scan_untrusted:
+        logger.warning(
+            "[upload] 恶意软件扫描降级，非生产策略允许继续 "
+            f"(file={filename}, engine={scan_result.engine}, result={scan_result.result})"
         )
 
 
@@ -226,11 +265,7 @@ def _scan_extracted_file(filename: str, content_bytes: bytes) -> None:
         ValueError: 检测到恶意软件,文件已被拒绝
     """
     scan_result = get_scanner().scan(content_bytes, filename)
-    if scan_result.result == "infected":
-        raise ValueError(
-            f"压缩包内文件 {filename} 检测到恶意软件: "
-            f"{scan_result.threat_name},文件已被拒绝"
-        )
+    _enforce_scan_result(scan_result, filename, archive_member=True)
 
 
 def _upload_single_file(
@@ -549,7 +584,11 @@ def get_file_meta(db: Session, user: User, file_id: int) -> dict:
                 # 兼容旧数据:从 base64 还原
                 import base64
                 content_str = code_file.content or ""
-                raw_bytes = base64.b64decode(content_str[len(BASE64_PREFIX):]) if content_str.startswith(BASE64_PREFIX) else b""
+                raw_bytes = (
+                    base64.b64decode(content_str[len(BASE64_PREFIX):])
+                    if content_str.startswith(BASE64_PREFIX)
+                    else b""
+                )
         else:
             raw_bytes = (code_file.content or "").encode("utf-8")
         md5_hash = hashlib.md5(raw_bytes).hexdigest()

@@ -10,6 +10,7 @@ export interface RegisterIn {
   nickname?: string
   captcha_id?: string
   captcha_answer?: string
+  beta_code?: string
 }
 
 export interface UserOut {

@@ -10,6 +10,7 @@ from typing import Optional
 from loguru import logger
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
+from app.agents.contracts import compose_system_prompt
 from app.ai.prompt_builder import build_prompt
 from app.ai.result_parser import Issue
 from app.ai.result_parser import parse as parse_review_result
@@ -38,7 +39,11 @@ class CodeReviewerAgent(BaseAgent):
             "输出格式: 严格JSON对象,包含 issues 数组。"
             "每个 issue 包含: severity, issue_type, line, description, suggestion。"
         )
-        super().__init__(system_prompt=system_prompt, temperature=0.2, max_tokens=4096)
+        super().__init__(
+            system_prompt=compose_system_prompt(self.name, system_prompt),
+            temperature=0.2,
+            max_tokens=4096,
+        )
 
     def _init_skills(self) -> None:
         """子类 override:挂载 CodeReviewerSelfImprovementSkill + CodeReviewerProactiveSkill
@@ -128,7 +133,7 @@ class CodeReviewerAgent(BaseAgent):
         # 2. 临时覆盖 system_prompt(BaseAgent.call 用 self._system_prompt)
         #    review_service 后台线程顺序调用,无并发安全问题
         original_system = self._system_prompt
-        self._system_prompt = system_prompt
+        self._system_prompt = compose_system_prompt(self.name, system_prompt)
         try:
             result = self.call(user_prompt, ctx=ctx, json_mode=True, api_config=api_config)
         finally:

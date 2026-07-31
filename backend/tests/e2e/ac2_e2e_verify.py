@@ -19,10 +19,8 @@
     python3 ac2_e2e_verify.py --base-url http://127.0.0.1:8000
 """
 import argparse
-import json
 import sys
 import time
-from pathlib import Path
 
 import httpx
 
@@ -387,12 +385,12 @@ def verify_agent_label(logs: list) -> tuple:
             print(f"  ✅ log_id={log_id} status={status} model={model} agent_label={label!r}")
 
     print()
-    print(f"  ─── agent_label 分布统计 ───")
+    print("  ─── agent_label 分布统计 ───")
     for label, count in sorted(label_counter.items()):
         print(f"    {label}: {count} 条")
     if null_label_count:
         print(f"    (NULL): {null_label_count} 条")
-    print(f"  ────────────────────────────")
+    print("  ────────────────────────────")
 
     return passed, failed, details
 
@@ -431,19 +429,19 @@ def verify_issues(issues: list) -> tuple:
         if cwe:
             cwe_set.add(cwe)
 
-    print(f"  ─── 漏洞类型分布 ───")
+    print("  ─── 漏洞类型分布 ───")
     for itype, count in sorted(type_counter.items()):
         print(f"    {itype}: {count} 个")
-    print(f"  ─── 严重程度分布 ───")
+    print("  ─── 严重程度分布 ───")
     for sev, count in sorted(severity_counter.items()):
         print(f"    {sev}: {count} 个")
-    print(f"  ─── 来源(static/llm/hybrid) ───")
+    print("  ─── 来源(static/llm/hybrid) ───")
     for src, count in sorted(source_counter.items()):
         print(f"    {src}: {count} 个")
-    print(f"  ─── CWE 集合 ───")
+    print("  ─── CWE 集合 ───")
     for cwe in sorted(cwe_set):
         print(f"    {cwe}")
-    print(f"  ───────────────────")
+    print("  ───────────────────")
 
     # 列出前 5 条漏洞详情
     print(f"  ─── 前 {min(5, actual)} 条漏洞详情 ───")
@@ -454,7 +452,7 @@ def verify_issues(issues: list) -> tuple:
         severity = issue.get("severity", "?")
         source = issue.get("source", "?")
         print(f"    [{i}] L{line} [{severity}] {cwe} ({source}) {title}")
-    print(f"  ────────────────────────────")
+    print("  ────────────────────────────")
 
     if actual >= expected:
         log_ok(f"漏洞识别验证通过:识别 {actual} 个漏洞(≥期望 {expected})")
@@ -491,7 +489,7 @@ def main() -> int:
     print(f"Base URL:   {args.base_url}")
     print(f"Username:   {args.username}")
     print(f"Project:    {args.project_name}")
-    print(f"Test Code:  vulnerable_ac2_e2e.py (4 个已知漏洞)")
+    print("Test Code:  vulnerable_ac2_e2e.py (4 个已知漏洞)")
     print("=" * 72)
     print()
 
@@ -524,19 +522,19 @@ def main() -> int:
             severity_count = task.get("severity_count", {})
 
             print()
-            print(f"  ─── 审查任务最终结果 ───")
+            print("  ─── 审查任务最终结果 ───")
             print(f"    task_id:      {task_id}")
             print(f"    status:       {status}")
             print(f"    total_issues: {total_issues}")
             print(f"    score:        {score}")
             print(f"    severity:     {severity_count}")
-            print(f"  ────────────────────────────")
+            print("  ────────────────────────────")
 
             if status != "success":
                 log_fail(f"审查任务未成功完成,status={status}")
                 exit_code = 1
             else:
-                log_ok(f"审查任务成功完成!")
+                log_ok("审查任务成功完成!")
 
             # 步骤6:查询 ai_call_log 验证 agent_label
             print()

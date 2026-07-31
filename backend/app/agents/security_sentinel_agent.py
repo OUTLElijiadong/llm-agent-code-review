@@ -22,6 +22,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
+from app.agents.contracts import compose_system_prompt
 from app.agents.events import AgentEventType
 from app.ai.code_chunker import chunk_code
 from app.ai.security_patterns import list_patterns, scan_secrets
@@ -96,7 +97,7 @@ class SecuritySentinelAgent(BaseAgent):
 
     def __init__(self):
         super().__init__(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=compose_system_prompt(self.name, SYSTEM_PROMPT),
             temperature=0.1,
             max_tokens=4096,
         )
@@ -1655,4 +1656,3 @@ def _compute_security_score(findings: list) -> int:
         sev = getattr(f, "severity", "中")
         total_deduct += deduct.get(sev, 3)
     return max(0, 100 - total_deduct)
-

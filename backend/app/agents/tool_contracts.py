@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Type
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -212,6 +212,24 @@ class AdminUserIdArguments(FixedToolArguments):
     user_id: int = Field(description="目标用户 ID")
 
 
+class AdminDeleteUsersArguments(FixedToolArguments):
+    """管理员一次性批量删除精确用户 ID 列表。"""
+
+    user_ids: List[int] = Field(
+        min_length=1,
+        max_length=200,
+        description="经查询和用户澄清后得到的精确用户 ID 列表；不得传列表序号",
+    )
+
+    @model_validator(mode="after")
+    def validate_user_ids(self) -> "AdminDeleteUsersArguments":
+        if any(user_id <= 0 for user_id in self.user_ids):
+            raise ValueError("user_ids 只能包含正整数")
+        if len(set(self.user_ids)) != len(self.user_ids):
+            raise ValueError("user_ids 不能重复")
+        return self
+
+
 class AdminSetRoleArguments(FixedToolArguments):
     """管理员设置用户角色参数(敏感,强制审批)。"""
 
@@ -230,6 +248,41 @@ class AdminListApprovalsArguments(FixedToolArguments):
     """管理员查询审批事项参数。"""
 
     status: str = Field(default="pending", description="状态过滤: pending/approved/rejected/auto_approved")
+
+
+class SearchPublishedAgentsArguments(FixedToolArguments):
+    """搜索当前用户可调用的已发布自定义 Agent。"""
+
+    query: str = Field(default="", max_length=200, description="Agent 编码、名称、描述或自然语言能力意图")
+    limit: int = Field(default=8, ge=1, le=20, description="最多返回的候选数量")
+
+
+class InvokePublishedAgentArguments(FixedToolArguments):
+    """调用一个已经精确确定的已发布自定义 Agent。"""
+
+    agent_code: str = Field(min_length=1, max_length=80, description="搜索结果返回的精确 Agent 编码")
+    code: str = Field(min_length=1, max_length=200_000, description="待审查代码")
+    language: str = Field(default="plaintext", max_length=40, description="代码语言")
+    file_name: str = Field(default="snippet.txt", max_length=255, description="文件名")
+    rules: List[Dict[str, Any]] = Field(default_factory=list, max_length=100, description="附加审查规则")
+    line_offset: int = Field(default=0, ge=0, le=10_000_000, description="起始行号偏移")
+    experience: str = Field(default="", max_length=12_000, description="可选审查经验上下文")
+
+
+class AdminReleaseApprovalsArguments(FixedToolArguments):
+    """管理员查询自定义 Agent 发布审批详情。"""
+
+    approval_id: Optional[int] = Field(default=None, gt=0, description="指定审批 ID；为空时返回列表")
+    status: str = Field(default="pending", description="状态过滤；传空字符串表示全部状态")
+    limit: int = Field(default=50, ge=1, le=100, description="最多返回数量")
+
+
+class AdminDecideAgentReleaseArguments(FixedToolArguments):
+    """管理员批准或驳回一个待处理的 Agent 发布审批。"""
+
+    approval_id: int = Field(gt=0, description="目标发布审批 ID")
+    decision: Literal["approve", "reject"] = Field(description="approve 批准发布，reject 驳回")
+    note: str = Field(default="", max_length=500, description="审批说明")
 
 
 @dataclass(frozen=True)
@@ -296,16 +349,46 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
     ),
     FixedToolContract("trigger_evolution", "触发指定 Agent 的自进化", TriggerEvolutionArguments, True),
     FixedToolContract("list_agent_skills", "列出指定或全部 Agent Skill 元数据", ListAgentSkillsArguments, False),
+    FixedToolContract(
+        "search_published_agents",
+        "按编码、名称、描述或能力意图模糊搜索当前用户可调用的已发布 Agent；候选不唯一时应调用 ask_user 让用户确认",
+        SearchPublishedAgentsArguments,
+        True,
+    ),
+    FixedToolContract(
+        "invoke_published_agent",
+        "使用搜索结果中的精确 agent_code 调用已发布自定义 Agent 完成代码审查",
+        InvokePublishedAgentArguments,
+        True,
+    ),
     # ── 管理员 AI 代管后台(仅管理员;写操作强制审批)──
     FixedToolContract("admin_list_users", "管理员查询平台用户列表", AdminListUsersArguments, True),
     FixedToolContract("admin_list_roles", "管理员查询 RBAC 角色列表", NoArguments, True),
     FixedToolContract("admin_governance_overview", "管理员查询 Agent 治理观测概览", NoArguments, True),
     FixedToolContract("admin_list_agents", "管理员查询 Agent 配置档案", NoArguments, True),
     FixedToolContract("admin_list_approvals", "管理员查询审批事项", AdminListApprovalsArguments, True),
+    FixedToolContract(
+        "admin_list_agent_release_approvals",
+        "管理员查询 Agent 发布审批的修改前后内容、依赖、测试证据与风险详情",
+        AdminReleaseApprovalsArguments,
+        True,
+    ),
     FixedToolContract("admin_system_status", "管理员查询服务器运行状态", NoArguments, True),
     FixedToolContract("admin_set_user_role", "管理员申请修改用户角色(敏感,需审批)", AdminSetRoleArguments, True),
     FixedToolContract("admin_delete_user", "管理员申请删除用户(高危,需审批)", AdminUserIdArguments, True),
+    FixedToolContract(
+        "admin_delete_users",
+        "管理员一次审批原子软删除精确 user_ids 列表；调用前必须先查询并澄清列表序号与用户 ID",
+        AdminDeleteUsersArguments,
+        True,
+    ),
     FixedToolContract("admin_toggle_agent", "管理员申请启停某个 Agent(敏感,需审批)", AdminToggleAgentArguments, True),
+    FixedToolContract(
+        "admin_decide_agent_release",
+        "管理员批准或驳回一个 Agent 发布审批(敏感,需 Responses 审批)",
+        AdminDecideAgentReleaseArguments,
+        True,
+    ),
 )
 _FIXED_TOOL_BY_NAME: Dict[str, FixedToolContract] = {
     contract.name: contract for contract in _FIXED_TOOL_CONTRACTS

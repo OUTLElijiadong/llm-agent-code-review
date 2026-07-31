@@ -16,6 +16,7 @@ class RegisterIn(BaseModel):
     # 防批量注册:一次性数学验证码
     captcha_id: Optional[str] = Field(default=None, max_length=64)
     captcha_answer: Optional[str] = Field(default=None, max_length=16)
+    beta_code: Optional[str] = Field(default=None, max_length=64)
 
 
 class LoginIn(BaseModel):

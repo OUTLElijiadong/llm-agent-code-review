@@ -78,7 +78,12 @@ function sparklinePoints(
 }
 
 /**
- * 构建 SVG 面积路径（折线 + 底部闭合）
+ * 构建 SVG 面积路径（折线 + 底部闭合）。
+ * @param trend - 趋势数据点数组
+ * @param width - SVG 宽度
+ * @param height - SVG 高度
+ * @param padding - 内边距
+ * @returns SVG path 字符串
  */
 function sparklineArea(
   trend: TrendPointOut[],
@@ -100,6 +105,10 @@ function sparklineArea(
   return `M${points.join(' L')} L${lastX},${height - padding} L${firstPoint.split(',')[0]},${height - padding} Z`
 }
 
+/**
+ * 加载安全态势；失败时保留可重试错误状态。
+ * @returns 无返回值，结果写入组件状态
+ */
 async function loadDashboard(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -113,18 +122,31 @@ async function loadDashboard(): Promise<void> {
   }
 }
 
+/** 跳转安全中心。
+ * @returns 无返回值
+ */
 function gotoSecurityCenter(): void {
   router.push('/security')
 }
 
+/** 跳转项目详情。
+ * @param projectId - 项目 ID
+ * @returns 无返回值
+ */
 function gotoProject(projectId: number): void {
   router.push(`/projects/${projectId}`)
 }
 
+/** 跳转项目列表以创建项目。
+ * @returns 无返回值
+ */
 function gotoCreateProject(): void {
   router.push('/projects')
 }
 
+/** 跳转项目列表以发起扫描。
+ * @returns 无返回值
+ */
 function gotoProjectList(): void {
   router.push('/projects')
 }
@@ -147,7 +169,8 @@ onMounted(loadDashboard)
 
     <!-- 错误态 -->
     <div v-if="error" class="state-error">
-      {{ error }}
+      <span>{{ error }}</span>
+      <el-button size="small" type="primary" @click="loadDashboard">重试</el-button>
     </div>
 
     <!-- 空态: 一个项目都没有 -->

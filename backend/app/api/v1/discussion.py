@@ -57,8 +57,8 @@ def start_discussion(
     if not code_file:
         raise NotFoundError("文件不存在", code=40400)
 
-    from app.ai.multi_agent import get_agent_profiles
-    profiles = get_agent_profiles(review_type)
+    from app.ai.multi_agent import get_discussion_agent_profiles
+    profiles = get_discussion_agent_profiles()
     rules = rule_service.get_enabled_rules(
         db, user.id, language=(project.language or "").strip().lower(),
     )

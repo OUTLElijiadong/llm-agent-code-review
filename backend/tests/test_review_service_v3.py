@@ -17,15 +17,12 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from app.agents.base import AgentResult, BaseAgent
 from app.ai.multi_agent import GENERAL_AGENT as _GENERAL_PROFILE
 from app.ai.result_parser import Issue
 from app.ai.static_analyzer import Finding
 from app.models.ai_call_log import AiCallLog
 from app.models.code_file import CodeFile
-from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
@@ -35,7 +32,6 @@ from app.services.review_service import (
     _issue_to_review_issue,
     _review_one_file,
 )
-
 
 # ============ 辅助函数 ============
 

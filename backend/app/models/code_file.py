@@ -33,7 +33,11 @@ class CodeFile(Base, IdMixin, TimestampMixin):
     size_bytes = Column(Integer, nullable=False, default=0, comment="字节数")
     line_count = Column(Integer, nullable=False, default=0, comment="行数")
     version_no = Column(Integer, nullable=False, default=1, comment="当前版本号")
-    content = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=False, comment="代码内容UTF-8;binary 文件存 base64")
+    content = Column(
+        LONGTEXT().with_variant(Text, "sqlite"),
+        nullable=False,
+        comment="代码内容UTF-8;binary 文件存 base64",
+    )
     status = Column(String(20), nullable=False, default="active", comment="active/deleted")
 
     # === v2 二进制文件支持(2026-06-25 新增)===

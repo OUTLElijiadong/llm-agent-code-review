@@ -5,6 +5,7 @@ import AppHeader from './AppHeader.vue'
 import AgentChatDrawer from '@/components/ai/AgentChatDrawer.vue'
 
 const agentVisible = ref(false)
+const agentPrefill = ref('')
 const sidebarVisible = ref(false)
 
 /**
@@ -19,7 +20,9 @@ function openAgentChat(): void {
  * v2.0: 监听全局事件,允许其他视图(如 Agent 办公室)通过 dispatchEvent 唤起聊天
  * @returns void
  */
-function handleOpenChat(): void {
+function handleOpenChat(event: Event): void {
+  const detail = (event as CustomEvent<{ prefill?: string }>).detail
+  if (detail?.prefill) agentPrefill.value = detail.prefill
   agentVisible.value = true
 }
 
@@ -64,7 +67,7 @@ provide('openAgentChat', openAgentChat)
         </router-view>
       </main>
     </div>
-    <AgentChatDrawer v-model:visible="agentVisible" />
+    <AgentChatDrawer v-model:visible="agentVisible" :prefill="agentPrefill" @consumed-prefill="agentPrefill = ''" />
   </div>
 </template>
 

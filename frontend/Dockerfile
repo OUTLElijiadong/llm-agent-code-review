@@ -2,9 +2,16 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# npm 默认 registry 在国内/跨境拉包慢甚至卡死,统一走 npmmirror(可被 --build-arg 覆盖)
+ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY}
+RUN npm ci --registry=${NPM_CONFIG_REGISTRY}
 COPY . .
-RUN npm run build
+# 生产构建跳过 vue-tsc:服务器内存有限(1.9G),vue-tsc+vite 并联易 OOM。
+# 类型检查已在本地 CI/开发期通过(vue-tsc --noEmit),镜像内只做 vite 打包。
+# NODE_OPTIONS 限堆内存,防止 vite 构建期 OOM。
+ENV NODE_OPTIONS=--max-old-space-size=1536
+RUN npx vite build
 
 FROM nginx:1.27-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html

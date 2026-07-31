@@ -14,12 +14,21 @@ class CodeChunk:
 
 
 _FUNC_PATTERNS = {
-    "python": re.compile(r"^\s*(def|class)\s+\w+", re.MULTILINE),
-    "java": re.compile(r"^\s*(public|private|protected|static|final|class)\s.+[{(]?\s*$", re.MULTILINE),
-    "javascript": re.compile(r"^\s*(function\s+\w+|const\s+\w+\s*=\s*\(|class\s+\w+)", re.MULTILINE),
-    "typescript": re.compile(r"^\s*(function\s+\w+|const\s+\w+\s*=\s*\(|class\s+\w+)", re.MULTILINE),
-    "go": re.compile(r"^\s*func\s+\w+", re.MULTILINE),
-    "cpp": re.compile(r"^\s*\w[\w\s*&]*\s+\w+\s*\(.*\)\s*\{?", re.MULTILINE),
+    "python": re.compile(r"^[ \t]*(def|class)[ \t]+\w+", re.MULTILINE),
+    "java": re.compile(
+        r"^[ \t]*(public|private|protected|static|final|class)[ \t]+.+[{(]?[ \t]*$",
+        re.MULTILINE,
+    ),
+    "javascript": re.compile(
+        r"^[ \t]*(function[ \t]+\w+|const[ \t]+\w+[ \t]*=[ \t]*\(|class[ \t]+\w+)",
+        re.MULTILINE,
+    ),
+    "typescript": re.compile(
+        r"^[ \t]*(function[ \t]+\w+|const[ \t]+\w+[ \t]*=[ \t]*\(|class[ \t]+\w+)",
+        re.MULTILINE,
+    ),
+    "go": re.compile(r"^[ \t]*func[ \t]+\w+", re.MULTILINE),
+    "cpp": re.compile(r"^[ \t]*\w[\w \t*&]*[ \t]+\w+[ \t]*\(.*\)[ \t]*\{?", re.MULTILINE),
 }
 
 

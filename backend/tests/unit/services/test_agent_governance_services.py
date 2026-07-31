@@ -1,5 +1,10 @@
 """Agent 治理平台服务测试。"""
-from app.models.agent_governance import AgentToolPermission, ApprovalItem, PolicyRule
+import json
+
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from app.models.agent_governance import AgentProfile, AgentToolPermission, ApprovalItem, PolicyRule
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.services import (
@@ -84,6 +89,60 @@ def test_approval_service_auto_approves_low_risk(db, admin_user):
     assert item.decision == "allow"
 
 
+def test_copilot_request_id_is_database_unique(db, admin_user):
+    """同一副驾驶确认请求只能创建一条审批，幂等不依赖进程锁。"""
+    kwargs = {
+        "title": "停用 Agent",
+        "action": "agent.toggle",
+        "resource": "agent:code_reviewer",
+        "risk_level": "high",
+        "decision": "escalate",
+        "reason": "test",
+        "agent_code": "manager",
+        "actor": admin_user,
+        "copilot_request_id": "copilot-request-unique",
+    }
+    first = approval_service.create_or_auto_decide(db, **kwargs)
+
+    with pytest.raises(IntegrityError):
+        approval_service.create_or_auto_decide(db, **kwargs)
+    db.rollback()
+
+    rows = db.query(ApprovalItem).filter(
+        ApprovalItem.copilot_request_id == "copilot-request-unique",
+    ).all()
+    assert [item.id for item in rows] == [first.id]
+
+
+def test_approval_side_effect_failure_rolls_back_status(db, admin_user, monkeypatch):
+    """真实副作用失败时审批状态必须与业务修改一起回滚。"""
+    item = approval_service.create_or_auto_decide(
+        db,
+        title="失败事务",
+        action="agent.toggle",
+        resource="agent:missing",
+        risk_level="high",
+        decision="escalate",
+        reason="test",
+        agent_code="manager",
+        request={"context": {"agent_code": "missing", "enable": False}},
+        actor=admin_user,
+    )
+    monkeypatch.setattr(
+        approval_service,
+        "_apply_approval_side_effect",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("side effect failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="side effect failed"):
+        approval_service.decide_item(db, admin_user, item.id, approve=True)
+
+    db.expire_all()
+    persisted = db.get(ApprovalItem, item.id)
+    assert persisted.status == "pending"
+    assert persisted.decided_by is None
+
+
 def test_tool_gateway_escalates_high_risk_action(db, admin_user):
     """验证工具网关会把高风险动作升级审批并写日志。"""
     result = tool_gateway.execute(
@@ -127,6 +186,77 @@ def test_tool_gateway_applies_tool_permission_deny(db):
     assert result.risk_level == "critical"
 
 
+def test_tool_gateway_boundary_defaults_to_deny_for_out_of_scope_tool(db):
+    """验证配置职责边界后，未知工具不能因默认低风险而越权放行。"""
+    db.add(AgentProfile(
+        code="bounded_reviewer",
+        name="受限审查Agent",
+        category="quality",
+        config_json=json.dumps({
+            "governance_boundary": {
+                "allowed_tools": ["source_reader"],
+                "approval_tools": ["workflow_dispatch"],
+                "blocked_tools": ["shell"],
+            }
+        }),
+    ))
+    db.commit()
+
+    allowed = tool_gateway.execute(
+        db,
+        agent_code="bounded_reviewer",
+        tool_code="source_reader",
+        action="source.read",
+        resource="project:1",
+    )
+    unknown = tool_gateway.execute(
+        db,
+        agent_code="bounded_reviewer",
+        tool_code="report_builder",
+        action="report.build",
+        resource="project:1",
+    )
+
+    assert allowed.status == "success"
+    assert unknown.status == "denied"
+    assert unknown.risk_level == "high"
+
+
+def test_tool_gateway_boundary_escalation_cannot_be_downgraded_by_allow_permission(db):
+    """验证显式 allow 不能绕过职责边界要求的审批。"""
+    db.add(AgentProfile(
+        code="bounded_manager",
+        name="受限管理Agent",
+        category="governance",
+        config_json=json.dumps({
+            "governance_boundary": {
+                "allowed_tools": ["governance_reader"],
+                "approval_tools": ["workflow_dispatch"],
+                "blocked_tools": ["shell"],
+            }
+        }),
+    ))
+    db.add(AgentToolPermission(
+        agent_code="bounded_manager",
+        tool_code="workflow_dispatch",
+        permission="allow",
+        risk_level="low",
+        enabled=1,
+    ))
+    db.commit()
+
+    result = tool_gateway.execute(
+        db,
+        agent_code="bounded_manager",
+        tool_code="workflow_dispatch",
+        action="workflow.dispatch",
+        resource="review:1",
+    )
+
+    assert result.status == "escalated"
+    assert result.risk_level == "high"
+
+
 def test_agent_governance_sync_profiles_creates_governance_agents(db):
     """验证治理 Agent 画像可同步并绑定自我进化 skill。"""
     rows = agent_governance_service.sync_profiles(db)
@@ -136,6 +266,26 @@ def test_agent_governance_sync_profiles_creates_governance_agents(db):
     assert manager.name == "管理Agent"
     assert "selfimprovingagent" in data["skills"]
     assert "reflection" in data["skills"]
+    operations = [row for row in rows if row.code == "operations"]
+    assert len(operations) == 1
+    assert operations[0].name == "全服管理Agent"
+
+
+def test_agent_governance_sync_preserves_disabled_runtime_state(db):
+    """刷新治理画像不得把管理员停用的 Agent 恢复为空闲。"""
+    rows = agent_governance_service.sync_profiles(db)
+    manager = next(row for row in rows if row.code == "manager")
+    manager.is_enabled = 0
+    manager.status = "disabled"
+    db.commit()
+
+    refreshed = agent_governance_service.sync_profiles(db)
+    manager = next(row for row in refreshed if row.code == "manager")
+
+    assert manager.is_enabled == 0
+    assert manager.status == "disabled"
+    assert agent_governance_service.is_runtime_enabled(db, "manager") is False
+    assert agent_governance_service.is_runtime_enabled(db, "legacy_without_profile") is True
 
 
 def test_high_risk_agent_knowledge_requires_approval_and_can_activate(db, admin_user):

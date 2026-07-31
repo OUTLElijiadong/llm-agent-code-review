@@ -17,6 +17,15 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from loguru import logger
 
+from app.agents.tool_contracts import (
+    FixedToolArgumentError,
+    get_fixed_tool_description,
+    get_fixed_tool_names,
+    get_fixed_tool_schema,
+    is_fixed_tool,
+    validate_fixed_tool_arguments,
+)
+
 if TYPE_CHECKING:
     from app.agents.base import Agent, AgentContext
 
@@ -50,32 +59,8 @@ class ChatPlanner:
     MAX_STEPS = 5
     TIMEOUT_SECONDS = 10
 
-    # Orchestrator 固定方法白名单(非 Skill 工具)
-    # 这些方法在 Orchestrator 上以同名方法形式存在,可被 invoke_tool 动态调用
-    _FIXED_TOOLS: List[str] = [
-        "list_agents",
-        "list_projects",
-        "create_project",
-        "delete_project",
-        "start_review",
-        "list_review_tasks",
-        "list_review_issues",
-        "list_code_files",
-        "dashboard_summary",
-        "list_rules",
-        "list_reports",
-        "detect_language",
-        "analyze_project",
-        "review_code",
-        "generate_ai_prompt_for_issue",
-        "generate_ai_prompt_for_task",
-        "generate_ai_prompt_for_project",
-        "audit_security_for_file",
-        "audit_security_for_task",
-        "audit_security_for_project",
-        "trigger_evolution",
-        "list_agent_skills",
-    ]
+    # 固定工具名称、Schema 与执行校验均来自 tool_contracts 单一注册表。
+    _FIXED_TOOLS: List[str] = get_fixed_tool_names()
 
     def __init__(self, agent: "Agent"):
         """初始化规划器
@@ -157,12 +142,12 @@ class ChatPlanner:
         except Exception as e:
             logger.warning(f"[ChatPlanner] 收集 Skill 工具失败: {e}")
 
-        # 2. Orchestrator 固定方法(简化 schema,只列 name+description)
+        # 2. Orchestrator 固定方法：直接复用执行器的严格参数契约。
         for name in self._FIXED_TOOLS:
             tools.append({
                 "name": name,
-                "description": f"Orchestrator 固定方法: {name}",
-                "parameters": {"type": "object", "properties": {}},
+                "description": get_fixed_tool_description(name),
+                "parameters": get_fixed_tool_schema(name),
                 "type": "fixed",
             })
 
@@ -206,9 +191,11 @@ class ChatPlanner:
             '{"tool_name":"工具名","arguments":{参数kv},"reason":"调用理由"}\n\n'
             "规则:\n"
             "1. tool_name 必须来自上面的工具列表,不得编造\n"
-            "2. 顺序执行,上一步的输出可作为下一步 arguments 的输入\n"
+            "2. arguments 只允许 JSON 字面量,不得使用 $... 等动态引用语法\n"
             "3. 如果意图只需单步即可完成,输出长度为 1 的数组\n"
-            "4. 不要输出任何额外文本,只输出 JSON 数组"
+            "4. start_review 只有项目 ID 时必须省略 file_ids,"
+            "服务端会自动选择项目 active 文件,不要先调用 list_code_files\n"
+            "5. 不要输出任何额外文本,只输出 JSON 数组"
         )
 
     def _call_llm_for_plan(
@@ -306,14 +293,14 @@ class ChatPlanner:
     def _validate_plan(
         self, plan: List[ToolCall], tools: List[Dict[str, Any]]
     ) -> None:
-        """校验 plan 的 tool_name 必须在 tools 白名单中
+        """校验工具白名单，并用同一固定工具契约规范化参数。
 
         Args:
             plan: 待校验的调用链
             tools: 工具白名单(_collect_tools 输出)
 
         Raises:
-            ValueError: 存在非法 tool_name
+            ValueError: 存在非法 tool_name 或固定工具参数
         """
         valid_names = {t["name"] for t in tools}
         for i, step in enumerate(plan):
@@ -322,8 +309,52 @@ class ChatPlanner:
                     f"ChatPlanner 步骤 {i + 1} 非法 tool_name: "
                     f"{step.tool_name}(不在 {len(valid_names)} 个可用工具中)"
                 )
+            if is_fixed_tool(step.tool_name):
+                try:
+                    normalized_arguments = self._normalize_dynamic_arguments(
+                        step.tool_name,
+                        step.arguments,
+                    )
+                    step.arguments = validate_fixed_tool_arguments(
+                        step.tool_name,
+                        normalized_arguments,
+                    )
+                except FixedToolArgumentError as exc:
+                    raise ValueError(
+                        f"ChatPlanner 步骤 {i + 1} 参数不合法: {exc}"
+                    ) from exc
         if len(plan) > self.MAX_STEPS:
             logger.warning(
                 f"[ChatPlanner] 调用链 {len(plan)} 步超过 MAX_STEPS={self.MAX_STEPS},"
                 f"将截断"
             )
+
+    @staticmethod
+    def _normalize_dynamic_arguments(
+        tool_name: str,
+        arguments: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """规范化 Planner 产生的可选动态参数。
+
+        `start_review` 已由 Orchestrator 统一解析项目 active 文件。
+        Planner 在无显式文件 ID 时偶尔仍会生成 `$...` 上游输出引用，
+        而当前执行器不支持该引用语法。此处只删除 `None` 或以 `$`
+        开头的模型动态引用；其他非数组字符串仍交由严格契约拒绝。
+
+        Args:
+            tool_name: 当前固定工具名称。
+            arguments: Planner 生成的原始参数字典。
+
+        Returns:
+            Dict[str, Any]: 供固定工具契约继续严格校验的副本。
+        """
+        normalized = dict(arguments)
+        file_ids = normalized.get("file_ids")
+        is_dynamic_reference = (
+            isinstance(file_ids, str) and file_ids.strip().startswith("$")
+        )
+        if tool_name == "start_review" and (
+            file_ids is None or is_dynamic_reference
+        ):
+            normalized.pop("file_ids", None)
+        return normalized

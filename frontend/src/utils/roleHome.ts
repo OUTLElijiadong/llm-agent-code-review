@@ -9,6 +9,21 @@ const ROLE_HOME_PATHS: Record<UserRole, string> = {
 }
 
 /**
+ * 判断指定角色是否应显示某个已认证导航项
+ * @param role - 后端用户角色
+ * @param allowedRoles - 导航项声明的可见角色;为空表示全员可见
+ * @returns 当前角色是否可见
+ */
+export function canRoleSeeNavigationItem(
+  role: string | null | undefined,
+  allowedRoles?: UserRole[],
+): boolean {
+  const normalizedRole = normalizeRole(role)
+  if (normalizedRole === 'admin') return true
+  return !allowedRoles || allowedRoles.includes(normalizedRole)
+}
+
+/**
  * 将后端返回的角色字符串归一化为前端已知角色
  * @param role - 后端用户角色
  * @returns 归一化后的用户角色
@@ -29,12 +44,12 @@ export function getRoleHomePath(role?: string | null): string {
   return ROLE_HOME_PATHS[normalizeRole(role)]
 }
 
-// 管理员只允许进入「管理相关」页面：管理区(/admin/*)、平台工作台、个人账户，
-// 以及管理员有管理职责的共享页（论坛版务 / 维修工单受理 / 反馈回复 / 平台安全与
-// Agent 监控）。开发/用户专属页（项目、代码、审查、报告、知识库、个性化画像等）
-// 对管理员隐藏且不可直达。
+// 管理员作为超级用户，可同时使用主站用户功能与 Agent 治理后台。
+// 仅允许已知站内路由前缀，避免把外部/未知路径当作登录后重定向目标。
 const ADMIN_ALLOWED_PREFIXES = [
-  '/dashboard', '/agents', '/security', '/forum', '/support', '/admin',
+  '/dashboard', '/projects', '/code', '/reviews', '/issues', '/reports',
+  '/agents', '/security', '/rules', '/forum', '/knowledge', '/support',
+  '/profile', '/admin',
 ]
 
 /**
@@ -43,9 +58,8 @@ const ADMIN_ALLOWED_PREFIXES = [
  * @returns 管理员是否允许进入
  */
 export function canAdminOpenPath(path: string): boolean {
-  // 个性化画像属于用户专属，管理员不可进；其余个人中心子页（改密/API配置）允许
-  if (path === '/profile/personalization') return false
-  if (path === '/profile' || path.startsWith('/profile/')) return true
+  if (!path.startsWith('/') || path.startsWith('//')) return false
+  if (path === '/login' || path === '/register') return false
   return ADMIN_ALLOWED_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))
 }
 

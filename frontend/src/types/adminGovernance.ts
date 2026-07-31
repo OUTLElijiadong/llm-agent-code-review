@@ -27,6 +27,7 @@ export interface GovernanceAgent {
   priority: number
   auto_approval_threshold: number
   is_enabled: number
+  config_json?: Record<string, unknown> | unknown[] | null
   skills: string[]
   tool_count: number
   memory_count: number

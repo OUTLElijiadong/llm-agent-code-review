@@ -47,6 +47,9 @@
             {{ task.project_name || `项目 #${task.project_id}` }}
           </el-button>
           <el-button link type="primary" @click="goReport(taskId)">报告 #{{ taskId }}</el-button>
+          <el-tag v-for="agent in task?.agent_releases || []" :key="agent.release_id" size="small" type="success" effect="plain">
+            {{ agent.agent_name }} v{{ agent.agent_version }}
+          </el-tag>
         </div>
       </div>
 

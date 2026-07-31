@@ -90,7 +90,13 @@ def is_admin_user(db: Session, user_id: int) -> bool:
 # ============================================================================
 
 
-def assign_roles_to_user(db: Session, user_id: int, role_ids: List[int]) -> None:
+def assign_roles_to_user(
+    db: Session,
+    user_id: int,
+    role_ids: List[int],
+    *,
+    commit: bool = True,
+) -> None:
     """给用户分配角色(覆盖式)
 
     先删除用户的所有旧角色关联,再插入新角色关联。
@@ -104,7 +110,10 @@ def assign_roles_to_user(db: Session, user_id: int, role_ids: List[int]) -> None
     db.query(UserRole).filter(UserRole.user_id == user_id).delete()
     for rid in role_ids:
         db.add(UserRole(user_id=user_id, role_id=rid))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def get_user_roles(db: Session, user_id: int) -> List[Role]:

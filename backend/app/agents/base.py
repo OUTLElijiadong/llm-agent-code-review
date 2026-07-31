@@ -12,6 +12,7 @@ from app.core.config import settings
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from app.agents.skills.base import BaseSkill
     from app.utils.api_resolver import ApiConfig
 
 
@@ -89,6 +90,7 @@ class BaseAgent:
                 parent=parent,
                 message=message,
                 payload=payload or {},
+                user_id=ctx.user_id if ctx else None,
             )
         except Exception as e:
             logger.warning(f"[{self.name}] emit 事件失败: {e}")
@@ -148,7 +150,15 @@ class BaseAgent:
 
                 if resp.status_code == 200:
                     body = resp.json()
-                    content = body["choices"][0]["message"]["content"]
+                    choice = body["choices"][0]
+                    message_body = choice.get("message") or {}
+                    # reasoning_content 是模型内部推理，不是面向用户的答复。
+                    # 即使最终 content 因 token 截断为空，也绝不能降级回显内部推理。
+                    content = message_body.get("content") or ""
+                    if not str(content).strip():
+                        raise RuntimeError(
+                            f"模型未返回最终内容(finish_reason={choice.get('finish_reason') or 'unknown'})"
+                        )
                     usage = body.get("usage", {})
                     logger.debug(
                         f"[{self.name}] 调用成功 duration={duration_ms}ms "
