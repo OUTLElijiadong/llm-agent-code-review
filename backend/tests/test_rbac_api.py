@@ -15,6 +15,7 @@
 - 覆盖 get_db 与 get_current_user 依赖,分别模拟 admin/普通用户
 - require_permission / require_admin 闭包内部依赖 get_current_user,覆盖即生效
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -30,6 +31,8 @@ from app.core.dependencies import get_current_user
 from app.main import app
 from app.models.rbac import Menu, Permission, Role
 from app.models.user import User
+from app.services.admin_capability_registry import CAPABILITY_BY_CODE
+from app.services.admin_capability_service import AdminCapabilityError, execute_api
 
 # ============================================================================
 # Fixture: 共享内存数据库 + 基础种子数据
@@ -70,24 +73,44 @@ def seed(db: Session) -> Dict[str, Any]:
     """
     # 用户:admin(旧版字段管理员)与 normal(普通用户无角色)
     admin = User(
-        id=1, username="admin", password="x", email="admin@t.com",
-        nickname="管理员", role="admin", status=1,
+        id=1,
+        username="admin",
+        password="x",
+        email="admin@t.com",
+        nickname="管理员",
+        role="admin",
+        status=1,
     )
     normal = User(
-        id=2, username="normal", password="x", email="normal@t.com",
-        nickname="普通用户", role="user", status=1,
+        id=2,
+        username="normal",
+        password="x",
+        email="normal@t.com",
+        nickname="普通用户",
+        role="user",
+        status=1,
     )
     db.add_all([admin, normal])
     db.flush()
 
     # 角色:reviewer(自定义)与 admin_role(内置,用于测试不可删)
     reviewer_role = Role(
-        id=10, name="评审员", code="reviewer", description="代码评审",
-        status="active", sort=100, is_builtin=0,
+        id=10,
+        name="评审员",
+        code="reviewer",
+        description="代码评审",
+        status="active",
+        sort=100,
+        is_builtin=0,
     )
     builtin_role = Role(
-        id=20, name="管理员", code="admin", description="系统管理员",
-        status="active", sort=50, is_builtin=1,
+        id=20,
+        name="管理员",
+        code="admin",
+        description="系统管理员",
+        status="active",
+        sort=50,
+        is_builtin=1,
     )
     db.add_all([reviewer_role, builtin_role])
     db.flush()
@@ -111,8 +134,12 @@ def seed(db: Session) -> Dict[str, Any]:
     ]
     for idx, (code, name, module) in enumerate(perm_specs, start=100):
         p = Permission(
-            id=idx, code=code, name=name, module=module,
-            type="api", description=name,
+            id=idx,
+            code=code,
+            name=name,
+            module=module,
+            type="api",
+            description=name,
         )
         db.add(p)
         permissions[code] = p
@@ -120,19 +147,40 @@ def seed(db: Session) -> Dict[str, Any]:
 
     # 菜单:顶级 + 子菜单,用于测试树形构建
     m_root = Menu(
-        id=1, parent_id=None, name="项目管理", path="/project",
-        component="Project", icon="folder", sort=100,
-        permission_code=None, visible=1, is_builtin=1,
+        id=1,
+        parent_id=None,
+        name="项目管理",
+        path="/project",
+        component="Project",
+        icon="folder",
+        sort=100,
+        permission_code=None,
+        visible=1,
+        is_builtin=1,
     )
     m_child = Menu(
-        id=2, parent_id=1, name="项目列表", path="/project/list",
-        component="ProjectList", icon="list", sort=110,
-        permission_code="project:view", visible=1, is_builtin=0,
+        id=2,
+        parent_id=1,
+        name="项目列表",
+        path="/project/list",
+        component="ProjectList",
+        icon="list",
+        sort=110,
+        permission_code="project:view",
+        visible=1,
+        is_builtin=0,
     )
     m_hidden = Menu(
-        id=3, parent_id=None, name="隐藏菜单", path="/hidden",
-        component=None, icon=None, sort=200,
-        permission_code=None, visible=0, is_builtin=0,
+        id=3,
+        parent_id=None,
+        name="隐藏菜单",
+        path="/hidden",
+        component=None,
+        icon=None,
+        sort=200,
+        permission_code=None,
+        visible=0,
+        is_builtin=0,
     )
     db.add_all([m_root, m_child, m_hidden])
     db.commit()
@@ -172,6 +220,7 @@ def client_factory(db: Session):
         Returns:
             TestClient: 已覆盖鉴权依赖的测试客户端
         """
+
         def override_db():
             """覆盖数据库依赖,返回共享会话"""
             yield db
@@ -212,6 +261,46 @@ def _forbidden(response):
         response: TestClient 响应对象
     """
     assert response.status_code == 403, response.text
+
+
+@pytest.mark.asyncio
+async def test_admin_capability_service_reenters_real_api_with_current_user(db, seed):
+    """管理能力执行器必须携带当前用户 JWT 重入真实路由，而非直接调用或伪造结果。"""
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides.pop(get_current_user, None)
+    try:
+        listed = await execute_api(
+            seed["admin"],
+            CAPABILITY_BY_CODE["rbac.roles.list"],
+            {},
+            request_id="capability-read-test",
+        )
+        assert {row["code"] for row in listed["data"]} == {"reviewer", "admin"}
+
+        updated = await execute_api(
+            seed["admin"],
+            CAPABILITY_BY_CODE["rbac.roles.data_scope.update"],
+            {"role_id": 10, "scope_type": "custom", "project_ids": [101, 102]},
+            request_id="capability-write-test",
+        )
+        assert updated["data"]["role_id"] == 10
+        assert updated["data"]["scope_type"] == "custom"
+        assert updated["data"]["project_ids"] == [101, 102]
+
+        with pytest.raises(AdminCapabilityError, match="HTTP 403"):
+            await execute_api(
+                seed["normal"],
+                CAPABILITY_BY_CODE["rbac.roles.list"],
+                {},
+                request_id="capability-forbidden-test",
+            )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 # ============================================================================
@@ -297,9 +386,16 @@ class TestRbacNormalUserForbidden:
     def test_normal_create_role_forbidden(self, db, seed, client_factory):
         """普通用户创建角色应 403"""
         client = client_factory(seed["normal"])
-        _forbidden(client.post("/api/rbac/roles", json={
-            "name": "x", "code": "x", "permission_codes": [],
-        }))
+        _forbidden(
+            client.post(
+                "/api/rbac/roles",
+                json={
+                    "name": "x",
+                    "code": "x",
+                    "permission_codes": [],
+                },
+            )
+        )
 
     def test_normal_assign_user_roles_forbidden(self, db, seed, client_factory):
         """普通用户分配用户角色应 403"""
@@ -338,10 +434,17 @@ class TestRoleCrud:
     def test_admin_create_role(self, db, seed, client_factory):
         """admin 创建角色应成功并返回角色信息"""
         client = client_factory(seed["admin"])
-        data = _ok(client.post("/api/rbac/roles", json={
-            "name": "测试角色", "code": "test_role", "description": "测试",
-            "permission_codes": ["project:view"],
-        }))
+        data = _ok(
+            client.post(
+                "/api/rbac/roles",
+                json={
+                    "name": "测试角色",
+                    "code": "test_role",
+                    "description": "测试",
+                    "permission_codes": ["project:view"],
+                },
+            )
+        )
         assert data["code"] == "test_role"
         assert data["is_builtin"] == 0
         assert "project:view" in data["permission_codes"]
@@ -349,17 +452,27 @@ class TestRoleCrud:
     def test_admin_create_role_duplicate_code(self, db, seed, client_factory):
         """admin 创建角色编码重复应返回业务错误"""
         client = client_factory(seed["admin"])
-        response = client.post("/api/rbac/roles", json={
-            "name": "重复", "code": "reviewer",
-        })
+        response = client.post(
+            "/api/rbac/roles",
+            json={
+                "name": "重复",
+                "code": "reviewer",
+            },
+        )
         assert response.status_code == 400
 
     def test_admin_update_role(self, db, seed, client_factory):
         """admin 更新角色字段应成功"""
         client = client_factory(seed["admin"])
-        data = _ok(client.put("/api/rbac/roles/10", json={
-            "name": "评审员V2", "sort": 200,
-        }))
+        data = _ok(
+            client.put(
+                "/api/rbac/roles/10",
+                json={
+                    "name": "评审员V2",
+                    "sort": 200,
+                },
+            )
+        )
         assert data["name"] == "评审员V2"
         assert data["sort"] == 200
 
@@ -409,9 +522,14 @@ class TestPermissionAssignment:
         client = client_factory(seed["admin"])
         perm_view = seed["permissions"]["project:view"].id
         perm_create = seed["permissions"]["project:create"].id
-        _ok(client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [perm_view, perm_create],
-        }))
+        _ok(
+            client.put(
+                "/api/rbac/roles/10/permissions",
+                json={
+                    "permission_ids": [perm_view, perm_create],
+                },
+            )
+        )
         # 查询验证
         data = _ok(client.get("/api/rbac/roles/10/permissions"))
         codes = {p["code"] for p in data}
@@ -423,13 +541,23 @@ class TestPermissionAssignment:
         perm_view = seed["permissions"]["project:view"].id
         perm_agent = seed["permissions"]["agent:view"].id
         # 第一次分配 project:view
-        _ok(client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [perm_view],
-        }))
+        _ok(
+            client.put(
+                "/api/rbac/roles/10/permissions",
+                json={
+                    "permission_ids": [perm_view],
+                },
+            )
+        )
         # 第二次分配 agent:view(覆盖)
-        _ok(client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [perm_agent],
-        }))
+        _ok(
+            client.put(
+                "/api/rbac/roles/10/permissions",
+                json={
+                    "permission_ids": [perm_agent],
+                },
+            )
+        )
         data = _ok(client.get("/api/rbac/roles/10/permissions"))
         codes = {p["code"] for p in data}
         assert codes == {"agent:view"}
@@ -438,12 +566,22 @@ class TestPermissionAssignment:
         """admin 分配空权限列表应清空角色权限"""
         client = client_factory(seed["admin"])
         perm_view = seed["permissions"]["project:view"].id
-        _ok(client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [perm_view],
-        }))
-        _ok(client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [],
-        }))
+        _ok(
+            client.put(
+                "/api/rbac/roles/10/permissions",
+                json={
+                    "permission_ids": [perm_view],
+                },
+            )
+        )
+        _ok(
+            client.put(
+                "/api/rbac/roles/10/permissions",
+                json={
+                    "permission_ids": [],
+                },
+            )
+        )
         data = _ok(client.get("/api/rbac/roles/10/permissions"))
         assert data == []
 
@@ -459,18 +597,32 @@ class TestDataScopeAndUserAssignment:
     def test_admin_update_role_data_scope(self, db, seed, client_factory):
         """admin 更新角色数据范围应成功"""
         client = client_factory(seed["admin"])
-        data = _ok(client.put("/api/rbac/roles/10/data-scope", json={
-            "role_id": 10, "scope_type": "all",
-        }))
+        data = _ok(
+            client.put(
+                "/api/rbac/roles/10/data-scope",
+                json={
+                    "scope_type": "all",
+                },
+            )
+        )
         assert data["scope_type"] == "all"
         assert data["role_id"] == 10
+        current = _ok(client.get("/api/rbac/roles/10/data-scope"))
+        assert current["scope_type"] == "all"
+        assert current["role_id"] == 10
 
     def test_admin_update_role_data_scope_custom(self, db, seed, client_factory):
         """admin 更新角色数据范围为 custom 应保存 project_ids"""
         client = client_factory(seed["admin"])
-        data = _ok(client.put("/api/rbac/roles/10/data-scope", json={
-            "role_id": 10, "scope_type": "custom", "project_ids": [1, 2, 3],
-        }))
+        data = _ok(
+            client.put(
+                "/api/rbac/roles/10/data-scope",
+                json={
+                    "scope_type": "custom",
+                    "project_ids": [1, 2, 3],
+                },
+            )
+        )
         assert data["scope_type"] == "custom"
         assert data["project_ids"] == [1, 2, 3]
 
@@ -505,9 +657,14 @@ class TestPermissionChange:
         client = client_factory(seed["admin"])
         # 给 reviewer 角色分配 project:view 权限
         perm_view = seed["permissions"]["project:view"].id
-        _ok(client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [perm_view],
-        }))
+        _ok(
+            client.put(
+                "/api/rbac/roles/10/permissions",
+                json={
+                    "permission_ids": [perm_view],
+                },
+            )
+        )
         # 给 normal 用户分配 reviewer 角色
         _ok(client.post("/api/rbac/users/2/roles", json={"role_ids": [10]}))
         # 查询 normal 用户权限应包含 project:view
@@ -518,9 +675,14 @@ class TestPermissionChange:
         """撤销用户角色后权限应清空"""
         client = client_factory(seed["admin"])
         perm_view = seed["permissions"]["project:view"].id
-        _ok(client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [perm_view],
-        }))
+        _ok(
+            client.put(
+                "/api/rbac/roles/10/permissions",
+                json={
+                    "permission_ids": [perm_view],
+                },
+            )
+        )
         _ok(client.post("/api/rbac/users/2/roles", json={"role_ids": [10]}))
         # 撤销角色(空列表覆盖)
         _ok(client.post("/api/rbac/users/2/roles", json={"role_ids": []}))
@@ -585,9 +747,12 @@ class TestBusinessRoutePermission:
         admin_client = client_factory(seed["admin"])
         # 给 reviewer 角色分配 project:view 权限
         perm_view = seed["permissions"]["project:view"].id
-        admin_client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [perm_view],
-        })
+        admin_client.put(
+            "/api/rbac/roles/10/permissions",
+            json={
+                "permission_ids": [perm_view],
+            },
+        )
         # 给 normal 用户分配 reviewer 角色
         admin_client.post("/api/rbac/users/2/roles", json={"role_ids": [10]})
         # 切换为 normal 用户访问
@@ -599,9 +764,12 @@ class TestBusinessRoutePermission:
         """普通用户有 agent:view 权限访问 Agent 列表应 200"""
         admin_client = client_factory(seed["admin"])
         perm_agent = seed["permissions"]["agent:view"].id
-        admin_client.put("/api/rbac/roles/10/permissions", json={
-            "permission_ids": [perm_agent],
-        })
+        admin_client.put(
+            "/api/rbac/roles/10/permissions",
+            json={
+                "permission_ids": [perm_agent],
+            },
+        )
         admin_client.post("/api/rbac/users/2/roles", json={"role_ids": [10]})
         normal_client = client_factory(seed["normal"])
         response = normal_client.get("/api/agents")

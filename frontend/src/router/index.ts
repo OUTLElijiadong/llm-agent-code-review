@@ -307,6 +307,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Agent 调用日志', role: 'admin' },
       },
       {
+        path: 'report-templates',
+        name: 'AdminReportTemplateManage',
+        component: () => import('@/views/report/ReportTemplateManage.vue'),
+        meta: { title: '报告模板管理', role: 'admin', permissions: ['report:template_manage'] },
+      },
+      {
         path: 'audit',
         name: 'SystemAudit',
         component: () => import('@/views/admin/SystemAudit.vue'),

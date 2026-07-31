@@ -22,6 +22,7 @@ RBAC 管理 API 路由
 - GET    /rbac/menus                          列出全部菜单(树形)
 - GET    /rbac/roles/{role_code}/users        按角色编码查询用户列表
 """
+
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,7 @@ from app.schemas.common import Resp
 from app.schemas.rbac import (
     DataScopeIn,
     DataScopeOut,
+    DataScopeUpdateIn,
     MenuOut,
     PermissionOut,
     RoleCreateIn,
@@ -268,13 +270,15 @@ def get_user_data_scope(
     # 服务层在用户无数据范围记录时返回虚拟 DataScope(无 id/role_id/create_time),
     # 此处补齐默认值以适配 DataScopeOut 的必填字段约束。
     if scope.id is None:
-        return Resp(data=DataScopeOut(
-            id=0,
-            role_id=0,
-            scope_type=scope.scope_type,
-            project_ids=scope.project_ids,
-            create_time=datetime.now(),
-        ))
+        return Resp(
+            data=DataScopeOut(
+                id=0,
+                role_id=0,
+                scope_type=scope.scope_type,
+                project_ids=scope.project_ids,
+                create_time=datetime.now(),
+            )
+        )
     return Resp(data=DataScopeOut.model_validate(scope))
 
 
@@ -446,14 +450,14 @@ def assign_role_permissions(
 @router.put("/roles/{role_id}/data-scope", response_model=Resp[DataScopeOut])
 def update_role_data_scope(
     role_id: int,
-    payload: DataScopeIn,
+    payload: DataScopeUpdateIn,
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
     """更新角色数据范围
 
     若角色已有数据范围记录则更新,否则新建。
-    请求体中 role_id 字段将被忽略,以路径参数 role_id 为准。
+    角色 ID 只来自路径参数，请求体不重复接收 role_id。
 
     Args:
         role_id: 角色ID(路径参数)
@@ -472,6 +476,18 @@ def update_role_data_scope(
     )
     scope = rbac_service.update_data_scope(db, role_id, scope_in)
     return Resp(data=DataScopeOut.model_validate(scope))
+
+
+@router.get("/roles/{role_id}/data-scope", response_model=Resp[Optional[DataScopeOut]])
+def get_role_data_scope(
+    role_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """查询角色已保存的数据范围；未配置时返回 ``null``。"""
+
+    scope = rbac_service.get_role_data_scope(db, role_id)
+    return Resp(data=DataScopeOut.model_validate(scope) if scope is not None else None)
 
 
 @router.get("/roles/{role_code}/users", response_model=Resp[List[Dict[str, Any]]])
@@ -494,17 +510,19 @@ def list_users_by_role(
         Resp[List[Dict[str, Any]]]: 用户信息字典列表
     """
     users = rbac_service.get_users_by_role(db, role_code)
-    return Resp(data=[
-        {
-            "id": u.id,
-            "username": u.username,
-            "nickname": u.nickname,
-            "email": u.email,
-            "role": u.role,
-            "status": u.status,
-        }
-        for u in users
-    ])
+    return Resp(
+        data=[
+            {
+                "id": u.id,
+                "username": u.username,
+                "nickname": u.nickname,
+                "email": u.email,
+                "role": u.role,
+                "status": u.status,
+            }
+            for u in users
+        ]
+    )
 
 
 # ============================================================================
@@ -549,10 +567,5 @@ def list_menus_tree(
     Returns:
         Resp[List[MenuOut]]: 全部菜单树
     """
-    menus = (
-        db.query(Menu)
-        .filter(Menu.visible == 1)
-        .order_by(Menu.sort)
-        .all()
-    )
+    menus = db.query(Menu).filter(Menu.visible == 1).order_by(Menu.sort).all()
     return Resp(data=_build_menu_tree(menus))

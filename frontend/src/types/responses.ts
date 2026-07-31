@@ -67,7 +67,7 @@ export interface ResponseInputQuestion {
   question?: string
   label?: string
   title?: string
-  options?: Array<ResponseInputOption | string | number | boolean | Record<string, unknown>>
+  options?: Array<ResponseInputOption | string | number | boolean | Record<string, unknown> | null>
   [key: string]: unknown
 }
 
@@ -103,7 +103,7 @@ export interface ResponseInputRequiredEvent extends ResponseStreamEventBase {
   call_id?: string
   question?: string
   questions?: ResponseInputQuestion[]
-  options?: Array<ResponseInputOption | string | number | boolean | Record<string, unknown>>
+  options?: Array<ResponseInputOption | string | number | boolean | Record<string, unknown> | null>
   arguments?: Record<string, unknown>
   allow_custom?: boolean
   allow_free_text?: boolean

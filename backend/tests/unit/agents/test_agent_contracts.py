@@ -94,6 +94,15 @@ def test_protected_interaction_agents_are_not_prompt_injected() -> None:
     assert compose_system_prompt("code_reviewer", baseline) != baseline
 
 
+def test_manager_contract_declares_full_admin_page_capabilities() -> None:
+    """受保护的管理 Agent 仍须声明其完整后台能力边界。"""
+    manager = CONTRACTS["manager"]
+    assert "管理全部管理员页面" in manager.mission
+    assert {skill.code for skill in manager.skills} == {"manager.admin_capabilities"}
+    assert "真实业务 API" in manager.skills[0].purpose
+    assert "禁止自行拼接 HTTP 方法或路径" in manager.skills[0].usage_rule
+
+
 def test_collaboration_requires_reciprocal_allowlist() -> None:
     """已治理 Agent 间只允许双向声明的委派，未知端点不能成为旁路。"""
     assert collaboration_allowed("orchestrator", "code_reviewer") is True

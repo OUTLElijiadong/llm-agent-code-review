@@ -68,7 +68,7 @@ export function setupGuards(router: Router): void {
     const isAdmin = user.isAdmin()
 
     // 历史单角色字段检查(向后兼容)
-    if (to.meta.role && to.meta.role !== user.profile?.role) {
+    if (!isAdmin && to.meta.role && to.meta.role !== user.profile?.role) {
       return { path: '/403' }
     }
 

@@ -137,6 +137,7 @@ import {
   listPermissions,
   fetchRolePermissions,
   assignRolePermissions,
+  fetchRoleDataScope,
   updateRoleDataScope,
 } from '@/api/rbac'
 import { getProjects } from '@/api/project'
@@ -394,8 +395,7 @@ async function onConfirmPermissions(): Promise<void> {
 }
 
 /**
- * 打开数据范围设置对话框,加载项目列表供选择
- * 注:后端未提供"查询角色数据范围"的 GET 接口,此处展示空表单供设置
+ * 打开数据范围设置对话框,并同时加载当前值和项目选项。
  * @param row - 角色行数据
  * @returns void
  */
@@ -403,14 +403,19 @@ async function onSetDataScope(row: Role): Promise<void> {
   currentRole.value = row
   scopeDialogVisible.value = true
   scopeLoading.value = true
-  scopeForm.scope_type = 'project_own'
-  scopeForm.project_ids = []
   try {
-    // 加载项目选项(仅加载前 200 条用于选择)
-    if (projectOptions.value.length === 0) {
-      const page = await getProjects({ page: 1, page_size: 200 })
-      projectOptions.value = page.items
-    }
+    const [scope, projectPage] = await Promise.all([
+      fetchRoleDataScope(row.id),
+      projectOptions.value.length === 0
+        ? getProjects({ page: 1, page_size: 200 })
+        : Promise.resolve(null),
+    ])
+    scopeForm.scope_type = scope?.scope_type ?? 'project_own'
+    scopeForm.project_ids = [...(scope?.project_ids ?? [])]
+    if (projectPage) projectOptions.value = projectPage.items
+  } catch {
+    scopeDialogVisible.value = false
+    ElMessage.error('数据范围加载失败')
   } finally {
     scopeLoading.value = false
   }

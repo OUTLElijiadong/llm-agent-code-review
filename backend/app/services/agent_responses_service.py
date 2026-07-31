@@ -32,12 +32,25 @@ from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
 from app.services import (
     admin_agent_tools,
+    admin_capability_service,
     agent_governance_service,
     ops_service,
     policy_engine,
     published_agent_tools,
     rbac_service,
     tool_gateway,
+)
+from app.services.admin_capability_registry import (
+    CAPABILITY_BY_CODE,
+    describe_capabilities,
+    discovery_tool_schema,
+    execution_tool_schema,
+)
+from app.services.admin_capability_registry import (
+    CRITICAL as CAPABILITY_CRITICAL,
+)
+from app.services.admin_capability_registry import (
+    READ as CAPABILITY_READ,
 )
 from app.services.deepseek_responses_runtime import (
     COMPLETED,
@@ -93,6 +106,8 @@ def _is_admin_actor(db: Session, user: User) -> bool:
     if str(getattr(user, "role", "")) in {"admin", "super_admin"}:
         return True
     return rbac_service.is_admin_user(db, int(user.id))
+
+
 _OPS_READ_ONLY = ops_service.READ_ONLY_ACTIONS
 _TOOL_NAME_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _SENSITIVE_EVENT_KEY = re.compile(
@@ -350,6 +365,9 @@ class PrismToolExecutor:
                 }
             )
 
+        if is_admin:
+            tools.extend((discovery_tool_schema(), execution_tool_schema()))
+
         for schema in SkillRegistry.instance().list_tools(invocable_only=True):
             function = schema.get("function") if isinstance(schema, Mapping) else None
             if not isinstance(function, Mapping):
@@ -398,6 +416,12 @@ class PrismToolExecutor:
                 call,
                 lambda: self._mcp.call(call.name, call.arguments),
             )
+
+        if call.name == "admin_describe_capabilities":
+            return await self._describe_admin_capabilities(call)
+
+        if call.name == "admin_execute_capability":
+            return await self._execute_admin_capability(call, approved=approved)
 
         if call.name in self._skill_bindings:
             if not approved:
@@ -649,11 +673,7 @@ class PrismToolExecutor:
         """持久化占位后至多执行一次；不确定结果绝不自动重复副作用。"""
         await self._emit_tool_event("response.tool.started", call)
         request_id = _request_id(self._run_id, call.call_id)
-        row = (
-            self._db.query(AgentToolExecution)
-            .filter(AgentToolExecution.request_id == request_id)
-            .first()
-        )
+        row = self._db.query(AgentToolExecution).filter(AgentToolExecution.request_id == request_id).first()
         if row is not None:
             recorded = self._recorded_execution(row)
             await self._emit_tool_result(call, recorded, cached=True)
@@ -673,11 +693,7 @@ class PrismToolExecutor:
             self._db.commit()
         except IntegrityError:
             self._db.rollback()
-            existing = (
-                self._db.query(AgentToolExecution)
-                .filter(AgentToolExecution.request_id == request_id)
-                .first()
-            )
+            existing = self._db.query(AgentToolExecution).filter(AgentToolExecution.request_id == request_id).first()
             if existing is None:
                 raise
             recorded = self._recorded_execution(existing)
@@ -689,9 +705,7 @@ class PrismToolExecutor:
             if inspect.isawaitable(raw_result):
                 raw_result = await raw_result
             result = (
-                raw_result
-                if isinstance(raw_result, ToolExecutionResult)
-                else ToolExecutionResult.success(raw_result)
+                raw_result if isinstance(raw_result, ToolExecutionResult) else ToolExecutionResult.success(raw_result)
             )
         except Exception as exc:  # noqa: BLE001 - 错误也必须进入幂等结果账本
             result = ToolExecutionResult.failure(str(exc))
@@ -779,11 +793,7 @@ class PrismToolExecutor:
         row: Optional[ApprovalItem] = None,
     ) -> Dict[str, Any]:
         request_id = _request_id(self._run_id, call.call_id)
-        approval = row or (
-            self._db.query(ApprovalItem)
-            .filter(ApprovalItem.copilot_request_id == request_id)
-            .first()
-        )
+        approval = row or (self._db.query(ApprovalItem).filter(ApprovalItem.copilot_request_id == request_id).first())
         if approval is None:
             raise InvalidRunStateError("找不到与当前工具调用匹配的审批记录")
         try:
@@ -848,6 +858,105 @@ class PrismToolExecutor:
             )
         return self._agent_result(call, result)
 
+    async def _describe_admin_capabilities(self, call: ToolCall) -> ToolExecutionResult:
+        if not self._is_admin:
+            return await self._failed_attempt(call, "仅管理员可查询后台能力契约")
+        unknown = sorted(set(call.arguments) - {"page", "query"})
+        if unknown:
+            return await self._failed_attempt(call, f"能力查询不接受参数: {', '.join(unknown)}")
+        page = str(call.arguments.get("page") or "")
+        query = str(call.arguments.get("query") or "")
+
+        async def discover() -> ToolExecutionResult:
+            from app.main import app
+
+            rows = describe_capabilities(app.openapi(), page=page, query=query)
+            if not rows:
+                return ToolExecutionResult.failure("没有找到匹配的管理能力")
+            return ToolExecutionResult.success({"count": len(rows), "items": rows})
+
+        return await self._execute_once(call, discover)
+
+    async def _execute_admin_capability(
+        self,
+        call: ToolCall,
+        *,
+        approved: bool,
+    ) -> ToolExecutionResult:
+        if not self._is_admin:
+            return await self._failed_attempt(call, "仅管理员可执行后台能力")
+        unknown = sorted(set(call.arguments) - {"capability", "params"})
+        if unknown:
+            return await self._failed_attempt(call, f"管理能力工具不接受参数: {', '.join(unknown)}")
+        capability = str(call.arguments.get("capability") or "")
+        spec = CAPABILITY_BY_CODE.get(capability)
+        if spec is None:
+            return await self._failed_attempt(call, f"未注册的管理能力: {capability}")
+        raw_params = call.arguments.get("params", {})
+        if not isinstance(raw_params, Mapping):
+            return await self._failed_attempt(call, "管理能力 params 必须是 JSON object")
+        params = dict(raw_params)
+        legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
+        if (
+            spec.permission
+            and not legacy_admin
+            and not rbac_service.check_permission(
+                self._db,
+                self._user.id,
+                spec.permission,
+            )
+        ):
+            return await self._failed_attempt(call, f"当前管理员缺少权限: {spec.permission}")
+
+        from app.main import app
+
+        try:
+            admin_capability_service.prepare_request(spec, params, app.openapi())
+        except admin_capability_service.AdminCapabilityError as exc:
+            return await self._failed_attempt(call, str(exc))
+
+        policy = tool_gateway.authorize(
+            self._db,
+            agent_code="manager",
+            tool_code="admin_execute_capability",
+            action=f"admin.{spec.code}",
+            resource=spec.page,
+            actor=self._user,
+            context={"copilot_request_id": _request_id(self._run_id, call.call_id), "surface": self._surface},
+        )
+        if policy.decision == policy_engine.DENY:
+            return await self._failed_attempt(call, f"策略阻断管理能力: {policy.reason}")
+
+        if spec.risk != CAPABILITY_READ and not approved:
+            return self._approval(
+                call,
+                danger=spec.risk == CAPABILITY_CRITICAL,
+                operation=spec.description,
+                impact=f"将通过真实业务 API 在 {spec.page} 执行「{spec.description}」",
+                preview={
+                    "capability": spec.code,
+                    "page": spec.page,
+                    "risk": spec.risk,
+                    "params": _redact_event_value(params),
+                },
+            )
+        if spec.risk != CAPABILITY_READ:
+            self._mark_approval(call, approve=True)
+
+        async def execute_capability() -> ToolExecutionResult:
+            try:
+                output = await admin_capability_service.execute_api(
+                    self._user,
+                    spec,
+                    params,
+                    request_id=_request_id(self._run_id, call.call_id),
+                )
+            except admin_capability_service.AdminCapabilityError as exc:
+                return ToolExecutionResult.failure(str(exc))
+            return ToolExecutionResult.success(output)
+
+        return await self._execute_once(call, execute_capability)
+
     async def _execute_operation(self, call: ToolCall, *, approved: bool) -> ToolExecutionResult:
         if not self._is_admin:
             return ToolExecutionResult.failure("仅管理员可执行运维工具")
@@ -859,11 +968,15 @@ class PrismToolExecutor:
         if not rbac_service.check_permission(self._db, self._user.id, PermissionCode.SERVER_OPS_VIEW):
             return ToolExecutionResult.failure("当前管理员没有服务器运维查看权限")
         if action not in _OPS_READ_ONLY and not rbac_service.check_permission(
-            self._db, self._user.id, PermissionCode.SERVER_OPS_EXECUTE,
+            self._db,
+            self._user.id,
+            PermissionCode.SERVER_OPS_EXECUTE,
         ):
             return ToolExecutionResult.failure("当前管理员没有服务器运维执行权限")
         if ops_service.ACTION_RISKS[action] == "critical" and not rbac_service.check_permission(
-            self._db, self._user.id, PermissionCode.SERVER_OPS_CRITICAL,
+            self._db,
+            self._user.id,
+            PermissionCode.SERVER_OPS_CRITICAL,
         ):
             return ToolExecutionResult.failure("当前管理员没有服务器关键运维权限")
         try:
@@ -891,6 +1004,7 @@ class PrismToolExecutor:
             )
         if action not in _OPS_READ_ONLY:
             self._mark_approval(call, approve=True)
+
         async def execute_operation() -> ToolExecutionResult:
             result = ops_service.execute(
                 self._db,
@@ -910,6 +1024,8 @@ class PrismToolExecutor:
     def _persisted_arguments(call: ToolCall) -> Dict[str, Any]:
         """运维写入内容和 SSH 公钥只保存摘要；其他工具保持原有参数。"""
         arguments = dict(call.arguments)
+        if call.name == "admin_execute_capability":
+            return dict(_redact_event_value(arguments))
         if call.name != "admin_execute_operation":
             return arguments
         action = str(arguments.get("action") or "")
@@ -1167,6 +1283,8 @@ def _instructions(surface: str) -> str:
         "展示动态候选，确认后才能调用 invoke_published_agent。"
         "涉及用户批量操作时必须先查询真实用户。用户说序号、第几条或范围而未明确是用户 ID 时，"
         "不得猜测；必须用 ask_user 区分列表序号与用户 ID，得到精确 user_ids 后再调用批量工具。"
+        "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
+        "再调用 admin_execute_capability；不得猜测能力编码或参数。"
         "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
         "写操作由系统暂停并展示审批；用户点击批准后系统会把原调用结果自动交还给你，不要要求用户重复发送指令。"
         "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。"
@@ -1191,7 +1309,7 @@ def _operations_tool_schema() -> Dict[str, Any]:
                     "additionalProperties": False,
                 }
                 for action in sorted(ops_service.ACTION_RISKS)
-            ]
+            ],
         },
     }
 

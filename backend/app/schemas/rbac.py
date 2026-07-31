@@ -3,6 +3,7 @@ RBAC 权限 Pydantic Schema
 
 用于角色/权限/菜单/数据范围管理的请求与响应模型。
 """
+
 from datetime import datetime
 from typing import Optional
 
@@ -199,6 +200,20 @@ class DataScopeIn(BaseModel):
     """
 
     role_id: int = Field(..., description="角色ID")
+    scope_type: str = Field(
+        ...,
+        pattern="^(all|project_own|project_member|custom)$",
+        description="范围类型",
+    )
+    project_ids: Optional[list[int]] = Field(
+        default=None,
+        description="自定义项目ID列表(custom类型时使用)",
+    )
+
+
+class DataScopeUpdateIn(BaseModel):
+    """按角色路径更新数据范围的请求体。"""
+
     scope_type: str = Field(
         ...,
         pattern="^(all|project_own|project_member|custom)$",

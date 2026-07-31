@@ -558,6 +558,156 @@ async def test_uncertain_tool_execution_is_never_retried(db, monkeypatch) -> Non
     assert orchestrator.calls == 0
 
 
+@pytest.mark.asyncio
+async def test_admin_capability_tools_are_admin_only_and_discover_exact_contracts(db, monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(service_module.rbac_service, "check_permission", lambda *_args, **_kwargs: False)
+    admin = SimpleNamespace(id=7, role="admin", token_version=0)
+    executor = PrismToolExecutor(
+        db,
+        admin,
+        surface="admin",
+        run_id="run_admin_capabilities",
+        mcp_provider=EmptyMcp(),
+    )
+
+    schemas = await executor.tool_schemas()
+    names = {schema["name"] for schema in schemas}
+    assert "admin_describe_capabilities" in names
+    assert "admin_execute_capability" in names
+
+    result = await executor.execute(
+        ToolCall(
+            "call_describe",
+            "admin_describe_capabilities",
+            {"page": "/admin/beta-codes"},
+            '{"page":"/admin/beta-codes"}',
+        )
+    )
+    assert result.status == "success"
+    assert {row["capability"] for row in result.output["items"]} == {
+        "beta_codes.list",
+        "beta_codes.generate",
+        "beta_codes.revoke",
+    }
+
+    monkeypatch.setattr(service_module.rbac_service, "is_admin_user", lambda *_args, **_kwargs: False)
+    ordinary = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=8, role="user"),
+        surface="user",
+        run_id="run_user_capabilities",
+        mcp_provider=EmptyMcp(),
+    )
+    ordinary_names = {schema["name"] for schema in await ordinary.tool_schemas()}
+    assert "admin_describe_capabilities" not in ordinary_names
+    denied = await ordinary.execute(
+        ToolCall(
+            "call_forge",
+            "admin_execute_capability",
+            {"capability": "users.list", "params": {}},
+            '{"capability":"users.list","params":{}}',
+        )
+    )
+    assert denied.status == "error"
+    assert "没有管理员工具权限" in denied.error
+
+
+@pytest.mark.asyncio
+async def test_admin_capability_read_executes_and_write_is_approved_once(db, monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        service_module.tool_gateway,
+        "authorize",
+        lambda *_args, **_kwargs: SimpleNamespace(decision=service_module.policy_engine.ALLOW, reason="allow"),
+    )
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_execute(_user, spec, params, *, request_id):
+        calls.append((spec.code, dict(params)))
+        return {"capability": spec.code, "request_id": request_id, "data": {"ok": True}}
+
+    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, role="admin", token_version=0),
+        surface="admin",
+        run_id="run_admin_execute",
+        mcp_provider=EmptyMcp(),
+    )
+
+    read_call = ToolCall(
+        "call_read",
+        "admin_execute_capability",
+        {"capability": "overview.security", "params": {}},
+        '{"capability":"overview.security","params":{}}',
+    )
+    read = await executor.execute(read_call)
+    assert read.status == "success"
+    assert calls == [("overview.security", {})]
+
+    write_params = {"name": "内测模板", "type": "custom", "content": "<h1>{{ title }}</h1>"}
+    write_call = ToolCall(
+        "call_write",
+        "admin_execute_capability",
+        {"capability": "report_templates.create", "params": write_params},
+        json.dumps({"capability": "report_templates.create", "params": write_params}, ensure_ascii=False),
+    )
+    paused = await executor.execute(write_call)
+    assert paused.status == "approval_required"
+    assert paused.danger is False
+    assert calls == [("overview.security", {})]
+
+    completed = await executor.execute(write_call, approved=True)
+    assert completed.status == "success"
+    assert calls == [("overview.security", {}), ("report_templates.create", write_params)]
+    repeated = await executor.execute(write_call, approved=True)
+    assert repeated.output == completed.output
+    assert calls == [("overview.security", {}), ("report_templates.create", write_params)]
+
+
+@pytest.mark.asyncio
+async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger(db, monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        service_module.tool_gateway,
+        "authorize",
+        lambda *_args, **_kwargs: SimpleNamespace(decision=service_module.policy_engine.ALLOW, reason="allow"),
+    )
+
+    async def fake_execute(_user, spec, _params, *, request_id):
+        return {"capability": spec.code, "request_id": request_id, "data": {"updated": True}}
+
+    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, role="admin", token_version=0),
+        surface="admin",
+        run_id="run_admin_secret",
+        mcp_provider=EmptyMcp(),
+    )
+    secret = "sk-secret-value-12345678"
+    call = ToolCall(
+        "call_secret",
+        "admin_execute_capability",
+        {"capability": "llm.config.update", "params": {"active": True, "api_key": secret}},
+        "{}",
+    )
+
+    paused = await executor.execute(call)
+    assert paused.status == "approval_required"
+    assert paused.danger is True
+    approval = db.get(ApprovalItem, paused.approval_id)
+    assert secret not in approval.request_json
+    assert "[REDACTED]" in approval.request_json
+
+    completed = await executor.execute(call, approved=True)
+    assert completed.status == "success"
+    execution = db.query(AgentToolExecution).filter_by(run_id="run_admin_secret", call_id="call_secret").one()
+    assert secret not in execution.arguments_json
+    assert "[REDACTED]" in execution.arguments_json
+
+
 async def _collect_stream(response: Any) -> str:
     chunks: list[str] = []
     async for chunk in response.body_iterator:
@@ -610,33 +760,41 @@ async def test_api_stream_never_exposes_reasoning_or_raw_function_arguments(monk
 
         async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
             await event_sink({"type": "response.reasoning_text.delta", "delta": "reasoning-marker"})
-            await event_sink({
-                "type": "response.function_call_arguments.delta",
-                "delta": '{"api_key":"argument-secret-marker"}',
-            })
-            await event_sink({
-                "type": "response.output_item.done",
-                "item": {
-                    "type": "function_call",
-                    "name": "tool",
-                    "arguments": '{"authorization":"output-secret-marker"}',
-                },
-            })
-            await event_sink({
-                "type": "response.tool.started",
-                "call_id": "call-sensitive",
-                "tool_name": "mcp_sensitive_tool",
-                "arguments": {
-                    "payload": '{"api_key":"nested-stream-secret-marker","query":"visible"}',
-                    "reasoning": "tool-reasoning-secret-marker",
-                },
-            })
-            await event_sink({
-                "type": "response.tool.failed",
-                "call_id": "call-sensitive",
-                "tool_name": "mcp_sensitive_tool",
-                "error": "Authorization: Bearer stream-error-secret-marker",
-            })
+            await event_sink(
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "delta": '{"api_key":"argument-secret-marker"}',
+                }
+            )
+            await event_sink(
+                {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "function_call",
+                        "name": "tool",
+                        "arguments": '{"authorization":"output-secret-marker"}',
+                    },
+                }
+            )
+            await event_sink(
+                {
+                    "type": "response.tool.started",
+                    "call_id": "call-sensitive",
+                    "tool_name": "mcp_sensitive_tool",
+                    "arguments": {
+                        "payload": '{"api_key":"nested-stream-secret-marker","query":"visible"}',
+                        "reasoning": "tool-reasoning-secret-marker",
+                    },
+                }
+            )
+            await event_sink(
+                {
+                    "type": "response.tool.failed",
+                    "call_id": "call-sensitive",
+                    "tool_name": "mcp_sensitive_tool",
+                    "error": "Authorization: Bearer stream-error-secret-marker",
+                }
+            )
             await event_sink({"type": "response.output_text.delta", "delta": "用户可见结果"})
             return RuntimeResult(
                 run_id=run_id,

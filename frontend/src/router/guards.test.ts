@@ -122,20 +122,25 @@ describe('router guards', () => {
     expect(auth.user.logout).toHaveBeenCalledOnce()
   })
 
-  it('enforces legacy role metadata while allowing admins into authenticated main pages', async () => {
-    /** 验证历史 role 限制和管理员主站超级用户语义。 */
+  it('enforces legacy role metadata for users while allowing admins to bypass it', async () => {
+    /** 验证普通用户受历史 role 限制，RBAC 管理员保持超级用户语义。 */
     const { before } = installHarness()
     auth.user.token = 'token'
     auth.user.profile = { id: 1, role: 'admin' }
     auth.user.isAdmin.mockReturnValue(true)
 
-    expect(await before(route('/admin/users', { role: 'reviewer' }), route('/'))).toEqual({ path: '/403' })
+    expect(await before(route('/admin/users', { role: 'reviewer' }), route('/'))).toBe(true)
     expect(await before(route('/projects'), route('/'))).toBe(true)
     expect(await before(route('/code'), route('/'))).toBe(true)
     expect(await before(route('/rules'), route('/'))).toBe(true)
     expect(await before(route('/knowledge'), route('/'))).toBe(true)
     expect(await before(route('/profile/personalization'), route('/'))).toBe(true)
     expect(await before(route('/security'), route('/'))).toBe(true)
+
+    auth.user.profile = { id: 2, role: 'user' }
+    auth.user.isAdmin.mockReturnValue(false)
+    auth.user.hasRole.mockReturnValue(false)
+    expect(await before(route('/admin/users', { role: 'reviewer' }), route('/'))).toEqual({ path: '/403' })
   })
 
   it('requires any configured role and permission while allowing valid access', async () => {

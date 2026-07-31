@@ -1,4 +1,5 @@
 """Agent 治理画像服务。"""
+
 import json
 from datetime import datetime, timezone
 from typing import Optional, Union
@@ -23,10 +24,29 @@ from app.models.agent_governance import (
 )
 
 _DEFAULT_GOVERNANCE_AGENTS = (
-    ("manager", "管理Agent", "治理 Agent 生命周期、配置、版本和策略", "governance", ("agent_management",)),
     (
-        "operations", "全服管理Agent", "宿主机全域巡检、受批准变更、验证与回滚", "operations",
-        ("host_inspection", "systemd", "container_operations", "file_management", "package_management", "firewall", "account_keys", "backup_restore", "incident_response"),  # noqa: E501
+        "manager",
+        "管理Agent",
+        "管理全部管理员页面、Agent 生命周期、配置、版本和策略",
+        "governance",
+        ("admin_capabilities", "agent_management"),
+    ),
+    (
+        "operations",
+        "全服管理Agent",
+        "宿主机全域巡检、受批准变更、验证与回滚",
+        "operations",
+        (
+            "host_inspection",
+            "systemd",
+            "container_operations",
+            "file_management",
+            "package_management",
+            "firewall",
+            "account_keys",
+            "backup_restore",
+            "incident_response",
+        ),  # noqa: E501
     ),
     ("approval", "审批Agent", "低风险自动审批，高风险升级", "governance", ("approval",)),
     ("policy", "安全策略Agent", "动作风险评分与策略决策", "security", ("policy",)),
@@ -38,27 +58,45 @@ _DEFAULT_GOVERNANCE_AGENTS = (
     ("alert", "告警Agent", "异常告警和升级通知", "operations", ("alert",)),
     ("test_verifier", "测试验证Agent", "执行回归验证并归档可复核结果", "quality", ("test", "verification")),
     (
-        "quality_evaluator", "质量评估Agent", "汇总代码质量信号并评估改进收益", "quality",
+        "quality_evaluator",
+        "质量评估Agent",
+        "汇总代码质量信号并评估改进收益",
+        "quality",
         ("quality_evaluation", "reflection"),
     ),
     (
-        "cost_controller", "成本控制Agent", "分析模型消耗、预算和异常调用", "operations",
+        "cost_controller",
+        "成本控制Agent",
+        "分析模型消耗、预算和异常调用",
+        "operations",
         ("cost_analysis", "budget_guard"),
     ),
     (
-        "model_evaluator", "模型评测Agent", "运行黄金集并比较模型表现", "quality",
+        "model_evaluator",
+        "模型评测Agent",
+        "运行黄金集并比较模型表现",
+        "quality",
         ("model_evaluation", "benchmark"),
     ),
     (
-        "report_verifier", "报告校验Agent", "校验审查报告完整性和证据引用", "quality",
+        "report_verifier",
+        "报告校验Agent",
+        "校验审查报告完整性和证据引用",
+        "quality",
         ("report_validation",),
     ),
     (
-        "data_integrity", "数据一致性Agent", "核验任务、问题、审计和指标之间的关联", "governance",
+        "data_integrity",
+        "数据一致性Agent",
+        "核验任务、问题、审计和指标之间的关联",
+        "governance",
         ("data_validation", "audit"),
     ),
     (
-        "incident_responder", "事件响应Agent", "处置告警并生成恢复与复盘记录", "operations",
+        "incident_responder",
+        "事件响应Agent",
+        "处置告警并生成恢复与复盘记录",
+        "operations",
         ("incident_response", "alert"),
     ),
 )
@@ -76,29 +114,33 @@ def sync_profiles(db: Session) -> list[AgentProfile]:
     registry_items = AgentRegistry.instance().list_runtime()
     desired: list[dict] = []
     for item in registry_items:
-        desired.append({
-            "code": item["code"],
-            "name": item["name"],
-            "description": item.get("description", ""),
-            "category": item.get("category", "general"),
-            "status": item.get("status", "idle"),
-            "model": item.get("model", ""),
-            "icon": item.get("icon", "base"),
-            "color": item.get("color", "#5B58E8"),
-            "skills": item.get("skills", []),
-        })
+        desired.append(
+            {
+                "code": item["code"],
+                "name": item["name"],
+                "description": item.get("description", ""),
+                "category": item.get("category", "general"),
+                "status": item.get("status", "idle"),
+                "model": item.get("model", ""),
+                "icon": item.get("icon", "base"),
+                "color": item.get("color", "#5B58E8"),
+                "skills": item.get("skills", []),
+            }
+        )
     for code, name, desc, category, skills in _DEFAULT_GOVERNANCE_AGENTS:
-        desired.append({
-            "code": code,
-            "name": name,
-            "description": desc,
-            "category": category,
-            "status": "idle",
-            "model": "",
-            "icon": code,
-            "color": "#2A9D8F",
-            "skills": list(skills),
-        })
+        desired.append(
+            {
+                "code": code,
+                "name": name,
+                "description": desc,
+                "category": category,
+                "status": "idle",
+                "model": "",
+                "icon": code,
+                "color": "#2A9D8F",
+                "skills": list(skills),
+            }
+        )
 
     # 同一 Agent 可能同时出现在运行时注册表和治理默认表。按编码合并，
     # 后写入的治理元数据覆盖运行时展示字段，避免单事务重复插入触发唯一索引。
@@ -112,11 +154,7 @@ def sync_profiles(db: Session) -> list[AgentProfile]:
         profile.name = item["name"]
         profile.description = item.get("description", "")
         profile.category = item.get("category", "general")
-        profile.status = (
-            "disabled"
-            if profile.is_enabled == 0
-            else item.get("status", profile.status or "idle")
-        )
+        profile.status = "disabled" if profile.is_enabled == 0 else item.get("status", profile.status or "idle")
         profile.model = item.get("model") or profile.model
         profile.icon = item.get("icon", "base")
         profile.color = item.get("color", "#5B58E8")
@@ -203,10 +241,12 @@ def profile_to_dict(db: Session, profile: AgentProfile) -> dict:
     """
     skills = [
         row.skill_name
-        for row in db.query(AgentSkillBinding).filter(
+        for row in db.query(AgentSkillBinding)
+        .filter(
             AgentSkillBinding.agent_code == profile.code,
             AgentSkillBinding.enabled == 1,
-        ).all()
+        )
+        .all()
     ]
     return {
         "code": profile.code,
@@ -269,11 +309,7 @@ def governance_overview(db: Session) -> dict:
         .all()
     )
     recent_alerts = (
-        db.query(AgentAlert)
-        .filter(AgentAlert.status == "open")
-        .order_by(AgentAlert.id.desc())
-        .limit(5)
-        .all()
+        db.query(AgentAlert).filter(AgentAlert.status == "open").order_by(AgentAlert.id.desc()).limit(5).all()
     )
     return {
         "agents_total": agents_total,
@@ -281,9 +317,7 @@ def governance_overview(db: Session) -> dict:
         "approvals_pending": db.query(ApprovalItem).filter(ApprovalItem.status == "pending").count(),
         "approvals_auto_today": db.query(ApprovalItem).filter(ApprovalItem.status == "auto_approved").count(),
         "policy_decisions_today": (
-            db.query(PolicyDecisionLog)
-            .filter(func.date(PolicyDecisionLog.create_time) == today)
-            .count()
+            db.query(PolicyDecisionLog).filter(func.date(PolicyDecisionLog.create_time) == today).count()
         ),
         "tool_calls_today": db.query(ToolCallLog).filter(func.date(ToolCallLog.create_time) == today).count(),
         "alerts_open": db.query(AgentAlert).filter(AgentAlert.status == "open").count(),
@@ -310,23 +344,26 @@ def _sync_skills(db: Session, agent_code: str, skills: list[str]) -> None:
     # v3.0 起 AgentRegistry 的 skills 已升级为结构化 list[dict]
     # (形如 {"name": "orchestrator.self_improve", ...})。这里兼容性地
     # 归一化为技能名字符串,避免对 dict 取 set 触发 unhashable type 报错。
-    normalized = [
-        (item.get("name") if isinstance(item, dict) else item)
-        for item in (skills or [])
-    ]
+    normalized = [(item.get("name") if isinstance(item, dict) else item) for item in (skills or [])]
     base_skills = {name for name in normalized if name}
     base_skills.update({"selfimprovingagent", "reflection"})
     for skill in sorted(base_skills):
-        existing = db.query(AgentSkillBinding).filter(
-            AgentSkillBinding.agent_code == agent_code,
-            AgentSkillBinding.skill_code == skill,
-        ).first()
+        existing = (
+            db.query(AgentSkillBinding)
+            .filter(
+                AgentSkillBinding.agent_code == agent_code,
+                AgentSkillBinding.skill_code == skill,
+            )
+            .first()
+        )
         if existing:
             continue
-        db.add(AgentSkillBinding(
-            agent_code=agent_code,
-            skill_code=skill,
-            skill_name=skill,
-            version="1.0.0",
-            enabled=1,
-        ))
+        db.add(
+            AgentSkillBinding(
+                agent_code=agent_code,
+                skill_code=skill,
+                skill_name=skill,
+                version="1.0.0",
+                enabled=1,
+            )
+        )

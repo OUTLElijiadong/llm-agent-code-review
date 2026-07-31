@@ -143,6 +143,11 @@ export function updateRoleDataScope(roleId: number, body: DataScopeUpdateIn): Pr
   return put<DataScope>(`${BASE}/roles/${roleId}/data-scope`, body)
 }
 
+/** 查询角色已保存的数据范围，未配置时返回 null。 */
+export function fetchRoleDataScope(roleId: number): Promise<DataScope | null> {
+  return get<DataScope | null>(`${BASE}/roles/${roleId}/data-scope`)
+}
+
 /* ------------------------------------------------------------------ */
 /* 权限点 / 菜单 / 按角色查用户                                        */
 /* ------------------------------------------------------------------ */

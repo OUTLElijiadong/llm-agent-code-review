@@ -10,9 +10,10 @@ RBAC 业务服务层
 3. 角色分配为覆盖式:assign_roles_to_user 先清除旧关联再插入新关联
 4. 兼容旧版 User.role 字段:admin/super_admin 文本角色同样享受绕过
 """
+
 from __future__ import annotations
 
-from typing import List, Set
+from typing import List, Optional, Set
 
 from sqlalchemy.orm import Session
 
@@ -176,20 +177,12 @@ def get_user_menus(db: Session, user_id: int) -> List[Menu]:
     Returns:
         List[Menu]: 可见菜单 ORM 对象列表,按 sort 升序
     """
-    menus = (
-        db.query(Menu)
-        .filter(Menu.visible == 1)
-        .order_by(Menu.sort)
-        .all()
-    )
+    menus = db.query(Menu).filter(Menu.visible == 1).order_by(Menu.sort).all()
     if is_admin_user(db, user_id):
         return menus
 
     perm_codes = get_user_permissions(db, user_id)
-    return [
-        m for m in menus
-        if not m.permission_code or m.permission_code in perm_codes
-    ]
+    return [m for m in menus if not m.permission_code or m.permission_code in perm_codes]
 
 
 def get_user_data_scope(db: Session, user_id: int) -> DataScope:
@@ -414,6 +407,14 @@ def update_data_scope(db: Session, role_id: int, scope_in: DataScopeIn) -> DataS
     db.commit()
     db.refresh(scope)
     return scope
+
+
+def get_role_data_scope(db: Session, role_id: int) -> Optional[DataScope]:
+    """查询单个角色当前数据范围，不存在时返回 ``None``。"""
+
+    if db.get(Role, role_id) is None:
+        raise NotFoundError("角色不存在", code=40400)
+    return db.query(DataScope).filter(DataScope.role_id == role_id).first()
 
 
 def get_users_by_role(db: Session, role_code: str) -> List[User]:

@@ -1,6 +1,7 @@
 """
 FastAPI依赖注入模块: 用户认证与权限校验
 """
+
 from typing import Optional
 
 from fastapi import Depends, Header
@@ -50,7 +51,10 @@ def get_current_user(
     return user
 
 
-def require_admin(user: User = Depends(get_current_user)) -> User:
+def require_admin(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
     """校验当前用户是否为管理员角色
 
     Args:
@@ -62,7 +66,9 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     Raises:
         ForbiddenError: 非管理员用户
     """
-    if user.role != "admin":
+    from app.services.rbac_service import is_admin_user
+
+    if user.role not in {"admin", "super_admin"} and not is_admin_user(db, user.id):
         raise ForbiddenError("需要管理员权限", code=40300)
     return user
 
