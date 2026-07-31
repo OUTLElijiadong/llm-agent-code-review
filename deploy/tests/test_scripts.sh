@@ -311,6 +311,7 @@ verify_systemd_templates() {
   assert_contains systemd/prism-ops-check.service.in 'ExecStart=@DEPLOY_DIR@/ops-check.sh'
   assert_contains systemd/prism-ops-executor.service.in 'Group=prism-ops'
   assert_contains systemd/prism-ops-executor.service.in 'RuntimeDirectoryMode=0770'
+  assert_contains systemd/prism-ops-executor.service.in 'RuntimeDirectoryPreserve=restart'
   assert_contains systemd/prism-ops-executor.service.in 'UMask=0007'
   assert_contains systemd/install.sh 'groupadd --system --gid 991 prism-ops'
   assert_contains systemd/prism-backup.timer 'OnCalendar=*-*-* 02:15:00'
