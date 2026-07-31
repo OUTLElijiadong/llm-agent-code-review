@@ -45,6 +45,9 @@ ENV VIRTUAL_ENV=/opt/venv \
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=prism:prism . .
 
+# WORKDIR 创建的 /app 仍属于 root；运行用户需要预先建好文件日志目录。
+RUN install -d -o prism -g prism -m 0750 /app/logs
+
 USER prism
 
 EXPOSE 8000
