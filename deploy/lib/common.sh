@@ -88,7 +88,8 @@ sha256_file() {
 latest_file_by_mtime() {
   local directory="$1"
   local pattern="$2"
-  local candidate candidate_mtime latest latest_mtime
+  local candidate candidate_mtime latest latest_mtime resolved_directory
+  resolved_directory="$(cd "$directory" 2>/dev/null && pwd -P)" || return 1
   latest=""
   latest_mtime=-1
   while IFS= read -r candidate; do
@@ -98,7 +99,7 @@ latest_file_by_mtime() {
       latest="$candidate"
       latest_mtime="$candidate_mtime"
     fi
-  done < <(find "$directory" -maxdepth 1 -type f -name "$pattern" -print 2>/dev/null)
+  done < <(find "$resolved_directory" -maxdepth 1 -type f -name "$pattern" -print 2>/dev/null)
   [[ -n "$latest" ]] || return 1
   printf '%s\n' "$latest"
 }
