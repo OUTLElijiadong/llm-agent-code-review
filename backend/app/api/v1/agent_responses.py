@@ -74,6 +74,7 @@ class AgentResponsesRequest(BaseModel):
     run_id: str = Field(default="", max_length=80)
     call_id: str = Field(default="", max_length=160)
     answer: str = Field(default="", max_length=20_000)
+    confirmation: str = Field(default="", max_length=20)
 
     @field_validator("session_id")
     @classmethod
@@ -350,7 +351,11 @@ def _public_pending_event(run_id: str, status: str, value: Any) -> Optional[dict
     }
 
 
-def _public_stream_event(event: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+def _public_stream_event(
+    event: Mapping[str, Any],
+    *,
+    allow_sensitive: bool = False,
+) -> Optional[dict[str, Any]]:
     """内部 Agent 流只暴露 UI 需要的协议事件，不透传 reasoning 或原始工具参数。"""
     event_type = str(event.get("type") or "")
     if event_type == "response.output_text.delta":
@@ -408,6 +413,27 @@ def _public_stream_event(event: Mapping[str, Any]) -> Optional[dict[str, Any]]:
             "options": redact_agent_event_value(event.get("options")),
             "allow_free_text": bool(event.get("allow_free_text", True)),
         }
+    if event_type == "response.sensitive.result":
+        if not allow_sensitive:
+            return None
+        capability = str(event.get("capability") or "")
+        if capability not in {"beta_codes.generate", "users.reset_password"}:
+            return None
+        raw_values = event.get("values")
+        if not isinstance(raw_values, list):
+            return None
+        values = [str(value)[:256] for value in raw_values[:100] if isinstance(value, str) and value]
+        if not values:
+            return None
+        return {
+            "type": event_type,
+            "run_id": str(event.get("run_id") or ""),
+            "call_id": str(event.get("call_id") or ""),
+            "capability": capability,
+            "title": _public_text(event.get("title")),
+            "notice": _public_text(event.get("notice")),
+            "values": values,
+        }
     if event_type in _RAW_TERMINAL_EVENTS:
         return {"type": event_type, "response": _public_response_envelope(event.get("response"))}
     if event_type == "error":
@@ -452,7 +478,10 @@ async def stream_agent_response(
             event_type = str(event.get("type") or "")
             if event_type in _RAW_TERMINAL_EVENTS or event_type == "response.created":
                 return
-            public_event = _public_stream_event(event)
+            public_event = _public_stream_event(
+                event,
+                allow_sensitive=payload.surface == "admin",
+            )
             if public_event is not None:
                 while not discard_events:
                     try:
@@ -470,13 +499,17 @@ async def stream_agent_response(
                 action=payload.action,
                 call_id=payload.call_id,
                 answer=payload.answer,
+                confirmation=payload.confirmation,
                 event_sink=sink,
             )
 
         def encode(event: Mapping[str, Any]) -> str:
             nonlocal sequence
             sequence += 1
-            public_event = _public_stream_event(event)
+            public_event = _public_stream_event(
+                event,
+                allow_sensitive=payload.surface == "admin",
+            )
             if public_event is None:
                 public_event = {
                     "type": "error",

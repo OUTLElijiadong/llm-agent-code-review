@@ -155,6 +155,23 @@ describe('streamResponses', () => {
     ])
   })
 
+  it('passes an ephemeral sensitive result through before the terminal event', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+      'data: {"type":"response.sensitive.result","run_id":"run-secret","call_id":"call-secret","capability":"beta_codes.generate","title":"内测码","notice":"刷新后不可恢复","values":["BETA-ONCE"]}\n\n',
+      'data: {"type":"response.completed","response":{"id":"run-secret","status":"completed"}}\n\n',
+    ])))
+    const events: ResponseStreamEvent[] = []
+
+    await streamResponses({}, { onEvent: (event) => events.push(event) }).done
+
+    expect(events).toHaveLength(2)
+    expect(events[0]).toMatchObject({
+      type: 'response.sensitive.result',
+      capability: 'beta_codes.generate',
+      values: ['BETA-ONCE'],
+    })
+  })
+
   it('uses a JSON message for HTTP errors', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ message: '请求参数不完整' }),

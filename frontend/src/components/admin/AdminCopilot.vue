@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   ChatDotRound,
   Close,
+  DocumentCopy,
   Promotion,
   WarningFilled,
 } from '@element-plus/icons-vue'
@@ -28,7 +29,9 @@ import {
 } from '@/utils/responsesTimeline'
 import type {
   ResponseApprovalRequiredEvent,
+  ResponseApprovalDecision,
   ResponseInputRequiredEvent,
+  ResponseSensitiveResultEvent,
   ResponsesStreamHandle,
   ResponseStreamEvent,
 } from '@/types/responses'
@@ -53,6 +56,7 @@ interface ChatEntry {
     status: 'pending' | 'submitting' | 'answered'
   }
   toolCalls?: ResponseToolCall[]
+  sensitiveResult?: ResponseSensitiveResultEvent
 }
 
 const ASSISTANT_NAME = 'Prism 管理副驾驶'
@@ -367,6 +371,13 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         if (!duplicate && target) {
           target.inputRequest = { ...event, answer: '', status: 'pending' }
         }
+      } else if (event.type === 'response.sensitive.result') {
+        showTyping.value = false
+        messages.value.push({
+          ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
+          sensitiveResult: event,
+        })
+        if (!visible.value) unreadAlerts.value += 1
       } else if (
         event.type === 'response.completed'
         || event.type === 'response.incomplete'
@@ -425,9 +436,10 @@ async function sendMessage(): Promise<void> {
   })
 }
 
-async function decideApproval(entry: ChatEntry, action: 'approve' | 'reject'): Promise<void> {
+async function decideApproval(entry: ChatEntry, decision: ResponseApprovalDecision): Promise<void> {
   const approval = entry.approval
   if (!approval || approval.status !== 'pending' || loading.value) return
+  const { action, confirmation = '' } = decision
   approval.status = 'submitting'
   setTimelineCallStatus(approval.call_id, action === 'approve' ? 'running' : 'rejected')
   const succeeded = await runResponse({
@@ -437,6 +449,7 @@ async function decideApproval(entry: ChatEntry, action: 'approve' | 'reject'): P
     messages: conversationHistory(),
     run_id: approval.run_id,
     call_id: approval.call_id,
+    confirmation,
   })
   approval.status = succeeded ? (action === 'approve' ? 'approved' : 'rejected') : 'pending'
   setTimelineCallStatus(
@@ -444,6 +457,17 @@ async function decideApproval(entry: ChatEntry, action: 'approve' | 'reject'): P
     succeeded ? (action === 'approve' ? 'completed' : 'rejected') : 'failed',
     succeeded ? undefined : '审批续跑失败，可重试',
   )
+}
+
+async function copySensitiveValues(entry: ChatEntry): Promise<void> {
+  const values = entry.sensitiveResult?.values ?? []
+  if (!values.length) return
+  try {
+    await navigator.clipboard.writeText(values.join('\n'))
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择文本')
+  }
 }
 
 async function submitInput(entry: ChatEntry, selectedAnswer?: string): Promise<void> {
@@ -566,6 +590,23 @@ onBeforeUnmount(() => {
             </div>
 
             <ResponseToolTimeline v-if="entry.toolCalls?.length" :calls="entry.toolCalls" />
+
+            <section v-if="entry.sensitiveResult" class="sensitive-result" aria-live="assertive">
+              <header>
+                <strong>{{ entry.sensitiveResult.title }}</strong>
+                <button
+                  type="button"
+                  class="sensitive-copy"
+                  aria-label="复制全部一次性结果"
+                  title="复制全部"
+                  @click="copySensitiveValues(entry)"
+                >
+                  <el-icon><DocumentCopy /></el-icon>
+                </button>
+              </header>
+              <code v-for="value in entry.sensitiveResult.values" :key="value">{{ value }}</code>
+              <p>{{ entry.sensitiveResult.notice }}</p>
+            </section>
 
             <div v-else-if="entry.payload.type === 'report'" class="report-card">
               <div class="card-title">{{ entry.payload.title }}</div>
@@ -823,6 +864,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .response-answer:focus { border-color: var(--agent-primary); }
 .response-answer-submit { margin-top: 9px; }
+
+.sensitive-result { width: 100%; margin-top: 8px; padding: 10px 11px; border: 1px solid #d88b22; border-radius: 7px; background: #fff8e8; }
+.sensitive-result header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; color: #8a4b08; }
+.sensitive-result code { display: block; margin-top: 5px; padding: 6px 7px; overflow-wrap: anywhere; border: 1px solid #ead6ad; border-radius: 5px; background: #fff; color: #442604; font-size: 11px; user-select: all; }
+.sensitive-result p { margin: 7px 0 0; color: #71552f; font-size: 10px; }
+.sensitive-copy { display: grid; flex: 0 0 30px; width: 30px; height: 30px; place-items: center; border: 1px solid #d9b36d; border-radius: 5px; color: #8a4b08; background: #fff; cursor: pointer; }
 
 .report-summary { margin: 0 0 10px; font-weight: 600; }
 .report-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid #edf0f2; border-radius: 6px; }

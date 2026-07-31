@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { WarningFilled } from '@element-plus/icons-vue'
 
-import type { ResponseApprovalRequiredEvent } from '@/types/responses'
+import type { ResponseApprovalDecision, ResponseApprovalRequiredEvent } from '@/types/responses'
 import { formatResponseValue } from '@/utils/responsesTimeline'
 
 type ApprovalStatus = 'pending' | 'submitting' | 'approved' | 'rejected'
@@ -12,7 +12,7 @@ const props = defineProps<{
   loading: boolean
 }>()
 
-const emit = defineEmits<{ decide: [action: 'approve' | 'reject'] }>()
+const emit = defineEmits<{ decide: [decision: ResponseApprovalDecision] }>()
 
 const dangerConfirmation = ref('')
 const argumentsText = computed(() => formatResponseValue(props.approval.arguments))
@@ -52,8 +52,13 @@ watch(() => props.approval.call_id, () => { dangerConfirmation.value = '' })
         placeholder="输入“确认执行”"
         :disabled="loading"
       >
-      <button class="response-approve primary-action" type="button" :disabled="!canApprove" @click="emit('decide', 'approve')">{{ approval.danger ? '执行' : '批准' }}</button>
-      <button class="response-reject secondary-action" type="button" :disabled="loading" @click="emit('decide', 'reject')">拒绝</button>
+      <button
+        class="response-approve primary-action"
+        type="button"
+        :disabled="!canApprove"
+        @click="emit('decide', { action: 'approve', confirmation: approval.danger ? dangerConfirmation : '' })"
+      >{{ approval.danger ? '执行' : '批准' }}</button>
+      <button class="response-reject secondary-action" type="button" :disabled="loading" @click="emit('decide', { action: 'reject' })">拒绝</button>
     </div>
     <div v-else class="response-control-result card-result" :class="approval.status">{{ resultLabel }}</div>
   </section>

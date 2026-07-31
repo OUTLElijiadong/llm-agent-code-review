@@ -20,6 +20,7 @@ const SUPPORTED_EVENTS = new Set<ResponseStreamEventType>([
   'response.tool.failed',
   'response.approval.required',
   'response.input.required',
+  'response.sensitive.result',
   'response.completed',
   'response.incomplete',
   'response.failed',

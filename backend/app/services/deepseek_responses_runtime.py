@@ -407,10 +407,24 @@ class DeepSeekResponsesRuntime:
                 )
             return await self._drive(checkpoint)
 
-    async def approve(self, run_id: str, tool_call_id: Optional[str] = None) -> RuntimeResult:
+    async def approve(
+        self,
+        run_id: str,
+        tool_call_id: Optional[str] = None,
+        *,
+        confirmation: str = "",
+    ) -> RuntimeResult:
         """批准暂停的精确调用，执行后自动继续模型工具循环。"""
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
+            preview = await self._require_checkpoint(run_id)
+            pending_preview = self._require_pending(
+                preview,
+                WAITING_APPROVAL,
+                tool_call_id,
+            )
+            if pending_preview.danger and confirmation != "确认执行":
+                raise InvalidRunStateError("高风险操作必须输入完整确认词“确认执行”")
             checkpoint = await self._claim_pending(
                 run_id,
                 expected_status=WAITING_APPROVAL,

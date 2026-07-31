@@ -953,9 +953,67 @@ class PrismToolExecutor:
                 )
             except admin_capability_service.AdminCapabilityError as exc:
                 return ToolExecutionResult.failure(str(exc))
-            return ToolExecutionResult.success(output)
+            protected_output = await self._protect_sensitive_capability_output(
+                call,
+                capability,
+                output,
+            )
+            return ToolExecutionResult.success(protected_output)
 
         return await self._execute_once(call, execute_capability)
+
+    async def _protect_sensitive_capability_output(
+        self,
+        call: ToolCall,
+        capability: str,
+        output: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """一次性凭据仅发往当前管理员连接，不进入模型或持久化账本。"""
+        protected = copy.deepcopy(dict(output))
+        data = protected.get("data")
+        if not isinstance(data, Mapping):
+            return protected
+
+        values: list[str] = []
+        title = ""
+        safe_data: dict[str, Any]
+        if capability == "beta_codes.generate":
+            raw_codes = data.get("codes")
+            if isinstance(raw_codes, Sequence) and not isinstance(raw_codes, (str, bytes, bytearray)):
+                values = [str(value) for value in raw_codes if isinstance(value, str) and value]
+            title = "新生成的内测码"
+            safe_data = {
+                "generated_count": len(values),
+                "items": copy.deepcopy(data.get("items")) if isinstance(data.get("items"), list) else [],
+                "one_time_result": True,
+            }
+        elif capability == "users.reset_password":
+            password = data.get("default_password")
+            if isinstance(password, str) and password:
+                values = [password]
+            title = "重置后的临时密码"
+            safe_data = {
+                "password_reset": bool(values),
+                "one_time_result": True,
+            }
+        else:
+            return protected
+
+        protected["data"] = safe_data
+        if values:
+            await _emit(
+                self._event_sink,
+                {
+                    "type": "response.sensitive.result",
+                    "run_id": self._run_id,
+                    "call_id": call.call_id,
+                    "capability": capability,
+                    "title": title,
+                    "notice": "仅当前页面会话显示，请立即妥善保存；刷新后无法恢复明文。",
+                    "values": values,
+                },
+            )
+        return protected
 
     async def _execute_operation(self, call: ToolCall, *, approved: bool) -> ToolExecutionResult:
         if not self._is_admin:
@@ -1082,6 +1140,7 @@ class AgentResponsesService:
         action: str,
         call_id: str = "",
         answer: str = "",
+        confirmation: str = "",
         event_sink: Optional[EventSink] = None,
     ) -> RuntimeResult:
         executor, runtime = await self._runtime(run_id, event_sink)
@@ -1089,7 +1148,11 @@ class AgentResponsesService:
         # schema 仍由 runtime 原样复用，这里只恢复执行器映射。
         await executor.tool_schemas()
         if action == "approve":
-            return await runtime.approve(run_id, call_id or None)
+            return await runtime.approve(
+                run_id,
+                call_id or None,
+                confirmation=confirmation,
+            )
         if action == "reject":
             return await runtime.reject(run_id, call_id or None, reason=answer or "用户拒绝执行该操作")
         if action == "answer":

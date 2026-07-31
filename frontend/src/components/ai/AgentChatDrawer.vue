@@ -39,6 +39,7 @@ import {
 } from '@/utils/responsesTimeline'
 import type {
   ResponseApprovalRequiredEvent,
+  ResponseApprovalDecision,
   ResponseInputRequiredEvent,
   ResponsesStreamHandle,
   ResponseStreamEvent,
@@ -677,10 +678,11 @@ async function sendMessage(): Promise<void> {
 
 async function decideApproval(
   message: ChatMessage,
-  action: 'approve' | 'reject',
+  decision: ResponseApprovalDecision,
 ): Promise<void> {
   const approval = message.approval
   if (!approval || approval.status !== 'pending' || loading.value) return
+  const { action, confirmation = '' } = decision
   approval.status = 'submitting'
   setTimelineCallStatus(approval.call_id, action === 'approve' ? 'running' : 'rejected')
   const succeeded = await runResponse({
@@ -690,6 +692,7 @@ async function decideApproval(
     messages: conversationHistory(),
     run_id: approval.run_id,
     call_id: approval.call_id,
+    confirmation,
   })
   approval.status = succeeded ? (action === 'approve' ? 'approved' : 'rejected') : 'pending'
   setTimelineCallStatus(

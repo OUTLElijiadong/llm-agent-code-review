@@ -270,7 +270,17 @@ async def test_approval_executes_exact_call_and_resumes_without_new_user_message
     }
     assert paused.events[-1]["type"] == "response.approval.required"
 
-    completed = await runtime.approve("run_approval", "call_delete")
+    with pytest.raises(InvalidRunStateError, match="确认执行"):
+        await runtime.approve("run_approval", "call_delete", confirmation="确认")
+    unchanged = await runtime.get_checkpoint("run_approval")
+    assert unchanged.status == WAITING_APPROVAL
+    assert unchanged.pending is not None
+
+    completed = await runtime.approve(
+        "run_approval",
+        "call_delete",
+        confirmation="确认执行",
+    )
 
     assert completed.status == "completed"
     assert completed.output_text == "项目已删除"
@@ -310,7 +320,11 @@ async def test_approval_resume_preserves_remaining_calls_from_same_response() ->
     runtime = _runtime(transport, executor)
 
     paused = await runtime.start("依次执行", run_id="run_middle_approval")
-    completed = await runtime.approve("run_middle_approval", "call_2")
+    completed = await runtime.approve(
+        "run_middle_approval",
+        "call_2",
+        confirmation="确认执行",
+    )
 
     assert paused.status == WAITING_APPROVAL
     assert completed.output_text == "顺序完成"
@@ -576,8 +590,8 @@ async def test_shared_store_allows_only_one_concurrent_approval_execution() -> N
     await runtime_a.start("执行一次", run_id="run_concurrent_approval")
 
     outcomes = await asyncio.gather(
-        runtime_a.approve("run_concurrent_approval", "call_once"),
-        runtime_b.approve("run_concurrent_approval", "call_once"),
+        runtime_a.approve("run_concurrent_approval", "call_once", confirmation="确认执行"),
+        runtime_b.approve("run_concurrent_approval", "call_once", confirmation="确认执行"),
         return_exceptions=True,
     )
 
@@ -631,7 +645,7 @@ async def test_concurrent_approve_and_reject_persists_only_winning_decision() ->
     await runtime_a.start("执行一次", run_id="run_approve_reject_race")
 
     outcomes = await asyncio.gather(
-        runtime_a.approve("run_approve_reject_race", "call_race"),
+        runtime_a.approve("run_approve_reject_race", "call_race", confirmation="确认执行"),
         runtime_b.reject("run_approve_reject_race", "call_race"),
         return_exceptions=True,
     )

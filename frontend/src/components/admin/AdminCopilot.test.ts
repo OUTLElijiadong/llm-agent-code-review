@@ -10,7 +10,7 @@ const streams = vi.hoisted(() => ({
   }>,
 }))
 
-const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn() }))
+const messages = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
@@ -26,6 +26,7 @@ function mountCopilot(): VueWrapper {
         'el-icon': { template: '<span class="el-icon-stub"><slot /></span>' },
         ChatDotRound: true,
         Close: true,
+        DocumentCopy: true,
         Promotion: true,
         WarningFilled: true,
       },
@@ -156,6 +157,7 @@ describe('AdminCopilot Responses stream', () => {
       action: 'approve',
       run_id: 'run-restored',
       call_id: 'call-restored',
+      confirmation: '确认执行',
       messages: [{ role: 'user', content: '删除两个测试用户' }],
     })
     await finish(0)
@@ -246,6 +248,7 @@ describe('AdminCopilot Responses stream', () => {
       type: 'response.approval.required',
       run_id: 'run-admin-approval',
       call_id: 'call-delete',
+      confirmation: '确认执行',
       tool_name: 'admin_delete_user',
       arguments: { user_id: 9 },
       operation: '删除用户',
@@ -282,6 +285,53 @@ describe('AdminCopilot Responses stream', () => {
     expect(wrapper.text()).toContain('操作已完成')
     expect(wrapper.text()).toContain('已批准')
     expect(wrapper.find('.response-tool-timeline').text()).toContain('已完成')
+  })
+
+  it('shows one-time sensitive results without sending them into the next model request', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await wrapper.find('textarea').setValue('生成一个内测码')
+    void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    emit(0, {
+      type: 'response.sensitive.result',
+      run_id: 'run-sensitive',
+      call_id: 'call-sensitive',
+      capability: 'beta_codes.generate',
+      title: '新生成的内测码',
+      notice: '仅当前页面会话显示，请立即妥善保存；刷新后无法恢复明文。',
+      values: ['BETA-ONE-TIME-123'],
+    })
+    emit(0, { type: 'response.output_text.delta', delta: '已生成 1 个内测码' })
+    emit(0, { type: 'response.completed', response: { id: 'run-sensitive' } })
+    await finish(0)
+
+    expect(wrapper.find('.sensitive-result').text()).toContain('BETA-ONE-TIME-123')
+    expect(wrapper.find('.sensitive-result').text()).toContain('刷新后无法恢复明文')
+    await wrapper.find('.sensitive-copy').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('BETA-ONE-TIME-123')
+    expect(messages.success).toHaveBeenCalledWith('已复制')
+
+    await wrapper.find('textarea').setValue('查询内测码列表')
+    void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    const serialized = JSON.stringify(streams.records[1].body)
+    expect(serialized).not.toContain('BETA-ONE-TIME-123')
+    expect(streams.records[1].body).toMatchObject({
+      messages: [
+        { role: 'user', content: '生成一个内测码' },
+        { role: 'assistant', content: '已生成 1 个内测码' },
+        { role: 'user', content: '查询内测码列表' },
+      ],
+    })
+    await finish(1)
   })
 
   it('streams function arguments and submits a structured option immediately', async () => {

@@ -10,6 +10,7 @@ export type ResponseStreamEventType =
   | 'response.tool.failed'
   | 'response.approval.required'
   | 'response.input.required'
+  | 'response.sensitive.result'
   | 'response.completed'
   | 'response.incomplete'
   | 'response.failed'
@@ -109,6 +110,21 @@ export interface ResponseInputRequiredEvent extends ResponseStreamEventBase {
   allow_free_text?: boolean
 }
 
+export interface ResponseSensitiveResultEvent extends ResponseStreamEventBase {
+  type: 'response.sensitive.result'
+  run_id: string
+  call_id: string
+  capability: 'beta_codes.generate' | 'users.reset_password'
+  title: string
+  notice: string
+  values: string[]
+}
+
+export interface ResponseApprovalDecision {
+  action: 'approve' | 'reject'
+  confirmation?: string
+}
+
 export interface ResponseTerminalEvent extends ResponseStreamEventBase {
   type: 'response.completed' | 'response.incomplete' | 'response.failed' | 'response.cancelled'
   response: Record<string, unknown>
@@ -134,6 +150,7 @@ export type ResponseStreamEvent =
   | ResponseToolLifecycleEvent
   | ResponseApprovalRequiredEvent
   | ResponseInputRequiredEvent
+  | ResponseSensitiveResultEvent
   | ResponseTerminalEvent
   | ResponseErrorEvent
 

@@ -708,6 +708,106 @@ async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger
     assert "[REDACTED]" in execution.arguments_json
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("capability", "params", "api_data", "secret", "safe_marker"),
+    [
+        (
+            "beta_codes.generate",
+            {"count": 1, "expiry_days": 7},
+            {"codes": ["BETA-ONE-TIME-SECRET"], "items": [{"id": 21}]},
+            "BETA-ONE-TIME-SECRET",
+            "generated_count",
+        ),
+        (
+            "users.reset_password",
+            {"user_id": 9},
+            {"default_password": "TEMP-PASSWORD-SECRET"},
+            "TEMP-PASSWORD-SECRET",
+            "password_reset",
+        ),
+    ],
+)
+async def test_one_time_admin_secret_only_uses_ephemeral_sse_event(
+    db,
+    monkeypatch,
+    capability,
+    params,
+    api_data,
+    secret,
+    safe_marker,
+) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        service_module.tool_gateway,
+        "authorize",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            decision=service_module.policy_engine.ALLOW,
+            reason="allow",
+        ),
+    )
+
+    async def fake_execute(_user, spec, _params, *, request_id):
+        return {
+            "capability": spec.code,
+            "request_id": request_id,
+            "data": api_data,
+        }
+
+    events: list[Mapping[str, Any]] = []
+    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, role="admin", token_version=0),
+        surface="admin",
+        run_id=f"run_{capability.replace('.', '_')}",
+        mcp_provider=EmptyMcp(),
+        event_sink=lambda event: events.append(event),
+    )
+    call = ToolCall(
+        f"call_{capability.replace('.', '_')}",
+        "admin_execute_capability",
+        {"capability": capability, "params": params},
+        "{}",
+    )
+
+    paused = await executor.execute(call)
+    assert paused.status == "approval_required"
+    completed = await executor.execute(call, approved=True)
+
+    serialized_result = json.dumps(completed.output, ensure_ascii=False)
+    ledger = db.query(AgentToolExecution).filter_by(call_id=call.call_id).one()
+    assert secret not in serialized_result
+    assert safe_marker in serialized_result
+    assert secret not in ledger.result_json
+    assert secret not in ledger.arguments_json
+    sensitive = [event for event in events if event.get("type") == "response.sensitive.result"]
+    assert len(sensitive) == 1
+    assert sensitive[0]["capability"] == capability
+    assert sensitive[0]["values"] == [secret]
+
+    repeated = await executor.execute(call, approved=True)
+    assert secret not in json.dumps(repeated.output, ensure_ascii=False)
+    assert len([event for event in events if event.get("type") == "response.sensitive.result"]) == 1
+
+
+def test_sensitive_result_event_is_admin_only_and_not_redacted_in_authorized_stream() -> None:
+    event = {
+        "type": "response.sensitive.result",
+        "run_id": "run_secret",
+        "call_id": "call_secret",
+        "capability": "beta_codes.generate",
+        "title": "新生成的内测码",
+        "notice": "仅本次显示",
+        "values": ["BETA-EPHEMERAL-ONLY"],
+    }
+
+    assert api_module._public_stream_event(event) is None
+    public = api_module._public_stream_event(event, allow_sensitive=True)
+    assert public is not None
+    assert public["values"] == ["BETA-EPHEMERAL-ONLY"]
+
+
 async def _collect_stream(response: Any) -> str:
     chunks: list[str] = []
     async for chunk in response.body_iterator:
