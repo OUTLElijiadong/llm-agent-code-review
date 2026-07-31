@@ -82,6 +82,27 @@ sha256_file() {
   fi
 }
 
+# 按文件修改时间选择目录中的最新文件，不依赖文件名字典序。
+# 参数: $1 目录；$2 find -name 模式。
+# 返回: stdout 输出最新文件；无匹配时返回 1。
+latest_file_by_mtime() {
+  local directory="$1"
+  local pattern="$2"
+  local candidate candidate_mtime latest latest_mtime
+  latest=""
+  latest_mtime=-1
+  while IFS= read -r candidate; do
+    candidate_mtime="$(stat -c '%Y' "$candidate" 2>/dev/null || stat -f '%m' "$candidate" 2>/dev/null || true)"
+    [[ "$candidate_mtime" =~ ^[0-9]+$ ]] || continue
+    if (( candidate_mtime > latest_mtime )); then
+      latest="$candidate"
+      latest_mtime="$candidate_mtime"
+    fi
+  done < <(find "$directory" -maxdepth 1 -type f -name "$pattern" -print 2>/dev/null)
+  [[ -n "$latest" ]] || return 1
+  printf '%s\n' "$latest"
+}
+
 # 获取 Compose 服务对应的容器 ID。
 # 参数: $1 为服务名。
 # 返回: stdout 输出容器 ID；服务不存在时返回 1。

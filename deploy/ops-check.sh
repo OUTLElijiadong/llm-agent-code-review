@@ -195,8 +195,7 @@ if [[ "$memory_used" =~ ^-?[0-9]+$ ]] && (( memory_used >= 0 && memory_used <= m
   memory_ok=true
 fi
 
-latest_backup="$(find "$backup_dir" -maxdepth 1 -type f -name 'code_review_*.sql.gz' -print \
-  2>/dev/null | sort | tail -n 1 || true)"
+latest_backup="$(latest_file_by_mtime "$backup_dir" 'code_review_*.sql.gz' || true)"
 backup_ok=false
 backup_age_hours=-1
 backup_name="none"

@@ -26,11 +26,11 @@ fi
 backup_dir="${BACKUP_DIR:-../backups}"
 backup_file="${1:-}"
 if [[ -z "$backup_file" ]]; then
-  backup_file="$(find "$backup_dir" -maxdepth 1 -type f -name 'code_review_*.sql.gz' -print 2>/dev/null | sort | tail -n 1)"
+  backup_file="$(latest_file_by_mtime "$backup_dir" 'code_review_*.sql.gz' || true)"
 fi
 [[ -n "$backup_file" && -f "$backup_file" ]] || fatal "找不到待验证备份"
 
-require_commands docker gzip awk date
+require_commands docker gzip awk date find stat
 validate_compose_environment
 wait_for_service_health mysql "${MYSQL_HEALTH_TIMEOUT:-120}" || fatal "MySQL 未就绪"
 gzip -t "$backup_file" || fatal "备份 gzip 完整性校验失败"

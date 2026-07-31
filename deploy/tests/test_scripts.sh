@@ -134,6 +134,7 @@ run_ops_check_simulation() {
   local backup_dir="$workspace/backups"
   local env_file="$workspace/ops.env"
   local backup_file="$backup_dir/code_review_20990101_000000.sql.gz"
+  local stale_lexical_backup="$backup_dir/code_review_pre018_20990101.sql.gz"
   local output_file="$workspace/ops.json"
   local error_file="$workspace/ops-error.json"
   local degraded_file="$workspace/ops-degraded.json"
@@ -142,6 +143,8 @@ run_ops_check_simulation() {
   mkdir -p "$backup_dir"
   printf '%s\n' 'APP_DOMAIN=example.test' > "$env_file"
   printf '%s\n' 'CREATE TABLE healthcheck(id INT);' | gzip -c > "$backup_file"
+  printf '%s\n' 'stale backup without checksum' | gzip -c > "$stale_lexical_backup"
+  touch -t 202001010000 "$stale_lexical_backup"
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$backup_file" > "$backup_file.sha256"
   else
@@ -174,6 +177,7 @@ assert payload["checks"]["containers"]["services"]["redis"] in {"healthy", "runn
 assert payload["checks"]["https"]["http_redirect_code"] == "308"
 assert payload["checks"]["alembic"]["current"] == "009"
 assert payload["checks"]["alembic"]["head"] == "009"
+assert payload["checks"]["backup"]["file"] == "code_review_20990101_000000.sql.gz"
 PY
 
   set +e
