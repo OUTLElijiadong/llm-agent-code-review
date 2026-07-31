@@ -1173,6 +1173,12 @@
             "title": "Call Id",
             "type": "string"
           },
+          "confirmation": {
+            "default": "",
+            "maxLength": 20,
+            "title": "Confirmation",
+            "type": "string"
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/AgentResponseMessage"
@@ -3876,43 +3882,6 @@
         "title": "DataFlowOut",
         "type": "object"
       },
-      "DataScopeIn": {
-        "description": "数据范围设置请求体\n\nAttributes:\n    role_id: 角色ID\n    scope_type: 范围类型(all/project_own/project_member/custom)\n    project_ids: 自定义项目ID列表(custom类型时使用)",
-        "properties": {
-          "project_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "自定义项目ID列表(custom类型时使用)",
-            "title": "Project Ids"
-          },
-          "role_id": {
-            "description": "角色ID",
-            "title": "Role Id",
-            "type": "integer"
-          },
-          "scope_type": {
-            "description": "范围类型",
-            "pattern": "^(all|project_own|project_member|custom)$",
-            "title": "Scope Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "role_id",
-          "scope_type"
-        ],
-        "title": "DataScopeIn",
-        "type": "object"
-      },
       "DataScopeOut": {
         "description": "数据范围响应项\n\nAttributes:\n    id: 数据范围ID\n    role_id: 角色ID\n    scope_type: 范围类型\n    project_ids: 自定义项目ID列表\n    create_time: 创建时间",
         "properties": {
@@ -3955,6 +3924,37 @@
           "create_time"
         ],
         "title": "DataScopeOut",
+        "type": "object"
+      },
+      "DataScopeUpdateIn": {
+        "description": "按角色路径更新数据范围的请求体。",
+        "properties": {
+          "project_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "自定义项目ID列表(custom类型时使用)",
+            "title": "Project Ids"
+          },
+          "scope_type": {
+            "description": "范围类型",
+            "pattern": "^(all|project_own|project_member|custom)$",
+            "title": "Scope Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_type"
+        ],
+        "title": "DataScopeUpdateIn",
         "type": "object"
       },
       "DecisionIn": {
@@ -10101,6 +10101,32 @@
           }
         },
         "title": "Resp[TicketOut]",
+        "type": "object"
+      },
+      "Resp_Union_DataScopeOut__NoneType__": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DataScopeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[Union[DataScopeOut, NoneType]]",
         "type": "object"
       },
       "Resp_UserOut_": {
@@ -25637,8 +25663,65 @@
       }
     },
     "/api/rbac/roles/{role_id}/data-scope": {
+      "get": {
+        "description": "查询角色已保存的数据范围；未配置时返回 ``null``。",
+        "operationId": "get_role_data_scope_api_rbac_roles__role_id__data_scope_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "title": "Role Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_Union_DataScopeOut__NoneType__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Role Data Scope",
+        "tags": [
+          "RBAC权限管理"
+        ]
+      },
       "put": {
-        "description": "更新角色数据范围\n\n若角色已有数据范围记录则更新,否则新建。\n请求体中 role_id 字段将被忽略,以路径参数 role_id 为准。\n\nArgs:\n    role_id: 角色ID(路径参数)\n    payload: 数据范围设置请求体\n    db: 数据库会话\n    _: 管理员鉴权(结果不使用)\n\nReturns:\n    Resp[DataScopeOut]: 更新或新建的数据范围信息",
+        "description": "更新角色数据范围\n\n若角色已有数据范围记录则更新,否则新建。\n角色 ID 只来自路径参数，请求体不重复接收 role_id。\n\nArgs:\n    role_id: 角色ID(路径参数)\n    payload: 数据范围设置请求体\n    db: 数据库会话\n    _: 管理员鉴权(结果不使用)\n\nReturns:\n    Resp[DataScopeOut]: 更新或新建的数据范围信息",
         "operationId": "update_role_data_scope_api_rbac_roles__role_id__data_scope_put",
         "parameters": [
           {
@@ -25671,7 +25754,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DataScopeIn"
+                "$ref": "#/components/schemas/DataScopeUpdateIn"
               }
             }
           },

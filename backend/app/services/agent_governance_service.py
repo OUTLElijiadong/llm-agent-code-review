@@ -101,6 +101,13 @@ _DEFAULT_GOVERNANCE_AGENTS = (
     ),
 )
 
+_MANAGER_ADMIN_CAPABILITY_TOOL = "admin_execute_capability"
+_MANAGER_ADMIN_CAPABILITY_CONTRACT_VERSION = "manager_admin_capability_v1"
+_MANAGER_ADMIN_CAPABILITY_SCOPE = "管理全部管理员页面并通过真实业务 API 执行已登记能力"
+_MANAGER_ADMIN_CAPABILITY_PERMISSION_NOTE = (
+    "manager_admin_capability_v1 protected manager admin capability gateway"
+)
+
 
 def sync_profiles(db: Session) -> list[AgentProfile]:
     """同步运行时 Agent 和治理 Agent 到持久化画像。
@@ -158,6 +165,8 @@ def sync_profiles(db: Session) -> list[AgentProfile]:
         profile.model = item.get("model") or profile.model
         profile.icon = item.get("icon", "base")
         profile.color = item.get("color", "#5B58E8")
+        if profile.code == "manager":
+            _ensure_manager_admin_capability_contract(db, profile)
         _sync_skills(db, item["code"], item.get("skills", []))
     db.commit()
     return list_profiles(db)
@@ -223,6 +232,8 @@ def update_profile(
             setattr(profile, key, payload[key])
     if payload.get("config_json") is not None:
         profile.config_json = json.dumps(payload["config_json"], ensure_ascii=False)
+    if profile.code == "manager":
+        _ensure_manager_admin_capability_contract(db, profile)
     if commit:
         db.commit()
         db.refresh(profile)
@@ -289,6 +300,64 @@ def _safe_json_parse(value: Optional[str]) -> Optional[Union[dict, list]]:
     except (json.JSONDecodeError, TypeError):
         return None
     return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _ensure_manager_admin_capability_contract(db: Session, profile: AgentProfile) -> None:
+    """保证受保护管理 Agent 始终能进入已登记的管理页面能力。
+
+    该入口仅负责转发到固定能力注册表；真实执行仍由能力权限、
+    OpenAPI 参数校验、风险分级和审批门禁约束。显式工具权限记录如果
+    已存在则保留，以允许运维人员在更高级治理层收紧该入口。
+    """
+    parsed = _safe_json_parse(profile.config_json)
+    config = dict(parsed) if isinstance(parsed, dict) else {}
+    raw_boundary = config.get("governance_boundary")
+    boundary = dict(raw_boundary) if isinstance(raw_boundary, dict) else {}
+
+    def _tool_set(key: str) -> set[str]:
+        values = boundary.get(key, [])
+        if not isinstance(values, (list, tuple, set)):
+            return set()
+        return {str(value) for value in values if value}
+
+    allowed_tools = _tool_set("allowed_tools")
+    approval_tools = _tool_set("approval_tools")
+    blocked_tools = _tool_set("blocked_tools")
+    allowed_tools.add(_MANAGER_ADMIN_CAPABILITY_TOOL)
+    approval_tools.discard(_MANAGER_ADMIN_CAPABILITY_TOOL)
+    blocked_tools.discard(_MANAGER_ADMIN_CAPABILITY_TOOL)
+    boundary.update(
+        {
+            "scope": str(boundary.get("scope") or _MANAGER_ADMIN_CAPABILITY_SCOPE),
+            "allowed_tools": sorted(allowed_tools),
+            "approval_tools": sorted(approval_tools),
+            "blocked_tools": sorted(blocked_tools),
+        }
+    )
+    config["governance_boundary"] = boundary
+    config["manager_admin_capability_boundary_version"] = _MANAGER_ADMIN_CAPABILITY_CONTRACT_VERSION
+    profile.config_json = json.dumps(config, ensure_ascii=False, sort_keys=True)
+
+    permission = (
+        db.query(AgentToolPermission)
+        .filter(
+            AgentToolPermission.agent_code == "manager",
+            AgentToolPermission.tool_code == _MANAGER_ADMIN_CAPABILITY_TOOL,
+        )
+        .order_by(AgentToolPermission.id.asc())
+        .first()
+    )
+    if permission is None:
+        db.add(
+            AgentToolPermission(
+                agent_code="manager",
+                tool_code=_MANAGER_ADMIN_CAPABILITY_TOOL,
+                permission="allow",
+                risk_level="low",
+                enabled=1,
+                note=_MANAGER_ADMIN_CAPABILITY_PERMISSION_NOTE,
+            )
+        )
 
 
 def governance_overview(db: Session) -> dict:

@@ -6,17 +6,17 @@
 
 | 事实 | 数量/值 |
 | --- | ---: |
-| 业务 HTTP 路由 | 231 |
-| HTTP 操作 | 231 |
+| 业务 HTTP 路由 | 232 |
+| HTTP 操作 | 232 |
 | WebSocket 路由 | 1 |
 | ORM 表 | 64 |
 | Agent | 15 |
 | Vue 页面 | 56 |
-| 后端 Python 模块 | 257 |
-| 后端测试文件 | 90 |
-| 前端测试文件 | 14 |
-| Alembic 迁移 | 19 |
-| Alembic head | 019 |
+| 后端 Python 模块 | 259 |
+| 后端测试文件 | 92 |
+| 前端测试文件 | 15 |
+| Alembic 迁移 | 20 |
+| Alembic head | 020 |
 
 ## HTTP 路由
 
@@ -210,6 +210,7 @@
 | GET | `/api/rbac/roles/{role_code}/users` | list_users_by_role |
 | DELETE | `/api/rbac/roles/{role_id}` | delete_role |
 | PUT | `/api/rbac/roles/{role_id}` | update_role |
+| GET | `/api/rbac/roles/{role_id}/data-scope` | get_role_data_scope |
 | PUT | `/api/rbac/roles/{role_id}/data-scope` | update_role_data_scope |
 | GET | `/api/rbac/roles/{role_id}/permissions` | list_role_permissions |
 | PUT | `/api/rbac/roles/{role_id}/permissions` | assign_role_permissions |
@@ -431,3 +432,4 @@
 | `017` | `016` | `backend/alembic/versions/017_agent_response_runs.py` |
 | `018` | `017` | `backend/alembic/versions/018_expand_agent_response_payloads.py` |
 | `019` | `018` | `backend/alembic/versions/019_server_ops_permissions.py` |
+| `020` | `019` | `backend/alembic/versions/020_manager_admin_capability_contract.py` |

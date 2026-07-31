@@ -188,9 +188,9 @@
   },
   "alembic": {
     "heads": [
-      "019"
+      "020"
     ],
-    "migration_count": 19,
+    "migration_count": 20,
     "revisions": [
       {
         "down_revisions": [],
@@ -322,11 +322,18 @@
         ],
         "file": "backend/alembic/versions/019_server_ops_permissions.py",
         "revision": "019"
+      },
+      {
+        "down_revisions": [
+          "019"
+        ],
+        "file": "backend/alembic/versions/020_manager_admin_capability_contract.py",
+        "revision": "020"
       }
     ]
   },
   "code": {
-    "backend_python_module_count": 257,
+    "backend_python_module_count": 259,
     "backend_python_modules": [
       "backend/app/__init__.py",
       "backend/app/agents/__init__.py",
@@ -519,6 +526,8 @@
       "backend/app/schemas/user.py",
       "backend/app/services/__init__.py",
       "backend/app/services/admin_agent_tools.py",
+      "backend/app/services/admin_capability_registry.py",
+      "backend/app/services/admin_capability_service.py",
       "backend/app/services/admin_chat_history_service.py",
       "backend/app/services/admin_copilot_service.py",
       "backend/app/services/agent_governance_service.py",
@@ -586,7 +595,7 @@
       "backend/app/utils/malware_scanner.py",
       "backend/app/utils/sanitize.py"
     ],
-    "backend_test_file_count": 90,
+    "backend_test_file_count": 92,
     "backend_test_files": [
       "backend/tests/test_code_file_service.py",
       "backend/tests/test_compliance_dict.py",
@@ -627,6 +636,7 @@
       "backend/tests/unit/api/test_responses_api.py",
       "backend/tests/unit/core/test_config_security.py",
       "backend/tests/unit/scripts/test_project_contract_scripts.py",
+      "backend/tests/unit/services/test_admin_capability_registry.py",
       "backend/tests/unit/services/test_admin_copilot_service.py",
       "backend/tests/unit/services/test_agent_governance_api_integration.py",
       "backend/tests/unit/services/test_agent_governance_services.py",
@@ -672,6 +682,7 @@
       "backend/tests/unit/test_ac2_e2e_fixes.py",
       "backend/tests/unit/test_discussion_orchestrator_coverage.py",
       "backend/tests/unit/test_json_field_serialization_check.py",
+      "backend/tests/unit/test_migration_020_manager_admin_capability.py",
       "backend/tests/unit/test_pure_logic_export_coverage.py",
       "backend/tests/unit/test_schema_field_coverage_r1_r8.py",
       "backend/tests/unit/utils/test_api_resolver.py",
@@ -679,7 +690,7 @@
       "backend/tests/unit/utils/test_archive_extractor.py",
       "backend/tests/unit/utils/test_pdf_exporter.py"
     ],
-    "frontend_test_file_count": 14,
+    "frontend_test_file_count": 15,
     "frontend_test_files": [
       "frontend/src/api/http.test.ts",
       "frontend/src/components/admin/AdminCopilot.test.ts",
@@ -694,7 +705,8 @@
       "frontend/src/utils/responsesStream.test.ts",
       "frontend/src/utils/responsesTimeline.test.ts",
       "frontend/src/utils/tilt.test.ts",
-      "frontend/src/views/admin/AgentReleaseAdmin.test.ts"
+      "frontend/src/views/admin/AgentReleaseAdmin.test.ts",
+      "frontend/src/views/admin/RoleManage.test.ts"
     ]
   },
   "frontend": {
@@ -759,8 +771,8 @@
     ]
   },
   "http": {
-    "business_route_count": 231,
-    "operation_count": 231,
+    "business_route_count": 232,
+    "operation_count": 232,
     "routes": [
       {
         "methods": [
@@ -2077,6 +2089,13 @@
         ],
         "name": "update_role",
         "path": "/api/rbac/roles/{role_id}"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "get_role_data_scope",
+        "path": "/api/rbac/roles/{role_id}/data-scope"
       },
       {
         "methods": [

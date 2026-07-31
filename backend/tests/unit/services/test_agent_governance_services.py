@@ -264,11 +264,94 @@ def test_agent_governance_sync_profiles_creates_governance_agents(db):
     data = agent_governance_service.profile_to_dict(db, manager)
 
     assert manager.name == "管理Agent"
+    boundary = data["config_json"]["governance_boundary"]
+    assert "admin_execute_capability" in boundary["allowed_tools"]
+    assert "admin_execute_capability" not in boundary["approval_tools"]
+    assert "admin_execute_capability" not in boundary["blocked_tools"]
+    permission = (
+        db.query(AgentToolPermission)
+        .filter_by(agent_code="manager", tool_code="admin_execute_capability")
+        .one()
+    )
+    assert permission.permission == "allow"
+    assert permission.enabled == 1
     assert "selfimprovingagent" in data["skills"]
     assert "reflection" in data["skills"]
     operations = [row for row in rows if row.code == "operations"]
     assert len(operations) == 1
     assert operations[0].name == "全服管理Agent"
+
+
+def test_manager_admin_capability_contract_preserves_boundary_and_real_gateway(db):
+    """受保护管理入口必须放行，未登记工具仍按 default-deny 阻断。"""
+    db.add(
+        AgentProfile(
+            code="manager",
+            name="管理Agent",
+            config_json=json.dumps(
+                {
+                    "governance_boundary": {
+                        "scope": "旧管理边界",
+                        "allowed_tools": ["governance_reader"],
+                        "approval_tools": ["admin_execute_capability", "workflow_dispatch"],
+                        "blocked_tools": ["admin_execute_capability", "shell"],
+                    },
+                    "custom": {"preserved": True},
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    db.commit()
+
+    rows = agent_governance_service.sync_profiles(db)
+    manager = next(row for row in rows if row.code == "manager")
+    config = json.loads(manager.config_json)
+    boundary = config["governance_boundary"]
+    assert config["custom"] == {"preserved": True}
+    assert boundary["scope"] == "旧管理边界"
+    assert boundary["allowed_tools"] == ["admin_execute_capability", "governance_reader"]
+    assert boundary["approval_tools"] == ["workflow_dispatch"]
+    assert boundary["blocked_tools"] == ["shell"]
+
+    allowed = tool_gateway.authorize(
+        db,
+        agent_code="manager",
+        tool_code="admin_execute_capability",
+        action="admin.users.list",
+        resource="/admin/users",
+    )
+    denied = tool_gateway.authorize(
+        db,
+        agent_code="manager",
+        tool_code="unregistered_admin_escape",
+        action="admin.escape",
+        resource="/admin/users",
+    )
+    assert allowed.decision == policy_engine.ALLOW
+    assert denied.decision == policy_engine.DENY
+    assert "不在职责边界" in denied.reason
+
+
+def test_manager_profile_update_cannot_remove_protected_admin_gateway(db):
+    agent_governance_service.sync_profiles(db)
+    updated = agent_governance_service.update_profile(
+        db,
+        "manager",
+        {
+            "config_json": {
+                "governance_boundary": {
+                    "allowed_tools": [],
+                    "approval_tools": ["admin_execute_capability"],
+                    "blocked_tools": ["admin_execute_capability"],
+                }
+            }
+        },
+    )
+    boundary = json.loads(updated.config_json)["governance_boundary"]
+    assert boundary["allowed_tools"] == ["admin_execute_capability"]
+    assert boundary["approval_tools"] == []
+    assert boundary["blocked_tools"] == []
 
 
 def test_agent_governance_sync_preserves_disabled_runtime_state(db):

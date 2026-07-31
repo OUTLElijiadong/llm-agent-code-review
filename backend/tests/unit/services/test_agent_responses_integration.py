@@ -15,7 +15,13 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.v1 import agent_responses as api_module
 from app.models.admin_chat import AdminChatMessage, OpsExecution
-from app.models.agent_governance import ApprovalItem
+from app.models.agent_governance import (
+    AgentProfile,
+    AgentToolPermission,
+    ApprovalItem,
+    PolicyDecisionLog,
+    PolicyRule,
+)
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.services import agent_responses_service as service_module
 from app.services.agent_responses_service import DatabaseCheckpointStore, PrismToolExecutor
@@ -33,6 +39,10 @@ def db():
     AgentResponseRun.__table__.create(engine)
     AgentToolExecution.__table__.create(engine)
     ApprovalItem.__table__.create(engine)
+    AgentProfile.__table__.create(engine)
+    AgentToolPermission.__table__.create(engine)
+    PolicyRule.__table__.create(engine)
+    PolicyDecisionLog.__table__.create(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
         yield session
@@ -664,6 +674,58 @@ async def test_admin_capability_read_executes_and_write_is_approved_once(db, mon
     repeated = await executor.execute(write_call, approved=True)
     assert repeated.output == completed.output
     assert calls == [("overview.security", {}), ("report_templates.create", write_params)]
+
+
+@pytest.mark.asyncio
+async def test_manager_registered_admin_capability_executes_through_real_gateway(db, monkeypatch) -> None:
+    """复现生产故障路径：管理 Agent 真实策略网关应放行 users.list。"""
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    profile = AgentProfile(
+        code="manager",
+        name="管理Agent",
+        config_json=json.dumps(
+            {
+                "governance_boundary": {
+                    "allowed_tools": ["governance_reader"],
+                    "approval_tools": ["workflow_dispatch"],
+                    "blocked_tools": ["shell"],
+                }
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db.add(profile)
+    db.commit()
+    service_module.agent_governance_service._ensure_manager_admin_capability_contract(db, profile)
+    db.commit()
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_execute(_user, spec, params, *, request_id):
+        calls.append((spec.code, dict(params)))
+        return {"capability": spec.code, "request_id": request_id, "data": {"users": []}}
+
+    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, role="admin", token_version=0),
+        surface="admin",
+        run_id="run_manager_real_gateway",
+        mcp_provider=EmptyMcp(),
+    )
+    result = await executor.execute(
+        ToolCall(
+            "call_users_list",
+            "admin_execute_capability",
+            {"capability": "users.list", "params": {}},
+            '{"capability":"users.list","params":{}}',
+        )
+    )
+
+    assert result.status == "success"
+    assert calls == [("users.list", {})]
+    decision = db.query(PolicyDecisionLog).filter_by(action="admin.users.list").one()
+    assert decision.decision == "allow"
 
 
 @pytest.mark.asyncio
