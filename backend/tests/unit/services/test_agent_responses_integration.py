@@ -1282,6 +1282,33 @@ def test_admin_completion_guard_allows_honest_rejection_without_retry() -> None:
     assert service_module._admin_completion_guard(checkpoint, "已取消，不会删除模板") is None
 
 
+def test_admin_completion_guard_accepts_successful_reject_action() -> None:
+    arguments = {"capability": "evolution.proposals.reject", "params": {"proposal_id": 12}}
+    checkpoint = RunCheckpoint(
+        run_id="run_successful_reject_action",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "请拒绝进化提案 12"},
+            {
+                "type": "function_call",
+                "call_id": "call_reject",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_reject",
+                "output": json.dumps({"status": "success", "output": {"rejected": True}}),
+            },
+        ],
+        tools=[],
+    )
+
+    assert service_module._claims_mutation_failure("已拒绝发布申请") is False
+    assert service_module._claims_mutation_success("已拒绝发布申请") is True
+    assert service_module._admin_completion_guard(checkpoint, "已拒绝发布申请") is None
+
+
 @pytest.mark.asyncio
 async def test_admin_transport_sink_buffers_only_text_deltas() -> None:
     events: list[Mapping[str, Any]] = []
