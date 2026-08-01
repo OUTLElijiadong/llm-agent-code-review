@@ -488,7 +488,7 @@ async def test_completion_guard_discards_unverified_text_and_forces_tool_retry()
             return "缺少真实写工具证据"
         return None
 
-    result = await _runtime(transport, executor, completion_guard=guard).start(
+    result = await _runtime(transport, executor, completion_guard=guard, model="deepseek-chat").start(
         "删除模板 4",
         tools=[{"type": "function", "name": "delete_template", "parameters": {"type": "object"}}],
         run_id="run_completion_guard_retry",
@@ -503,6 +503,45 @@ async def test_completion_guard_discards_unverified_text_and_forces_tool_retry()
     ]
     projected_text = json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
     assert "已删除模板，deleted_count=1" not in projected_text
+    assert "runtime_completion_guard" in projected_text
+    assert [call.name for call, _approved in executor.calls] == ["delete_template"]
+
+
+@pytest.mark.asyncio
+async def test_completion_guard_retry_uses_auto_for_deepseek_thinking_models() -> None:
+    transport = ScriptedTransport(
+        [
+            _message_response("已删除模板，deleted_count=1"),
+            _function_response(("call_delete", "delete_template", {"id": 4})),
+            _message_response("模板删除成功"),
+        ]
+    )
+    executor = RecordingExecutor()
+
+    def guard(checkpoint: RunCheckpoint, output_text: str) -> str | None:
+        has_success = any(item.get("type") == "function_call_output" for item in checkpoint.transcript)
+        if "删除" in output_text and not has_success:
+            return "缺少真实写工具证据"
+        return None
+
+    result = await _runtime(
+        transport,
+        executor,
+        completion_guard=guard,
+        model="deepseek-v4-flash",
+    ).start(
+        "删除模板 4",
+        tools=[{"type": "function", "name": "delete_template", "parameters": {"type": "object"}}],
+        run_id="run_completion_guard_retry_v4",
+    )
+
+    assert result.status == "completed"
+    assert [payload["tool_choice"] for payload in transport.payloads] == [
+        "auto",
+        "auto",
+        "auto",
+    ]
+    projected_text = json.dumps(transport.payloads[1]["input"], ensure_ascii=False)
     assert "runtime_completion_guard" in projected_text
     assert [call.name for call, _approved in executor.calls] == ["delete_template"]
 
@@ -546,6 +585,7 @@ async def test_completion_guard_fails_after_bounded_retries_without_persisting_c
         transport,
         RecordingExecutor(),
         completion_guard=lambda _checkpoint, _text: "没有执行证据",
+        model="deepseek-chat",
     ).start("delete", run_id="run_completion_guard_fail")
 
     assert result.status == FAILED

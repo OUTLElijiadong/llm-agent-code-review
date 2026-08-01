@@ -550,7 +550,7 @@ class DeepSeekResponsesRuntime:
 
             guard_retries = int(checkpoint.context_metadata.get("completion_guard_retries") or 0)
             force_tool_rounds = int(checkpoint.context_metadata.get("force_tool_rounds") or 0)
-            tool_choice = "required" if force_tool_rounds > 0 else "auto"
+            tool_choice = _tool_choice_for_round(checkpoint.model, force_tool_rounds)
             overhead_tokens = estimate_tokens(
                 {
                     "instructions": checkpoint.instructions,
@@ -999,6 +999,29 @@ def _validate_context_budget(
         raise ValueError("compaction_threshold_tokens 必须在可用输入预算内")
     if keep_recent_tokens <= 0 or keep_recent_tokens > compaction_threshold_tokens:
         raise ValueError("keep_recent_tokens 必须大于 0 且不超过压缩阈值")
+
+
+def _tool_choice_for_round(model: str, force_tool_rounds: int) -> str:
+    """选择本轮工具策略；DeepSeek 思考模式不支持 required。"""
+    if force_tool_rounds <= 0:
+        return "auto"
+    if _model_disallows_required_tool_choice(model):
+        return "auto"
+    return "required"
+
+
+def _model_disallows_required_tool_choice(model: str) -> bool:
+    normalized = model.casefold()
+    return any(
+        marker in normalized
+        for marker in (
+            "deepseek-v4",
+            "deepseek-r1",
+            "deepseek-reasoner",
+            "reasoner",
+            "thinking",
+        )
+    )
 
 
 def _paired_item_indices(items: Sequence[Mapping[str, Any]], index: int) -> set[int]:
