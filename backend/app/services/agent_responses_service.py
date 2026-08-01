@@ -103,17 +103,23 @@ _DANGER_TOOLS = {
     "admin_delete_users",
     "admin_execute_operation",
 }
+_CN_MUTATION_VERB = (
+    r"(?:创建|新增|添加|修改|调整|编辑|更改|更新|设置|启用|停用|禁用|下线|"
+    r"删除|移除|重置|生成|撤销|发布|批准|驳回|拒绝|回滚|写入|保存|上传|导入|"
+    r"绑定|分配|激活|抓取|运行|试算|解决|记录|覆盖|评测|触发|调用|测试|沉淀|应用|"
+    r"备份|校验|验证|重启|重载|续期|维护|恢复|清理|安装|升级|卸载|锁定|解锁|"
+    r"暂停|启动|停止|开放|关闭)"
+)
 _MUTATION_SUCCESS_PATTERNS = (
     re.compile(
         r"(?:成功(?:地)?|已经完成|已完成|完成了).{0,24}"
-        r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+        + _CN_MUTATION_VERB
     ),
     re.compile(
-        r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
-        r".{0,16}(?:已成功完成|成功完成|已完成|成功|完成了)"
+        _CN_MUTATION_VERB + r".{0,16}(?:已成功完成|成功完成|已完成|成功|完成了)"
     ),
     re.compile(
-        r"(?:已|已经)(?:成功)?(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+        r"(?:已|已经)(?:成功)?" + _CN_MUTATION_VERB
     ),
     re.compile(
         r"\b(?:created|updated|deleted|removed|enabled|disabled|reset|published|approved|rejected|executed)\b"
@@ -130,30 +136,32 @@ _MUTATION_SUCCESS_PATTERNS = (
 _MUTATION_FAILURE_PATTERNS = (
     re.compile(
         r"(?:未(?:能|成功|完成)?|没(?:有)?|无法|不能|不会|失败|未执行|未完成)"
-        r".{0,24}(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+        r".{0,24}" + _CN_MUTATION_VERB
     ),
     re.compile(
-        r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
-        r".{0,24}(?:失败|被拒绝|已取消|未执行|未完成|未成功|无法|不能)"
+        _CN_MUTATION_VERB + r".{0,24}(?:失败|被拒绝|已取消|未执行|未完成|未成功|无法|不能)"
     ),
     re.compile(r"(?:用户|审批|策略|系统).{0,16}(?:拒绝|取消).{0,16}(?:执行|操作|请求)"),
+    re.compile(r"(?:请求|操作|执行).{0,12}(?:被拒绝|已取消)"),
+    re.compile(r"(?:已取消|不会).{0,12}(?:执行|操作|" + _CN_MUTATION_VERB + r")"),
     re.compile(r"\b(?:failed|rejected|cancelled|canceled|denied|not completed)\b", re.I),
 )
 _ADMIN_MUTATION_REQUEST = re.compile(
     r"^(?:请(?!问)|请帮|帮我|帮忙|麻烦|劳烦|给我|现在|立即|马上|需要|我要|"
     r"请通过|请在|把|将|直接|执行).{0,80}"
-    r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
-    r"|^(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+    + _CN_MUTATION_VERB
+    + r"|^"
+    + _CN_MUTATION_VERB
 )
 _ADMIN_MUTATION_DISCUSSION = re.compile(
-    r"(?:^\s*(?:请问|是否|能否|可否|可以吗|怎么|如何|为什么|是什么|什么意思|"
+    r"(?:^\s*(?:请说明|请告诉我|请介绍|请解释|请问|是否|能否|可否|可以吗|怎么|如何|为什么|是什么|什么意思|"
     r"原理|说明|解释|介绍|告诉我|文档|教程|用途)"
     r"|(?:的参数|参数和|成功后|失败后|之后|以后).{0,40}"
     r"(?:是什么|什么意思|怎么|如何|是否|能否|可以|恢复))"
 )
 _ADMIN_POLITE_MUTATION_REQUEST = re.compile(
     r"(?:能否帮我|可否帮我|可以帮我|是否可以帮我|请帮我|帮我|麻烦|劳烦)"
-    r".{0,80}(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+    r".{0,80}" + _CN_MUTATION_VERB
 )
 _NON_TERMINAL_RUN_STATUSES = {
     "running",
@@ -1302,8 +1310,11 @@ class AgentResponsesService:
             user_id=int(self._user.id),
             checkpoint=checkpoint,
         )
-        evidence = dict(transcript_evidence)
-        evidence.update(ledger_evidence)
+        # 成功必须由持久化审计账本证明；回传文本只能证明失败或拒绝。
+        evidence = dict(ledger_evidence)
+        for call_id, terminal in transcript_evidence.items():
+            if terminal[1] != "success" and call_id not in evidence:
+                evidence[call_id] = terminal
         return _admin_completion_guard(
             checkpoint,
             output_text,
@@ -1593,7 +1604,7 @@ def _requests_admin_mutation(transcript: Sequence[Mapping[str, Any]]) -> bool:
     return bool(
         _requested_admin_write_capabilities(transcript)
         and re.search(
-            r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)",
+            _CN_MUTATION_VERB,
             text,
         )
     )

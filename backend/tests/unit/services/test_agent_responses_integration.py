@@ -1049,6 +1049,35 @@ def test_admin_completion_ledger_rejects_argument_mismatch(db) -> None:
     ) == {}
 
 
+@pytest.mark.asyncio
+async def test_admin_completion_validator_requires_ledger_for_success(db) -> None:
+    arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
+    checkpoint = RunCheckpoint(
+        run_id="run_transcript_only_success",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "删除模板 ID 4"},
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_delete",
+                "output": json.dumps({"status": "success"}),
+            },
+        ],
+        tools=[],
+    )
+    service = object.__new__(service_module.AgentResponsesService)
+    service._db = db
+    service._user = SimpleNamespace(id=7)
+
+    assert await service._validate_admin_completion(checkpoint, "模板已成功删除") is not None
+
+
 def test_admin_completion_guard_does_not_treat_hypothetical_question_as_write() -> None:
     checkpoint = RunCheckpoint(
         run_id="run_hypothetical",
@@ -1110,6 +1139,12 @@ def test_admin_completion_guard_recognizes_polite_mutation_request() -> None:
         "请按这些参数删除 ID 4 的报告模板",
         "请更新用户风险等级",
         "麻烦删除 ID 4 的报告模板",
+        "请调整用户角色",
+        "请编辑报告模板",
+        "请更改系统配置",
+        "请撤销邀请码",
+        "请导入审查规则",
+        "请下线这个 Agent",
     ],
 )
 def test_admin_completion_guard_recognizes_production_mutation_phrasing(user_text: str) -> None:
@@ -1121,6 +1156,19 @@ def test_admin_completion_guard_recognizes_production_mutation_phrasing(user_tex
     )
 
     assert service_module._admin_completion_guard(checkpoint, "操作完成") is not None
+
+
+def test_admin_completion_guard_recognizes_every_registered_write_capability() -> None:
+    write_specs = [
+        spec
+        for spec in service_module.CAPABILITY_BY_CODE.values()
+        if spec.risk != service_module.CAPABILITY_READ
+    ]
+
+    assert write_specs
+    for spec in write_specs:
+        transcript = [{"role": "user", "content": f"请{spec.description}"}]
+        assert service_module._requests_admin_mutation(transcript), spec.code
 
 
 def test_admin_completion_guard_distinguishes_question_from_polite_command() -> None:
@@ -1139,6 +1187,26 @@ def test_admin_completion_guard_distinguishes_question_from_polite_command() -> 
 
     assert service_module._requests_admin_mutation(question.transcript) is False
     assert service_module._requests_admin_mutation(command.transcript) is True
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "请说明如何删除报告模板",
+        "请告诉我如何删除报告模板",
+        "请介绍删除报告模板的风险",
+    ],
+)
+def test_admin_completion_guard_treats_explanations_as_discussion(user_text: str) -> None:
+    checkpoint = RunCheckpoint(
+        run_id="run_mutation_discussion",
+        model="test",
+        transcript=[{"role": "user", "content": user_text}],
+        tools=[],
+    )
+
+    assert service_module._requests_admin_mutation(checkpoint.transcript) is False
+    assert service_module._admin_completion_guard(checkpoint, "删除操作需要审批") is None
 
 
 def test_admin_completion_guard_requires_success_for_every_same_capability_call() -> None:
@@ -1280,6 +1348,43 @@ def test_admin_completion_guard_allows_honest_rejection_without_retry() -> None:
     )
 
     assert service_module._admin_completion_guard(checkpoint, "已取消，不会删除模板") is None
+
+
+@pytest.mark.parametrize(
+    "output_text",
+    [
+        "请求被拒绝",
+        "已取消删除操作",
+        "操作已取消",
+        "不会执行该操作",
+    ],
+)
+def test_admin_completion_guard_recognizes_natural_failure_phrases(output_text: str) -> None:
+    arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
+    checkpoint = RunCheckpoint(
+        run_id="run_natural_failure",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "删除模板 ID 4"},
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            },
+        ],
+        tools=[],
+    )
+
+    assert service_module._claims_mutation_failure(output_text) is True
+    assert (
+        service_module._admin_completion_guard(
+            checkpoint,
+            output_text,
+            write_evidence={"call_delete": ("report_templates.delete", "failed")},
+        )
+        is None
+    )
 
 
 def test_admin_completion_guard_accepts_successful_reject_action() -> None:
