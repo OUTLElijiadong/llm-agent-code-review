@@ -826,7 +826,7 @@ input { font: inherit; }
 }
 .message-bubble.markdown-body :deep(p) { margin: 0; }
 .message-bubble.markdown-body :deep(table) {
-  width: max-content;
+  width: auto;
   min-width: 100%;
   border-collapse: collapse;
   white-space: nowrap;
