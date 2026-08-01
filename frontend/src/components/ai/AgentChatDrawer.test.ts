@@ -274,6 +274,41 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(timelineText).toContain('已完成')
   })
 
+  it('marks a resumed approval as failed when the terminal response has no tool result', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('修改项目配置')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    emit(0, {
+      type: 'response.approval.required',
+      run_id: 'run-user-resume-missing-tool',
+      call_id: 'call-write-missing-tool',
+      tool_name: 'update_project',
+      arguments: { project_id: 3 },
+      operation: '修改项目',
+      impact: '更新项目配置',
+      danger: false,
+    })
+    await finish(0)
+
+    await wrapper.find('.response-approve').trigger('click')
+    await flushPromises()
+    expect(streams.records[1].body).toMatchObject({
+      action: 'approve',
+      run_id: 'run-user-resume-missing-tool',
+      call_id: 'call-write-missing-tool',
+    })
+
+    emit(1, { type: 'response.completed', response: { id: 'run-user-resume-missing-tool' } })
+    await finish(1)
+
+    const timelineText = wrapper.find('.response-tool-timeline').text()
+    expect(timelineText).toContain('失败')
+    expect(timelineText).toContain('响应已结束，但工具未返回完成事件')
+    expect(timelineText).not.toContain('已完成')
+  })
+
   it('submits the model generated question as an answer continuation', async () => {
     const wrapper = await mountReadyDrawer()
     await wrapper.find('.chat-input').setValue('运行审查')

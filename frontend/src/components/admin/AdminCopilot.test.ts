@@ -294,6 +294,43 @@ describe('AdminCopilot Responses stream', () => {
     expect(timelineText).toContain('已完成')
   })
 
+  it('marks a resumed approval as failed when the terminal response has no tool result', async () => {
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await wrapper.find('textarea').setValue('删除测试用户')
+    void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    emit(0, {
+      type: 'response.approval.required',
+      run_id: 'run-admin-resume-missing-tool',
+      call_id: 'call-delete-missing-tool',
+      tool_name: 'admin_delete_user',
+      arguments: { user_id: 9 },
+      operation: '删除用户',
+      impact: '用户将无法登录',
+      danger: true,
+    })
+    await finish(0)
+
+    await wrapper.find('.danger-input').setValue('确认执行')
+    await wrapper.find('.response-approval .primary-action').trigger('click')
+    await flushPromises()
+    expect(streams.records[1].body).toMatchObject({
+      action: 'approve',
+      run_id: 'run-admin-resume-missing-tool',
+      call_id: 'call-delete-missing-tool',
+    })
+
+    emit(1, { type: 'response.completed', response: { id: 'run-admin-resume-missing-tool' } })
+    await finish(1)
+
+    const timelineText = wrapper.find('.response-tool-timeline').text()
+    expect(timelineText).toContain('失败')
+    expect(timelineText).toContain('响应已结束，但工具未返回完成事件')
+    expect(timelineText).not.toContain('已完成')
+  })
+
   it('does not mark a tool completed without response.tool.completed evidence', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
