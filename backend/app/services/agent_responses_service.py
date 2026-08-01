@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import hmac
 import inspect
 import json
 import re
@@ -1734,20 +1735,49 @@ def _canonical_json_text(value: Any) -> str:
     return _canonical_json(parsed)
 
 
+def _argument_fingerprint(value: Any) -> str:
+    digest = hmac.new(
+        str(settings.jwt_secret).encode("utf-8"),
+        f"agent-tool-argument-v1\0{_canonical_json(value)}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"[REDACTED]:hmac-sha256:{digest}"
+
+
+def _audit_persisted_value(value: Any, *, key: str = "") -> Any:
+    """完整保留参数身份；敏感值只持久化服务端 HMAC 指纹。"""
+
+    if _SENSITIVE_EVENT_KEY.search(key):
+        return _argument_fingerprint(value)
+    if isinstance(value, Mapping):
+        return {
+            str(item_key): _audit_persisted_value(item_value, key=str(item_key))
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_audit_persisted_value(item) for item in value]
+    if isinstance(value, str):
+        redacted = _redact_sensitive_text(value)
+        if redacted != value:
+            return f"{redacted} {_argument_fingerprint(value)}"
+        return value
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)
+
+
 def _persisted_tool_arguments(name: str, arguments: Mapping[str, Any]) -> Dict[str, Any]:
-    """返回与执行账本相同的脱敏、摘要化参数。"""
+    """返回与执行账本相同的脱敏参数身份。"""
     persisted = dict(arguments)
-    if name == "admin_execute_capability":
-        return dict(_redact_event_value(persisted))
-    if name != "admin_execute_operation":
-        return persisted
-    action = str(persisted.get("action") or "")
-    params = persisted.get("params") if isinstance(persisted.get("params"), dict) else {}
-    try:
-        persisted["params"] = ops_service.audit_action_params(action, dict(params))
-    except (KeyError, TypeError, ValueError):
-        persisted["params"] = dict(params)
-    return persisted
+    if name == "admin_execute_operation":
+        action = str(persisted.get("action") or "")
+        params = persisted.get("params") if isinstance(persisted.get("params"), dict) else {}
+        try:
+            persisted["params"] = ops_service.audit_action_params(action, dict(params))
+        except (KeyError, TypeError, ValueError):
+            persisted["params"] = dict(params)
+    audited = _audit_persisted_value(persisted)
+    return dict(audited) if isinstance(audited, Mapping) else {}
 
 
 def _execution_row_matches_call(

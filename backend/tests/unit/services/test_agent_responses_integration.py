@@ -569,6 +569,80 @@ async def test_uncertain_tool_execution_is_never_retried(db, monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_cached_execution_is_not_reused_for_different_arguments(db, monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    run_id = "run_cached_argument_mismatch"
+    call_id = "call_describe"
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, role="admin", token_version=0),
+        surface="admin",
+        run_id=run_id,
+        mcp_provider=EmptyMcp(),
+    )
+    db.add(
+        AgentToolExecution(
+            request_id=service_module._request_id(run_id, call_id),
+            run_id=run_id,
+            call_id=call_id,
+            user_id=7,
+            tool_name="admin_describe_capabilities",
+            status="success",
+            arguments_json=json.dumps({"page": "/admin/overview"}),
+            result_json=json.dumps({"status": "success", "output": {"count": 1}}),
+        )
+    )
+    db.commit()
+
+    result = await executor.execute(
+        ToolCall(
+            call_id,
+            "admin_describe_capabilities",
+            {"page": "/admin/users"},
+            '{"page":"/admin/users"}',
+        )
+    )
+
+    assert result.status == "error"
+    assert "工具或参数不一致" in result.error
+
+
+def test_persisted_argument_identity_distinguishes_redacted_and_deep_values() -> None:
+    first_secret = "sk-first-secret-value-12345678"
+    second_secret = "sk-second-secret-value-87654321"
+    first = service_module._persisted_tool_arguments(
+        "admin_execute_capability",
+        {
+            "capability": "llm.config.update",
+            "params": {"api_key": first_secret},
+        },
+    )
+    second = service_module._persisted_tool_arguments(
+        "admin_execute_capability",
+        {
+            "capability": "llm.config.update",
+            "params": {"api_key": second_secret},
+        },
+    )
+
+    serialized_first = json.dumps(first, ensure_ascii=False)
+    assert first != second
+    assert first_secret not in serialized_first
+    assert second_secret not in json.dumps(second, ensure_ascii=False)
+    assert "[REDACTED]" in serialized_first
+
+    long_first = service_module._persisted_tool_arguments(
+        "custom_tool",
+        {"items": [*range(21), {"nested": {"a": {"b": {"c": {"value": "first"}}}}}]},
+    )
+    long_second = service_module._persisted_tool_arguments(
+        "custom_tool",
+        {"items": [*range(21), {"nested": {"a": {"b": {"c": {"value": "second"}}}}}]},
+    )
+    assert long_first != long_second
+
+
+@pytest.mark.asyncio
 async def test_admin_capability_tools_are_admin_only_and_discover_exact_contracts(db, monkeypatch) -> None:
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
     monkeypatch.setattr(service_module.rbac_service, "check_permission", lambda *_args, **_kwargs: False)
@@ -937,6 +1011,44 @@ def test_admin_completion_ledger_rejects_forged_request_id(db) -> None:
     ) == {}
 
 
+def test_admin_completion_ledger_rejects_argument_mismatch(db) -> None:
+    expected_arguments = {"capability": "report_templates.delete", "params": {"template_id": 5}}
+    checkpoint = RunCheckpoint(
+        run_id="run_argument_mismatch",
+        model="test",
+        transcript=[
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(expected_arguments),
+            }
+        ],
+        tools=[],
+    )
+    db.add(
+        AgentToolExecution(
+            request_id=service_module._request_id("run_argument_mismatch", "call_delete"),
+            run_id="run_argument_mismatch",
+            call_id="call_delete",
+            user_id=7,
+            tool_name="admin_execute_capability",
+            status="success",
+            arguments_json=json.dumps(
+                {"capability": "report_templates.delete", "params": {"template_id": 4}}
+            ),
+            result_json=json.dumps({"status": "success", "output": {"deleted_count": 1}}),
+        )
+    )
+    db.commit()
+
+    assert service_module._ledger_admin_write_evidence(
+        db,
+        user_id=7,
+        checkpoint=checkpoint,
+    ) == {}
+
+
 def test_admin_completion_guard_does_not_treat_hypothetical_question_as_write() -> None:
     checkpoint = RunCheckpoint(
         run_id="run_hypothetical",
@@ -992,6 +1104,116 @@ def test_admin_completion_guard_recognizes_polite_mutation_request() -> None:
     assert service_module._admin_completion_guard(checkpoint, "模板已删除") is not None
 
 
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "请按这些参数删除 ID 4 的报告模板",
+        "请更新用户风险等级",
+        "麻烦删除 ID 4 的报告模板",
+    ],
+)
+def test_admin_completion_guard_recognizes_production_mutation_phrasing(user_text: str) -> None:
+    checkpoint = RunCheckpoint(
+        run_id="run_production_mutation_phrasing",
+        model="test",
+        transcript=[{"role": "user", "content": user_text}],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(checkpoint, "操作完成") is not None
+
+
+def test_admin_completion_guard_distinguishes_question_from_polite_command() -> None:
+    question = RunCheckpoint(
+        run_id="run_mutation_question",
+        model="test",
+        transcript=[{"role": "user", "content": "能否删除 ID 4 的报告模板？"}],
+        tools=[],
+    )
+    command = RunCheckpoint(
+        run_id="run_mutation_command",
+        model="test",
+        transcript=[{"role": "user", "content": "能否帮我删除 ID 4 的报告模板？"}],
+        tools=[],
+    )
+
+    assert service_module._requests_admin_mutation(question.transcript) is False
+    assert service_module._requests_admin_mutation(command.transcript) is True
+
+
+def test_admin_completion_guard_requires_success_for_every_same_capability_call() -> None:
+    transcript: list[dict[str, Any]] = [{"role": "user", "content": "删除 ID 4 和 ID 5 的报告模板"}]
+    for call_id, template_id, status in (
+        ("call_delete_4", 4, "success"),
+        ("call_delete_5", 5, "failed"),
+    ):
+        transcript.extend(
+            [
+                {
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": "admin_execute_capability",
+                    "arguments": json.dumps(
+                        {
+                            "capability": "report_templates.delete",
+                            "params": {"template_id": template_id},
+                        }
+                    ),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": json.dumps({"status": status}),
+                },
+            ]
+        )
+    checkpoint = RunCheckpoint(
+        run_id="run_multi_delete",
+        model="test",
+        transcript=transcript,
+        tools=[],
+    )
+
+    error = service_module._admin_completion_guard(checkpoint, "两个模板均已成功删除")
+
+    assert error is not None
+    assert "call_delete_5" in error
+
+
+def test_admin_completion_guard_rejects_conflicting_duplicate_call_id() -> None:
+    checkpoint = RunCheckpoint(
+        run_id="run_conflicting_call_id",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "删除 ID 4 的报告模板"},
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(
+                    {"capability": "report_templates.delete", "params": {"template_id": 4}}
+                ),
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(
+                    {"capability": "report_templates.delete", "params": {"template_id": 5}}
+                ),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_delete",
+                "output": json.dumps({"status": "success"}),
+            },
+        ],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(checkpoint, "模板已成功删除") is not None
+
+
 def test_admin_completion_guard_rejects_success_claim_for_failed_call() -> None:
     arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
     checkpoint = RunCheckpoint(
@@ -1024,6 +1246,14 @@ def test_admin_completion_guard_rejects_success_claim_for_failed_call() -> None:
             write_evidence={"call_delete": ("report_templates.delete", "failed")},
         )
         is None
+    )
+    assert (
+        service_module._admin_completion_guard(
+            checkpoint,
+            "操作完成",
+            write_evidence={"call_delete": ("report_templates.delete", "failed")},
+        )
+        is not None
     )
 
 
