@@ -927,6 +927,25 @@ def test_admin_completion_guard_does_not_treat_hypothetical_question_as_write() 
     ) is None
 
 
+def test_admin_completion_guard_allows_capability_contract_discussion() -> None:
+    checkpoint = RunCheckpoint(
+        run_id="run_capability_discussion",
+        model="test",
+        transcript=[
+            {
+                "role": "user",
+                "content": "report_templates.delete 的参数和风险是什么？",
+            }
+        ],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(
+        checkpoint,
+        "report_templates.delete 成功后会移除指定模板",
+    ) is None
+
+
 def test_admin_completion_guard_requires_tool_for_natural_language_write_request() -> None:
     checkpoint = RunCheckpoint(
         run_id="run_natural_write",

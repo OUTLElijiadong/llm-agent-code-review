@@ -303,6 +303,19 @@ function setTimelineCallStatus(
   }
 }
 
+function applyExistingTimelineToolEvent(event: ResponseStreamEvent): boolean {
+  const callId = 'call_id' in event && typeof event.call_id === 'string' ? event.call_id : undefined
+  if (!callId) return false
+  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+    const message = messages.value[index]
+    const calls = message.toolCalls
+    if (!calls?.some((call) => call.callId === callId)) continue
+    applyResponseToolEvent(calls, event)
+    return true
+  }
+  return false
+}
+
 async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   invalidateSessionPoll()
   loading.value = true
@@ -341,8 +354,10 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
-        applyResponseToolEvent(runToolCalls, event)
-        syncTimeline()
+        if (!applyExistingTimelineToolEvent(event)) {
+          applyResponseToolEvent(runToolCalls, event)
+          syncTimeline()
+        }
       } else if (event.type === 'response.output_text.delta') {
         rawText += event.delta
         const content = compactOutsideCodeBlocks(rawText)
@@ -699,11 +714,8 @@ async function decideApproval(
     confirmation,
   })
   approval.status = succeeded ? (action === 'approve' ? 'approved' : 'rejected') : 'pending'
-  setTimelineCallStatus(
-    approval.call_id,
-    succeeded ? (action === 'approve' ? 'completed' : 'rejected') : 'failed',
-    succeeded ? undefined : '审批续跑失败，可重试',
-  )
+  if (!succeeded) setTimelineCallStatus(approval.call_id, 'failed', '审批续跑失败，可重试')
+  else if (action === 'reject') setTimelineCallStatus(approval.call_id, 'rejected')
 }
 
 async function submitInput(message: ChatMessage, selectedAnswer?: string): Promise<void> {

@@ -117,7 +117,8 @@ _ADMIN_MUTATION_REQUEST = re.compile(
     r"|^(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
 )
 _ADMIN_MUTATION_DISCUSSION = re.compile(
-    r"(?:如果|假如|假设|若|是否|能否|可以吗|怎么|如何|为什么|原理|说明|解释|文档|教程|成功后|失败后)"
+    r"(?:如果|假如|假设|若|是否|能否|可以吗|怎么|如何|为什么|是什么|什么意思|"
+    r"原理|说明|解释|文档|教程|用途|参数|风险|成功后|失败后)"
 )
 _NON_TERMINAL_RUN_STATUSES = {
     "running",
@@ -1446,8 +1447,14 @@ def _admin_completion_guard(
         if spec.risk != CAPABILITY_READ and spec.code.casefold() in output_text.casefold()
     }
     attempted_capabilities = set(_admin_write_calls(checkpoint.transcript).values())
-    required_capabilities = claimed_capabilities or requested_capabilities or attempted_capabilities
     mutation_requested = _requests_admin_mutation(checkpoint.transcript)
+    if not mutation_requested and not attempted_capabilities:
+        return None
+    required_capabilities = (
+        claimed_capabilities
+        or (requested_capabilities if mutation_requested else set())
+        or attempted_capabilities
+    )
     transcript_completed, transcript_successful = _transcript_admin_write_evidence(checkpoint.transcript)
     completed = transcript_completed if completed_writes is None else completed_writes
     successful = transcript_successful if successful_writes is None else successful_writes
