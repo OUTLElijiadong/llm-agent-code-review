@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from typing import (
     Any,
     AsyncIterable,
+    Awaitable,
+    Callable,
     Dict,
     List,
     Mapping,
@@ -46,6 +48,8 @@ DEFAULT_MAX_OUTPUT_TOKENS = 32_768
 DEFAULT_COMPACTION_THRESHOLD_TOKENS = 850_000
 DEFAULT_KEEP_RECENT_TOKENS = 200_000
 COMPACTION_STRATEGY_VERSION = "agent-transcript-v1"
+COMPLETION_GUARD_RETRY_LIMIT = 2
+_COMPLETION_GUARD_CORRECTION_PREFIX = "[runtime_completion_guard]"
 
 
 class RunNotFoundError(LookupError):
@@ -247,6 +251,7 @@ TransportOutput = Union[
     AsyncIterable[Mapping[str, Any]],
     Sequence[Mapping[str, Any]],
 ]
+CompletionGuard = Callable[[RunCheckpoint, str], Union[Optional[str], Awaitable[Optional[str]]]]
 
 
 class ResponsesTransport(Protocol):
@@ -361,6 +366,7 @@ class DeepSeekResponsesRuntime:
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         compaction_threshold_tokens: int = DEFAULT_COMPACTION_THRESHOLD_TOKENS,
         keep_recent_tokens: int = DEFAULT_KEEP_RECENT_TOKENS,
+        completion_guard: Optional[CompletionGuard] = None,
     ) -> None:
         if max_rounds < 1:
             raise ValueError("max_rounds 必须大于 0")
@@ -380,6 +386,7 @@ class DeepSeekResponsesRuntime:
         self._max_output_tokens = max_output_tokens
         self._compaction_threshold_tokens = compaction_threshold_tokens
         self._keep_recent_tokens = keep_recent_tokens
+        self._completion_guard = completion_guard
         self._locks: Dict[str, asyncio.Lock] = {}
 
     async def start(
@@ -541,11 +548,14 @@ class DeepSeekResponsesRuntime:
                 await self._store.save(checkpoint)
                 return self._result(checkpoint, events=events)
 
+            guard_retries = int(checkpoint.context_metadata.get("completion_guard_retries") or 0)
+            force_tool_rounds = int(checkpoint.context_metadata.get("force_tool_rounds") or 0)
+            tool_choice = "required" if force_tool_rounds > 0 else "auto"
             overhead_tokens = estimate_tokens(
                 {
                     "instructions": checkpoint.instructions,
                     "tools": checkpoint.tools,
-                    "tool_choice": "auto",
+                    "tool_choice": tool_choice,
                 }
             )
             try:
@@ -568,13 +578,15 @@ class DeepSeekResponsesRuntime:
                 context_metadata["compaction_count"] = previous_compactions + 1
             else:
                 context_metadata["compaction_count"] = previous_compactions
+            context_metadata["completion_guard_retries"] = guard_retries
+            context_metadata["force_tool_rounds"] = max(force_tool_rounds - 1, 0)
             checkpoint.context_metadata = context_metadata
 
             payload: Dict[str, Any] = {
                 "model": checkpoint.model,
                 "input": projected_input,
                 "tools": copy.deepcopy(checkpoint.tools),
-                "tool_choice": "auto",
+                "tool_choice": tool_choice,
                 "stream": self._stream,
                 "max_output_tokens": self._max_output_tokens,
             }
@@ -599,11 +611,9 @@ class DeepSeekResponsesRuntime:
                 for item in list(response.get("output") or [])
                 if isinstance(item, Mapping)
             ]
-            checkpoint.transcript.extend(copy.deepcopy(output_items))
-            await self._store.save(checkpoint)
-
             upstream_status = str(response.get("status") or "")
             if upstream_status != COMPLETED:
+                checkpoint.transcript.extend(copy.deepcopy(output_items))
                 checkpoint.output_text = _extract_output_text(output_items)
                 if upstream_status == FAILED:
                     checkpoint.status = FAILED
@@ -620,12 +630,59 @@ class DeepSeekResponsesRuntime:
 
             calls = _extract_tool_calls(output_items)
             if calls:
+                persisted_items = output_items
+                if self._completion_guard is not None:
+                    persisted_items = [
+                        item
+                        for item in output_items
+                        if str(item.get("type") or "") != "message"
+                    ]
+                checkpoint.transcript.extend(copy.deepcopy(persisted_items))
+                await self._store.save(checkpoint)
                 paused = await self._process_calls(checkpoint, calls)
                 if paused:
                     return self._result(checkpoint, events=events + list(paused.events))
                 continue
 
-            checkpoint.output_text = _extract_output_text(output_items)
+            candidate_text = _extract_output_text(output_items)
+            try:
+                guard_error = await _invoke_completion_guard(
+                    self._completion_guard,
+                    checkpoint,
+                    candidate_text,
+                )
+            except Exception as exc:  # noqa: BLE001 - 证据校验异常必须失败关闭
+                checkpoint.last_response = {}
+                checkpoint.output_text = ""
+                checkpoint.status = FAILED
+                checkpoint.error = f"运行时执行证据校验异常: {exc}"
+                await self._store.save(checkpoint)
+                return self._result(checkpoint, events=events)
+            if guard_error:
+                guard_retries = int(checkpoint.context_metadata.get("completion_guard_retries") or 0)
+                checkpoint.last_response = {}
+                checkpoint.output_text = ""
+                if guard_retries < COMPLETION_GUARD_RETRY_LIMIT:
+                    checkpoint.context_metadata["completion_guard_retries"] = guard_retries + 1
+                    checkpoint.context_metadata["force_tool_rounds"] = 1
+                    checkpoint.transcript.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"{_COMPLETION_GUARD_CORRECTION_PREFIX} {guard_error} "
+                                "不要复述或猜测执行结果；现在必须调用能产生真实证据的工具。"
+                            ),
+                        }
+                    )
+                    await self._store.save(checkpoint)
+                    continue
+                checkpoint.status = FAILED
+                checkpoint.error = f"运行时执行证据校验失败: {guard_error}"
+                await self._store.save(checkpoint)
+                return self._result(checkpoint, events=events)
+
+            checkpoint.transcript.extend(copy.deepcopy(output_items))
+            checkpoint.output_text = candidate_text
             checkpoint.status = COMPLETED
             await self._store.save(checkpoint)
             return self._result(checkpoint, events=events)
@@ -1136,6 +1193,22 @@ async def _invoke_tool_executor(
     if inspect.isawaitable(result):
         result = await result
     return result
+
+
+async def _invoke_completion_guard(
+    guard: Optional[CompletionGuard],
+    checkpoint: RunCheckpoint,
+    output_text: str,
+) -> Optional[str]:
+    if guard is None:
+        return None
+    result = guard(checkpoint, output_text)
+    if inspect.isawaitable(result):
+        result = await result
+    if result is None:
+        return None
+    message = str(result).strip()
+    return message or None
 
 
 async def _invoke_tool_rejection(

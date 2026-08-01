@@ -472,6 +472,93 @@ async def test_empty_stream_deltas_do_not_create_blank_final_output() -> None:
 
 
 @pytest.mark.asyncio
+async def test_completion_guard_discards_unverified_text_and_forces_tool_retry() -> None:
+    transport = ScriptedTransport(
+        [
+            _message_response("已删除模板，deleted_count=1"),
+            _function_response(("call_delete", "delete_template", {"id": 4})),
+            _message_response("模板删除成功"),
+        ]
+    )
+    executor = RecordingExecutor()
+
+    def guard(checkpoint: RunCheckpoint, output_text: str) -> str | None:
+        has_success = any(item.get("type") == "function_call_output" for item in checkpoint.transcript)
+        if "删除" in output_text and not has_success:
+            return "缺少真实写工具证据"
+        return None
+
+    result = await _runtime(transport, executor, completion_guard=guard).start(
+        "删除模板 4",
+        tools=[{"type": "function", "name": "delete_template", "parameters": {"type": "object"}}],
+        run_id="run_completion_guard_retry",
+    )
+
+    assert result.status == "completed"
+    assert result.output_text == "模板删除成功"
+    assert [payload["tool_choice"] for payload in transport.payloads] == [
+        "auto",
+        "required",
+        "auto",
+    ]
+    projected_text = json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
+    assert "已删除模板，deleted_count=1" not in projected_text
+    assert "runtime_completion_guard" in projected_text
+    assert [call.name for call, _approved in executor.calls] == ["delete_template"]
+
+
+@pytest.mark.asyncio
+async def test_completion_guard_drops_same_round_text_when_tool_call_exists() -> None:
+    mixed_response = _function_response(("call_delete", "delete_template", {"id": 4}))
+    mixed_response["output"].insert(
+        0,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "已删除模板"}],
+        },
+    )
+    transport = ScriptedTransport([mixed_response, _message_response("模板删除成功")])
+
+    result = await _runtime(
+        transport,
+        RecordingExecutor(),
+        completion_guard=lambda _checkpoint, _text: None,
+    ).start("delete", run_id="run_completion_guard_mixed")
+
+    assert result.status == "completed"
+    final_input = json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
+    assert "已删除模板" not in final_input
+    assert "call_delete" in final_input
+
+
+@pytest.mark.asyncio
+async def test_completion_guard_fails_after_bounded_retries_without_persisting_claim() -> None:
+    transport = ScriptedTransport(
+        [
+            _message_response("删除成功"),
+            _message_response("删除成功"),
+            _message_response("删除成功"),
+        ]
+    )
+
+    result = await _runtime(
+        transport,
+        RecordingExecutor(),
+        completion_guard=lambda _checkpoint, _text: "没有执行证据",
+    ).start("delete", run_id="run_completion_guard_fail")
+
+    assert result.status == FAILED
+    assert result.output_text == ""
+    assert "执行证据校验失败" in result.error
+    assert [payload["tool_choice"] for payload in transport.payloads] == [
+        "auto",
+        "required",
+        "required",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_stops_at_maximum_model_rounds() -> None:
     transport = ScriptedTransport(
         [

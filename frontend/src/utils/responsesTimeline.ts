@@ -258,13 +258,13 @@ export function setResponseToolCallStatus(
 
 export function finishResponseToolCalls(
   calls: ResponseToolCall[],
-  status: 'completed' | 'failed',
+  status: 'failed',
   error?: string,
 ): void {
   for (const call of calls) {
     if (['completed', 'failed', 'rejected', 'waiting_approval', 'waiting_input'].includes(call.status)) continue
     call.status = status
-    if (status === 'failed') call.error = error ? formatResponseValue(error) : '调用未完成'
+    call.error = error ? formatResponseValue(error) : '调用未完成'
   }
 }
 

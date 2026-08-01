@@ -393,7 +393,11 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: terminalStatus, error: protocolError }
         invalidateSessionPoll()
         const failed = event.type !== 'response.completed'
-        finishResponseToolCalls(runToolCalls, failed ? 'failed' : 'completed', protocolError)
+        finishResponseToolCalls(
+          runToolCalls,
+          'failed',
+          failed ? protocolError : '响应已结束，但工具未返回完成事件',
+        )
         syncTimeline()
       }
       void scrollToBottom()

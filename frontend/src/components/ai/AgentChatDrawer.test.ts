@@ -259,12 +259,19 @@ describe('AgentChatDrawer Responses stream', () => {
     })
     expect(wrapper.findAll('.msg-row.user')).toHaveLength(1)
 
+    emit(1, {
+      type: 'response.tool.completed',
+      call_id: 'call-write',
+      tool_name: 'update_project',
+      output_summary: { status: 'success', updated_count: 1 },
+    })
     emit(1, { type: 'response.output_text.delta', delta: '配置已更新' })
     emit(1, { type: 'response.completed', response: { id: 'run-user-approval' } })
     await finish(1)
     expect(wrapper.text()).toContain('配置已更新')
     expect(wrapper.text()).toContain('已批准')
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('已完成')
+    const timelineText = wrapper.findAll('.response-tool-timeline').map((node) => node.text()).join('\n')
+    expect(timelineText).toContain('已完成')
   })
 
   it('submits the model generated question as an answer continuation', async () => {

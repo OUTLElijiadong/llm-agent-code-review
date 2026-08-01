@@ -279,12 +279,42 @@ describe('AdminCopilot Responses stream', () => {
     })
     expect(wrapper.findAll('.is-user')).toHaveLength(1)
 
+    emit(1, {
+      type: 'response.tool.completed',
+      call_id: 'call-delete',
+      tool_name: 'admin_delete_user',
+      status: 'success',
+    })
     emit(1, { type: 'response.output_text.delta', delta: '操作已完成' })
     emit(1, { type: 'response.completed', response: { id: 'run-admin-approval' } })
     await finish(1)
     expect(wrapper.text()).toContain('操作已完成')
     expect(wrapper.text()).toContain('已批准')
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('已完成')
+    const timelineText = wrapper.findAll('.response-tool-timeline').map((node) => node.text()).join('\n')
+    expect(timelineText).toContain('已完成')
+  })
+
+  it('does not mark a tool completed without response.tool.completed evidence', async () => {
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await wrapper.find('textarea').setValue('删除测试模板')
+    void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    emit(0, {
+      type: 'response.tool.started',
+      call_id: 'call-unproven',
+      tool_name: 'admin_execute_capability',
+      arguments: { capability: 'report_templates.delete' },
+    })
+    emit(0, { type: 'response.completed', response: { id: 'run-unproven', status: 'completed' } })
+    await finish(0)
+
+    const timeline = wrapper.find('.response-tool-timeline')
+    expect(timeline.text()).toContain('admin_execute_capability')
+    expect(timeline.text()).toContain('失败')
+    expect(timeline.text()).toContain('响应已结束，但工具未返回完成事件')
+    expect(timeline.text()).not.toContain('已完成')
   })
 
   it('shows one-time sensitive results without sending them into the next model request', async () => {

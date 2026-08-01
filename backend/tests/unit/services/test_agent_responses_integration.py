@@ -728,6 +728,227 @@ async def test_manager_registered_admin_capability_executes_through_real_gateway
     assert decision.decision == "allow"
 
 
+def test_admin_completion_guard_requires_current_run_write_evidence() -> None:
+    checkpoint = RunCheckpoint(
+        run_id="run_guard",
+        model="test",
+        transcript=[
+            {
+                "role": "user",
+                "content": "请通过 report_templates.delete 删除模板 ID 4",
+            }
+        ],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(checkpoint, "已处理") is not None
+    assert service_module._admin_completion_guard(
+        RunCheckpoint(
+            run_id="run_read",
+            model="test",
+            transcript=[{"role": "user", "content": "查询已发布 Agent"}],
+            tools=[],
+        ),
+        "找到 2 个已发布 Agent",
+    ) is None
+
+
+def test_admin_completion_guard_accepts_successful_real_write_output() -> None:
+    arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
+    checkpoint = RunCheckpoint(
+        run_id="run_guard_success",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "删除模板 ID 4"},
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_delete",
+                "output": json.dumps({"status": "success", "output": {"deleted_count": 1}}),
+            },
+        ],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(checkpoint, "删除操作已成功完成") is None
+
+
+def test_admin_completion_guard_does_not_reuse_success_from_another_capability() -> None:
+    calls = [
+        (
+            "call_create",
+            {"capability": "report_templates.create", "params": {"name": "temporary"}},
+        ),
+    ]
+    transcript: list[dict[str, Any]] = [
+        {"role": "user", "content": "请通过 report_templates.delete 删除模板 ID 4"},
+    ]
+    for call_id, arguments in calls:
+        transcript.extend(
+            [
+                {
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": "admin_execute_capability",
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": json.dumps({"status": "success", "output": {"id": 4}}),
+                },
+            ]
+        )
+    checkpoint = RunCheckpoint(
+        run_id="run_guard_cross_capability",
+        model="test",
+        transcript=transcript,
+        tools=[],
+    )
+
+    error = service_module._admin_completion_guard(
+        checkpoint,
+        "report_templates.delete 已成功",
+    )
+
+    assert error is not None
+    assert "report_templates.delete" in error
+
+
+def test_admin_completion_ledger_requires_same_run_user_call_and_capability(db) -> None:
+    arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
+    checkpoint = RunCheckpoint(
+        run_id="run_ledger_exact",
+        model="test",
+        transcript=[
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            }
+        ],
+        tools=[],
+    )
+    db.add_all(
+        [
+            AgentToolExecution(
+                request_id="wrong-run",
+                run_id="another_run",
+                call_id="call_delete",
+                user_id=7,
+                tool_name="admin_execute_capability",
+                status="success",
+                arguments_json=json.dumps(arguments),
+            ),
+            AgentToolExecution(
+                request_id="wrong-user",
+                run_id="run_ledger_exact",
+                call_id="call_delete",
+                user_id=8,
+                tool_name="admin_execute_capability",
+                status="success",
+                arguments_json=json.dumps(arguments),
+            ),
+            AgentToolExecution(
+                request_id=service_module._request_id("run_ledger_exact", "call_delete"),
+                run_id="run_ledger_exact",
+                call_id="call_delete",
+                user_id=7,
+                tool_name="admin_execute_capability",
+                status="success",
+                arguments_json=json.dumps(arguments),
+            ),
+        ]
+    )
+    db.commit()
+
+    completed, successful = service_module._ledger_admin_write_evidence(
+        db,
+        user_id=7,
+        checkpoint=checkpoint,
+    )
+
+    assert completed == {"report_templates.delete"}
+    assert successful == {"report_templates.delete"}
+
+
+def test_admin_completion_ledger_rejects_forged_request_id(db) -> None:
+    arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
+    checkpoint = RunCheckpoint(
+        run_id="run_forged_ledger",
+        model="test",
+        transcript=[
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments),
+            }
+        ],
+        tools=[],
+    )
+    db.add(
+        AgentToolExecution(
+            request_id="forged-request-id",
+            run_id="run_forged_ledger",
+            call_id="call_delete",
+            user_id=7,
+            tool_name="admin_execute_capability",
+            status="success",
+            arguments_json=json.dumps(arguments),
+        )
+    )
+    db.commit()
+
+    assert service_module._ledger_admin_write_evidence(
+        db,
+        user_id=7,
+        checkpoint=checkpoint,
+    ) == (set(), set())
+
+
+def test_admin_completion_guard_does_not_treat_hypothetical_question_as_write() -> None:
+    checkpoint = RunCheckpoint(
+        run_id="run_hypothetical",
+        model="test",
+        transcript=[{"role": "user", "content": "如果删除成功后如何恢复？"}],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(
+        checkpoint,
+        "删除成功后可以通过备份恢复",
+    ) is None
+
+
+def test_admin_completion_guard_requires_tool_for_natural_language_write_request() -> None:
+    checkpoint = RunCheckpoint(
+        run_id="run_natural_write",
+        model="test",
+        transcript=[{"role": "user", "content": "请帮我删除 ID 4 的报告模板"}],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(checkpoint, "已处理") is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_transport_sink_buffers_only_text_deltas() -> None:
+    events: list[Mapping[str, Any]] = []
+    sink = service_module._buffer_admin_text_sink(events.append)
+
+    await sink({"type": "response.output_text.delta", "delta": "未验证文本"})
+    await sink({"type": "response.tool.started", "call_id": "call-1"})
+
+    assert events == [{"type": "response.tool.started", "call_id": "call-1"}]
+
+
 @pytest.mark.asyncio
 async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger(db, monkeypatch) -> None:
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())

@@ -90,6 +90,35 @@ _DANGER_TOOLS = {
     "admin_delete_users",
     "admin_execute_operation",
 }
+_MUTATION_SUCCESS_PATTERNS = (
+    re.compile(
+        r"(?:成功(?:地)?|已经完成|已完成|完成了).{0,24}"
+        r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+    ),
+    re.compile(
+        r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+        r".{0,16}(?:已成功完成|成功完成|已完成|成功|完成了)"
+    ),
+    re.compile(
+        r"\b(?:created|updated|deleted|removed|enabled|disabled|reset|published|approved|rejected|executed)\b"
+        r".{0,20}\bsuccess(?:fully)?\b",
+        re.I,
+    ),
+    re.compile(
+        r"\bsuccess(?:fully)?\b.{0,20}"
+        r"\b(?:created|updated|deleted|removed|enabled|disabled|reset|published|approved|rejected|executed)\b",
+        re.I,
+    ),
+    re.compile(r'\b(?:deleted|updated|created)_count\b\s*[":=]+\s*[1-9]\d*', re.I),
+)
+_ADMIN_MUTATION_REQUEST = re.compile(
+    r"(?:^请|请帮|帮我|帮忙|给我|现在|立即|马上|需要|我要|请通过|请在|把|将)"
+    r".{0,80}(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+    r"|^(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+)
+_ADMIN_MUTATION_DISCUSSION = re.compile(
+    r"(?:如果|假如|假设|若|是否|能否|可以吗|怎么|如何|为什么|原理|说明|解释|文档|教程|成功后|失败后)"
+)
 _NON_TERMINAL_RUN_STATUSES = {
     "running",
     "approving",
@@ -1126,12 +1155,14 @@ class AgentResponsesService:
     ) -> RuntimeResult:
         executor, runtime = await self._runtime(run_id, event_sink)
         tools = await executor.tool_schemas()
-        return await runtime.start(
+        result = await runtime.start(
             messages,
             instructions=_instructions(self._surface),
             tools=tools,
             run_id=run_id,
         )
+        await self._emit_validated_admin_output(event_sink, result)
+        return result
 
     async def resume(
         self,
@@ -1148,18 +1179,30 @@ class AgentResponsesService:
         # schema 仍由 runtime 原样复用，这里只恢复执行器映射。
         await executor.tool_schemas()
         if action == "approve":
-            return await runtime.approve(
+            result = await runtime.approve(
                 run_id,
                 call_id or None,
                 confirmation=confirmation,
             )
-        if action == "reject":
-            return await runtime.reject(run_id, call_id or None, reason=answer or "用户拒绝执行该操作")
-        if action == "answer":
+        elif action == "reject":
+            result = await runtime.reject(run_id, call_id or None, reason=answer or "用户拒绝执行该操作")
+        elif action == "answer":
             if not answer.strip():
                 raise ValueError("回答不能为空")
-            return await runtime.answer(run_id, answer, call_id or None)
-        raise ValueError("不支持的恢复动作")
+            result = await runtime.answer(run_id, answer, call_id or None)
+        else:
+            raise ValueError("不支持的恢复动作")
+        await self._emit_validated_admin_output(event_sink, result)
+        return result
+
+    async def _emit_validated_admin_output(
+        self,
+        event_sink: Optional[EventSink],
+        result: RuntimeResult,
+    ) -> None:
+        if self._surface != "admin" or result.status != COMPLETED or not result.output_text:
+            return
+        await _emit(event_sink, {"type": "response.output_text.delta", "delta": result.output_text})
 
     async def _runtime(
         self,
@@ -1176,8 +1219,13 @@ class AgentResponsesService:
             mcp_provider=mcp,
             event_sink=event_sink,
         )
+        transport_sink = (
+            _buffer_admin_text_sink(event_sink)
+            if self._surface == "admin"
+            else event_sink
+        )
         runtime = DeepSeekResponsesRuntime(
-            transport=NativeResponsesTransport(config, event_sink),
+            transport=NativeResponsesTransport(config, transport_sink),
             tool_executor=executor,
             checkpoint_store=self._store,
             model=config.model or settings.deepseek_model,
@@ -1187,8 +1235,26 @@ class AgentResponsesService:
             max_output_tokens=settings.deepseek_max_output_tokens,
             compaction_threshold_tokens=settings.deepseek_compaction_threshold_tokens,
             keep_recent_tokens=settings.deepseek_compaction_keep_recent_tokens,
+            completion_guard=self._validate_admin_completion if self._surface == "admin" else None,
         )
         return executor, runtime
+
+    async def _validate_admin_completion(
+        self,
+        checkpoint: RunCheckpoint,
+        output_text: str,
+    ) -> Optional[str]:
+        completed, successful = _ledger_admin_write_evidence(
+            self._db,
+            user_id=int(self._user.id),
+            checkpoint=checkpoint,
+        )
+        return _admin_completion_guard(
+            checkpoint,
+            output_text,
+            completed_writes=completed,
+            successful_writes=successful,
+        )
 
 
 async def _emit(sink: Optional[EventSink], event: Mapping[str, Any]) -> None:
@@ -1197,6 +1263,15 @@ async def _emit(sink: Optional[EventSink], event: Mapping[str, Any]) -> None:
     result = sink(copy.deepcopy(dict(event)))
     if inspect.isawaitable(result):
         await result
+
+
+def _buffer_admin_text_sink(sink: Optional[EventSink]) -> EventSink:
+    async def filtered(event: Mapping[str, Any]) -> None:
+        if str(event.get("type") or "") == "response.output_text.delta":
+            return
+        await _emit(sink, event)
+
+    return filtered
 
 
 def _redact_sensitive_text(value: str) -> str:
@@ -1352,6 +1427,181 @@ def _instructions(surface: str) -> str:
         "写操作由系统暂停并展示审批；用户点击批准后系统会把原调用结果自动交还给你，不要要求用户重复发送指令。"
         "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。"
     )
+
+
+def _admin_completion_guard(
+    checkpoint: RunCheckpoint,
+    output_text: str,
+    *,
+    completed_writes: Optional[set[str]] = None,
+    successful_writes: Optional[set[str]] = None,
+) -> Optional[str]:
+    """阻止管理 Agent 在没有成功写工具证据时声称变更已完成。"""
+
+    requested_capabilities = _requested_admin_write_capabilities(checkpoint.transcript)
+    claims_success = bool(output_text) and any(pattern.search(output_text) for pattern in _MUTATION_SUCCESS_PATTERNS)
+    claimed_capabilities = {
+        spec.code
+        for spec in CAPABILITY_BY_CODE.values()
+        if spec.risk != CAPABILITY_READ and spec.code.casefold() in output_text.casefold()
+    }
+    attempted_capabilities = set(_admin_write_calls(checkpoint.transcript).values())
+    required_capabilities = claimed_capabilities or requested_capabilities or attempted_capabilities
+    mutation_requested = _requests_admin_mutation(checkpoint.transcript)
+    transcript_completed, transcript_successful = _transcript_admin_write_evidence(checkpoint.transcript)
+    completed = transcript_completed if completed_writes is None else completed_writes
+    successful = transcript_successful if successful_writes is None else successful_writes
+
+    if claims_success and (required_capabilities or mutation_requested):
+        if required_capabilities and required_capabilities.issubset(successful):
+            return None
+        missing = sorted(required_capabilities - successful)
+        detail = f": {', '.join(missing)}" if missing else ""
+        return f"回复声称管理写操作已完成，但当前运行缺少精确的成功写工具证据{detail}"
+
+    if not requested_capabilities and not mutation_requested:
+        return None
+    if required_capabilities and required_capabilities.issubset(completed):
+        return None
+    missing = sorted(required_capabilities - completed)
+    detail = f": {', '.join(missing)}" if missing else ""
+    return f"管理写请求在没有精确工具执行证据时就结束了{detail}"
+
+
+def _requested_admin_write_capabilities(
+    transcript: Sequence[Mapping[str, Any]],
+) -> set[str]:
+    normalized = _latest_user_text(transcript).casefold()
+    return {
+        spec.code
+        for spec in CAPABILITY_BY_CODE.values()
+        if spec.risk != CAPABILITY_READ and spec.code.casefold() in normalized
+    }
+
+
+def _latest_user_text(transcript: Sequence[Mapping[str, Any]]) -> str:
+    latest_user_text = ""
+    for item in transcript:
+        if str(item.get("role") or "") != "user":
+            continue
+        content = item.get("content")
+        if isinstance(content, str):
+            latest_user_text = content
+        elif isinstance(content, Sequence) and not isinstance(content, (str, bytes, bytearray)):
+            latest_user_text = " ".join(
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, Mapping)
+            )
+    return latest_user_text.strip()
+
+
+def _requests_admin_mutation(transcript: Sequence[Mapping[str, Any]]) -> bool:
+    text = _latest_user_text(transcript)
+    if not text or _ADMIN_MUTATION_DISCUSSION.search(text):
+        return False
+    if _requested_admin_write_capabilities(transcript):
+        return True
+    return bool(_ADMIN_MUTATION_REQUEST.search(text))
+
+
+def _admin_write_calls(transcript: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    calls: dict[str, tuple[str, Mapping[str, Any]]] = {}
+    for item in transcript:
+        if str(item.get("type") or "") == "function_call":
+            call_id = str(item.get("call_id") or "")
+            name = str(item.get("name") or "")
+            raw_arguments = item.get("arguments")
+            try:
+                arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+            except json.JSONDecodeError:
+                arguments = {}
+            if call_id and isinstance(arguments, Mapping):
+                calls[call_id] = (name, arguments)
+    return {
+        call_id: write_code
+        for call_id, (name, arguments) in calls.items()
+        if (write_code := _admin_write_code(name, arguments))
+    }
+
+
+def _transcript_admin_write_evidence(
+    transcript: Sequence[Mapping[str, Any]],
+) -> tuple[set[str], set[str]]:
+    calls = _admin_write_calls(transcript)
+    completed: set[str] = set()
+    successful: set[str] = set()
+    for item in transcript:
+        if str(item.get("type") or "") != "function_call_output":
+            continue
+        call_id = str(item.get("call_id") or "")
+        write_code = calls.get(call_id)
+        if not write_code:
+            continue
+        raw_output = item.get("output")
+        try:
+            output = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
+        except json.JSONDecodeError:
+            output = {}
+        if not isinstance(output, Mapping):
+            continue
+        completed.add(write_code)
+        if str(output.get("status") or "") == "success":
+            successful.add(write_code)
+    return completed, successful
+
+
+def _ledger_admin_write_evidence(
+    db: Session,
+    *,
+    user_id: int,
+    checkpoint: RunCheckpoint,
+) -> tuple[set[str], set[str]]:
+    call_codes = _admin_write_calls(checkpoint.transcript)
+    if not call_codes:
+        return set(), set()
+    rows = (
+        db.query(AgentToolExecution)
+        .filter(
+            AgentToolExecution.run_id == checkpoint.run_id,
+            AgentToolExecution.user_id == user_id,
+            AgentToolExecution.call_id.in_(tuple(call_codes)),
+        )
+        .all()
+    )
+    completed: set[str] = set()
+    successful: set[str] = set()
+    for row in rows:
+        expected_code = call_codes.get(str(row.call_id))
+        if not expected_code:
+            continue
+        try:
+            arguments = json.loads(row.arguments_json or "{}")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(arguments, Mapping):
+            continue
+        actual_code = _admin_write_code(str(row.tool_name or ""), arguments)
+        if (
+            actual_code != expected_code
+            or row.request_id != _request_id(checkpoint.run_id, str(row.call_id))
+            or row.status == "executing"
+        ):
+            continue
+        completed.add(expected_code)
+        if row.status == "success":
+            successful.add(expected_code)
+    return completed, successful
+
+
+def _admin_write_code(name: str, arguments: Mapping[str, Any]) -> str:
+    if name == "admin_execute_capability":
+        spec = CAPABILITY_BY_CODE.get(str(arguments.get("capability") or ""))
+        return spec.code if spec is not None and spec.risk != CAPABILITY_READ else ""
+    if name == "admin_execute_operation":
+        action = str(arguments.get("action") or "")
+        return f"operations.{action}" if action and action not in _OPS_READ_ONLY else ""
+    return name if name in _WRITE_TOOLS else ""
 
 
 def _operations_tool_schema() -> Dict[str, Any]:
