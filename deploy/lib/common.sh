@@ -221,6 +221,19 @@ validate_compose_environment() {
     || fatal "docker compose 配置解析失败"
 }
 
+# 验证登录来源地图使用的 GeoLite2 只读数据源。
+# 参数: 无；从 deploy 环境文件读取 GEOLITE_DB_HOST_PATH。
+# 返回: 文件存在、可读且为绝对路径时 0，否则终止脚本。
+validate_geolite_database() {
+  local env_file="${DEPLOY_ENV_FILE:-.env}"
+  local database_path
+  database_path="$(read_env_value GEOLITE_DB_HOST_PATH "$env_file" 2>/dev/null || true)"
+  database_path="${database_path:-/opt/code-review/backend/GeoLite2-City.mmdb}"
+  [[ "$database_path" == /* ]] || fatal "GEOLITE_DB_HOST_PATH 必须是绝对路径"
+  [[ -f "$database_path" ]] || fatal "GeoLite2 数据库不存在或不是普通文件: $database_path"
+  [[ -r "$database_path" ]] || fatal "GeoLite2 数据库不可读: $database_path"
+}
+
 # 在 Backend 容器中执行 Alembic 并断言 current 与唯一 head 一致。
 # 参数: 无。
 # 返回: 一致时 0，否则返回 1。

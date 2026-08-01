@@ -118,6 +118,7 @@ case "$target" in
 esac
 
 if [[ "$target" == "all" || "$target" == "backend" ]]; then
+  validate_geolite_database
   release_image_exists prism-backend "$current_backend" && rollback_ready=1 || true
 else
   release_image_exists prism-frontend "$current_frontend" && rollback_ready=1 || true

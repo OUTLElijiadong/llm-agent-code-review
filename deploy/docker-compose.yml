@@ -106,9 +106,17 @@ services:
       MALWARE_SCAN_FAIL_CLOSED: ${MALWARE_SCAN_FAIL_CLOSED:-true}
       REDIS_URL: redis://redis:6379/0
       OPS_EXECUTOR_SOCKET: /run/prism-ops/agent.sock
+      # GeoLite2 是宿主机维护的只读生产数据源，不能随 release 工作区丢失。
+      GEOLITE_DB_PATH: /app/GeoLite2-City.mmdb
     volumes:
       - ./yara/rules:/app/deploy/yara/rules:ro
       - /run/prism-ops:/run/prism-ops
+      - type: bind
+        source: ${GEOLITE_DB_HOST_PATH:-/opt/code-review/backend/GeoLite2-City.mmdb}
+        target: /app/GeoLite2-City.mmdb
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "127.0.0.1:${BACKEND_BIND_PORT:-8000}:8000"
     healthcheck:

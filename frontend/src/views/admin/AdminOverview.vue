@@ -83,10 +83,11 @@
       <section class="card map-card">
         <header class="card-head">
           <h3><el-icon><MapLocation /></el-icon>登录来源分布</h3>
-          <span class="muted sm">近30天 · {{ geoPoints.length }} 个来源</span>
+          <span class="muted sm">近30天成功登录 · {{ geoPoints.length }} 个来源</span>
         </header>
         <div ref="mapRef" class="world-map"></div>
-        <div v-if="!geoPoints.length" class="muted center">暂无可定位的登录来源</div>
+        <div v-if="geoLoadFailed" class="map-state error">登录来源数据加载失败</div>
+        <div v-else-if="!geoPoints.length" class="map-state muted">暂无可定位的成功登录来源</div>
       </section>
 
       <!-- Agent 活跃 -->
@@ -146,6 +147,7 @@ echarts.use([GeoComponent, TooltipComponent, VisualMapComponent, ScatterChart, E
 const system = ref<SystemStatus | null>(null)
 const posture = ref<SecurityPosture | null>(null)
 const geoPoints = ref<GeoPoint[]>([])
+const geoLoadFailed = ref(false)
 const agents = ref<AgentActivity[]>([])
 const mapRef = ref<HTMLElement | null>(null)
 let mapChart: echarts.EChartsType | null = null
@@ -247,7 +249,12 @@ async function loadAll(): Promise<void> {
     ])
     if (sys.status === 'fulfilled') system.value = sys.value
     if (sec.status === 'fulfilled') posture.value = sec.value
-    if (geo.status === 'fulfilled') geoPoints.value = geo.value
+    if (geo.status === 'fulfilled') {
+      geoPoints.value = geo.value
+      geoLoadFailed.value = false
+    } else {
+      geoLoadFailed.value = true
+    }
     if (ag.status === 'fulfilled') agents.value = ag.value
     renderMap()
   } finally {
@@ -355,6 +362,8 @@ onBeforeUnmount(() => {
 
 .map-card { display: flex; flex-direction: column; }
 .world-map { width: 100%; height: 320px; }
+.map-state { margin-top: -24px; padding-bottom: 8px; text-align: center; font-size: 12.5px; }
+.map-state.error { color: #C92A4E; }
 
 .agent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; }
 .agent-item { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 10px; transition: background .15s;

@@ -140,7 +140,10 @@ def _agent_activity(db: Session) -> list[dict]:
 
 
 def _login_geo(db: Session, days: int = 30) -> list[dict]:
-    """近 N 天登录 IP 的地理分布(聚合打点)。
+    """近 N 天成功登录 IP 的地理分布(聚合打点)。
+
+    失败登录已经在安全态势中单独统计；来源地图只表达实际建立登录会话的
+    来源，避免爆破流量把地图误显示成业务用户分布。
 
     Returns:
         list[dict]: [{ip, country, city, latitude, longitude, count}]
@@ -148,7 +151,13 @@ def _login_geo(db: Session, days: int = 30) -> list[dict]:
     since = datetime.utcnow() - timedelta(days=days)
     rows = (
         db.query(AuditLog.ip, func.count(AuditLog.id).label("cnt"))
-        .filter(AuditLog.action == "login", AuditLog.create_time >= since, AuditLog.ip.isnot(None), AuditLog.ip != "")
+        .filter(
+            AuditLog.action == "login",
+            AuditLog.status == "success",
+            AuditLog.create_time >= since,
+            AuditLog.ip.isnot(None),
+            AuditLog.ip != "",
+        )
         .group_by(AuditLog.ip)
         .order_by(func.count(AuditLog.id).desc())
         .limit(200)
