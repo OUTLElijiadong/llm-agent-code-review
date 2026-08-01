@@ -27,6 +27,7 @@ from app.services.agent_responses_service import (
     AgentResponsesService,
     is_paused,
     redact_agent_event_value,
+    redact_agent_output_text,
     terminal_event,
 )
 
@@ -243,7 +244,7 @@ def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
         else:
             text = ""
         if text and role == "assistant":
-            text = _public_text(text)
+            text = redact_agent_output_text(text)
         if text:
             messages.append({"role": role, "content": text})
     return messages[-100:]
@@ -272,7 +273,7 @@ def _public_response_envelope(value: Any) -> dict[str, Any]:
             public[key] = field
     output_text = value.get("output_text")
     if isinstance(output_text, str):
-        public["output_text"] = _public_text(output_text, limit=100_000)
+        public["output_text"] = redact_agent_output_text(output_text)
     error = value.get("error")
     if error is not None:
         public["error"] = redact_agent_event_value(error)
@@ -293,7 +294,7 @@ def _public_response_envelope(value: Any) -> dict[str, Any]:
                     if part_type not in {"output_text", "refusal"}:
                         continue
                     source_key = "refusal" if part_type == "refusal" else "text"
-                    text = _public_text(part.get(source_key), limit=100_000)
+                    text = redact_agent_output_text(str(part.get(source_key) or ""))
                     if text:
                         content.append({"type": part_type, source_key: text})
             output.append(

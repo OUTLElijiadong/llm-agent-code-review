@@ -1349,6 +1349,11 @@ def _redact_sensitive_text(value: str) -> str:
             parsed = None
         if isinstance(parsed, (Mapping, list)):
             return json.dumps(_redact_event_value(parsed), ensure_ascii=False, default=str)
+    return _redact_sensitive_text_unbounded(value)
+
+
+def _redact_sensitive_text_unbounded(value: str) -> str:
+    """脱敏用户可见长文本，但不套用工具事件的长度上限。"""
     redacted = _PRIVATE_KEY_BLOCK.sub("[REDACTED PRIVATE KEY]", value)
     redacted = _SENSITIVE_TEXT_ASSIGNMENT.sub(
         lambda match: f"{match.group('prefix')}[REDACTED]",
@@ -1392,6 +1397,11 @@ def _redact_event_value(value: Any, *, key: str = "", depth: int = 0) -> Any:
 def redact_agent_event_value(value: Any) -> Any:
     """向 API 层提供统一的有界递归脱敏，避免恢复接口绕过 SSE 保护。"""
     return _redact_event_value(value)
+
+
+def redact_agent_output_text(value: str, *, limit: int = 100_000) -> str:
+    """恢复用户可见的模型文本，保留长输出并继续清除敏感信息。"""
+    return _redact_sensitive_text_unbounded(value)[:limit]
 
 
 def _public_response_output(value: Any) -> list[dict[str, Any]]:

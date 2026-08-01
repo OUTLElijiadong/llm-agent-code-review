@@ -282,6 +282,41 @@ def test_session_recovery_redacts_reasoning_and_secrets_in_textual_payloads(db) 
         assert marker not in serialized
 
 
+def test_session_recovery_preserves_long_visible_table_without_leaking_secrets() -> None:
+    rows = [
+        f"| {index} | production_acceptance_user_{index:02d} | 生产验收用户昵称 {index} | user | 启用 |"
+        for index in range(1, 21)
+    ]
+    table = "\n".join(
+        [
+            "共 56 个用户，第一页 20 条：",
+            "| ID | 用户名 | 昵称 | 角色 | 状态 |",
+            "| --- | --- | --- | --- | --- |",
+            *rows,
+            "api_key=sk-session-secret-12345678",
+        ]
+    )
+
+    messages = api_module._public_transcript_messages(
+        [
+            {"role": "user", "content": "查询用户列表"},
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": table}],
+            },
+        ]
+    )
+
+    restored = messages[-1]["content"]
+    assert len(restored) > 1000
+    assert restored.count("\n| ") == 22
+    assert "production_acceptance_user_20" in restored
+    assert "[TRUNCATED" not in restored
+    assert "sk-session-secret-12345678" not in restored
+    assert "api_key=[REDACTED]" in restored
+
+
 def test_public_terminal_response_drops_non_message_output_items() -> None:
     event = api_module._public_stream_event(
         {
