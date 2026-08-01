@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Mapping, Optional, Sequence
 
@@ -71,6 +72,17 @@ from app.utils.api_resolver import ApiConfig, resolve_api_config
 
 EventSink = Callable[[Mapping[str, Any]], Optional[Awaitable[None]]]
 
+
+@dataclass(frozen=True)
+class _AdminWriteCall:
+    """管理员写调用的不可变身份；证据必须绑定到完整调用签名。"""
+
+    code: str
+    tool_name: str
+    arguments_json: str
+    invalid: bool = False
+
+
 _ADMIN_TOOL_PREFIX = "admin_"
 _WRITE_TOOLS = {
     "create_project",
@@ -100,6 +112,9 @@ _MUTATION_SUCCESS_PATTERNS = (
         r".{0,16}(?:已成功完成|成功完成|已完成|成功|完成了)"
     ),
     re.compile(
+        r"(?:已|已经)(?:成功)?(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+    ),
+    re.compile(
         r"\b(?:created|updated|deleted|removed|enabled|disabled|reset|published|approved|rejected|executed)\b"
         r".{0,20}\bsuccess(?:fully)?\b",
         re.I,
@@ -111,14 +126,32 @@ _MUTATION_SUCCESS_PATTERNS = (
     ),
     re.compile(r'\b(?:deleted|updated|created)_count\b\s*[":=]+\s*[1-9]\d*', re.I),
 )
+_MUTATION_FAILURE_PATTERNS = (
+    re.compile(
+        r"(?:未(?:能|成功|完成)?|没(?:有)?|无法|不能|失败|拒绝|取消|未执行|未完成)"
+        r".{0,24}(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+    ),
+    re.compile(
+        r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+        r".{0,24}(?:失败|被拒绝|已取消|未执行|未完成|未成功|无法|不能)"
+    ),
+    re.compile(r"\b(?:failed|rejected|cancelled|canceled|denied|not completed)\b", re.I),
+)
 _ADMIN_MUTATION_REQUEST = re.compile(
-    r"(?:^请|请帮|帮我|帮忙|给我|现在|立即|马上|需要|我要|请通过|请在|把|将)"
-    r".{0,80}(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
+    r"^(?:请(?!问)|请帮|帮我|帮忙|麻烦|劳烦|给我|现在|立即|马上|需要|我要|"
+    r"请通过|请在|把|将|直接|执行).{0,80}"
+    r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
     r"|^(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
 )
 _ADMIN_MUTATION_DISCUSSION = re.compile(
-    r"(?:如果|假如|假设|若|是否|能否|可以吗|怎么|如何|为什么|是什么|什么意思|"
-    r"原理|说明|解释|文档|教程|用途|参数|风险|成功后|失败后)"
+    r"(?:^\s*(?:请问|是否|能否|可否|可以吗|怎么|如何|为什么|是什么|什么意思|"
+    r"原理|说明|解释|介绍|告诉我|文档|教程|用途)"
+    r"|(?:的参数|参数和|成功后|失败后|之后|以后).{0,40}"
+    r"(?:是什么|什么意思|怎么|如何|是否|能否|可以|恢复))"
+)
+_ADMIN_POLITE_MUTATION_REQUEST = re.compile(
+    r"(?:能否帮我|可否帮我|可以帮我|是否可以帮我|请帮我|帮我|麻烦|劳烦)"
+    r".{0,80}(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)"
 )
 _NON_TERMINAL_RUN_STATUSES = {
     "running",
@@ -705,6 +738,18 @@ class PrismToolExecutor:
         request_id = _request_id(self._run_id, call.call_id)
         row = self._db.query(AgentToolExecution).filter(AgentToolExecution.request_id == request_id).first()
         if row is not None:
+            if not _execution_row_matches_call(
+                row,
+                call,
+                request_id=request_id,
+                run_id=self._run_id,
+                user_id=int(self._user.id),
+            ):
+                recorded = ToolExecutionResult.failure(
+                    "相同运行和调用标识对应的工具或参数不一致，已阻止复用既有执行结果"
+                )
+                await self._emit_tool_result(call, recorded, cached=True)
+                return recorded
             recorded = self._recorded_execution(row)
             await self._emit_tool_result(call, recorded, cached=True)
             return recorded
@@ -726,6 +771,18 @@ class PrismToolExecutor:
             existing = self._db.query(AgentToolExecution).filter(AgentToolExecution.request_id == request_id).first()
             if existing is None:
                 raise
+            if not _execution_row_matches_call(
+                existing,
+                call,
+                request_id=request_id,
+                run_id=self._run_id,
+                user_id=int(self._user.id),
+            ):
+                recorded = ToolExecutionResult.failure(
+                    "相同运行和调用标识对应的工具或参数不一致，已阻止复用既有执行结果"
+                )
+                await self._emit_tool_result(call, recorded, cached=True)
+                return recorded
             recorded = self._recorded_execution(existing)
             await self._emit_tool_result(call, recorded, cached=True)
             return recorded
@@ -1111,15 +1168,7 @@ class PrismToolExecutor:
     @staticmethod
     def _persisted_arguments(call: ToolCall) -> Dict[str, Any]:
         """运维写入内容和 SSH 公钥只保存摘要；其他工具保持原有参数。"""
-        arguments = dict(call.arguments)
-        if call.name == "admin_execute_capability":
-            return dict(_redact_event_value(arguments))
-        if call.name != "admin_execute_operation":
-            return arguments
-        action = str(arguments.get("action") or "")
-        params = arguments.get("params") if isinstance(arguments.get("params"), dict) else {}
-        arguments["params"] = ops_service.audit_action_params(action, dict(params))
-        return arguments
+        return _persisted_tool_arguments(call.name, call.arguments)
 
     @staticmethod
     def _agent_result(call: ToolCall, result: Any) -> ToolExecutionResult:
@@ -1245,16 +1294,18 @@ class AgentResponsesService:
         checkpoint: RunCheckpoint,
         output_text: str,
     ) -> Optional[str]:
-        completed, successful = _ledger_admin_write_evidence(
+        transcript_evidence = _transcript_admin_write_evidence(checkpoint.transcript)
+        ledger_evidence = _ledger_admin_write_evidence(
             self._db,
             user_id=int(self._user.id),
             checkpoint=checkpoint,
         )
+        evidence = dict(transcript_evidence)
+        evidence.update(ledger_evidence)
         return _admin_completion_guard(
             checkpoint,
             output_text,
-            completed_writes=completed,
-            successful_writes=successful,
+            write_evidence=evidence,
         )
 
 
@@ -1434,45 +1485,67 @@ def _admin_completion_guard(
     checkpoint: RunCheckpoint,
     output_text: str,
     *,
-    completed_writes: Optional[set[str]] = None,
-    successful_writes: Optional[set[str]] = None,
+    write_evidence: Optional[Mapping[str, tuple[str, str]]] = None,
 ) -> Optional[str]:
-    """阻止管理 Agent 在没有成功写工具证据时声称变更已完成。"""
+    """要求当前运行的每个写调用都有逐调用终态证据。"""
 
     requested_capabilities = _requested_admin_write_capabilities(checkpoint.transcript)
-    claims_success = bool(output_text) and any(pattern.search(output_text) for pattern in _MUTATION_SUCCESS_PATTERNS)
-    claimed_capabilities = {
-        spec.code
-        for spec in CAPABILITY_BY_CODE.values()
-        if spec.risk != CAPABILITY_READ and spec.code.casefold() in output_text.casefold()
-    }
-    attempted_capabilities = set(_admin_write_calls(checkpoint.transcript).values())
+    claims_success = _claims_mutation_success(output_text)
+    claims_failure = _claims_mutation_failure(output_text)
+    attempted_calls = _admin_write_calls(checkpoint.transcript)
+    attempted_capabilities = {call.code for call in attempted_calls.values()}
     mutation_requested = _requests_admin_mutation(checkpoint.transcript)
-    if not mutation_requested and not attempted_capabilities:
+    if not mutation_requested and not attempted_calls:
         return None
-    required_capabilities = (
-        claimed_capabilities
-        or (requested_capabilities if mutation_requested else set())
-        or attempted_capabilities
+    if not attempted_calls:
+        return "管理写请求在没有精确工具执行证据时就结束了"
+
+    evidence = (
+        _transcript_admin_write_evidence(checkpoint.transcript)
+        if write_evidence is None
+        else dict(write_evidence)
     )
-    transcript_completed, transcript_successful = _transcript_admin_write_evidence(checkpoint.transcript)
-    completed = transcript_completed if completed_writes is None else completed_writes
-    successful = transcript_successful if successful_writes is None else successful_writes
-
-    if claims_success and (required_capabilities or mutation_requested):
-        if required_capabilities and required_capabilities.issubset(successful):
+    missing_calls = sorted(call_id for call_id in attempted_calls if call_id not in evidence)
+    mismatched_calls = sorted(
+        call_id
+        for call_id, expected_call in attempted_calls.items()
+        if call_id in evidence and evidence[call_id][0] != expected_call.code
+    )
+    non_successful_calls = sorted(
+        call_id
+        for call_id in attempted_calls
+        if call_id in evidence and evidence[call_id][1] != "success"
+    )
+    missing_capabilities = sorted(requested_capabilities - attempted_capabilities)
+    details = missing_calls + mismatched_calls + missing_capabilities
+    if claims_success:
+        if not details and not non_successful_calls:
             return None
-        missing = sorted(required_capabilities - successful)
-        detail = f": {', '.join(missing)}" if missing else ""
-        return f"回复声称管理写操作已完成，但当前运行缺少精确的成功写工具证据{detail}"
+        labels = details + [f"{call_id}(未成功)" for call_id in non_successful_calls]
+        return f"回复声称管理写操作已完成，但当前运行缺少逐调用成功证据: {', '.join(sorted(set(labels)))}"
 
-    if not requested_capabilities and not mutation_requested:
+    # 只有与真实失败工具证据对应的失败陈述才可结束；泛化的“已处理/操作完成”不能掩盖失败。
+    if claims_failure:
+        if not details and non_successful_calls:
+            return None
+        labels = details + (["缺少失败工具证据"] if not non_successful_calls else [])
+        return f"回复声称管理写操作失败，但当前运行缺少逐调用失败证据: {', '.join(sorted(set(labels)))}"
+    if not details and not non_successful_calls:
         return None
-    if required_capabilities and required_capabilities.issubset(completed):
-        return None
-    missing = sorted(required_capabilities - completed)
-    detail = f": {', '.join(missing)}" if missing else ""
-    return f"管理写请求在没有精确工具执行证据时就结束了{detail}"
+    labels = details + [f"{call_id}(未成功)" for call_id in non_successful_calls]
+    return f"管理写请求在没有精确工具执行证据时就结束了: {', '.join(sorted(set(labels)))}"
+
+
+def _claims_mutation_success(output_text: str) -> bool:
+    if not output_text:
+        return False
+    return not _claims_mutation_failure(output_text) and any(
+        pattern.search(output_text) for pattern in _MUTATION_SUCCESS_PATTERNS
+    )
+
+
+def _claims_mutation_failure(output_text: str) -> bool:
+    return bool(output_text) and any(pattern.search(output_text) for pattern in _MUTATION_FAILURE_PATTERNS)
 
 
 def _requested_admin_write_capabilities(
@@ -1505,15 +1578,27 @@ def _latest_user_text(transcript: Sequence[Mapping[str, Any]]) -> str:
 
 def _requests_admin_mutation(transcript: Sequence[Mapping[str, Any]]) -> bool:
     text = _latest_user_text(transcript)
-    if not text or _ADMIN_MUTATION_DISCUSSION.search(text):
+    if not text:
         return False
-    if _requested_admin_write_capabilities(transcript):
+    # “能否/可否/麻烦”是礼貌祈使句，不应被疑问句规则当成纯讨论。
+    if _ADMIN_POLITE_MUTATION_REQUEST.search(text):
         return True
-    return bool(_ADMIN_MUTATION_REQUEST.search(text))
+    if _ADMIN_MUTATION_DISCUSSION.search(text):
+        return False
+    if _ADMIN_MUTATION_REQUEST.search(text):
+        return True
+    # 能力码本身不是执行授权；只有同时出现明确动作词时才算写命令。
+    return bool(
+        _requested_admin_write_capabilities(transcript)
+        and re.search(
+            r"(?:创建|新增|添加|修改|更新|设置|启用|停用|禁用|删除|移除|重置|生成|发布|批准|拒绝|回滚|写入|保存|上传|绑定|分配)",
+            text,
+        )
+    )
 
 
-def _admin_write_calls(transcript: Sequence[Mapping[str, Any]]) -> dict[str, str]:
-    calls: dict[str, tuple[str, Mapping[str, Any]]] = {}
+def _admin_write_calls(transcript: Sequence[Mapping[str, Any]]) -> dict[str, _AdminWriteCall]:
+    calls: dict[str, _AdminWriteCall] = {}
     for item in transcript:
         if str(item.get("type") or "") == "function_call":
             call_id = str(item.get("call_id") or "")
@@ -1524,26 +1609,43 @@ def _admin_write_calls(transcript: Sequence[Mapping[str, Any]]) -> dict[str, str
             except json.JSONDecodeError:
                 arguments = {}
             if call_id and isinstance(arguments, Mapping):
-                calls[call_id] = (name, arguments)
-    return {
-        call_id: write_code
-        for call_id, (name, arguments) in calls.items()
-        if (write_code := _admin_write_code(name, arguments))
-    }
+                write_code = _admin_write_code(name, arguments)
+                if not write_code:
+                    continue
+                candidate = _AdminWriteCall(
+                    code=write_code,
+                    tool_name=name,
+                    arguments_json=_canonical_json(_persisted_tool_arguments(name, arguments)),
+                )
+                previous = calls.get(call_id)
+                if previous is None:
+                    calls[call_id] = candidate
+                elif (
+                    previous.code != candidate.code
+                    or previous.tool_name != candidate.tool_name
+                    or previous.arguments_json != candidate.arguments_json
+                ):
+                    # 同一 call_id 出现不同参数时，任何一条结果都不能证明当前调用成功。
+                    calls[call_id] = _AdminWriteCall(
+                        code=previous.code,
+                        tool_name=previous.tool_name,
+                        arguments_json="",
+                        invalid=True,
+                    )
+    return calls
 
 
 def _transcript_admin_write_evidence(
     transcript: Sequence[Mapping[str, Any]],
-) -> tuple[set[str], set[str]]:
+) -> dict[str, tuple[str, str]]:
     calls = _admin_write_calls(transcript)
-    completed: set[str] = set()
-    successful: set[str] = set()
+    evidence: dict[str, tuple[str, str]] = {}
     for item in transcript:
         if str(item.get("type") or "") != "function_call_output":
             continue
         call_id = str(item.get("call_id") or "")
-        write_code = calls.get(call_id)
-        if not write_code:
+        write_call = calls.get(call_id)
+        if not write_call or write_call.invalid:
             continue
         raw_output = item.get("output")
         try:
@@ -1552,10 +1654,17 @@ def _transcript_admin_write_evidence(
             output = {}
         if not isinstance(output, Mapping):
             continue
-        completed.add(write_code)
-        if str(output.get("status") or "") == "success":
-            successful.add(write_code)
-    return completed, successful
+        status = str(output.get("status") or "").casefold()
+        if status == "success":
+            evidence[call_id] = (write_call.code, "success")
+        elif status in {"error", "failed", "rejected", "denied", "cancelled", "canceled"}:
+            terminal_status = (
+                "rejected"
+                if status in {"rejected", "denied", "cancelled", "canceled"}
+                else "failed"
+            )
+            evidence[call_id] = (write_call.code, terminal_status)
+    return evidence
 
 
 def _ledger_admin_write_evidence(
@@ -1563,10 +1672,10 @@ def _ledger_admin_write_evidence(
     *,
     user_id: int,
     checkpoint: RunCheckpoint,
-) -> tuple[set[str], set[str]]:
+) -> dict[str, tuple[str, str]]:
     call_codes = _admin_write_calls(checkpoint.transcript)
     if not call_codes:
-        return set(), set()
+        return {}
     rows = (
         db.query(AgentToolExecution)
         .filter(
@@ -1576,29 +1685,23 @@ def _ledger_admin_write_evidence(
         )
         .all()
     )
-    completed: set[str] = set()
-    successful: set[str] = set()
+    evidence: dict[str, tuple[str, str]] = {}
     for row in rows:
-        expected_code = call_codes.get(str(row.call_id))
-        if not expected_code:
+        expected_call = call_codes.get(str(row.call_id))
+        if not expected_call or expected_call.invalid:
             continue
-        try:
-            arguments = json.loads(row.arguments_json or "{}")
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(arguments, Mapping):
-            continue
-        actual_code = _admin_write_code(str(row.tool_name or ""), arguments)
         if (
-            actual_code != expected_code
+            row.tool_name != expected_call.tool_name
+            or _canonical_json_text(row.arguments_json) != expected_call.arguments_json
             or row.request_id != _request_id(checkpoint.run_id, str(row.call_id))
             or row.status == "executing"
         ):
             continue
-        completed.add(expected_code)
-        if row.status == "success":
-            successful.add(expected_code)
-    return completed, successful
+        evidence[str(row.call_id)] = (
+            expected_call.code,
+            "success" if row.status == "success" else "failed",
+        )
+    return evidence
 
 
 def _admin_write_code(name: str, arguments: Mapping[str, Any]) -> str:
@@ -1609,6 +1712,61 @@ def _admin_write_code(name: str, arguments: Mapping[str, Any]) -> str:
         action = str(arguments.get("action") or "")
         return f"operations.{action}" if action and action not in _OPS_READ_ONLY else ""
     return name if name in _WRITE_TOOLS else ""
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _canonical_json_text(value: Any) -> str:
+    try:
+        parsed = json.loads(value or "{}") if isinstance(value, str) else value
+    except (TypeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(parsed, Mapping):
+        return ""
+    return _canonical_json(parsed)
+
+
+def _persisted_tool_arguments(name: str, arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    """返回与执行账本相同的脱敏、摘要化参数。"""
+    persisted = dict(arguments)
+    if name == "admin_execute_capability":
+        return dict(_redact_event_value(persisted))
+    if name != "admin_execute_operation":
+        return persisted
+    action = str(persisted.get("action") or "")
+    params = persisted.get("params") if isinstance(persisted.get("params"), dict) else {}
+    try:
+        persisted["params"] = ops_service.audit_action_params(action, dict(params))
+    except (KeyError, TypeError, ValueError):
+        persisted["params"] = dict(params)
+    return persisted
+
+
+def _execution_row_matches_call(
+    row: AgentToolExecution,
+    call: ToolCall,
+    *,
+    request_id: str,
+    run_id: str,
+    user_id: int,
+) -> bool:
+    expected = _canonical_json(_persisted_tool_arguments(call.name, call.arguments))
+    return (
+        row.request_id == request_id
+        and row.run_id == run_id
+        and str(row.call_id) == call.call_id
+        and int(row.user_id) == user_id
+        and row.tool_name == call.name
+        and _canonical_json_text(row.arguments_json) == expected
+    )
 
 
 def _operations_tool_schema() -> Dict[str, Any]:

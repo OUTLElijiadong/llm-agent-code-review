@@ -816,13 +816,10 @@ input { font: inherit; }
 }
 .message-bubble.markdown-body :deep(th),
 .message-bubble.markdown-body :deep(td) {
-  max-width: 220px;
   padding: 7px 9px;
   border-bottom: 1px solid #dfe2e6;
-  overflow: hidden;
   overflow-wrap: normal;
   text-align: left;
-  text-overflow: ellipsis;
   white-space: nowrap;
   word-break: normal;
 }

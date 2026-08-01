@@ -778,6 +778,31 @@ def test_admin_completion_guard_accepts_successful_real_write_output() -> None:
     assert service_module._admin_completion_guard(checkpoint, "删除操作已成功完成") is None
 
 
+def test_admin_completion_guard_does_not_promote_non_success_status() -> None:
+    arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
+    checkpoint = RunCheckpoint(
+        run_id="run_guard_non_success_status",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "删除模板 ID 4"},
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_delete",
+                "output": json.dumps({"status": "completed", "output": {"deleted_count": 1}}),
+            },
+        ],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(checkpoint, "模板已删除") is not None
+
+
 def test_admin_completion_guard_does_not_reuse_success_from_another_capability() -> None:
     calls = [
         (
@@ -868,14 +893,13 @@ def test_admin_completion_ledger_requires_same_run_user_call_and_capability(db) 
     )
     db.commit()
 
-    completed, successful = service_module._ledger_admin_write_evidence(
+    evidence = service_module._ledger_admin_write_evidence(
         db,
         user_id=7,
         checkpoint=checkpoint,
     )
 
-    assert completed == {"report_templates.delete"}
-    assert successful == {"report_templates.delete"}
+    assert evidence == {"call_delete": ("report_templates.delete", "success")}
 
 
 def test_admin_completion_ledger_rejects_forged_request_id(db) -> None:
@@ -910,7 +934,7 @@ def test_admin_completion_ledger_rejects_forged_request_id(db) -> None:
         db,
         user_id=7,
         checkpoint=checkpoint,
-    ) == (set(), set())
+    ) == {}
 
 
 def test_admin_completion_guard_does_not_treat_hypothetical_question_as_write() -> None:
@@ -955,6 +979,77 @@ def test_admin_completion_guard_requires_tool_for_natural_language_write_request
     )
 
     assert service_module._admin_completion_guard(checkpoint, "已处理") is not None
+
+
+def test_admin_completion_guard_recognizes_polite_mutation_request() -> None:
+    checkpoint = RunCheckpoint(
+        run_id="run_polite_write",
+        model="test",
+        transcript=[{"role": "user", "content": "能否帮我删除 ID 4 的报告模板？"}],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(checkpoint, "模板已删除") is not None
+
+
+def test_admin_completion_guard_rejects_success_claim_for_failed_call() -> None:
+    arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
+    checkpoint = RunCheckpoint(
+        run_id="run_failed_write",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "删除模板 ID 4"},
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            },
+        ],
+        tools=[],
+    )
+
+    assert (
+        service_module._admin_completion_guard(
+            checkpoint,
+            "模板已删除",
+            write_evidence={"call_delete": ("report_templates.delete", "failed")},
+        )
+        is not None
+    )
+    assert (
+        service_module._admin_completion_guard(
+            checkpoint,
+            "删除失败，模板未被修改",
+            write_evidence={"call_delete": ("report_templates.delete", "failed")},
+        )
+        is None
+    )
+
+
+def test_admin_completion_guard_allows_honest_rejection_without_retry() -> None:
+    arguments = {"capability": "report_templates.delete", "params": {"template_id": 4}}
+    checkpoint = RunCheckpoint(
+        run_id="run_rejected_write",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "删除模板 ID 4"},
+            {
+                "type": "function_call",
+                "call_id": "call_delete",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_delete",
+                "output": json.dumps({"status": "rejected", "error": "用户拒绝执行该操作"}),
+            },
+        ],
+        tools=[],
+    )
+
+    assert service_module._admin_completion_guard(checkpoint, "已取消，不会删除模板") is None
 
 
 @pytest.mark.asyncio
