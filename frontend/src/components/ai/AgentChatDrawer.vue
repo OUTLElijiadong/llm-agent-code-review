@@ -71,6 +71,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   time: string
+  runId?: string
   trace_id?: string
   steps?: StepBubble[]
   clarify?: ClarifyPayload
@@ -161,6 +162,7 @@ async function restoreSession(): Promise<void> {
       role: 'assistant',
       content: '',
       time: restoredTime,
+      runId: session.run?.run_id,
       toolCalls,
     }
     if (pending.type === 'response.approval.required') {
@@ -224,7 +226,14 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
         const pending = session.pending
         if (pending) {
           const toolCalls: ResponseToolCall[] = []
-          const target: ChatMessage = { id: messageId(), role: 'assistant', content: '', time: restoredTime, toolCalls }
+          const target: ChatMessage = {
+            id: messageId(),
+            role: 'assistant',
+            content: '',
+            time: restoredTime,
+            runId: session.run?.run_id,
+            toolCalls,
+          }
           if (pending.type === 'response.approval.required') {
             attachApprovalToToolCall(toolCalls, pending.call_id, pending.tool_name, pending.arguments)
             target.approval = { ...pending, status: 'pending' }
@@ -316,6 +325,14 @@ function applyExistingTimelineToolEvent(event: ResponseStreamEvent): boolean {
   return false
 }
 
+function finishExistingTimelineToolCalls(runId: string | undefined, error: string): void {
+  if (!runId) return
+  for (const message of messages.value) {
+    if (message.runId !== runId) continue
+    finishResponseToolCalls(message.toolCalls ?? [], 'failed', error)
+  }
+}
+
 async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   invalidateSessionPoll()
   loading.value = true
@@ -324,6 +341,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   let textTarget: ChatMessage | null = null
   let timelineTarget: ChatMessage | null = null
   const runToolCalls: ResponseToolCall[] = []
+  let activeRunId = sessionRun.value?.run_id
   let protocolError = ''
 
   const syncTimeline = (): ChatMessage | null => {
@@ -334,6 +352,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         role: 'assistant',
         content: '',
         time: dayjs().format('HH:mm'),
+        runId: activeRunId,
         toolCalls: [...runToolCalls],
       }
       messages.value.push(timelineTarget)
@@ -348,8 +367,10 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       if (event.type === 'response.created') {
         const model = event.response.model
         if (typeof model === 'string' && model) modelName.value = model
+        const runId = typeof event.response.id === 'string' ? event.response.id : sessionRun.value?.run_id ?? ''
+        activeRunId = runId || activeRunId
         sessionRun.value = {
-          run_id: typeof event.response.id === 'string' ? event.response.id : sessionRun.value?.run_id ?? '',
+          run_id: runId,
           status: 'running', model: modelName.value, rounds: sessionRun.value?.rounds ?? 0, error: '', updated_at: new Date().toISOString(),
         }
       } else if (isResponseToolEvent(event)) {
@@ -376,6 +397,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (event.type === 'response.approval.required') {
         showTyping.value = false
+        activeRunId = event.run_id
         sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, status: 'running', model: modelName.value, rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_approval' }
         clearSessionPoll()
         attachApprovalToToolCall(runToolCalls, event.call_id, event.tool_name, event.arguments)
@@ -388,6 +410,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (event.type === 'response.input.required') {
         showTyping.value = false
+        activeRunId = event.run_id
         sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, status: 'running', model: modelName.value, rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_input' }
         clearSessionPoll()
         attachInputToToolCall(runToolCalls, event)
@@ -418,11 +441,13 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         invalidateSessionPoll()
         protocolError ||= eventErrorMessage(event)
         const failed = event.type !== 'response.completed'
+        const terminalError = failed ? protocolError : '响应已结束，但工具未返回完成事件'
         finishResponseToolCalls(
           runToolCalls,
           'failed',
-          failed ? protocolError : '响应已结束，但工具未返回完成事件',
+          terminalError,
         )
+        finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
       }
       void nextTick().then(scrollToBottom)

@@ -46,6 +46,7 @@ interface ChatEntry {
   id: string
   role: 'user' | 'assistant'
   time: string
+  runId?: string
   payload: AdminCopilotMessage
   approval?: ResponseApprovalRequiredEvent & {
     status: 'pending' | 'submitting' | 'approved' | 'rejected'
@@ -142,6 +143,7 @@ function pendingEntry(session: AgentResponseSession, restoredTime: string): Chat
   const toolCalls: ResponseToolCall[] = []
   const target = assistantEntry({ type: 'text', content: '', status: 'completed' })
   target.time = restoredTime
+  target.runId = session.run?.run_id
   target.toolCalls = toolCalls
   if (pending.type === 'response.approval.required') {
     attachApprovalToToolCall(toolCalls, pending.call_id, pending.tool_name, pending.arguments)
@@ -306,6 +308,14 @@ function applyExistingTimelineToolEvent(event: ResponseStreamEvent): boolean {
   return false
 }
 
+function finishExistingTimelineToolCalls(runId: string | undefined, error: string): void {
+  if (!runId) return
+  for (const entry of messages.value) {
+    if (entry.runId !== runId) continue
+    finishResponseToolCalls(entry.toolCalls ?? [], 'failed', error)
+  }
+}
+
 async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   invalidateSessionPoll()
   loading.value = true
@@ -314,6 +324,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   let textTarget: ChatEntry | null = null
   let timelineTarget: ChatEntry | null = null
   const runToolCalls: ResponseToolCall[] = []
+  let activeRunId = sessionRun.value?.run_id
   let protocolError = ''
 
   const syncTimeline = (): ChatEntry | null => {
@@ -321,6 +332,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     if (!timelineTarget) {
       timelineTarget = {
         ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
+        runId: activeRunId,
         toolCalls: [...runToolCalls],
       }
       messages.value.push(timelineTarget)
@@ -335,6 +347,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     onEvent(event) {
       if (event.type === 'response.created') {
         const runId = typeof event.response.id === 'string' ? event.response.id : sessionRun.value?.run_id ?? ''
+        activeRunId = runId || activeRunId
         sessionRun.value = {
           run_id: runId,
           status: 'running',
@@ -363,6 +376,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (event.type === 'response.approval.required') {
         showTyping.value = false
+        activeRunId = event.run_id
         sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, model: '', rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_approval' }
         clearSessionPoll()
         attachApprovalToToolCall(runToolCalls, event.call_id, event.tool_name, event.arguments)
@@ -375,6 +389,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (event.type === 'response.input.required') {
         showTyping.value = false
+        activeRunId = event.run_id
         sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, model: '', rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_input' }
         clearSessionPoll()
         attachInputToToolCall(runToolCalls, event)
@@ -408,11 +423,13 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: terminalStatus, error: protocolError }
         invalidateSessionPoll()
         const failed = event.type !== 'response.completed'
+        const terminalError = failed ? protocolError : '响应已结束，但工具未返回完成事件'
         finishResponseToolCalls(
           runToolCalls,
           'failed',
-          failed ? protocolError : '响应已结束，但工具未返回完成事件',
+          terminalError,
         )
+        finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
       }
       void scrollToBottom()
