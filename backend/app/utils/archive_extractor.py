@@ -16,6 +16,7 @@ from libarchive.exception import ArchiveError
 
 from app.core.exceptions import ValidationError
 
+
 MAX_EXTRACTED_FILES = 10_000
 MAX_COMPRESSION_RATIO = 1_000
 MIN_RATIO_GUARD_BYTES = 256 * 1024 * 1024
@@ -203,8 +204,6 @@ def _validate_path(
         raise ValidationError("压缩包包含非法或绝对路径", code=40001)
     normalized = unicodedata.normalize("NFC", name.replace("\\", "/"))
     if normalized.startswith("/") or re.match(r"^[a-zA-Z]:", normalized):
-        if strict:
-            raise ValidationError("压缩包包含非法或绝对路径", code=40001)
         raise ValidationError(
             f"压缩包包含绝对路径(可能是 zip slip 攻击): {name}", code=40001
         )

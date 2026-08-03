@@ -71,6 +71,7 @@ USER_PAGE_ROUTES: tuple[str, ...] = (
     "/security",
     "/agents",
     "/agent-studio",
+    "/sandboxes",
     "/forum",
     "/knowledge",
     "/support/maintenance",
@@ -219,6 +220,23 @@ USER_CAPABILITIES: tuple[UserCapabilitySpec, ...] = (
         "/api/issues/batch-status",
         WRITE,
         "issue:batch",
+    ),
+    # 代码沙箱:测试与持续部署环境的只读查询;创建/停止/续期走专用固定工具。
+    _cap(
+        "sandboxes.list",
+        "/sandboxes",
+        "查询我的测试与部署沙箱环境",
+        "GET",
+        "/api/sandboxes",
+        permission="project:view",
+    ),
+    _cap(
+        "sandboxes.get",
+        "/sandboxes",
+        "查询单个沙箱环境详情",
+        "GET",
+        "/api/sandboxes/{public_id}",
+        permission="project:view",
     ),
     # 报告 JSON 管理路由；HTML/PDF/Word/源文件下载不经通用 JSON 执行器。
     _cap("reports.list", "/reports", "查询报告", "GET", "/api/reports"),
@@ -506,6 +524,7 @@ USER_CAPABILITIES: tuple[UserCapabilitySpec, ...] = (
     _cap("knowledge.sync", "/knowledge", "从当前用户可见平台数据同步知识库", "POST", "/api/knowledge/sync", WRITE),
     _cap("knowledge.stats", "/knowledge", "查询个人知识库统计", "GET", "/api/knowledge/stats"),
     _cap("maintenance.list", "/support/maintenance", "查询我的维修工单", "GET", "/api/maintenance"),
+    _cap("maintenance.stats", "/support/maintenance", "查询我的维修工单统计", "GET", "/api/maintenance/stats"),
     _cap("maintenance.get", "/support/maintenance", "查询维修工单详情", "GET", "/api/maintenance/{ticket_id}"),
     _cap("maintenance.create", "/support/maintenance", "提交维修工单", "POST", "/api/maintenance", WRITE),
     _cap(
@@ -517,6 +536,7 @@ USER_CAPABILITIES: tuple[UserCapabilitySpec, ...] = (
         WRITE,
     ),
     _cap("feedback.list", "/support/feedback", "查询我的反馈", "GET", "/api/feedback"),
+    _cap("feedback.stats", "/support/feedback", "查询我的反馈统计", "GET", "/api/feedback/stats"),
     _cap("feedback.get", "/support/feedback", "查询反馈详情", "GET", "/api/feedback/{feedback_id}"),
     _cap("feedback.create", "/support/feedback", "提交用户反馈", "POST", "/api/feedback", WRITE),
     # 个人资料。密码和 API Key 明文操作不进入模型通用工具参数。

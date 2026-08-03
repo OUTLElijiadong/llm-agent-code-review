@@ -34,13 +34,13 @@ from app.models.user import User
 from app.schemas.project import ProjectIn
 from app.services import audit_service, code_file_service, project_service
 from app.services.project_member_service import require_project_access
+from app.utils.encoding_utils import BASE64_PREFIX, MAX_AUDIT_TEXT_LINES_PER_FILE, to_utf8
 from app.utils.archive_extractor import (
     ARCHIVE_EXTENSIONS,
     ArchiveMember,
     is_archive,
     read_archive_members,
 )
-from app.utils.encoding_utils import BASE64_PREFIX, MAX_AUDIT_TEXT_LINES_PER_FILE, to_utf8
 from app.utils.malware_scanner import MalwareScanner, ScanResult
 from app.utils.public_http import PinnedPublicUrl, pin_public_http_url
 from app.utils.source_archive_gate import source_archive_workload
@@ -625,7 +625,7 @@ def download_remote_archive(url: str) -> tuple[bytes, str]:
                         code=50201,
                     )
                 try:
-                    int(response.headers.get("content-length") or 0)
+                    declared = int(response.headers.get("content-length") or 0)
                 except (TypeError, ValueError) as exc:
                     raise ExternalServiceError("远程源码响应长度无效", code=50201) from exc
                 chunks: list[bytes] = []

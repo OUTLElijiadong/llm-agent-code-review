@@ -23,7 +23,7 @@ class ProjectSourceArchive(Base, IdMixin, TimestampMixin):
     original_filename = Column(String(255), nullable=False)
     media_type = Column(String(120), nullable=False, default="application/zip")
     archive_sha256 = Column(String(64), nullable=False)
-    compressed_size = Column(BigInteger, nullable=False)
+    compressed_size = Column(Integer, nullable=False)
     expanded_size = Column(BigInteger, nullable=False)
     file_count = Column(Integer, nullable=False)
     max_member_size = Column(BigInteger, nullable=False)
