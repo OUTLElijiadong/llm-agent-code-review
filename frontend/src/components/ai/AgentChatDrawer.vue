@@ -1586,6 +1586,7 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
+.msg-content.markdown-body { white-space: normal; }
 .msg-content.markdown-body :deep(p)        { margin: 0; }
 .msg-content.markdown-body :deep(pre) {
   background: #1e1e2e; color: #cdd6f4;
