@@ -1,0 +1,12 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG BASE_IMAGE
+RUN set -eu; \
+    image_digest="${BASE_IMAGE##*@sha256:}"; \
+    [ "$image_digest" != "$BASE_IMAGE" ]; \
+    [ "${#image_digest}" -eq 64 ]; \
+    case "$image_digest" in *[!0-9a-f]*) exit 1 ;; esac
+# The fixed runner uses only the runtime and the base image's shell for local
+# health probes; no mutable package repository is accessed during the build.
+COPY --chmod=0555 runner.sh /opt/prism/runner.sh
+ENTRYPOINT ["/opt/prism/runner.sh"]

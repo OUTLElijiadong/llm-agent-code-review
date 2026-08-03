@@ -1,0 +1,13 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG BASE_IMAGE
+RUN set -eu; \
+    image_digest="${BASE_IMAGE##*@sha256:}"; \
+    [ "$image_digest" != "$BASE_IMAGE" ]; \
+    [ "${#image_digest}" -eq 64 ]; \
+    case "$image_digest" in *[!0-9a-f]*) exit 1 ;; esac
+# Keep the runner build offline and reproducible after the base image is pinned.
+# Uploaded projects may provide pytest in their own locked/vendor tree; otherwise
+# runner.sh falls back to the standard-library unittest discovery path.
+COPY --chmod=0555 runner.sh /opt/prism/runner.sh
+ENTRYPOINT ["/opt/prism/runner.sh"]

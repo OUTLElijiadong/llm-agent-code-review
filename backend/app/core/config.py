@@ -6,7 +6,7 @@ FastAPI应用核心配置模块
 from pathlib import Path
 from typing import List
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = Path(__file__).resolve().parent.parent.parent.parent / ".env"
@@ -39,7 +39,11 @@ class Settings(BaseSettings):
     clamav_timeout: float = 5.0
     clamav_recheck_seconds: int = 30
     yara_rules_dir: str = "deploy/yara/rules"
+    yara_match_timeout: int = Field(default=5, ge=1, le=60)
     malware_scan_fail_closed: bool = False
+    source_archive_max_bytes: int = Field(default=20 * 1024 * 1024, ge=1, le=20 * 1024 * 1024)
+    source_archive_clamav_timeout: float = Field(default=120.0, gt=0, le=300)
+    source_archive_yara_total_timeout: float = Field(default=300.0, gt=0, le=600)
 
     db_host: str = "127.0.0.1"
     db_port: int = 3306
@@ -62,8 +66,22 @@ class Settings(BaseSettings):
     # DeepSeek V4 上下文窗口与内部 Agent 投影预算。完整 transcript 仍持久化供审计。
     deepseek_context_window_tokens: int = 1_000_000
     deepseek_max_output_tokens: int = 32_768
+    # 项目级白盒审计需要同时承载漏洞、入口和危险汇，不能沿用通用 Agent 的 4096 token 默认值。
+    security_semantic_max_output_tokens: int = Field(default=16_384, ge=4_096, le=65_536)
     deepseek_compaction_threshold_tokens: int = 850_000
     deepseek_compaction_keep_recent_tokens: int = 200_000
+    # 项目级语义审计先使用保守批次，输出截断时再递归拆分。
+    security_semantic_batch_chars: int = Field(default=60_000, ge=8_000, le=120_000)
+    security_semantic_min_split_chars: int = Field(default=2_000, ge=512, le=24_000)
+    security_semantic_max_split_depth: int = Field(default=8, ge=1, le=12)
+    security_semantic_max_requests: int = Field(default=128, ge=1, le=512)
+    security_semantic_timeout_seconds: int = Field(default=1_800, ge=60, le=7_200)
+    security_semantic_max_findings_per_batch: int = Field(default=12, ge=1, le=50)
+    security_semantic_max_graph_items_per_batch: int = Field(default=20, ge=1, le=100)
+    # static_full / triage 只调度可在共享请求预算内闭合的多文件语义窗口。
+    security_semantic_bounded_total_chars: int = Field(default=16_000, ge=512, le=2_400_000)
+    security_semantic_bounded_per_file_chars: int = Field(default=4_000, ge=512, le=240_000)
+    security_semantic_bounded_max_files: int = Field(default=4, ge=1, le=32)
     # 全局审查并发上限:同时进行的后台审查任务数上限(2C2G 生产机默认 2)
     review_max_concurrency: int = 2
     allow_private_ai_base_url: bool = False
@@ -107,6 +125,19 @@ class Settings(BaseSettings):
     mcp_timeout: float = 30.0
     agent_event_stream_maxlen: int = 500
 
+    # 不可信代码只通过独立沙箱执行器运行，后端不挂载 Docker Socket。
+    sandbox_enabled: bool = False
+    sandbox_executor_socket: str = "/var/lib/prism-sandbox/agent.sock"
+    sandbox_executor_token: str = ""
+    sandbox_default_ttl_hours: int = 72
+    sandbox_max_ttl_hours: int = 168
+    sandbox_max_concurrency: int = 1
+    sandbox_required_runtime: str = "runsc"
+    sandbox_mode: str = "strict"
+    sandbox_allow_runc: bool = False
+    sandbox_remote_targets_enabled: bool = True
+    sandbox_remote_timeout: int = 30
+
     # 宿主机运维白名单执行器；仅 Unix Socket，不开放 TCP。
     ops_executor_socket: str = "/run/prism-ops/agent.sock"
     ops_executor_token: str = ""
@@ -134,6 +165,8 @@ class Settings(BaseSettings):
             problems.append("DEEPSEEK_CONTEXT_WINDOW_TOKENS 必须在 100000 到 1000000 之间")
         if not 128 <= self.deepseek_max_output_tokens <= 384_000:
             problems.append("DEEPSEEK_MAX_OUTPUT_TOKENS 必须在 128 到 384000 之间")
+        if self.security_semantic_max_output_tokens > self.deepseek_max_output_tokens:
+            problems.append("SECURITY_SEMANTIC_MAX_OUTPUT_TOKENS 不能超过 DEEPSEEK_MAX_OUTPUT_TOKENS")
         input_budget = self.deepseek_context_window_tokens - self.deepseek_max_output_tokens
         if input_budget <= 0:
             problems.append("DEEPSEEK_MAX_OUTPUT_TOKENS 必须小于上下文窗口")
@@ -144,6 +177,53 @@ class Settings(BaseSettings):
             0,
         ):
             problems.append("DEEPSEEK_COMPACTION_KEEP_RECENT_TOKENS 必须在 1000 到压缩阈值之间")
+        if self.security_semantic_min_split_chars >= self.security_semantic_batch_chars:
+            problems.append("SECURITY_SEMANTIC_MIN_SPLIT_CHARS 必须小于初始语义批次字符数")
+        if self.security_semantic_bounded_per_file_chars > self.security_semantic_bounded_total_chars:
+            problems.append(
+                "SECURITY_SEMANTIC_BOUNDED_PER_FILE_CHARS 不能超过有界语义总字符数"
+            )
+        if (
+            self.security_semantic_bounded_total_chars
+            > self.security_semantic_bounded_per_file_chars
+            * self.security_semantic_bounded_max_files
+        ):
+            problems.append(
+                "SECURITY_SEMANTIC_BOUNDED_TOTAL_CHARS 不能超过单文件上限与文件数上限的乘积"
+            )
+        # split 最坏可形成约 4 * chars / min_split 个叶片；invalid_item
+        # 每个节点最多消耗原调用和契约修复各一次，并预留一次数据流请求。
+        max_terminal_leaves = max(1, (self.security_semantic_max_requests + 1) // 4)
+        safe_bounded_chars = (
+            max_terminal_leaves * self.security_semantic_min_split_chars // 4
+        )
+        if self.security_semantic_bounded_total_chars > safe_bounded_chars:
+            problems.append(
+                "SECURITY_SEMANTIC_BOUNDED_TOTAL_CHARS 超过共享请求预算的保守闭合上限 "
+                f"{safe_bounded_chars}"
+            )
+        # 分割点会尽量贴近换行边界，最坏时较大子叶约为父节点的 3/4。
+        # 配置深度必须足以把有界窗口降至终端叶片上限。
+        required_split_depth = 0
+        worst_leaf_chars = self.security_semantic_bounded_total_chars
+        while worst_leaf_chars > self.security_semantic_min_split_chars:
+            worst_leaf_chars = (worst_leaf_chars * 3 + 3) // 4
+            required_split_depth += 1
+        if self.security_semantic_max_split_depth < required_split_depth:
+            problems.append(
+                "SECURITY_SEMANTIC_MAX_SPLIT_DEPTH 不足以在最坏分割下闭合有界语义窗口,"
+                f"至少需要 {required_split_depth}"
+            )
+        # 使用高于数据库当前 500 字符路径上限的保守开销，防止
+        # 路径、语言和分隔标记使有界窗口意外拆成多个初始批次。
+        bounded_batch_estimate = (
+            self.security_semantic_bounded_total_chars
+            + self.security_semantic_bounded_max_files * 2_168
+        )
+        if bounded_batch_estimate > self.security_semantic_batch_chars:
+            problems.append(
+                "有界语义窗口连同文件路径开销必须能够装入一个初始批次"
+            )
         if problems:
             raise ValueError("检测到无效的 DeepSeek 上下文预算: " + "; ".join(problems))
         return self
@@ -177,6 +257,18 @@ class Settings(BaseSettings):
             problems.append("API_KEY_ENCRYPTION_KEYS 第一项必须与 JWT_SECRET 不同")
         if self.ops_automation_enabled and len(self.ops_executor_token.strip()) < 32:
             problems.append("OPS_EXECUTOR_TOKEN 必须配置至少 32 字符的独立随机令牌")
+        if not self.malware_scan_fail_closed:
+            problems.append("MALWARE_SCAN_FAIL_CLOSED 在非 dev 环境必须为 true")
+        if self.sandbox_enabled and len(self.sandbox_executor_token.strip()) < 32:
+            problems.append("SANDBOX_EXECUTOR_TOKEN 启用沙箱时必须至少 32 字符")
+        if not 1 <= self.sandbox_default_ttl_hours <= self.sandbox_max_ttl_hours <= 720:
+            problems.append("沙箱保留时间配置不合法")
+        if not 1 <= self.sandbox_max_concurrency <= 8:
+            problems.append("SANDBOX_MAX_CONCURRENCY 必须在 1-8")
+        if self.sandbox_mode not in {"strict", "local_development"}:
+            problems.append("SANDBOX_MODE 只能是 strict 或 local_development")
+        if self.sandbox_allow_runc and self.sandbox_mode != "local_development":
+            problems.append("SANDBOX_ALLOW_RUNC 只能在 local_development 模式启用")
         if problems:
             raise ValueError(
                 f"检测到不安全的生产配置(APP_ENV={self.app_env}): " + "; ".join(problems),

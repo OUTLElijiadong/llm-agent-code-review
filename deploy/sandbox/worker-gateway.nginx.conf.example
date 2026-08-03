@@ -1,0 +1,41 @@
+# Prism sandbox remote Worker gateway (Nginx 1.24+).
+#
+# Replace worker.example.com and the certificate paths before enabling this
+# server. The gateway forwards the caller's Bearer header to the executor over
+# a local Unix socket; it does not create or log a second credential.
+
+upstream prism_sandbox_executor {
+    server unix:/var/lib/prism-sandbox/agent.sock;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name worker.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/worker.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/worker.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:prism_sandbox_tls:10m;
+    ssl_session_timeout 10m;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # A 32 MiB archive is base64 encoded in the JSON request. Keep this above
+    # the executor request limit while still bounding reverse-proxy memory.
+    client_max_body_size 70m;
+    proxy_http_version 1.1;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_connect_timeout 10s;
+    proxy_send_timeout 630s;
+    proxy_read_timeout 630s;
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_hide_header Server;
+
+    location / {
+        proxy_pass http://prism_sandbox_executor;
+    }
+}

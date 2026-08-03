@@ -1,0 +1,36 @@
+services:
+  python:
+    image: prism-sandbox-python:3.11
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+      args:
+        BASE_IMAGE: ${PYTHON_BASE_IMAGE:?PYTHON_BASE_IMAGE must name the reviewed image}@sha256:${PYTHON_BASE_IMAGE_DIGEST:?PYTHON_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
+  node:
+    image: prism-sandbox-node:20
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+      args:
+        BASE_IMAGE: ${NODE_BASE_IMAGE:?NODE_BASE_IMAGE must name the reviewed image}@sha256:${NODE_BASE_IMAGE_DIGEST:?NODE_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
+  java:
+    image: prism-sandbox-java:17
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        BASE_IMAGE: ${JAVA_BASE_IMAGE:?JAVA_BASE_IMAGE must name the reviewed image}@sha256:${JAVA_BASE_IMAGE_DIGEST:?JAVA_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
+  go:
+    image: prism-sandbox-go:1.23
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+      args:
+        BASE_IMAGE: ${GO_BASE_IMAGE:?GO_BASE_IMAGE must name the reviewed image}@sha256:${GO_BASE_IMAGE_DIGEST:?GO_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
+  php:
+    image: prism-sandbox-php:8.3
+    build:
+      context: .
+      dockerfile: Dockerfile.php
+      args:
+        BASE_IMAGE: ${PHP_BASE_IMAGE:?PHP_BASE_IMAGE must name the reviewed image}@sha256:${PHP_BASE_IMAGE_DIGEST:?PHP_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
