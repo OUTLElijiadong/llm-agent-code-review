@@ -58,6 +58,13 @@ _DEFAULT_GOVERNANCE_AGENTS = (
     ("alert", "告警Agent", "异常告警和升级通知", "operations", ("alert",)),
     ("test_verifier", "测试验证Agent", "执行回归验证并归档可复核结果", "quality", ("test", "verification")),
     (
+        "sandbox_deployer",
+        "沙箱部署Agent",
+        "部署、续期和关闭隔离运行环境",
+        "operations",
+        ("sandbox", "deploy", "lifecycle"),
+    ),
+    (
         "quality_evaluator",
         "质量评估Agent",
         "汇总代码质量信号并评估改进收益",

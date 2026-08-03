@@ -17,7 +17,13 @@ from typing import List, Optional, Set
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import BadRequestError, NotFoundError
+from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.core.super_admin import (
+    SERVER_OPS_PERMISSION_PREFIX,
+    SUPER_ADMIN_ROLE,
+    SUPER_ADMIN_USERNAME,
+    is_unique_super_admin,
+)
 from app.models.rbac import (
     DataScope,
     Menu,
@@ -86,6 +92,12 @@ def is_admin_user(db: Session, user_id: int) -> bool:
     return admin_role_count > 0
 
 
+def is_super_admin_user(db: Session, user_id: int) -> bool:
+    """判断用户是否为唯一且数据一致的 ``admin`` 超级管理员。"""
+
+    return is_unique_super_admin(db, db.get(User, user_id))
+
+
 # ============================================================================
 # 用户角色分配
 # ============================================================================
@@ -97,6 +109,7 @@ def assign_roles_to_user(
     role_ids: List[int],
     *,
     commit: bool = True,
+    actor: User | None = None,
 ) -> None:
     """给用户分配角色(覆盖式)
 
@@ -108,9 +121,30 @@ def assign_roles_to_user(
         user_id: 用户ID
         role_ids: 角色ID列表(将完全替换用户现有角色)
     """
+    target = db.query(User).populate_existing().filter(User.id == user_id).with_for_update().one_or_none()
+    if target is None:
+        raise NotFoundError("用户不存在", code=40400)
+    roles = db.query(Role).filter(Role.id.in_(set(role_ids))).all() if role_ids else []
+    if len({role.id for role in roles}) != len(set(role_ids)):
+        raise BadRequestError("包含不存在的角色", code=40000)
+    if target.username == SUPER_ADMIN_USERNAME:
+        raise ForbiddenError("超级管理员角色固定，不允许修改", code=40322)
+    if any(role.code == SUPER_ADMIN_ROLE for role in roles):
+        raise ForbiddenError("超级管理员只能是 admin", code=40322)
+    if actor is not None and not is_admin_user(db, actor.id):
+        raise ForbiddenError("需要管理员权限", code=40300)
+
     db.query(UserRole).filter(UserRole.user_id == user_id).delete()
     for rid in role_ids:
         db.add(UserRole(user_id=user_id, role_id=rid))
+    role_codes = {role.code for role in roles}
+    if "admin" in role_codes:
+        target.role = "admin"
+    elif "reviewer" in role_codes:
+        target.role = "reviewer"
+    else:
+        target.role = "user"
+    target.token_version = (target.token_version or 0) + 1
     if commit:
         db.commit()
     else:
@@ -249,7 +283,7 @@ def list_permissions(db: Session) -> List[Permission]:
     return db.query(Permission).order_by(Permission.id).all()
 
 
-def create_role(db: Session, role_in: RoleCreateIn) -> Role:
+def create_role(db: Session, role_in: RoleCreateIn, *, actor: User | None = None) -> Role:
     """创建角色
 
     创建角色记录,若 role_in.permission_codes 非空,同时分配对应权限。
@@ -267,6 +301,10 @@ def create_role(db: Session, role_in: RoleCreateIn) -> Role:
     existing = db.query(Role).filter(Role.code == role_in.code).first()
     if existing:
         raise BadRequestError("角色编码已存在", code=40000)
+    if role_in.code == SUPER_ADMIN_ROLE:
+        raise ForbiddenError("超级管理员角色为系统唯一内置角色", code=40322)
+    if any(code.startswith(SERVER_OPS_PERMISSION_PREFIX) for code in role_in.permission_codes):
+        raise ForbiddenError("服务器权限仅属于超级管理员", code=40323)
 
     role = Role(
         name=role_in.name,
@@ -291,7 +329,7 @@ def create_role(db: Session, role_in: RoleCreateIn) -> Role:
     return role
 
 
-def update_role(db: Session, role_id: int, role_in: RoleUpdateIn) -> Role:
+def update_role(db: Session, role_id: int, role_in: RoleUpdateIn, *, actor: User | None = None) -> Role:
     """更新角色
 
     仅更新提供的字段。若 permission_codes 字段提供(包括空列表),
@@ -311,6 +349,12 @@ def update_role(db: Session, role_id: int, role_in: RoleUpdateIn) -> Role:
     role = db.get(Role, role_id)
     if not role:
         raise NotFoundError("角色不存在", code=40400)
+    if role.code == SUPER_ADMIN_ROLE:
+        raise ForbiddenError("超级管理员角色固定，不允许修改", code=40322)
+    if role_in.permission_codes is not None and any(
+        code.startswith(SERVER_OPS_PERMISSION_PREFIX) for code in role_in.permission_codes
+    ):
+        raise ForbiddenError("服务器权限仅属于超级管理员", code=40323)
 
     # 更新基础字段(仅更新提供的字段)
     if role_in.name is not None:
@@ -336,7 +380,13 @@ def update_role(db: Session, role_id: int, role_in: RoleUpdateIn) -> Role:
     return role
 
 
-def assign_permissions_to_role(db: Session, role_id: int, permission_ids: List[int]) -> None:
+def assign_permissions_to_role(
+    db: Session,
+    role_id: int,
+    permission_ids: List[int],
+    *,
+    actor: User | None = None,
+) -> None:
     """给角色分配权限(覆盖式)
 
     先删除角色的所有旧权限关联,再插入新权限关联。
@@ -347,6 +397,17 @@ def assign_permissions_to_role(db: Session, role_id: int, permission_ids: List[i
         role_id: 角色ID
         permission_ids: 权限ID列表(将完全替换角色现有权限)
     """
+    role = db.get(Role, role_id)
+    if role is None:
+        raise NotFoundError("角色不存在", code=40400)
+    if role.code == SUPER_ADMIN_ROLE:
+        raise ForbiddenError("超级管理员权限固定，不允许修改", code=40322)
+    permissions = db.query(Permission).filter(Permission.id.in_(set(permission_ids))).all() if permission_ids else []
+    if len({permission.id for permission in permissions}) != len(set(permission_ids)):
+        raise BadRequestError("包含不存在的权限", code=40000)
+    if any(permission.code.startswith(SERVER_OPS_PERMISSION_PREFIX) for permission in permissions):
+        raise ForbiddenError("服务器权限仅属于超级管理员", code=40323)
+
     db.query(RolePermission).filter(RolePermission.role_id == role_id).delete()
     for pid in permission_ids:
         db.add(RolePermission(role_id=role_id, permission_id=pid))
@@ -372,7 +433,13 @@ def get_role_permissions(db: Session, role_id: int) -> List[Permission]:
     )
 
 
-def update_data_scope(db: Session, role_id: int, scope_in: DataScopeIn) -> DataScope:
+def update_data_scope(
+    db: Session,
+    role_id: int,
+    scope_in: DataScopeIn,
+    *,
+    actor: User | None = None,
+) -> DataScope:
     """更新角色的数据范围
 
     若角色已有数据范围记录则更新,否则新建。
@@ -391,6 +458,8 @@ def update_data_scope(db: Session, role_id: int, scope_in: DataScopeIn) -> DataS
     role = db.get(Role, role_id)
     if not role:
         raise NotFoundError("角色不存在", code=40400)
+    if role.code == SUPER_ADMIN_ROLE:
+        raise ForbiddenError("超级管理员数据范围固定，不允许修改", code=40322)
 
     scope = db.query(DataScope).filter(DataScope.role_id == role_id).first()
     if scope:
@@ -457,7 +526,10 @@ def check_permission(db: Session, user_id: int, permission_code: str) -> bool:
     Returns:
         bool: 拥有权限返回 True,否则 False
     """
-    # 管理员绕过
+    if permission_code.startswith(SERVER_OPS_PERMISSION_PREFIX):
+        return is_super_admin_user(db, user_id)
+
+    # 普通管理员只绕过程序内权限，不绕过服务器权限。
     if is_admin_user(db, user_id):
         return True
 

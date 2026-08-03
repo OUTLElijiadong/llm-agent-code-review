@@ -118,6 +118,20 @@ def change_password(
 
 
 @router.post("/logout", response_model=Resp[None])
-def logout():
-    """退出登录(后端无状态,前端清除token即可)"""
+def logout(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """退出登录并使当前账号已签发的会话令牌失效。"""
+    auth_service.logout(db, user)
+    audit_service.log(
+        db,
+        user,
+        "logout",
+        target_type="user",
+        target_id=user.id,
+        detail=f"用户 {user.username} 退出登录",
+        ip=_client_ip(request),
+    )
     return Resp(data=None)

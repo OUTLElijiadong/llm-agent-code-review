@@ -7,7 +7,9 @@ const auth = vi.hoisted(() => ({
     profile: null as null | { id: number; role: string },
     fetchProfile: vi.fn(),
     logout: vi.fn(),
+    clearSession: vi.fn(),
     isAdmin: vi.fn(() => false),
+    isSuperAdmin: vi.fn(() => false),
     hasRole: vi.fn<(role: string) => boolean>(() => false),
     hasPermission: vi.fn<(permission: string) => boolean>(() => false),
   },
@@ -53,7 +55,9 @@ function resetAuthHarness(): void {
   auth.user.profile = null
   auth.user.fetchProfile.mockReset()
   auth.user.logout.mockReset()
+  auth.user.clearSession.mockReset()
   auth.user.isAdmin.mockReset().mockReturnValue(false)
+  auth.user.isSuperAdmin.mockReset().mockReturnValue(false)
   auth.user.hasRole.mockReset().mockReturnValue(false)
   auth.user.hasPermission.mockReset().mockReturnValue(false)
 }
@@ -90,7 +94,7 @@ describe('router guards', () => {
     auth.user.profile = null
     auth.user.fetchProfile.mockRejectedValueOnce(new Error('expired'))
     expect(await before(route('/login', { public: true }), route('/'))).toBe(true)
-    expect(auth.user.logout).toHaveBeenCalledOnce()
+    expect(auth.user.clearSession).toHaveBeenCalledOnce()
   })
 
   it('redirects unauthenticated users with the original full path', async () => {
@@ -119,7 +123,7 @@ describe('router guards', () => {
       path: '/login',
       query: { redirect: '/projects' },
     })
-    expect(auth.user.logout).toHaveBeenCalledOnce()
+    expect(auth.user.clearSession).toHaveBeenCalledOnce()
   })
 
   it('enforces legacy role metadata for users while allowing admins to bypass it', async () => {
@@ -173,6 +177,32 @@ describe('router guards', () => {
     ).toBe(true)
     expect(auth.user.hasRole).not.toHaveBeenCalled()
     expect(auth.user.hasPermission).not.toHaveBeenCalled()
+  })
+
+  it('enforces super-admin routes before the ordinary admin bypass', async () => {
+    /** 普通管理员即使可绕过 RBAC,也不得进入全局模型与嵌入配置页。 */
+    const { before } = installHarness()
+    auth.user.token = 'token'
+    auth.user.profile = { id: 1, role: 'admin' }
+    auth.user.isAdmin.mockReturnValue(true)
+
+    expect(
+      await before(route('/admin/llm', { role: 'admin', superAdmin: true }), route('/')),
+    ).toEqual({ path: '/403' })
+    expect(
+      await before(route('/admin/embedding', { role: 'admin', superAdmin: true }), route('/')),
+    ).toEqual({ path: '/403' })
+    expect(
+      await before(route('/admin/mcp-workers', { role: 'admin', superAdmin: true }), route('/')),
+    ).toEqual({ path: '/403' })
+
+    auth.user.isSuperAdmin.mockReturnValue(true)
+    expect(
+      await before(route('/admin/llm', { role: 'admin', superAdmin: true }), route('/')),
+    ).toBe(true)
+    expect(
+      await before(route('/admin/mcp-workers', { role: 'admin', superAdmin: true }), route('/')),
+    ).toBe(true)
   })
 
   it('updates the document title after navigation', () => {

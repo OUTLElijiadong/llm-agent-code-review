@@ -23,15 +23,19 @@ interface Props {
   refName?: string
   /** 进入时是否自动触发扫描 */
   autoStart?: boolean
+  /** 隔离整包最近一次已持久化结果。 */
+  initialResult?: SecurityScanOut | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   refName: '',
   autoStart: false,
+  initialResult: null,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
+  completed: []
 }>()
 
 const visible = computed({
@@ -41,6 +45,7 @@ const visible = computed({
 
 // 扫描配置
 const scanDepth = ref<'quick' | 'standard' | 'deep'>('standard')
+const scanMode = ref<'full' | 'static_full' | 'triage'>('static_full')
 const topN = ref(50)
 const traceDataflow = ref(true)
 
@@ -130,6 +135,7 @@ async function runScan(): Promise<void> {
     } else if (props.source === 'project') {
       result.value = await scanProject({
         project_id: props.refId as number,
+        scan_mode: scanMode.value,
         top_n: topN.value,
         trace_dataflow: traceDataflow.value,
       })
@@ -142,6 +148,7 @@ async function runScan(): Promise<void> {
     if (!result.value?.findings?.length) {
       ElMessage.success('未检出安全风险')
     }
+    emit('completed')
   } catch (e: unknown) {
     const err = e as { message?: string }
     errorMessage.value = err.message || '扫描失败'
@@ -158,6 +165,9 @@ function downloadReport(): void {
   lines.push(`- 扫描范围: ${scopeLabel.value} ${props.refName ? `(${props.refName})` : ''}`)
   lines.push(`- 风险评分: **${result.value.risk_score}/100**`)
   lines.push(`- 扫描文件数: ${result.value.file_count}`)
+  if (result.value.source_archive_sha256) {
+    lines.push(`- 源码归档 SHA-256: \`${result.value.source_archive_sha256}\``)
+  }
   lines.push(`- 耗时: ${(result.value.duration_ms / 1000).toFixed(2)}s`)
   lines.push('')
   lines.push(`## 概要`)
@@ -266,7 +276,17 @@ function codeLinkPath(link: CodeLinkOut): string {
   return [link.from, link.to].filter(Boolean).join(' → ')
 }
 
+function complianceMetric(key: string, fallback: number): number {
+  const value = result.value?.compliance?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
 watch(visible, (v) => {
+  if (v && props.initialResult) {
+    result.value = props.initialResult
+    activeFindingIdx.value = 0
+    errorMessage.value = ''
+  }
   if (v && props.autoStart && !result.value) {
     runScan()
   }
@@ -282,7 +302,7 @@ watch(() => props.refId, () => {
   <el-dialog
     v-model="visible"
     :title="dialogTitle"
-    width="880px"
+    width="min(880px, 94vw)"
     :close-on-click-modal="false"
     top="5vh"
   >
@@ -299,10 +319,26 @@ watch(() => props.refId, () => {
         </template>
 
         <template v-else-if="isProjectScan">
-          <span class="tb-label">
-            {{ source === 'all-projects' ? '每项目文件数' : '扫描文件数' }}
-          </span>
-          <el-input-number v-model="topN" :min="1" :max="200" size="small" />
+          <template v-if="source === 'project'">
+            <span class="tb-label">审计范围</span>
+            <el-radio-group v-model="scanMode" size="small">
+              <el-radio-button value="static_full">全量静态</el-radio-button>
+              <el-radio-button value="full">完整语义</el-radio-button>
+              <el-radio-button value="triage">风险抽样</el-radio-button>
+            </el-radio-group>
+            <el-input-number
+              v-if="scanMode !== 'full'"
+              v-model="topN"
+              :min="1"
+              :max="200"
+              size="small"
+            />
+            <span v-if="scanMode !== 'full'" class="tb-label">语义候选上限</span>
+          </template>
+          <template v-else>
+            <span class="tb-label">每项目文件数</span>
+            <el-input-number v-model="topN" :min="1" :max="200" size="small" />
+          </template>
           <el-checkbox v-model="traceDataflow" size="small">跨文件数据流追踪</el-checkbox>
         </template>
 
@@ -342,14 +378,14 @@ watch(() => props.refId, () => {
           source === 'all-projects'
             ? '正在扫描全部可见项目、接口和代码联动关系'
             : source === 'project'
-              ? '正在扫描项目文件并构建威胁模型'
+              ? '正在执行整包源码白盒审计'
               : '正在执行网络安全审查'
         }}
       </div>
       <div class="loading-sub">
         {{
           isProjectScan
-            ? '逐项目/逐文件执行正则、静态规则、接口抽取、数据流追踪和多 Agent 讨论摘要'
+            ? '全包静态覆盖、项目级语义批处理与跨文件数据流追踪'
             : '正则秘钥扫描 + LLM 深度漏洞审查'
         }}
       </div>
@@ -396,6 +432,26 @@ watch(() => props.refId, () => {
       </div>
 
       <div class="sec-summary" v-if="result.summary" v-html="renderMarkdown(result.summary)" />
+
+      <dl v-if="result.source_archive_sha256" class="audit-evidence">
+        <dt>归档 SHA-256</dt>
+        <dd class="font-mono">{{ result.source_archive_sha256 }}</dd>
+        <dt>静态覆盖</dt>
+        <dd>
+          {{ complianceMetric('static_scanned_file_count', result.file_count) }} /
+          {{ complianceMetric('total_file_count', result.file_count) }}
+        </dd>
+        <dt>语义归档字符覆盖</dt>
+        <dd>
+          {{ complianceMetric('semantic_source_chars', 0) }} /
+          {{
+            complianceMetric(
+              'archive_text_source_chars',
+              complianceMetric('total_text_source_chars', 0),
+            )
+          }}
+        </dd>
+      </dl>
 
       <!-- 接口、联动和多 Agent 讨论 -->
       <div
@@ -792,6 +848,35 @@ watch(() => props.refId, () => {
   :deep(ul), :deep(ol) { padding-left: 18px; margin: 4px 0; }
   :deep(strong) { font-weight: 600; }
   :deep(code) { background: var(--gray-100); padding: 0 4px; border-radius: 3px; font-size: 11.5px; }
+}
+
+.audit-evidence {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 6px 12px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  background: var(--gray-50);
+  border-left: 3px solid var(--brand-600, #5B58E8);
+
+  dt {
+    color: var(--gray-600);
+    font-size: 12px;
+  }
+
+  dd {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--gray-800);
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 560px) {
+  .audit-evidence {
+    grid-template-columns: 1fr;
+  }
 }
 
 .block-head {

@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   authLogin: vi.fn(),
+  authLogout: vi.fn(),
   authRegister: vi.fn(),
   authMe: vi.fn(),
   fetchRoles: vi.fn(),
@@ -16,6 +17,7 @@ const api = vi.hoisted(() => ({
 
 vi.mock('@/api/auth', () => ({
   login: api.authLogin,
+  logout: api.authLogout,
   register: api.authRegister,
   me: api.authMe,
 }))
@@ -56,6 +58,7 @@ function resetUserStore(): void {
     dataScope: null,
   })
   api.authLogin.mockReset()
+  api.authLogout.mockReset().mockResolvedValue(undefined)
   api.authRegister.mockReset()
   api.authMe.mockReset()
   api.fetchRoles.mockReset().mockResolvedValue([])
@@ -174,10 +177,25 @@ describe('user store authentication and RBAC', () => {
     store.roles = ['admin']
     expect(store.isAdmin()).toBe(true)
     expect(store.hasPermission('anything')).toBe(true)
+    expect(store.hasPermission('server_ops:view')).toBe(false)
 
     store.roles = []
     store.profile = { ...member, role: 'admin' }
     expect(store.isAdmin()).toBe(true)
+
+    store.profile = { ...member, username: 'admin', role: 'super_admin' }
+    store.roles = ['super_admin']
+    expect(store.isSuperAdmin()).toBe(true)
+    expect(store.hasPermission('server_ops:view')).toBe(true)
+
+    store.roles = ['admin']
+    expect(store.isSuperAdmin()).toBe(false)
+    expect(store.hasPermission('server_ops:view')).toBe(false)
+
+    store.profile = { ...member, username: 'admin', role: 'admin' }
+    store.roles = ['super_admin']
+    expect(store.isSuperAdmin()).toBe(false)
+    expect(store.hasPermission('server_ops:view')).toBe(false)
   })
 
   it('registers and restores a profile before loading RBAC data', async () => {
@@ -195,7 +213,7 @@ describe('user store authentication and RBAC', () => {
     expect(store.roles).toEqual(['user'])
   })
 
-  it('logout and auth-expired events clear all local authorization state', () => {
+  it('logout and auth-expired events clear all local authorization state', async () => {
     /** 验证主动退出与拦截器事件均清空敏感状态。 */
     store.$patch({
       token: 'token',
@@ -211,13 +229,14 @@ describe('user store authentication and RBAC', () => {
     expect(store.profile).toBeNull()
     expect(store.roles).toEqual([])
     expect([...store.permissions]).toEqual([])
-    expect(api.clearToken).not.toHaveBeenCalled()
+    expect(api.clearToken).toHaveBeenCalledOnce()
 
     store.$patch({ token: 'again', profile: member, roles: ['user'] })
-    store.logout()
+    await store.logout()
     expect(store.token).toBe('')
     expect(store.profile).toBeNull()
     expect(store.roles).toEqual([])
-    expect(api.clearToken).toHaveBeenCalledOnce()
+    expect(api.clearToken).toHaveBeenCalledTimes(2)
+    expect(api.authLogout).toHaveBeenCalledOnce()
   })
 })

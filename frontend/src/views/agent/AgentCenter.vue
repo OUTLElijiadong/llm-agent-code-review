@@ -276,7 +276,7 @@ const selectedAgent = ref<AgentRuntimeOut | null>(null)
 const agentSkills = ref<SkillMetaOut[]>([])
 const skillsLoading = ref(false)
 const triggering = ref(false)
-const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const isAdmin = computed(() => userStore.isAdmin())
 
 /**
  * Skill 类型中文标签

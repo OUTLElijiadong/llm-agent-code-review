@@ -2,7 +2,12 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { UserOut, LoginIn, RegisterIn } from '@/types/auth'
 import type { Menu, DataScope } from '@/types/rbac'
-import { login as authLogin, register as authRegister, me as authMe } from '@/api/auth'
+import {
+  login as authLogin,
+  logout as authLogout,
+  register as authRegister,
+  me as authMe,
+} from '@/api/auth'
 import {
   fetchUserRoles as apiFetchUserRoles,
   fetchUserPermissions as apiFetchUserPermissions,
@@ -111,6 +116,7 @@ export const useUserStore = defineStore('user', () => {
    * @returns 是否拥有该权限
    */
   function hasPermission(code: string): boolean {
+    if (code.startsWith('server_ops:')) return isSuperAdmin()
     if (isAdmin()) return true
     return permissions.value.has(code)
   }
@@ -134,6 +140,12 @@ export const useUserStore = defineStore('user', () => {
     if (roles.value.includes('admin') || roles.value.includes('super_admin')) return true
     const legacy = profile.value?.role
     return legacy === 'admin' || legacy === 'super_admin'
+  }
+
+  /** 唯一超级管理员必须同时满足 admin 用户名与 super_admin 角色。 */
+  function isSuperAdmin(): boolean {
+    if (profile.value?.username !== 'admin') return false
+    return profile.value.role === 'super_admin' && roles.value.includes('super_admin')
   }
 
   /**
@@ -180,11 +192,20 @@ export const useUserStore = defineStore('user', () => {
    * 退出登录,清除本地状态与 RBAC 权限
    * @returns void
    */
-  function logout(): void {
+  function clearSession(): void {
     token.value = ''
     profile.value = null
     clearRbacState()
     clearToken()
+  }
+
+  /** 先通知服务端吊销会话，网络失败时也确保本地退出。 */
+  async function logout(): Promise<void> {
+    try {
+      if (token.value) await authLogout()
+    } finally {
+      clearSession()
+    }
   }
 
   /**
@@ -195,6 +216,7 @@ export const useUserStore = defineStore('user', () => {
     token.value = ''
     profile.value = null
     clearRbacState()
+    clearToken()
   }
 
   /**
@@ -229,6 +251,8 @@ export const useUserStore = defineStore('user', () => {
     hasPermission,
     hasRole,
     isAdmin,
+    isSuperAdmin,
+    clearSession,
     logout,
   }
 })

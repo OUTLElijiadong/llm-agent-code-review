@@ -62,7 +62,8 @@ previous_state="$release_dir/previous.env"
 pending_state="$release_dir/pending.env"
 mkdir -p "$release_dir"
 chmod 700 "$release_dir"
-lock_dir="$release_dir/.deploy.lock"
+lock_dir="$(maintenance_lock_path)"
+mkdir -p "$(dirname "$lock_dir")"
 acquire_directory_lock "$lock_dir"
 trap 'release_directory_lock "$lock_dir"' EXIT
 
@@ -117,12 +118,22 @@ case "$target" in
     ;;
 esac
 
-if [[ "$target" == "all" || "$target" == "backend" ]]; then
-  validate_geolite_database
-  release_image_exists prism-backend "$current_backend" && rollback_ready=1 || true
-else
-  release_image_exists prism-frontend "$current_frontend" && rollback_ready=1 || true
-fi
+case "$target" in
+  all)
+    validate_geolite_database
+    if release_image_exists prism-backend "$current_backend" \
+      && release_image_exists prism-frontend "$current_frontend"; then
+      rollback_ready=1
+    fi
+    ;;
+  backend)
+    validate_geolite_database
+    release_image_exists prism-backend "$current_backend" && rollback_ready=1 || true
+    ;;
+  frontend)
+    release_image_exists prism-frontend "$current_frontend" && rollback_ready=1 || true
+    ;;
+esac
 
 export APP_RELEASE="$target_sha"
 export BACKEND_RELEASE="$desired_backend"
@@ -138,11 +149,12 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
   compose up -d mysql clamav
   wait_for_service_health mysql "${MYSQL_HEALTH_TIMEOUT:-180}" || fatal "MySQL 未就绪"
   wait_for_service_health clamav "${CLAMAV_HEALTH_TIMEOUT:-420}" || fatal "ClamAV 未就绪"
-  backup_file="$(./backup.sh --reason pre_deploy | tail -n 1)"
+  backup_file="$(PRISM_MAINTENANCE_LOCK_HELD=1 ./backup.sh --reason pre_deploy | tail -n 1)"
   [[ -f "$backup_file" ]] || fatal "发布前备份未生成"
+  PRISM_MAINTENANCE_LOCK_HELD=1 ./verify-backup.sh "$backup_file"
   log_info "发布前备份已完成"
   compose build backend
-  compose run --rm --no-deps backend alembic upgrade head
+  run_admin_alembic upgrade head
   assert_alembic_at_head || fatal "Alembic 未位于唯一 head"
   compose up -d --no-deps backend
   wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || fatal "Backend 未恢复健康"

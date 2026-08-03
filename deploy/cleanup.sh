@@ -68,7 +68,7 @@ docker compose version >/dev/null 2>&1 || fatal "docker compose 不可用"
 release_dir="${RELEASE_STATE_DIR:-.releases}"
 current_state="$release_dir/current.env"
 previous_state="$release_dir/previous.env"
-lock_dir="$release_dir/.deploy.lock"
+lock_dir="$(maintenance_lock_path)"
 if [[ "$apply" == "1" ]]; then
   mkdir -p "$release_dir"
   acquire_directory_lock "$lock_dir"

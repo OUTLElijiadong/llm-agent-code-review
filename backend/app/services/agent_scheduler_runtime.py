@@ -99,7 +99,7 @@ def _run_scheduled_job(job_id: int) -> None:
     """
     db = SessionLocal()
     try:
-        run = scheduler_service.run_job(db, job_id)
+        run = scheduler_service.run_job(db, job_id, system_scheduled=True)
         logger.info("[agent-governance-scheduler] job_id={} run_id={} status={}", job_id, run.id, run.status)
     except Exception as exc:  # noqa: BLE001 - 后台任务异常不能杀死调度器
         logger.warning("[agent-governance-scheduler] job_id={} failed: {}", job_id, exc)
@@ -216,6 +216,17 @@ def start_agent_governance_scheduler() -> None:
     for job in jobs:
         if _register_job_to_scheduler(scheduler, job):
             registered += 1
+    from app.services.sandbox_service import expire_due_environments
+
+    scheduler.add_job(
+        expire_due_environments,
+        "interval",
+        id="sandbox-expiry-reaper",
+        minutes=5,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     _scheduler = scheduler
     logger.info("[agent-governance-scheduler] started with {} jobs", registered)

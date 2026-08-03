@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -23,6 +24,22 @@ from app.core.exceptions import NotFoundError
 from app.models.report_template import ReportTemplate
 from app.schemas.report_template import ReportTemplateIn, ReportTemplateUpdate
 from app.services.report_exporter import load_builtin_template
+
+_LEGACY_MARKDOWN_SHA256_BY_TYPE = {
+    "simple": "bcfa90326f10d2c108a77a8382337bd8c84340838b72e0e230a7a3d8ebb88bc0",
+    "detailed": "482ccd450a0d1e98c4d20436aa04a6958357330ce76a2411b8a583369e336bf9",
+    "compliance": "6882c929d69f5fc84eb25946ec4e1f9622c3b86e5f596c5c1fb214b47ae2c9e8",
+}
+
+
+def _is_legacy_markdown_template(content: str, template_type: str) -> bool:
+    """精确识别 008 数据迁移写入的旧版 Markdown 内置模板。"""
+
+    expected_digest = _LEGACY_MARKDOWN_SHA256_BY_TYPE.get(template_type)
+    if not expected_digest:
+        return False
+    actual_digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return actual_digest == expected_digest
 
 # ============ 查询接口 ============
 
@@ -195,7 +212,11 @@ def get_builtin_template_content(db: Session, template_type: str) -> str:
         )
         .first()
     )
-    if db_template and db_template.content:
+    if (
+        db_template
+        and db_template.content
+        and not _is_legacy_markdown_template(db_template.content, template_type)
+    ):
         return db_template.content
 
     # 降级到文件系统

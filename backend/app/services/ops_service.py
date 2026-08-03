@@ -46,9 +46,9 @@ ACTION_RISKS = {
     "account_action": "critical",
     "ssh_authorized_key_action": "critical",
 }
-AUTO_ACTIONS = frozenset({
-    "status", "certificate_status", "host_inventory", "list_directory", "read_text_file", "journal_query",
-})
+# 无交互系统身份只服务于固定健康巡检。其他只读动作同样可能泄露
+# 目录、日志或主机拓扑，必须由唯一超级管理员在交互会话中发起。
+AUTO_ACTIONS = frozenset({"status", "certificate_status"})
 READ_ONLY_ACTIONS = frozenset({
     "status", "certificate_status", "host_inventory", "list_directory", "read_text_file", "journal_query",
 })
@@ -170,8 +170,8 @@ def execute(
     if action not in ACTION_RISKS:
         raise ValueError(f"不支持的运维动作: {action}")
     safe_params = validate_action_params(action, params or {})
-    if actor is not None and not rbac_service.is_admin_user(db, actor.id):
-        raise PermissionError("仅管理员可执行运维动作")
+    if actor is not None and not rbac_service.is_super_admin_user(db, actor.id):
+        raise PermissionError("仅超级管理员 admin 可执行运维动作")
     if actor is None and action not in AUTO_ACTIONS:
         raise PermissionError("无交互调度只允许运维只读动作")
     request_id = request_id or uuid.uuid4().hex

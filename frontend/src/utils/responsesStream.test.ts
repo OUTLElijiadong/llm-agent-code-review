@@ -110,6 +110,23 @@ describe('streamResponses', () => {
     })
   })
 
+  it('forces local sign-out when a running response session expires', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+      'event: auth_expired\ndata: {"type":"auth_expired","code":40102,"message":"forced offline"}\n\n',
+    ])))
+    const events: ResponseStreamEvent[] = []
+
+    await streamResponses({}, { onEvent: (event) => events.push(event) }).done
+
+    expect(events).toEqual([
+      expect.objectContaining({ type: 'auth_expired', code: 40102 }),
+    ])
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'prism:auth-expired' }),
+    )
+  })
+
   it('rejects a clean EOF that has no terminal or explicit pause event', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
       'data: {"type":"response.created","response":{"id":"resp-cut"}}\n\n',

@@ -12,11 +12,12 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json as json_lib
 import re
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Iterator, List, Optional, Tuple
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -27,11 +28,17 @@ from app.agents.events import AgentEventType
 from app.ai.code_chunker import chunk_code
 from app.ai.security_patterns import list_patterns, scan_secrets
 from app.ai.security_static_rules import apply_static_rules, list_static_rules
+from app.core.config import settings
+from app.core.exceptions import AppError, ConflictError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from app.services import project_source_service
+from app.services.project_member_service import get_visible_project_ids, require_project_access
+from app.utils.encoding_utils import MAX_AUDIT_TEXT_LINES_PER_FILE
+from app.utils.source_archive_gate import source_archive_workload
 
 if TYPE_CHECKING:
     from app.ai.static_analyzer import Finding
@@ -76,6 +83,81 @@ class _AuditChunkResult:
     findings: List[dict] = field(default_factory=list)
     entry_points: List[dict] = field(default_factory=list)
     dangerous_sinks: List[dict] = field(default_factory=list)
+    success: bool = True
+    error: str = ""
+    failure_kind: str = ""
+    finish_reason: str = ""
+    invalid_item_count: int = 0
+    invalid_item_kinds: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class _ProjectAuditPart:
+    """项目级语义审计中的一段源码及其原文件定位。"""
+
+    file: CodeFile
+    text: str
+    start_line: int
+
+
+@dataclass
+class _AdaptiveAuditResult:
+    """语义批次自适应拆分后的终端叶片及请求统计。"""
+
+    leaves: List[Tuple[List[_ProjectAuditPart], _AuditChunkResult]] = field(default_factory=list)
+    request_count: int = 0
+    split_count: int = 0
+
+
+@dataclass
+class _SemanticAuditBudget:
+    """一次项目语义审计共享的请求数与墙钟时间预算。"""
+
+    max_requests: int
+    deadline: float
+    request_count: int = 0
+    exhausted_reason: str = ""
+
+    def reserve(self) -> bool:
+        if self.request_count >= self.max_requests:
+            self.exhausted_reason = f"语义审计超过最多 {self.max_requests} 次模型请求"
+            return False
+        if time.monotonic() >= self.deadline:
+            self.exhausted_reason = "语义审计超过全局执行时限"
+            return False
+        self.request_count += 1
+        return True
+
+
+@dataclass
+class _BoundedGraphResult:
+    """图谱分析的有界返回样本与完整有效总量。"""
+
+    items: List[dict] = field(default_factory=list)
+    total_count: int = 0
+    unique_link_count: int = 0
+
+
+_PROJECT_PART_CHARS = 24_000
+_MAX_RETAINED_FINDINGS = 2_000
+_MAX_RETAINED_GRAPH_ITEMS = 2_000
+_MAX_AUDIT_RESULT_JSON_BYTES = 16 * 1024 * 1024
+_INVALID_CONTRACT_FAILURE_KINDS = frozenset({
+    "invalid_json",
+    "invalid_schema",
+    "invalid_item",
+})
+_RECOVERABLE_BATCH_FAILURE_KINDS = frozenset({
+    "output_truncated",
+    "output_limited",
+    *_INVALID_CONTRACT_FAILURE_KINDS,
+})
+_PROJECT_RISK_RE = re.compile(
+    r"(?i)(exec\s*\(|system\s*\(|shell_exec\s*\(|eval\s*\(|unserialize\s*\(|"
+    r"select\s+.+\s+from|insert\s+into|update\s+.+\s+set|delete\s+from|"
+    r"requests?\.|curl_|file_get_contents\s*\(|\$_(?:GET|POST|REQUEST|COOKIE|FILES)|"
+    r"password|token|secret|authorize|permission|route|controller|handler)"
+)
 
 
 class SecuritySentinelAgent(BaseAgent):
@@ -99,7 +181,7 @@ class SecuritySentinelAgent(BaseAgent):
         super().__init__(
             system_prompt=compose_system_prompt(self.name, SYSTEM_PROMPT),
             temperature=0.1,
-            max_tokens=4096,
+            max_tokens=settings.security_semantic_max_output_tokens,
         )
         self._db: Optional[Session] = None
         self._user: Optional[User] = None
@@ -220,20 +302,33 @@ class SecuritySentinelAgent(BaseAgent):
         return None
 
     def _authz_project(self, project: Project) -> Optional[AgentResult]:
-        if self._user and self._user.role != "admin" and project.user_id != self._user.id:
+        if self._user is None or self._user.role in {"admin", "super_admin"}:
+            return None
+        if project.user_id == self._user.id:
+            return None
+        try:
+            require_project_access(self._db, project.id, self._user, need_write=False)
+        except AppError:
             return AgentResult(success=False, error="无权访问该项目")
         return None
 
     def _authz_task(self, task: ReviewTask) -> Optional[AgentResult]:
-        if self._user and self._user.role != "admin" and task.user_id != self._user.id:
+        if self._user is None or self._user.role in {"admin", "super_admin"}:
+            return None
+        if task.user_id == self._user.id:
+            return None
+        try:
+            require_project_access(self._db, task.project_id, self._user, need_write=False)
+        except AppError:
             return AgentResult(success=False, error="无权访问该任务")
         return None
 
     def _authz_file(self, file: CodeFile) -> Optional[AgentResult]:
-        if self._user is None or self._user.role == "admin":
+        if self._user is None or self._user.role in {"admin", "super_admin"}:
             return None
-        project = self._db.get(Project, file.project_id)
-        if project is None or project.user_id != self._user.id:
+        try:
+            require_project_access(self._db, file.project_id, self._user, need_write=False)
+        except AppError:
             return AgentResult(success=False, error="无权访问该文件")
         return None
 
@@ -432,8 +527,64 @@ class SecuritySentinelAgent(BaseAgent):
 
     def scan_project(self, project_id: int, top_n: int = 50,
                      trace_dataflow: bool = True,
-                     ctx: Optional[AgentContext] = None) -> AgentResult:
-        """项目级威胁建模:聚合所有文件入口 + 跨文件数据流"""
+                     ctx: Optional[AgentContext] = None,
+                     scan_mode: str = "full") -> AgentResult:
+        """执行项目级白盒审计，并确保异常不会遗留 running 状态。"""
+        started_at = time.time()
+        audit_state: dict[str, str] = {}
+        try:
+            with source_archive_workload():
+                return self._scan_project_impl(
+                    project_id,
+                    top_n=top_n,
+                    trace_dataflow=trace_dataflow,
+                    ctx=ctx,
+                    scan_mode=scan_mode,
+                    audit_state=audit_state,
+                )
+        except ConflictError as exc:
+            return AgentResult(
+                success=False,
+                error=str(exc),
+                model=self._model,
+                duration_ms=int((time.time() - started_at) * 1000),
+            )
+        except Exception:
+            logger.exception("[security_sentinel] 项目 #%s 白盒审计异常", project_id)
+            audit_run_id = audit_state.get("audit_run_id", "")
+            if self._db is not None and audit_run_id:
+                try:
+                    self._db.rollback()
+                    project_source_service.finish_source_archive_audit(
+                        self._db,
+                        project_id,
+                        "failed",
+                        {
+                            "error": "项目白盒审计执行失败",
+                            "duration_ms": int((time.time() - started_at) * 1000),
+                        },
+                        audit_run_id=audit_run_id,
+                    )
+                except Exception:
+                    self._db.rollback()
+                    logger.exception("[security_sentinel] 写入隔离归档失败状态异常")
+            return AgentResult(
+                success=False,
+                error="项目白盒审计执行失败",
+                model=self._model,
+                duration_ms=int((time.time() - started_at) * 1000),
+            )
+
+    def _scan_project_impl(self, project_id: int, top_n: int = 50,
+                           trace_dataflow: bool = True,
+                           ctx: Optional[AgentContext] = None,
+                           scan_mode: str = "full",
+                           audit_state: Optional[dict[str, str]] = None) -> AgentResult:
+        """一次性形成项目源码白盒审计结果。
+
+        full 覆盖全部静态与语义内容；static_full 对全包做静态审计并对
+        风险文件做有界语义分析；triage 只扫风险优先子集。
+        """
         if (err := self._ensure_db()) is not None:
             return err
         project = self._db.get(Project, project_id)
@@ -442,25 +593,71 @@ class SecuritySentinelAgent(BaseAgent):
         if (err := self._authz_project(project)) is not None:
             return err
 
+        if scan_mode not in {"full", "static_full", "triage"}:
+            return AgentResult(
+                success=False,
+                error="不支持的 scan_mode,只能是 full、static_full 或 triage",
+            )
+
         t0 = time.time()
-        files = (
-            self._db.query(CodeFile)
-            .filter(CodeFile.project_id == project_id, CodeFile.status == "active")
-            .all()
+        audit_run_id = project_source_service.begin_source_archive_audit(
+            self._db,
+            project_id,
+        )
+        archive_audit_active = bool(audit_run_id)
+        if audit_run_id and audit_state is not None:
+            audit_state["audit_run_id"] = audit_run_id
+        files = project_source_service.load_project_source_files(
+            self._db,
+            self._user,
+            project_id,
         )
         if not files:
+            if archive_audit_active:
+                project_source_service.finish_source_archive_audit(
+                    self._db,
+                    project_id,
+                    "failed",
+                    {"error": "项目下没有可扫描的代码文件"},
+                    audit_run_id=audit_run_id,
+                )
             return AgentResult(success=False, error="项目下没有可扫描的代码文件")
-
-        # 优先扫描"危险文件":含 api/controller/view/auth/sql/raw 关键字
-        files_sorted = self._prioritize_files(files)[:top_n]
+        source_archive, source_archive_filename = project_source_service.build_source_archive(
+            self._db,
+            self._user,
+            project_id,
+        )
+        source_archive_sha256 = hashlib.sha256(source_archive).hexdigest()
+        top_limit = max(1, min(200, int(top_n)))
+        all_files_sorted = sorted(
+            files,
+            key=lambda item: ((item.file_path or item.file_name or "").lower(), item.id),
+        )
+        archive_text_files = [
+            file for file in all_files_sorted
+            if not bool(file.is_binary) and bool((file.content or "").strip())
+        ]
+        archive_text_source_chars = sum(
+            len(file.content or "") for file in archive_text_files
+        )
+        prioritized = self._prioritize_files(archive_text_files)[:top_limit]
+        static_files = prioritized if scan_mode == "triage" else all_files_sorted
+        semantic_files = archive_text_files if scan_mode == "full" else prioritized
+        total_text_chars = sum(len(file.content or "") for file in semantic_files)
         self._emit(
             AgentEventType.DISPATCH, ctx,
-            message=f"项目 #{project_id} 开始扫描 {len(files_sorted)} 个文件",
+            message=f"项目 #{project_id} 开始白盒审计 {len(static_files)}/{len(files)} 个文件",
             payload={
                 "scope": "project",
                 "project_id": project_id,
-                "file_count": len(files_sorted),
+                "file_count": len(static_files),
+                "total_file_count": len(files),
+                "semantic_candidate_file_count": len(semantic_files),
+                "semantic_candidate_source_chars": total_text_chars,
+                "scan_mode": scan_mode,
                 "trace_dataflow": trace_dataflow,
+                "source_archive_sha256": source_archive_sha256,
+                "source_archive_bytes": len(source_archive),
             },
         )
 
@@ -468,41 +665,229 @@ class SecuritySentinelAgent(BaseAgent):
         all_entries: List[dict] = []
         all_sinks: List[dict] = []
         all_endpoints: List[dict] = []
-        for idx, file in enumerate(files_sorted):
+        finding_total_count = 0
+        finding_severity_counts = {"严重": 0, "高": 0, "中": 0, "低": 0}
+        finding_owasp_hits: set[str] = set()
+        entry_total_count = 0
+        sink_total_count = 0
+        endpoint_total_count = 0
+
+        def record_findings(items: List[dict]) -> None:
+            nonlocal finding_total_count
+            for finding in items:
+                finding_total_count += 1
+                severity = finding.get("severity") or "中"
+                if severity in finding_severity_counts:
+                    finding_severity_counts[severity] += 1
+                owasp = str(finding.get("owasp") or "")
+                if owasp.startswith("A") and ":" in owasp:
+                    finding_owasp_hits.add(owasp.split(":", 1)[0])
+                if len(all_findings) < _MAX_RETAINED_FINDINGS:
+                    all_findings.append(finding)
+
+        def record_entries(items: List[dict]) -> None:
+            nonlocal entry_total_count
+            entry_total_count += len(items)
+            remaining = _MAX_RETAINED_GRAPH_ITEMS - len(all_entries)
+            if remaining > 0:
+                all_entries.extend(items[:remaining])
+
+        def record_sinks(items: List[dict]) -> None:
+            nonlocal sink_total_count
+            sink_total_count += len(items)
+            remaining = _MAX_RETAINED_GRAPH_ITEMS - len(all_sinks)
+            if remaining > 0:
+                all_sinks.extend(items[:remaining])
+
+        def record_endpoints(items: List[dict]) -> None:
+            nonlocal endpoint_total_count
+            endpoint_total_count += len(items)
+            remaining = _MAX_RETAINED_GRAPH_ITEMS - len(all_endpoints)
+            if remaining > 0:
+                all_endpoints.extend(items[:remaining])
+
+        for idx, file in enumerate(static_files):
             file_path = file.file_path or file.file_name
             endpoints = self._extract_api_endpoints(file)
-            all_endpoints.extend(endpoints)
+            record_endpoints(endpoints)
+            endpoint_entries: List[dict] = []
             for endpoint in endpoints:
-                all_entries.append({
+                endpoint_entries.append({
                     "file": file_path,
                     "function": endpoint.get("handler") or endpoint.get("path") or "",
                     "line": endpoint.get("line_number") or 0,
                     "risk": f"{endpoint.get('method', '')} {endpoint.get('path', '')}".strip(),
                     "input_source": "HTTP API",
                 })
+            record_entries(endpoint_entries)
             # 正则
-            all_findings.extend(self._regex_findings(file))
+            record_findings(self._regex_findings(file))
             # 静态语义规则 (v2.1.1)
-            all_findings.extend(self._static_findings(file))
-            # LLM
-            chunk_result = self._llm_audit_collect(file, ctx=ctx, scan_depth="standard")
-            all_findings.extend(chunk_result.findings)
-            for ep in chunk_result.entry_points:
-                ep["file"] = file_path
-                all_entries.append(ep)
-            for sk in chunk_result.dangerous_sinks:
-                sk["file"] = file_path
-                all_sinks.append(sk)
+            record_findings(self._static_findings(file))
+
+            if (idx + 1) % 25 == 0 or idx + 1 == len(static_files):
+                if archive_audit_active:
+                    project_source_service.touch_source_archive_audit(
+                        self._db,
+                        project_id,
+                        audit_run_id,
+                    )
+                self._emit(
+                    AgentEventType.PROGRESS, ctx,
+                    message=f"静态分析 {idx + 1}/{len(static_files)}",
+                    payload={
+                        "phase": "static_analysis",
+                        "index": idx + 1,
+                        "total": len(static_files),
+                        "findings_count": len(all_findings),
+                    },
+                )
+
+        # 项目源码统一编批。一个模型请求可同时包含多个文件，并要求每条结果
+        # 返回原始路径；这仍是一次项目级白盒审计，不会退化成 N 个文件任务。
+        semantic_attempted_chars_by_file: dict[int, int] = {}
+        semantic_chars_by_file: dict[int, int] = {}
+        semantic_failed_chars_by_file: dict[int, int] = {}
+        semantic_initial_batch_count = 0
+        semantic_batch_count = 0
+        semantic_request_count = 0
+        semantic_split_count = 0
+        semantic_successful_batch_count = 0
+        semantic_failed_batch_count = 0
+        semantic_output_truncated_leaf_count = 0
+        semantic_output_limited_leaf_count = 0
+        semantic_budget_exhausted_leaf_count = 0
+        semantic_invalid_contract_leaf_count = 0
+        semantic_invalid_item_count = 0
+        semantic_invalid_item_kinds: dict[str, int] = {}
+        semantic_budget = _SemanticAuditBudget(
+            max_requests=settings.security_semantic_max_requests,
+            deadline=time.monotonic() + settings.security_semantic_timeout_seconds,
+        )
+        audit_batches = self._project_audit_batches(
+            semantic_files,
+            full_content=scan_mode == "full",
+        )
+        for idx, batch in enumerate(audit_batches, start=1):
+            semantic_initial_batch_count = idx
+            for part in batch:
+                semantic_attempted_chars_by_file[part.file.id] = (
+                    semantic_attempted_chars_by_file.get(part.file.id, 0) + len(part.text)
+                )
+            adaptive = self._audit_project_batch_resilient(
+                batch,
+                ctx=ctx,
+                budget=semantic_budget,
+            )
+            semantic_request_count += adaptive.request_count
+            semantic_split_count += adaptive.split_count
+            for leaf_parts, chunk_result in adaptive.leaves:
+                semantic_batch_count += 1
+                semantic_invalid_item_count += chunk_result.invalid_item_count
+                for kind, count in chunk_result.invalid_item_kinds.items():
+                    semantic_invalid_item_kinds[kind] = (
+                        semantic_invalid_item_kinds.get(kind, 0) + count
+                    )
+                if chunk_result.success:
+                    semantic_successful_batch_count += 1
+                    for part in leaf_parts:
+                        semantic_chars_by_file[part.file.id] = (
+                            semantic_chars_by_file.get(part.file.id, 0) + len(part.text)
+                        )
+                    record_findings(chunk_result.findings)
+                    record_entries(chunk_result.entry_points)
+                    record_sinks(chunk_result.dangerous_sinks)
+                else:
+                    semantic_failed_batch_count += 1
+                    for part in leaf_parts:
+                        semantic_failed_chars_by_file[part.file.id] = (
+                            semantic_failed_chars_by_file.get(part.file.id, 0) + len(part.text)
+                        )
+                    if chunk_result.failure_kind == "output_truncated":
+                        semantic_output_truncated_leaf_count += 1
+                    elif chunk_result.failure_kind == "output_limited":
+                        semantic_output_limited_leaf_count += 1
+                    elif chunk_result.failure_kind == "semantic_budget_exhausted":
+                        semantic_budget_exhausted_leaf_count += 1
+                    elif chunk_result.failure_kind in _INVALID_CONTRACT_FAILURE_KINDS:
+                        semantic_invalid_contract_leaf_count += 1
+
+            if archive_audit_active:
+                project_source_service.touch_source_archive_audit(
+                    self._db,
+                    project_id,
+                    audit_run_id,
+                )
 
             self._emit(
                 AgentEventType.PROGRESS, ctx,
-                message=f"已完成 {idx + 1}/{len(files_sorted)} ({file.file_name})",
+                message=f"项目源码语义审计批次 {idx}",
                 payload={
-                    "index": idx + 1,
-                    "total": len(files_sorted),
+                    "phase": "semantic_analysis",
+                    "index": idx,
+                    "batch_file_count": len({part.file.id for part in batch}),
+                    "batch_source_chars": sum(len(part.text) for part in batch),
+                    "terminal_leaf_count": len(adaptive.leaves),
+                    "request_count": adaptive.request_count,
+                    "split_count": adaptive.split_count,
+                    "batch_success": all(result.success for _, result in adaptive.leaves),
                     "findings_count": len(all_findings),
                 },
             )
+
+        semantic_attempted_source_chars = sum(semantic_attempted_chars_by_file.values())
+        semantic_planned_file_count = len(semantic_attempted_chars_by_file)
+        semantic_planned_source_chars = semantic_attempted_source_chars
+        semantic_source_chars = sum(semantic_chars_by_file.values())
+        semantic_failed_source_chars = sum(semantic_failed_chars_by_file.values())
+        semantic_accounted_source_chars = semantic_source_chars + semantic_failed_source_chars
+        semantic_accounting_complete = (
+            semantic_accounted_source_chars == semantic_attempted_source_chars
+        )
+        semantic_request_accounting_complete = (
+            semantic_request_count == semantic_budget.request_count
+        )
+        semantic_truncated_files = sum(
+            1 for file in semantic_files
+            if semantic_chars_by_file.get(file.id, 0) < len(file.content or "")
+        )
+        semantic_unscheduled_file_count = sum(
+            1 for file in semantic_files
+            if semantic_attempted_chars_by_file.get(file.id, 0) == 0
+        )
+        semantic_partially_scheduled_file_count = sum(
+            1 for file in semantic_files
+            if 0 < semantic_attempted_chars_by_file.get(file.id, 0) < len(file.content or "")
+        )
+        semantic_fully_scheduled_file_count = sum(
+            1 for file in semantic_files
+            if semantic_attempted_chars_by_file.get(file.id, 0) == len(file.content or "")
+        )
+        semantic_verified_file_count = sum(
+            1 for file in semantic_files
+            if semantic_chars_by_file.get(file.id, 0) == len(file.content or "")
+            and semantic_failed_chars_by_file.get(file.id, 0) == 0
+        )
+        semantic_failed_file_count = sum(
+            1 for file in semantic_files
+            if semantic_failed_chars_by_file.get(file.id, 0) > 0
+        )
+        semantic_complete = (
+            semantic_failed_batch_count == 0
+            and semantic_source_chars == total_text_chars
+            and len(semantic_chars_by_file) == len(semantic_files)
+        )
+        semantic_execution_complete = (
+            semantic_failed_batch_count == 0
+            and semantic_source_chars == semantic_attempted_source_chars
+            and semantic_accounting_complete
+            and semantic_request_accounting_complete
+        )
+        archive_semantic_complete = (
+            semantic_execution_complete
+            and semantic_source_chars == archive_text_source_chars
+            and len(semantic_chars_by_file) == len(archive_text_files)
+        )
 
         # 数据流分析(第二轮 LLM)
         threat_model: dict = {
@@ -511,58 +896,407 @@ class SecuritySentinelAgent(BaseAgent):
             "api_endpoints": all_endpoints[:100],
             "code_links": [],
             "attack_surface_summary": (
-                f"扫描接口 {len(all_endpoints)} 个,入口 {len(all_entries)} 处,"
-                f"危险接收点 {len(all_sinks)} 处。"
+                f"扫描接口 {endpoint_total_count} 个,入口 {entry_total_count} 处,"
+                f"危险接收点 {sink_total_count} 处。"
             ),
         }
-        if trace_dataflow and all_entries and all_sinks:
+        dataflow_requested = bool(trace_dataflow)
+        dataflow_attempted = False
+        dataflow_complete = True
+        dataflow_failure_kind = ""
+        dataflow_request_count = 0
+        data_flow_total_count = 0
+        data_flow_link_total_count = 0
+        if trace_dataflow and semantic_execution_complete and all_entries and all_sinks:
+            dataflow_attempted = True
             self._emit(
                 AgentEventType.PROGRESS, ctx,
                 message="开始跨文件数据流分析",
                 payload={"phase": "dataflow_analysis"},
             )
-            data_flows = self._llm_dataflow_analysis(
+            request_count_before_dataflow = semantic_budget.request_count
+            dataflow_result = self._llm_dataflow_analysis(
                 all_entries, all_sinks, project_name=project.project_name, ctx=ctx,
                 api_endpoints=all_endpoints,
+                budget=semantic_budget,
             )
-            threat_model["data_flows"] = data_flows
-            # 升级出现在数据流上的 finding 严重度
-            self._upgrade_findings_on_dataflow(all_findings, data_flows)
-        threat_model["code_links"] = self._build_code_links(
-            all_endpoints, all_sinks, threat_model["data_flows"],
+            dataflow_request_count = (
+                semantic_budget.request_count - request_count_before_dataflow
+            )
+            if dataflow_result is None:
+                dataflow_complete = False
+                dataflow_failure_kind = (
+                    "semantic_budget_exhausted"
+                    if semantic_budget.exhausted_reason
+                    else "dataflow_analysis_failed"
+                )
+            else:
+                data_flows = dataflow_result.items
+                data_flow_total_count = dataflow_result.total_count
+                data_flow_link_total_count = dataflow_result.unique_link_count
+                threat_model["data_flows"] = data_flows
+                # 升级出现在数据流上的 finding 严重度
+                severities_before = [finding.get("severity") or "中" for finding in all_findings]
+                self._upgrade_findings_on_dataflow(all_findings, data_flows)
+                for previous, finding in zip(severities_before, all_findings):
+                    current = finding.get("severity") or "中"
+                    if previous != current:
+                        if previous in finding_severity_counts:
+                            finding_severity_counts[previous] -= 1
+                        if current in finding_severity_counts:
+                            finding_severity_counts[current] += 1
+        audit_request_count = semantic_request_count + dataflow_request_count
+        audit_request_accounting_complete = (
+            audit_request_count == semantic_budget.request_count
         )
+        code_link_result = self._build_code_links(
+            all_endpoints,
+            all_sinks,
+            threat_model["data_flows"],
+            data_flow_link_total_count=data_flow_link_total_count,
+        )
+        threat_model["code_links"] = code_link_result.items
+        code_link_total_count = code_link_result.total_count
+        returned_entry_count = len(threat_model["entry_points"])
+        returned_flow_count = len(threat_model["data_flows"])
+        returned_endpoint_count = len(threat_model["api_endpoints"])
+        returned_code_link_count = len(threat_model["code_links"])
 
         duration_ms = int((time.time() - t0) * 1000)
-        risk_score = self._compute_risk_score(all_findings)
-        sev_counts = self._severity_counts(all_findings)
+        deduct = sum(
+            _SEVERITY_DEDUCT[severity] * count
+            for severity, count in finding_severity_counts.items()
+        )
+        risk_score = max(0, min(100, 100 - deduct))
+        sev_counts = dict(finding_severity_counts)
+        compliance = self._compute_compliance(all_findings)
+        compliance.update({
+            "owasp_coverage": sorted(finding_owasp_hits),
+            "gb_t_22239": (
+                f"等保 2.0 应用安全相关命中风险 {len(finding_owasp_hits)} 类"
+                if finding_owasp_hits else "未触及等保 2.0 应用安全条款"
+            ),
+            "scan_mode": scan_mode,
+            "total_file_count": len(files),
+            "scanned_file_count": len(static_files),
+            "skipped_file_count": len(files) - len(static_files),
+            "coverage_ratio": round(len(static_files) / len(files), 4) if files else 0,
+            "truncated": bool(len(static_files) < len(files)),
+            "requested_top_n": int(top_n),
+            "static_scanned_file_count": len(static_files),
+            "static_complete": len(static_files) == len(files),
+            "semantic_candidate_file_count": len(semantic_files),
+            "semantic_candidate_source_chars": total_text_chars,
+            "semantic_selection_strategy": (
+                "all_source"
+                if scan_mode == "full"
+                else "path_keyword_pool_then_content_risk_prefix"
+            ),
+            "semantic_planned_file_count": semantic_planned_file_count,
+            "semantic_planned_source_chars": semantic_planned_source_chars,
+            "semantic_file_count": len(semantic_chars_by_file),
+            "archive_text_file_count": len(archive_text_files),
+            "archive_text_source_chars": archive_text_source_chars,
+            "binary_or_empty_file_count": len(files) - len(archive_text_files),
+            "archive_binary_or_empty_file_count": len(files) - len(archive_text_files),
+            "candidate_binary_or_empty_file_count": 0,
+            "semantic_initial_batch_count": semantic_initial_batch_count,
+            "semantic_batch_count": semantic_batch_count,
+            "semantic_request_count": semantic_request_count,
+            "semantic_split_count": semantic_split_count,
+            "semantic_successful_batch_count": semantic_successful_batch_count,
+            "semantic_failed_batch_count": semantic_failed_batch_count,
+            "semantic_output_truncated_leaf_count": semantic_output_truncated_leaf_count,
+            "semantic_output_limited_leaf_count": semantic_output_limited_leaf_count,
+            "semantic_budget_exhausted_leaf_count": semantic_budget_exhausted_leaf_count,
+            "semantic_invalid_contract_leaf_count": semantic_invalid_contract_leaf_count,
+            "semantic_invalid_item_count": semantic_invalid_item_count,
+            "semantic_invalid_item_kinds": semantic_invalid_item_kinds,
+            "semantic_attempted_source_chars": semantic_attempted_source_chars,
+            "semantic_source_chars": semantic_source_chars,
+            "semantic_failed_source_chars": semantic_failed_source_chars,
+            "semantic_accounted_source_chars": semantic_accounted_source_chars,
+            "total_text_source_chars": total_text_chars,
+            "semantic_char_coverage_ratio": (
+                round(semantic_source_chars / total_text_chars, 4)
+                if total_text_chars else 0
+            ),
+            "semantic_scheduled_coverage_ratio": (
+                round(semantic_planned_source_chars / total_text_chars, 4)
+                if total_text_chars else 0
+            ),
+            "semantic_archive_coverage_ratio": (
+                round(semantic_source_chars / archive_text_source_chars, 4)
+                if archive_text_source_chars else 0
+            ),
+            "semantic_truncated_file_count": semantic_truncated_files,
+            "semantic_unscheduled_file_count": semantic_unscheduled_file_count,
+            "semantic_partially_scheduled_file_count": semantic_partially_scheduled_file_count,
+            "semantic_fully_scheduled_file_count": semantic_fully_scheduled_file_count,
+            "semantic_verified_file_count": semantic_verified_file_count,
+            "semantic_failed_file_count": semantic_failed_file_count,
+            "semantic_complete": semantic_complete,
+            "semantic_candidate_complete": semantic_complete,
+            "semantic_execution_complete": semantic_execution_complete,
+            "semantic_scope_execution_complete": semantic_execution_complete,
+            "archive_semantic_complete": archive_semantic_complete,
+            "semantic_accounting_complete": semantic_accounting_complete,
+            "semantic_request_accounting_complete": semantic_request_accounting_complete,
+            "audit_request_count": audit_request_count,
+            "semantic_request_headroom": max(
+                0,
+                settings.security_semantic_max_requests - semantic_budget.request_count,
+            ),
+            "dataflow_request_count": dataflow_request_count,
+            "dataflow_scope": (
+                "all_semantic_source"
+                if scan_mode == "full"
+                else "bounded_semantic_results_and_static_endpoints"
+            ),
+            "audit_request_accounting_complete": audit_request_accounting_complete,
+            "semantic_request_budget": settings.security_semantic_max_requests,
+            "semantic_timeout_seconds": settings.security_semantic_timeout_seconds,
+            "semantic_bounded_total_chars": (
+                None
+                if scan_mode == "full"
+                else settings.security_semantic_bounded_total_chars
+            ),
+            "semantic_bounded_per_file_chars": (
+                None
+                if scan_mode == "full"
+                else settings.security_semantic_bounded_per_file_chars
+            ),
+            "semantic_bounded_max_files": (
+                None
+                if scan_mode == "full"
+                else settings.security_semantic_bounded_max_files
+            ),
+            "dataflow_requested": dataflow_requested,
+            "dataflow_attempted": dataflow_attempted,
+            "dataflow_complete": dataflow_complete,
+            "finding_total_count": finding_total_count,
+            "retained_finding_count": len(all_findings),
+            "findings_truncated": finding_total_count > len(all_findings),
+            "finding_severity_counts": sev_counts,
+            "entry_point_total_count": entry_total_count,
+            "retained_entry_point_count": len(all_entries),
+            "dangerous_sink_total_count": sink_total_count,
+            "retained_dangerous_sink_count": len(all_sinks),
+            "api_endpoint_total_count": endpoint_total_count,
+            "retained_api_endpoint_count": len(all_endpoints),
+            "data_flow_total_count": data_flow_total_count,
+            "retained_data_flow_count": len(threat_model["data_flows"]),
+            "code_link_total_count": code_link_total_count,
+            "retained_code_link_count": len(threat_model["code_links"]),
+            "returned_entry_point_count": returned_entry_count,
+            "returned_data_flow_count": returned_flow_count,
+            "returned_api_endpoint_count": returned_endpoint_count,
+            "returned_code_link_count": returned_code_link_count,
+            "response_graph_truncated": any((
+                entry_total_count > returned_entry_count,
+                data_flow_total_count > returned_flow_count,
+                endpoint_total_count > returned_endpoint_count,
+                code_link_total_count > returned_code_link_count,
+            )),
+            "graph_items_truncated": any((
+                entry_total_count > len(all_entries),
+                sink_total_count > len(all_sinks),
+                endpoint_total_count > len(all_endpoints),
+                entry_total_count > returned_entry_count,
+                data_flow_total_count > returned_flow_count,
+                endpoint_total_count > returned_endpoint_count,
+                code_link_total_count > returned_code_link_count,
+            )),
+        })
         summary = (
-            f"项目「{project.project_name}」共扫描 {len(files_sorted)} 个文件,"
+            f"项目「{project.project_name}」白盒审计静态覆盖 {len(static_files)}/{len(files)} 个文件,"
             f"发现 {sev_counts['严重']} 处严重 / {sev_counts['高']} 处高危 / "
             f"{sev_counts['中']} 处中危 / {sev_counts['低']} 处低危。"
             f"风险评分 {risk_score}/100。"
         )
 
+        result_data = {
+            "findings": all_findings,
+            "threat_model": threat_model,
+            "compliance": compliance,
+            "risk_score": risk_score,
+            "summary": summary,
+            "file_count": len(static_files),
+            "duration_ms": duration_ms,
+            "source_archive_sha256": source_archive_sha256,
+            "source_archive_bytes": len(source_archive),
+            "source_archive_filename": source_archive_filename,
+        }
+        result_json_bytes = len(
+            json_lib.dumps(result_data, ensure_ascii=False, default=str).encode("utf-8")
+        )
+        while result_json_bytes > _MAX_AUDIT_RESULT_JSON_BYTES and result_data["findings"]:
+            result_data["findings"] = result_data["findings"][: len(result_data["findings"]) // 2]
+            compliance["retained_finding_count"] = len(result_data["findings"])
+            compliance["findings_truncated"] = True
+            compliance["result_payload_truncated"] = True
+            result_json_bytes = len(
+                json_lib.dumps(result_data, ensure_ascii=False, default=str).encode("utf-8")
+            )
+        if result_json_bytes > _MAX_AUDIT_RESULT_JSON_BYTES:
+            raise RuntimeError("白盒审计结果超过 16MiB 持久化上限")
+        compliance["result_json_bytes"] = result_json_bytes
+        result_json_bytes = len(
+            json_lib.dumps(result_data, ensure_ascii=False, default=str).encode("utf-8")
+        )
+        if result_json_bytes > _MAX_AUDIT_RESULT_JSON_BYTES:
+            raise RuntimeError("白盒审计结果超过 16MiB 持久化上限")
+        compliance["result_json_bytes"] = result_json_bytes
+        if not semantic_execution_complete or (scan_mode == "full" and not semantic_complete):
+            semantic_failure_kind = (
+                "output_truncated" if semantic_output_truncated_leaf_count else
+                "output_limited" if semantic_output_limited_leaf_count else
+                "semantic_budget_exhausted" if semantic_budget_exhausted_leaf_count else
+                "invalid_item" if semantic_invalid_item_count else
+                "invalid_contract" if semantic_invalid_contract_leaf_count else
+                "semantic_accounting_failed" if not semantic_accounting_complete else
+                "semantic_analysis_failed"
+            )
+            error = (
+                "项目语义审计执行未完成: "
+                f"成功覆盖 {semantic_source_chars}/{semantic_attempted_source_chars} 个已调度字符,"
+                f"失败叶片 {semantic_failed_batch_count},"
+                f"终端截断 {semantic_output_truncated_leaf_count},"
+                f"结果受限 {semantic_output_limited_leaf_count},"
+                f"预算耗尽 {semantic_budget_exhausted_leaf_count},"
+                f"契约无效 {semantic_invalid_contract_leaf_count}"
+            )
+            self._emit(
+                AgentEventType.FAILED, ctx,
+                message=error,
+                payload={
+                    "phase": "semantic_analysis",
+                    "semantic_source_chars": semantic_source_chars,
+                    "semantic_attempted_source_chars": semantic_attempted_source_chars,
+                    "total_text_source_chars": total_text_chars,
+                    "failed_batch_count": semantic_failed_batch_count,
+                    "output_truncated_leaf_count": semantic_output_truncated_leaf_count,
+                    "output_limited_leaf_count": semantic_output_limited_leaf_count,
+                    "budget_exhausted_leaf_count": semantic_budget_exhausted_leaf_count,
+                    "invalid_contract_leaf_count": semantic_invalid_contract_leaf_count,
+                    "semantic_failed_source_chars": semantic_failed_source_chars,
+                    "semantic_accounting_complete": semantic_accounting_complete,
+                    "failure_kind": semantic_failure_kind,
+                },
+            )
+            blocked = any((
+                semantic_output_truncated_leaf_count,
+                semantic_output_limited_leaf_count,
+                semantic_budget_exhausted_leaf_count,
+            ))
+            project_source_service.finish_source_archive_audit(
+                self._db,
+                project_id,
+                "blocked" if blocked else "failed",
+                result_data,
+                audit_run_id=audit_run_id,
+            )
+            return AgentResult(
+                success=False,
+                data=result_data,
+                error=error,
+                model=self._model,
+                duration_ms=duration_ms,
+                failure_kind=semantic_failure_kind,
+            )
+
+        if dataflow_attempted and not dataflow_complete:
+            error = (
+                "跨文件数据流分析未完成:"
+                "模型请求预算或返回结构不满足可信审计契约"
+            )
+            self._emit(
+                AgentEventType.FAILED,
+                ctx,
+                message=error,
+                payload={
+                    "phase": "dataflow_analysis",
+                    "failure_kind": dataflow_failure_kind or "dataflow_analysis_failed",
+                },
+            )
+            project_source_service.finish_source_archive_audit(
+                self._db,
+                project_id,
+                "blocked" if dataflow_failure_kind == "semantic_budget_exhausted" else "failed",
+                result_data,
+                audit_run_id=audit_run_id,
+            )
+            return AgentResult(
+                success=False,
+                data=result_data,
+                error=error,
+                model=self._model,
+                duration_ms=duration_ms,
+                failure_kind=dataflow_failure_kind or "dataflow_analysis_failed",
+            )
+
+        if not audit_request_accounting_complete:
+            error = "项目审计模型请求账目不一致,拒绝生成可信结论"
+            self._emit(
+                AgentEventType.FAILED,
+                ctx,
+                message=error,
+                payload={
+                    "phase": "audit_budget",
+                    "audit_request_count": audit_request_count,
+                    "budget_request_count": semantic_budget.request_count,
+                },
+            )
+            project_source_service.finish_source_archive_audit(
+                self._db,
+                project_id,
+                "blocked",
+                result_data,
+                audit_run_id=audit_run_id,
+            )
+            return AgentResult(
+                success=False,
+                data=result_data,
+                error=error,
+                model=self._model,
+                duration_ms=duration_ms,
+                failure_kind="semantic_budget_accounting_failed",
+            )
+
+        if archive_audit_active and not project_source_service.finish_source_archive_audit(
+            self._db,
+            project_id,
+            "succeeded",
+            result_data,
+            audit_run_id=audit_run_id,
+        ):
+            error = "当前源码审计已被新一代运行接管,结果未持久化"
+            self._emit(
+                AgentEventType.FAILED,
+                ctx,
+                message=error,
+                payload={"phase": "persist_audit_result"},
+            )
+            return AgentResult(
+                success=False,
+                data=result_data,
+                error=error,
+                model=self._model,
+                duration_ms=duration_ms,
+            )
         self._emit(
             AgentEventType.COMPLETE, ctx,
             message="项目扫描完成",
             payload={
                 "findings_count": len(all_findings),
+                "findings_total_count": finding_total_count,
                 "risk_score": risk_score,
                 "duration_ms": duration_ms,
             },
         )
-
         return AgentResult(
             success=True,
-            data={
-                "findings": all_findings,
-                "threat_model": threat_model,
-                "compliance": self._compute_compliance(all_findings),
-                "risk_score": risk_score,
-                "summary": summary,
-                "file_count": len(files_sorted),
-                "duration_ms": duration_ms,
-            },
+            data=result_data,
             model=self._model,
             duration_ms=duration_ms,
         )
@@ -590,8 +1324,9 @@ class SecuritySentinelAgent(BaseAgent):
         top_n = max(1, min(200, top_n))
 
         q = self._db.query(Project).filter(Project.status == "active")
-        if self._user and self._user.role != "admin":
-            q = q.filter(Project.user_id == self._user.id)
+        if self._user and self._user.role not in {"admin", "super_admin"}:
+            visible_project_ids, _scope = get_visible_project_ids(self._db, self._user)
+            q = q.filter(Project.id.in_(visible_project_ids))
         projects = q.order_by(Project.id.asc()).all()
 
         t0 = time.time()
@@ -648,6 +1383,13 @@ class SecuritySentinelAgent(BaseAgent):
         project_errors: List[dict] = []
         total_files = 0
         scanned_projects = 0
+        finding_total_count = 0
+        finding_severity_counts = {"严重": 0, "高": 0, "中": 0, "低": 0}
+        owasp_hits: set[str] = set()
+        entry_total_count = 0
+        flow_total_count = 0
+        endpoint_total_count = 0
+        code_link_total_count = 0
 
         def project_path(project: Project, path: str) -> str:
             name = project.project_name or f"项目 #{project.id}"
@@ -669,36 +1411,72 @@ class SecuritySentinelAgent(BaseAgent):
                 top_n=top_n,
                 trace_dataflow=trace_dataflow,
                 ctx=ctx,
+                scan_mode="triage",
             )
             if not result.success:
-                project_errors.append({
-                    "project_id": project.id,
-                    "project_name": project.project_name,
-                    "error": result.error or "扫描失败",
-                })
+                if len(project_errors) < 500:
+                    project_errors.append({
+                        "project_id": project.id,
+                        "project_name": project.project_name,
+                        "error": result.error or "扫描失败",
+                    })
                 continue
 
             data = result.data or {}
             scanned_projects += 1
             total_files += int(data.get("file_count") or 0)
+            project_compliance = data.get("compliance") or {}
+            project_findings = [
+                raw for raw in (data.get("findings") or []) if isinstance(raw, dict)
+            ]
+            project_finding_total = int(
+                project_compliance.get("finding_total_count") or len(project_findings)
+            )
+            finding_total_count += project_finding_total
+            project_severity_counts = project_compliance.get("finding_severity_counts") or self._severity_counts(
+                project_findings
+            )
+            for severity in finding_severity_counts:
+                finding_severity_counts[severity] += int(project_severity_counts.get(severity) or 0)
+            owasp_hits.update(project_compliance.get("owasp_coverage") or [])
 
-            for raw in data.get("findings") or []:
-                if not isinstance(raw, dict):
-                    continue
+            for raw in project_findings:
+                if len(all_findings) >= _MAX_RETAINED_FINDINGS:
+                    break
                 finding = dict(raw)
                 finding["file_path"] = project_path(project, str(finding.get("file_path") or ""))
                 all_findings.append(finding)
 
             threat_model = data.get("threat_model") or {}
+            entry_total_count += int(
+                project_compliance.get("entry_point_total_count")
+                or len(threat_model.get("entry_points") or [])
+            )
+            endpoint_total_count += int(
+                project_compliance.get("api_endpoint_total_count")
+                or len(threat_model.get("api_endpoints") or [])
+            )
+            flow_total_count += int(
+                project_compliance.get("data_flow_total_count")
+                or len(threat_model.get("data_flows") or [])
+            )
+            code_link_total_count += int(
+                project_compliance.get("code_link_total_count")
+                or len(threat_model.get("code_links") or [])
+            )
             for raw_entry in threat_model.get("entry_points") or []:
                 if not isinstance(raw_entry, dict):
                     continue
+                if len(all_entries) >= _MAX_RETAINED_GRAPH_ITEMS:
+                    break
                 entry = dict(raw_entry)
                 entry["file"] = project_path(project, str(entry.get("file") or ""))
                 all_entries.append(entry)
 
             for raw_flow in threat_model.get("data_flows") or []:
                 if not isinstance(raw_flow, dict):
+                    continue
+                if len(all_flows) >= _MAX_RETAINED_GRAPH_ITEMS:
                     continue
                 flow = dict(raw_flow)
                 if flow.get("from"):
@@ -715,6 +1493,8 @@ class SecuritySentinelAgent(BaseAgent):
             for raw_endpoint in threat_model.get("api_endpoints") or []:
                 if not isinstance(raw_endpoint, dict):
                     continue
+                if len(all_endpoints) >= _MAX_RETAINED_GRAPH_ITEMS:
+                    break
                 endpoint = dict(raw_endpoint)
                 endpoint["file_path"] = project_path(
                     project, str(endpoint.get("file_path") or ""),
@@ -724,6 +1504,8 @@ class SecuritySentinelAgent(BaseAgent):
             for raw_link in threat_model.get("code_links") or []:
                 if not isinstance(raw_link, dict):
                     continue
+                if len(all_code_links) >= _MAX_RETAINED_GRAPH_ITEMS:
+                    continue
                 link = dict(raw_link)
                 if link.get("from"):
                     link["from"] = project_path(project, str(link.get("from")))
@@ -732,24 +1514,54 @@ class SecuritySentinelAgent(BaseAgent):
                 all_code_links.append(link)
 
         duration_ms = int((time.time() - t0) * 1000)
-        risk_score = self._compute_risk_score(all_findings)
-        sev_counts = self._severity_counts(all_findings)
+        deduct = sum(
+            _SEVERITY_DEDUCT[severity] * count
+            for severity, count in finding_severity_counts.items()
+        )
+        risk_score = max(0, min(100, 100 - deduct))
+        sev_counts = dict(finding_severity_counts)
         skipped_projects = len(projects) - scanned_projects
         compliance = self._compute_compliance(all_findings)
         compliance.update({
+            "owasp_coverage": sorted(owasp_hits),
+            "finding_total_count": finding_total_count,
+            "retained_finding_count": len(all_findings),
+            "findings_truncated": finding_total_count > len(all_findings),
+            "finding_severity_counts": sev_counts,
+            "entry_point_total_count": entry_total_count,
+            "retained_entry_point_count": len(all_entries),
+            "api_endpoint_total_count": endpoint_total_count,
+            "retained_api_endpoint_count": len(all_endpoints),
+            "data_flow_total_count": flow_total_count,
+            "retained_data_flow_count": len(all_flows),
+            "code_link_total_count": code_link_total_count,
+            "retained_code_link_count": len(all_code_links),
+            "graph_items_truncated": any((
+                entry_total_count > len(all_entries),
+                endpoint_total_count > len(all_endpoints),
+                flow_total_count > len(all_flows),
+                code_link_total_count > len(all_code_links),
+            )),
             "project_count": len(projects),
             "scanned_project_count": scanned_projects,
             "skipped_project_count": skipped_projects,
             "project_errors": project_errors,
         })
+        scan_success = not project_errors
         summary = (
             f"全量项目扫描完成:可见项目 {len(projects)} 个,成功扫描 {scanned_projects} 个,"
             f"跳过 {skipped_projects} 个,累计扫描文件 {total_files} 个;"
-            f"识别接口 {len(all_endpoints)} 个,代码联动关系 {len(all_code_links)} 条;"
+            f"识别接口 {endpoint_total_count} 个,代码联动关系 {code_link_total_count} 条;"
             f"发现 {sev_counts['严重']} 处严重 / {sev_counts['高']} 处高危 / "
             f"{sev_counts['中']} 处中危 / {sev_counts['低']} 处低危。"
             f"综合风险评分 {risk_score}/100。"
         )
+        compliance["scan_complete"] = scan_success
+        if not scan_success:
+            summary = (
+                f"全量项目扫描未完成:可见项目 {len(projects)} 个,成功扫描 {scanned_projects} 个,"
+                f"失败 {len(project_errors)} 个;已拒绝生成完整结论。"
+            )
         threat_model = {
             "entry_points": all_entries[:100],
             "data_flows": all_flows[:100],
@@ -757,29 +1569,54 @@ class SecuritySentinelAgent(BaseAgent):
             "code_links": all_code_links[:200],
             "attack_surface_summary": (
                 f"全量扫描覆盖 {scanned_projects} 个项目,"
-                f"识别接口 {len(all_endpoints)} 个,入口 {len(all_entries)} 处,"
-                f"跨文件攻击路径 {len(all_flows)} 条,代码联动关系 {len(all_code_links)} 条。"
+                f"识别接口 {endpoint_total_count} 个,入口 {entry_total_count} 处,"
+                f"跨文件攻击路径 {flow_total_count} 条,代码联动关系 {code_link_total_count} 条。"
             ),
         }
+        returned_entry_count = len(threat_model["entry_points"])
+        returned_flow_count = len(threat_model["data_flows"])
+        returned_endpoint_count = len(threat_model["api_endpoints"])
+        returned_code_link_count = len(threat_model["code_links"])
+        compliance.update({
+            "returned_entry_point_count": returned_entry_count,
+            "returned_data_flow_count": returned_flow_count,
+            "returned_api_endpoint_count": returned_endpoint_count,
+            "returned_code_link_count": returned_code_link_count,
+            "response_graph_truncated": any((
+                entry_total_count > returned_entry_count,
+                flow_total_count > returned_flow_count,
+                endpoint_total_count > returned_endpoint_count,
+                code_link_total_count > returned_code_link_count,
+            )),
+            "graph_items_truncated": any((
+                compliance["graph_items_truncated"],
+                entry_total_count > returned_entry_count,
+                flow_total_count > returned_flow_count,
+                endpoint_total_count > returned_endpoint_count,
+                code_link_total_count > returned_code_link_count,
+            )),
+        })
         discussion = self._build_multi_agent_discussion(
             all_findings, threat_model, project_count=scanned_projects,
         )
 
         self._emit(
-            AgentEventType.COMPLETE, ctx,
-            message="全量项目扫描完成",
+            AgentEventType.COMPLETE if scan_success else AgentEventType.FAILED,
+            ctx,
+            message="全量项目扫描完成" if scan_success else "全量项目扫描存在失败项目",
             payload={
                 "scope": "all_projects",
                 "project_count": len(projects),
                 "scanned_project_count": scanned_projects,
                 "findings_count": len(all_findings),
+                "findings_total_count": finding_total_count,
                 "risk_score": risk_score,
                 "duration_ms": duration_ms,
             },
         )
 
         return AgentResult(
-            success=True,
+            success=scan_success,
             data={
                 "findings": all_findings,
                 "threat_model": threat_model,
@@ -792,6 +1629,11 @@ class SecuritySentinelAgent(BaseAgent):
             },
             model=self._model,
             duration_ms=duration_ms,
+            error=(
+                f"全量项目扫描有 {len(project_errors)} 个项目失败"
+                if not scan_success else None
+            ),
+            failure_kind="project_scan_failed" if not scan_success else "",
         )
 
     # ============ 内部辅助 ============
@@ -808,11 +1650,21 @@ class SecuritySentinelAgent(BaseAgent):
         content = file.content or ""
         if not content:
             return []
+        line_count = int(file.line_count or 0)
+        if line_count <= 0:
+            line_count = content.count("\n") + 1
+        if line_count > MAX_AUDIT_TEXT_LINES_PER_FILE:
+            raise RuntimeError(
+                f"源码文件超过单文件 {MAX_AUDIT_TEXT_LINES_PER_FILE} 行审计资源上限"
+            )
 
         file_path = file.file_path or file.file_name
         lines = content.splitlines()
         endpoints: List[dict] = []
-        seen: set[tuple[str, str, str, int, str]] = set()
+        seen: set[tuple[str, str, str, int]] = set()
+
+        class _EndpointLimitReached(Exception):
+            pass
 
         def add_endpoint(method: str, path: str, line_no: int,
                          source: str, handler: str = "") -> None:
@@ -820,9 +1672,10 @@ class SecuritySentinelAgent(BaseAgent):
             path_norm = (path or "").strip()
             if not path_norm:
                 return
+            path_norm = path_norm[:2_048]
             if not path_norm.startswith(("/", "http://", "https://")):
                 path_norm = f"/{path_norm.lstrip('/')}"
-            key = (method_norm, path_norm, file_path, line_no, source)
+            key = (method_norm, path_norm, file_path, line_no)
             if key in seen:
                 return
             seen.add(key)
@@ -831,10 +1684,12 @@ class SecuritySentinelAgent(BaseAgent):
                 "path": path_norm,
                 "file_path": file_path,
                 "line_number": line_no,
-                "handler": handler or self._next_handler_name(lines, line_no - 1),
+                "handler": (handler or self._next_handler_name(lines, line_no - 1))[:200],
                 "auth_hint": self._endpoint_auth_hint(lines, line_no - 1),
                 "source": source,
             })
+            if len(endpoints) >= 200:
+                raise _EndpointLimitReached
 
         fastapi_pattern = re.compile(
             r"@\s*(?:[\w_]+\.)?(?:router|app|api)\."
@@ -870,47 +1725,50 @@ class SecuritySentinelAgent(BaseAgent):
             re.IGNORECASE,
         )
 
-        for idx, line in enumerate(lines, start=1):
-            for match in fastapi_pattern.finditer(line):
-                add_endpoint(match.group(1), match.group(2), idx, "python_route")
+        try:
+            for idx, line in enumerate(lines, start=1):
+                for match in fastapi_pattern.finditer(line):
+                    add_endpoint(match.group(1), match.group(2), idx, "python_route")
 
-            flask_match = flask_route_pattern.search(line)
-            if flask_match:
-                path = flask_match.group(1)
-                methods = self._parse_route_methods(flask_match.group("opts"))
-                for method in methods:
-                    add_endpoint(method, path, idx, "python_route")
+                flask_match = flask_route_pattern.search(line)
+                if flask_match:
+                    path = flask_match.group(1)
+                    methods = self._parse_route_methods(flask_match.group("opts"))
+                    for method in methods:
+                        add_endpoint(method, path, idx, "python_route")
 
-            for match in express_pattern.finditer(line):
-                add_endpoint(match.group(1), match.group(2), idx, "node_route")
+                for match in express_pattern.finditer(line):
+                    add_endpoint(match.group(1), match.group(2), idx, "node_route")
 
-            spring_match = spring_method_pattern.search(line)
-            if spring_match:
-                method = spring_match.group(1).replace("Mapping", "")
-                add_endpoint(method, spring_match.group(2), idx, "java_route")
+                spring_match = spring_method_pattern.search(line)
+                if spring_match:
+                    method = spring_match.group(1).replace("Mapping", "")
+                    add_endpoint(method, spring_match.group(2), idx, "java_route")
 
-            request_match = spring_request_pattern.search(line)
-            if request_match:
-                body = request_match.group("body")
-                path_match = re.search(
-                    r"(?:value|path)\s*=\s*['\"]([^'\"]+)['\"]|['\"]([^'\"]+)['\"]",
-                    body,
-                    re.IGNORECASE,
-                )
-                if path_match:
-                    path = path_match.group(1) or path_match.group(2)
-                    methods = re.findall(r"RequestMethod\.([A-Z]+)", body)
-                    for method in (methods or ["ANY"]):
-                        add_endpoint(method, path, idx, "java_route")
+                request_match = spring_request_pattern.search(line)
+                if request_match:
+                    body = request_match.group("body")
+                    path_match = re.search(
+                        r"(?:value|path)\s*=\s*['\"]([^'\"]+)['\"]|['\"]([^'\"]+)['\"]",
+                        body,
+                        re.IGNORECASE,
+                    )
+                    if path_match:
+                        path = path_match.group(1) or path_match.group(2)
+                        methods = re.findall(r"RequestMethod\.([A-Z]+)", body)
+                        for method in (methods or ["ANY"]):
+                            add_endpoint(method, path, idx, "java_route")
 
-            django_match = django_path_pattern.search(line)
-            if django_match:
-                add_endpoint("ANY", django_match.group(1), idx, "django_url")
+                django_match = django_path_pattern.search(line)
+                if django_match:
+                    add_endpoint("ANY", django_match.group(1), idx, "django_url")
 
-            for match in http_client_pattern.finditer(line):
-                add_endpoint(match.group(1), match.group(2), idx, "http_client_wrapper")
+                for match in http_client_pattern.finditer(line):
+                    add_endpoint(match.group(1), match.group(2), idx, "http_client_wrapper")
+        except _EndpointLimitReached:
+            pass
 
-        return endpoints[:200]
+        return endpoints
 
     def _parse_route_methods(self, route_options: str) -> List[str]:
         """解析 Flask/Django 风格路由声明中的 HTTP method 列表。
@@ -985,8 +1843,14 @@ class SecuritySentinelAgent(BaseAgent):
             return "发现认证/权限线索"
         return "未发现明显认证线索"
 
-    def _build_code_links(self, api_endpoints: List[dict], sinks: List[dict],
-                          data_flows: List[dict]) -> List[dict]:
+    def _build_code_links(
+        self,
+        api_endpoints: List[dict],
+        sinks: List[dict],
+        data_flows: List[dict],
+        *,
+        data_flow_link_total_count: int = 0,
+    ) -> _BoundedGraphResult:
         """生成接口、数据流和危险接收点之间的代码联动关系。
 
         Args:
@@ -995,7 +1859,7 @@ class SecuritySentinelAgent(BaseAgent):
             data_flows: 跨文件数据流推断结果。
 
         Returns:
-            List[dict]: 用于前端展示的联动关系列表。
+            _BoundedGraphResult: 用于前端展示的有界样本及完整总量。
         """
         links: List[dict] = []
         seen: set[tuple[str, str, str]] = set()
@@ -1009,13 +1873,14 @@ class SecuritySentinelAgent(BaseAgent):
             if key in seen:
                 return
             seen.add(key)
-            links.append({
-                "from": from_loc,
-                "to": to_loc,
-                "relation": relation,
-                "risk_type": risk_type or "代码联动风险",
-                "severity": sev,
-            })
+            if len(links) < 200:
+                links.append({
+                    "from": from_loc,
+                    "to": to_loc,
+                    "relation": relation,
+                    "risk_type": risk_type or "代码联动风险",
+                    "severity": sev,
+                })
 
         for flow in data_flows or []:
             add_link(
@@ -1025,21 +1890,12 @@ class SecuritySentinelAgent(BaseAgent):
                 str(flow.get("risk_type") or ""),
                 str(flow.get("severity") or "中"),
             )
+        flow_unique_count = len(seen)
 
-        sinks_by_file: dict[str, List[dict]] = {}
+        sinks_by_file: dict[str, dict[str, tuple[str, str]]] = {}
         for sink in sinks or []:
             sink_file = str(sink.get("file") or "")
             if sink_file:
-                sinks_by_file.setdefault(sink_file, []).append(sink)
-
-        for endpoint in api_endpoints or []:
-            endpoint_file = str(endpoint.get("file_path") or "")
-            if not endpoint_file:
-                continue
-            endpoint_loc = (
-                f"{endpoint_file}:{endpoint.get('handler') or endpoint.get('path') or ''}"
-            )
-            for sink in sinks_by_file.get(endpoint_file, []):
                 sink_text = str(sink.get("sink_type") or sink.get("name") or "")
                 sink_lower = sink_text.lower()
                 if "sql" in sink_lower:
@@ -1052,12 +1908,47 @@ class SecuritySentinelAgent(BaseAgent):
                     risk_type, severity = "路径遍历/任意文件访问", "高"
                 else:
                     risk_type, severity = "危险接收点", "中"
-                sink_loc = f"{endpoint_file}:{sink.get('name') or sink_text or 'sink'}"
-                add_link(endpoint_loc, sink_loc, "接口到同文件危险接收点", risk_type, severity)
-                if len(links) >= 200:
-                    return links
+                sink_loc = f"{sink_file}:{sink.get('name') or sink_text or 'sink'}"
+                sinks_by_file.setdefault(sink_file, {}).setdefault(
+                    sink_loc,
+                    (risk_type, severity),
+                )
 
-        return links[:200]
+        endpoints_by_file: dict[str, dict[str, None]] = {}
+        for endpoint in api_endpoints or []:
+            endpoint_file = str(endpoint.get("file_path") or "")
+            if not endpoint_file:
+                continue
+            endpoint_loc = (
+                f"{endpoint_file}:{endpoint.get('handler') or endpoint.get('path') or ''}"
+            )
+            endpoints_by_file.setdefault(endpoint_file, {}).setdefault(endpoint_loc, None)
+
+        endpoint_sink_total = 0
+        for endpoint_file, endpoint_locations in endpoints_by_file.items():
+            sink_locations = sinks_by_file.get(endpoint_file, {})
+            endpoint_sink_total += len(endpoint_locations) * len(sink_locations)
+            if len(links) >= 200:
+                continue
+            for endpoint_loc in endpoint_locations:
+                for sink_loc, (risk_type, severity) in sink_locations.items():
+                    if len(links) >= 200:
+                        break
+                    add_link(
+                        endpoint_loc,
+                        sink_loc,
+                        "接口到同文件危险接收点",
+                        risk_type,
+                        severity,
+                    )
+
+        return _BoundedGraphResult(
+            items=links,
+            total_count=(
+                max(flow_unique_count, int(data_flow_link_total_count or 0))
+                + endpoint_sink_total
+            ),
+        )
 
     def _build_multi_agent_discussion(self, findings: List[dict],
                                       threat_model: dict,
@@ -1296,6 +2187,558 @@ class SecuritySentinelAgent(BaseAgent):
                     out.dangerous_sinks.append(sk)
         return out
 
+    def _project_audit_batches(
+        self,
+        files: List[CodeFile],
+        *,
+        full_content: bool = True,
+    ) -> Iterator[List[_ProjectAuditPart]]:
+        """流式构建项目级多文件语义批次。
+
+        full 模式逐字符覆盖所有可解析源码；static_full / triage 使用
+        可在共享模型请求预算内闭合的多文件风险窗口。
+        返回迭代器以便调用方每次只保留一个批次，避免大型项目内存翻倍。
+        """
+        if not full_content:
+            ordered = sorted(
+                files,
+                key=lambda file: (
+                    -self._semantic_risk_score(file),
+                    (file.file_path or file.file_name or "").lower(),
+                    file.id,
+                ),
+            )
+            remaining = settings.security_semantic_bounded_total_chars
+            current: List[_ProjectAuditPart] = []
+            current_chars = 0
+            selected_file_count = 0
+            batch_full = False
+            for file in ordered:
+                if remaining <= 0 or selected_file_count >= settings.security_semantic_bounded_max_files:
+                    break
+                content_size = len(file.content or "")
+                if content_size <= 0:
+                    continue
+                file_budget = min(
+                    content_size,
+                    settings.security_semantic_bounded_per_file_chars,
+                    remaining,
+                )
+                consumed = 0
+                for part in self._semantic_parts_for_file(file, file_budget):
+                    path = part.file.file_path or part.file.file_name
+                    estimated = len(part.text) + len(path) + 120
+                    if current_chars + estimated > settings.security_semantic_batch_chars:
+                        batch_full = True
+                        break
+                    current.append(part)
+                    current_chars += estimated
+                    consumed += len(part.text)
+                if consumed:
+                    selected_file_count += 1
+                    remaining -= consumed
+                if batch_full:
+                    break
+            if current:
+                yield current
+            return
+
+        ordered = sorted(
+            files,
+            key=lambda file: (
+                (file.file_path or file.file_name or "").lower(),
+                file.id,
+            ),
+        )
+        current: List[_ProjectAuditPart] = []
+        current_chars = 0
+        for file in ordered:
+            content_size = len(file.content or "")
+            if content_size <= 0:
+                continue
+            for part in self._semantic_parts_for_file(file, content_size):
+                path = part.file.file_path or part.file.file_name
+                estimated = len(part.text) + len(path) + 120
+                if current and current_chars + estimated > settings.security_semantic_batch_chars:
+                    yield current
+                    current = []
+                    current_chars = 0
+                current.append(part)
+                current_chars += estimated
+        if current:
+            yield current
+
+    @staticmethod
+    def _split_project_audit_parts(
+        parts: List[_ProjectAuditPart],
+    ) -> Optional[Tuple[List[_ProjectAuditPart], List[_ProjectAuditPart]]]:
+        """按字符量将语义批次二分，并保持原文与绝对行号连续。"""
+        total_chars = sum(len(part.text) for part in parts)
+        if total_chars < 2:
+            return None
+        target = total_chars // 2
+        consumed = 0
+        left: List[_ProjectAuditPart] = []
+        right: List[_ProjectAuditPart] = []
+        for part in parts:
+            part_size = len(part.text)
+            if consumed >= target:
+                right.append(part)
+            elif consumed + part_size <= target:
+                left.append(part)
+            else:
+                approximate = target - consumed
+                candidates = []
+                before = part.text.rfind("\n", max(0, approximate // 2), approximate)
+                after = part.text.find(
+                    "\n",
+                    approximate,
+                    min(part_size, approximate + max(2, approximate // 2)),
+                )
+                if before >= 0:
+                    candidates.append(before + 1)
+                if after >= 0:
+                    candidates.append(after + 1)
+                cut = min(candidates, key=lambda value: abs(value - approximate)) if candidates else approximate
+                cut = max(1, min(cut, part_size - 1))
+                left_text = part.text[:cut]
+                right_text = part.text[cut:]
+                left.append(_ProjectAuditPart(part.file, left_text, part.start_line))
+                right.append(_ProjectAuditPart(
+                    part.file,
+                    right_text,
+                    part.start_line + left_text.count("\n"),
+                ))
+            consumed += part_size
+        if not left or not right:
+            return None
+        return left, right
+
+    def _audit_project_batch_resilient(
+        self,
+        parts: List[_ProjectAuditPart],
+        *,
+        ctx: Optional[AgentContext],
+        depth: int = 0,
+        budget: Optional[_SemanticAuditBudget] = None,
+    ) -> _AdaptiveAuditResult:
+        """输出截断或契约无效时缩小批次，不重发相同 prompt。"""
+        if budget is None:
+            budget = _SemanticAuditBudget(
+                max_requests=settings.security_semantic_max_requests,
+                deadline=time.monotonic() + settings.security_semantic_timeout_seconds,
+            )
+        request_count_before = budget.request_count
+        if not budget.reserve():
+            return _AdaptiveAuditResult(leaves=[(
+                parts,
+                _AuditChunkResult(
+                    success=False,
+                    error=budget.exhausted_reason,
+                    failure_kind="semantic_budget_exhausted",
+                ),
+            )])
+
+        result = self._llm_project_audit_batch(parts, ctx=ctx, budget=budget)
+        outcome = _AdaptiveAuditResult(
+            request_count=budget.request_count - request_count_before,
+        )
+        if result.failure_kind == "invalid_item":
+            # 先用同一源码叶片做一次严格契约修复，避免因单条模型幻觉直接
+            # 放弃整批已覆盖源码；修复仍失败时才进入常规拆分/失败门禁。
+            repair_before = budget.request_count
+            if budget.reserve():
+                repaired = self._llm_project_audit_batch(
+                    parts,
+                    ctx=ctx,
+                    budget=budget,
+                    contract_repair=True,
+                )
+                outcome.request_count += budget.request_count - repair_before
+                if repaired.success:
+                    outcome.leaves.append((parts, repaired))
+                    return outcome
+                result = repaired
+            else:
+                result = _AuditChunkResult(
+                    success=False,
+                    error=budget.exhausted_reason,
+                    failure_kind="semantic_budget_exhausted",
+                    invalid_item_count=result.invalid_item_count,
+                    invalid_item_kinds=result.invalid_item_kinds,
+                )
+        if result.success or result.failure_kind not in _RECOVERABLE_BATCH_FAILURE_KINDS:
+            outcome.leaves.append((parts, result))
+            return outcome
+
+        source_chars = sum(len(part.text) for part in parts)
+        if (
+            depth >= settings.security_semantic_max_split_depth
+            or source_chars <= settings.security_semantic_min_split_chars
+        ):
+            outcome.leaves.append((parts, result))
+            return outcome
+        split = self._split_project_audit_parts(parts)
+        if split is None:
+            outcome.leaves.append((parts, result))
+            return outcome
+
+        left, right = split
+        self._emit(
+            AgentEventType.PROGRESS,
+            ctx,
+            message=f"语义批次结果不可用，自适应拆分至深度 {depth + 1}",
+            payload={
+                "phase": "semantic_batch_split",
+                "failure_kind": result.failure_kind,
+                "depth": depth + 1,
+                "source_chars": source_chars,
+                "left_chars": sum(len(part.text) for part in left),
+                "right_chars": sum(len(part.text) for part in right),
+            },
+        )
+        left_result = self._audit_project_batch_resilient(
+            left,
+            ctx=ctx,
+            depth=depth + 1,
+            budget=budget,
+        )
+        right_result = self._audit_project_batch_resilient(
+            right,
+            ctx=ctx,
+            depth=depth + 1,
+            budget=budget,
+        )
+        outcome.leaves.extend(left_result.leaves)
+        outcome.leaves.extend(right_result.leaves)
+        outcome.request_count += left_result.request_count + right_result.request_count
+        outcome.split_count = 1 + left_result.split_count + right_result.split_count
+        return outcome
+
+    def _semantic_risk_score(self, file: CodeFile) -> int:
+        """仅用于模型语义上下文排序，不影响全量静态扫描覆盖。"""
+        path = (file.file_path or file.file_name or "").lower()
+        path_keywords = (
+            "api", "controller", "route", "handler", "auth", "login",
+            "admin", "service", "sql", "query", "db", "upload", "webhook",
+            "config", "permission", "token", "payment", "password",
+        )
+        score = sum(8 for keyword in path_keywords if keyword in path)
+        content = file.content or ""
+        sample = content[:200_000]
+        if len(content) > 200_000:
+            sample += content[-200_000:]
+        score += min(40, sum(1 for _ in _PROJECT_RISK_RE.finditer(sample)))
+        return score
+
+    def _semantic_parts_for_file(
+        self, file: CodeFile, max_chars: int,
+    ) -> Iterator[_ProjectAuditPart]:
+        """按行边界流式切分单文件，并兼容超长单行。"""
+        content = file.content or ""
+        if not content or max_chars <= 0:
+            return
+
+        limit = min(len(content), max_chars)
+        cursor = 0
+        start_line = 0
+        while cursor < limit:
+            end = min(limit, cursor + _PROJECT_PART_CHARS)
+            if end < limit:
+                newline = content.rfind("\n", cursor, end)
+                if newline >= cursor + (_PROJECT_PART_CHARS // 2):
+                    end = newline + 1
+            text = content[cursor:end]
+            if not text:
+                break
+            yield _ProjectAuditPart(file, text, start_line)
+            start_line += text.count("\n")
+            cursor = end
+
+    def _llm_project_audit_batch(
+        self,
+        parts: List[_ProjectAuditPart],
+        ctx: Optional[AgentContext],
+        budget: Optional[_SemanticAuditBudget] = None,
+        contract_repair: bool = False,
+    ) -> _AuditChunkResult:
+        """同时审查一个项目批次中的多个源码文件并恢复原文件定位。"""
+        out = _AuditChunkResult()
+        if not parts:
+            return out
+
+        files_by_path: dict[str, CodeFile] = {}
+        scoped_parts_by_path: dict[str, List[_ProjectAuditPart]] = {}
+        sections: List[str] = []
+        for part in parts:
+            path = part.file.file_path or part.file.file_name
+            files_by_path[path] = part.file
+            scoped_parts_by_path.setdefault(path, []).append(part)
+            sections.append(
+                f"===== FILE {path} | LANGUAGE {part.file.language or 'plaintext'} "
+                f"| START_LINE {part.start_line + 1} =====\n{part.text}"
+            )
+        source = "\n\n".join(sections)
+
+        def canonicalize_line_endings(value: str) -> str:
+            """让 JSON 中常见的 LF 证据可与 CRLF/CR 源码安全比对。"""
+            return value.replace("\r\n", "\n").replace("\r", "\n")
+
+        def contiguous_runs(path: str) -> List[List[_ProjectAuditPart]]:
+            """只把当前模型请求中连续的同文件分片拼接用于定位证据。"""
+            runs: List[List[_ProjectAuditPart]] = []
+            for part in scoped_parts_by_path.get(path, []):
+                if not runs:
+                    runs.append([part])
+                    continue
+                previous = runs[-1][-1]
+                previous_line_end = previous.start_line + previous.text.count("\n")
+                previous_has_newline = previous.text.endswith(("\n", "\r"))
+                is_contiguous = (
+                    part.start_line == previous_line_end
+                    if previous_has_newline
+                    else part.start_line == previous.start_line
+                )
+                if is_contiguous:
+                    runs[-1].append(part)
+                else:
+                    runs.append([part])
+            return runs
+
+        scoped_runs_by_path = {
+            path: contiguous_runs(path) for path in scoped_parts_by_path
+        }
+        repair_instruction = (
+            "上一轮同一源码叶片的输出包含无法逐字定位的条目。现在进行契约修复："
+            "重新检查每一条结果，file_path、函数名、变量名和 evidence 必须直接复制当前叶片；"
+            "不能定位的条目必须省略，禁止猜测、补全、改写或使用省略号。\n"
+            if contract_repair else ""
+        )
+        prompt = (
+            "你正在执行一次项目级白盒安全审计。下面是同一个项目源码索引中的一个多文件批次，"
+            "必须结合路由、调用、配置、数据访问和相邻模块关系分析，不能把它当成互不相关的单文件任务。\n\n"
+            "逐项排查 OWASP Top10、访问控制、注入、弱加密、认证会话、反序列化、供应链、"
+            "日志泄密和 SSRF；只报告代码证据可以支撑的问题。\n"
+            "严格输出 JSON，结构为：\n"
+            '{"output_limited":false,'
+            '"findings":[{"file_path":"源码中的精确路径","title":"...","category":"...",'
+            '"owasp":"A03:2021-Injection","cwe":"CWE-89","severity":"严重|高|中|低",'
+            '"line_start":1,"line_end":1,"evidence":"源码原文","exploit_scenario":"...",'
+            '"fix_suggestion":"...","references":[],"confidence":0.9}],'
+            '"entry_points":[{"file_path":"精确路径","name":"...","line":1,'
+            '"evidence":"源码原文","input_source":"HTTP body|query|header"}],'
+            '"dangerous_sinks":[{"file_path":"精确路径","name":"...","line":1,'
+            '"evidence":"源码原文","sink_type":"SQL|exec|open|requests"}]}\n'
+            "硬约束：file_path 必须逐字取自 FILE 标记；行号必须是原文件绝对行号；"
+            "evidence 必须是源码中的原文（仅允许把 CRLF/CR 换行规范化为 LF）；禁止输出 Markdown 或解释。\n"
+            "禁止根据语义改写函数名、变量名或 SQL；禁止使用省略号、占位符或源码片段之外的内容。"
+            "无法在当前 FILE 叶片逐字定位的结果不要输出。\n"
+            f"最多返回 {settings.security_semantic_max_findings_per_batch} 条 findings、"
+            f"{settings.security_semantic_max_graph_items_per_batch} 条 entry_points 和 "
+            f"{settings.security_semantic_max_graph_items_per_batch} 条 dangerous_sinks；"
+            "按置信度和风险优先级保留，evidence 不超过 160 字符，"
+            "exploit_scenario 和 fix_suggestion 各不超过 240 字符。"
+            "如果当前源码存在超过上述任一条数上限的合格结果，必须把 output_limited 设为 true；"
+            "否则必须设为 false。不得为了返回 false 而漏掉合格结果。\n\n"
+            f"{repair_instruction}"
+            f"{source}"
+        )
+        result = self.call_json(
+            prompt,
+            ctx=ctx,
+            recover_truncation=True,
+            retry_reserver=budget.reserve if budget is not None else None,
+            deadline_monotonic=budget.deadline if budget is not None else None,
+            thinking=False,
+        )
+        if not result.success or not isinstance(result.data, dict):
+            error = result.error or "LLM 返回了无效的项目审计结果"
+            failure_kind = result.failure_kind
+            if result.success and not isinstance(result.data, dict):
+                failure_kind = "invalid_schema"
+            logger.warning(
+                f"[security_sentinel] 项目源码批次 LLM 调用失败: {error}"
+            )
+            return _AuditChunkResult(
+                success=False,
+                error=error,
+                failure_kind=failure_kind,
+                finish_reason=result.finish_reason,
+            )
+
+        required_lists = ("findings", "entry_points", "dangerous_sinks")
+        if not isinstance(result.data.get("output_limited"), bool) or any(
+            key not in result.data
+            or not isinstance(result.data[key], list)
+            or any(not isinstance(item, dict) for item in result.data[key])
+            for key in required_lists
+        ):
+            error = "LLM 返回的项目审计 JSON 不符合列表结构契约"
+            logger.warning(f"[security_sentinel] {error}")
+            return _AuditChunkResult(
+                success=False,
+                error=error,
+                failure_kind="invalid_schema",
+                finish_reason=result.finish_reason,
+            )
+        if result.data["output_limited"]:
+            return _AuditChunkResult(
+                success=False,
+                error="LLM 明确声明当前批次结果超过有界输出容量",
+                failure_kind="output_limited",
+                finish_reason=result.finish_reason,
+            )
+
+        finding_count = len(result.data["findings"])
+        entry_count = len(result.data["entry_points"])
+        sink_count = len(result.data["dangerous_sinks"])
+        if any((
+            finding_count >= settings.security_semantic_max_findings_per_batch,
+            entry_count >= settings.security_semantic_max_graph_items_per_batch,
+            sink_count >= settings.security_semantic_max_graph_items_per_batch,
+        )):
+            return _AuditChunkResult(
+                success=False,
+                error="LLM 返回结果达到或超过有界容量，必须缩小批次排除静默漏报",
+                failure_kind="output_limited",
+                finish_reason=result.finish_reason,
+            )
+
+        def valid_path(raw: dict) -> bool:
+            path = str(raw.get("file_path") or "").strip().removeprefix("./")
+            return bool(path and path in files_by_path)
+
+        def locate_exact_source_span(
+            path: str,
+            needle: str,
+            hinted_line: int = 0,
+        ) -> Optional[Tuple[int, int]]:
+            """用当前叶片的精确原文恢复绝对行号，避免信任模型的计数。"""
+            if not needle:
+                return None
+            candidates: List[Tuple[int, int]] = []
+            normalized_needle = canonicalize_line_endings(needle)
+            for run in scoped_runs_by_path.get(path, []):
+                normalized_source = canonicalize_line_endings(
+                    "".join(part.text for part in run)
+                )
+                cursor = 0
+                while True:
+                    found = normalized_source.find(normalized_needle, cursor)
+                    if found < 0:
+                        break
+                    start = run[0].start_line + 1 + normalized_source[:found].count("\n")
+                    end_offset = found + max(0, len(normalized_needle) - 1)
+                    end = run[0].start_line + 1 + normalized_source[:end_offset].count("\n")
+                    candidates.append((start, end))
+                    cursor = found + 1
+            if not candidates:
+                return None
+            if hinted_line > 0:
+                return min(candidates, key=lambda span: abs(span[0] - hinted_line))
+            return candidates[0]
+
+        findings = result.data["findings"]
+        if any(
+            (
+                not valid_path(raw)
+                or not str(raw.get("title") or "").strip()
+                or raw.get("severity") not in _ALLOWED_SEVERITY
+                or not str(raw.get("evidence") or "").strip()
+                or (
+                    "references" in raw
+                    and not isinstance(raw.get("references"), list)
+                )
+            )
+            for raw in findings
+        ):
+            error = "LLM 返回的项目审计 finding 不符合定位与证据契约"
+            logger.warning(f"[security_sentinel] {error}")
+            return _AuditChunkResult(success=False, error=error, failure_kind="invalid_schema")
+
+        for raw in findings:
+            raw_path = str(raw.get("file_path") or "").strip().removeprefix("./")
+            evidence = str(raw.get("evidence") or "").strip()
+            span = locate_exact_source_span(
+                raw_path,
+                evidence,
+                self._coerce_int(raw.get("line_start"), 0),
+            )
+            if span is None:
+                out.invalid_item_count += 1
+                out.invalid_item_kinds["finding_evidence"] = (
+                    out.invalid_item_kinds.get("finding_evidence", 0) + 1
+                )
+                logger.warning(
+                    "[security_sentinel] 丢弃无法在当前源码叶片定位的 finding evidence"
+                )
+                continue
+            raw["line_start"], raw["line_end"] = span
+            normalized = self._normalize_finding(
+                raw,
+                file=files_by_path[raw_path],
+                line_offset=0,
+                code=files_by_path[raw_path].content or "",
+            )
+            if normalized:
+                out.findings.append(normalized)
+
+        for key in ("entry_points", "dangerous_sinks"):
+            for raw in result.data[key]:
+                raw_path = str(raw.get("file_path") or "").strip().removeprefix("./")
+                name = str(raw.get("name") or "").strip()
+                evidence = str(raw.get("evidence") or "").strip()
+                if not valid_path(raw) or not name or not evidence:
+                    out.invalid_item_count += 1
+                    structure_kind = f"{key}_structure"
+                    out.invalid_item_kinds[structure_kind] = (
+                        out.invalid_item_kinds.get(structure_kind, 0) + 1
+                    )
+                    logger.warning(
+                        "[security_sentinel] 丢弃结构不完整的 {} 条目",
+                        key,
+                    )
+                    continue
+                span = (
+                    locate_exact_source_span(
+                        raw_path,
+                        evidence,
+                        self._coerce_int(raw.get("line"), 0),
+                    )
+                )
+                if span is None:
+                    out.invalid_item_count += 1
+                    out.invalid_item_kinds[f"{key}_evidence"] = (
+                        out.invalid_item_kinds.get(f"{key}_evidence", 0) + 1
+                    )
+                    logger.warning(
+                        "[security_sentinel] 丢弃无法在当前源码叶片定位的 {} evidence",
+                        key,
+                    )
+                    continue
+                raw["line"] = span[0]
+                item = {
+                    "file": raw_path,
+                    "name": name[:200],
+                    "line": self._coerce_int(raw.get("line"), 0),
+                }
+                if key == "entry_points":
+                    item["input_source"] = str(raw.get("input_source") or "")[:200]
+                    out.entry_points.append(item)
+                else:
+                    item["sink_type"] = str(raw.get("sink_type") or "")[:100]
+                    out.dangerous_sinks.append(item)
+        if out.invalid_item_count:
+            error = (
+                "LLM 返回的项目审计包含无法严格验证的条目: "
+                f"{out.invalid_item_count} 条"
+            )
+            logger.warning(f"[security_sentinel] {error}")
+            out.success = False
+            out.error = error
+            out.failure_kind = "invalid_item"
+        return out
+
     def _llm_audit_chunk(self, code: str, language: str, file_path: str,
                         line_offset: int,
                         ctx: Optional[AgentContext]) -> Optional[dict]:
@@ -1368,8 +2811,12 @@ class SecuritySentinelAgent(BaseAgent):
     def _llm_dataflow_analysis(self, entries: List[dict], sinks: List[dict],
                                project_name: str,
                                ctx: Optional[AgentContext],
-                               api_endpoints: Optional[List[dict]] = None) -> List[dict]:
+                               api_endpoints: Optional[List[dict]] = None,
+                               budget: Optional[_SemanticAuditBudget] = None,
+                               ) -> Optional[_BoundedGraphResult]:
         """第二轮 LLM:跨文件数据流推断"""
+        if budget is not None and not budget.reserve():
+            return None
         def _short(items: List[dict], limit: int = 30) -> List[dict]:
             return items[:limit]
 
@@ -1390,26 +2837,48 @@ class SecuritySentinelAgent(BaseAgent):
             "- severity: 严重/高/中/低\n\n"
             '严格输出 JSON: {"data_flows": [...]} ,无可达路径时 data_flows 为 []。'
         )
-        result = self.call_json(user_msg, ctx=ctx)
+        result = self.call_json(
+            user_msg,
+            ctx=ctx,
+            recover_truncation=budget is not None,
+            retry_reserver=budget.reserve if budget is not None else None,
+            deadline_monotonic=budget.deadline if budget is not None else None,
+            thinking=False,
+        )
         if not result.success or not isinstance(result.data, dict):
-            return []
-        raw_flows = result.data.get("data_flows") or []
+            return None
+        if "data_flows" not in result.data:
+            return None
+        raw_flows = result.data["data_flows"]
         if not isinstance(raw_flows, list):
-            return []
+            return None
         flows: List[dict] = []
+        flow_link_keys: set[tuple[str, str]] = set()
         for f in raw_flows:
             if not isinstance(f, dict):
-                continue
-            flows.append({
-                "from": str(f.get("from") or ""),
-                "via": [str(v) for v in (f.get("via") or []) if v],
-                "to": str(f.get("to") or ""),
-                "risk_type": str(f.get("risk_type") or ""),
+                return None
+            via = f.get("via", [])
+            if not isinstance(via, list):
+                return None
+            normalized = {
+                "from": str(f.get("from") or "")[:500],
+                "via": [str(v)[:500] for v in via[:20] if v],
+                "to": str(f.get("to") or "")[:500],
+                "risk_type": str(f.get("risk_type") or "")[:200],
                 "severity": (
-                    f.get("severity") if f.get("severity") in _ALLOWED_SEVERITY else "中"
+                    f.get("severity")
+                    if f.get("severity") in _ALLOWED_SEVERITY else "中"
                 ),
-            })
-        return flows
+            }
+            if normalized["from"] and normalized["to"]:
+                flow_link_keys.add((normalized["from"], normalized["to"]))
+            if len(flows) < 100:
+                flows.append(normalized)
+        return _BoundedGraphResult(
+            items=flows,
+            total_count=len(raw_flows),
+            unique_link_count=len(flow_link_keys),
+        )
 
     def _normalize_finding(self, raw: dict, file: CodeFile,
                            line_offset: int,
@@ -1465,9 +2934,9 @@ class SecuritySentinelAgent(BaseAgent):
             "line_number": line_start,
             "end_line": line_end,
             "evidence": evidence,
-            "exploit_scenario": str(raw.get("exploit_scenario") or ""),
-            "fix_suggestion": str(raw.get("fix_suggestion") or ""),
-            "references": [str(r) for r in (raw.get("references") or []) if r][:5],
+            "exploit_scenario": str(raw.get("exploit_scenario") or "")[:1_000],
+            "fix_suggestion": str(raw.get("fix_suggestion") or "")[:1_000],
+            "references": [str(r)[:500] for r in (raw.get("references") or []) if r][:5],
             "confidence": confidence,
             "source": "llm",
         }
@@ -1477,26 +2946,27 @@ class SecuritySentinelAgent(BaseAgent):
         """用 evidence 原文在代码块里反查行号(1-based 相对行号),找不到返回 0。
 
         LLM(尤其小模型)常漏给 line_start,导致漏洞只有描述、没有定位。
-        这里取 evidence 中最有辨识度的一行,在代码里做子串匹配兜底。
+        这里取 evidence 中最有辨识度的一行,在代码里做子串匹配兜底；仅规范化换行符。
         """
         if not code or not evidence:
             return 0
-        code_lines = code.splitlines()
         ev_lines = [ln.strip() for ln in evidence.splitlines() if ln.strip()]
         if not ev_lines:
             return 0
         needle = max(ev_lines, key=len).strip("`. ").strip()
         if len(needle) < 4:
             return 0
-        for idx, ln in enumerate(code_lines, start=1):
-            if needle in ln:
-                return idx
+        normalized_code = code.replace("\r\n", "\n").replace("\r", "\n")
+        normalized_needle = needle.replace("\r\n", "\n").replace("\r", "\n")
+        position = normalized_code.find(normalized_needle)
+        if position >= 0:
+            return normalized_code.count("\n", 0, position) + 1
         # 放宽:用前若干字符再试一次(应对 evidence 带省略号/尾部差异)
-        compact = needle[:16]
+        compact = normalized_needle[:16]
         if len(compact) >= 6:
-            for idx, ln in enumerate(code_lines, start=1):
-                if compact in ln:
-                    return idx
+            position = normalized_code.find(compact)
+            if position >= 0:
+                return normalized_code.count("\n", 0, position) + 1
         return 0
 
     def _infer_owasp_cwe(self, title: str, description: str) -> tuple[str, str]:
@@ -1574,9 +3044,9 @@ class SecuritySentinelAgent(BaseAgent):
             "sql", "query", "db", "model",
         )
 
-        def score(f: CodeFile) -> int:
-            name = (f.file_path or f.file_name).lower()
-            return -sum(1 for k in keywords if k in name)
+        def score(f: CodeFile) -> tuple[int, str, int]:
+            name = (f.file_path or f.file_name or "").lower()
+            return -sum(1 for k in keywords if k in name), name, f.id
 
         return sorted(files, key=score)
 

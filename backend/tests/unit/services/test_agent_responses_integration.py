@@ -282,6 +282,131 @@ def test_session_recovery_redacts_reasoning_and_secrets_in_textual_payloads(db) 
         assert marker not in serialized
 
 
+def test_session_recovery_replays_completed_tools_before_conclusion_by_sequence(db) -> None:
+    checkpoint = {
+        "model": "deepseek-v4-flash",
+        "status": "completed",
+        "rounds": 3,
+        "transcript": [
+            {"role": "user", "content": "先查询项目再给结论"},
+            {
+                "type": "function_call",
+                "call_id": "call_projects",
+                "name": "user_execute_capability",
+                "arguments": '{"capability":"projects.list","params":{}}',
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_projects",
+                "output": '{"status":"success"}',
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_profile",
+                "name": "user_execute_capability",
+                "arguments": '{"capability":"profile.get","params":{}}',
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_profile",
+                "output": '{"status":"error"}',
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "结论：项目查询完成，画像查询失败。"}],
+            },
+        ],
+    }
+    run = AgentResponseRun(
+        run_id="run_replay_sequence",
+        user_id=7,
+        surface="user",
+        session_key="session-replay-sequence",
+        status="completed",
+        checkpoint_json=json.dumps(checkpoint, ensure_ascii=False),
+    )
+    db.add(run)
+    db.flush()
+    db.add_all(
+        [
+            AgentToolExecution(
+                request_id="request-projects",
+                run_id=run.run_id,
+                call_id="call_projects",
+                user_id=7,
+                tool_name="user_execute_capability",
+                status="success",
+                arguments_json=json.dumps(
+                    {
+                        "capability": "projects.list",
+                        "params": {},
+                        "api_key": "ledger-argument-secret",
+                    }
+                ),
+                result_json=json.dumps(
+                    {
+                        "status": "success",
+                        "output": {
+                            "count": 2,
+                            "authorization": "Bearer ledger-output-secret",
+                        },
+                    }
+                ),
+            ),
+            AgentToolExecution(
+                request_id="request-profile",
+                run_id=run.run_id,
+                call_id="call_profile",
+                user_id=7,
+                tool_name="user_execute_capability",
+                status="failed",
+                arguments_json=json.dumps({"capability": "profile.get", "params": {}}),
+                result_json=json.dumps(
+                    {
+                        "status": "error",
+                        "error": "Authorization: Bearer ledger-error-secret",
+                    }
+                ),
+                error="Authorization: Bearer duplicate-ledger-error-secret",
+            ),
+        ]
+    )
+    db.commit()
+
+    response = api_module.get_agent_response_session(
+        surface="user",
+        session_id="session-replay-sequence",
+        db=db,
+        user=SimpleNamespace(id=7, role="user"),
+    )
+
+    events = response.data["events"]
+    assert [event["type"] for event in events] == [
+        "response.tool.started",
+        "response.tool.completed",
+        "response.tool.started",
+        "response.tool.failed",
+        "response.output_text.delta",
+    ]
+    assert [event["sequence_number"] for event in events] == [1, 2, 3, 4, 5]
+    assert response.data["last_sequence_number"] == 5
+    assert events[-1]["delta"].startswith("结论：")
+    assert max(
+        event["sequence_number"]
+        for event in events
+        if event["type"].startswith("response.tool.")
+    ) < events[-1]["sequence_number"]
+    serialized = json.dumps(response.data, ensure_ascii=False)
+    for marker in (
+        "ledger-argument-secret",
+        "ledger-output-secret",
+        "ledger-error-secret",
+        "duplicate-ledger-error-secret",
+    ):
+        assert marker not in serialized
+
+
 def test_session_recovery_preserves_long_visible_table_without_leaking_secrets() -> None:
     rows = [
         f"| {index} | production_acceptance_user_{index:02d} | 生产验收用户昵称 {index} | user | 启用 |"
@@ -1463,6 +1588,7 @@ async def test_admin_transport_sink_buffers_only_text_deltas() -> None:
 @pytest.mark.asyncio
 async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger(db, monkeypatch) -> None:
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(service_module, "_is_super_admin_actor", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         service_module.tool_gateway,
         "authorize",
@@ -1475,7 +1601,7 @@ async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger
     monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
     executor = PrismToolExecutor(
         db,
-        SimpleNamespace(id=7, role="admin", token_version=0),
+        SimpleNamespace(id=7, username="admin", role="super_admin", token_version=0),
         surface="admin",
         run_id="run_admin_secret",
         mcp_provider=EmptyMcp(),
@@ -1516,7 +1642,7 @@ async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger
         (
             "users.reset_password",
             {"user_id": 9},
-            {"default_password": "TEMP-PASSWORD-SECRET"},
+            {"temporary_password": "TEMP-PASSWORD-SECRET"},
             "TEMP-PASSWORD-SECRET",
             "password_reset",
         ),
@@ -1644,6 +1770,58 @@ async def test_api_stream_filters_empty_deltas_and_emits_one_final_event(monkeyp
     assert "第一行\\n第二行" in body
     assert body.count("event: response.completed") == 1
     assert "[DONE]" not in body
+
+
+@pytest.mark.asyncio
+async def test_api_stream_emits_auth_expired_and_discards_events_after_session_replacement(monkeypatch) -> None:
+    cancelled = False
+
+    class FakeService:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
+            nonlocal cancelled
+            try:
+                await event_sink(
+                    {
+                        "type": "response.tool.started",
+                        "run_id": run_id,
+                        "call_id": "call-expired",
+                        "tool_name": "list_projects",
+                    }
+                )
+                await asyncio.Event().wait()
+                return RuntimeResult(run_id=run_id, status="completed", rounds=1)
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
+
+        async def cancel(self, _run_id: str) -> None:
+            return None
+
+    clock = iter((0.0, 11.0, 12.0))
+    monkeypatch.setattr(api_module, "AgentResponsesService", FakeService)
+    monkeypatch.setattr(api_module.time, "monotonic", lambda: next(clock, 12.0))
+    monkeypatch.setattr(api_module, "_is_session_version_active", lambda *_args: False)
+    request = api_module.AgentResponsesRequest(
+        surface="user",
+        session_id="session-auth-expired",
+        messages=[{"role": "user", "content": "执行"}],
+    )
+
+    response = await api_module.stream_agent_response(
+        request,
+        db=object(),
+        user=SimpleNamespace(id=7, role="user", token_version=3),
+    )
+    body = await _collect_stream(response)
+
+    assert body.count("event: auth_expired") == 1
+    assert '"code": 40102' in body
+    assert "event: response.tool.started" not in body
+    assert "event: response.completed" not in body
+    assert cancelled is True
 
 
 @pytest.mark.asyncio

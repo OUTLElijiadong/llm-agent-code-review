@@ -24,7 +24,7 @@ const loading = ref(false)
 const replyContent = ref('')
 const replying = ref(false)
 
-const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const isAdmin = computed(() => userStore.isAdmin())
 const myId = computed(() => userStore.profile?.id)
 const isAuthor = computed(() => post.value?.user_id === myId.value)
 

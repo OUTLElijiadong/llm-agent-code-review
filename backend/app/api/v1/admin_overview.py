@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.event_bus import AgentEventBus
 from app.core.database import get_db
-from app.core.dependencies import require_admin
+from app.core.dependencies import require_admin, require_super_admin
 from app.models.agent_governance import AgentProfile, ToolCallLog
 from app.models.audit_log import AuditLog
 from app.models.user import User
@@ -180,7 +180,7 @@ def _login_geo(db: Session, days: int = 30) -> list[dict]:
 
 
 @router.get("/overview/system", response_model=Resp[dict])
-def overview_system(_: User = Depends(require_admin)):
+def overview_system(_: User = Depends(require_super_admin)):
     """服务器运行状态(CPU/内存/磁盘/负载/运行时长)。"""
     return Resp(data=system_service.system_status())
 

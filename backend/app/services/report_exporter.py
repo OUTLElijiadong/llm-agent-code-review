@@ -421,6 +421,33 @@ def export_to_html(
         str: 渲染后的 HTML 字符串;模板渲染异常时抛出 jinja2 异常。
     """
     context = _build_report_context(task, issues, summary, score)
+    # 008 迁移预置的模板使用 task / metrics / compliance_summary，后续内置
+    # HTML 模板改为 task_info / statistics。保留旧变量别名，确保历史数据库中
+    # 已保存的模板和用户基于旧契约创建的模板仍可导出。
+    severity_aliases = {
+        "critical": {"严重", "critical"},
+        "high": {"高", "high"},
+        "medium": {"中", "medium"},
+        "low": {"低", "low"},
+        "info": {"信息", "info"},
+    }
+    legacy_severity_counts = {
+        key: sum(
+            1
+            for issue in context["issues"]
+            if str(issue.get("severity") or "").lower() in aliases
+        )
+        for key, aliases in severity_aliases.items()
+    }
+    context.update({
+        "task": context["task_info"],
+        "metrics": {
+            "total_files": context["task_info"].get("total_files") or 0,
+            "total_issues": context["statistics"]["total_issues"],
+            "severity_counts": legacy_severity_counts,
+        },
+        "compliance_summary": context["statistics"]["compliance_summary"],
+    })
     template = _JINJA_ENV.from_string(template_content)
     return template.render(**context)
 

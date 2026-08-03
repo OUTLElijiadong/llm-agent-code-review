@@ -20,6 +20,7 @@ import {
   TrendCharts,
   User,
   View,
+  Connection,
 } from '@element-plus/icons-vue'
 
 import { useUserStore } from '@/stores/user'
@@ -30,6 +31,7 @@ interface AdminMenuItem {
   path: string
   title: string
   icon: typeof Histogram
+  superAdmin?: boolean
 }
 
 const route = useRoute()
@@ -58,12 +60,19 @@ const menuItems: AdminMenuItem[] = [
   { path: '/admin/audit', title: '系统操作审计', icon: Bell },
   { path: '/admin/evolution', title: 'Agent 自进化', icon: MagicStick },
   { path: '/admin/skills', title: 'Skill 管理', icon: View },
-  { path: '/admin/llm', title: '大模型配置', icon: Setting },
-  { path: '/admin/embedding', title: 'RAG 嵌入配置', icon: Key },
+  { path: '/admin/mcp-workers', title: 'MCP 与沙箱节点', icon: Connection, superAdmin: true },
+  { path: '/admin/llm', title: '大模型配置', icon: Setting, superAdmin: true },
+  { path: '/admin/embedding', title: 'RAG 嵌入配置', icon: Key, superAdmin: true },
 ]
 
+const visibleMenuItems = computed(() => (
+  menuItems.filter((item) => !item.superAdmin || userStore.isSuperAdmin())
+))
+
 const activePath = computed(() => {
-  const found = menuItems.find((item) => route.path === item.path || route.path.startsWith(item.path + '/'))
+  const found = visibleMenuItems.value.find(
+    (item) => route.path === item.path || route.path.startsWith(item.path + '/'),
+  )
   return found?.path || '/admin/overview'
 })
 
@@ -87,7 +96,7 @@ async function logout(): Promise<void> {
       cancelButtonText: '取消',
       type: 'warning',
     })
-    userStore.logout()
+    await userStore.logout()
     router.push('/login')
   } catch {
     /* 用户取消 */
@@ -107,7 +116,7 @@ async function logout(): Promise<void> {
       </div>
       <nav class="admin-nav">
         <button
-          v-for="item in menuItems"
+          v-for="item in visibleMenuItems"
           :key="item.path"
           type="button"
           class="admin-nav-item"
@@ -128,6 +137,9 @@ async function logout(): Promise<void> {
         </div>
         <div class="admin-user">
           <span>{{ userStore.displayName || '管理员' }}</span>
+          <el-tag size="small" :type="userStore.isSuperAdmin() ? 'danger' : 'warning'">
+            {{ userStore.isSuperAdmin() ? '超级管理员' : '管理员' }}
+          </el-tag>
           <el-button :icon="SwitchButton" @click="logout">退出</el-button>
         </div>
       </header>

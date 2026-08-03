@@ -6,6 +6,7 @@
 
 所有工具仅管理员可用(is_admin_user 校验),非管理员调用返回权限错误。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -39,6 +40,10 @@ def _is_admin(db: Session, user: Optional[User]) -> bool:
     return rbac_service.is_admin_user(db, user.id)
 
 
+def _is_super_admin(db: Session, user: Optional[User]) -> bool:
+    return bool(user and rbac_service.is_super_admin_user(db, user.id))
+
+
 def _deny() -> AgentResult:
     return AgentResult(success=False, error="仅管理员可使用后台代管工具")
 
@@ -66,74 +71,85 @@ def _emit_admin_write_event(
 
 # ──────────────────────────── 只读工具(直接执行)────────────────────────────
 
-def admin_list_users(db: Session, user: Optional[User], keyword: str = "",
-                     role: str = "", page: int = 1, page_size: int = 20,
-                     ctx: Optional[AgentContext] = None) -> AgentResult:
+
+def admin_list_users(
+    db: Session,
+    user: Optional[User],
+    keyword: str = "",
+    role: str = "",
+    page: int = 1,
+    page_size: int = 20,
+    ctx: Optional[AgentContext] = None,
+) -> AgentResult:
     """查询用户列表(管理员只读)。"""
     if not _is_admin(db, user):
         return _deny()
     data = user_service.list_users(db, keyword=keyword, role=role, page=page, page_size=page_size)
     items = [
         {
-            "id": u.id, "username": u.username, "nickname": u.nickname,
-            "role": u.role, "status": u.status,
+            "id": u.id,
+            "username": u.username,
+            "nickname": u.nickname,
+            "role": u.role,
+            "status": u.status,
         }
         for u in data.get("items", [])
     ]
     return AgentResult(success=True, data={"total": data.get("total", 0), "users": items})
 
 
-def admin_list_roles(db: Session, user: Optional[User],
-                     ctx: Optional[AgentContext] = None) -> AgentResult:
+def admin_list_roles(db: Session, user: Optional[User], ctx: Optional[AgentContext] = None) -> AgentResult:
     """查询角色列表(管理员只读)。"""
     if not _is_admin(db, user):
         return _deny()
     roles = rbac_service.list_roles(db)
-    return AgentResult(success=True, data=[
-        {"code": r.code, "name": r.name, "description": r.description} for r in roles
-    ])
+    return AgentResult(
+        success=True, data=[{"code": r.code, "name": r.name, "description": r.description} for r in roles]
+    )
 
 
-def admin_governance_overview(db: Session, user: Optional[User],
-                              ctx: Optional[AgentContext] = None) -> AgentResult:
+def admin_governance_overview(db: Session, user: Optional[User], ctx: Optional[AgentContext] = None) -> AgentResult:
     """Agent 治理概览(管理员只读)。"""
     if not _is_admin(db, user):
         return _deny()
     return AgentResult(success=True, data=observability_service.overview(db))
 
 
-def admin_list_agents(db: Session, user: Optional[User],
-                      ctx: Optional[AgentContext] = None) -> AgentResult:
+def admin_list_agents(db: Session, user: Optional[User], ctx: Optional[AgentContext] = None) -> AgentResult:
     """查询 Agent 配置档案(管理员只读)。"""
     if not _is_admin(db, user):
         return _deny()
     profiles = agent_governance_service.list_profiles(db)
-    return AgentResult(success=True, data=[
-        {"agent_code": p.code, "name": p.name, "status": p.status, "is_enabled": p.is_enabled}
-        for p in profiles
-    ])
+    return AgentResult(
+        success=True,
+        data=[{"agent_code": p.code, "name": p.name, "status": p.status, "is_enabled": p.is_enabled} for p in profiles],
+    )
 
 
-def admin_list_approvals(db: Session, user: Optional[User], status: str = "pending",
-                         ctx: Optional[AgentContext] = None) -> AgentResult:
+def admin_list_approvals(
+    db: Session, user: Optional[User], status: str = "pending", ctx: Optional[AgentContext] = None
+) -> AgentResult:
     """查询审批事项(管理员只读)。"""
     if not _is_admin(db, user):
         return _deny()
-    items = approval_service.list_items(db, status=status)
-    return AgentResult(success=True, data=[
-        {
-            "id": i.id,
-            "title": i.title,
-            "action": i.action,
-            "resource": i.resource,
-            "status": i.status,
-            "risk_level": i.risk_level,
-            "decision": i.decision,
-            "decision_reason": i.decision_reason,
-            "request": _load_json(i.request_json, {}),
-        }
-        for i in items
-    ])
+    items = approval_service.list_items(db, status=status, actor=user)
+    return AgentResult(
+        success=True,
+        data=[
+            {
+                "id": i.id,
+                "title": i.title,
+                "action": i.action,
+                "resource": i.resource,
+                "status": i.status,
+                "risk_level": i.risk_level,
+                "decision": i.decision,
+                "decision_reason": i.decision_reason,
+                "request": _load_json(i.request_json, {}),
+            }
+            for i in items
+        ],
+    )
 
 
 def _load_json(value: Optional[str], default: Any) -> Any:
@@ -170,9 +186,7 @@ def _delegate_target_detail(db: Session, agent_code: str) -> Optional[dict[str, 
     if target is None:
         return None
     version = (
-        db.get(CustomAgentVersion, target.current_published_version_id)
-        if target.current_published_version_id
-        else None
+        db.get(CustomAgentVersion, target.current_published_version_id) if target.current_published_version_id else None
     )
     release = (
         db.query(CustomAgentRelease)
@@ -198,7 +212,9 @@ def _delegate_target_detail(db: Session, agent_code: str) -> Optional[dict[str, 
             "id": release.id,
             "status": release.status,
             "package_checksum": release.package_checksum,
-        } if release else None,
+        }
+        if release
+        else None,
     }
 
 
@@ -281,7 +297,9 @@ def _release_approval_detail(db: Session, row: ApprovalItem) -> dict[str, Any]:
             "owner_id": agent.owner_id,
             "status": agent.status,
             "is_enabled": bool(agent.is_enabled),
-        } if agent else None,
+        }
+        if agent
+        else None,
         "current_authoring": current_authoring,
         "previous_authoring": previous_authoring,
         "changes": {
@@ -359,12 +377,15 @@ def preview_agent_release_decision(
         return AgentResult(success=False, error=f"Agent 发布审批 {approval_id} 不存在")
     if row.status != "pending":
         return AgentResult(success=False, error=f"Agent 发布审批 {approval_id} 当前状态为 {row.status}，不能重复处理")
-    return AgentResult(success=True, data={
-        "decision": decision,
-        "note": note,
-        "target_snapshot": _release_target_snapshot(db, row),
-        "approval": _release_approval_detail(db, row),
-    })
+    return AgentResult(
+        success=True,
+        data={
+            "decision": decision,
+            "note": note,
+            "target_snapshot": _release_target_snapshot(db, row),
+            "approval": _release_approval_detail(db, row),
+        },
+    )
 
 
 def admin_decide_agent_release(
@@ -409,26 +430,28 @@ def admin_decide_agent_release(
             note=note,
         )
         release = (
-            db.query(CustomAgentRelease)
-            .filter(CustomAgentRelease.approval_id == approval_id)
-            .first()
-        ) if decision == "approve" else None
-        return AgentResult(success=True, data={
-            "approval_id": row.id,
-            "status": row.status,
-            "decision": decision,
-            "release_id": release.id if release else None,
-        })
+            (db.query(CustomAgentRelease).filter(CustomAgentRelease.approval_id == approval_id).first())
+            if decision == "approve"
+            else None
+        )
+        return AgentResult(
+            success=True,
+            data={
+                "approval_id": row.id,
+                "status": row.status,
+                "decision": decision,
+                "release_id": release.id if release else None,
+            },
+        )
     except Exception as exc:
         db.rollback()
         return AgentResult(success=False, error=str(exc))
 
 
-def admin_system_status(db: Session, user: Optional[User],
-                        ctx: Optional[AgentContext] = None) -> AgentResult:
-    """服务器运行状态(管理员只读)。"""
-    if not _is_admin(db, user):
-        return _deny()
+def admin_system_status(db: Session, user: Optional[User], ctx: Optional[AgentContext] = None) -> AgentResult:
+    """服务器运行状态(唯一超级管理员只读)。"""
+    if not _is_super_admin(db, user):
+        return AgentResult(success=False, error="仅超级管理员 admin 可查看服务器状态")
     return AgentResult(success=True, data=system_status())
 
 
@@ -476,13 +499,12 @@ def _validate_delete_targets(
         return f"以下用户不存在或已删除: {missing}"
     if user.id in found:
         return "不能删除当前登录的管理员账号"
+    if any(target.username == "admin" for target in targets):
+        return "唯一超级管理员 admin 不允许通过用户管理工具删除"
     active_admin_ids = {
         row[0]
         for row in (
-            db.query(User.id)
-            .filter(User.role.in_(["admin", "super_admin"]), User.status == 1)
-            .with_for_update()
-            .all()
+            db.query(User.id).filter(User.role.in_(["admin", "super_admin"]), User.status == 1).with_for_update().all()
         )
     }
     selected_active_admins = active_admin_ids & found
@@ -503,22 +525,20 @@ def preview_delete_users(
         canonical_ids = _canonical_user_ids(user_ids)
     except (TypeError, ValueError) as exc:
         return AgentResult(success=False, error=str(exc))
-    targets = (
-        db.query(User)
-        .filter(User.id.in_(canonical_ids))
-        .order_by(User.id.asc())
-        .all()
-    )
+    targets = db.query(User).populate_existing().filter(User.id.in_(canonical_ids)).order_by(User.id.asc()).all()
     validation_error = _validate_delete_targets(db, user, canonical_ids, targets)
     if validation_error:
         return AgentResult(success=False, error=validation_error)
     serialized = [_serialize_user_target(target) for target in targets]
-    return AgentResult(success=True, data={
-        "count": len(serialized),
-        "user_ids": canonical_ids,
-        "targets": serialized,
-        "target_snapshot": _user_target_snapshot(targets),
-    })
+    return AgentResult(
+        success=True,
+        data={
+            "count": len(serialized),
+            "user_ids": canonical_ids,
+            "targets": serialized,
+            "target_snapshot": _user_target_snapshot(targets),
+        },
+    )
 
 
 def admin_delete_users(
@@ -537,13 +557,7 @@ def admin_delete_users(
         canonical_ids = _canonical_user_ids(user_ids)
     except (TypeError, ValueError) as exc:
         return AgentResult(success=False, error=str(exc))
-    targets = (
-        db.query(User)
-        .filter(User.id.in_(canonical_ids))
-        .order_by(User.id.asc())
-        .with_for_update()
-        .all()
-    )
+    targets = db.query(User).filter(User.id.in_(canonical_ids)).order_by(User.id.asc()).with_for_update().all()
     validation_error = _validate_delete_targets(db, user, canonical_ids, targets)
     if validation_error:
         db.rollback()
@@ -601,13 +615,17 @@ def admin_delete_users(
             exc=exc,
         )
     _complete_admin_write(user, event_context, action=action, resource=resource, title=title)
-    return AgentResult(success=True, data={
-        "tool_call_id": tool_call_id,
-        "title": title,
-        "deleted_count": len(targets),
-        "user_ids": canonical_ids,
-        "targets": serialized_targets,
-    })
+    return AgentResult(
+        success=True,
+        data={
+            "tool_call_id": tool_call_id,
+            "title": title,
+            "deleted_count": len(targets),
+            "user_ids": canonical_ids,
+            "targets": serialized_targets,
+        },
+    )
+
 
 def _execute_confirmed_write(
     db: Session,
@@ -623,14 +641,25 @@ def _execute_confirmed_write(
     if not request_id:
         return AgentResult(success=False, error="缺少确认请求标识")
     _emit_admin_write_event(
-        AgentEventType.DISPATCH, user, context,
-        action=action, resource=resource, message=f"管理操作已确认：{title}",
+        AgentEventType.DISPATCH,
+        user,
+        context,
+        action=action,
+        resource=resource,
+        message=f"管理操作已确认：{title}",
     )
     from app.models.agent_governance import ToolCallLog
+
     call = ToolCallLog(
-        agent_code="manager", tool_code="admin_copilot", action=action, resource=resource,
-        status="pending", risk_level="critical" if action.startswith("user.delete") else "high",
-        decision="confirmed", input_summary=title, copilot_request_id=request_id,
+        agent_code="manager",
+        tool_code="admin_copilot",
+        action=action,
+        resource=resource,
+        status="pending",
+        risk_level="critical" if action.startswith("user.delete") else "high",
+        decision="confirmed",
+        input_summary=title,
+        copilot_request_id=request_id,
     )
     db.add(call)
     try:
@@ -638,19 +667,33 @@ def _execute_confirmed_write(
     except IntegrityError:
         db.rollback()
         from app.models.agent_governance import ToolCallLog
+
         existing = db.query(ToolCallLog).filter(ToolCallLog.copilot_request_id == request_id).first()
         if not existing:
             raise
         _emit_admin_write_event(
-            AgentEventType.COMPLETE, user, context,
-            action=action, resource=resource, message=f"管理操作已执行过：{title}",
+            AgentEventType.COMPLETE,
+            user,
+            context,
+            action=action,
+            resource=resource,
+            message=f"管理操作已执行过：{title}",
         )
-        return AgentResult(success=True, data={
-            "duplicate": True, "tool_call_id": existing.id, "title": existing.input_summary,
-        })
+        return AgentResult(
+            success=True,
+            data={
+                "duplicate": True,
+                "tool_call_id": existing.id,
+                "title": existing.input_summary,
+            },
+        )
     _emit_admin_write_event(
-        AgentEventType.PROGRESS, user, context,
-        action=action, resource=resource, message=f"正在执行管理操作：{title}",
+        AgentEventType.PROGRESS,
+        user,
+        context,
+        action=action,
+        resource=resource,
+        message=f"正在执行管理操作：{title}",
     )
     return AgentResult(success=True, data={"tool_call_id": call.id, "title": title, "call": call})
 
@@ -664,8 +707,12 @@ def _complete_admin_write(
     title: str,
 ) -> None:
     _emit_admin_write_event(
-        AgentEventType.COMPLETE, user, context,
-        action=action, resource=resource, message=f"管理操作完成：{title}",
+        AgentEventType.COMPLETE,
+        user,
+        context,
+        action=action,
+        resource=resource,
+        message=f"管理操作完成：{title}",
     )
 
 
@@ -681,15 +728,24 @@ def _fail_admin_write(
 ) -> AgentResult:
     db.rollback()
     _emit_admin_write_event(
-        AgentEventType.FAILED, user, context,
-        action=action, resource=resource, message=f"管理操作失败：{title}",
+        AgentEventType.FAILED,
+        user,
+        context,
+        action=action,
+        resource=resource,
+        message=f"管理操作失败：{title}",
     )
     return AgentResult(success=False, error=str(exc))
 
 
-def admin_set_user_role(db: Session, user: Optional[User], user_id: int, role: str,
-                        ctx: Optional[AgentContext] = None,
-                        context: Optional[dict[str, Any]] = None) -> AgentResult:
+def admin_set_user_role(
+    db: Session,
+    user: Optional[User],
+    user_id: int,
+    role: str,
+    ctx: Optional[AgentContext] = None,
+    context: Optional[dict[str, Any]] = None,
+) -> AgentResult:
     """确认后直接修改用户角色，并写入审计。"""
     if not _is_admin(db, user):
         return _deny()
@@ -703,8 +759,12 @@ def admin_set_user_role(db: Session, user: Optional[User], user_id: int, role: s
     action = "user.set_role"
     resource = f"user:{user_id}"
     reserved = _execute_confirmed_write(
-        db, user,
-        title=title, action=action, resource=resource, context=event_context,
+        db,
+        user,
+        title=title,
+        action=action,
+        resource=resource,
+        context=event_context,
     )
     if not reserved.success or (reserved.data or {}).get("duplicate"):
         return reserved
@@ -728,9 +788,13 @@ def admin_set_user_role(db: Session, user: Optional[User], user_id: int, role: s
     return reserved
 
 
-def admin_delete_user(db: Session, user: Optional[User], user_id: int,
-                      ctx: Optional[AgentContext] = None,
-                      context: Optional[dict[str, Any]] = None) -> AgentResult:
+def admin_delete_user(
+    db: Session,
+    user: Optional[User],
+    user_id: int,
+    ctx: Optional[AgentContext] = None,
+    context: Optional[dict[str, Any]] = None,
+) -> AgentResult:
     """确认后直接软删除用户，并写入审计。"""
     if not _is_admin(db, user):
         return _deny()
@@ -742,8 +806,12 @@ def admin_delete_user(db: Session, user: Optional[User], user_id: int,
     action = "user.delete"
     resource = f"user:{user_id}"
     reserved = _execute_confirmed_write(
-        db, user,
-        title=title, action=action, resource=resource, context=event_context,
+        db,
+        user,
+        title=title,
+        action=action,
+        resource=resource,
+        context=event_context,
     )
     if not reserved.success or (reserved.data or {}).get("duplicate"):
         return reserved
@@ -767,9 +835,14 @@ def admin_delete_user(db: Session, user: Optional[User], user_id: int,
     return reserved
 
 
-def admin_toggle_agent(db: Session, user: Optional[User], agent_code: str, enable: bool,
-                       ctx: Optional[AgentContext] = None,
-                       context: Optional[dict[str, Any]] = None) -> AgentResult:
+def admin_toggle_agent(
+    db: Session,
+    user: Optional[User],
+    agent_code: str,
+    enable: bool,
+    ctx: Optional[AgentContext] = None,
+    context: Optional[dict[str, Any]] = None,
+) -> AgentResult:
     """确认后直接启停 Agent，并写入审计。"""
     if not _is_admin(db, user):
         return _deny()
@@ -783,8 +856,12 @@ def admin_toggle_agent(db: Session, user: Optional[User], agent_code: str, enabl
     action = "agent.toggle"
     resource = f"agent:{agent_code}"
     reserved = _execute_confirmed_write(
-        db, user,
-        title=title, action=action, resource=resource, context=event_context,
+        db,
+        user,
+        title=title,
+        action=action,
+        resource=resource,
+        context=event_context,
     )
     if not reserved.success or (reserved.data or {}).get("duplicate"):
         return reserved

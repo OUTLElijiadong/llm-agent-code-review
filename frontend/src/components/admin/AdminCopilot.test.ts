@@ -71,6 +71,44 @@ afterEach(() => {
 })
 
 describe('AdminCopilot Responses stream', () => {
+  it('刷新恢复后仍先显示工具调用，再显示最终结论', async () => {
+    sessionApi.get.mockResolvedValueOnce({
+      surface: 'admin',
+      session_id: 'admin-test',
+      run: {
+        run_id: 'run-restored-tools', status: 'completed', model: '', rounds: 1,
+        error: '', updated_at: '2026-08-01T12:00:00Z',
+      },
+      messages: [
+        { role: 'user', content: '查询用户列表' },
+        { role: 'assistant', content: '共找到 3 个用户。' },
+      ],
+      events: [
+        {
+          type: 'response.tool.completed', sequence_number: 2, call_id: 'call-users',
+          tool_name: 'admin_list_users', agent_code: 'admin_copilot', output_summary: '返回 3 个用户',
+        },
+        {
+          type: 'response.tool.started', sequence_number: 1, call_id: 'call-users',
+          tool_name: 'admin_list_users', agent_code: 'admin_copilot', arguments: { page: 1 },
+        },
+      ],
+      last_sequence_number: 2,
+      pending: null,
+    })
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    const rows = wrapper.findAll('.message-row')
+
+    expect(rows).toHaveLength(3)
+    expect(rows[0].classes()).toContain('is-user')
+    expect(rows[1].find('.response-tool-timeline').text()).toContain('admin_list_users')
+    expect(rows[1].text()).toContain('已完成')
+    expect(rows[2].find('.markdown-body').text()).toContain('共找到 3 个用户')
+    wrapper.unmount()
+  })
+
   it('初始会话恢复完成前禁止发送', async () => {
     let resolveSession!: (value: unknown) => void
     sessionApi.get.mockReturnValueOnce(new Promise((resolve) => { resolveSession = resolve }))

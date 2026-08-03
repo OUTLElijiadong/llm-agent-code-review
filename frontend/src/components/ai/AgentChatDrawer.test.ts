@@ -81,6 +81,43 @@ async function mountReadyDrawer(prefill?: string): Promise<VueWrapper> {
 }
 
 describe('AgentChatDrawer Responses stream', () => {
+  it('刷新恢复后仍先显示工具调用，再显示最终结论', async () => {
+    sessionApi.get.mockResolvedValueOnce({
+      surface: 'user',
+      session_id: 'user-test',
+      run: {
+        run_id: 'run-restored-tools', status: 'completed', model: 'deepseek-v4-flash',
+        rounds: 1, error: '', updated_at: '2026-08-01T12:00:00Z',
+      },
+      messages: [
+        { role: 'user', content: '列出项目' },
+        { role: 'assistant', content: '共找到 2 个项目。' },
+      ],
+      events: [
+        {
+          type: 'response.tool.completed', sequence_number: 2, call_id: 'call-projects',
+          tool_name: 'list_projects', agent_code: 'project_agent', output_summary: '返回 2 个项目',
+        },
+        {
+          type: 'response.tool.started', sequence_number: 1, call_id: 'call-projects',
+          tool_name: 'list_projects', agent_code: 'project_agent', arguments: { page: 1 },
+        },
+      ],
+      last_sequence_number: 2,
+      pending: null,
+    })
+
+    const wrapper = await mountReadyDrawer()
+    const rows = wrapper.findAll('.msg-row')
+
+    expect(rows).toHaveLength(3)
+    expect(rows[0].classes()).toContain('user')
+    expect(rows[1].find('.response-tool-timeline').text()).toContain('list_projects')
+    expect(rows[1].text()).toContain('已完成')
+    expect(rows[2].find('.markdown-body').text()).toContain('共找到 2 个项目')
+    wrapper.unmount()
+  })
+
   it('初始会话恢复完成前禁止发送', async () => {
     let resolveSession!: (value: unknown) => void
     sessionApi.get.mockReturnValueOnce(new Promise((resolve) => { resolveSession = resolve }))

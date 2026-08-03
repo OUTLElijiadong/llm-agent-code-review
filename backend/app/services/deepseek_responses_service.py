@@ -20,6 +20,7 @@ import httpx
 from loguru import logger
 
 from app.core.config import settings
+from app.utils.public_http import pin_public_http_url
 
 TRANSCRIPT_TTL_SECONDS = 30 * 24 * 60 * 60
 MEMORY_TRANSCRIPT_LIMIT = 512
@@ -419,6 +420,7 @@ class DeepSeekResponsesService:
         self._responses_url = self._resolve_responses_url(base_url or settings.deepseek_base_url)
         self._timeout_seconds = float(timeout_seconds or settings.deepseek_timeout)
         self._storage = storage or build_transcript_store(settings.redis_url)
+        self._pin_upstream = client_factory is None
         self._client_factory = client_factory or self._new_http_client
 
     @property
@@ -548,7 +550,20 @@ class DeepSeekResponsesService:
     ) -> BufferedGatewayResponse:
         client = self._client_factory()
         try:
-            response = await client.post(self._responses_url, headers=headers, json=payload)
+            request_url = self._responses_url
+            request_headers = dict(headers)
+            extensions = None
+            if self._pin_upstream:
+                target = pin_public_http_url(self._responses_url)
+                request_url = target.request_url
+                request_headers["Host"] = target.host_header
+                extensions = target.request_extensions
+            response = await client.post(
+                request_url,
+                headers=request_headers,
+                json=payload,
+                extensions=extensions,
+            )
             content = await response.aread()
         except httpx.TimeoutException as exc:
             raise ResponsesGatewayError(
@@ -591,7 +606,21 @@ class DeepSeekResponsesService:
     ) -> StreamingGatewayResponse:
         client = self._client_factory()
         try:
-            request = client.build_request("POST", self._responses_url, headers=headers, json=payload)
+            request_url = self._responses_url
+            request_headers = dict(headers)
+            extensions = None
+            if self._pin_upstream:
+                target = pin_public_http_url(self._responses_url)
+                request_url = target.request_url
+                request_headers["Host"] = target.host_header
+                extensions = target.request_extensions
+            request = client.build_request(
+                "POST",
+                request_url,
+                headers=request_headers,
+                json=payload,
+                extensions=extensions,
+            )
             response = await client.send(request, stream=True)
         except httpx.TimeoutException as exc:
             await client.aclose()

@@ -19,10 +19,12 @@
    - GET    /{task_id}/export/pdf   导出 PDF(旧)
 
 权限点:
-- report:generate         生成报告
-- report:read             预览报告
+- report:view             生成与预览报告
 - report:template_manage  模板管理
-- report:export           导出报告
+- report:export:pdf       导出 PDF
+- report:export:word      导出 Word
+- report:export:json      导出 JSON
+- report:export:html      导出 HTML
 """
 from io import BytesIO
 from typing import List, Optional
@@ -35,6 +37,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.exceptions import NotFoundError
+from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
@@ -43,6 +46,7 @@ from app.schemas.common import PageOut, Resp
 from app.schemas.report import ReportDetailOut, ReportListItem
 from app.schemas.report_template import ReportTemplateIn, ReportTemplateOut, ReportTemplateUpdate
 from app.services import report_service, report_template_service
+from app.services.rbac_service import check_permission
 from app.services.report_exporter import (
     export_to_html,
     export_to_json,
@@ -94,7 +98,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     if not task or task.status != "success":
         raise NotFoundError(f"审查任务 #{task_id} 不存在或未完成", code=40400)
     # 权限校验:管理员或任务发起者可访问
-    if task.user_id != user.id and user.role != "admin":
+    if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise NotFoundError("报告不存在", code=40400)
 
     issues: List[ReviewIssue] = (
@@ -147,7 +151,7 @@ def _build_download_response(
 def generate_report(
     payload: ReportGenerateIn,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("report:generate")),
+    user: User = Depends(require_permission(PermissionCode.REPORT_VIEW)),
 ):
     """生成报告(支持 JSON / HTML / PDF / Word 四种格式)。
 
@@ -160,7 +164,7 @@ def generate_report(
     Args:
         payload: 报告生成请求体(task_id / format / template_type)。
         db: 数据库会话(由 Depends 注入)。
-        user: 当前用户(由 require_permission 注入,已校验 report:generate 权限)。
+        user: 当前用户(由 require_permission 注入,已校验 report:view 权限)。
 
     Returns:
         Response: 根据格式返回 JSONResponse / HTMLResponse / StreamingResponse。
@@ -205,7 +209,7 @@ def preview_report(
     task_id: int,
     template_type: str = Query(default="detailed", pattern="^(simple|detailed|compliance)$"),
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("report:read")),
+    user: User = Depends(require_permission(PermissionCode.REPORT_VIEW)),
 ):
     """预览报告(返回 HTML,便于前端 iframe 嵌入)。
 
@@ -213,7 +217,7 @@ def preview_report(
         task_id: 审查任务 ID(路径参数)。
         template_type: 模板类型(simple/detailed/compliance),默认 detailed。
         db: 数据库会话(由 Depends 注入)。
-        user: 当前用户(由 require_permission 注入,已校验 report:read 权限)。
+        user: 当前用户(由 require_permission 注入,已校验 report:view 权限)。
 
     Returns:
         HTMLResponse: 渲染后的 HTML 报告字符串。
@@ -227,13 +231,35 @@ def preview_report(
     return HTMLResponse(content=html_str)
 
 
+def _require_report_export_permission(
+    format: str = Query(default="pdf", pattern="^(json|html|pdf|word)$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> User:
+    """按实际导出格式校验权限，避免使用不存在的 report:export。"""
+    permission_by_format = {
+        "json": PermissionCode.REPORT_EXPORT_JSON,
+        "html": PermissionCode.REPORT_EXPORT_HTML,
+        "pdf": PermissionCode.REPORT_EXPORT_PDF,
+        "word": PermissionCode.REPORT_EXPORT_WORD,
+    }
+    permission = permission_by_format[format]
+    if not check_permission(db, user.id, permission):
+        from app.core.exceptions import PermissionError
+        raise PermissionError(
+            f"无操作权限: 需要 {permission}",
+            detail={"required_permission": permission, "format": format},
+        )
+    return user
+
+
 @router.get("/tasks/{task_id}/export")
 def export_report(
     task_id: int,
     format: str = Query(default="pdf", pattern="^(json|html|pdf|word)$"),
     template_type: str = Query(default="detailed", pattern="^(simple|detailed|compliance)$"),
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("report:export")),
+    user: User = Depends(_require_report_export_permission),
 ):
     """导出报告(直接下载文件,返回 StreamingResponse with Content-Disposition: attachment)。
 
@@ -242,7 +268,7 @@ def export_report(
         format: 导出格式(json/html/pdf/word),默认 pdf。
         template_type: 模板类型(simple/detailed/compliance),默认 detailed。
         db: 数据库会话(由 Depends 注入)。
-        user: 当前用户(由 require_permission 注入,已校验 report:export 权限)。
+        user: 当前用户(按 format 校验对应 report:export:* 权限)。
 
     Returns:
         StreamingResponse: 带下载头的流式响应;JSON/HTML 格式同样以文件下载方式返回。

@@ -125,6 +125,11 @@ class ChatPlanner:
                 [{"name", "description", "parameters", "type": "skill|fixed"}]
         """
         tools: List[Dict[str, Any]] = []
+        orchestrator = getattr(self._agent, "_orchestrator", None)
+        can_configure = bool(
+            orchestrator is not None
+            and getattr(orchestrator, "_can_configure_agents", lambda: False)()
+        )
 
         # 1. SkillRegistry 中所有 invocable Skill(OpenAI tools 格式)
         try:
@@ -132,6 +137,8 @@ class ChatPlanner:
 
             for s in SkillRegistry.instance().list_all():
                 if not s.invocable:
+                    continue
+                if not can_configure:
                     continue
                 tools.append({
                     "name": s.name,
@@ -144,6 +151,8 @@ class ChatPlanner:
 
         # 2. Orchestrator 固定方法：直接复用执行器的严格参数契约。
         for name in self._FIXED_TOOLS:
+            if name == "trigger_evolution" and not can_configure:
+                continue
             tools.append({
                 "name": name,
                 "description": get_fixed_tool_description(name),

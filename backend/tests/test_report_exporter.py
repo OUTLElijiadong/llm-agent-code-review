@@ -214,6 +214,27 @@ def test_export_to_html_detailed_renders_with_key_content():
     assert "SQL注入" in html  # 标题(已覆盖)
 
 
+def test_export_to_html_supports_legacy_template_context():
+    """历史模板的 task/metrics/compliance_summary 变量应继续可用。"""
+
+    task = _make_task(total_files=4)
+    issues = [
+        _make_issue(id=1, severity="严重"),
+        _make_issue(id=2, severity="high"),
+        _make_issue(id=3, severity="信息"),
+    ]
+    template = (
+        "{{ task.task_name }}|{{ metrics.total_files }}|"
+        "{{ metrics.total_issues }}|{{ metrics.severity_counts.critical }}|"
+        "{{ metrics.severity_counts.high }}|{{ metrics.severity_counts.info }}|"
+        "{{ compliance_summary.iso27001.total_findings }}"
+    )
+
+    rendered = export_to_html(task, issues, "旧模板", 66, template)
+
+    assert rendered == "示例审查任务|4|3|1|1|1|3"
+
+
 def test_export_to_html_compliance_renders_with_key_content():
     """合规版模板渲染应包含任务名、4 标准概览与合规条款编号。"""
     task = _make_task(project_name="合规项目")

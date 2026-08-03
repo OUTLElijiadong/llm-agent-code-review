@@ -10,7 +10,8 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Mapping, Optional, Sequence
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Literal, Mapping, Optional, Sequence
+from urllib.parse import urlencode
 
 import httpx
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +21,11 @@ from app.agents import AgentContext
 from app.agents.orchestrator import get_request_orchestrator
 from app.agents.skills.registry import SkillRegistry
 from app.agents.tool_contracts import (
+    DownloadProjectSourceArguments,
     FixedToolArgumentError,
+    FixedToolArguments,
+    ImportRemoteProjectArguments,
+    UpdateProjectArguments,
     get_fixed_tool_description,
     get_fixed_tool_names,
     get_fixed_tool_schema,
@@ -36,10 +41,12 @@ from app.services import (
     admin_agent_tools,
     admin_capability_service,
     agent_governance_service,
+    code_file_service,
     ops_service,
     policy_engine,
     published_agent_tools,
     rbac_service,
+    report_service,
     tool_gateway,
 )
 from app.services.admin_capability_registry import (
@@ -62,6 +69,7 @@ from app.services.deepseek_responses_runtime import (
     WAITING_APPROVAL,
     WAITING_INPUT,
     DeepSeekResponsesRuntime,
+    FatalToolExecutionError,
     InvalidRunStateError,
     RunCheckpoint,
     RuntimeResult,
@@ -69,9 +77,33 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
 )
 from app.services.mcp_tool_provider import McpToolProvider
+from app.services.user_capability_registry import (
+    CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
+)
+from app.services.user_capability_registry import (
+    CRITICAL as USER_CAPABILITY_CRITICAL,
+)
+from app.services.user_capability_registry import (
+    READ as USER_CAPABILITY_READ,
+)
+from app.services.user_capability_registry import USER_CAPABILITIES
+from app.services.user_capability_registry import (
+    describe_capabilities as describe_user_capabilities,
+)
+from app.services.user_capability_registry import (
+    discovery_tool_schema as user_discovery_tool_schema,
+)
+from app.services.user_capability_registry import (
+    execution_tool_schema as user_execution_tool_schema,
+)
 from app.utils.api_resolver import ApiConfig, resolve_api_config
 
 EventSink = Callable[[Mapping[str, Any]], Optional[Awaitable[None]]]
+SessionValidator = Callable[[], bool]
+
+
+class AgentSessionExpiredError(FatalToolExecutionError):
+    """当前 Responses 运行所属的登录版本已被更新登录取代。"""
 
 
 @dataclass(frozen=True)
@@ -84,11 +116,64 @@ class _AdminWriteCall:
     invalid: bool = False
 
 
+class DownloadReportArguments(FixedToolArguments):
+    """报告下载入口的固定参数契约。"""
+
+    task_id: int
+    format: Literal["json", "html", "pdf", "word"] = "html"
+    template_type: Literal["simple", "detailed", "compliance"] = "detailed"
+
+
+class DownloadCodeFileArguments(FixedToolArguments):
+    """二进制代码文件下载入口的固定参数契约。"""
+
+    file_id: int
+
+
+class StartRoundtableDiscussionArguments(FixedToolArguments):
+    """用户 Agent 启动圆桌讨论的固定参数。"""
+
+    project_id: int
+    file_id: int
+    review_type: str = "full"
+
+
+class GetRoundtableDiscussionArguments(FixedToolArguments):
+    """读取当前用户圆桌讨论状态的固定参数。"""
+
+    session_id: str
+
+
+class ControlRoundtableDiscussionArguments(FixedToolArguments):
+    """控制当前用户圆桌讨论的固定参数。"""
+
+    session_id: str
+    action: Literal["pause", "resume", "stop", "user_input"]
+    content: str = ""
+
+
 _ADMIN_TOOL_PREFIX = "admin_"
+_SUPER_ADMIN_FIXED_TOOLS = frozenset({"admin_system_status"})
+_SECURITY_SCAN_FIXED_TOOLS = frozenset({
+    "audit_security_for_file",
+    "audit_security_for_task",
+    "audit_security_for_project",
+})
 _WRITE_TOOLS = {
     "create_project",
+    "update_project",
     "delete_project",
+    "import_remote_project",
+    "start_roundtable_discussion",
+    "control_roundtable_discussion",
     "start_review",
+    "audit_security_for_file",
+    "audit_security_for_task",
+    "audit_security_for_project",
+    "run_project_tests",
+    "deploy_project_sandbox",
+    "close_sandbox",
+    "extend_sandbox",
     "trigger_evolution",
     "admin_set_user_role",
     "admin_delete_user",
@@ -103,24 +188,31 @@ _DANGER_TOOLS = {
     "admin_delete_users",
     "admin_execute_operation",
 }
+_USER_CAPABILITY_NAMES = {
+    "update_project",
+    "import_remote_project",
+    "download_project_source",
+    "download_report",
+    "download_code_file",
+    "start_roundtable_discussion",
+    "get_roundtable_discussion",
+    "control_roundtable_discussion",
+    "run_project_tests",
+    "deploy_project_sandbox",
+    "close_sandbox",
+    "extend_sandbox",
+}
 _CN_MUTATION_VERB = (
     r"(?:创建|新增|添加|修改|调整|编辑|更改|更新|设置|启用|停用|禁用|下线|"
     r"删除|移除|重置|生成|撤销|发布|批准|驳回|拒绝|回滚|写入|保存|上传|导入|"
-    r"绑定|分配|激活|抓取|运行|试算|解决|记录|覆盖|评测|触发|调用|测试|沉淀|应用|"
+    r"绑定|分配|激活|抓取|运行|试算|解决|记录|登记|覆盖|评测|触发|调用|测试|检查|同步|沉淀|应用|"
     r"备份|校验|验证|重启|重载|续期|维护|恢复|清理|安装|升级|卸载|锁定|解锁|"
     r"暂停|启动|停止|开放|关闭)"
 )
 _MUTATION_SUCCESS_PATTERNS = (
-    re.compile(
-        r"(?:成功(?:地)?|已经完成|已完成|完成了).{0,24}"
-        + _CN_MUTATION_VERB
-    ),
-    re.compile(
-        _CN_MUTATION_VERB + r".{0,16}(?:已成功完成|成功完成|已完成|成功|完成了)"
-    ),
-    re.compile(
-        r"(?:已|已经)(?:成功)?" + _CN_MUTATION_VERB
-    ),
+    re.compile(r"(?:成功(?:地)?|已经完成|已完成|完成了).{0,24}" + _CN_MUTATION_VERB),
+    re.compile(_CN_MUTATION_VERB + r".{0,16}(?:已成功完成|成功完成|已完成|成功|完成了)"),
+    re.compile(r"(?:已|已经)(?:成功)?" + _CN_MUTATION_VERB),
     re.compile(
         r"\b(?:created|updated|deleted|removed|enabled|disabled|reset|published|approved|rejected|executed)\b"
         r".{0,20}\bsuccess(?:fully)?\b",
@@ -138,9 +230,7 @@ _MUTATION_FAILURE_PATTERNS = (
         r"(?:未(?:能|成功|完成)?|没(?:有)?|无法|不能|不会|失败|未执行|未完成)"
         r".{0,24}" + _CN_MUTATION_VERB
     ),
-    re.compile(
-        _CN_MUTATION_VERB + r".{0,24}(?:失败|被拒绝|已取消|未执行|未完成|未成功|无法|不能)"
-    ),
+    re.compile(_CN_MUTATION_VERB + r".{0,24}(?:失败|被拒绝|已取消|未执行|未完成|未成功|无法|不能)"),
     re.compile(r"(?:用户|审批|策略|系统).{0,16}(?:拒绝|取消).{0,16}(?:执行|操作|请求)"),
     re.compile(r"(?:请求|操作|执行).{0,12}(?:被拒绝|已取消)"),
     re.compile(r"(?:已取消|不会).{0,12}(?:执行|操作|" + _CN_MUTATION_VERB + r")"),
@@ -148,10 +238,7 @@ _MUTATION_FAILURE_PATTERNS = (
 )
 _ADMIN_MUTATION_REQUEST = re.compile(
     r"^(?:请(?!问)|请帮|帮我|帮忙|麻烦|劳烦|给我|现在|立即|马上|需要|我要|"
-    r"请通过|请在|把|将|直接|执行).{0,80}"
-    + _CN_MUTATION_VERB
-    + r"|^"
-    + _CN_MUTATION_VERB
+    r"请通过|请在|把|将|直接|执行).{0,80}" + _CN_MUTATION_VERB + r"|^" + _CN_MUTATION_VERB
 )
 _ADMIN_MUTATION_DISCUSSION = re.compile(
     r"(?:^\s*(?:请说明|请告诉我|请介绍|请解释|请问|是否|能否|可否|可以吗|怎么|如何|为什么|是什么|什么意思|"
@@ -179,6 +266,12 @@ def _is_admin_actor(db: Session, user: User) -> bool:
     if str(getattr(user, "role", "")) in {"admin", "super_admin"}:
         return True
     return rbac_service.is_admin_user(db, int(user.id))
+
+
+def _is_super_admin_actor(db: Session, user: User) -> bool:
+    if str(getattr(user, "username", "")) != "admin" or str(getattr(user, "role", "")) != "super_admin":
+        return False
+    return rbac_service.is_super_admin_user(db, int(user.id))
 
 
 _OPS_READ_ONLY = ops_service.READ_ONLY_ACTIONS
@@ -364,16 +457,31 @@ class NativeResponsesTransport:
         return self._stream(payload)
 
     async def _stream(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
-        url = _responses_url(self._config.base_url)
+        from app.utils.api_resolver import validate_ai_base_url
+        from app.utils.public_http import pin_public_http_url
+
+        base_url = validate_ai_base_url(
+            self._config.base_url,
+            resolve_host=True,
+            allow_private=False,
+        )
+        target = pin_public_http_url(_responses_url(base_url))
         headers = {
             "Authorization": f"Bearer {self._config.api_key}",
             "Accept": "text/event-stream",
             "Content-Type": "application/json",
             "Accept-Encoding": "identity",
+            "Host": target.host_header,
         }
         timeout = httpx.Timeout(float(settings.deepseek_timeout), read=float(settings.deepseek_timeout))
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            async with client.stream("POST", url, headers=headers, json=dict(payload)) as response:
+            async with client.stream(
+                "POST",
+                target.request_url,
+                headers=headers,
+                json=dict(payload),
+                extensions=target.request_extensions,
+            ) as response:
                 if response.status_code >= 400:
                     raw = (await response.aread()).decode("utf-8", errors="replace")
                     raise RuntimeError(_upstream_error(raw, response.status_code))
@@ -412,22 +520,60 @@ class PrismToolExecutor:
         run_id: str,
         mcp_provider: McpToolProvider,
         event_sink: Optional[EventSink] = None,
+        session_validator: Optional[SessionValidator] = None,
     ) -> None:
         self._db = db
         self._user = user
         self._surface = surface
         self._run_id = run_id
         self._is_admin = surface == "admin" and _is_admin_actor(db, user)
+        self._is_super_admin = surface == "admin" and _is_super_admin_actor(db, user)
         self._mcp = mcp_provider
         self._event_sink = event_sink
+        self._session_validator = session_validator
         self._orch = get_request_orchestrator(db, user=user)
         self._skill_bindings: Dict[str, str] = {}
 
     async def tool_schemas(self) -> list[Dict[str, Any]]:
+        self._assert_session_active()
         tools: list[Dict[str, Any]] = []
         is_admin = self._surface == "admin" and self._is_admin
+        legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
+        can_invoke_published = legacy_admin or rbac_service.check_permission(
+            self._db,
+            self._user.id,
+            PermissionCode.CUSTOM_AGENT_INVOKE,
+        )
+        can_view_projects = legacy_admin or rbac_service.check_permission(
+            self._db,
+            self._user.id,
+            PermissionCode.PROJECT_VIEW,
+        )
+        can_download_files = legacy_admin or rbac_service.check_permission(
+            self._db,
+            self._user.id,
+            PermissionCode.FILE_DOWNLOAD,
+        )
+        can_scan_security = legacy_admin or rbac_service.check_permission(
+            self._db,
+            self._user.id,
+            PermissionCode.SECURITY_SCAN,
+        )
+        can_configure_agents = self._has_permission(PermissionCode.AGENT_CONFIGURE)
         for name in get_fixed_tool_names():
             if name.startswith(_ADMIN_TOOL_PREFIX) and not is_admin:
+                continue
+            if name in _SUPER_ADMIN_FIXED_TOOLS and not self._is_super_admin:
+                continue
+            if name == "trigger_evolution" and not can_configure_agents:
+                continue
+            if name in _SECURITY_SCAN_FIXED_TOOLS and not can_scan_security:
+                continue
+            if (
+                self._surface == "user"
+                and name in {"search_published_agents", "invoke_published_agent"}
+                and not can_invoke_published
+            ):
                 continue
             tools.append(
                 {
@@ -438,8 +584,42 @@ class PrismToolExecutor:
                 }
             )
 
+        # 用户端项目页的写入/源码能力不是任意 HTTP 代理，而是固定的、
+        # 请求级用户隔离能力。它们单独注册，避免破坏旧固定工具契约。
+        user_fixed_schemas = _user_capability_schemas()
+        if self._surface == "user" and not (can_view_projects and can_download_files):
+            user_fixed_schemas = [
+                schema for schema in user_fixed_schemas if schema["name"] != "download_project_source"
+            ]
+        tools.extend(user_fixed_schemas)
+
+        if self._surface == "user":
+            available_specs = [
+                spec
+                for spec in USER_CAPABILITIES
+                if not spec.permission
+                or legacy_admin
+                or rbac_service.check_permission(self._db, self._user.id, spec.permission)
+            ]
+            tools.extend(
+                (
+                    user_discovery_tool_schema(),
+                    user_execution_tool_schema(available_specs),
+                )
+            )
+
         if is_admin:
-            tools.extend((discovery_tool_schema(), execution_tool_schema()))
+            available_admin_specs = [
+                spec
+                for spec in CAPABILITY_BY_CODE.values()
+                if not spec.permission or self._has_permission(spec.permission)
+            ]
+            tools.extend(
+                (
+                    discovery_tool_schema(),
+                    execution_tool_schema(available_admin_specs),
+                )
+            )
 
         for schema in SkillRegistry.instance().list_tools(invocable_only=True):
             function = schema.get("function") if isinstance(schema, Mapping) else None
@@ -447,6 +627,8 @@ class PrismToolExecutor:
                 continue
             original = str(function.get("name") or "")
             if not original:
+                continue
+            if not can_configure_agents:
                 continue
             model_name = _unique_tool_name(f"skill_{original}", set(self._skill_bindings) | {t["name"] for t in tools})
             self._skill_bindings[model_name] = original
@@ -460,15 +642,43 @@ class PrismToolExecutor:
                 }
             )
 
-        if is_admin and rbac_service.check_permission(self._db, self._user.id, PermissionCode.SERVER_OPS_VIEW):
+        if is_admin and self._has_permission(PermissionCode.SERVER_OPS_VIEW):
             if agent_governance_service.is_runtime_enabled(self._db, "operations"):
                 tools.append(_operations_tool_schema())
-        tools.extend(await self._mcp.discover())
+        # MCP 是外部动态能力，无法仅凭工具名证明它不会触达宿主机或其他
+        # 基础设施；因此只向唯一超级管理员发现，普通管理员按最小权限失败关闭。
+        if self._is_super_admin or bool(
+            getattr(self._mcp, "supports_user_scoped_managed_tools", False)
+        ):
+            tools.extend(await self._mcp.discover())
         return tools
 
+    def _assert_session_active(self) -> None:
+        if self._session_validator is not None and not self._session_validator():
+            raise AgentSessionExpiredError("账号已在另一台设备登录，当前设备已下线")
+
+    def _has_permission(self, permission_code: str) -> bool:
+        """普通管理员继续管理程序内容，服务器权限只认唯一 admin 超管。"""
+
+        if permission_code.startswith(rbac_service.SERVER_OPS_PERMISSION_PREFIX):
+            return self._is_super_admin
+        if str(getattr(self._user, "role", "")) in {"admin", "super_admin"}:
+            return True
+        return rbac_service.check_permission(self._db, self._user.id, permission_code)
+
     async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+        self._assert_session_active()
         if call.name.startswith(_ADMIN_TOOL_PREFIX) and not self._is_admin:
             return await self._failed_attempt(call, "当前用户没有管理员工具权限")
+        if call.name in _SUPER_ADMIN_FIXED_TOOLS and not self._is_super_admin:
+            return await self._failed_attempt(call, "仅超级管理员 admin 可使用服务器工具")
+        is_managed_mcp = bool(
+            getattr(self._mcp, "is_managed_tool", lambda _tool_name: False)(call.name)
+        )
+        if call.name.startswith("mcp_") and not self._is_super_admin and not is_managed_mcp:
+            return await self._failed_attempt(call, "仅超级管理员 admin 可使用外部 MCP 工具")
+        if call.name == "trigger_evolution" and not self._has_permission(PermissionCode.AGENT_CONFIGURE):
+            return await self._failed_attempt(call, "当前用户缺少 Agent 配置权限")
         if is_fixed_tool(call.name):
             try:
                 arguments = validate_fixed_tool_arguments(call.name, call.arguments)
@@ -481,10 +691,43 @@ class PrismToolExecutor:
                 raw_arguments=call.raw_arguments,
                 parse_error=call.parse_error,
             )
+        elif call.name in _USER_CAPABILITY_NAMES:
+            try:
+                model_by_name = {
+                    "update_project": UpdateProjectArguments,
+                    "import_remote_project": ImportRemoteProjectArguments,
+                    "download_project_source": DownloadProjectSourceArguments,
+                    "download_report": DownloadReportArguments,
+                    "download_code_file": DownloadCodeFileArguments,
+                    "start_roundtable_discussion": StartRoundtableDiscussionArguments,
+                    "get_roundtable_discussion": GetRoundtableDiscussionArguments,
+                    "control_roundtable_discussion": ControlRoundtableDiscussionArguments,
+                }[call.name]
+                arguments = model_by_name.model_validate(call.arguments).model_dump(exclude_unset=True)
+            except Exception as exc:
+                return await self._failed_attempt(call, f"工具 {call.name} 参数校验失败: {exc}")
+            call = ToolCall(
+                call_id=call.call_id,
+                name=call.name,
+                arguments=arguments,
+                raw_arguments=call.raw_arguments,
+                parse_error=call.parse_error,
+            )
         if self._mcp.has_tool(call.name):
-            if not approved:
-                return self._approval(call, danger=False, impact="将向已配置的 MCP Server 发送本次工具参数")
-            self._mark_approval(call, approve=True)
+            requires_approval = getattr(
+                self._mcp,
+                "requires_approval",
+                lambda _tool_name: True,
+            )(call.name)
+            if requires_approval and not approved:
+                impact = (
+                    "将使用当前登录用户权限执行项目内 MCP 能力"
+                    if is_managed_mcp
+                    else "将向已配置的 MCP Server 发送本次工具参数"
+                )
+                return self._approval(call, danger=False, impact=impact)
+            if approved:
+                self._mark_approval(call, approve=True)
             return await self._execute_once(
                 call,
                 lambda: self._mcp.call(call.name, call.arguments),
@@ -496,7 +739,15 @@ class PrismToolExecutor:
         if call.name == "admin_execute_capability":
             return await self._execute_admin_capability(call, approved=approved)
 
+        if call.name == "user_describe_capabilities":
+            return await self._describe_user_capabilities(call)
+
+        if call.name == "user_execute_capability":
+            return await self._execute_user_capability(call, approved=approved)
+
         if call.name in self._skill_bindings:
+            if not self._has_permission(PermissionCode.AGENT_CONFIGURE):
+                return await self._failed_attempt(call, "当前用户缺少 Agent 配置权限")
             if not approved:
                 return self._approval(call, danger=False, impact="将执行已注册的 Agent Skill")
             self._mark_approval(call, approve=True)
@@ -542,6 +793,49 @@ class PrismToolExecutor:
                 ),
             )
 
+        if call.name == "download_report":
+            return await self._execute_once(call, lambda: self._download_report(call))
+
+        if call.name == "download_code_file":
+            return await self._execute_once(call, lambda: self._download_code_file(call))
+
+        if call.name == "get_roundtable_discussion":
+            return await self._execute_once(call, lambda: self._get_roundtable_discussion(call))
+
+        if call.name in {"start_roundtable_discussion", "control_roundtable_discussion"}:
+            if not approved:
+                operation = "启动圆桌讨论" if call.name == "start_roundtable_discussion" else "控制圆桌讨论"
+                return self._approval(
+                    call,
+                    danger=False,
+                    operation=operation,
+                    impact="将以当前登录用户身份变更圆桌讨论运行状态",
+                )
+            self._mark_approval(call, approve=True)
+            if call.name == "start_roundtable_discussion":
+                return await self._execute_once(call, lambda: self._start_roundtable_discussion(call))
+            return await self._execute_once(call, lambda: self._control_roundtable_discussion(call))
+
+        if call.name in _USER_CAPABILITY_NAMES:
+            if call.name in _WRITE_TOOLS and not approved:
+                return self._approval(
+                    call,
+                    danger=False,
+                    impact="将使用当前登录用户权限执行项目写操作",
+                )
+            if call.name in _WRITE_TOOLS:
+                self._mark_approval(call, approve=True)
+            return await self._execute_once(
+                call,
+                lambda: self._agent_result(
+                    call,
+                    getattr(self._orch, call.name)(
+                        **call.arguments,
+                        ctx=AgentContext(user_id=self._user.id, extra={"run_id": self._run_id}),
+                    ),
+                ),
+            )
+
         if call.name == "admin_list_agent_release_approvals":
             return await self._execute_once(
                 call,
@@ -584,6 +878,165 @@ class PrismToolExecutor:
                     AgentContext(user_id=self._user.id, extra={"run_id": self._run_id}),
                 ),
             ),
+        )
+
+    def _download_report(self, call: ToolCall) -> ToolExecutionResult:
+        """校验格式权限与报告归属后，返回固定同源下载入口。"""
+
+        task_id = int(call.arguments["task_id"])
+        export_format = str(call.arguments.get("format") or "html")
+        template_type = str(call.arguments.get("template_type") or "detailed")
+        permission = {
+            "json": PermissionCode.REPORT_EXPORT_JSON,
+            "html": PermissionCode.REPORT_EXPORT_HTML,
+            "pdf": PermissionCode.REPORT_EXPORT_PDF,
+            "word": PermissionCode.REPORT_EXPORT_WORD,
+        }[export_format]
+        if not rbac_service.check_permission(self._db, self._user.id, permission):
+            return ToolExecutionResult.failure(f"当前用户缺少权限: {permission}")
+        try:
+            report_service.get_report_detail(self._db, self._user, task_id)
+        except Exception as exc:  # 与真实报告路由保持归属/存在性语义
+            return ToolExecutionResult.failure(str(exc))
+        query = urlencode({"format": export_format, "template_type": template_type})
+        path = f"/api/reports/tasks/{task_id}/export?{query}"
+        extension = "docx" if export_format == "word" else export_format
+        return ToolExecutionResult.success(
+            {
+                "task_id": task_id,
+                "format": export_format,
+                "template_type": template_type,
+                "file_name": f"review_report_{task_id}.{extension}",
+                "download_path": path,
+                "download_url": path,
+                "authentication": "current_user",
+            }
+        )
+
+    def _download_code_file(self, call: ToolCall) -> ToolExecutionResult:
+        """校验文件下载权限与项目归属后，返回固定二进制下载入口。"""
+
+        file_id = int(call.arguments["file_id"])
+        if not rbac_service.check_permission(self._db, self._user.id, PermissionCode.FILE_DOWNLOAD):
+            return ToolExecutionResult.failure(f"当前用户缺少权限: {PermissionCode.FILE_DOWNLOAD}")
+        try:
+            code_file = code_file_service.get_file(self._db, self._user, file_id)
+        except Exception as exc:  # 与真实下载路由保持归属/存在性语义
+            return ToolExecutionResult.failure(str(exc))
+        if int(getattr(code_file, "is_binary", 0) or 0) != 1:
+            return ToolExecutionResult.failure("当前单文件下载路由仅支持二进制文件；文本源码请下载项目源码 ZIP")
+        path = f"/api/code-files/{file_id}/download"
+        return ToolExecutionResult.success(
+            {
+                "file_id": file_id,
+                "file_name": str(getattr(code_file, "file_name", "") or ""),
+                "download_path": path,
+                "download_url": path,
+                "authentication": "current_user",
+            }
+        )
+
+    async def _start_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
+        """复用用户 REST 预检后，在后台启动同一套圆桌编排器。"""
+
+        from app.api.v1.discussion import start_discussion
+        from app.api.v1.ws_discussion import launch_pending_discussion, take_pending
+
+        response = start_discussion(
+            project_id=int(call.arguments["project_id"]),
+            file_id=int(call.arguments["file_id"]),
+            review_type=str(call.arguments.get("review_type") or "full"),
+            db=self._db,
+            user=self._user,
+        )
+        data = dict(response.data or {})
+        session_id = str(data.get("session_id") or "")
+        pending = take_pending(session_id)
+        if not session_id or pending is None:
+            return ToolExecutionResult.failure("圆桌讨论上下文创建失败")
+        launch_pending_discussion(pending)
+        open_query = urlencode(
+            {
+                "discuss_session": session_id,
+                "discuss_ws": str(data.get("ws_url") or ""),
+                "discuss_agents": json.dumps(data.get("agents") or [], ensure_ascii=False),
+                "discuss_file": str(data.get("file_name") or ""),
+            }
+        )
+        data.update(
+            {
+                "started_by": "user_agent",
+                "open_path": f"/agents?{open_query}",
+                "open_url": f"/agents?{open_query}",
+            }
+        )
+        return ToolExecutionResult.success(data)
+
+    def _get_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
+        """按会话归属返回圆桌状态与已产生的发言。"""
+
+        from app.agents.discussion_bus import DiscussionBus
+
+        session_id = str(call.arguments["session_id"])
+        session = DiscussionBus.instance().get_session(session_id)
+        if session is None:
+            return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
+        if int(session.owner_user_id) != int(self._user.id) and not _is_admin_actor(self._db, self._user):
+            return ToolExecutionResult.failure("无权访问该圆桌讨论")
+        return ToolExecutionResult.success(
+            {
+                "session_id": session.session_id,
+                "status": session.status,
+                "file_name": session.file_name,
+                "max_rounds": session.max_rounds,
+                "report_task_id": session.report_task_id,
+                "turn_count": len(session.turns),
+                "turns": [turn.to_dict() for turn in session.turns[-100:]],
+            }
+        )
+
+    def _control_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
+        """按会话归属发送暂停、恢复、停止或用户发言。"""
+
+        from app.agents.discussion_bus import DiscussionBus
+        from app.agents.events import DiscussionTurn
+
+        session_id = str(call.arguments["session_id"])
+        action = str(call.arguments["action"])
+        content = str(call.arguments.get("content") or "").strip()
+        bus = DiscussionBus.instance()
+        session = bus.get_session(session_id)
+        if session is None:
+            return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
+        if int(session.owner_user_id) != int(self._user.id) and not _is_admin_actor(self._db, self._user):
+            return ToolExecutionResult.failure("无权控制该圆桌讨论")
+        if session.status == "concluded":
+            return ToolExecutionResult.failure("圆桌讨论已经结束")
+        if action == "user_input":
+            if not content:
+                return ToolExecutionResult.failure("user_input 必须提供非空 content")
+            bus.publish_turn(
+                session_id,
+                DiscussionTurn(
+                    turn_id=-1,
+                    agent_code="user",
+                    agent_name="你",
+                    role="user",
+                    content=content,
+                ),
+            )
+            accepted = bus.send_user_input(session_id, content)
+        else:
+            accepted = bus.control_session(session_id, action)
+        if not accepted:
+            return ToolExecutionResult.failure("讨论尚未启动或控制器已结束")
+        return ToolExecutionResult.success(
+            {
+                "session_id": session_id,
+                "action": action,
+                "accepted": True,
+                "status": session.status,
+            }
         )
 
     async def _execute_batch_user_delete(
@@ -798,6 +1251,9 @@ class PrismToolExecutor:
             return recorded
 
         try:
+            # 登录版本可能在占位账本提交后变化；真正触发任何外部副作用前
+            # 必须再次校验，旧设备不能利用校验与执行之间的窗口。
+            self._assert_session_active()
             raw_result = operation()
             if inspect.isawaitable(raw_result):
                 raw_result = await raw_result
@@ -967,12 +1423,125 @@ class PrismToolExecutor:
         async def discover() -> ToolExecutionResult:
             from app.main import app
 
-            rows = describe_capabilities(app.openapi(), page=page, query=query)
+            specs = [
+                spec
+                for spec in CAPABILITY_BY_CODE.values()
+                if not spec.permission or self._has_permission(spec.permission)
+            ]
+            rows = describe_capabilities(app.openapi(), page=page, query=query, specs=specs)
             if not rows:
                 return ToolExecutionResult.failure("没有找到匹配的管理能力")
             return ToolExecutionResult.success({"count": len(rows), "items": rows})
 
         return await self._execute_once(call, discover)
+
+    async def _describe_user_capabilities(self, call: ToolCall) -> ToolExecutionResult:
+        if self._surface != "user":
+            return await self._failed_attempt(call, "普通用户页面能力只能在用户 Agent 中查询")
+        unknown = sorted(set(call.arguments) - {"page", "query"})
+        if unknown:
+            return await self._failed_attempt(call, f"能力查询不接受参数: {', '.join(unknown)}")
+        page = str(call.arguments.get("page") or "")
+        query = str(call.arguments.get("query") or "")
+
+        async def discover() -> ToolExecutionResult:
+            from app.main import app
+
+            rows = describe_user_capabilities(app.openapi(), page=page, query=query)
+            legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
+            available = [
+                row
+                for row in rows
+                if row["permission"] == "route_enforced"
+                or legacy_admin
+                or rbac_service.check_permission(
+                    self._db,
+                    self._user.id,
+                    str(row["permission"]),
+                )
+            ]
+            if not available:
+                return ToolExecutionResult.failure("当前用户没有匹配的可用页面能力")
+            return ToolExecutionResult.success({"count": len(available), "items": available})
+
+        return await self._execute_once(call, discover)
+
+    async def _execute_user_capability(
+        self,
+        call: ToolCall,
+        *,
+        approved: bool,
+    ) -> ToolExecutionResult:
+        if self._surface != "user":
+            return await self._failed_attempt(call, "普通用户页面能力只能在用户 Agent 中执行")
+        unknown = sorted(set(call.arguments) - {"capability", "params"})
+        if unknown:
+            return await self._failed_attempt(call, f"用户能力工具不接受参数: {', '.join(unknown)}")
+        capability = str(call.arguments.get("capability") or "")
+        spec = USER_CAPABILITY_BY_CODE.get(capability)
+        if spec is None:
+            return await self._failed_attempt(call, f"未注册的用户页面能力: {capability}")
+        raw_params = call.arguments.get("params", {})
+        if not isinstance(raw_params, Mapping):
+            return await self._failed_attempt(call, "用户能力 params 必须是 JSON object")
+        params = dict(raw_params)
+
+        legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
+        if (
+            spec.permission
+            and not legacy_admin
+            and not rbac_service.check_permission(self._db, self._user.id, spec.permission)
+        ):
+            return await self._failed_attempt(call, f"当前用户缺少权限: {spec.permission}")
+
+        from app.main import app
+
+        try:
+            admin_capability_service.prepare_request(spec, params, app.openapi())  # type: ignore[arg-type]
+        except admin_capability_service.AdminCapabilityError as exc:
+            return await self._failed_attempt(call, str(exc))
+
+        policy = tool_gateway.authorize(
+            self._db,
+            agent_code="chat_assistant",
+            tool_code="user_execute_capability",
+            action=f"user.{spec.code}",
+            resource=spec.page,
+            actor=self._user,
+            context={"copilot_request_id": _request_id(self._run_id, call.call_id), "surface": self._surface},
+        )
+        if policy.decision == policy_engine.DENY:
+            return await self._failed_attempt(call, f"策略阻断用户页面能力: {policy.reason}")
+
+        if spec.risk != USER_CAPABILITY_READ and not approved:
+            return self._approval(
+                call,
+                danger=spec.risk == USER_CAPABILITY_CRITICAL,
+                operation=spec.description,
+                impact=f"将以当前登录用户身份在 {spec.page} 执行「{spec.description}」",
+                preview={
+                    "capability": spec.code,
+                    "page": spec.page,
+                    "risk": spec.risk,
+                    "params": _redact_event_value(params),
+                },
+            )
+        if spec.risk != USER_CAPABILITY_READ:
+            self._mark_approval(call, approve=True)
+
+        async def execute_capability() -> ToolExecutionResult:
+            try:
+                output = await admin_capability_service.execute_api(
+                    self._user,
+                    spec,  # type: ignore[arg-type]
+                    params,
+                    request_id=_request_id(self._run_id, call.call_id),
+                )
+            except admin_capability_service.AdminCapabilityError as exc:
+                return ToolExecutionResult.failure(str(exc))
+            return ToolExecutionResult.success(output)
+
+        return await self._execute_once(call, execute_capability)
 
     async def _execute_admin_capability(
         self,
@@ -993,16 +1562,7 @@ class PrismToolExecutor:
         if not isinstance(raw_params, Mapping):
             return await self._failed_attempt(call, "管理能力 params 必须是 JSON object")
         params = dict(raw_params)
-        legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
-        if (
-            spec.permission
-            and not legacy_admin
-            and not rbac_service.check_permission(
-                self._db,
-                self._user.id,
-                spec.permission,
-            )
-        ):
+        if spec.permission and not self._has_permission(spec.permission):
             return await self._failed_attempt(call, f"当前管理员缺少权限: {spec.permission}")
 
         from app.main import app
@@ -1085,7 +1645,7 @@ class PrismToolExecutor:
                 "one_time_result": True,
             }
         elif capability == "users.reset_password":
-            password = data.get("default_password")
+            password = data.get("temporary_password")
             if isinstance(password, str) and password:
                 values = [password]
             title = "重置后的临时密码"
@@ -1113,24 +1673,18 @@ class PrismToolExecutor:
         return protected
 
     async def _execute_operation(self, call: ToolCall, *, approved: bool) -> ToolExecutionResult:
-        if not self._is_admin:
-            return ToolExecutionResult.failure("仅管理员可执行运维工具")
+        if not self._is_super_admin:
+            return ToolExecutionResult.failure("仅超级管理员 admin 可执行运维工具")
         action = str(call.arguments.get("action") or "")
         if action not in ops_service.ACTION_RISKS:
             return ToolExecutionResult.failure(f"不支持的运维动作: {action}")
         if not agent_governance_service.is_runtime_enabled(self._db, "operations"):
             return ToolExecutionResult.failure("全服管理 Agent 当前已停用")
-        if not rbac_service.check_permission(self._db, self._user.id, PermissionCode.SERVER_OPS_VIEW):
+        if not self._has_permission(PermissionCode.SERVER_OPS_VIEW):
             return ToolExecutionResult.failure("当前管理员没有服务器运维查看权限")
-        if action not in _OPS_READ_ONLY and not rbac_service.check_permission(
-            self._db,
-            self._user.id,
-            PermissionCode.SERVER_OPS_EXECUTE,
-        ):
+        if action not in _OPS_READ_ONLY and not self._has_permission(PermissionCode.SERVER_OPS_EXECUTE):
             return ToolExecutionResult.failure("当前管理员没有服务器运维执行权限")
-        if ops_service.ACTION_RISKS[action] == "critical" and not rbac_service.check_permission(
-            self._db,
-            self._user.id,
+        if ops_service.ACTION_RISKS[action] == "critical" and not self._has_permission(
             PermissionCode.SERVER_OPS_CRITICAL,
         ):
             return ToolExecutionResult.failure("当前管理员没有服务器关键运维权限")
@@ -1190,7 +1744,15 @@ class PrismToolExecutor:
 class AgentResponsesService:
     """构建并驱动一次用户隔离的 Agent Responses 运行。"""
 
-    def __init__(self, db: Session, user: User, *, surface: str, session_key: str) -> None:
+    def __init__(
+        self,
+        db: Session,
+        user: User,
+        *,
+        surface: str,
+        session_key: str,
+        session_validator: Optional[SessionValidator] = None,
+    ) -> None:
         if surface not in {"user", "admin"}:
             raise ValueError("surface 必须是 user 或 admin")
         if surface == "admin" and not _is_admin_actor(db, user):
@@ -1199,6 +1761,7 @@ class AgentResponsesService:
         self._user = user
         self._surface = surface
         self._session_key = session_key
+        self._session_validator = session_validator
         self._store = DatabaseCheckpointStore(
             db,
             user_id=user.id,
@@ -1221,7 +1784,7 @@ class AgentResponsesService:
             tools=tools,
             run_id=run_id,
         )
-        await self._emit_validated_admin_output(event_sink, result)
+        await self._emit_validated_output(event_sink, result)
         return result
 
     async def resume(
@@ -1252,15 +1815,25 @@ class AgentResponsesService:
             result = await runtime.answer(run_id, answer, call_id or None)
         else:
             raise ValueError("不支持的恢复动作")
-        await self._emit_validated_admin_output(event_sink, result)
+        await self._emit_validated_output(event_sink, result)
         return result
 
-    async def _emit_validated_admin_output(
+    async def cancel(self, run_id: str) -> None:
+        """把因登录版本失效而取消的运行持久化为终态。"""
+
+        checkpoint = await self._store.load(run_id)
+        if checkpoint is None:
+            return
+        checkpoint.status = "cancelled"
+        checkpoint.pending = None
+        await self._store.save(checkpoint)
+
+    async def _emit_validated_output(
         self,
         event_sink: Optional[EventSink],
         result: RuntimeResult,
     ) -> None:
-        if self._surface != "admin" or result.status != COMPLETED or not result.output_text:
+        if result.status != COMPLETED or not result.output_text:
             return
         await _emit(event_sink, {"type": "response.output_text.delta", "delta": result.output_text})
 
@@ -1270,7 +1843,11 @@ class AgentResponsesService:
         event_sink: Optional[EventSink],
     ) -> tuple[PrismToolExecutor, DeepSeekResponsesRuntime]:
         config = resolve_api_config(self._db, self._user.id)
-        mcp = McpToolProvider()
+        mcp = McpToolProvider(
+            db=self._db,
+            agent_code="manager" if self._surface == "admin" else "chat_assistant",
+            user=self._user,
+        )
         executor = PrismToolExecutor(
             self._db,
             self._user,
@@ -1278,12 +1855,11 @@ class AgentResponsesService:
             run_id=run_id,
             mcp_provider=mcp,
             event_sink=event_sink,
+            session_validator=self._session_validator,
         )
-        transport_sink = (
-            _buffer_admin_text_sink(event_sink)
-            if self._surface == "admin"
-            else event_sink
-        )
+        # 工具事件必须先于结论文本到达用户端。DeepSeek 可能在工具调用前
+        # 产生 output_text.delta，因此所有 surface 都先缓冲文本，完成后统一发出。
+        transport_sink = _buffer_text_sink(event_sink)
         runtime = DeepSeekResponsesRuntime(
             transport=NativeResponsesTransport(config, transport_sink),
             tool_executor=executor,
@@ -1330,13 +1906,17 @@ async def _emit(sink: Optional[EventSink], event: Mapping[str, Any]) -> None:
         await result
 
 
-def _buffer_admin_text_sink(sink: Optional[EventSink]) -> EventSink:
+def _buffer_text_sink(sink: Optional[EventSink]) -> EventSink:
     async def filtered(event: Mapping[str, Any]) -> None:
         if str(event.get("type") or "") == "response.output_text.delta":
             return
         await _emit(sink, event)
 
     return filtered
+
+
+# 兼容既有单元测试和外部导入；语义已扩展为所有 surface。
+_buffer_admin_text_sink = _buffer_text_sink
 
 
 def _redact_sensitive_text(value: str) -> str:
@@ -1488,6 +2068,17 @@ def _upstream_error(raw: str, status: int) -> str:
 
 def _instructions(surface: str) -> str:
     identity = "Prism 管理员 Agent" if surface == "admin" else "Prism 代码审查 Agent"
+    capability_instruction = (
+        "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
+        "再调用 admin_execute_capability；不得猜测能力编码或参数。"
+        if surface == "admin"
+        else "普通用户页面任务必须先调用 user_describe_capabilities 查询对应页面能力和精确参数，"
+        "再调用 user_execute_capability；不得猜测能力编码或参数。"
+        "报告、二进制单文件和项目源码下载必须分别使用 download_report、"
+        "download_code_file 和 download_project_source 固定工具。"
+        "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
+        "和 control_roundtable_discussion 固定工具。"
+    )
     return (
         f"你是 {identity}。所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
         "根据每次工具返回结果自主判断下一步，可以连续调用多个工具。"
@@ -1496,8 +2087,7 @@ def _instructions(surface: str) -> str:
         "展示动态候选，确认后才能调用 invoke_published_agent。"
         "涉及用户批量操作时必须先查询真实用户。用户说序号、第几条或范围而未明确是用户 ID 时，"
         "不得猜测；必须用 ask_user 区分列表序号与用户 ID，得到精确 user_ids 后再调用批量工具。"
-        "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
-        "再调用 admin_execute_capability；不得猜测能力编码或参数。"
+        f"{capability_instruction}"
         "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
         "写操作由系统暂停并展示审批；用户点击批准后系统会把原调用结果自动交还给你，不要要求用户重复发送指令。"
         "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。"
@@ -1524,9 +2114,7 @@ def _admin_completion_guard(
         return "管理写请求在没有精确工具执行证据时就结束了"
 
     evidence = (
-        _transcript_admin_write_evidence(checkpoint.transcript)
-        if write_evidence is None
-        else dict(write_evidence)
+        _transcript_admin_write_evidence(checkpoint.transcript) if write_evidence is None else dict(write_evidence)
     )
     missing_calls = sorted(call_id for call_id in attempted_calls if call_id not in evidence)
     mismatched_calls = sorted(
@@ -1535,9 +2123,7 @@ def _admin_completion_guard(
         if call_id in evidence and evidence[call_id][0] != expected_call.code
     )
     non_successful_calls = sorted(
-        call_id
-        for call_id in attempted_calls
-        if call_id in evidence and evidence[call_id][1] != "success"
+        call_id for call_id in attempted_calls if call_id in evidence and evidence[call_id][1] != "success"
     )
     missing_capabilities = sorted(requested_capabilities - attempted_capabilities)
     details = missing_calls + mismatched_calls + missing_capabilities
@@ -1591,11 +2177,7 @@ def _latest_user_text(transcript: Sequence[Mapping[str, Any]]) -> str:
         if isinstance(content, str):
             latest_user_text = content
         elif isinstance(content, Sequence) and not isinstance(content, (str, bytes, bytearray)):
-            latest_user_text = " ".join(
-                str(part.get("text") or "")
-                for part in content
-                if isinstance(part, Mapping)
-            )
+            latest_user_text = " ".join(str(part.get("text") or "") for part in content if isinstance(part, Mapping))
     return latest_user_text.strip()
 
 
@@ -1681,11 +2263,7 @@ def _transcript_admin_write_evidence(
         if status == "success":
             evidence[call_id] = (write_call.code, "success")
         elif status in {"error", "failed", "rejected", "denied", "cancelled", "canceled"}:
-            terminal_status = (
-                "rejected"
-                if status in {"rejected", "denied", "cancelled", "canceled"}
-                else "failed"
-            )
+            terminal_status = "rejected" if status in {"rejected", "denied", "cancelled", "canceled"} else "failed"
             evidence[call_id] = (write_call.code, terminal_status)
     return evidence
 
@@ -1825,7 +2403,11 @@ def _operations_tool_schema() -> Dict[str, Any]:
     return {
         "type": "function",
         "name": "admin_execute_operation",
-        "description": "查询生产状态或执行宿主机白名单运维动作；有副作用的动作会先等待用户批准",
+        "description": (
+            "仅超级管理员可用的结构化服务器运维工具。查询路径或服务前必须先调用 host_inventory；"
+            "后续只能使用清单返回的真实绝对路径和单元名，禁止猜测路径、绕过软链接限制或对安全拒绝换路径重试。"
+            "有副作用的动作会先等待用户批准。"
+        ),
         "parameters": {
             "type": "object",
             "oneOf": [
@@ -1842,6 +2424,60 @@ def _operations_tool_schema() -> Dict[str, Any]:
             ],
         },
     }
+
+
+def _user_capability_schemas() -> list[Dict[str, Any]]:
+    """用户页面对应的固定项目能力契约。"""
+    return [
+        {
+            "type": "function",
+            "name": "update_project",
+            "description": "编辑当前用户有权限项目的名称、描述、语言或状态",
+            "parameters": UpdateProjectArguments.model_json_schema(),
+        },
+        {
+            "type": "function",
+            "name": "import_remote_project",
+            "description": "导入公开 HTTPS 源码归档并创建项目；执行前需要用户批准",
+            "parameters": ImportRemoteProjectArguments.model_json_schema(),
+        },
+        {
+            "type": "function",
+            "name": "download_project_source",
+            "description": "生成当前用户可访问项目的完整源码 ZIP 下载地址",
+            "parameters": DownloadProjectSourceArguments.model_json_schema(),
+        },
+        {
+            "type": "function",
+            "name": "download_report",
+            "description": "校验当前用户权限后，生成 JSON、HTML、PDF 或 Word 报告的同源下载地址",
+            "parameters": DownloadReportArguments.model_json_schema(),
+        },
+        {
+            "type": "function",
+            "name": "download_code_file",
+            "description": "校验当前用户权限后，生成二进制代码文件的同源下载地址",
+            "parameters": DownloadCodeFileArguments.model_json_schema(),
+        },
+        {
+            "type": "function",
+            "name": "start_roundtable_discussion",
+            "description": "为当前用户可访问的单个源码文件启动多 Agent 圆桌讨论；执行前需要批准",
+            "parameters": StartRoundtableDiscussionArguments.model_json_schema(),
+        },
+        {
+            "type": "function",
+            "name": "get_roundtable_discussion",
+            "description": "查询当前用户圆桌讨论的状态、发言与沉淀报告任务",
+            "parameters": GetRoundtableDiscussionArguments.model_json_schema(),
+        },
+        {
+            "type": "function",
+            "name": "control_roundtable_discussion",
+            "description": "暂停、恢复、停止圆桌讨论或提交用户发言；执行前需要批准",
+            "parameters": ControlRoundtableDiscussionArguments.model_json_schema(),
+        },
+    ]
 
 
 def _unique_tool_name(value: str, occupied: set[str]) -> str:

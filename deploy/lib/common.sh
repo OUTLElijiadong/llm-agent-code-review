@@ -211,12 +211,62 @@ release_directory_lock() {
   rmdir "$lock_dir" 2>/dev/null || true
 }
 
+# 返回备份、验证、恢复、发布、回滚和清理共用的维护锁路径。
+# 参数: 无。
+# 返回: stdout 输出锁目录路径。
+maintenance_lock_path() {
+  printf '%s\n' "${MAINTENANCE_LOCK_DIR:-${RELEASE_STATE_DIR:-.releases}/.maintenance.lock}"
+}
+
+# 统计密钥包含的小写、大写、数字和符号字符类别数。
+# 参数: $1 为待检查密钥。
+# 返回: stdout 输出 0-4 的整数。
+secret_character_class_count() {
+  local secret="$1"
+  local count=0
+  [[ "$secret" =~ [[:lower:]] ]] && ((count += 1))
+  [[ "$secret" =~ [[:upper:]] ]] && ((count += 1))
+  [[ "$secret" =~ [[:digit:]] ]] && ((count += 1))
+  [[ "$secret" =~ [^[:alnum:]] ]] && ((count += 1))
+  printf '%s\n' "$count"
+}
+
+# 验证 MySQL root 与应用账号使用不同的强密码。
+# 参数: $1 为 dotenv 路径。
+# 返回: 合格时 0，否则终止当前部署操作。
+validate_database_credentials() {
+  local env_file="$1"
+  local compose_environment line key value
+  local root_password="" app_password="" root_classes app_classes
+  compose_environment="$(
+    DEPLOY_ENV_FILE="$env_file" compose --env-file "$env_file" config --environment 2>/dev/null
+  )" || fatal "docker compose 环境解析失败"
+  while IFS= read -r line; do
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "$key" in
+      MYSQL_ROOT_PASSWORD) root_password="$value" ;;
+      MYSQL_PASSWORD) app_password="$value" ;;
+    esac
+  done <<< "$compose_environment"
+  unset compose_environment line key value
+  [[ ${#root_password} -ge 32 ]] || fatal "MYSQL_ROOT_PASSWORD 必须至少 32 个字符"
+  [[ ${#app_password} -ge 32 ]] || fatal "MYSQL_PASSWORD 必须至少 32 个字符"
+  root_classes="$(secret_character_class_count "$root_password")"
+  app_classes="$(secret_character_class_count "$app_password")"
+  (( root_classes >= 3 )) || fatal "MYSQL_ROOT_PASSWORD 必须包含至少三类字符"
+  (( app_classes >= 3 )) || fatal "MYSQL_PASSWORD 必须包含至少三类字符"
+  [[ "$root_password" != "$app_password" ]] || fatal "MySQL root 与应用账号不得共用密码"
+}
+
 # 检查部署 .env 与 Compose 配置是否可解析。
 # 参数: 无。
 # 返回: 配置有效时 0，否则终止脚本。
 validate_compose_environment() {
   local env_file="${DEPLOY_ENV_FILE:-.env}"
   [[ -f "$env_file" ]] || fatal "缺少 deploy/$env_file，请从 .env.example 创建并填写安全值"
+  validate_database_credentials "$env_file"
   DEPLOY_ENV_FILE="$env_file" compose --env-file "$env_file" config --quiet \
     || fatal "docker compose 配置解析失败"
 }
@@ -232,6 +282,46 @@ validate_geolite_database() {
   [[ "$database_path" == /* ]] || fatal "GEOLITE_DB_HOST_PATH 必须是绝对路径"
   [[ -f "$database_path" ]] || fatal "GeoLite2 数据库不存在或不是普通文件: $database_path"
   [[ -r "$database_path" ]] || fatal "GeoLite2 数据库不可读: $database_path"
+}
+
+# 使用 MySQL 容器网络命名空间内的 root@% TCP 账号执行数据库结构迁移。
+# 参数: 原样传递给 alembic。
+# 返回: alembic 的退出状态。
+run_admin_alembic() {
+  local env_file="${DEPLOY_ENV_FILE:-.env}"
+  local mysql_container backend_container backend_image
+  [[ -f "$env_file" ]] || fatal "缺少部署环境文件: $env_file"
+
+  mysql_container="$(service_container_id mysql)" || fatal "MySQL 容器不存在，无法执行迁移"
+  if [[ -n "${BACKEND_RELEASE:-}" ]]; then
+    validate_release_token "$BACKEND_RELEASE" BACKEND_RELEASE
+    backend_image="prism-backend:$BACKEND_RELEASE"
+  else
+    backend_container="$(service_container_id backend)" || fatal "无法确定 Alembic 所在的 Backend 镜像"
+    backend_image="$(docker inspect --format '{{.Config.Image}}' "$backend_container")"
+  fi
+  [[ -n "$backend_image" ]] || fatal "Backend 镜像名为空"
+  docker image inspect "$backend_image" >/dev/null 2>&1 || fatal "Backend 迁移镜像不存在: $backend_image"
+
+  # 生产开启 binary log 时，创建触发器需要数据库管理权限。
+  # 共享 MySQL 网络命名空间并连接 127.0.0.1；生产 skip_name_resolve=1
+  # 时实际匹配 root@%。该凭据仅交给一次性迁移容器，不进入长期 Backend。
+  docker run --rm \
+    --network "container:$mysql_container" \
+    --env-file "$env_file" \
+    -e "APP_RELEASE=${APP_RELEASE:-migration}" \
+    -e MALWARE_SCAN_FAIL_CLOSED=true \
+    -e DB_HOST=127.0.0.1 \
+    -e DB_PORT=3306 \
+    -e DB_USER=root \
+    "$backend_image" \
+    sh -ec '
+      test -n "$MYSQL_ROOT_PASSWORD"
+      test -n "$MYSQL_DATABASE"
+      export DB_PASSWORD="$MYSQL_ROOT_PASSWORD"
+      export DB_NAME="$MYSQL_DATABASE"
+      exec alembic "$@"
+    ' sh "$@"
 }
 
 # 在 Backend 容器中执行 Alembic 并断言 current 与唯一 head 一致。
@@ -360,7 +450,7 @@ smoke_backend() {
 # 返回: 全部通过时 0；显式 SKIP_HTTPS_SMOKE=1 时直接成功。
 smoke_https() {
   local expected_release="${1:-unknown}"
-  local domain http_code health
+  local domain http_code health ready
   if [[ "${SKIP_HTTPS_SMOKE:-0}" == "1" ]]; then
     log_warn "已按显式配置跳过 HTTPS 冒烟"
     return 0
@@ -378,5 +468,12 @@ smoke_https() {
   if [[ "$expected_release" != "unknown" ]]; then
     printf '%s' "$health" | grep -Eq "\"release\"[[:space:]]*:[[:space:]]*\"$expected_release\"" || return 1
   fi
-  log_info "HTTP→HTTPS 与同源 API 冒烟通过(domain=$domain)"
+  ready="$(curl --fail --silent --show-error --max-time 20 \
+    --resolve "$domain:443:127.0.0.1" "https://$domain/readyz")" || return 1
+  if [[ "$expected_release" == "unknown" ]]; then
+    printf '%s' "$ready" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"' || return 1
+  else
+    [[ "$ready" == "{\"status\":\"ready\",\"release\":\"$expected_release\"}" ]] || return 1
+  fi
+  log_info "HTTP→HTTPS 与同源 health/ready 冒烟通过(domain=$domain)"
 }

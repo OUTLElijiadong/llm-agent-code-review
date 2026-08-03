@@ -16,6 +16,7 @@
         />
         <el-select v-model="filterRole" placeholder="角色筛选" clearable style="width: 140px" @change="loadData">
           <el-option label="管理员" value="admin" />
+          <el-option label="超级管理员" value="super_admin" />
           <el-option label="审查员" value="reviewer" />
           <el-option label="普通用户" value="user" />
         </el-select>
@@ -57,12 +58,15 @@
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
+            <span v-if="row.username === 'admin'" class="protected-admin">唯一超级管理员</span>
+            <template v-else>
             <el-button link type="primary" size="small" @click="onSetRole(row)">设置角色</el-button>
             <el-button link :type="row.status ? 'warning' : 'success'" size="small" @click="onToggleStatus(row)">
               {{ row.status ? '禁用' : '启用' }}
             </el-button>
-            <el-button link type="danger" size="small" @click="onResetPassword(row.id)">重置密码</el-button>
+            <el-button link type="danger" size="small" @click="onResetPassword(row)">重置密码</el-button>
             <el-button link type="danger" size="small" @click="onDelete(row)">删除</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -86,7 +90,7 @@
           <el-select v-model="selectedRole" placeholder="选择角色" style="width: 100%">
             <el-option label="普通用户(可管理自己的项目)" value="user" />
             <el-option label="审查员(可审查,不管理项目)" value="reviewer" />
-            <el-option label="管理员(全部权限)" value="admin" />
+            <el-option label="管理员(程序内管理权限)" value="admin" />
           </el-select>
         </el-form-item>
         <!-- 项目影响说明:角色变更不影响已建项目归属,仅改变后续可见范围 -->
@@ -117,11 +121,38 @@
         <el-button type="primary" :loading="submitting" @click="onConfirmRole">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="passwordDialogVisible"
+      title="密码已重置"
+      width="min(520px, 92vw)"
+      destroy-on-close
+      @closed="clearTemporaryPassword"
+    >
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="旧设备会话已强制下线。随机密码仅显示这一次，请立即通过安全渠道交给用户。"
+      />
+      <p class="password-owner">账号：{{ resetPasswordUsername }}</p>
+      <el-input :model-value="temporaryPassword" readonly class="temporary-password">
+        <template #append>
+          <el-tooltip content="复制随机密码" placement="top">
+            <el-button :icon="CopyDocument" aria-label="复制随机密码" @click="copyTemporaryPassword" />
+          </el-tooltip>
+        </template>
+      </el-input>
+      <template #footer>
+        <el-button type="primary" @click="passwordDialogVisible = false">我已保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { CopyDocument } from '@element-plus/icons-vue'
 
 import { getUsers, setUserRole, toggleUserStatus, resetPassword, deleteUser } from '@/api/user'
 import type { UserListItem } from '@/types/user'
@@ -142,8 +173,12 @@ const filterStatus = ref<number | null>(null)
 const roleDialogVisible = ref(false)
 const selectedUser = ref<UserListItem | null>(null)
 const selectedRole = ref('user')
+const passwordDialogVisible = ref(false)
+const resetPasswordUsername = ref('')
+const temporaryPassword = ref('')
 
 const roleLabels: Record<string, string> = {
+  super_admin: '超级管理员',
   admin: '管理员',
   reviewer: '审查员',
   user: '普通用户',
@@ -154,7 +189,7 @@ function roleLabel(role: string) {
 }
 
 function roleType(role: string) {
-  const map: Record<string, string> = { admin: 'danger', reviewer: 'warning', user: 'info' }
+  const map: Record<string, string> = { super_admin: 'danger', admin: 'warning', reviewer: 'warning', user: 'info' }
   return map[role] ?? 'info'
 }
 
@@ -212,14 +247,32 @@ async function onToggleStatus(row: UserListItem) {
   }
 }
 
-async function onResetPassword(userId: number) {
+async function onResetPassword(row: UserListItem) {
   try {
-    await ElMessageBox.confirm('确定要重置该用户的密码吗？', '确认重置密码', { type: 'warning' })
-    const data = await resetPassword(userId)
-    ElMessage.success(`密码已重置为: ${data.password}`)
+    await ElMessageBox.confirm(`确定要重置用户「${row.username}」的密码并强制下线其旧会话吗？`, '确认重置密码', {
+      type: 'warning',
+    })
+    const data = await resetPassword(row.id)
+    resetPasswordUsername.value = row.username
+    temporaryPassword.value = data.temporary_password
+    passwordDialogVisible.value = true
   } catch {
     /* canceled */
   }
+}
+
+async function copyTemporaryPassword() {
+  try {
+    await navigator.clipboard.writeText(temporaryPassword.value)
+    ElMessage.success('随机密码已复制')
+  } catch {
+    ElMessage.warning('浏览器未允许自动复制，请手动选择密码')
+  }
+}
+
+function clearTemporaryPassword() {
+  temporaryPassword.value = ''
+  resetPasswordUsername.value = ''
 }
 
 async function onDelete(row: UserListItem) {
@@ -269,5 +322,19 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.protected-admin {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.password-owner {
+  margin: 18px 0 8px;
+  color: var(--el-text-color-regular);
+}
+
+.temporary-password {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 </style>

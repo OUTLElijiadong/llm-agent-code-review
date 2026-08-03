@@ -6,6 +6,7 @@ MetaGPT Environment、WebSocket 讨论总线和真实等待，不访问任何外
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any, Optional
 
 import pytest
@@ -1284,6 +1285,71 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
     assert len(review_args["all_turns"]) == 2
     assert len(review_args["deferred_logs"]) == 3
     assert review_args["consensus"].startswith("📋 **讨论共识小结**")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """登录会话失效取消编排后，不得再抽取问题或生成成功报告。"""
+    bus = DiscussionBus()
+    session = bus.create_session(
+        "roundtable-cancelled",
+        task_id=0,
+        file_name="cancelled.py",
+        owner_user_id=42,
+        max_rounds=1,
+    )
+    orchestrator = _make_orchestrator(bus)
+    created = threading.Event()
+    cancelled_task_ids: list[int] = []
+    finalized = False
+
+    def create_task(**_kwargs: Any) -> int:
+        created.set()
+        return 77
+
+    def cancel_review(task_id: int) -> int:
+        cancelled_task_ids.append(task_id)
+        return task_id
+
+    def finalize_review(**_kwargs: Any) -> int:
+        nonlocal finalized
+        finalized = True
+        return 88
+
+    def fail_environment(**_kwargs: Any) -> Any:
+        raise RuntimeError("environment disabled")
+
+    monkeypatch.setattr(module, "DeepSeekAgent", lambda: RecordingAgent())
+    monkeypatch.setattr(module, "build_discussion_environment", fail_environment)
+    monkeypatch.setattr(module, "_create_review_task", create_task)
+    monkeypatch.setattr(module, "_cancel_review_task", cancel_review)
+    monkeypatch.setattr(module, "_finalize_review", finalize_review)
+
+    run = asyncio.create_task(
+        orchestrator.start_discussion(
+            session_id="roundtable-cancelled",
+            profiles=(GENERAL_AGENT,),
+            code="print('cancel')",
+            language="python",
+            file_name="cancelled.py",
+            user_id=42,
+            project_id=12,
+            file_id=34,
+            max_rounds=1,
+        )
+    )
+    assert await asyncio.wait_for(asyncio.to_thread(created.wait, 1), timeout=2)
+    await asyncio.sleep(0)
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    assert cancelled_task_ids == [77]
+    assert finalized is False
+    assert session.status == "concluded"
+    assert session.report_task_id == 77
 
 
 @pytest.mark.asyncio

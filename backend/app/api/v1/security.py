@@ -10,6 +10,8 @@ from app.agents.orchestrator import get_orchestrator, get_request_orchestrator
 from app.ai.exceptions import AiServiceError
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.permission_codes import PermissionCode
+from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import Resp
 from app.schemas.security import (
@@ -30,7 +32,11 @@ def _ctx(user: User) -> AgentContext:
     return AgentContext(user_id=user.id)
 
 
-@router.get("/checklist", response_model=Resp[SecurityChecklistOut])
+@router.get(
+    "/checklist",
+    response_model=Resp[SecurityChecklistOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_VIEW))],
+)
 def get_checklist(_: User = Depends(get_current_user)):
     """返回 OWASP Top10 + 内置敏感信息正则规则清单"""
     orch = get_orchestrator()
@@ -38,7 +44,11 @@ def get_checklist(_: User = Depends(get_current_user)):
     return Resp(data=SecurityChecklistOut(**data))
 
 
-@router.post("/scan-file", response_model=Resp[SecurityScanOut])
+@router.post(
+    "/scan-file",
+    response_model=Resp[SecurityScanOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_SCAN))],
+)
 def scan_file(
     payload: SecurityScanFileIn,
     db: Session = Depends(get_db),
@@ -56,7 +66,11 @@ def scan_file(
     return Resp(data=SecurityScanOut(**result.data))
 
 
-@router.post("/scan-task", response_model=Resp[SecurityScanOut])
+@router.post(
+    "/scan-task",
+    response_model=Resp[SecurityScanOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_SCAN))],
+)
 def scan_task(
     payload: SecurityScanTaskIn,
     db: Session = Depends(get_db),
@@ -72,7 +86,11 @@ def scan_task(
     return Resp(data=SecurityScanOut(**result.data))
 
 
-@router.post("/scan-project", response_model=Resp[SecurityScanOut])
+@router.post(
+    "/scan-project",
+    response_model=Resp[SecurityScanOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_SCAN))],
+)
 def scan_project(
     payload: SecurityScanProjectIn,
     db: Session = Depends(get_db),
@@ -84,6 +102,7 @@ def scan_project(
         project_id=payload.project_id,
         top_n=payload.top_n,
         trace_dataflow=payload.trace_dataflow,
+        scan_mode=payload.scan_mode,
         ctx=_ctx(user),
     )
     if not result.success:
@@ -91,15 +110,18 @@ def scan_project(
     return Resp(data=SecurityScanOut(**result.data))
 
 
-@router.post("/scan-all-projects", response_model=Resp[SecurityScanOut])
+@router.post(
+    "/scan-all-projects",
+    response_model=Resp[SecurityScanOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_SCAN))],
+)
 def scan_all_projects(
     payload: SecurityScanAllProjectsIn,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """全量项目安全扫描:扫描当前用户可见的全部活跃项目"""
-    orch = get_orchestrator()
-    orch.inject_db(db, user=user)
+    orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_all_projects(
         top_n_per_project=payload.top_n_per_project,
         trace_dataflow=payload.trace_dataflow,
@@ -110,7 +132,11 @@ def scan_all_projects(
     return Resp(data=SecurityScanOut(**result.data))
 
 
-@router.get("/findings", response_model=Resp[SecurityScanOut])
+@router.get(
+    "/findings",
+    response_model=Resp[SecurityScanOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_VIEW))],
+)
 def list_findings(
     task_id: int = Query(..., description="审查任务 ID"),
     db: Session = Depends(get_db),
@@ -124,7 +150,11 @@ def list_findings(
     return Resp(data=SecurityScanOut(**result.data))
 
 
-@router.get("/dashboard-summary", response_model=Resp[SecurityDashboardSummaryOut])
+@router.get(
+    "/dashboard-summary",
+    response_model=Resp[SecurityDashboardSummaryOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_VIEW))],
+)
 def dashboard_summary(
     days: int = Query(30, ge=1, le=365, description="统计窗口天数"),
     db: Session = Depends(get_db),

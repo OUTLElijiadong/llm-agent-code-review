@@ -51,12 +51,14 @@ import type {
   PolicyRule,
   ToolCallLog,
 } from '@/types/adminGovernance'
+import { useUserStore } from '@/stores/user'
 
 type Mode = 'overview' | 'agents' | 'approvals' | 'policies' | 'tools' | 'knowledge' | 'jobs' | 'observability' | 'rewards' | 'rollback'
 
 const props = defineProps<{
   mode: Mode
 }>()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const overview = ref<GovernanceOverview | null>(null)
@@ -75,6 +77,7 @@ const agentKnowledge = ref<AgentKnowledgeDoc[]>([])
 const knowledgeSources = ref<AgentKnowledgeSource[]>([])
 const rewardEvents = ref<AgentRewardEvent[]>([])
 const artifactVersions = ref<AgentArtifactVersion[]>([])
+const canManageKnowledgeSources = computed(() => userStore.isSuperAdmin())
 const policyForm = ref({ subject: 'agent:manager', action: 'knowledge.read', resource: 'agent:manager' })
 const policyResult = ref<PolicyDecision | null>(null)
 const policyEditor = ref({
@@ -371,7 +374,7 @@ async function onCreateKnowledgeDoc(): Promise<void> {
  * @returns Promise<void>
  */
 async function onSaveKnowledgeSource(): Promise<void> {
-  if (!selectedAgent.value) return
+  if (!selectedAgent.value || !canManageKnowledgeSources.value) return
   await upsertAgentKnowledgeSource({
     agent_code: selectedAgent.value,
     source_type: knowledgeSourceForm.value.source_type,
@@ -389,6 +392,7 @@ async function onSaveKnowledgeSource(): Promise<void> {
  * @returns Promise<void>
  */
 async function onCrawlKnowledge(): Promise<void> {
+  if (!canManageKnowledgeSources.value) return
   const result = await crawlAgentKnowledgeSources(selectedAgent.value)
   ElMessage.success(`抓取完成：${result.doc_count ?? 0} 个文档`)
   await loadAgentKnowledge()
@@ -651,7 +655,7 @@ onMounted(loadData)
           <el-select v-model="selectedAgent" filterable style="width: 280px">
             <el-option v-for="agent in agents" :key="agent.code" :label="agent.name" :value="agent.code" />
           </el-select>
-          <el-button type="primary" @click="onCrawlKnowledge">抓取知识</el-button>
+          <el-button v-if="canManageKnowledgeSources" type="primary" @click="onCrawlKnowledge">抓取知识</el-button>
         </div>
       </div>
       <div class="content-grid">
@@ -690,8 +694,11 @@ onMounted(loadData)
         </div>
       </div>
       <div class="panel">
-        <h3>知识来源</h3>
-        <div class="toolbar-grid source-grid">
+        <div class="panel-heading">
+          <h3>知识来源</h3>
+          <el-tag v-if="!canManageKnowledgeSources" size="small" type="info">只读</el-tag>
+        </div>
+        <div v-if="canManageKnowledgeSources" class="toolbar-grid source-grid">
           <el-select v-model="knowledgeSourceForm.source_type">
             <el-option label="内联(inline)" value="inline" />
             <el-option label="项目(project)" value="project" />
@@ -975,6 +982,18 @@ onMounted(loadData)
 .panel h3 {
   margin: 0 0 12px;
   font-size: 15px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-heading h3 {
+  margin-bottom: 0;
 }
 
 .form-row {

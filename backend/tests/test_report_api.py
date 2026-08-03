@@ -20,6 +20,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
+from app.core.permission_codes import PermissionCode
 from app.main import app
 from app.models.report_template import ReportTemplate
 from app.models.review_issue import ReviewIssue
@@ -577,6 +578,41 @@ def test_export_report_html_success(admin_client):
     assert "<!DOCTYPE html>" in response.text
 
 
+def test_plain_owner_html_export_uses_format_specific_permission(
+    plain_client, monkeypatch,
+):
+    """普通任务所有者有 HTML 权限时可导出，且不能借此导出 PDF。"""
+    client, db, task_id = plain_client
+    task = db.get(ReviewTask, task_id)
+    task.user_id = 2
+    db.commit()
+    checked = []
+
+    def fake_check_permission(_db, user_id, permission):
+        checked.append((user_id, permission))
+        return permission == PermissionCode.REPORT_EXPORT_HTML
+
+    monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
+
+    html_response = client.get(
+        f"/api/reports/tasks/{task_id}/export",
+        params={"format": "html"},
+    )
+    pdf_response = client.get(
+        f"/api/reports/tasks/{task_id}/export",
+        params={"format": "pdf"},
+    )
+
+    assert html_response.status_code == 200
+    assert "attachment" in html_response.headers.get("content-disposition", "")
+    assert "<!DOCTYPE html>" in html_response.text
+    assert pdf_response.status_code == 403
+    assert checked == [
+        (2, PermissionCode.REPORT_EXPORT_HTML),
+        (2, PermissionCode.REPORT_EXPORT_PDF),
+    ]
+
+
 # ============ 补充测试 ============
 
 def test_generate_html_with_simple_template(admin_client):
@@ -589,6 +625,68 @@ def test_generate_html_with_simple_template(admin_client):
     })
     assert response.status_code == 200
     assert "SQL注入审查" in response.text or "SQL 注入漏洞" in response.text
+
+
+def test_export_html_falls_back_from_legacy_seeded_markdown(admin_client):
+    """008 迁移遗留的 Markdown 内置模板不应导致 HTML 导出 500。"""
+
+    client, db, task_id = admin_client
+    template = (
+        db.query(ReportTemplate)
+        .filter(ReportTemplate.type == "simple", ReportTemplate.is_builtin == 1)
+        .one()
+    )
+    template.content = (
+        "# 代码审查报告 · {{ task.task_name }}\n\n"
+        "- **项目**: {{ task.project_name }}\n"
+        "- **审查类型**: {{ task.review_type }}\n"
+        "- **执行时间**: {{ task.start_time }} ~ {{ task.end_time }}\n"
+        "- **风险评分**: {{ score }}/100\n\n"
+        "## 总览\n\n{{ summary }}\n\n"
+        "| 严重度 | 数量 |\n"
+        "|--------|------|\n"
+        "| 严重 | {{ metrics.severity_counts.critical }} |\n"
+        "| 高 | {{ metrics.severity_counts.high }} |\n"
+        "| 中 | {{ metrics.severity_counts.medium }} |\n"
+        "| 低 | {{ metrics.severity_counts.low }} |\n"
+        "| 信息 | {{ metrics.severity_counts.info }} |\n"
+    )
+    db.commit()
+
+    response = client.get(
+        f"/api/reports/tasks/{task_id}/export",
+        params={"format": "html", "template_type": "simple"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "attachment" in response.headers["content-disposition"]
+    assert "<!DOCTYPE html>" in response.text
+    assert "SQL注入审查" in response.text
+
+
+def test_export_html_preserves_admin_customization_with_legacy_title(admin_client):
+    """保留旧标题的管理员定制模板不能被误判为 008 原始模板。"""
+
+    client, db, task_id = admin_client
+    template = (
+        db.query(ReportTemplate)
+        .filter(ReportTemplate.type == "detailed", ReportTemplate.is_builtin == 1)
+        .one()
+    )
+    template.content = (
+        "# 代码审查报告 · {{ task.task_name }}\n\n"
+        "<!DOCTYPE html><html><body>管理员定制：{{ task.task_name }}</body></html>"
+    )
+    db.commit()
+
+    response = client.get(
+        f"/api/reports/tasks/{task_id}/export",
+        params={"format": "html", "template_type": "detailed"},
+    )
+
+    assert response.status_code == 200
+    assert "管理员定制：SQL注入审查" in response.text
 
 
 def test_update_builtin_template_content_allowed(admin_client):

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, List, Optional
 from loguru import logger
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
+from app.utils.public_http import pin_public_http_url
 
 if TYPE_CHECKING:
     from app.agents.chat_planner import ToolCall
@@ -325,6 +326,13 @@ class ChatAssistantAgent(BaseAgent):
         last_result: Optional[AgentResult] = None
 
         for idx, step in enumerate(plan):
+            if (
+                step.tool_name == "trigger_evolution"
+                or ".self_improve" in step.tool_name
+                or ".proactive" in step.tool_name
+            ) and not self._orchestrator._can_configure_agents():
+                self._last_plan_steps = executed_steps
+                return AgentResult(success=False, error="当前用户缺少 Agent 配置权限")
             write_gate = self._guard_planned_write(
                 step.tool_name, step.arguments, ctx,
             )
@@ -918,6 +926,7 @@ class ChatAssistantAgent(BaseAgent):
                 project_id=self._int_or(p.get("project_id"), 0),
                 top_n=self._int_or(p.get("top_n"), 50),
                 trace_dataflow=(True if trace_df is None else bool(trace_df)),
+                scan_mode=(p.get("scan_mode") or "static_full"),
                 ctx=ctx,
             )
             target = f"项目 #{p['project_id']}"
@@ -996,6 +1005,8 @@ class ChatAssistantAgent(BaseAgent):
         """
         if not self._check_orch():
             return AgentResult(success=False, error="Orchestrator 未注入")
+        if not self._orchestrator._can_configure_agents():
+            return AgentResult(success=False, error="当前用户缺少 Agent 配置权限")
 
         payload = intent.get("payload", {}) or {}
         agent_name = payload.get("agent_name") or "evolution"
@@ -1080,6 +1091,8 @@ class ChatAssistantAgent(BaseAgent):
         """
         if not self._check_orch():
             return AgentResult(success=False, error="Orchestrator 未注入")
+        if not self._orchestrator._can_configure_agents():
+            return AgentResult(success=False, error="当前用户缺少 Agent 配置权限")
 
         payload = intent.get("payload", {}) or {}
         agent_name = payload.get("agent_name")
@@ -1711,12 +1724,14 @@ class ChatAssistantAgent(BaseAgent):
         for attempt in range(self._max_retries + 1):
             t0 = time.time()
             try:
-                with httpx.Client(timeout=self._timeout) as client:
+                target = pin_public_http_url(f"{self._base_url}/chat/completions")
+                with httpx.Client(timeout=self._timeout, trust_env=False) as client:
                     resp = client.post(
-                        f"{self._base_url}/chat/completions",
+                        target.request_url,
                         headers={
                             "Authorization": f"Bearer {self._api_key}",
                             "Content-Type": "application/json",
+                            "Host": target.host_header,
                         },
                         json={
                             "model": self._model,
@@ -1724,6 +1739,7 @@ class ChatAssistantAgent(BaseAgent):
                             "temperature": self._temperature,
                             "max_tokens": self._max_tokens,
                         },
+                        extensions=target.request_extensions,
                     )
                 duration_ms = int((time.time() - t0) * 1000)
                 if resp.status_code == 200:

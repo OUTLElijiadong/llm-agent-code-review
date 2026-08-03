@@ -35,7 +35,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
         dict: 分页响应
     """
     q = db.query(ReviewTask).filter(ReviewTask.status == "success")
-    if user.role != "admin":
+    if user.role not in {"admin", "super_admin"}:
         q = q.filter(ReviewTask.user_id == user.id)
     if project_id:
         q = q.filter(ReviewTask.project_id == project_id)
@@ -74,7 +74,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
     task = db.get(ReviewTask, task_id)
     if not task or task.status != "success":
         raise NotFoundError("报告不存在", code=40400)
-    if task.user_id != user.id and user.role != "admin":
+    if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise NotFoundError("报告不存在", code=40400)
 
     project = db.get(Project, task.project_id)
@@ -221,7 +221,7 @@ def delete_report(db: Session, user: User, task_id: int) -> None:
     task = db.get(ReviewTask, task_id)
     if not task:
         raise NotFoundError("报告不存在", code=40400)
-    if task.user_id != user.id and user.role != "admin":
+    if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无权限删除此报告", code=40300)
     task.status = "deleted"
     db.commit()

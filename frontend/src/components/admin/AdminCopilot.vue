@@ -23,6 +23,7 @@ import {
   attachInputToToolCall,
   finishResponseToolCalls,
   isResponseToolEvent,
+  responseToolCallsFromEvents,
   setResponseToolCallStatus,
   type ResponseToolCall,
   type ResponseToolCallStatus,
@@ -155,6 +156,37 @@ function pendingEntry(session: AgentResponseSession, restoredTime: string): Chat
   return target
 }
 
+function restoredEntries(session: AgentResponseSession, restoredTime: string): ChatEntry[] {
+  const restored: ChatEntry[] = session.messages.map((message) => ({
+    id: crypto.randomUUID(),
+    role: message.role,
+    time: restoredTime,
+    payload: {
+      type: 'text' as const,
+      content: message.role === 'assistant'
+        ? compactOutsideCodeBlocks(message.content)
+        : message.content,
+    },
+  }))
+  const toolCalls = responseToolCallsFromEvents(session.events)
+  if (!toolCalls.length) return restored
+  const timeline: ChatEntry = {
+    ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
+    time: restoredTime,
+    runId: session.run?.run_id,
+    toolCalls,
+  }
+  let conclusionIndex = -1
+  for (let index = restored.length - 1; index >= 0; index -= 1) {
+    if (restored[index].role === 'assistant' && restored[index].payload.content?.trim()) {
+      conclusionIndex = index
+      break
+    }
+  }
+  restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
+  return restored
+}
+
 function applySessionSnapshot(session: AgentResponseSession): void {
   sessionRun.value = session.run
   if (!loading.value) showTyping.value = isAgentResponseSessionActive(session.run?.status)
@@ -164,6 +196,7 @@ function applySessionSnapshot(session: AgentResponseSession): void {
   const signature = JSON.stringify({
     run: session.run,
     messages: session.messages,
+    events: session.events,
     pending: session.pending,
   })
   if (signature === sessionSnapshotSignature) return
@@ -174,17 +207,7 @@ function applySessionSnapshot(session: AgentResponseSession): void {
   const restoredTime = session.run?.updated_at
     ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(session.run.updated_at))
     : now()
-  messages.value = session.messages.map((message) => ({
-    id: crypto.randomUUID(),
-    role: message.role,
-    time: restoredTime,
-    payload: {
-      type: 'text',
-      content: message.role === 'assistant'
-        ? compactOutsideCodeBlocks(message.content)
-        : message.content,
-    },
-  }))
+  messages.value = restoredEntries(session, restoredTime)
   const pending = pendingEntry(session, restoredTime)
   if (pending) messages.value.push(pending)
 }

@@ -25,6 +25,7 @@ const SUPPORTED_EVENTS = new Set<ResponseStreamEventType>([
   'response.incomplete',
   'response.failed',
   'response.cancelled',
+  'auth_expired',
   'error',
 ])
 
@@ -54,6 +55,7 @@ function isCompletionBoundary(event: ResponseStreamEvent): boolean {
     || event.type === 'response.cancelled'
     || event.type === 'response.approval.required'
     || event.type === 'response.input.required'
+    || event.type === 'auth_expired'
     || event.type === 'error'
 }
 
@@ -129,6 +131,9 @@ class SseParser {
     if (!SUPPORTED_EVENTS.has(type as ResponseStreamEventType)) return
 
     const event = { ...parsed, type } as ResponseStreamEvent
+    if (event.type === 'auth_expired') {
+      window.dispatchEvent(new Event('prism:auth-expired'))
+    }
     if (
       (event.type === 'response.output_text.delta'
         || event.type === 'response.function_call_arguments.delta')

@@ -51,36 +51,92 @@ done
 require_commands docker gzip
 validate_compose_environment
 
-./verify-backup.sh "$backup_file"
-if [[ "$skip_safety_backup" != "1" ]]; then
-  ./backup.sh --reason pre_restore >/dev/null
-fi
+lock_dir="$(maintenance_lock_path)"
+safety_backup=""
+backend_stopped=0
+restore_started=0
+restore_completed=0
+database_name=""
 
-lock_dir="${BACKUP_DIR:-../backups}/.restore.lock"
+# 重建生产库并导入指定备份。
+# 参数: $1 为已验证的 .sql.gz 备份。
+# 返回: 导入成功时返回 0。
+restore_database_file() {
+  local source_file="$1"
+  compose exec -T mysql sh -ec '
+    db="$1"
+    [[ "$db" =~ ^[A-Za-z0-9_]+$ ]]
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
+      --protocol=TCP -h 127.0.0.1 -uroot \
+      -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+  ' sh "$database_name" || return $?
+  gzip -dc "$source_file" | compose exec -T mysql sh -ec '
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
+      --protocol=TCP -h 127.0.0.1 -uroot --max-allowed-packet=64M "$MYSQL_DATABASE"
+  ' || return $?
+}
+
+# 任一恢复阶段失败时，用事前已验证备份自动回填生产库。
+# 参数: EXIT trap 传入的原始退出码。
+# 返回: 保留原始退出码。
+on_restore_exit() {
+  local rc=$?
+  trap - EXIT
+  if [[ "$rc" != "0" && "$restore_started" == "1" && "$restore_completed" != "1" ]]; then
+    set +e
+    if [[ -n "$safety_backup" && -f "$safety_backup" ]]; then
+      log_warn "恢复事务失败，正在回填事前安全备份"
+      if ! compose stop backend; then
+        log_warn "无法确认 Backend 已停止，取消自动回填并保持维护状态"
+      elif restore_database_file "$safety_backup"; then
+        compose up -d --no-deps backend
+        if wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-180}"; then
+          log_warn "已回填事前数据并恢复 Backend"
+        else
+          log_warn "事前数据已回填，但 Backend 未恢复健康"
+        fi
+      else
+        log_warn "事前安全备份回填失败，生产保持维护状态"
+      fi
+    else
+      log_warn "未生成事前安全备份，无法自动回填数据"
+    fi
+  elif [[ "$rc" != "0" && "$backend_stopped" == "1" ]]; then
+    set +e
+    log_warn "数据库尚未重建，正在恢复 Backend"
+    compose up -d --no-deps backend
+    wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-180}" \
+      || log_warn "Backend 未恢复健康"
+  fi
+  release_directory_lock "$lock_dir"
+  exit "$rc"
+}
+
 mkdir -p "$(dirname "$lock_dir")"
 acquire_directory_lock "$lock_dir"
-trap 'release_directory_lock "$lock_dir"' EXIT
-
-log_warn "即将停止 Backend 并重建生产应用数据库"
-compose stop backend
+trap on_restore_exit EXIT
 
 database_name="$(compose exec -T mysql sh -ec 'printf "%s" "$MYSQL_DATABASE"')"
 [[ "$database_name" =~ ^[A-Za-z0-9_]+$ ]] || fatal "MYSQL_DATABASE 名称不安全"
-compose exec -T mysql sh -ec '
-  db="$1"
-  [[ "$db" =~ ^[A-Za-z0-9_]+$ ]]
-  MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
-    --protocol=TCP -h 127.0.0.1 -uroot \
-    -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-' sh "$database_name"
 
-gzip -dc "$backup_file" | compose exec -T mysql sh -ec '
-  MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
-    --protocol=TCP -h 127.0.0.1 -uroot "$MYSQL_DATABASE"
-'
+PRISM_MAINTENANCE_LOCK_HELD=1 ./verify-backup.sh "$backup_file"
 
-compose run --rm --no-deps backend alembic upgrade head
+log_warn "目标备份已验证；即将停止 Backend 并冻结生产写入"
+compose stop backend
+backend_stopped=1
+if [[ "$skip_safety_backup" != "1" ]]; then
+  safety_backup="$(PRISM_MAINTENANCE_LOCK_HELD=1 ./backup.sh --reason pre_restore | tail -n 1)"
+  [[ -f "$safety_backup" ]] || fatal "事前安全备份未生成"
+  PRISM_MAINTENANCE_LOCK_HELD=1 ./verify-backup.sh "$safety_backup"
+fi
+
+log_warn "停写后的安全备份已完成；即将重建生产应用数据库"
+restore_started=1
+restore_database_file "$backup_file"
+
+run_admin_alembic upgrade head
 assert_alembic_at_head || fatal "恢复后 Alembic 未位于 head，Backend 保持停止"
 compose up -d --no-deps backend
 wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-180}" || fatal "恢复后 Backend 未恢复健康"
+restore_completed=1
 log_info "生产数据库恢复完成并通过健康检查"

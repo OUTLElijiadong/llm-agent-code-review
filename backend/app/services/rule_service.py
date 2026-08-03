@@ -25,7 +25,7 @@ def _ensure_can_mutate(user: User, rule: ReviewRule, *, allow_builtin_for_admin:
         ConflictError: 内置规则不可改/删。
     """
     is_global = rule.is_builtin or rule.user_id is None
-    if user.role == "admin":
+    if user.role in {"admin", "super_admin"}:
         if is_global and not allow_builtin_for_admin:
             raise ConflictError("不可修改内置规则", code=40901)
         return

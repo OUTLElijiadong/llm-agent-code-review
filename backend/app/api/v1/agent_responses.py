@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, List, Literal, Mapping, Optional
@@ -14,17 +15,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.dependencies import get_current_user
 from app.core.exceptions import ForbiddenError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
-from app.models.agent_response_run import AgentResponseRun
+from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
 from app.schemas.common import Resp
 from app.services import rbac_service
 from app.services.agent_responses_service import (
     AgentResponsesService,
+    AgentSessionExpiredError,
     is_paused,
     redact_agent_event_value,
     redact_agent_output_text,
@@ -52,6 +54,8 @@ _TRANSITION_TO_WAITING = {
     "rejecting": "waiting_approval",
     "answering": "waiting_input",
 }
+_STREAM_SESSION_CHECK_INTERVAL = 1.0
+_STREAM_WAIT_TIMEOUT = 2.0
 
 
 def _is_admin_actor(db: Session, user: User) -> bool:
@@ -60,6 +64,23 @@ def _is_admin_actor(db: Session, user: User) -> bool:
     if str(getattr(user, "role", "")) in {"admin", "super_admin"}:
         return True
     return rbac_service.is_admin_user(db, int(user.id))
+
+
+def _is_session_version_active(user_id: int, token_version: int) -> bool:
+    """使用独立短会话检查长流所属登录是否仍是当前版本。"""
+
+    check_db = SessionLocal()
+    try:
+        current = check_db.get(User, user_id)
+        return bool(
+            current
+            and current.status == 1
+            and int(current.token_version or 0) == token_version
+        )
+    except Exception:
+        return False
+    finally:
+        check_db.close()
 
 
 class AgentResponseMessage(BaseModel):
@@ -160,6 +181,7 @@ def get_agent_response_session(
         checkpoint = {}
     if not isinstance(checkpoint, Mapping):
         checkpoint = {}
+    replay_events = _public_completed_tool_events(db, row, checkpoint)
     return Resp(
         data={
             "surface": surface,
@@ -173,6 +195,8 @@ def get_agent_response_session(
                 "updated_at": row.update_time.isoformat() if row.update_time else "",
             },
             "messages": _public_transcript_messages(checkpoint.get("transcript")),
+            "events": replay_events,
+            "last_sequence_number": len(replay_events),
             "pending": _public_pending_event(row.run_id, row.status, checkpoint.get("pending")),
         }
     )
@@ -259,6 +283,109 @@ def _public_text(value: Any, *, limit: int = 1000) -> str:
     if isinstance(safe_value, str):
         return safe_value[:limit]
     return str(safe_value)[:limit]
+
+
+def _public_completed_tool_events(
+    db: Session,
+    run: AgentResponseRun,
+    checkpoint: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """恢复已确认工具执行，并把结论文本排在工具事件之后。
+
+    ``AgentToolExecution.id`` 是实际执行顺序；运行时对同一个 run
+    串行执行工具。恢复协议不伪造未确认的 ``executing`` 结果，也不
+    从模型 transcript 重放原始参数，只使用已脱敏的幂等账本。
+    """
+
+    rows = (
+        db.query(AgentToolExecution)
+        .filter(
+            AgentToolExecution.run_id == run.run_id,
+            AgentToolExecution.user_id == run.user_id,
+            AgentToolExecution.status.in_(("success", "failed")),
+        )
+        .order_by(AgentToolExecution.id.asc())
+        .all()
+    )
+    events: list[dict[str, Any]] = []
+    sequence = 0
+    agent_code = "manager" if run.surface == "admin" else "chat_assistant"
+    for row in rows:
+        try:
+            arguments = json.loads(row.arguments_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            arguments = {}
+        safe_arguments = redact_agent_event_value(arguments if isinstance(arguments, Mapping) else {})
+        sequence += 1
+        events.append(
+            {
+                "type": "response.tool.started",
+                "run_id": run.run_id,
+                "tool_call_id": row.call_id,
+                "call_id": row.call_id,
+                "tool_name": row.tool_name,
+                "agent_code": agent_code,
+                "arguments": safe_arguments,
+                "cached": True,
+                "sequence_number": sequence,
+            }
+        )
+
+        try:
+            result = json.loads(row.result_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            result = {}
+        if not isinstance(result, Mapping):
+            result = {}
+        sequence += 1
+        if row.status == "success" and str(result.get("status") or "success") == "success":
+            events.append(
+                {
+                    "type": "response.tool.completed",
+                    "run_id": run.run_id,
+                    "tool_call_id": row.call_id,
+                    "call_id": row.call_id,
+                    "tool_name": row.tool_name,
+                    "agent_code": agent_code,
+                    "status": "success",
+                    "cached": True,
+                    "output_summary": _public_text(result.get("output")),
+                    "sequence_number": sequence,
+                }
+            )
+        else:
+            events.append(
+                {
+                    "type": "response.tool.failed",
+                    "run_id": run.run_id,
+                    "tool_call_id": row.call_id,
+                    "call_id": row.call_id,
+                    "tool_name": row.tool_name,
+                    "agent_code": agent_code,
+                    "status": "failed",
+                    "cached": True,
+                    "error": _public_text(result.get("error") or row.error or "工具执行失败"),
+                    "sequence_number": sequence,
+                }
+            )
+
+    # 目前前端仍可使用 messages 恢复完整对话；events 是按顺序
+    # 重建工具时间线的增量契约。将助手文本统一置于工具后，
+    # 保证恢复时不会出现“先结论、后调用”。
+    visible_messages = _public_transcript_messages(checkpoint.get("transcript"))
+    for index, message in enumerate(visible_messages):
+        if message["role"] != "assistant":
+            continue
+        sequence += 1
+        events.append(
+            {
+                "type": "response.output_text.delta",
+                "delta": message["content"],
+                "item_id": f"recovered-message-{index}",
+                "sequence_number": sequence,
+            }
+        )
+    return events
 
 
 def _public_response_envelope(value: Any) -> dict[str, Any]:
@@ -443,6 +570,12 @@ def _public_stream_event(
             "message": _public_text(event.get("message")),
             "error": redact_agent_event_value(event.get("error")),
         }
+    if event_type == "auth_expired":
+        return {
+            "type": "auth_expired",
+            "code": 40102,
+            "message": "账号已在另一台设备登录，当前设备已下线",
+        }
     return None
 
 
@@ -459,18 +592,34 @@ async def stream_agent_response(
 
     if payload.surface == "admin" and not _is_admin_actor(db, user):
         raise ForbiddenError("仅管理员可使用管理员 Agent", code=40300)
+    session_user_id = int(user.id)
+    session_token_version = int(getattr(user, "token_version", 0) or 0)
+    session_is_active = lambda: _is_session_version_active(  # noqa: E731
+        session_user_id,
+        session_token_version,
+    )
     run_id = payload.run_id or f"run_{uuid.uuid4().hex}"
     service = AgentResponsesService(
         db,
         user,
         surface=payload.surface,
         session_key=payload.session_id,
+        session_validator=session_is_active,
     )
 
     async def event_source() -> AsyncIterator[str]:
         queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=128)
         sequence = 0
         discard_events = False
+        last_session_check = time.monotonic()
+
+        def session_expired() -> bool:
+            nonlocal last_session_check
+            now = time.monotonic()
+            if now - last_session_check < _STREAM_SESSION_CHECK_INTERVAL:
+                return False
+            last_session_check = now
+            return not session_is_active()
 
         async def sink(event: Mapping[str, Any]) -> None:
             nonlocal discard_events
@@ -504,6 +653,15 @@ async def stream_agent_response(
                 event_sink=sink,
             )
 
+        async def cancel_expired_run() -> None:
+            """取消旧登录的在途工作，并避免遗留 running 检查点。"""
+
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            cancel = getattr(service, "cancel", None)
+            if callable(cancel):
+                await cancel(run_id)
+
         def encode(event: Mapping[str, Any]) -> str:
             nonlocal sequence
             sequence += 1
@@ -534,10 +692,21 @@ async def stream_agent_response(
                 event_task = asyncio.create_task(queue.get())
                 done, _ = await asyncio.wait(
                     {task, event_task},
-                    timeout=15.0,
+                    timeout=_STREAM_WAIT_TIMEOUT,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if event_task in done:
+                    if session_expired():
+                        discard_events = True
+                        yield encode(
+                            {
+                                "type": "auth_expired",
+                                "code": 40102,
+                                "message": "账号已在另一台设备登录，当前设备已下线",
+                            }
+                        )
+                        await cancel_expired_run()
+                        return
                     yield encode(event_task.result())
                     event_task = None
                     continue
@@ -545,6 +714,17 @@ async def stream_agent_response(
                 await asyncio.gather(event_task, return_exceptions=True)
                 event_task = None
                 if not done:
+                    if session_expired():
+                        discard_events = True
+                        yield encode(
+                            {
+                                "type": "auth_expired",
+                                "code": 40102,
+                                "message": "账号已在另一台设备登录，当前设备已下线",
+                            }
+                        )
+                        await cancel_expired_run()
+                        return
                     yield ": keep-alive\n\n"
 
             result = await task
@@ -575,6 +755,16 @@ async def stream_agent_response(
             # 浏览器关闭、代理断流不能中止已经开始的工具链。保持请求级数据库
             # 会话存活，直到运行时把完成/暂停/失败检查点可靠落库。
             await asyncio.gather(asyncio.shield(task), return_exceptions=True)
+            return
+        except AgentSessionExpiredError:
+            discard_events = True
+            yield encode(
+                {
+                    "type": "auth_expired",
+                    "code": 40102,
+                    "message": "账号已在另一台设备登录，当前设备已下线",
+                }
+            )
             return
         except Exception as exc:  # noqa: BLE001 - 流已开始，只能返回协议错误事件
             error = {

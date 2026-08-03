@@ -219,6 +219,8 @@ def test_base_agent_events_keep_current_user_ownership(
 
 def test_base_agent_never_exposes_reasoning_content(monkeypatch: pytest.MonkeyPatch) -> None:
     """最终 content 为空时必须失败，不能把模型内部推理回显给用户。"""
+    post_calls = 0
+
     class FakeResponse:
         status_code = 200
         text = ""
@@ -244,17 +246,416 @@ def test_base_agent_never_exposes_reasoning_content(monkeypatch: pytest.MonkeyPa
             return False
 
         def post(self, *args, **kwargs):
+            nonlocal post_calls
+            post_calls += 1
             return FakeResponse()
 
     monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__("app.utils.public_http", fromlist=["PinnedPublicUrl"]).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
     agent = BaseAgent()
-    agent._max_retries = 0
+    agent._max_retries = 2
 
     result = agent.call("test")
 
     assert result.success is False
+    assert result.failure_kind == "output_truncated"
+    assert result.finish_reason == "length"
+    assert post_calls == 1
     assert "finish_reason=length" in str(result.error)
     assert "private chain of thought" not in str(result.error)
+
+
+def test_base_agent_rejects_parseable_nonempty_length_response_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """恰好闭合的截断 JSON 仍是不完整输出，不得当成零漏洞结论。"""
+    post_calls = 0
+    events: list[AgentEventType] = []
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json() -> dict[str, Any]:
+            return {
+                "choices": [{
+                    "finish_reason": "length",
+                    "message": {"content": '{"findings": []}'},
+                }],
+                "usage": {"completion_tokens": 4096},
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            nonlocal post_calls
+            post_calls += 1
+            return FakeResponse()
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__("app.utils.public_http", fromlist=["PinnedPublicUrl"]).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    agent = BaseAgent()
+    agent._max_retries = 2
+    monkeypatch.setattr(
+        agent,
+        "_emit",
+        lambda event_type, *_args, **_kwargs: events.append(event_type),
+    )
+
+    result = agent.call_json("test")
+
+    assert result.success is False
+    assert result.failure_kind == "output_truncated"
+    assert post_calls == 1
+    assert AgentEventType.FAILED in events
+    assert AgentEventType.COMPLETE not in events
+
+
+def test_base_agent_still_retries_rate_limit_then_accepts_stop_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """429 仍属于可恢复错误，但只接纳 stop 终止的完整响应。"""
+    responses = [
+        SimpleNamespace(status_code=429, text="rate limited"),
+        SimpleNamespace(
+            status_code=200,
+            text="",
+            json=lambda: {
+                "choices": [{"finish_reason": "stop", "message": {"content": "{}"}}],
+                "usage": {},
+            },
+        ),
+    ]
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            return responses.pop(0)
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.agents.base.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__("app.utils.public_http", fromlist=["PinnedPublicUrl"]).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    agent = BaseAgent()
+    agent._max_retries = 2
+
+    result = agent.call_json("test")
+
+    assert result.success is True
+    assert result.data == {}
+    assert result.finish_reason == "stop"
+    assert responses == []
+
+
+@pytest.mark.parametrize(
+    ("thinking", "expected"),
+    [
+        (None, None),
+        (False, {"type": "disabled"}),
+        (True, {"type": "enabled"}),
+    ],
+)
+def test_base_agent_thinking_request_body_is_explicit_only_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    thinking: bool | None,
+    expected: dict[str, str] | None,
+) -> None:
+    payloads: list[dict[str, Any]] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            payloads.append(kwargs["json"])
+            return SimpleNamespace(
+                status_code=200,
+                text="",
+                json=lambda: {
+                    "choices": [{"finish_reason": "stop", "message": {"content": "{}"}}],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__(
+            "app.utils.public_http",
+            fromlist=["PinnedPublicUrl"],
+        ).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    agent = BaseAgent()
+
+    result = agent.call_json("test", thinking=thinking)
+
+    assert result.success is True
+    assert len(payloads) == 1
+    if expected is None:
+        assert "thinking" not in payloads[0]
+    else:
+        assert payloads[0]["thinking"] == expected
+
+
+def test_base_agent_does_not_sleep_past_shared_audit_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """重试退避不得突破整次语义审计的共享墙钟时限。"""
+    post_calls = 0
+    sleeps: list[float] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            nonlocal post_calls
+            post_calls += 1
+            return SimpleNamespace(status_code=429, text="rate limited")
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.agents.base.time.monotonic", lambda: 100.0)
+    monkeypatch.setattr("app.agents.base.time.sleep", sleeps.append)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__("app.utils.public_http", fromlist=["PinnedPublicUrl"]).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    agent = BaseAgent()
+    agent._max_retries = 2
+
+    result = agent.call_json("test", deadline_monotonic=100.05)
+
+    assert result.success is False
+    assert result.failure_kind == "semantic_budget_exhausted"
+    assert post_calls == 1
+    assert sleeps == []
+
+
+def test_base_agent_invalid_json_emits_failed_without_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[AgentEventType] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            return SimpleNamespace(
+                status_code=200,
+                text="",
+                json=lambda: {
+                    "choices": [{"finish_reason": "stop", "message": {"content": "{bad"}}],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__(
+            "app.utils.public_http",
+            fromlist=["PinnedPublicUrl"],
+        ).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    agent = BaseAgent()
+    monkeypatch.setattr(
+        agent,
+        "_emit",
+        lambda event_type, *_args, **_kwargs: events.append(event_type),
+    )
+
+    result = agent.call_json("test")
+
+    assert result.success is False
+    assert result.failure_kind == "invalid_json"
+    assert events.count(AgentEventType.FAILED) == 1
+    assert AgentEventType.COMPLETE not in events
+
+
+def test_base_agent_rejects_non_string_content_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post_calls = 0
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            nonlocal post_calls
+            post_calls += 1
+            return SimpleNamespace(
+                status_code=200,
+                text="",
+                json=lambda: {
+                    "choices": [{"finish_reason": "stop", "message": {"content": {}}}],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__(
+            "app.utils.public_http",
+            fromlist=["PinnedPublicUrl"],
+        ).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    agent = BaseAgent()
+    agent._max_retries = 2
+
+    result = agent.call_json("test")
+
+    assert result.success is False
+    assert result.failure_kind == "invalid_response"
+    assert post_calls == 1
+
+
+def test_base_agent_rejects_non_stop_terminal_reason_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post_calls = 0
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            nonlocal post_calls
+            post_calls += 1
+            return SimpleNamespace(
+                status_code=200,
+                text="",
+                json=lambda: {
+                    "choices": [{
+                        "finish_reason": "content_filter",
+                        "message": {"content": "{}"},
+                    }],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__(
+            "app.utils.public_http",
+            fromlist=["PinnedPublicUrl"],
+        ).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    agent = BaseAgent()
+    agent._max_retries = 3
+
+    result = agent.call_json("test")
+
+    assert result.success is False
+    assert result.failure_kind == "incomplete_response"
+    assert result.finish_reason == "content_filter"
+    assert post_calls == 1
 
 
 def test_skill_semaphore_and_debounce_follow_settings(
@@ -265,17 +666,30 @@ def test_skill_semaphore_and_debounce_follow_settings(
 
     monkeypatch.setattr(settings, "skill_trigger_max_concurrency", 0)
     monkeypatch.setattr(settings, "skill_event_debounce_seconds", 10)
-    semaphore = module._get_skill_semaphore()
-    assert semaphore._value == 1
-    assert module._get_skill_semaphore() is semaphore
+    try:
+        previous_loop = asyncio.get_event_loop()
+    except RuntimeError:
+        previous_loop = None
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    module._skill_semaphore = None
+    module._skill_debounce.clear()
+    try:
+        semaphore = module._get_skill_semaphore()
+        assert semaphore._value == 1
+        assert module._get_skill_semaphore() is semaphore
 
-    timestamps = iter([100.0, 105.0, 111.0])
-    monkeypatch.setattr(module.time, "time", lambda: next(timestamps))
-    event_type = AgentEventType.SECURITY_SCAN_COMPLETED
+        timestamps = iter([100.0, 105.0, 111.0])
+        monkeypatch.setattr(module.time, "time", lambda: next(timestamps))
+        event_type = AgentEventType.SECURITY_SCAN_COMPLETED
 
-    assert module._should_trigger("security", "self-improve", event_type) is True
-    assert module._should_trigger("security", "self-improve", event_type) is False
-    assert module._should_trigger("security", "self-improve", event_type) is True
+        assert module._should_trigger("security", "self-improve", event_type) is True
+        assert module._should_trigger("security", "self-improve", event_type) is False
+        assert module._should_trigger("security", "self-improve", event_type) is True
+    finally:
+        module._skill_semaphore = None
+        loop.close()
+        asyncio.set_event_loop(previous_loop)
 
 
 @pytest.mark.asyncio

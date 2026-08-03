@@ -175,6 +175,14 @@ class TestSecurityChecks:
         with pytest.raises(ValidationError, match="zip slip"):
             extract_archive(buf.getvalue(), "evil.zip")
 
+    def test_posix_absolute_path_rejected_before_normalization(self):
+        """POSIX 绝对路径不得被去掉前导斜杠后接受。"""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("/etc/evil.py", "import os\n")
+        with pytest.raises(ValidationError, match="绝对路径"):
+            extract_archive(buf.getvalue(), "evil.zip")
+
     def test_too_many_files_rejected(self):
         """超过文件数量上限应被拒绝"""
         buf = io.BytesIO()

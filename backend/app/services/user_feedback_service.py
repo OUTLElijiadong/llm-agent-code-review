@@ -40,7 +40,7 @@ def create_feedback(db: Session, user: User, payload: dict) -> UserFeedback:
 def list_feedback(db: Session, user: User, status: str = "", feedback_type: str = "",
                   mine: bool = True, page: int = 1, page_size: int = 20) -> dict:
     q = db.query(UserFeedback)
-    if user.role != "admin" or mine:
+    if user.role not in {"admin", "super_admin"} or mine:
         q = q.filter(UserFeedback.user_id == user.id)
     if status:
         q = q.filter(UserFeedback.status == status)
@@ -57,10 +57,10 @@ def get_feedback(db: Session, user: User, feedback_id: int) -> dict:
     fb = db.get(UserFeedback, feedback_id)
     if not fb:
         raise NotFoundError("反馈不存在", code=40400)
-    if fb.user_id != user.id and user.role != "admin":
+    if fb.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无权查看该反馈", code=40300)
     # 管理员打开即标记已读
-    if user.role == "admin" and fb.status == "new":
+    if user.role in {"admin", "super_admin"} and fb.status == "new":
         fb.status = "read"
         db.commit()
         db.refresh(fb)
@@ -68,7 +68,7 @@ def get_feedback(db: Session, user: User, feedback_id: int) -> dict:
 
 
 def reply_feedback(db: Session, admin: User, feedback_id: int, payload: dict) -> dict:
-    if admin.role != "admin":
+    if admin.role not in {"admin", "super_admin"}:
         raise ForbiddenError("需要管理员权限", code=40300)
     fb = db.get(UserFeedback, feedback_id)
     if not fb:
@@ -87,7 +87,7 @@ def reply_feedback(db: Session, admin: User, feedback_id: int, payload: dict) ->
 
 
 def stats_for_admin(db: Session, admin: User) -> dict:
-    if admin.role != "admin":
+    if admin.role not in {"admin", "super_admin"}:
         raise ForbiddenError("需要管理员权限", code=40300)
     out = {s: 0 for s in _STATUS}
     for status, in db.query(UserFeedback.status).all():

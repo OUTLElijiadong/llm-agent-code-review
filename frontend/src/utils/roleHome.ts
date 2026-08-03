@@ -29,6 +29,7 @@ export function canRoleSeeNavigationItem(
  * @returns 归一化后的用户角色
  */
 export function normalizeRole(role?: string | null): UserRole {
+  if (role === 'super_admin') return 'admin'
   if (role === 'admin' || role === 'reviewer' || role === 'user') {
     return role
   }

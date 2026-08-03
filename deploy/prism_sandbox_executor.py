@@ -49,6 +49,7 @@ BROWSER_IMAGE_DIGEST = os.environ.get("PLAYWRIGHT_IMAGE_DIGEST", "").strip()
 BROWSER_TIMEOUT_SECONDS = int(os.environ.get("PLAYWRIGHT_TIMEOUT_SECONDS", "90"))
 BROWSER_SCRIPT = DEPLOY_DIR / "sandbox" / "browser_blackbox.js"
 BROWSER_PROXY_SCRIPT = DEPLOY_DIR / "sandbox" / "browser_target_proxy.py"
+BROWSER_EXECUTABLE = "/ms-playwright/chromium-1232/chrome-linux64/chrome"
 
 MAX_CONCURRENCY = int(os.environ.get("SANDBOX_MAX_CONCURRENCY", "1"))
 MAX_ARCHIVE_BYTES = int(os.environ.get("SANDBOX_MAX_ARCHIVE_BYTES", str(32 * 1024 * 1024)))
@@ -419,6 +420,20 @@ def _browser_health(runtime: str, profiles: dict[str, Profile]) -> dict[str, Any
             if path.is_symlink() or not path.is_file() or current.st_mode & 0o022:
                 raise BlockedError("Playwright 固定脚本不是只读普通文件")
         browser = _resolve_fixed_image(BROWSER_IMAGE, BROWSER_IMAGE_DIGEST, "Playwright")
+        browser_self_test = (
+            "const {chromium}=require('/app/node_modules/playwright');"
+            f"chromium.launch({{headless:true,executablePath:'{BROWSER_EXECUTABLE}',"
+            "args:['--no-sandbox','--disable-dev-shm-usage','--disable-background-networking']}})"
+            ".then(async b=>{await b.close()}).catch(e=>{console.error(String(e));process.exit(2)})"
+        )
+        _run_command([
+            "docker", "run", "--rm", "--runtime", runtime, "--network", "none",
+            "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+            "--user", "1000:1000", "--pids-limit", "256", "--memory", "1024m",
+            "--memory-swap", "1024m", "--cpus", "1.0", "--ipc", "none",
+            "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=256m,mode=1777,uid=1000,gid=1000",
+            "--entrypoint", "node", browser.run_ref, "-e", browser_self_test,
+        ], timeout=60)
         python_profile = profiles.get("python")
         if python_profile is None:
             raise BlockedError("Playwright 目标代理缺少 Python 固定镜像")
@@ -545,14 +560,14 @@ def run_browser_blackbox(payload: dict[str, Any]) -> dict[str, Any]:
             "--runtime", runtime, "--network", private_network,
             "--dns", "127.0.0.1", "--add-host", f"target-proxy:{proxy_address}",
             "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-            "--user", "1001:1001", "--pids-limit", "256", "--memory", "1024m",
+            "--user", "1000:1000", "--pids-limit", "256", "--memory", "1024m",
             "--memory-swap", "1024m", "--cpus", "1.0", "--ipc", "none", "--restart", "no", "--init",
-            "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=256m,mode=1777,uid=1001,gid=1001",
-            "--tmpfs", "/home/pwuser:rw,exec,nosuid,nodev,size=64m,mode=0700,uid=1001,gid=1001",
+            "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=256m,mode=1777,uid=1000,gid=1000",
+            "--tmpfs", "/home/node:rw,exec,nosuid,nodev,size=64m,mode=0700,uid=1000,gid=1000",
             "--mount", f"type=bind,src={BROWSER_SCRIPT},dst=/opt/prism/browser_blackbox.js,readonly,bind-propagation=rprivate",
             "--env", f"PRISM_TARGET_URL={target_url}", "--env", "PRISM_PROXY_SERVER=http://target-proxy:3128",
             "--env", f"PRISM_BROWSER_TIMEOUT_MS={BROWSER_TIMEOUT_SECONDS * 1000}",
-            "--env", "HOME=/home/pwuser", "--env", "NO_PROXY=", "--env", "HTTP_PROXY=", "--env", "HTTPS_PROXY=",
+            "--env", "HOME=/home/node", "--env", "NO_PROXY=", "--env", "HTTP_PROXY=", "--env", "HTTPS_PROXY=",
             "--entrypoint", "node", browser_image.run_ref, "/opt/prism/browser_blackbox.js",
         ], timeout=60)
         time.sleep(0.25)

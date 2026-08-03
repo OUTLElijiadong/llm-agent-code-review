@@ -3,6 +3,7 @@ import { get } from '@/api/http'
 import type {
   ResponseApprovalRequiredEvent,
   ResponseInputRequiredEvent,
+  ResponseStreamEvent,
 } from '@/types/responses'
 
 export interface AgentResponseSessionMessage {
@@ -24,6 +25,8 @@ export interface AgentResponseSession {
   session_id: string
   run: AgentResponseSessionRun | null
   messages: AgentResponseSessionMessage[]
+  events?: ResponseStreamEvent[]
+  last_sequence_number?: number
   pending: ResponseApprovalRequiredEvent | ResponseInputRequiredEvent | null
 }
 

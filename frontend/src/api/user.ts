@@ -7,7 +7,7 @@ export function getUsers(params?: Record<string, unknown>) {
 }
 
 export function resetPassword(userId: number) {
-  return post<{ password: string }>(`/users/${userId}/reset-password`)
+  return post<{ temporary_password: string }>(`/users/${userId}/reset-password`)
 }
 
 export function toggleUserStatus(userId: number, status: number) {

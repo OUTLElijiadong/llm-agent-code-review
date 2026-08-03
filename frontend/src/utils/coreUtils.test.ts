@@ -25,6 +25,7 @@ import { clearToken, getToken, setToken } from '@/utils/token'
 /** 验证角色归一化与默认首页映射。 */
 it('normalizes known roles and falls back to the user home', function testRoleNormalization(): void {
   expect(normalizeRole('admin')).toBe('admin')
+  expect(normalizeRole('super_admin')).toBe('admin')
   expect(normalizeRole('reviewer')).toBe('reviewer')
   expect(normalizeRole('user')).toBe('user')
   expect(normalizeRole('ADMIN')).toBe('user')

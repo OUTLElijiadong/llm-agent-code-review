@@ -62,6 +62,32 @@ class DeleteProjectArguments(FixedToolArguments):
     project_id: int = Field(description="项目 ID")
 
 
+class UpdateProjectArguments(FixedToolArguments):
+    """编辑项目元数据工具参数。"""
+
+    project_id: int = Field(description="项目 ID")
+    project_name: Optional[str] = Field(default=None, description="新的项目名称")
+    description: Optional[str] = Field(default=None, description="新的项目描述")
+    language: Optional[str] = Field(default=None, description="新的主语言")
+    status: Optional[Literal["active", "archived"]] = Field(default=None, description="项目状态")
+
+
+class ImportRemoteProjectArguments(FixedToolArguments):
+    """远程源码归档导入工具参数。"""
+
+    url: str = Field(description="公开 HTTPS 源码归档地址")
+    project_name: str = Field(description="新项目名称")
+    description: str = Field(default="", description="项目描述")
+    language: Optional[str] = Field(default=None, description="主语言")
+    audit_mode: bool = Field(default=False, description="是否作为隔离整包源码审计")
+
+
+class DownloadProjectSourceArguments(FixedToolArguments):
+    """项目源码归档下载工具参数。"""
+
+    project_id: int = Field(description="项目 ID")
+
+
 class StartReviewArguments(FixedToolArguments):
     """启动审查工具参数；用户身份只允许由 Orchestrator 注入。"""
 
@@ -177,8 +203,40 @@ class AuditSecurityProjectArguments(FixedToolArguments):
     """项目安全审计工具参数。"""
 
     project_id: int = Field(description="项目 ID")
-    top_n: int = Field(default=50, description="最多扫描的问题数")
+    scan_mode: Literal["full", "static_full", "triage"] = Field(
+        default="static_full",
+        description="full=全量语义, static_full=整包静态加有界语义, triage=风险优先抽样",
+    )
+    top_n: int = Field(default=50, description="static_full/triage 的语义候选文件数")
     trace_dataflow: bool = Field(default=True, description="是否追踪数据流")
+
+
+class RunProjectTestsArguments(FixedToolArguments):
+    """在登记 worker 上运行固定测试配置，不接受任意命令。"""
+
+    project_id: int = Field(gt=0, description="项目 ID")
+    language: Literal["python", "node", "java", "go", "php"]
+    test_mode: Literal["whitebox", "blackbox", "combined"] = "whitebox"
+    worker_code: str = Field(default="", max_length=80)
+    remote_target_url: str = Field(default="", max_length=500)
+    remote_target_authorized: bool = Field(default=False)
+
+
+class DeployProjectSandboxArguments(FixedToolArguments):
+    """部署持续沙箱的固定参数。"""
+
+    project_id: int = Field(gt=0, description="项目 ID")
+    language: Literal["python", "node", "java", "go", "php"]
+    ttl_hours: int = Field(default=72, ge=1, le=720)
+    worker_code: str = Field(default="", max_length=80)
+
+
+class SandboxIdArguments(FixedToolArguments):
+    public_id: str = Field(pattern=r"^sbx_[0-9a-f]{24}$")
+
+
+class ExtendSandboxArguments(SandboxIdArguments):
+    hours: int = Field(ge=1, le=168)
 
 
 class TriggerEvolutionArguments(FixedToolArguments):
@@ -347,6 +405,20 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
         AuditSecurityProjectArguments,
         True,
     ),
+    FixedToolContract(
+        "run_project_tests",
+        "调用测试验证 Agent 在隔离 worker 上执行项目级白盒、黑盒或组合测试",
+        RunProjectTestsArguments,
+        True,
+    ),
+    FixedToolContract(
+        "deploy_project_sandbox",
+        "调用沙箱部署 Agent 启动持续预览环境",
+        DeployProjectSandboxArguments,
+        True,
+    ),
+    FixedToolContract("close_sandbox", "调用沙箱部署 Agent 关闭环境", SandboxIdArguments, True),
+    FixedToolContract("extend_sandbox", "调用沙箱部署 Agent 续期环境", ExtendSandboxArguments, True),
     FixedToolContract("trigger_evolution", "触发指定 Agent 的自进化", TriggerEvolutionArguments, True),
     FixedToolContract("list_agent_skills", "列出指定或全部 Agent Skill 元数据", ListAgentSkillsArguments, False),
     FixedToolContract(
@@ -373,7 +445,7 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
         AdminReleaseApprovalsArguments,
         True,
     ),
-    FixedToolContract("admin_system_status", "管理员查询服务器运行状态", NoArguments, True),
+    FixedToolContract("admin_system_status", "超级管理员查询服务器运行状态", NoArguments, True),
     FixedToolContract("admin_set_user_role", "管理员申请修改用户角色(敏感,需审批)", AdminSetRoleArguments, True),
     FixedToolContract("admin_delete_user", "管理员申请删除用户(高危,需审批)", AdminUserIdArguments, True),
     FixedToolContract(

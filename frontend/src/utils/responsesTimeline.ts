@@ -216,6 +216,19 @@ export function applyResponseToolEvent(
   }
 }
 
+/** 从持久化会话事件重建已完成工具时间线。 */
+export function responseToolCallsFromEvents(
+  events: ResponseStreamEvent[] | undefined,
+): ResponseToolCall[] {
+  const calls: ResponseToolCall[] = []
+  for (const event of [...(events ?? [])].sort(
+    (left, right) => (left.sequence_number ?? 0) - (right.sequence_number ?? 0),
+  )) {
+    if (isResponseToolEvent(event)) applyResponseToolEvent(calls, event)
+  }
+  return calls
+}
+
 export function attachApprovalToToolCall(
   calls: ResponseToolCall[],
   callId: string,

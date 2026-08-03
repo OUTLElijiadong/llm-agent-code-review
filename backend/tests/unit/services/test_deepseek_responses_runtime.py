@@ -508,7 +508,7 @@ async def test_completion_guard_discards_unverified_text_and_forces_tool_retry()
 
 
 @pytest.mark.asyncio
-async def test_completion_guard_retry_uses_auto_for_deepseek_thinking_models() -> None:
+async def test_completion_guard_retry_disables_thinking_and_requires_tool_for_deepseek_v4() -> None:
     transport = ScriptedTransport(
         [
             _message_response("已删除模板，deleted_count=1"),
@@ -538,12 +538,67 @@ async def test_completion_guard_retry_uses_auto_for_deepseek_thinking_models() -
     assert result.status == "completed"
     assert [payload["tool_choice"] for payload in transport.payloads] == [
         "auto",
-        "auto",
+        "required",
         "auto",
     ]
+    assert "thinking" not in transport.payloads[0]
+    assert transport.payloads[1]["thinking"] == {"type": "disabled"}
+    assert transport.payloads[2]["thinking"] == {"type": "disabled"}
     projected_text = json.dumps(transport.payloads[1]["input"], ensure_ascii=False)
     assert "runtime_completion_guard" in projected_text
     assert [call.name for call, _approved in executor.calls] == ["delete_template"]
+
+
+@pytest.mark.asyncio
+async def test_answered_admin_question_uses_v4_non_thinking_evidence_repair() -> None:
+    transport = ScriptedTransport(
+        [
+            _function_response((
+                "call_question",
+                "ask_user",
+                {"question": "请输入账号名称", "allow_free_text": True},
+            )),
+            _message_response("管理员账号已创建"),
+            _function_response(("call_create", "create_admin", {"username": "review_admin"})),
+            _message_response("管理员账号创建成功"),
+        ]
+    )
+    executor = RecordingExecutor()
+
+    def guard(checkpoint: RunCheckpoint, output_text: str) -> str | None:
+        has_write = any(
+            item.get("type") == "function_call_output"
+            and item.get("call_id") == "call_create"
+            for item in checkpoint.transcript
+        )
+        if "创建" in output_text and not has_write:
+            return "管理写请求在没有精确工具执行证据时就结束了"
+        return None
+
+    runtime = _runtime(
+        transport,
+        executor,
+        completion_guard=guard,
+        model="deepseek-v4-flash",
+    )
+    waiting = await runtime.start(
+        "创建管理员",
+        tools=[{"type": "function", "name": "create_admin", "parameters": {"type": "object"}}],
+        run_id="run_answered_admin_guard",
+    )
+    assert waiting.status == WAITING_INPUT
+
+    completed = await runtime.answer("run_answered_admin_guard", "review_admin", "call_question")
+
+    assert completed.status == "completed"
+    assert [payload["tool_choice"] for payload in transport.payloads] == [
+        "auto",
+        "auto",
+        "required",
+        "auto",
+    ]
+    assert transport.payloads[2]["thinking"] == {"type": "disabled"}
+    assert [call.name for call, _approved in executor.calls] == ["create_admin"]
 
 
 @pytest.mark.asyncio

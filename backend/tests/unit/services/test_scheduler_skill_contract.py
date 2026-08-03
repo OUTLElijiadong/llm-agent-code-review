@@ -6,8 +6,13 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
+from app.core.exceptions import ForbiddenError
 from app.models.agent_governance import AgentJob, AgentJobRun, AgentProfile
 from app.models.ai_call_log import AiCallLog
+from app.models.rbac import Role, UserRole
+from app.models.user import User
 from app.services import scheduler_service
 
 
@@ -139,7 +144,64 @@ def test_unhealthy_ops_result_marks_job_run_failed(db: Any, monkeypatch: Any) ->
     db.commit()
     monkeypatch.setattr(scheduler_service, "_execute_job", lambda _db, _job: {"success": False})
 
-    run = scheduler_service.run_job(db, job.id)
+    run = scheduler_service.run_job(db, job.id, system_scheduled=True)
 
     assert run.status == "failed"
     assert run.error == "AI 自动运维巡检检测到不健康状态"
+
+
+def test_only_unique_super_admin_can_control_or_run_ops_health_job(db: Any, monkeypatch: Any) -> None:
+    job = AgentJob(
+        job_code="ops_health_check",
+        job_type="ops_health_check",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    ordinary = User(username="manager", password="x", role="admin", status=1)
+    super_user = User(username="admin", password="x", role="super_admin", status=1)
+    super_role = Role(name="超级管理员", code="super_admin", status="active", is_builtin=1)
+    db.add_all([job, ordinary, super_user, super_role])
+    db.flush()
+    db.add(UserRole(user_id=super_user.id, role_id=super_role.id))
+    db.commit()
+
+    with pytest.raises(ForbiddenError, match="超级管理员"):
+        scheduler_service.update_job(db, job.id, {"status": "disabled"}, actor=ordinary)
+    with pytest.raises(ForbiddenError, match="超级管理员"):
+        scheduler_service.run_job(db, job.id, actor=ordinary)
+
+    updated = scheduler_service.update_job(db, job.id, {"status": "disabled"}, actor=super_user)
+    assert updated.status == "disabled"
+    monkeypatch.setattr(scheduler_service, "_execute_job", lambda _db, _job: {"success": True})
+    assert scheduler_service.run_job(db, job.id, actor=super_user).status == "success"
+    assert scheduler_service.run_job(db, job.id, system_scheduled=True).status == "success"
+
+
+def test_only_unique_super_admin_can_control_or_run_crawl_job(db: Any, monkeypatch: Any) -> None:
+    """外部知识抓取与服务器巡检一样属于受限调度动作。"""
+    job = AgentJob(
+        job_code="daily_agent_knowledge_crawl",
+        job_type="crawl",
+        agent_code="knowledge_distiller",
+        schedule="daily@02:00",
+        status="enabled",
+    )
+    ordinary = User(username="manager", password="x", role="admin", status=1)
+    super_user = User(username="admin", password="x", role="super_admin", status=1)
+    super_role = Role(name="超级管理员", code="super_admin", status="active", is_builtin=1)
+    db.add_all([job, ordinary, super_user, super_role])
+    db.flush()
+    db.add(UserRole(user_id=super_user.id, role_id=super_role.id))
+    db.commit()
+
+    with pytest.raises(ForbiddenError, match="超级管理员"):
+        scheduler_service.update_job(db, job.id, {"status": "disabled"}, actor=ordinary)
+    with pytest.raises(ForbiddenError, match="超级管理员"):
+        scheduler_service.run_job(db, job.id, actor=ordinary)
+
+    updated = scheduler_service.update_job(db, job.id, {"status": "disabled"}, actor=super_user)
+    assert updated.status == "disabled"
+    monkeypatch.setattr(scheduler_service, "_execute_job", lambda _db, _job: {"doc_count": 1})
+    assert scheduler_service.run_job(db, job.id, actor=super_user).status == "success"
+    assert scheduler_service.run_job(db, job.id, system_scheduled=True).status == "success"

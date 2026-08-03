@@ -147,6 +147,19 @@ export function subscribeDiscussion(
     missedPongs = 0
   }
 
+  // 业务终态不是网络异常。终态帧交付给页面后立即停止心跳和自动重连，
+  // 否则会话已经结束却在下一次断线时再次显示“连接失败”。
+  function terminateForBusiness() {
+    if (closed) return
+    closed = true
+    stopHeartbeat()
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    ws?.close()
+  }
+
   function connect() {
     if (closed) return
     opts.onStatus?.('connecting')
@@ -173,6 +186,9 @@ export function subscribeDiscussion(
         // 服务端保活探测帧,仅用于刷新 NAT 会话,不进业务回调
         if (msg.type === 'server_ping') return
         onMessage(msg)
+        if (msg.type === 'session_end' || (msg.type === 'control' && msg.action === 'done')) {
+          terminateForBusiness()
+        }
       } catch {
         // ignore malformed frame
       }
@@ -184,6 +200,9 @@ export function subscribeDiscussion(
       stopHeartbeat()
       if (FATAL_CLOSE_CODES.has(event.code)) {
         closed = true
+        if (event.code === 4001) {
+          window.dispatchEvent(new Event('prism:auth-expired'))
+        }
         opts.onError?.(`连接被服务端拒绝(${event.code}): ${event.reason || '鉴权失败或会话不存在'}`)
         opts.onStatus?.('error')
         return
@@ -193,6 +212,7 @@ export function subscribeDiscussion(
     }
 
     ws.onerror = () => {
+      if (closed) return
       opts.onError?.('WebSocket 连接失败,正在尝试重连...')
       // onclose 会自动触发
     }
@@ -222,10 +242,7 @@ export function subscribeDiscussion(
   return {
     send,
     close: () => {
-      closed = true
-      stopHeartbeat()
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      ws?.close()
+      terminateForBusiness()
     },
   }
 }

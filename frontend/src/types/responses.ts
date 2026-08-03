@@ -15,6 +15,7 @@ export type ResponseStreamEventType =
   | 'response.incomplete'
   | 'response.failed'
   | 'response.cancelled'
+  | 'auth_expired'
   | 'error'
 
 export interface ResponseStreamEventBase {
@@ -141,6 +142,12 @@ export interface ResponseErrorEvent extends ResponseStreamEventBase {
   }
 }
 
+export interface ResponseAuthExpiredEvent extends ResponseStreamEventBase {
+  type: 'auth_expired'
+  code: 40102
+  message: string
+}
+
 export type ResponseStreamEvent =
   | ResponseCreatedEvent
   | ResponseOutputTextDeltaEvent
@@ -152,6 +159,7 @@ export type ResponseStreamEvent =
   | ResponseInputRequiredEvent
   | ResponseSensitiveResultEvent
   | ResponseTerminalEvent
+  | ResponseAuthExpiredEvent
   | ResponseErrorEvent
 
 export interface ResponsesStreamOptions {

@@ -1,10 +1,10 @@
 -- 种子数据: 管理员账号 + 内置审查规则
--- 密码: admin123
+-- admin 的占位密码无法登录；022 迁移仅会从私有环境变量初始化新库。
 SET NAMES utf8mb4;
 
 -- 管理员账号
 INSERT IGNORE INTO user (username, password, email, nickname, role, status)
-VALUES ('admin', '$2b$12$Z6ulrL6Jmnek.a.FALzQleAJ2yYcnI.cj9yEuj5GbYAlZfkrnWD7O', 'admin@local', '管理员', 'admin', 1);
+VALUES ('admin', '!INITIAL_ADMIN_PASSWORD_REQUIRED!', 'admin@local', '管理员', 'admin', 1);
 
 -- 8条内置审查规则
 INSERT IGNORE INTO review_rule (user_id, rule_code, rule_name, rule_type, rule_content, enabled, is_builtin, sort_order) VALUES

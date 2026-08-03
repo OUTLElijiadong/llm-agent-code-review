@@ -14,8 +14,9 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.agent_governance import AgentJob, AgentJobRun
+from app.models.user import User
 from app.services import agent_knowledge_service, agent_memory_service
 
 _DEFAULT_JOBS = (
@@ -24,6 +25,11 @@ _DEFAULT_JOBS = (
     ("daily_agent_evolution", "evolution", "evolution", "daily@04:00"),
     ("ops_health_check", "ops_health_check", "operations", "interval@5m"),
 )
+
+# These tasks either reach externally configured sources or inspect the host.
+# Unattended scheduler execution remains allowed, but interactive access is
+# reserved for the unique super administrator.
+SUPER_ADMIN_JOB_TYPES = frozenset({"crawl", "ops_health_check"})
 
 # v3.0 AgentSkill: per-Agent 进化任务(每日 03:00 跑 self_improve action=evolve)
 # 14 个 Agent 各一条,与原 daily_agent_evolution 共存(后者保持兼容)
@@ -46,6 +52,22 @@ def _utcnow() -> datetime:
         datetime: 当前 UTC 时间。
     """
     return datetime.now(timezone.utc)
+
+
+def requires_super_admin(job_type: str) -> bool:
+    """Return whether a scheduler task is restricted to the unique super administrator."""
+
+    return job_type in SUPER_ADMIN_JOB_TYPES
+
+
+def can_access_restricted_jobs(db: Session, actor: Optional[User]) -> bool:
+    """Return whether ``actor`` may access restricted scheduler tasks."""
+
+    if actor is None:
+        return False
+    from app.services.rbac_service import is_super_admin_user
+
+    return is_super_admin_user(db, actor.id)
 
 
 def ensure_default_jobs(db: Session) -> list[AgentJob]:
@@ -156,7 +178,7 @@ def list_jobs(db: Session) -> list[AgentJob]:
     return db.query(AgentJob).order_by(AgentJob.id.asc()).all()
 
 
-def update_job(db: Session, job_id: int, payload: dict) -> AgentJob:
+def update_job(db: Session, job_id: int, payload: dict, *, actor: Optional[User] = None) -> AgentJob:
     """更新治理调度任务配置。
 
     Args:
@@ -173,6 +195,8 @@ def update_job(db: Session, job_id: int, payload: dict) -> AgentJob:
     job = db.get(AgentJob, job_id)
     if not job:
         raise NotFoundError("调度任务不存在", code=40400)
+    if requires_super_admin(job.job_type) and not can_access_restricted_jobs(db, actor):
+        raise ForbiddenError("仅超级管理员 admin 可修改受限调度任务", code=40322)
     if payload.get("schedule") is not None:
         job.schedule = payload["schedule"]
     if payload.get("status") is not None:
@@ -184,7 +208,13 @@ def update_job(db: Session, job_id: int, payload: dict) -> AgentJob:
     return job
 
 
-def run_job(db: Session, job_id: int) -> AgentJobRun:
+def run_job(
+    db: Session,
+    job_id: int,
+    *,
+    actor: Optional[User] = None,
+    system_scheduled: bool = False,
+) -> AgentJobRun:
     """手动运行一个治理调度任务。
 
     Args:
@@ -200,6 +230,12 @@ def run_job(db: Session, job_id: int) -> AgentJobRun:
     job = db.get(AgentJob, job_id)
     if not job:
         raise NotFoundError("调度任务不存在", code=40400)
+    if (
+        requires_super_admin(job.job_type)
+        and not system_scheduled
+        and not can_access_restricted_jobs(db, actor)
+    ):
+        raise ForbiddenError("仅超级管理员 admin 可手动运行受限调度任务", code=40322)
     run = AgentJobRun(job_id=job.id, status="running", started_at=_utcnow())
     db.add(run)
     db.commit()
@@ -549,7 +585,12 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
         ),
         None,
     )
-    admin = db.query(User).filter(User.role == "admin", User.status == 1).order_by(User.id.asc()).first()
+    admin = (
+        db.query(User)
+        .filter(User.role.in_(["admin", "super_admin"]), User.status == 1)
+        .order_by(User.id.asc())
+        .first()
+    )
     if healthy:
         if existing_alert:
             observability_service.resolve_alert(

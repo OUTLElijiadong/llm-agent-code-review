@@ -34,6 +34,12 @@ class UserListItem(BaseModel):
         return dt.isoformat()
 
 
+class PasswordResetOut(BaseModel):
+    """只在本次管理员响应中返回的随机密码。"""
+
+    temporary_password: str = Field(min_length=24, max_length=24)
+
+
 class RoleIn(BaseModel):
     """设置角色请求体"""
     role: str = Field(pattern="^(admin|user|reviewer)$")

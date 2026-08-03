@@ -33,6 +33,7 @@ import {
   attachInputToToolCall,
   finishResponseToolCalls,
   isResponseToolEvent,
+  responseToolCallsFromEvents,
   setResponseToolCallStatus,
   type ResponseToolCall,
   type ResponseToolCallStatus,
@@ -127,6 +128,39 @@ function messageId(): string {
   return crypto.randomUUID()
 }
 
+function restoredMessages(
+  session: Awaited<ReturnType<typeof getAgentResponseSession>>,
+  restoredTime: string,
+): ChatMessage[] {
+  const restored: ChatMessage[] = session.messages.map((message) => ({
+    id: messageId(),
+    role: message.role,
+    content: message.role === 'assistant'
+      ? compactOutsideCodeBlocks(message.content)
+      : message.content,
+    time: restoredTime,
+  }))
+  const toolCalls = responseToolCallsFromEvents(session.events)
+  if (!toolCalls.length) return restored
+  const timeline: ChatMessage = {
+    id: messageId(),
+    role: 'assistant',
+    content: '',
+    time: restoredTime,
+    runId: session.run?.run_id,
+    toolCalls,
+  }
+  let conclusionIndex = -1
+  for (let index = restored.length - 1; index >= 0; index -= 1) {
+    if (restored[index].role === 'assistant' && restored[index].content.trim()) {
+      conclusionIndex = index
+      break
+    }
+  }
+  restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
+  return restored
+}
+
 async function restoreSession(): Promise<void> {
   if (sessionRestoreStarted) return
   sessionRestoreStarted = true
@@ -137,17 +171,11 @@ async function restoreSession(): Promise<void> {
     const restoredTime = session.run?.updated_at
       ? dayjs(session.run.updated_at).format('HH:mm')
       : dayjs().format('HH:mm')
-    messages.value = session.messages.map((message) => ({
-      id: messageId(),
-      role: message.role,
-      content: message.role === 'assistant'
-        ? compactOutsideCodeBlocks(message.content)
-        : message.content,
-      time: restoredTime,
-    }))
+    messages.value = restoredMessages(session, restoredTime)
     sessionSnapshotSignature = JSON.stringify({
       run: session.run,
       messages: session.messages,
+      events: session.events,
       pending: session.pending,
     })
     const pending = session.pending
@@ -213,16 +241,16 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
     sessionRun.value = session.run
     if (session.run?.model) modelName.value = session.run.model
     if (!loading.value) {
-      const signature = JSON.stringify({ run: session.run, messages: session.messages, pending: session.pending })
+      const signature = JSON.stringify({
+        run: session.run,
+        messages: session.messages,
+        events: session.events,
+        pending: session.pending,
+      })
       if (signature !== sessionSnapshotSignature) {
         sessionSnapshotSignature = signature
         const restoredTime = session.run?.updated_at ? dayjs(session.run.updated_at).format('HH:mm') : dayjs().format('HH:mm')
-        messages.value = session.messages.map((message) => ({
-          id: messageId(),
-          role: message.role,
-          content: message.role === 'assistant' ? compactOutsideCodeBlocks(message.content) : message.content,
-          time: restoredTime,
-        }))
+        messages.value = restoredMessages(session, restoredTime)
         const pending = session.pending
         if (pending) {
           const toolCalls: ResponseToolCall[] = []

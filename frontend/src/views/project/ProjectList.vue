@@ -23,6 +23,12 @@
             <span class="ico">▦</span><span>卡片</span>
           </button>
         </div>
+        <el-button
+          v-if="userStore.hasPermission('project:import')"
+          data-testid="remote-import-button"
+          :icon="Connection"
+          @click="remoteVisible = true"
+        >远程导入</el-button>
         <el-button type="primary" :icon="Plus" @click="handleCreate">新建项目</el-button>
       </div>
     </header>
@@ -213,17 +219,45 @@
       :initial-data="editingProject"
       @submit="onFormSubmit"
     />
+
+    <el-dialog v-model="remoteVisible" title="远程导入源码" width="560px" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="源码归档 HTTPS 地址" required>
+          <el-input v-model="remoteForm.url" placeholder="https://example.com/project.zip" clearable />
+        </el-form-item>
+        <el-form-item label="项目名称" required>
+          <el-input v-model="remoteForm.project_name" maxlength="100" show-word-limit />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="remoteForm.description" type="textarea" :rows="2" maxlength="500" />
+        </el-form-item>
+        <el-form-item label="导入模式">
+          <el-checkbox v-model="remoteForm.audit_mode">隔离整包审计</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <el-alert
+        title="仅接受公开 HTTPS 归档，服务器会先校验地址、大小和压缩包路径，再执行恶意软件扫描。"
+        type="info"
+        :closable="false"
+        show-icon
+      />
+      <template #footer>
+        <el-button @click="remoteVisible = false">取消</el-button>
+        <el-button type="primary" :loading="remoteLoading" @click="submitRemoteImport">开始导入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { Connection, Plus, Search } from '@element-plus/icons-vue'
 
 import dayjs from 'dayjs'
-import { getProjects, deleteProject, createProject, updateProject } from '@/api/project'
+import { getProjects, deleteProject, createProject, updateProject, importRemoteProject } from '@/api/project'
 import { uploadFolder } from '@/api/codeFile'
+import { useUserStore } from '@/stores/user'
 import type { ProjectOut } from '@/types/project'
 import ProjectForm from './ProjectForm.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -231,6 +265,7 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
+const userStore = useUserStore()
 
 const view = ref<'table' | 'card'>('table')
 
@@ -246,6 +281,9 @@ const statusFilter = ref('')
 const formVisible = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const editingProject = ref<ProjectOut | null>(null)
+const remoteVisible = ref(false)
+const remoteLoading = ref(false)
+const remoteForm = ref({ url: '', project_name: '', description: '', audit_mode: false })
 
 const activeCount = computed(() => projects.value.filter((p) => p.status === 'active').length)
 const archivedCount = computed(() => projects.value.filter((p) => p.status === 'archived').length)
@@ -359,6 +397,31 @@ async function handleDelete(id: number): Promise<void> {
     await fetchProjects()
   } catch {
     /* 用户取消或 http 拦截器已处理 */
+  }
+}
+
+async function submitRemoteImport(): Promise<void> {
+  if (!remoteForm.value.url.trim() || !remoteForm.value.project_name.trim()) {
+    ElMessage.warning('请填写源码地址和项目名称')
+    return
+  }
+  remoteLoading.value = true
+  try {
+    const result = await importRemoteProject({
+      url: remoteForm.value.url.trim(),
+      project_name: remoteForm.value.project_name.trim(),
+      description: remoteForm.value.description.trim() || undefined,
+      audit_mode: remoteForm.value.audit_mode,
+    })
+    ElMessage.success(`远程源码导入完成，共 ${result.file_count} 个文件`)
+    remoteVisible.value = false
+    remoteForm.value = { url: '', project_name: '', description: '', audit_mode: false }
+    await fetchProjects()
+    router.push(`/projects/${result.id}`)
+  } catch {
+    /* http 拦截器已提示错误 */
+  } finally {
+    remoteLoading.value = false
   }
 }
 

@@ -33,6 +33,11 @@ class FakeOrchestrator:
         self.calls.append(("list_agent_skills", (agent_name,), {}))
         return self.skills
 
+    def _can_configure_agents(self) -> bool:
+        """该测试桩模拟具备 Agent 配置权限的管理调用方。"""
+
+        return True
+
     def invoke_tool(
         self,
         *,
@@ -187,6 +192,16 @@ def _install_http(
         """为每次重试创建共享响应队列的 fake Client。"""
         return FakeHttpClient(outcomes, requests, **kwargs)
 
+    monkeypatch.setattr(
+        "app.agents.chat_agent.pin_public_http_url",
+        lambda url: __import__("app.utils.public_http", fromlist=["PinnedPublicUrl"]).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
     monkeypatch.setattr(httpx, "Client", client_factory)
     return requests
 
@@ -1069,7 +1084,7 @@ def test_handle_chat_success_limits_history_and_injects_personalization(
 
     monkeypatch.setattr(personalization_service, "chat_context_for_agent", persona)
     body = {
-        "choices": [{"message": {"content": "你好，已收到"}}],
+        "choices": [{"finish_reason": "stop", "message": {"content": "你好，已收到"}}],
         "model": "chat-model",
     }
     requests = _install_http(monkeypatch, [FakeHttpResponse(200, body)])
@@ -1087,7 +1102,10 @@ def test_handle_chat_success_limits_history_and_injects_personalization(
     assert payload["messages"][1]["content"] == "message-2"
     assert payload["messages"][-1]["content"] == "message-11"
     assert "[PERSONA]偏好简洁回答" in payload["messages"][0]["content"]
-    assert requests[0]["url"].endswith("/chat/completions")
+    assert requests[0]["url"] == "https://93.184.216.34/chat/completions"
+    assert requests[0]["headers"]["Host"] == "api.deepseek.com"
+    assert requests[0]["extensions"] == {"sni_hostname": "api.deepseek.com"}
+    assert requests[0]["client"]["trust_env"] is False
 
 
 def test_handle_chat_retries_status_errors_and_network_failure(
@@ -1139,7 +1157,7 @@ def test_handle_chat_personalization_error_degrades_to_plain_prompt(
         raise RuntimeError("persona unavailable")
 
     monkeypatch.setattr(personalization_service, "chat_context_for_agent", fail_persona)
-    body = {"choices": [{"message": {"content": "fallback answer"}}]}
+    body = {"choices": [{"finish_reason": "stop", "message": {"content": "fallback answer"}}]}
     requests = _install_http(monkeypatch, [FakeHttpResponse(200, body)])
 
     result = agent._handle_chat(

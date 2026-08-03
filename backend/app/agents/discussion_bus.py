@@ -12,10 +12,12 @@ WebSocket 实时推送的讨论消息总线。与 EventBus 分离设计:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import inspect
 import json as json_lib
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from loguru import logger
 
@@ -49,6 +51,7 @@ class DiscussionBus:
         self._sessions: dict[str, DiscussionSession] = {}
         self._queues: dict[str, list[asyncio.Queue]] = {}
         self._control_callbacks: dict[str, Callable] = {}
+        self._discussion_tasks: dict[str, asyncio.Task] = {}
 
     @classmethod
     def instance(cls) -> "DiscussionBus":
@@ -100,11 +103,13 @@ class DiscussionBus:
             and s.closed_at
             and now - s.closed_at > _CONCLUDED_SESSION_TTL
             and not self._queues.get(sid)
+            and (self._discussion_tasks.get(sid) is None or self._discussion_tasks[sid].done())
         ]
         for sid in expired:
             self._sessions.pop(sid, None)
             self._queues.pop(sid, None)
             self._control_callbacks.pop(sid, None)
+            self._discussion_tasks.pop(sid, None)
             logger.debug(f"[DiscussBus] 过期会话已清理 session={sid}")
 
     def request_stop(self, session_id: str):
@@ -112,6 +117,47 @@ class DiscussionBus:
         session = self._sessions.get(session_id)
         if session:
             session.status = "concluded"
+
+    def start_discussion_task(
+        self,
+        session_id: str,
+        awaitable: Awaitable,
+    ) -> asyncio.Task:
+        """登记一个会话唯一的后台编排任务，供登录失效时精确取消。"""
+
+        current = self._discussion_tasks.get(session_id)
+        if current is not None and not current.done():
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            return current
+
+        task = asyncio.create_task(awaitable, name=f"discussion:{session_id}")
+        self._discussion_tasks[session_id] = task
+
+        def discard(done: asyncio.Task) -> None:
+            if self._discussion_tasks.get(session_id) is done:
+                self._discussion_tasks.pop(session_id, None)
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                done.exception()
+
+        task.add_done_callback(discard)
+        return task
+
+    def get_discussion_task(self, session_id: str) -> Optional[asyncio.Task]:
+        """返回当前会话仍在运行的编排任务。"""
+
+        task = self._discussion_tasks.get(session_id)
+        return task if task is not None and not task.done() else None
+
+    def cancel_discussion_task(self, session_id: str) -> bool:
+        """终止会话并取消其后台编排任务。"""
+
+        self.request_stop(session_id)
+        task = self.get_discussion_task(session_id)
+        if task is None:
+            return False
+        task.cancel()
+        return True
 
     # ── 发言推送 ──
 
@@ -194,9 +240,21 @@ class DiscussionBus:
     def set_controller(self, session_id: str, callback: Callable):
         self._control_callbacks[session_id] = callback
 
-    def send_user_input(self, session_id: str, content: str):
+    def send_user_input(self, session_id: str, content: str) -> bool:
         cb = self._control_callbacks.get(session_id)
         if cb:
             cb("user_input", {"content": content})
+            return True
         else:
             logger.warning(f"[DiscussBus] session={session_id} 无回调注册")
+            return False
+
+    def control_session(self, session_id: str, action: str) -> bool:
+        """向已启动且仍在运行的讨论发送暂停、恢复或停止指令。"""
+        if action not in {"pause", "resume", "stop"}:
+            return False
+        cb = self._control_callbacks.get(session_id)
+        if cb is None:
+            return False
+        cb(action, {"session_id": session_id})
+        return True

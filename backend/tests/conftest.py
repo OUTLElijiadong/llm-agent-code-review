@@ -10,6 +10,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
+from app.models.agent_capability import (  # noqa: F401,E402
+    AgentCapabilityAlias,
+    AgentMcpBinding,
+    McpServer,
+    McpTool,
+    SandboxArtifact,
+    SandboxEnvironment,
+    SandboxEvent,
+    SandboxWorker,
+)
 from app.models.agent_governance import (  # noqa: F401,E402
     AgentAlert,
     AgentArtifactVersion,
@@ -39,6 +49,7 @@ from app.models.eval_case import EvalCase  # noqa: F401,E402
 from app.models.evolution_proposal import EvolutionProposal  # noqa: F401,E402
 from app.models.project import Project  # noqa: F401,E402
 from app.models.project_member import ProjectMember  # noqa: F401,E402  -- v2.4
+from app.models.project_source_archive import ProjectSourceArchive  # noqa: F401,E402
 
 # RBAC 权限体系模型(T02): 确保测试建表时包含 6 张 RBAC 表
 from app.models.rbac import (  # noqa: F401,E402
@@ -113,8 +124,20 @@ def mk_rule():
 
 @pytest.fixture
 def admin_user(db):
-    user = User(username="admin", password="x", email="a@b.c",
+    user = User(username="manager", password="x", email="a@b.c",
                 nickname="管理员", role="admin", status=1)
     db.add(user)
+    db.commit()
+    return user
+
+
+@pytest.fixture
+def super_admin_user(db):
+    user = User(username="admin", password="x", email="root@b.c",
+                nickname="超级管理员", role="super_admin", status=1)
+    role = Role(name="超级管理员", code="super_admin", status="active", sort=0, is_builtin=1)
+    db.add_all([user, role])
+    db.flush()
+    db.add(UserRole(user_id=user.id, role_id=role.id))
     db.commit()
     return user

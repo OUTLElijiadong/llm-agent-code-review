@@ -34,7 +34,7 @@ from loguru import logger
 
 from app.agents.discussion_bus import DiscussionBus
 from app.core.database import SessionLocal
-from app.core.security import decode_token
+from app.core.dependencies import authenticate_access_token
 from app.models.user import User
 
 
@@ -42,6 +42,8 @@ class PendingDiscussion:
     """待启动的讨论上下文 — 前端 preflight 后暂存"""
     def __init__(self, session_id: str, **kwargs):
         self.session_id = session_id
+        raw_version = kwargs.pop("session_token_version", None)
+        self.session_token_version = int(raw_version) if raw_version is not None else None
         self.kwargs = kwargs
         self.created_at = time.time()
 
@@ -55,6 +57,7 @@ _owner_registered_at: dict[str, float] = {}
 # preflight 后一直没有 WebSocket 来消费的 pending、以及会话已从总线清除的
 # 归属记录,超过此时长即视为废弃 — 防止两个模块级 dict 随讨论次数无限增长。
 _STALE_TTL = 3600.0
+_SESSION_CHECK_INTERVAL = 1.0
 
 
 def _purge_stale():
@@ -80,6 +83,11 @@ def register_pending(session_id: str, **kwargs):
     if owner is not None:
         _session_owners[session_id] = int(owner)
         _owner_registered_at[session_id] = time.time()
+
+
+def take_pending(session_id: str) -> PendingDiscussion | None:
+    """原子领取待启动上下文，供 WebSocket 或用户 Agent 二选一启动。"""
+    return _pending.pop(session_id, None)
 
 
 def _load_active_user(user_id: int):
@@ -134,7 +142,7 @@ def _can_access_session(user: User, owner_user_id: int) -> bool:
     """
     if owner_user_id <= 0:
         return False
-    return user.role == "admin" or user.id == owner_user_id
+    return user.role in {"admin", "super_admin"} or user.id == owner_user_id
 
 
 def _load_ws_user(token: str) -> User | None:
@@ -146,16 +154,109 @@ def _load_ws_user(token: str) -> User | None:
     Returns:
         User | None: token 有效且账号启用时返回用户对象。
     """
-    payload = decode_token(token)
     db = SessionLocal()
     try:
-        user = db.get(User, int(payload["sub"]))
-        if not user or user.status != 1:
-            return None
+        user = authenticate_access_token(token, db)
         db.expunge(user)
         return user
     finally:
         db.close()
+
+
+def _is_session_version_active(user_id: int, token_version: int) -> bool:
+    """检查创建圆桌任务的登录版本是否仍为当前设备会话。"""
+
+    db = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        return bool(
+            user
+            and user.status == 1
+            and int(user.token_version or 0) == token_version
+        )
+    except Exception:
+        return False
+    finally:
+        db.close()
+
+
+async def _run_pending_discussion(pending: PendingDiscussion) -> None:
+    """运行圆桌编排，并在创建它的登录版本失效时终止后台任务。"""
+
+    from app.ai.discussion_orchestrator import DiscussionOrchestrator
+
+    bus = DiscussionBus.instance()
+    user_id = int(pending.kwargs.get("user_id") or 0)
+    if pending.session_token_version is not None:
+        active = await asyncio.to_thread(
+            _is_session_version_active,
+            user_id,
+            pending.session_token_version,
+        )
+        if not active:
+            bus.request_stop(pending.session_id)
+            bus.publish_control(pending.session_id, "cancelled", {"task_id": 0})
+            bus.close_session(pending.session_id)
+            return
+
+    orchestrator_task = asyncio.create_task(
+        DiscussionOrchestrator().start_discussion(
+            session_id=pending.session_id,
+            **pending.kwargs,
+        ),
+        name=f"discussion-orchestrator:{pending.session_id}",
+    )
+    monitor_task: asyncio.Task | None = None
+    try:
+        if pending.session_token_version is None:
+            await orchestrator_task
+            return
+
+        async def monitor_session() -> None:
+            while True:
+                await asyncio.sleep(_SESSION_CHECK_INTERVAL)
+                active = await asyncio.to_thread(
+                    _is_session_version_active,
+                    user_id,
+                    pending.session_token_version,
+                )
+                if not active:
+                    return
+
+        monitor_task = asyncio.create_task(
+            monitor_session(),
+            name=f"discussion-auth:{pending.session_id}",
+        )
+        done, _ = await asyncio.wait(
+            {orchestrator_task, monitor_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if monitor_task in done and not orchestrator_task.done():
+            logger.info(
+                f"[Discussion] 登录版本失效，取消旧设备圆桌 session={pending.session_id}"
+            )
+            bus.request_stop(pending.session_id)
+            orchestrator_task.cancel()
+        await orchestrator_task
+    finally:
+        if monitor_task is not None:
+            monitor_task.cancel()
+        if not orchestrator_task.done():
+            bus.request_stop(pending.session_id)
+            orchestrator_task.cancel()
+        pending_tasks = [task for task in (monitor_task, orchestrator_task) if task is not None]
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+
+def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task:
+    """按 session_id 唯一登记并启动待处理圆桌任务。"""
+
+    bus = DiscussionBus.instance()
+    return bus.start_discussion_task(
+        pending.session_id,
+        _run_pending_discussion(pending),
+    )
 
 
 async def ws_discuss(websocket: WebSocket, session_id: str):
@@ -201,7 +302,7 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
         return
 
     # 检查是否有待启动的讨论。通过鉴权后再 pop,避免越权连接消耗 pending。
-    pending = _pending.pop(session_id, None)
+    pending = take_pending(session_id)
 
     await websocket.accept(subprotocol="prism-auth" if use_auth_subprotocol else None)
     logger.info(f"[WS] 讨论连接已接受 session={session_id} pending={bool(pending)} client={client}")
@@ -209,11 +310,7 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
 
     # 启动讨论编排
     if pending:
-        from app.ai.discussion_orchestrator import DiscussionOrchestrator
-        orch = DiscussionOrchestrator()
-        asyncio.create_task(orch.start_discussion(
-            session_id=session_id, **pending.kwargs,
-        ))
+        launch_pending_discussion(pending)
     else:
         bus.publish_control(session_id, "info", {
             "message": "已连接,等待讨论启动。可通过 API 触发讨论。",
@@ -231,13 +328,20 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
     pump_task = asyncio.create_task(pump_bus_to_ws())
 
     # v2.4: 服务端主动心跳探测任务
-    # 每 60 秒发送一次 {"type":"server_ping"},客户端无需响应(仅保持 TCP 流量)
+    # 每秒复验会话版本；发现新设备登录后主动关闭旧设备连接。
     # 主要作用: 在客户端心跳失效时,服务端主动刷新 NAT 会话,防止中间设备断连
     async def server_heartbeat():
         try:
             while True:
-                await asyncio.sleep(60)
+                await asyncio.sleep(_SESSION_CHECK_INTERVAL)
                 if websocket.client_state.value == 1:  # CONNECTED
+                    try:
+                        _load_ws_user(token)
+                    except Exception:
+                        if int(user.id) == owner_user_id:
+                            bus.cancel_discussion_task(session_id)
+                        await websocket.close(code=4001, reason="账号已在另一台设备登录")
+                        return
                     ts = str(int(asyncio.get_event_loop().time()))
                     await websocket.send_text('{"type":"server_ping","ts":' + ts + '}')
         except asyncio.CancelledError:
@@ -251,6 +355,13 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
     try:
         while True:
             raw = await websocket.receive_text()
+            try:
+                _load_ws_user(token)
+            except Exception:
+                if int(user.id) == owner_user_id:
+                    bus.cancel_discussion_task(session_id)
+                await websocket.close(code=4001, reason="账号已在另一台设备登录")
+                return
             try:
                 data = json_lib.loads(raw)
                 action = data.get("action", "")
@@ -276,10 +387,7 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
                         # 然后通知编排器
                         bus.send_user_input(session_id, content.strip())
                 elif action in ("pause", "resume", "stop"):
-                    cb = bus._control_callbacks.get(session_id)
-                    if cb:
-                        cb(action, {"session_id": session_id})
-                    else:
+                    if not bus.control_session(session_id, action):
                         bus.publish_control(session_id, "info", {
                             "message": "讨论尚未启动或已结束。",
                         })
@@ -290,4 +398,5 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
     finally:
         pump_task.cancel()
         heartbeat_task.cancel()
+        await asyncio.gather(pump_task, heartbeat_task, return_exceptions=True)
         bus.unsubscribe(session_id, queue)

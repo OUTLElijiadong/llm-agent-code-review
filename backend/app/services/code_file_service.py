@@ -2,12 +2,12 @@
 代码文件管理服务模块
 
 v2 增强(2026-06-25):
-- 压缩包上传自动解压:zip/tar/gz/bz2/xz → 批量创建文件,带 zip slip 安全防护
+- 压缩包上传通过 libarchive 自动解压 → 批量创建文件,带路径与解压倍率防护
 - 二进制文件支持:is_binary=1 时 original_blob 存原始字节,content 存 base64(向后兼容)
 - 编辑器不再展示 base64 字符串:API 层 is_binary=1 时 content 置空,前端走下载接口
 
 T06 增强(2026-06-25):
-- 上传流程串行集成:MIME 白名单 → 单文件 10MB → 项目总 500MB → MalwareScanner 双引擎扫描
+- 上传流程串行集成:MIME 白名单 → MalwareScanner 双引擎扫描
 - 压缩包解压后对每个内部文件递归执行恶意软件扫描
 - CodeFile 入库时写入 raw_size 字段(用于项目总大小校验)
 """
@@ -16,7 +16,6 @@ from typing import Optional, Tuple
 
 from fastapi import UploadFile
 from loguru import logger
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.ai.language_detector import detect_language
@@ -25,18 +24,14 @@ from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.project import Project
+from app.models.project_source_archive import ProjectSourceArchive
 from app.models.user import User
 from app.schemas.code_file import CodeFileIn
 from app.utils.archive_extractor import ExtractedFile, extract_archive, is_archive
 from app.utils.encoding_utils import BASE64_PREFIX, to_utf8
 from app.utils.file_validator import (
-    MAX_PROJECT_TOTAL_SIZE,
-    MAX_SINGLE_FILE_SIZE,
     validate_filename,
     validate_mime,
-    validate_project_total_size,
-    validate_single_file_size,
-    validate_size,
 )
 from app.utils.malware_scanner import get_scanner
 
@@ -70,7 +65,7 @@ def list_files(db: Session, user: User, project_id: int = None, language: str = 
     project = db.get(Project, project_id)
     if not project or project.status == "deleted":
         raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role != "admin":
+    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无访问权限", code=40300)
 
     q = db.query(CodeFile).filter(
@@ -95,12 +90,12 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
     """上传代码文件(Multipart)
 
     v2 增强:
-    - 压缩包(zip/tar/gz/bz2/xz)自动解压 → 批量创建文件
+    - 常见源码归档由 libarchive 自动解压 → 批量创建文件
     - 二进制文件(图片/可执行文件等)单独存储 original_blob,content 存 base64(向后兼容)
     - 文本文件按原逻辑处理
 
     T06 增强:
-    - 上传前串行执行:MIME 白名单 → 单文件 10MB → 项目总 500MB → MalwareScanner 双引擎扫描
+    - 上传不设固定字节数上限，仍执行 MIME、恶意软件和归档安全校验
     - 任一校验失败抛出 ValueError 并附带清晰错误信息
 
     Args:
@@ -120,34 +115,33 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
         NotFoundError: 项目不存在
         ForbiddenError: 无访问权限
         ValidationError: 解压失败/扩展名不支持
-        ValueError: MIME 校验/大小校验/恶意软件扫描失败
+        ValueError: MIME 校验/恶意软件扫描失败
     """
-    _check_project_access(db, user, project_id)
+    try:
+        _check_project_access(db, user, project_id)
 
-    raw = upload_file.file.read()
-    filename = upload_file.filename or ""
+        raw = upload_file.file.read()
+        filename = upload_file.filename or ""
 
-    # === T06 安全校验链:MIME → 单文件大小 → 项目总大小 → 恶意软件扫描 ===
-    _validate_upload_security(db, project_id, filename, raw)
+        # 压缩包会在解包后逐成员扫描，避免 ClamAV INSTREAM 对外层大包的传输上限。
+        _validate_upload_security(db, project_id, filename, raw)
 
-    # 兼容旧的整体大小限制(max_upload_size 默认 20MB)
-    validate_size(len(raw), settings.max_upload_size)
+        # v2: 压缩包自动解压
+        if is_archive(filename):
+            return _upload_archive(db, user, project_id, raw, filename)
 
-    # v2: 压缩包自动解压
-    if is_archive(filename):
-        return _upload_archive(db, user, project_id, raw, filename)
-
-    # 普通文件:校验扩展名
-    safe_name = validate_filename(filename, settings.allowed_extensions)
-    return _upload_single_file(db, user, project_id, safe_name, raw, file_path, language)
+        # 普通文件:校验扩展名
+        safe_name = validate_filename(filename, settings.allowed_extensions)
+        return _upload_single_file(db, user, project_id, safe_name, raw, file_path, language)
+    except Exception:
+        db.rollback()
+        raise
 
 
 def _validate_upload_security(
     db: Session, project_id: int, filename: str, raw: bytes,
 ) -> None:
-    """上传前安全校验链:MIME → 单文件大小 → 项目总大小 → 恶意软件扫描
-
-    校验顺序严格按 T06 规范执行,任一环节失败立即抛出 ValueError 终止上传。
+    """上传前执行类型校验；普通文件立即扫描，归档改为逐成员扫描。
 
     Args:
         db: 数据库会话(用于查询项目当前总大小)
@@ -159,29 +153,16 @@ def _validate_upload_security(
         None: 无返回值,校验通过即静默返回
 
     Raises:
-        ValueError: MIME 不在白名单 / 单文件超 10MB / 项目总超 500MB / 检测到恶意软件
+        ValueError: MIME 不在白名单或检测到恶意软件
     """
     # 1. MIME 白名单校验(同时拦截可执行文件扩展名)
     if not validate_mime(filename):
         raise ValueError(f"不支持的文件类型: {filename}")
 
-    # 2. 单文件大小校验(≤ 10MB)
-    file_size = len(raw)
-    if not validate_single_file_size(file_size):
-        raise ValueError(
-            f"文件大小 {file_size} 字节超过单文件上限 "
-            f"{MAX_SINGLE_FILE_SIZE} 字节(10MB)"
-        )
+    if is_archive(filename):
+        return
 
-    # 3. 项目总大小校验(≤ 500MB)
-    current_total = _get_project_total_size(db, project_id)
-    if not validate_project_total_size(current_total, file_size):
-        raise ValueError(
-            f"项目总大小 {current_total + file_size} 字节超过项目上限 "
-            f"{MAX_PROJECT_TOTAL_SIZE} 字节(500MB)"
-        )
-
-    # 4. 恶意软件扫描(ClamAV + YARA 双引擎,生产默认 fail-closed)
+    # 普通文件继续走 ClamAV + YARA 双引擎；生产默认 fail-closed。
     scan_result = get_scanner().scan(raw, filename)
     _enforce_scan_result(scan_result, filename)
 
@@ -226,26 +207,6 @@ def _enforce_scan_result(
             "[upload] 恶意软件扫描降级，非生产策略允许继续 "
             f"(file={filename}, engine={scan_result.engine}, result={scan_result.result})"
         )
-
-
-def _get_project_total_size(db: Session, project_id: int) -> int:
-    """获取项目当前所有 active 文件的总原始字节数(raw_size 求和)
-
-    用于项目总大小 500MB 上限校验。raw_size 由 T01 引入,二进制文件计入
-    original_blob 真实大小,文本文件计入 UTF-8 编码字节长度。
-
-    Args:
-        db: 数据库会话
-        project_id: 项目ID
-
-    Returns:
-        int: 总字节数;项目无文件或查询异常时返回 0
-    """
-    total = db.query(func.sum(CodeFile.raw_size)).filter(
-        CodeFile.project_id == project_id,
-        CodeFile.status == "active",
-    ).scalar()
-    return int(total or 0)
 
 
 def _scan_extracted_file(filename: str, content_bytes: bytes) -> None:
@@ -333,31 +294,37 @@ def _upload_archive(
     if not extracted_files:
         raise ValueError("压缩包解压失败: 压缩包内没有可用文件")
 
+    # 在任何落库前完成全部成员扫描，确保恶意内容不会造成半包入库。
+    for ef in extracted_files:
+        scan_bytes = ef.raw_bytes if ef.is_binary else ef.content.encode("utf-8")
+        _scan_extracted_file(ef.name, scan_bytes)
+
     first_id: Optional[int] = None
     first_lang: str = "plaintext"
     first_version: int = 1
 
-    for ef in extracted_files:
-        # T06: 对解压出的每个内部文件做恶意软件扫描(防止打包绕过)
-        scan_bytes = ef.raw_bytes if ef.is_binary else ef.content.encode("utf-8")
-        _scan_extracted_file(ef.name, scan_bytes)
-
-        # 压缩包内文件已通过 archive_extractor 的安全过滤,跳过扩展名校验
-        # (压缩包可能包含无扩展名的配置文件、Dockerfile 等)
-        if ef.is_binary:
-            content_b64 = to_utf8(ef.raw_bytes) if ef.raw_bytes else ""
-            file_id, lang, version = _create_file(
-                db, user, project_id, ef.name, ef.path, ef.language, content_b64,
-                f"从压缩包 {archive_name} 解压",
-                is_binary=1, original_blob=ef.raw_bytes,
-            )
-        else:
-            file_id, lang, version = _create_file(
-                db, user, project_id, ef.name, ef.path, ef.language, ef.content,
-                f"从压缩包 {archive_name} 解压",
-            )
-        if first_id is None:
-            first_id, first_lang, first_version = file_id, lang, version
+    try:
+        for ef in extracted_files:
+            # 压缩包内文件已通过 archive_extractor 的安全过滤,跳过扩展名校验
+            # (压缩包可能包含无扩展名的配置文件、Dockerfile 等)
+            if ef.is_binary:
+                content_b64 = to_utf8(ef.raw_bytes) if ef.raw_bytes else ""
+                file_id, lang, version = _create_file(
+                    db, user, project_id, ef.name, ef.path, ef.language, content_b64,
+                    f"从压缩包 {archive_name} 解压",
+                    is_binary=1, original_blob=ef.raw_bytes, commit=False,
+                )
+            else:
+                file_id, lang, version = _create_file(
+                    db, user, project_id, ef.name, ef.path, ef.language, ef.content,
+                    f"从压缩包 {archive_name} 解压", commit=False,
+                )
+            if first_id is None:
+                first_id, first_lang, first_version = file_id, lang, version
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     logger.info(
         f"[upload] 压缩包 {archive_name} 解压完成,共创建 {len(extracted_files)} 个文件 "
@@ -381,11 +348,26 @@ def _check_project_access(db: Session, user: User, project_id: int) -> Project:
         NotFoundError: 项目不存在或已删除
         ForbiddenError: 无访问权限
     """
-    project = db.get(Project, project_id)
+    # 与隔离整包上传使用同一 Project 行锁。锁保持到文件提交，跨 worker
+    # 阻止两条写路径同时通过互斥检查后形成混合源码项目。
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id)
+        .with_for_update()
+        .first()
+    )
     if not project or project.status == "deleted":
         raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role != "admin":
+    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无访问权限", code=40300)
+    if db.query(ProjectSourceArchive.id).filter(
+        ProjectSourceArchive.project_id == project_id,
+        ProjectSourceArchive.storage_status == "active",
+    ).first():
+        raise ValidationError(
+            "隔离整包审计项目不能混入可编辑源码文件",
+            code=40901,
+        )
     return project
 
 
@@ -414,16 +396,30 @@ def create_file(db: Session, user: User, payload: CodeFileIn) -> tuple:
     Returns:
         tuple[int, str, int]: (文件ID, 语言, 版本号)
     """
-    _check_project_access(db, user, payload.project_id)
-    safe_name = validate_filename(payload.file_name, settings.allowed_extensions)
-    lang = payload.language or detect_language(safe_name)
+    try:
+        _check_project_access(db, user, payload.project_id)
+        safe_name = validate_filename(payload.file_name, settings.allowed_extensions)
+        lang = payload.language or detect_language(safe_name)
 
-    return _create_file(db, user, payload.project_id, safe_name, payload.file_path, lang, payload.content, "在线创建")
+        return _create_file(
+            db,
+            user,
+            payload.project_id,
+            safe_name,
+            payload.file_path,
+            lang,
+            payload.content,
+            "在线创建",
+        )
+    except Exception:
+        db.rollback()
+        raise
 
 
 def _create_file(db: Session, user: User, project_id: int, file_name: str,
                  file_path: Optional[str], language: str, content: str, change_desc: str,
-                 is_binary: int = 0, original_blob: Optional[bytes] = None) -> tuple:
+                 is_binary: int = 0, original_blob: Optional[bytes] = None,
+                 commit: bool = True) -> tuple:
     """内部: 创建文件及其初始版本
 
     v2 增强:支持 is_binary/original_blob 参数,二进制文件单独存储原始字节。
@@ -475,8 +471,11 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
         operator_id=user.id,
         create_time=datetime.now(timezone.utc),
     ))
-    db.commit()
-    db.refresh(code_file)
+    if commit:
+        db.commit()
+        db.refresh(code_file)
+    else:
+        db.flush()
     return code_file.id, language, 1
 
 
@@ -498,7 +497,7 @@ def get_file(db: Session, user: User, file_id: int) -> CodeFile:
     if not code_file or code_file.status == "deleted":
         raise NotFoundError("文件不存在", code=40400)
     project = db.get(Project, code_file.project_id)
-    if project.user_id != user.id and user.role != "admin":
+    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无访问权限", code=40300)
     # v2: 二进制文件不返回 base64 content,前端通过下载接口获取
     if code_file.is_binary == 1:
@@ -525,7 +524,7 @@ def get_binary_content(db: Session, user: User, file_id: int) -> Tuple[bytes, st
     if not code_file or code_file.status == "deleted":
         raise NotFoundError("文件不存在", code=40400)
     project = db.get(Project, code_file.project_id)
-    if project.user_id != user.id and user.role != "admin":
+    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无访问权限", code=40300)
     if code_file.is_binary != 1:
         raise NotFoundError("该文件不是二进制文件", code=40400)
@@ -565,7 +564,7 @@ def get_file_meta(db: Session, user: User, file_id: int) -> dict:
     if not code_file or code_file.status == "deleted":
         raise NotFoundError("文件不存在", code=40400)
     project = db.get(Project, code_file.project_id)
-    if project.user_id != user.id and user.role != "admin":
+    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无访问权限", code=40300)
 
     # MIME 类型按文件名扩展名推断;mimetypes 未知时回退到 application/octet-stream

@@ -1,6 +1,7 @@
-import { get, post, put, del } from './http'
+import { get, post, put, del, download } from './http'
 import type { Page } from '@/types/common'
-import type { ProjectOut, ProjectDetailOut } from '@/types/project'
+import type { ProjectOut, ProjectDetailOut, ProjectSourceArchiveOut } from '@/types/project'
+import type { SecurityScanOut } from '@/types/security'
 
 /**
  * 获取项目分页列表
@@ -45,6 +46,49 @@ export function updateProject(projectId: number, data: Record<string, unknown>):
  */
 export function deleteProject(projectId: number): Promise<void> {
   return del<void>(`/projects/${projectId}`)
+}
+
+/** 导入公开 HTTPS 源码归档。 */
+export function importRemoteProject(data: {
+  url: string
+  project_name: string
+  description?: string
+  language?: string
+  audit_mode?: boolean
+}): Promise<{ id: number; file_count: number }> {
+  return post<{ id: number; file_count: number }>('/projects/import-remote', data)
+}
+
+/** 上传可能含恶意代码的整包 ZIP，保留原包供白盒审计。 */
+export function uploadAuditSourceArchive(
+  projectId: number,
+  file: File,
+): Promise<ProjectSourceArchiveOut> {
+  const formData = new FormData()
+  formData.append('file', file, file.name)
+  return post<ProjectSourceArchiveOut>(`/projects/${projectId}/audit-source-archive`, formData)
+}
+
+/** 查询项目的隔离源码包状态。 */
+export function getAuditSourceArchive(
+  projectId: number,
+): Promise<ProjectSourceArchiveOut | null> {
+  return get<ProjectSourceArchiveOut | null>(`/projects/${projectId}/audit-source-archive`)
+}
+
+/** 读取与当前隔离原包摘要绑定的最近一次持久化审计报告。 */
+export function getAuditSourceArchiveResult(projectId: number): Promise<{
+  status: string
+  started_at?: string | null
+  completed_at?: string | null
+  result: SecurityScanOut
+} | null> {
+  return get(`/projects/${projectId}/audit-source-archive/result`)
+}
+
+/** 下载项目当前 active 文件组成的源码 ZIP。 */
+export function downloadProjectSource(projectId: number): Promise<Blob> {
+  return download(`/projects/${projectId}/source-archive`)
 }
 
 /**

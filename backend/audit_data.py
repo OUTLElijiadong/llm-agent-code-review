@@ -11,6 +11,7 @@
 """
 
 import json
+import os
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -23,14 +24,14 @@ import pymysql
 DB_HOST = "127.0.0.1"
 DB_PORT = 3307
 DB_USER = "root"
-DB_PASSWORD = "root123"
+DB_PASSWORD = os.environ.get("AUDIT_DB_PASSWORD", "")
 DB_NAME = "code_review"
 DB_CHARSET = "utf8mb4"
 
 API_BASE = "http://localhost:8000/api"
 LOGIN_URL = f"{API_BASE}/auth/login"
 LOGIN_USERNAME = "admin"
-LOGIN_PASSWORD = "admin123"
+LOGIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 # 各 API 分页大小
 PROJECT_PAGE_SIZE = 20
@@ -803,6 +804,10 @@ def main():
     print(f"  DB: mysql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
     print(f"  API: {API_BASE}")
     print("=" * 80)
+
+    if not DB_PASSWORD or not LOGIN_PASSWORD:
+        print("[fatal] 必须设置 AUDIT_DB_PASSWORD 和 ADMIN_PASSWORD")
+        sys.exit(2)
 
     conn: Optional[pymysql.Connection] = None
     api = ApiClient(API_BASE)

@@ -140,9 +140,35 @@ it('connects with token protocols and routes only business messages', function t
   expect(onMessage).toHaveBeenCalledWith({ type: 'session_end' })
 
   socket.fail()
-  expect(onError).toHaveBeenCalledWith('WebSocket 连接失败,正在尝试重连...')
+  expect(onError).not.toHaveBeenCalled()
   stream.close()
   expect(socket.closeCalls).toBe(1)
+})
+
+/** 验证业务终态主动关闭后不会再报网络错误或安排重连。 */
+it.each([
+  ['session_end', { type: 'session_end' }],
+  ['control done', { type: 'control', session_id: 'terminal-session', action: 'done', payload: {} }],
+])('stops permanently after %s', async (_label, terminalFrame): Promise<void> => {
+  vi.useFakeTimers()
+  installFakeWebSocket()
+  const onMessage = vi.fn()
+  const onStatus = vi.fn()
+  const onError = vi.fn()
+  subscribeDiscussion('terminal-session', onMessage, { onStatus, onError })
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+
+  socket.receive(JSON.stringify(terminalFrame))
+  socket.fail()
+  socket.serverClose(1006, 'closed after terminal frame')
+  await vi.advanceTimersByTimeAsync(60_000)
+
+  expect(onMessage).toHaveBeenCalledWith(terminalFrame)
+  expect(socket.closeCalls).toBe(1)
+  expect(FakeWebSocket.instances).toHaveLength(1)
+  expect(onError).not.toHaveBeenCalled()
+  expect(onStatus).not.toHaveBeenCalledWith('disconnected')
 })
 
 /** 验证无 token 的缺省 URL 以及 pong、超时和发送失败心跳分支。 */
@@ -205,13 +231,17 @@ it('reconnects transient failures but stops on fatal or repeated closes', async 
   installFakeWebSocket()
   const fatalError = vi.fn()
   const fatalStatus = vi.fn()
+  const dispatch = vi.spyOn(window, 'dispatchEvent')
   subscribeDiscussion('fatal-session', vi.fn(), {
     onError: fatalError,
     onStatus: fatalStatus,
   })
-  FakeWebSocket.instances[0].serverClose(4003, 'forbidden')
-  expect(fatalError).toHaveBeenCalledWith('连接被服务端拒绝(4003): forbidden')
+  FakeWebSocket.instances[0].serverClose(4001, '账号已在另一台设备登录')
+  expect(fatalError).toHaveBeenCalledWith('连接被服务端拒绝(4001): 账号已在另一台设备登录')
   expect(fatalStatus).toHaveBeenLastCalledWith('error')
+  expect(dispatch).toHaveBeenCalledWith(
+    expect.objectContaining({ type: 'prism:auth-expired' }),
+  )
   await vi.runAllTimersAsync()
   expect(FakeWebSocket.instances).toHaveLength(1)
 
