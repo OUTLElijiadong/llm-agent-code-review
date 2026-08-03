@@ -2067,18 +2067,31 @@ def _upstream_error(raw: str, status: int) -> str:
 
 
 def _instructions(surface: str) -> str:
-    identity = "Prism 管理员 Agent" if surface == "admin" else "Prism 代码审查 Agent"
-    capability_instruction = (
-        "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
-        "再调用 admin_execute_capability；不得猜测能力编码或参数。"
-        if surface == "admin"
-        else "普通用户页面任务必须先调用 user_describe_capabilities 查询对应页面能力和精确参数，"
-        "再调用 user_execute_capability；不得猜测能力编码或参数。"
-        "报告、二进制单文件和项目源码下载必须分别使用 download_report、"
-        "download_code_file 和 download_project_source 固定工具。"
-        "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
-        "和 control_roundtable_discussion 固定工具。"
-    )
+    from app.services.page_guide_service import admin_guide_block, user_guide_block
+
+    if surface == "admin":
+        identity = "Prism 管理员 Agent「小菱」"
+        capability_instruction = (
+            "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
+            "再调用 admin_execute_capability；不得猜测能力编码或参数。"
+        )
+        role_behavior = (
+            "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
+            "面向批量处理与批量分析时先说明影响范围再执行。"
+        )
+        guide_block = admin_guide_block()
+    else:
+        identity = "Prism 棱镜小助「小菱」"
+        capability_instruction = (
+            "普通用户页面任务必须先调用 user_describe_capabilities 查询对应页面能力和精确参数，"
+            "再调用 user_execute_capability；不得猜测能力编码或参数。"
+            "报告、二进制单文件和项目源码下载必须分别使用 download_report、"
+            "download_code_file 和 download_project_source 固定工具。"
+            "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
+            "和 control_roundtable_discussion 固定工具。"
+        )
+        role_behavior = "审查结论必须引用本次工具返回的真实数据，不得凭印象作答。"
+        guide_block = user_guide_block()
     return (
         f"你是 {identity}。所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
         "根据每次工具返回结果自主判断下一步，可以连续调用多个工具。"
@@ -2088,9 +2101,10 @@ def _instructions(surface: str) -> str:
         "涉及用户批量操作时必须先查询真实用户。用户说序号、第几条或范围而未明确是用户 ID 时，"
         "不得猜测；必须用 ask_user 区分列表序号与用户 ID，得到精确 user_ids 后再调用批量工具。"
         f"{capability_instruction}"
-        "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
+        f"{role_behavior}"
         "写操作由系统暂停并展示审批；用户点击批准后系统会把原调用结果自动交还给你，不要要求用户重复发送指令。"
-        "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。"
+        "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。\n\n"
+        f"{guide_block}"
     )
 
 

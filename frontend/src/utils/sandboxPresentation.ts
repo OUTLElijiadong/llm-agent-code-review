@@ -8,10 +8,20 @@ const PROJECT_LANGUAGE_TO_SANDBOX: Record<string, SandboxLanguage> = {
   node: 'node', nodejs: 'node', 'node.js': 'node', vue: 'node', svelte: 'node',
   java: 'java', go: 'go', golang: 'go', php: 'php',
 }
+const PROJECT_LANGUAGE_COMPACT_ALIASES = Object.entries(PROJECT_LANGUAGE_TO_SANDBOX)
+  .map(([alias, runtime]) => [alias.replace(/[^a-z0-9]+/g, ''), runtime] as const)
+  .sort((left, right) => right[0].length - left[0].length)
 
 export function projectSandboxLanguage(language?: string | null): SandboxLanguage | null {
   const normalized = (language || '').trim().toLowerCase().replace(/[_-]/g, '')
-  return PROJECT_LANGUAGE_TO_SANDBOX[normalized] || null
+  const exact = PROJECT_LANGUAGE_TO_SANDBOX[normalized]
+  if (exact) return exact
+  const compact = normalized.replace(/[^a-z0-9]+/g, '')
+  for (const [alias, runtime] of PROJECT_LANGUAGE_COMPACT_ALIASES) {
+    const suffix = compact.slice(alias.length)
+    if (compact === alias || (compact.startsWith(alias) && /^\d+$/.test(suffix))) return runtime
+  }
+  return null
 }
 
 export function sortSandboxEvents(events: SandboxEvent[]): SandboxEvent[] {

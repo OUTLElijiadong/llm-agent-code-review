@@ -104,6 +104,7 @@ const availableWorkers = computed(() => workers.value.filter((worker) => (
 const submitDisabled = computed(() => (
   !form.project_id
   || submitting.value
+  || (form.purpose === 'deploy' && !selectedProjectLanguage.value)
   || (remoteAuthorizationRequired.value && !form.remote_target_authorized)
 ))
 
@@ -215,12 +216,20 @@ async function submit(): Promise<void> {
     ElMessage.warning('请确认本次远程目标测试已获得授权')
     return
   }
+  const deploymentLanguage = form.purpose === 'deploy'
+    ? projectSandboxLanguage(selectedFormProject.value?.language)
+    : null
+  if (form.purpose === 'deploy' && !deploymentLanguage) {
+    ElMessage.warning('项目主语言无法映射到受控运行时，请先更新项目语言')
+    return
+  }
+  const language = deploymentLanguage || form.language
   submitting.value = true
   try {
     const created = await createSandbox({
       project_id: form.project_id,
       purpose: form.purpose,
-      language: form.language,
+      language,
       test_mode: form.purpose === 'deploy' ? 'deploy' : form.test_mode,
       worker_code: form.worker_code || undefined,
       ttl_hours: form.ttl_hours,
@@ -378,10 +387,11 @@ onBeforeUnmount(() => {
           </el-form-item>
 
           <el-form-item label="语言运行时">
-            <el-select v-model="form.language" :disabled="form.purpose === 'deploy' && Boolean(selectedProjectLanguage)" style="width: 100%">
+            <el-select v-model="form.language" :disabled="form.purpose === 'deploy'" style="width: 100%">
               <el-option v-for="language in languageOptions" :key="language.value" :label="language.label" :value="language.value" />
             </el-select>
             <div v-if="form.purpose === 'deploy' && selectedProjectLanguage" class="field-hint">部署 Agent 已按项目主语言自动选择受控运行时。</div>
+            <div v-else-if="form.purpose === 'deploy'" class="field-hint">项目主语言无法映射到受控运行时，请先更新项目语言。</div>
           </el-form-item>
 
           <el-form-item v-if="form.purpose === 'test'" label="测试模式">

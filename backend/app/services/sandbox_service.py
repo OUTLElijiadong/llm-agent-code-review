@@ -13,6 +13,7 @@ import hmac
 import html
 import ipaddress
 import json
+import re
 import threading
 import time
 import urllib.parse
@@ -56,6 +57,31 @@ _IMAGE_REFS = {
     "go": "prism-sandbox-go:1.23",
     "php": "prism-sandbox-php:8.3",
 }
+_PROJECT_LANGUAGE_TO_RUNTIME = {
+    "python": "python",
+    "py": "python",
+    "javascript": "node",
+    "js": "node",
+    "typescript": "node",
+    "ts": "node",
+    "node": "node",
+    "nodejs": "node",
+    "node.js": "node",
+    "vue": "node",
+    "svelte": "node",
+    "java": "java",
+    "go": "go",
+    "golang": "go",
+    "php": "php",
+}
+_PROJECT_LANGUAGE_COMPACT_ALIASES = sorted(
+    {
+        re.sub(r"[^a-z0-9]+", "", alias): runtime
+        for alias, runtime in _PROJECT_LANGUAGE_TO_RUNTIME.items()
+    }.items(),
+    key=lambda item: len(item[0]),
+    reverse=True,
+)
 _PROFILE_POLICIES = {
     "python": {"memory_mb": 512, "cpus": 1.0, "pids": 128, "timeout_seconds": 120, "workspace_mb": 256},
     "node": {"memory_mb": 768, "cpus": 1.0, "pids": 256, "timeout_seconds": 180, "workspace_mb": 512},
@@ -242,6 +268,24 @@ def _profile_policy(language: str) -> dict[str, Any]:
     policy = dict(_PROFILE_POLICIES.get(language, {}))
     policy.update(_RESOURCE_POLICY_COMMON)
     return policy
+
+
+def _project_deployment_language(project_language: str | None) -> str | None:
+    """将项目主语言映射到固定沙箱 profile。
+
+    部署环境只能运行一个受控 profile，因此以项目已保存的主语言为
+    权威来源；前端、MCP 或 Agent 传入的过期语言不得覆盖它。
+    """
+
+    normalized = str(project_language or "").strip().lower().replace("_", "").replace("-", "")
+    exact = _PROJECT_LANGUAGE_TO_RUNTIME.get(normalized)
+    if exact:
+        return exact
+    compact = re.sub(r"[^a-z0-9]+", "", normalized)
+    for alias, runtime in _PROJECT_LANGUAGE_COMPACT_ALIASES:
+        if compact == alias or (compact.startswith(alias) and compact[len(alias):].isdigit()):
+            return runtime
+    return None
 
 
 def _worker_token(worker: SandboxWorker) -> str:
@@ -865,6 +909,7 @@ def _create_environment_locked(
     project_id = int(payload["project_id"])
     purpose = payload["purpose"]
     require_project_access(db, project_id, actor, need_write=purpose == "deploy")
+    project: Project | None = None
     if purpose == "deploy":
         project = (
             db.query(Project)
@@ -883,7 +928,16 @@ def _create_environment_locked(
             "隔离源码归档只能审计或测试，不得部署或开放预览",
             code=40341,
         )
-    language = payload["language"]
+    requested_language = str(payload["language"] or "").strip().lower()
+    if requested_language not in LANGUAGES:
+        raise ValidationError("沙箱语言或模式不受支持", code=40001)
+    project_language = _project_deployment_language(project.language if project else None)
+    if purpose == "deploy" and not project_language:
+        raise ValidationError(
+            "项目主语言无法映射到受控部署运行时，请先更新项目语言",
+            code=40001,
+        )
+    language = project_language or requested_language
     mode = "deploy" if purpose == "deploy" else payload.get("test_mode", "whitebox")
     if language not in LANGUAGES or mode not in MODES:
         raise ValidationError("沙箱语言或模式不受支持", code=40001)
@@ -933,7 +987,14 @@ def _create_environment_locked(
                 "response_sample_bytes": 65_536,
             }
         ),
-        agent_config_json=_json({"worker_mode": worker_mode, "remote_only": remote_only, "ttl_hours": ttl_hours}),
+        agent_config_json=_json({
+            "worker_mode": worker_mode,
+            "remote_only": remote_only,
+            "ttl_hours": ttl_hours,
+            "requested_language": requested_language,
+            "resolved_language": language,
+            "language_source": "project" if project_language else "request",
+        }),
         remote_target_url=remote_url or None,
         remote_target_authorized_at=_utcnow() if remote_url else None,
         expires_at=_utcnow() + timedelta(hours=ttl_hours),
@@ -941,6 +1002,15 @@ def _create_environment_locked(
     db.add(environment)
     db.flush()
     _append_event(db, environment, "dispatch", "authorization", f"{agent_code} 已校验项目权限和测试边界")
+    if language != requested_language:
+        _append_event(
+            db,
+            environment,
+            "dispatch",
+            "language",
+            f"已按项目主语言将运行时从 {requested_language} 调整为 {language}",
+            {"requested_language": requested_language, "resolved_language": language},
+        )
     _append_event(db, environment, "dispatch", "snapshot", f"已生成不可变源码快照 {source_sha256[:12]}")
     worker_label = worker.code if worker else "remote-http-probe"
     worker_runtime = worker.runtime if worker else "remote_http"
@@ -958,7 +1028,10 @@ def _create_environment_locked(
         "sandbox_create",
         target_type="sandbox_environment",
         target_id=public_id,
-        detail=f"project={project_id}; purpose={purpose}; mode={mode}; worker={worker_label}; source={source_sha256}",
+        detail=(
+            f"project={project_id}; purpose={purpose}; mode={mode}; worker={worker_label}; "
+            f"requested_language={requested_language}; resolved_language={language}; source={source_sha256}"
+        ),
         commit=False,
     )
     db.commit()

@@ -49,6 +49,8 @@ MAX_REDIRECTS = 3
 MAX_QUARANTINE_FILES = 10_000
 MAX_RECORDED_THREATS = 100
 CLAMAV_INSTREAM_SAFE_BYTES = 24 * 1024 * 1024
+# 远程源码下载上限:不设业务上限,但要防内存耗尽
+MAX_REMOTE_BYTES = 500 * 1024 * 1024
 AUDIT_RUNNING_STALE_AFTER = timedelta(minutes=30)
 
 
@@ -595,7 +597,11 @@ def _archive_name(url: str, headers: httpx.Headers) -> str:
 
 
 def download_remote_archive(url: str) -> tuple[bytes, str]:
-    """下载公开 HTTPS 源码归档并逐跳校验重定向，不设置业务大小上限。"""
+    """下载公开 HTTPS 源码归档并逐跳校验重定向。
+
+    不设业务大小上限,但当响应体超过 MAX_REMOTE_BYTES 时立即中止,
+    防止超大响应把服务内存耗尽。
+    """
     current = url.strip()
     for _ in range(MAX_REDIRECTS + 1):
         target = _pin_remote_url(current)
@@ -629,7 +635,15 @@ def download_remote_archive(url: str) -> tuple[bytes, str]:
                 except (TypeError, ValueError) as exc:
                     raise ExternalServiceError("远程源码响应长度无效", code=50201) from exc
                 chunks: list[bytes] = []
+                received = 0
                 for chunk in response.iter_bytes():
+                    received += len(chunk)
+                    if received > MAX_REMOTE_BYTES:
+                        limit_mb = MAX_REMOTE_BYTES // (1024 * 1024)
+                        raise ValidationError(
+                            f"远程源码大小超过 {limit_mb}MB 上限，已中止下载",
+                            code=40001,
+                        )
                     chunks.append(chunk)
                 return b"".join(chunks), _archive_name(current, response.headers)
     raise ValidationError("远程源码重定向次数过多", code=40001)

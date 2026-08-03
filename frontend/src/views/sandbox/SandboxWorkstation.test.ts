@@ -49,6 +49,7 @@ const mountOptions = {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   projectApi.getProjects.mockResolvedValue({
     items: [{ id: 7, project_name: '项目 A', status: 'active', file_count: 1, create_time: '' }],
     total: 1,
@@ -94,6 +95,71 @@ describe('SandboxWorkstation Agent output ordering', () => {
     vm.form.purpose = 'deploy'
     await nextTick()
     expect(vm.form.language).toBe('php')
+    wrapper.unmount()
+  })
+
+  it('recomputes the project runtime at submit and sends an exact PHP deployment payload', async () => {
+    projectApi.getProjects.mockResolvedValue({
+      items: [
+        { id: 7, project_name: 'Python 项目', language: 'python', status: 'active', file_count: 1, create_time: '' },
+        { id: 8, project_name: 'PHP 项目', language: 'PHP 8.3', status: 'active', file_count: 1, create_time: '' },
+      ],
+      total: 2,
+    })
+    api.createSandbox.mockResolvedValue({
+      ...environment,
+      public_id: 'sbx_deploy_php',
+      project_id: 8,
+      purpose: 'deploy',
+      language: 'php',
+      test_mode: 'deploy',
+      status: 'ready',
+    })
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      form: { project_id: number | null; purpose: string; language: string }
+      submit: () => Promise<void>
+    }
+
+    vm.form.project_id = 8
+    vm.form.purpose = 'deploy'
+    await nextTick()
+    vm.form.language = 'python'
+    await vm.submit()
+
+    expect(api.createSandbox).toHaveBeenCalledOnce()
+    expect(api.createSandbox).toHaveBeenCalledWith({
+      project_id: 8,
+      purpose: 'deploy',
+      language: 'php',
+      test_mode: 'deploy',
+      worker_code: undefined,
+      ttl_hours: 72,
+      remote_target_url: undefined,
+      remote_target_authorized: false,
+    })
+    wrapper.unmount()
+  })
+
+  it('blocks deployment when the project language has no controlled runtime', async () => {
+    projectApi.getProjects.mockResolvedValue({
+      items: [{ id: 9, project_name: '未知语言项目', language: 'plaintext', status: 'active', file_count: 1, create_time: '' }],
+      total: 1,
+    })
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      form: { project_id: number | null; purpose: string }
+      submitDisabled: boolean
+      submit: () => Promise<void>
+    }
+
+    vm.form.purpose = 'deploy'
+    await nextTick()
+    expect(vm.submitDisabled).toBe(true)
+    await vm.submit()
+    expect(api.createSandbox).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

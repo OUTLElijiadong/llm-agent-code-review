@@ -394,6 +394,15 @@ def _resolve_fixed_image(image_ref: str, digest: str, label: str) -> ResolvedIma
     )
 
 
+def _browser_self_test_script() -> str:
+    return (
+        "const {chromium}=require('/app/node_modules/playwright');"
+        f"chromium.launch({{headless:true,executablePath:'{BROWSER_EXECUTABLE}',"
+        "args:['--no-sandbox','--disable-dev-shm-usage','--disable-background-networking']})"
+        ".then(async b=>{await b.close()}).catch(e=>{console.error(String(e));process.exit(2)})"
+    )
+
+
 def _browser_health(runtime: str, profiles: dict[str, Profile]) -> dict[str, Any]:
     policy = {
         "runtime": "runsc",
@@ -420,18 +429,16 @@ def _browser_health(runtime: str, profiles: dict[str, Profile]) -> dict[str, Any
             if path.is_symlink() or not path.is_file() or current.st_mode & 0o022:
                 raise BlockedError("Playwright 固定脚本不是只读普通文件")
         browser = _resolve_fixed_image(BROWSER_IMAGE, BROWSER_IMAGE_DIGEST, "Playwright")
-        browser_self_test = (
-            "const {chromium}=require('/app/node_modules/playwright');"
-            f"chromium.launch({{headless:true,executablePath:'{BROWSER_EXECUTABLE}',"
-            "args:['--no-sandbox','--disable-dev-shm-usage','--disable-background-networking']}})"
-            ".then(async b=>{await b.close()}).catch(e=>{console.error(String(e));process.exit(2)})"
-        )
+        browser_self_test = _browser_self_test_script()
         _run_command([
             "docker", "run", "--rm", "--runtime", runtime, "--network", "none",
             "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
             "--user", "1000:1000", "--pids-limit", "256", "--memory", "1024m",
             "--memory-swap", "1024m", "--cpus", "1.0", "--ipc", "none",
             "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=256m,mode=1777,uid=1000,gid=1000",
+            "--tmpfs", "/home/node:rw,exec,nosuid,nodev,size=64m,mode=0700,uid=1000,gid=1000",
+            "--env", "HOME=/home/node", "--env", "XDG_CONFIG_HOME=/tmp/.chromium",
+            "--env", "XDG_CACHE_HOME=/tmp/.cache",
             "--entrypoint", "node", browser.run_ref, "-e", browser_self_test,
         ], timeout=60)
         python_profile = profiles.get("python")
@@ -567,7 +574,9 @@ def run_browser_blackbox(payload: dict[str, Any]) -> dict[str, Any]:
             "--mount", f"type=bind,src={BROWSER_SCRIPT},dst=/opt/prism/browser_blackbox.js,readonly,bind-propagation=rprivate",
             "--env", f"PRISM_TARGET_URL={target_url}", "--env", "PRISM_PROXY_SERVER=http://target-proxy:3128",
             "--env", f"PRISM_BROWSER_TIMEOUT_MS={BROWSER_TIMEOUT_SECONDS * 1000}",
-            "--env", "HOME=/home/node", "--env", "NO_PROXY=", "--env", "HTTP_PROXY=", "--env", "HTTPS_PROXY=",
+            "--env", "HOME=/home/node", "--env", "XDG_CONFIG_HOME=/tmp/.chromium",
+            "--env", "XDG_CACHE_HOME=/tmp/.cache", "--env", "NO_PROXY=",
+            "--env", "HTTP_PROXY=", "--env", "HTTPS_PROXY=",
             "--entrypoint", "node", browser_image.run_ref, "/opt/prism/browser_blackbox.js",
         ], timeout=60)
         time.sleep(0.25)

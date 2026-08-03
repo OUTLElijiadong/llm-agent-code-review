@@ -263,6 +263,23 @@ case "${1:-}" in
       inspect)
         last=""
         for last in "$@"; do :; done
+        if [[ "${FAKE_DOCKER_SCENARIO:-}" == "playwright_stateful" ]]; then
+          state_file="${FAKE_PLAYWRIGHT_STATE_FILE:?FAKE_PLAYWRIGHT_STATE_FILE is required}"
+          case "$last" in
+            *@sha256:*) digest="${last##*@}" ;;
+            prism-sandbox-playwright:protected-*)
+              digest="$(awk -v tag="$last" '$1 == "tag" && $2 == tag { print $3; exit }' "$state_file")"
+              ;;
+            *) digest="" ;;
+          esac
+          [[ -n "$digest" ]] && grep -Fqx -- "image $digest" "$state_file" || exit 1
+          printf '%s\n' "$digest"
+          exit 0
+        fi
+        if [[ "${FAKE_DOCKER_SCENARIO:-}" == "missing_playwright" \
+          && "$last" == *"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" ]]; then
+          exit 1
+        fi
         case "$last" in
           prism-backend:be-running) printf '%s\n' 'sha256:running-backend' ;;
           prism-frontend:fe-running) printf '%s\n' 'sha256:running-frontend' ;;
@@ -274,7 +291,36 @@ case "${1:-}" in
           *) printf 'sha256:%s\n' "$(printf '%s' "$last" | tr ':/' '--')" ;;
         esac
         ;;
-      rm|prune)
+      tag)
+        if [[ "${FAKE_DOCKER_SCENARIO:-}" == "playwright_stateful" ]]; then
+          state_file="${FAKE_PLAYWRIGHT_STATE_FILE:?FAKE_PLAYWRIGHT_STATE_FILE is required}"
+          source_ref="${3:?source image is required}"
+          target_tag="${4:?target tag is required}"
+          digest="${source_ref##*@}"
+          grep -Fqx -- "image $digest" "$state_file" || exit 1
+          awk -v tag="$target_tag" '!($1 == "tag" && $2 == tag)' "$state_file" > "$state_file.tmp"
+          printf 'tag %s %s\n' "$target_tag" "$digest" >> "$state_file.tmp"
+          mv "$state_file.tmp" "$state_file"
+        fi
+        ;;
+      prune)
+        if [[ "${FAKE_DOCKER_SCENARIO:-}" == "playwright_stateful" ]]; then
+          state_file="${FAKE_PLAYWRIGHT_STATE_FILE:?FAKE_PLAYWRIGHT_STATE_FILE is required}"
+          awk '
+            $1 == "tag" { tags[$3]=1; lines[NR]=$0; next }
+            $1 == "image" { images[NR]=$2; next }
+            { lines[NR]=$0 }
+            END {
+              for (i=1; i<=NR; i++) {
+                if (i in images) { if (images[i] in tags) print "image " images[i] }
+                else if (i in lines) print lines[i]
+              }
+            }
+          ' "$state_file" > "$state_file.tmp"
+          mv "$state_file.tmp" "$state_file"
+        fi
+        ;;
+      rm)
         ;;
     esac
     ;;
@@ -480,7 +526,17 @@ run_cleanup_simulation() {
   local docker_log="$workspace/docker-cleanup.log"
   local dry_output="$workspace/cleanup-dry-run.log"
   local apply_output="$workspace/cleanup-apply.log"
+  local invalid_output="$workspace/cleanup-invalid.log"
+  local sandbox_env="$workspace/sandbox.env"
+  local next_sandbox_env="$workspace/sandbox-next.env"
+  local half_sandbox_env="$workspace/sandbox-half.env"
+  local missing_sandbox_env="$workspace/sandbox-missing.env"
+  local stateful_image_state="$workspace/playwright-images.state"
+  local process_root="$workspace/proc"
+  local process_pid=4242
   local state_count
+  local tag_line
+  local prune_line
 
   mkdir -p "$release_dir"
   cat > "$release_dir/current.env" <<'STATE'
@@ -494,14 +550,57 @@ STATE
   : > "$release_dir/rollback-from-20260708.env"
   : > "$release_dir/rollback-from-20260709.env"
   : > "$release_dir/rollback-from-20260710.env"
+  cat > "$sandbox_env" <<'ENV'
+PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+PLAYWRIGHT_IMAGE_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ENV
+  cat > "$next_sandbox_env" <<'ENV'
+PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/mcp@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+PLAYWRIGHT_IMAGE_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+ENV
+  cat > "$half_sandbox_env" <<'ENV'
+PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/mcp@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+ENV
+  cat > "$missing_sandbox_env" <<'ENV'
+PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/mcp@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+PLAYWRIGHT_IMAGE_DIGEST=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+ENV
+  cat > "$fake_bin/systemctl" <<'SCRIPT'
+#!/usr/bin/env bash
+set -eu
+[[ "$*" == *'show prism-sandbox-executor.service'* ]]
+case "$*" in
+  *MainPID*) printf '%s\n' "${FAKE_SANDBOX_PID:-0}" ;;
+  *EnvironmentFiles*) printf '%s (ignore_errors=no)\n' "${FAKE_SANDBOX_ENV_FILE:?}" ;;
+esac
+SCRIPT
+  chmod +x "$fake_bin/systemctl"
+
+  if PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    SANDBOX_ENV_FILE="$sandbox_env" ./cleanup.sh --cache-until 7d > "$invalid_output" 2>&1; then
+    printf 'cleanup 接受了 Docker 不支持的天数时长\n' >&2
+    exit 1
+  fi
+  assert_contains "$invalid_output" '缓存年龄格式必须类似 168h'
 
   : > "$docker_log"
   PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    FAKE_SANDBOX_ENV_FILE="$sandbox_env" \
+    ./cleanup.sh --keep-release-images 1 --keep-release-states 1 > "$workspace/cleanup-systemd.log"
+  assert_contains "$workspace/cleanup-systemd.log" "使用沙箱 systemd 单元环境文件: $sandbox_env"
+  assert_contains "$workspace/cleanup-systemd.log" 'DRY-RUN docker image tag mcr.microsoft.com/playwright/mcp@sha256:'
+  assert_not_contains "$docker_log" 'image tag'
+
+  : > "$docker_log"
+  PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    SANDBOX_ENV_FILE="$sandbox_env" \
     ./cleanup.sh --keep-release-images 1 --keep-release-states 1 > "$dry_output"
   assert_contains "$dry_output" 'DRY-RUN docker image rm prism-backend:be-old'
   assert_contains "$dry_output" 'DRY-RUN docker image rm prism-frontend:fe-old'
+  assert_contains "$dry_output" 'DRY-RUN docker image tag mcr.microsoft.com/playwright/mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa prism-sandbox-playwright:protected-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   assert_contains "$dry_output" 'dry-run 完成'
   assert_not_contains "$docker_log" 'image rm'
+  assert_not_contains "$docker_log" 'image tag'
   assert_not_contains "$docker_log" 'image prune'
   assert_not_contains "$docker_log" 'builder prune'
   state_count="$(find "$release_dir" -maxdepth 1 -type f -name 'rollback-from-*.env' | wc -l | tr -d ' ')"
@@ -512,11 +611,19 @@ STATE
 
   : > "$docker_log"
   PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    SANDBOX_ENV_FILE="$sandbox_env" \
     ./cleanup.sh --apply --keep-release-images 1 --keep-release-states 1 > "$apply_output"
   assert_contains "$docker_log" 'image rm prism-backend:be-old'
   assert_contains "$docker_log" 'image rm prism-frontend:fe-old'
+  assert_contains "$docker_log" 'image tag mcr.microsoft.com/playwright/mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa prism-sandbox-playwright:protected-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   assert_contains "$docker_log" 'image prune --force --filter until=168h'
   assert_contains "$docker_log" 'builder prune --force --filter until=168h'
+  tag_line="$(grep -Fn 'image tag mcr.microsoft.com/playwright/mcp@sha256:' "$docker_log" | cut -d: -f1)"
+  prune_line="$(grep -Fn 'image prune --force' "$docker_log" | cut -d: -f1)"
+  [[ -n "$tag_line" && -n "$prune_line" && "$tag_line" -lt "$prune_line" ]] || {
+    printf 'cleanup 未在 image prune 之前保护 Playwright 镜像\n' >&2
+    exit 1
+  }
   for protected in \
     prism-backend:be-current prism-backend:be-previous prism-backend:be-running prism-backend:be-new \
     prism-frontend:fe-current prism-frontend:fe-previous prism-frontend:fe-running prism-frontend:fe-new; do
@@ -539,6 +646,67 @@ STATE
     exit 1
   }
   assert_contains "$apply_output" '受控清理完成'
+
+  : > "$docker_log"
+  PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    SANDBOX_ENV_FILE="$next_sandbox_env" \
+    ./cleanup.sh --apply --keep-release-images 999 --keep-release-states 999 > "$workspace/cleanup-next.log"
+  assert_contains "$docker_log" 'image tag mcr.microsoft.com/playwright/mcp@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb prism-sandbox-playwright:protected-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
+  mkdir -p "$process_root/$process_pid"
+  printf 'PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\0PLAYWRIGHT_IMAGE_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\0' \
+    > "$process_root/$process_pid/environ"
+  cat > "$stateful_image_state" <<'STATE'
+image sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+image sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+image sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+STATE
+  : > "$docker_log"
+  PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    PROC_ROOT="$process_root" FAKE_SANDBOX_PID="$process_pid" FAKE_SANDBOX_ENV_FILE="$next_sandbox_env" \
+    FAKE_DOCKER_SCENARIO=playwright_stateful FAKE_PLAYWRIGHT_STATE_FILE="$stateful_image_state" \
+    ./cleanup.sh --apply --keep-release-images 999 --keep-release-states 999 > "$workspace/cleanup-stateful.log"
+  assert_contains "$docker_log" 'image tag mcr.microsoft.com/playwright/mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa prism-sandbox-playwright:protected-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  assert_contains "$docker_log" 'image tag mcr.microsoft.com/playwright/mcp@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb prism-sandbox-playwright:protected-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  assert_contains "$stateful_image_state" 'image sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  assert_contains "$stateful_image_state" 'image sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  assert_not_contains "$stateful_image_state" 'image sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+
+  : > "$docker_log"
+  if PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    PROC_ROOT="$process_root" FAKE_SANDBOX_PID=4243 FAKE_SANDBOX_ENV_FILE="$next_sandbox_env" \
+    ./cleanup.sh --apply > "$workspace/cleanup-unreadable-process.log" 2>&1; then
+    printf 'cleanup 接受了不可读的运行中执行器进程环境\n' >&2
+    exit 1
+  fi
+  assert_contains "$workspace/cleanup-unreadable-process.log" '运行中沙箱执行器的进程环境不可读'
+  assert_not_contains "$docker_log" 'image rm'
+  assert_not_contains "$docker_log" 'image tag'
+  assert_not_contains "$docker_log" 'image prune'
+  assert_not_contains "$docker_log" 'builder prune'
+
+  : > "$docker_log"
+  if PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    SANDBOX_ENV_FILE="$half_sandbox_env" \
+    ./cleanup.sh --apply > "$workspace/cleanup-half.log" 2>&1; then
+    printf 'cleanup 接受了半配置的 Playwright 镜像\n' >&2
+    exit 1
+  fi
+  assert_not_contains "$docker_log" 'image rm'
+  assert_not_contains "$docker_log" 'image prune'
+  assert_not_contains "$docker_log" 'builder prune'
+
+  : > "$docker_log"
+  if PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" RELEASE_STATE_DIR="$release_dir" \
+    FAKE_DOCKER_SCENARIO=missing_playwright SANDBOX_ENV_FILE="$missing_sandbox_env" \
+    ./cleanup.sh --apply > "$workspace/cleanup-missing.log" 2>&1; then
+    printf 'cleanup 接受了缺失的 Playwright 镜像\n' >&2
+    exit 1
+  fi
+  assert_not_contains "$docker_log" 'image rm'
+  assert_not_contains "$docker_log" 'image tag'
+  assert_not_contains "$docker_log" 'image prune'
+  assert_not_contains "$docker_log" 'builder prune'
 }
 
 # 真实运行备份验证脚本，覆盖维护锁、强制边车文件和 024 缺表拒绝路径。

@@ -7,7 +7,9 @@ import hashlib
 import importlib.util
 import io
 import json
+import shutil
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -20,7 +22,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.models.agent_capability import SandboxArtifact, SandboxEnvironment, SandboxWorker
+from app.models.agent_capability import SandboxArtifact, SandboxEnvironment, SandboxEvent, SandboxWorker
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_source_archive import ProjectSourceArchive
@@ -235,6 +237,22 @@ def test_browser_blackbox_uses_private_proxy_network_and_fixed_images(monkeypatc
     assert "--add-host" in browser_create and "target-proxy:172.28.0.2" in browser_create
     assert "1000:1000" in browser_create and "/home/node:rw" in " ".join(browser_create)
     assert "host" not in browser_create and "--privileged" not in browser_create
+
+
+def test_browser_self_test_script_is_valid_javascript() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required for JavaScript syntax validation")
+
+    completed = subprocess.run(
+        [node, "--check", "-"],
+        input=executor._browser_self_test_script(),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 @pytest.mark.parametrize("target_url,target_ip", [
@@ -886,6 +904,96 @@ def test_remote_combined_selects_whitebox_worker(monkeypatch) -> None:
     assert environment.worker_id == worker.id
     assert config["remote_only"] is False
     assert config["worker_mode"] == "whitebox"
+
+
+def test_deployment_uses_project_language_instead_of_stale_requested_profile(db, monkeypatch) -> None:
+    owner = User(username="deploy_language_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(
+        user_id=owner.id,
+        project_name="php-deployment",
+        language="PHP 8.3",
+        status="active",
+    )
+    worker = SandboxWorker(
+        code="deploy-language-worker",
+        name="Deploy language worker",
+        worker_type="local",
+        transport="unix",
+        endpoint="/run/prism-sandbox/executor.sock",
+        supported_languages_json='["php"]',
+        supported_modes_json='["deploy"]',
+        runtime="runsc",
+        max_concurrency=1,
+        priority=10,
+        status="healthy",
+        enabled=1,
+    )
+    db.add_all([project, worker])
+    db.commit()
+    _DormantThread.created.clear()
+    monkeypatch.setattr(
+        sandbox_service.project_source_service,
+        "build_source_archive",
+        lambda *_args, **_kwargs: (_archive({"index.php": "<?php echo 'ready';\n"}), "source.zip"),
+    )
+    monkeypatch.setattr(sandbox_service.threading, "Thread", _DormantThread)
+    monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
+
+    environment = sandbox_service.create_environment(
+        db,
+        owner,
+        {
+            "project_id": project.id,
+            "purpose": "deploy",
+            "language": "python",
+            "test_mode": "deploy",
+            "ttl_hours": 1,
+        },
+    )
+
+    config = json.loads(environment.agent_config_json)
+    events = db.query(SandboxEvent).filter(SandboxEvent.environment_id == environment.id).all()
+    assert environment.language == "php"
+    assert environment.image_ref == "prism-sandbox-php:8.3"
+    assert environment.worker_id == worker.id
+    assert config["requested_language"] == "python"
+    assert config["resolved_language"] == "php"
+    assert config["language_source"] == "project"
+    assert any(event.stage == "language" and "python" in event.message and "php" in event.message for event in events)
+    assert len(_DormantThread.created) == 1
+    assert _DormantThread.created[0].started is True
+
+
+def test_deployment_rejects_project_language_without_controlled_runtime(db) -> None:
+    owner = User(username="deploy_unknown_language_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(
+        user_id=owner.id,
+        project_name="unknown-language-deployment",
+        language="plaintext",
+        status="active",
+    )
+    db.add(project)
+    db.commit()
+
+    with pytest.raises(sandbox_service.ValidationError) as exc_info:
+        sandbox_service.create_environment(
+            db,
+            owner,
+            {
+                "project_id": project.id,
+                "purpose": "deploy",
+                "language": "python",
+                "test_mode": "deploy",
+                "ttl_hours": 1,
+            },
+        )
+
+    assert exc_info.value.code == 40001
+    assert "项目主语言" in exc_info.value.message
 
 
 def test_fast_terminal_execute_response_persists_worker_events_before_conclusion(monkeypatch) -> None:

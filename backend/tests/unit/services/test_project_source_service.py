@@ -238,7 +238,7 @@ def test_remote_download_stops_when_stream_exceeds_limit(monkeypatch):
     )
     monkeypatch.setattr(project_source_service.httpx, "Client", lambda **kwargs: FakeClient())
 
-    with pytest.raises(ValidationError, match="超过 20MB"):
+    with pytest.raises(ValidationError, match=r"超过 \d+MB"):
         project_source_service.download_remote_archive("https://example.com/source.zip")
 
 
@@ -284,7 +284,7 @@ def _stored_archive(db, *, username: str = "audit_state_owner"):
 def test_quarantine_zip_rejects_posix_absolute_path():
     raw = _zip_bytes({"/etc/evil.php": b"<?php echo 1;"})
 
-    with pytest.raises(ValidationError, match="非法或绝对路径"):
+    with pytest.raises(ValidationError, match="绝对路径"):
         project_source_service._strict_zip_members(raw)
 
 
