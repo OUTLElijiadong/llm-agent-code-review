@@ -894,15 +894,15 @@ def test_quarantined_scan_success_persists_result_bound_to_original_zip_sha(db, 
     assert result.success is True
     assert result.data["source_archive_sha256"] == expected_sha256
     assert result.data["source_archive_filename"] == "original-source.zip"
-    assert result.data["compliance"]["semantic_bounded_total_chars"] == 16_000
-    assert result.data["compliance"]["semantic_bounded_per_file_chars"] == 4_000
-    assert result.data["compliance"]["semantic_bounded_max_files"] == 4
+    assert result.data["compliance"]["semantic_bounded_total_chars"] == 32_000
+    assert result.data["compliance"]["semantic_bounded_per_file_chars"] == 8_000
+    assert result.data["compliance"]["semantic_bounded_max_files"] == 12
     assert result.data["compliance"]["semantic_candidate_source_chars"] > 0
     assert result.data["compliance"]["semantic_planned_file_count"] == 1
     assert result.data["compliance"]["archive_text_file_count"] == 1
     assert result.data["compliance"]["archive_semantic_complete"] is True
     assert result.data["compliance"]["semantic_verified_file_count"] == 1
-    assert result.data["compliance"]["semantic_request_headroom"] == 127
+    assert result.data["compliance"]["semantic_request_headroom"] == 255
     assert expected_sha256 == archive_row.archive_sha256
     db.expire_all()
     stored = db.query(ProjectSourceArchive).filter_by(project_id=project.id).one()
@@ -1182,18 +1182,18 @@ def test_scan_project_bounded_metrics_separate_candidate_plan_success_and_archiv
     assert result.success is True
     compliance = result.data["compliance"]
     assert compliance["semantic_candidate_file_count"] == 6
-    assert compliance["semantic_planned_file_count"] == 4
-    assert compliance["semantic_file_count"] == 4
+    assert compliance["semantic_planned_file_count"] == 5
+    assert compliance["semantic_file_count"] == 5
     assert compliance["archive_text_file_count"] == 6
-    assert compliance["semantic_planned_source_chars"] == 16_000
-    assert compliance["semantic_source_chars"] == 16_000
-    assert compliance["semantic_unscheduled_file_count"] == 2
-    assert compliance["semantic_partially_scheduled_file_count"] == 4
-    assert compliance["semantic_verified_file_count"] == 0
+    assert compliance["semantic_planned_source_chars"] == 32_000
+    assert compliance["semantic_source_chars"] == 32_000
+    assert compliance["semantic_unscheduled_file_count"] == 1
+    assert compliance["semantic_partially_scheduled_file_count"] == 1
+    assert compliance["semantic_verified_file_count"] == 4
     assert compliance["semantic_failed_file_count"] == 0
     assert compliance["semantic_scope_execution_complete"] is True
     assert compliance["archive_semantic_complete"] is False
-    assert compliance["semantic_request_headroom"] == 127
+    assert compliance["semantic_request_headroom"] == 255
 
 
 def test_prioritize_files_uses_stable_path_and_id_tie_breakers():

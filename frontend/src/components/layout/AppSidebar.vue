@@ -169,7 +169,7 @@ function go(item: MenuItem): void {
     </nav>
 
     <div class="sidebar-foot">
-      <div class="version font-mono">v1.0 · PRISM</div>
+      <div class="version font-mono">v3.4 · PRISM</div>
     </div>
   </aside>
 </template>

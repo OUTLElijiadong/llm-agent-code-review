@@ -62,26 +62,26 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_timeout: int = 60
     deepseek_max_retries: int = 2
-    deepseek_chunk_threshold: int = 6000
+    deepseek_chunk_threshold: int = 32000
     # DeepSeek V4 上下文窗口与内部 Agent 投影预算。完整 transcript 仍持久化供审计。
     deepseek_context_window_tokens: int = 1_000_000
-    deepseek_max_output_tokens: int = 32_768
+    deepseek_max_output_tokens: int = 65_536
     # 项目级白盒审计需要同时承载漏洞、入口和危险汇，不能沿用通用 Agent 的 4096 token 默认值。
-    security_semantic_max_output_tokens: int = Field(default=16_384, ge=4_096, le=65_536)
+    security_semantic_max_output_tokens: int = Field(default=65_536, ge=4_096, le=65_536)
     deepseek_compaction_threshold_tokens: int = 850_000
     deepseek_compaction_keep_recent_tokens: int = 200_000
     # 项目级语义审计先使用保守批次，输出截断时再递归拆分。
     security_semantic_batch_chars: int = Field(default=60_000, ge=8_000, le=120_000)
     security_semantic_min_split_chars: int = Field(default=2_000, ge=512, le=24_000)
-    security_semantic_max_split_depth: int = Field(default=8, ge=1, le=12)
-    security_semantic_max_requests: int = Field(default=128, ge=1, le=512)
-    security_semantic_timeout_seconds: int = Field(default=1_800, ge=60, le=7_200)
+    security_semantic_max_split_depth: int = Field(default=12, ge=1, le=12)
+    security_semantic_max_requests: int = Field(default=256, ge=1, le=512)
+    security_semantic_timeout_seconds: int = Field(default=3_600, ge=60, le=7_200)
     security_semantic_max_findings_per_batch: int = Field(default=12, ge=1, le=50)
     security_semantic_max_graph_items_per_batch: int = Field(default=20, ge=1, le=100)
     # static_full / triage 只调度可在共享请求预算内闭合的多文件语义窗口。
-    security_semantic_bounded_total_chars: int = Field(default=16_000, ge=512, le=2_400_000)
-    security_semantic_bounded_per_file_chars: int = Field(default=4_000, ge=512, le=240_000)
-    security_semantic_bounded_max_files: int = Field(default=4, ge=1, le=32)
+    security_semantic_bounded_total_chars: int = Field(default=32_000, ge=512, le=2_400_000)
+    security_semantic_bounded_per_file_chars: int = Field(default=8_000, ge=512, le=240_000)
+    security_semantic_bounded_max_files: int = Field(default=12, ge=1, le=32)
     # 全局审查并发上限:同时进行的后台审查任务数上限(2C2G 生产机默认 2)
     review_max_concurrency: int = 2
     allow_private_ai_base_url: bool = False

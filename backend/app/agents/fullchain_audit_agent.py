@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -262,39 +263,168 @@ class FullChainAuditOrchestrator:
     def _sandbox_verify(self, project: Project, actor: User,
                         targets: List[dict],
                         ctx: Optional[AgentContext]) -> List[dict]:
-        """沙箱实测: 复用 sandbox_service 起隔离 PHP 环境跑 PoC.
+        """真实沙箱 PoC 实测 (v3.4): 生成 PoC 脚本 → combined 沙箱起服务并执行 → 解析真实响应.
 
-        注意: 这是「真实沙箱执行」的挂点。完整 PoC 下发依赖 worker 协议与目标可运行
-        环境(很多 CMS 无法一键启动), 因此这里做**能力探测 + 环境就绪**:
-        创建沙箱 → 等待就绪/终态 → 读取执行结论。worker 不可用时抛异常由上层降级。
+        流程:
+          1) LLM 按每条高危漏洞的类别/证据生成一个 shell PoC(_prism_poc.sh),
+             遵守 CRUD 数据隔离红线: 只发 GET/POST 探测与对自身创建数据的读写,
+             绝不删改真实数据;
+          2) 把 PoC 注入项目源码包, 创建 combined 沙箱(php -l + php -S + 执行 PoC);
+          3) runner 起服务后执行 PoC 并输出 PRISM_POC_RESULT 行, 后端经沙箱结论回收
+             并按响应内容判定 confirmed / refuted / inconclusive。
+        worker 不在线或沙箱失败时抛异常, 由上层降级为 LLM 推理验证。
         """
-        from app.services import sandbox_service
-        from app.services.sandbox_service import SandboxEnvironment  # noqa: F401
+        import base64
+        import io
+        import zipfile
 
-        workers = sandbox_service.list_workers(self._db)
-        online = [w for w in workers if w.get("status") == "online"]
-        if not online:
-            raise RuntimeError("无在线沙箱 worker")
-        env = sandbox_service.create_environment(self._db, actor, {
-            "project_id": project.id,
+        from app.services import project_source_service
+        from app.services.sandbox_service import _select_worker
+
+        # worker 在线性由 _select_worker 强校验(不在线会抛异常,上层捕获降级)
+        # 1) 生成 PoC 脚本(一次 LLM 调用, 覆盖全部 target)
+        poc_script = self._generate_poc_script(targets, ctx=ctx)
+        if not poc_script:
+            raise RuntimeError("PoC 脚本生成失败")
+
+        # 2) 打包: 项目源码 + _prism_poc.sh
+        archive, _name = project_source_service.build_source_archive(self._db, actor, project.id)
+        buf = io.BytesIO(archive)
+        out = io.BytesIO()
+        with zipfile.ZipFile(buf, "r") as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                if item.filename == "_prism_poc.sh":
+                    continue
+                zout.writestr(item, zin.read(item.filename))
+            zout.writestr("_prism_poc.sh", poc_script)
+        patched = out.getvalue()
+        patched_b64 = base64.b64encode(patched).decode("ascii")
+        patched_sha256 = hashlib.sha256(patched).hexdigest()
+
+        # 3) 复用 sandbox_service 的 worker 选择 + 协议调用(含 Bearer token / HTTPS pin),
+        #    提交 combined 任务并轮询到终态。不经 create_environment,因为需要注入 PoC 的
+        #    源码包而非项目原始归档。
+        from app.services.sandbox_service import _call_worker, _select_worker
+
+        worker = _select_worker(self._db, language="php", mode="combined")
+        env_public_id = f"poc-{project.id}-{int(time.time())}"
+        result = self._call_worker_execute(
+            _call_worker, worker, env_public_id, patched_b64, patched_sha256, ctx=ctx,
+        )
+
+        # 4) 解析真实 PoC 结果
+        verdicts = self._parse_poc_result(result, targets)
+        return verdicts
+
+    def _call_worker_execute(self, _call_worker, worker, request_id: str,
+                             archive_b64: str, source_sha256: str,
+                             ctx: Optional[AgentContext]) -> dict:
+        """按 sandbox_service._call_worker 协议提交 combined 任务并轮询到终态."""
+        payload = {
+            "request_id": request_id,
             "purpose": "test",
             "language": "php",
-            "test_mode": "whitebox",
-        })
-        # 等待沙箱进入终态(有界轮询, 不阻塞主线程)
-        deadline = time.time() + 90
-        status = env.status
-        while time.time() < deadline and status not in (
-            "succeeded", "failed", "blocked", "stopped", "expired",
+            "test_mode": "combined",
+            "source_archive_base64": archive_b64,
+            "source_sha256": source_sha256,
+            "ttl_seconds": 300,
+            "image_digest": "",
+        }
+        resp = _call_worker(worker, "POST", "/execute", payload)
+        result = resp.get("result") if isinstance(resp.get("result"), dict) else resp
+
+        deadline = time.time() + 300
+        last_seq = 0
+        terminal = {"succeeded", "failed", "blocked", "stopped", "expired", "completed"}
+        # running 表示 deploy 常驻,test 模式的 combined 会跑到 succeeded/failed
+        while str(result.get("status") or "") not in terminal:
+            if time.time() > deadline:
+                raise RuntimeError("沙箱 PoC 轮询超时")
+            time.sleep(2)
+            sresp = _call_worker(worker, "POST", "/status", {
+                "request_id": request_id, "after_sequence": last_seq,
+            })
+            result = sresp.get("result") if isinstance(sresp.get("result"), dict) else sresp
+            last_seq = int(result.get("last_sequence") or last_seq)
+        return result
+
+    def _generate_poc_script(self, targets: List[dict],
+                             ctx: Optional[AgentContext]) -> str:
+        """LLM 生成 _prism_poc.sh: 按每条高危漏洞类别产出真实 HTTP 探测.
+
+        输出约定: 每条漏洞打印一行
+          PRISM_POC_RESULT index=<i> verdict=<confirmed|refuted|inconclusive> evidence=<关键响应特征>
+        """
+        if not targets:
+            return ""
+        items = []
+        for i, f in enumerate(targets):
+            cat = str(f.get("category") or f.get("title") or "")
+            items.append(
+                f"[{i}] 类别={cat} 文件={f.get('file_path','')}:{f.get('lines','')} "
+                f"证据={str(f.get('evidence',''))[:120]}"
+            )
+        prompt = (
+            "你要为一个 PHP 项目生成一个**在隔离沙箱内执行的 PoC 验证脚本** `_prism_poc.sh`。"
+            "沙箱已用 `php -S 127.0.0.1:$PRISM_POC_PORT` 启动该项目,你可向它发真实 HTTP 请求。\n"
+            "对下面每条高危漏洞候选,写一段 shell(curl 或 /dev/tcp)探测其是否真实可利用,并打印判定行。\n\n"
+            "严格要求:\n"
+            "1. 每条打印恰好一行: `PRISM_POC_RESULT index=<i> verdict=<confirmed|refuted|inconclusive> evidence=<≤60字关键响应特征>`\n"
+            "2. 遵守 CRUD 数据隔离红线: 只用 GET/POST 做只读探测或对自身新建数据的写,"
+            "绝不 UPDATE/DELETE 已存在数据,不 drop、不 rm、不写 webshell 到磁盘。\n"
+            "3. SQL 注入: 用 `' AND '1'='1` / `' AND '1'='2` 对比响应差异,或报错注入看 SQL 错误回显。\n"
+            "4. 路径遍历/LFI: 用 `../../../../etc/passwd` 看是否读出 `root:`。\n"
+            "5. 命令注入: 用时间型 `;sleep 3` 对比响应耗时(沙箱无网,不要外连)。\n"
+            "6. 反序列化: 构造无害序列化串看是否触发对象解析错误/差异。\n"
+            "7. 证据不足判 inconclusive,不得臆造 confirmed。\n"
+            "8. 脚本要健壮: set +e,每个请求带 --max-time 5,失败继续下一条。\n\n"
+            f"候选漏洞:\n" + "\n".join(items) + "\n\n"
+            "只输出 shell 脚本原文(以 #!/bin/sh 开头),不要任何解释。"
+        )
+        result = self._sentinel.call(prompt, ctx=ctx, thinking=False)
+        if not result.success or not result.data:
+            return ""
+        script = str(result.data).strip()
+        # 去掉可能的 markdown 围栏
+        if script.startswith("```"):
+            lines = script.splitlines()
+            script = "\n".join(lines[1:-1] if lines and lines[-1].startswith("```") else lines[1:])
+        if "PRISM_POC_RESULT" not in script:
+            return ""
+        if not script.startswith("#!"):
+            script = "#!/bin/sh\nset +e\n" + script
+        return script
+
+    def _parse_poc_result(self, worker_result: dict,
+                          targets: List[dict]) -> List[dict]:
+        """从 worker 输出(stdout/logs/result)解析 PRISM_POC_RESULT 行,映射回 target."""
+        text_parts: List[str] = []
+        def _collect(obj):
+            if isinstance(obj, str):
+                text_parts.append(obj)
+            elif isinstance(obj, dict):
+                for v in obj.values():
+                    _collect(v)
+            elif isinstance(obj, list):
+                for v in obj:
+                    _collect(v)
+        _collect(worker_result)
+        blob = "\n".join(text_parts)
+
+        verdicts: List[dict] = []
+        import re as _re
+        for m in _re.finditer(
+            r"PRISM_POC_RESULT\s+index=(\d+)\s+verdict=(confirmed|refuted|inconclusive)\s+evidence=(.*)",
+            blob,
         ):
-            time.sleep(3)
-            row = sandbox_service.get_environment(self._db, actor, env.public_id)
-            status = row.get("status", status)
-        self._emit(AgentEventType.PROGRESS, ctx,
-                   message=f"[Verification] 沙箱 {env.public_id} 终态: {status}",
-                   payload={"phase": "verification", "sandbox_status": status})
-        # 当前实现: 环境就绪即返回(具体 PoC 下发依赖 worker 证据协议, 后续接入)
-        return []
+            idx = int(m.group(1))
+            if 0 <= idx < len(targets):
+                verdicts.append({
+                    "_index": idx,
+                    "verdict": m.group(2),
+                    "evidence": m.group(3).strip()[:200],
+                })
+        return verdicts
 
     # =====================================================================
     # 角色四: 报告 Report —— 汇总全链路产出
