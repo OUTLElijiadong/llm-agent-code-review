@@ -42,7 +42,7 @@
       <div class="changelog-body">
         四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 +
         <b>真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。
-        <router-link to="/project" class="changelog-link">去发起全链路审计 →</router-link>
+        <router-link to="/projects" class="changelog-link">去发起全链路审计 →</router-link>
       </div>
     </el-alert>
 
