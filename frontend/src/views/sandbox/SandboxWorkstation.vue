@@ -34,6 +34,7 @@ import {
   hasSandboxConclusion,
   isRemoteAuthorizationRequired,
   isSandboxActive,
+  projectSandboxLanguage,
   sortSandboxEvents,
 } from '@/utils/sandboxPresentation'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -79,6 +80,8 @@ const testModes: Array<{ value: Exclude<SandboxTestMode, 'deploy'>; label: strin
 ]
 
 const selected = computed(() => environments.value.find((item) => item.public_id === selectedId.value) || null)
+const selectedFormProject = computed(() => projects.value.find((item) => item.id === form.project_id) || null)
+const selectedProjectLanguage = computed(() => projectSandboxLanguage(selectedFormProject.value?.language))
 const selectedEvents = computed(() => sortSandboxEvents(selected.value?.events || []))
 const selectedProjectName = computed(() => {
   const project = projects.value.find((item) => item.id === selected.value?.project_id)
@@ -103,6 +106,12 @@ const submitDisabled = computed(() => (
   || submitting.value
   || (remoteAuthorizationRequired.value && !form.remote_target_authorized)
 ))
+
+function syncProjectLanguage(projectId: number | null): void {
+  const project = projects.value.find((item) => item.id === projectId)
+  const language = projectSandboxLanguage(project?.language)
+  if (language) form.language = language
+}
 
 function statusLabel(status: string): string {
   return ({
@@ -166,8 +175,7 @@ async function loadInitial(): Promise<void> {
     if (!selectedId.value && sandboxRows.length) selectedId.value = sandboxRows[0].public_id
     if (!form.project_id && projects.value.length) {
       form.project_id = projects.value[0].id
-      const known = languageOptions.find((item) => item.value === projects.value[0].language?.toLowerCase())
-      if (known) form.language = known.value
+      syncProjectLanguage(form.project_id)
     }
     if (userStore.isSuperAdmin()) {
       try { workers.value = await listSandboxWorkers() } catch { workers.value = [] }
@@ -300,6 +308,7 @@ async function searchCapabilities(): Promise<void> {
 
 watch(() => form.purpose, (purpose) => {
   if (purpose === 'deploy') {
+    syncProjectLanguage(form.project_id)
     form.test_mode = 'deploy'
     form.remote_target_url = ''
     form.remote_target_authorized = false
@@ -318,6 +327,10 @@ watch(() => form.test_mode, (mode) => {
 })
 
 watch(() => form.language, () => { form.worker_code = '' })
+watch(() => form.project_id, (projectId) => {
+  syncProjectLanguage(projectId)
+  form.worker_code = ''
+})
 watch(() => form.remote_target_url, () => { form.remote_target_authorized = false })
 
 onMounted(async () => {
@@ -365,9 +378,10 @@ onBeforeUnmount(() => {
           </el-form-item>
 
           <el-form-item label="语言运行时">
-            <el-select v-model="form.language" style="width: 100%">
+            <el-select v-model="form.language" :disabled="form.purpose === 'deploy' && Boolean(selectedProjectLanguage)" style="width: 100%">
               <el-option v-for="language in languageOptions" :key="language.value" :label="language.label" :value="language.value" />
             </el-select>
+            <div v-if="form.purpose === 'deploy' && selectedProjectLanguage" class="field-hint">部署 Agent 已按项目主语言自动选择受控运行时。</div>
           </el-form-item>
 
           <el-form-item v-if="form.purpose === 'test'" label="测试模式">

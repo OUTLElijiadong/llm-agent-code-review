@@ -19,6 +19,14 @@ vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages
 
 import AdminCopilot from './AdminCopilot.vue'
 
+function flushSessionRestore(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      void flushPromises().then(() => setTimeout(resolve, 0))
+    }, 0)
+  })
+}
+
 function mountCopilot(): VueWrapper {
   return mount(AdminCopilot, {
     global: {
@@ -81,7 +89,7 @@ describe('AdminCopilot Responses stream', () => {
       },
       messages: [
         { role: 'user', content: '查询用户列表' },
-        { role: 'assistant', content: '共找到 3 个用户。' },
+        { role: 'assistant', content: '共找到 3 个用户。\n\n<wbr>\n    •已完成。' },
       ],
       events: [
         {
@@ -99,13 +107,18 @@ describe('AdminCopilot Responses stream', () => {
     const wrapper = mountCopilot()
     await flushPromises()
     await openCopilot(wrapper)
+    await flushSessionRestore()
     const rows = wrapper.findAll('.message-row')
 
-    expect(rows).toHaveLength(3)
-    expect(rows[0].classes()).toContain('is-user')
-    expect(rows[1].find('.response-tool-timeline').text()).toContain('admin_list_users')
-    expect(rows[1].text()).toContain('已完成')
-    expect(rows[2].find('.markdown-body').text()).toContain('共找到 3 个用户')
+    // 首条为吉祥物欢迎语,其后才是恢复的历史消息
+    expect(rows).toHaveLength(4)
+    expect(rows[0].text()).toContain('我是小菱')
+    expect(rows[1].classes()).toContain('is-user')
+    expect(rows[2].find('.response-tool-timeline').text()).toContain('admin_list_users')
+    expect(rows[2].text()).toContain('已完成')
+    expect(rows[3].find('.markdown-body').text()).toContain('共找到 3 个用户')
+    expect(rows[3].find('.markdown-body').text()).toContain('已完成。')
+    expect(rows[3].find('.markdown-body').text()).not.toMatch(/<wbr>|•/)
     wrapper.unmount()
   })
 
@@ -114,6 +127,7 @@ describe('AdminCopilot Responses stream', () => {
     sessionApi.get.mockReturnValueOnce(new Promise((resolve) => { resolveSession = resolve }))
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
 
     expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
     await wrapper.find('textarea').setValue('不应提前发送')
@@ -147,6 +161,8 @@ describe('AdminCopilot Responses stream', () => {
     const wrapper = mountCopilot()
     await flushPromises()
     await openCopilot(wrapper)
+    await vi.advanceTimersByTimeAsync(0)
+    await flushPromises()
     expect(sessionApi.get).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(1000)
@@ -182,6 +198,7 @@ describe('AdminCopilot Responses stream', () => {
     const wrapper = mountCopilot()
     await flushPromises()
     await openCopilot(wrapper)
+    await flushSessionRestore()
 
     expect(wrapper.text()).toContain('admin_delete_users')
     expect(wrapper.text()).toContain('qa-a (#901)')
@@ -204,8 +221,11 @@ describe('AdminCopilot Responses stream', () => {
   it('opens empty and renders only the first meaningful streamed delta', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
+    await flushPromises()
 
-    expect(wrapper.findAll('.message-row')).toHaveLength(0)
+    expect(wrapper.findAll('.message-row')).toHaveLength(1)
+    expect(wrapper.text()).toContain('我是小菱')
     expect(wrapper.find('.quick-commands').exists()).toBe(false)
 
     await wrapper.find('textarea').setValue('检查生产状态')
@@ -221,14 +241,16 @@ describe('AdminCopilot Responses stream', () => {
     emit(0, { type: 'response.output_text.delta', delta: '' })
     emit(0, { type: 'response.output_text.delta', delta: '\n\n' })
     await flushPromises()
-    expect(wrapper.findAll('.is-assistant .message-bubble')).toHaveLength(0)
-
-    emit(0, { type: 'response.output_text.delta', delta: '第一段\n\n第二段' })
-    await flushPromises()
-    const assistant = wrapper.find('.is-assistant .message-bubble')
-    expect(assistant.exists()).toBe(true)
-    expect(assistant.text()).toContain('第一段\n第二段')
     expect(wrapper.findAll('.is-assistant .message-bubble')).toHaveLength(1)
+
+    emit(0, { type: 'response.output_text.delta', delta: '第一段\n\n<wbr>\n    •第二段' })
+    await flushPromises()
+    const assistant = wrapper.findAll('.is-assistant .message-bubble')[1]
+    expect(assistant.exists()).toBe(true)
+    expect(assistant.text()).toContain('第一段')
+    expect(assistant.text()).toContain('第二段')
+    expect(assistant.text()).not.toContain('<wbr>')
+    expect(wrapper.findAll('.is-assistant .message-bubble')).toHaveLength(2)
 
     emit(0, { type: 'response.completed', response: { id: 'run-admin', status: 'completed' } })
     await finish(0)
@@ -236,19 +258,19 @@ describe('AdminCopilot Responses stream', () => {
     await wrapper.find('textarea').setValue('继续检查')
     void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(streams.records[1].body).toMatchObject({
-      messages: [
-        { role: 'user', content: '检查生产状态' },
-        { role: 'assistant', content: '第一段\n第二段' },
-        { role: 'user', content: '继续检查' },
-      ],
-    })
+    const history = streams.records[1].body.messages as Array<{ role: string; content: string }>
+    expect(history.slice(-3)).toEqual([
+      { role: 'user', content: '检查生产状态' },
+      { role: 'assistant', content: '第一段\n第二段' },
+      { role: 'user', content: '继续检查' },
+    ])
     await finish(1)
   })
 
   it('keeps a streamed Markdown user table complete inside the chat bubble', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
     await wrapper.find('textarea').setValue('查看用户列表')
     void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
@@ -278,6 +300,7 @@ describe('AdminCopilot Responses stream', () => {
   it('approves by click and resumes without adding a fake user message', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
     await wrapper.find('textarea').setValue('删除测试用户')
     void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
@@ -313,8 +336,9 @@ describe('AdminCopilot Responses stream', () => {
       surface: 'admin',
       run_id: 'run-admin-approval',
       call_id: 'call-delete',
-      messages: [{ role: 'user', content: '删除测试用户' }],
     })
+    const approveMessages = streams.records[1].body.messages as Array<{ role: string; content: string }>
+    expect(approveMessages[approveMessages.length - 1]).toEqual({ role: 'user', content: '删除测试用户' })
     expect(wrapper.findAll('.is-user')).toHaveLength(1)
 
     emit(1, {
@@ -335,6 +359,7 @@ describe('AdminCopilot Responses stream', () => {
   it('marks a resumed approval as failed when the terminal response has no tool result', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
     await wrapper.find('textarea').setValue('删除测试用户')
     void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
@@ -372,6 +397,7 @@ describe('AdminCopilot Responses stream', () => {
   it('does not mark a tool completed without response.tool.completed evidence', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
     await wrapper.find('textarea').setValue('删除测试模板')
     void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
@@ -400,6 +426,7 @@ describe('AdminCopilot Responses stream', () => {
     })
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
     await wrapper.find('textarea').setValue('生成一个内测码')
     void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
@@ -429,19 +456,19 @@ describe('AdminCopilot Responses stream', () => {
     await flushPromises()
     const serialized = JSON.stringify(streams.records[1].body)
     expect(serialized).not.toContain('BETA-ONE-TIME-123')
-    expect(streams.records[1].body).toMatchObject({
-      messages: [
-        { role: 'user', content: '生成一个内测码' },
-        { role: 'assistant', content: '已生成 1 个内测码' },
-        { role: 'user', content: '查询内测码列表' },
-      ],
-    })
+    const nextMessages = streams.records[1].body.messages as Array<{ role: string; content: string }>
+    expect(nextMessages.slice(-3)).toEqual([
+      { role: 'user', content: '生成一个内测码' },
+      { role: 'assistant', content: '已生成 1 个内测码' },
+      { role: 'user', content: '查询内测码列表' },
+    ])
     await finish(1)
   })
 
   it('streams function arguments and submits a structured option immediately', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
     await wrapper.find('textarea').setValue('查找李家栋')
     void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
@@ -495,6 +522,7 @@ describe('AdminCopilot Responses stream', () => {
   it('does not submit Enter while the Chinese IME is composing', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
+    await flushSessionRestore()
     const textarea = wrapper.find('textarea')
     await textarea.setValue('删除用户')
     await textarea.trigger('keydown', { key: 'Enter', isComposing: true })

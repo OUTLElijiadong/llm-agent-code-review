@@ -5,6 +5,7 @@ import {
   hasSandboxConclusion,
   isRemoteAuthorizationRequired,
   isSandboxActive,
+  projectSandboxLanguage,
   sortSandboxEvents,
 } from './sandboxPresentation'
 import type { SandboxEnvironment } from '@/types/sandbox'
@@ -33,5 +34,13 @@ describe('sandbox presentation rules', () => {
     expect(hasSandboxConclusion({ ...baseEnvironment, status: 'succeeded' })).toBe(true)
     expect(isRemoteAuthorizationRequired('combined', 'https://target.example')).toBe(true)
     expect(isRemoteAuthorizationRequired('whitebox', 'https://target.example')).toBe(false)
+  })
+
+  it('maps project languages to the fixed deployment runtime profiles', () => {
+    expect(projectSandboxLanguage('PHP')).toBe('php')
+    expect(projectSandboxLanguage('TypeScript')).toBe('node')
+    expect(projectSandboxLanguage('node.js')).toBe('node')
+    expect(projectSandboxLanguage('Golang')).toBe('go')
+    expect(projectSandboxLanguage('plaintext')).toBeNull()
   })
 })

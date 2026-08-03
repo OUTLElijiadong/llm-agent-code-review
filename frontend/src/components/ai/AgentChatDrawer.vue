@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { CircleCheck, Close, Promotion, WarningFilled } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { CircleCheck, Close, WarningFilled } from '@element-plus/icons-vue'
 
 import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
@@ -9,12 +9,18 @@ import { getAgentResponseSession } from '@/api/agentResponses'
 import { getProjects } from '@/api/project'
 import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
+import AgentNavLink from '@/components/ai/AgentNavLink.vue'
+import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
+import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
+import { extractNavigateDirectives, isAutoNavigateDirective } from '@/utils/agentNavigation'
+import type { AgentNavigateDirective } from '@/types/agentGuide'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
 import type { AgentStatus } from '@/types/agent'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { useRouter } from 'vue-router'
 import {
   CUSTOM_PROJECT_OPTION_VALUE,
   prepareClarifyAnswers,
@@ -26,7 +32,10 @@ import {
   AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS,
   isAgentResponseSessionActive,
   isAgentResponseSessionOccupied,
+  isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
+import { normalizeAgentText } from '@/utils/agentText'
+import { saveAgentChatSnapshot } from '@/utils/agentChatSessions'
 import {
   applyResponseToolEvent,
   attachApprovalToToolCall,
@@ -87,10 +96,17 @@ interface ChatMessage {
     status: 'pending' | 'submitting' | 'answered'
   }
   toolCalls?: ResponseToolCall[]
+  /** 助手回复末尾解析出的"带我去"导航指令 */
+  navigations?: AgentNavigateDirective[]
 }
 
 const props = defineProps<{ visible: boolean; prefill?: string }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean]; 'consumed-prefill': [] }>()
+
+const router = useRouter()
+
+const MASCOT_NAME = '小菱'
+const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},Prism 棱镜智能代码审查平台的小助手!我可以帮你发起代码审查、解读报告、查询项目与漏洞。点击左上角「+」可以随时开新对话,多个任务我会并行帮你盯着。`
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
@@ -98,8 +114,8 @@ const loading = ref(false)
 const showTyping = ref(false)
 const modelName = ref('deepseek-v4-flash')
 const chatBody = ref<HTMLElement>()
-const SESSION_KEY = 'prism-user-agent-session'
-const sessionId = getOrCreateSessionId()
+const LEGACY_SESSION_KEY = 'prism-user-agent-session'
+const sessionId = ref('')
 let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
 let sessionPollTimer: number | undefined
@@ -109,6 +125,19 @@ let sessionSnapshotSignature = ''
 const sessionRun = ref<Awaited<ReturnType<typeof getAgentResponseSession>>['run']>(null)
 const sessionRestoring = ref(true)
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
+const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+const lastActiveToolName = ref('')
+
+/** 吉祥物与标题栏共享的agent状态:运行中/等待用户/空闲 */
+const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
+  const status = sessionRun.value?.status
+  if (loading.value || isAgentResponseSessionActive(status)) return 'running'
+  if (isAgentResponseSessionWaiting(status)) return 'waiting'
+  return 'idle'
+})
+const runStatusLabel = computed(() => (
+  mascotStatus.value === 'running' ? '运行中' : mascotStatus.value === 'waiting' ? '等待你操作' : '空闲'
+))
 const canSend = computed(() => (
   inputText.value.trim().length > 0
   && !loading.value
@@ -116,30 +145,75 @@ const canSend = computed(() => (
   && !sessionBusy.value
 ))
 
-function getOrCreateSessionId(): string {
-  const current = window.localStorage.getItem(SESSION_KEY)
-  if (current) return current
-  const id = `user-${crypto.randomUUID()}`
-  window.localStorage.setItem(SESSION_KEY, id)
-  return id
-}
-
 function messageId(): string {
   return crypto.randomUUID()
+}
+
+function welcomeMessage(): ChatMessage {
+  return {
+    id: messageId(),
+    role: 'assistant',
+    content: WELCOME_TEXT,
+    time: dayjs().format('HH:mm'),
+  }
+}
+
+/** 把当前会话的关键上下文写入本地快照,供切换会话与忙碌标记使用。 */
+function persistSnapshot(): void {
+  if (!sessionId.value) return
+  saveAgentChatSnapshot(sessionId.value, {
+    messages: messages.value.map((message) => ({ role: message.role, content: message.content })),
+    runStatus: sessionRun.value?.status ?? null,
+    updatedAt: Date.now(),
+  })
+}
+
+/** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
+async function handleSessionSelect(nextSessionId: string): Promise<void> {
+  persistSnapshot()
+  activeResponse?.abort()
+  activeResponse = null
+  sessionPollStopped = true
+  invalidateSessionPoll()
+  sessionPollStopped = false
+  sessionSnapshotSignature = ''
+  sessionRestoreStarted = false
+  sessionId.value = nextSessionId
+  sessionRun.value = null
+  loading.value = false
+  showTyping.value = false
+  lastActiveToolName.value = ''
+  sessionRestoring.value = true
+  messages.value = [welcomeMessage()]
+  await nextTick()
+  scrollToBottom()
+  void restoreSession()
+}
+
+function syncBusy(): void {
+  switcherRef.value?.setBusy(sessionId.value, isAgentResponseSessionOccupied(sessionRun.value?.status))
 }
 
 function restoredMessages(
   session: Awaited<ReturnType<typeof getAgentResponseSession>>,
   restoredTime: string,
 ): ChatMessage[] {
-  const restored: ChatMessage[] = session.messages.map((message) => ({
-    id: messageId(),
-    role: message.role,
-    content: message.role === 'assistant'
-      ? compactOutsideCodeBlocks(message.content)
-      : message.content,
-    time: restoredTime,
-  }))
+  // 早期版本曾把本地欢迎语带入模型上下文并被服务端持久化,恢复时去重
+  const restored: ChatMessage[] = session.messages
+    .filter((message) => message.content.trim() !== WELCOME_TEXT.trim())
+    .map((message) => {
+      if (message.role !== 'assistant') {
+        return { id: messageId(), role: message.role, content: message.content, time: restoredTime }
+      }
+      const { cleaned, directives } = extractNavigateDirectives(message.content)
+      return {
+        id: messageId(),
+        role: message.role,
+        content: compactOutsideCodeBlocks(cleaned),
+        time: restoredTime,
+        navigations: directives.length ? directives : undefined,
+      }
+    })
   const toolCalls = responseToolCallsFromEvents(session.events)
   if (!toolCalls.length) return restored
   const timeline: ChatMessage = {
@@ -165,13 +239,15 @@ async function restoreSession(): Promise<void> {
   if (sessionRestoreStarted) return
   sessionRestoreStarted = true
   try {
-    const session = await getAgentResponseSession('user', sessionId)
+    const session = await getAgentResponseSession('user', sessionId.value)
     sessionRun.value = session.run
     if (session.run?.model) modelName.value = session.run.model
     const restoredTime = session.run?.updated_at
       ? dayjs(session.run.updated_at).format('HH:mm')
       : dayjs().format('HH:mm')
-    messages.value = restoredMessages(session, restoredTime)
+    const restored = restoredMessages(session, restoredTime)
+    // 服务端恢复出历史时,按欢迎语+历史整体重建,避免与本地占位重复
+    if (restored.length) messages.value = [welcomeMessage(), ...restored]
     sessionSnapshotSignature = JSON.stringify({
       run: session.run,
       messages: session.messages,
@@ -206,6 +282,8 @@ async function restoreSession(): Promise<void> {
     // HTTP 层已给出错误提示；保留本地会话不覆盖用户输入。
   } finally {
     sessionRestoring.value = false
+    syncBusy()
+    persistSnapshot()
     await nextTick()
     scrollToBottom()
   }
@@ -236,7 +314,7 @@ function scheduleSessionPoll(): void {
 async function pollSessionSnapshot(generation: number): Promise<void> {
   if (sessionPollStopped || generation !== sessionPollGeneration || !isAgentResponseSessionActive(sessionRun.value?.status)) return
   try {
-    const session = await getAgentResponseSession('user', sessionId)
+    const session = await getAgentResponseSession('user', sessionId.value)
     if (sessionPollStopped || generation !== sessionPollGeneration) return
     sessionRun.value = session.run
     if (session.run?.model) modelName.value = session.run.model
@@ -250,7 +328,9 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
       if (signature !== sessionSnapshotSignature) {
         sessionSnapshotSignature = signature
         const restoredTime = session.run?.updated_at ? dayjs(session.run.updated_at).format('HH:mm') : dayjs().format('HH:mm')
-        messages.value = restoredMessages(session, restoredTime)
+        const restored = restoredMessages(session, restoredTime)
+        // 轮询恢复快照:欢迎语置顶 + 服务端历史,替换本地占位
+        messages.value = restored.length ? [welcomeMessage(), ...restored] : restored
         const pending = session.pending
         if (pending) {
           const toolCalls: ResponseToolCall[] = []
@@ -276,6 +356,8 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   } catch {
     // SSE remains the primary channel; transient recovery errors are retried.
   } finally {
+    syncBusy()
+    persistSnapshot()
     if (
       !sessionPollStopped
       && generation === sessionPollGeneration
@@ -284,30 +366,20 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   }
 }
 
-/** 删除代码围栏之外的空白行，围栏内文本保持原样。 */
+/** 删除代码围栏之外的空白行和旧版展示哨兵。 */
 function compactOutsideCodeBlocks(value: string): string {
-  const lines = value.replace(/\r\n?/g, '\n').split('\n')
-  const output: string[] = []
-  let fence: '```' | '~~~' | null = null
-  for (const line of lines) {
-    const marker = line.trimStart().startsWith('```')
-      ? '```'
-      : line.trimStart().startsWith('~~~') ? '~~~' : null
-    if (marker) {
-      if (!fence) fence = marker
-      else if (fence === marker) fence = null
-      output.push(line)
-      continue
-    }
-    if (!fence && line.trim() === '') continue
-    output.push(line)
-  }
-  return output.join('\n')
+  return normalizeAgentText(value)
+}
+
+/** 流式渲染与历史恢复使用同一文本契约。 */
+function formatStreamContent(value: string): string {
+  return normalizeAgentText(value)
 }
 
 function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
   return messages.value
-    .filter((message) => message.content.trim().length > 0)
+    // 欢迎语是本地开屏气泡,不参与模型上下文,避免被服务端持久化后恢复重复
+    .filter((message) => message.content.trim().length > 0 && message.content.trim() !== WELCOME_TEXT.trim())
     .map((message) => ({ role: message.role, content: message.content }))
 }
 
@@ -390,6 +462,29 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     return timelineTarget
   }
 
+  /** 应用文本增量:剥离导航指令,单一指令在流结束后自动跳转到对应页面 */
+  let pendingNavigate: AgentNavigateDirective | null = null
+  let navigateHandled = false
+  const applyTextDelta = (): void => {
+    const { cleaned, directives } = extractNavigateDirectives(rawText)
+    pendingNavigate = isAutoNavigateDirective(directives) ? directives[0] : null
+    const content = formatStreamContent(cleaned)
+    if (!content.trim()) return
+    showTyping.value = false
+    if (!textTarget) {
+      messages.value.push({
+        id: messageId(),
+        role: 'assistant',
+        content,
+        time: dayjs().format('HH:mm'),
+      })
+      textTarget = messages.value[messages.value.length - 1]
+    } else {
+      textTarget.content = content
+    }
+    textTarget.navigations = directives.length ? directives : undefined
+  }
+
   const handle = streamResponses(payload, {
     onEvent(event) {
       if (event.type === 'response.created') {
@@ -403,26 +498,17 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
+        if (event.type === 'response.tool.started' && typeof event.tool_name === 'string' && event.tool_name) {
+          lastActiveToolName.value = event.tool_name
+        }
         if (!applyExistingTimelineToolEvent(event)) {
           applyResponseToolEvent(runToolCalls, event)
           syncTimeline()
         }
+        syncBusy()
       } else if (event.type === 'response.output_text.delta') {
         rawText += event.delta
-        const content = compactOutsideCodeBlocks(rawText)
-        if (!content.trim()) return
-        showTyping.value = false
-        if (!textTarget) {
-          messages.value.push({
-            id: messageId(),
-            role: 'assistant',
-            content,
-            time: dayjs().format('HH:mm'),
-          })
-          textTarget = messages.value[messages.value.length - 1]
-        } else {
-          textTarget.content = content
-        }
+        applyTextDelta()
       } else if (event.type === 'response.approval.required') {
         showTyping.value = false
         activeRunId = event.run_id
@@ -458,6 +544,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         || event.type === 'error'
       ) {
         showTyping.value = false
+        lastActiveToolName.value = ''
         if (sessionRun.value) {
           sessionRun.value = {
             ...sessionRun.value,
@@ -467,6 +554,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
           }
         }
         invalidateSessionPoll()
+        syncBusy()
+        persistSnapshot()
         protocolError ||= eventErrorMessage(event)
         const failed = event.type !== 'response.completed'
         const terminalError = failed ? protocolError : '响应已结束，但工具未返回完成事件'
@@ -477,6 +566,10 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         )
         finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
+        if (event.type === 'response.completed' && pendingNavigate && !navigateHandled) {
+          navigateHandled = true
+          followNavigation(pendingNavigate)
+        }
       }
       void nextTick().then(scrollToBottom)
     },
@@ -743,7 +836,7 @@ async function sendMessage(): Promise<void> {
   await runResponse({
     action: 'start',
     surface: 'user',
-    session_id: sessionId,
+    session_id: sessionId.value,
     messages: conversationHistory(),
   })
 }
@@ -760,7 +853,7 @@ async function decideApproval(
   const succeeded = await runResponse({
     action,
     surface: 'user',
-    session_id: sessionId,
+    session_id: sessionId.value,
     messages: conversationHistory(),
     run_id: approval.run_id,
     call_id: approval.call_id,
@@ -790,7 +883,7 @@ async function submitInput(message: ChatMessage, selectedAnswer?: string): Promi
   const succeeded = await runResponse({
     action: 'answer',
     surface: 'user',
-    session_id: sessionId,
+    session_id: sessionId.value,
     messages: conversationHistory(),
     run_id: request.run_id,
     call_id: request.call_id ?? '',
@@ -821,6 +914,31 @@ function planTotalMs(steps: PlanStep[]): number {
   return steps.reduce((sum, s) => sum + (s.duration_ms || 0), 0)
 }
 
+/**
+ * 执行指令导航:仅跳站内路由,目标由 AgentNavLink 同源守卫再次校验。
+ * 导航前收起抽屉,让目标页面完整呈现,模拟用户真实浏览路径。
+ */
+function followNavigation(directive: AgentNavigateDirective): void {
+  if (!directive.route.startsWith('/')) return
+  emit('update:visible', false)
+  void router.push(directive.route)
+}
+
+/**
+ * 拦截助手回复中的站内 markdown 链接点击:
+ * 命中路由表则由 AgentNavLink 同源守卫决定是否渲染,点击后 SPA 内跳转,
+ * 模拟用户点击真实页面入口;外部链接不拦截。
+ */
+function onMessageClick(event: MouseEvent): void {
+  const anchor = (event.target as HTMLElement | null)?.closest?.('a')
+  if (!anchor) return
+  const href = anchor.getAttribute('href') ?? ''
+  if (!href.startsWith('/') || href.startsWith('//')) return
+  event.preventDefault()
+  const label = anchor.textContent?.trim() || '前往页面'
+  followNavigation({ action: 'navigate', route: href, label })
+}
+
 function scrollToBottom(): void {
   if (chatBody.value) {
     chatBody.value.scrollTop = chatBody.value.scrollHeight
@@ -847,11 +965,6 @@ function handleEscape(event: KeyboardEvent): void {
   if (event.key === 'Escape' && props.visible) close()
 }
 
-onMounted(() => {
-  window.addEventListener('keydown', handleEscape)
-  void restoreSession()
-})
-
 onBeforeUnmount(() => {
   sessionPollStopped = true
   invalidateSessionPoll()
@@ -863,32 +976,71 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <button v-if="!visible" class="chat-fab" type="button" aria-label="打开棱镜小助" title="棱镜小助" @click="emit('update:visible', true)">
-      <el-icon><Promotion /></el-icon>
+    <button
+      v-if="!visible"
+      class="chat-fab"
+      :class="{ 'is-busy': mascotStatus !== 'idle' }"
+      type="button"
+      :aria-label="`打开${MASCOT_NAME}助手`"
+      :title="`${MASCOT_NAME} · Prism 小助手`"
+      @click="emit('update:visible', true)"
+    >
+      <PrismMascot :size="44" :status="mascotStatus !== 'idle' ? 'running' : 'idle'" />
     </button>
     <Transition name="drawer">
       <div v-if="visible" class="chat-overlay">
         <div class="chat-drawer">
           <div class="chat-header">
             <div class="chat-title">
-              <el-icon class="title-icon"><Promotion /></el-icon>
-              <span>Agent 助手</span>
-              <span class="model-tag font-mono">{{ modelName }}</span>
+              <span class="mascot-badge">
+                <PrismMascot :size="34" :status="mascotStatus" />
+              </span>
+              <div class="chat-title-text">
+                <div class="chat-title-line">
+                  <span>{{ MASCOT_NAME }} · Agent 助手</span>
+                  <span class="model-tag font-mono">{{ modelName }}</span>
+                  <span class="run-badge" :class="`run-${mascotStatus}`">
+                    <i></i>{{ runStatusLabel }}
+                  </span>
+                </div>
+                <AgentSessionSwitcher
+                  ref="switcherRef"
+                  class="chat-session-switch"
+                  storage-key="user"
+                  :legacy-key="LEGACY_SESSION_KEY"
+                  id-prefix="user"
+                  @select="handleSessionSelect"
+                />
+              </div>
             </div>
             <button
               class="close-btn"
               type="button"
-              aria-label="关闭 Agent 助手"
-              title="关闭 Agent 助手"
+              :aria-label="`关闭${MASCOT_NAME}助手`"
+              :title="`关闭${MASCOT_NAME}助手`"
               @click="close"
             >
               <el-icon><Close /></el-icon>
             </button>
           </div>
 
-          <div ref="chatBody" class="chat-body">
+          <div class="chat-body-region">
+            <Transition name="mascot-float">
+              <div v-if="messages.length <= 1 && !showTyping" class="mascot-hero" aria-hidden="true">
+                <PrismMascot :size="120" :status="mascotStatus" />
+              </div>
+            </Transition>
+
+            <div v-if="mascotStatus === 'running' && lastActiveToolName" class="chat-progress">
+              正在执行 <code>{{ lastActiveToolName }}</code>
+            </div>
+
+            <div ref="chatBody" class="chat-body" @click="onMessageClick">
             <div v-for="(msg, i) in messages" :key="msg.id ?? i" class="msg-row" :class="msg.role">
-              <div class="msg-avatar">{{ msg.role === 'user' ? 'U' : 'AG' }}</div>
+              <div class="msg-avatar">
+                <template v-if="msg.role === 'user'">U</template>
+                <PrismMascot v-else :size="26" :status="'idle'" />
+              </div>
               <div class="msg-bubble" :class="{ 'has-response-control': msg.toolCalls?.length || msg.approval || msg.inputRequest }">
                 <!-- 步骤气泡: 仅对 assistant + 有 steps 时展示 -->
                 <details
@@ -976,6 +1128,18 @@ onBeforeUnmount(() => {
                   v-html="renderMarkdown(msg.content)"
                 />
                 <div v-else-if="msg.role === 'user'" class="msg-content">{{ msg.content }}</div>
+
+                <!-- 页面引导:模型约定路由 + 指令导航按钮,鉴权由 AgentNavLink 同源守卫裁决 -->
+                <div v-if="msg.role === 'assistant' && msg.navigations?.length" class="nav-directives">
+                  <AgentNavLink
+                    v-for="nav in msg.navigations"
+                    :key="nav.route"
+                    :href="nav.route"
+                    :label="nav.label || '前往对应页面'"
+                    :hint="nav.hint"
+                    prominent
+                  />
+                </div>
 
                 <ResponseToolTimeline v-if="msg.toolCalls?.length" :calls="msg.toolCalls" />
 
@@ -1130,12 +1294,15 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-if="showTyping" class="msg-row assistant">
-              <div class="msg-avatar">AG</div>
+              <div class="msg-avatar">
+                <PrismMascot :size="26" :status="'running'" />
+              </div>
               <div class="msg-bubble typing">
                 <span class="typing-dot" />
                 <span class="typing-dot" />
                 <span class="typing-dot" />
               </div>
+            </div>
             </div>
           </div>
 
@@ -1143,7 +1310,7 @@ onBeforeUnmount(() => {
             <textarea
               v-model="inputText"
               class="chat-input"
-              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? '请先处理当前 Agent 任务' : '输入问题,Enter 发送,Shift+Enter 换行'"
+              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送,Shift+Enter 换行'"
               rows="2"
               :disabled="loading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
@@ -1172,31 +1339,122 @@ onBeforeUnmount(() => {
 }
 
 .chat-drawer {
-  width: min(380px, calc(100vw - 32px));
-  height: min(600px, calc(100dvh - 48px));
+  width: min(400px, calc(100vw - 32px));
+  height: min(620px, calc(100dvh - 48px));
   background: #fff;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--color-border-light);
-  border-radius: 12px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(91, 88, 232, 0.14);
+  border-radius: 18px;
+  box-shadow:
+    0 18px 48px rgba(51, 48, 140, 0.16),
+    0 4px 14px rgba(15, 18, 34, 0.08);
   overflow: hidden;
 }
 
 .chat-fab {
   position: fixed; right: 24px; bottom: 24px; z-index: 3000;
-  width: 56px; height: 56px; border: 0; border-radius: 50%;
-  background: var(--brand-500); color: #fff; font-size: 22px; cursor: pointer;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); transition: transform .16s ease;
+  width: 60px; height: 60px; border: 0; border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #eef0fb);
+  display: grid; place-items: center;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(91, 88, 232, 0.28), 0 2px 6px rgba(15, 18, 34, 0.1);
+  transition: transform .16s ease, box-shadow .16s ease;
 }
-.chat-fab:hover { transform: scale(1.05); }
+.chat-fab:hover { transform: scale(1.06) translateY(-2px); box-shadow: 0 12px 30px rgba(91, 88, 232, 0.36), 0 3px 8px rgba(15, 18, 34, 0.12); }
+.chat-fab.is-busy::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--brand-500);
+  border-right-color: var(--accent-400);
+  animation: fab-spin 1.2s linear infinite;
+}
+@keyframes fab-spin { to { transform: rotate(360deg); } }
+
+.mascot-badge {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #f2f3ff, #e4ecfb);
+  box-shadow: inset 0 0 0 1px rgba(91, 88, 232, 0.16);
+  overflow: hidden;
+}
+
+.chat-title-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.chat-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chat-session-switch {
+  align-self: flex-start;
+}
+
+.run-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.run-badge i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.run-idle { color: var(--gray-500); background: var(--gray-100); border-color: var(--gray-200, #e5e6eb); }
+.run-running { color: #2f7a3d; background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
+.run-running i { animation: run-blink 1s ease-in-out infinite; }
+.run-waiting { color: #b68039; background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
+.run-waiting i { animation: run-blink 1s ease-in-out infinite; }
+@keyframes run-blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+.chat-progress {
+  flex-shrink: 0;
+  padding: 6px 20px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: linear-gradient(90deg, rgba(91, 88, 232, 0.06), rgba(61, 188, 217, 0.06));
+  border-bottom: 1px solid var(--color-border-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-progress code {
+  font-family: var(--font-mono, monospace);
+  color: var(--brand-600);
+  font-size: 10.5px;
+  background: rgba(91, 88, 232, 0.1);
+  padding: 0 5px;
+  border-radius: 3px;
+}
 
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  gap: 8px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--color-border-light);
+  background: linear-gradient(135deg, rgba(91, 88, 232, 0.07), rgba(61, 188, 217, 0.06) 70%, transparent);
   flex-shrink: 0;
 }
 
@@ -1243,6 +1501,28 @@ onBeforeUnmount(() => {
   color: var(--color-text-primary);
 }
 
+.chat-body-region {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mascot-hero {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.mascot-float-enter-active,
+.mascot-float-leave-active { transition: opacity 0.35s ease, transform 0.35s ease; }
+.mascot-float-enter-from,
+.mascot-float-leave-to { opacity: 0; transform: translateY(10px) scale(0.9); }
+
 .chat-body {
   flex: 1;
   overflow-y: auto;
@@ -1270,12 +1550,13 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .msg-row.user .msg-avatar { background: var(--brand-500); color: #fff; }
 .msg-row.assistant .msg-avatar {
-  background: linear-gradient(135deg, var(--brand-500), var(--accent-400));
-  color: #fff;
+  background: linear-gradient(145deg, #f2f3ff, #e4ecfb);
+  box-shadow: inset 0 0 0 1px rgba(91, 88, 232, 0.16);
 }
 
 .msg-bubble {
@@ -1305,8 +1586,8 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
-.msg-content.markdown-body :deep(p)        { margin: 0 0 8px; }
-.msg-content.markdown-body :deep(p:last-child) { margin-bottom: 0; }
+.msg-content.markdown-body { white-space: normal; }
+.msg-content.markdown-body :deep(p)        { margin: 0; }
 .msg-content.markdown-body :deep(pre) {
   background: #1e1e2e; color: #cdd6f4;
   border-radius: 6px; padding: 12px;
@@ -1319,9 +1600,28 @@ onBeforeUnmount(() => {
   background: var(--gray-100); padding: 1px 5px;
   border-radius: 3px; color: var(--brand-600);
 }
-.msg-content.markdown-body :deep(ul),
+.msg-content.markdown-body :deep(ul) { list-style: none; padding-left: 0; margin: 0; }
 .msg-content.markdown-body :deep(ol) { padding-left: 18px; margin: 4px 0; }
 .msg-content.markdown-body :deep(li) { margin: 2px 0; }
+
+/* 站内页面引导链接:渲染成品牌色导航样式,未授权目标已由守卫隐藏 */
+.msg-content.markdown-body :deep(a) {
+  color: var(--brand-600, #5b58e8);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dashed var(--brand-300, #b7bcf5);
+  cursor: pointer;
+}
+.msg-content.markdown-body :deep(a:hover) {
+  color: var(--brand-500, #5b58e8);
+  border-bottom-style: solid;
+}
+
+.nav-directives {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
 .msg-time {
   font-size: 10px;
