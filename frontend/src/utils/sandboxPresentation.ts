@@ -1,7 +1,18 @@
-import type { SandboxEnvironment, SandboxEvent } from '@/types/sandbox'
+import type { SandboxEnvironment, SandboxEvent, SandboxLanguage } from '@/types/sandbox'
 
 const ACTIVE_STATUSES = new Set(['queued', 'dispatching', 'running', 'ready', 'stopping'])
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'blocked', 'stopped', 'expired'])
+const PROJECT_LANGUAGE_TO_SANDBOX: Record<string, SandboxLanguage> = {
+  python: 'python', py: 'python',
+  javascript: 'node', js: 'node', typescript: 'node', ts: 'node',
+  node: 'node', nodejs: 'node', 'node.js': 'node', vue: 'node', svelte: 'node',
+  java: 'java', go: 'go', golang: 'go', php: 'php',
+}
+
+export function projectSandboxLanguage(language?: string | null): SandboxLanguage | null {
+  const normalized = (language || '').trim().toLowerCase().replace(/[_-]/g, '')
+  return PROJECT_LANGUAGE_TO_SANDBOX[normalized] || null
+}
 
 export function sortSandboxEvents(events: SandboxEvent[]): SandboxEvent[] {
   return [...events].sort((left, right) => {

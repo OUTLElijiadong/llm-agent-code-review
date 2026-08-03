@@ -91,7 +91,7 @@ describe('AgentChatDrawer Responses stream', () => {
       },
       messages: [
         { role: 'user', content: '列出项目' },
-        { role: 'assistant', content: '共找到 2 个项目。' },
+        { role: 'assistant', content: '共找到 2 个项目。\n\n<wbr>\n    •已完成。' },
       ],
       events: [
         {
@@ -110,11 +110,15 @@ describe('AgentChatDrawer Responses stream', () => {
     const wrapper = await mountReadyDrawer()
     const rows = wrapper.findAll('.msg-row')
 
-    expect(rows).toHaveLength(3)
-    expect(rows[0].classes()).toContain('user')
-    expect(rows[1].find('.response-tool-timeline').text()).toContain('list_projects')
-    expect(rows[1].text()).toContain('已完成')
-    expect(rows[2].find('.markdown-body').text()).toContain('共找到 2 个项目')
+    // 首条为吉祥物欢迎语,其后才是恢复的历史消息
+    expect(rows).toHaveLength(4)
+    expect(rows[0].text()).toContain('我是小菱')
+    expect(rows[1].classes()).toContain('user')
+    expect(rows[2].find('.response-tool-timeline').text()).toContain('list_projects')
+    expect(rows[2].text()).toContain('已完成')
+    expect(rows[3].find('.markdown-body').text()).toContain('共找到 2 个项目')
+    expect(rows[3].find('.markdown-body').text()).toContain('已完成。')
+    expect(rows[3].find('.markdown-body').text()).not.toMatch(/<wbr>|•/)
     wrapper.unmount()
   })
 
@@ -213,9 +217,10 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.emitted('consumed-prefill')).toHaveLength(1)
   })
 
-  it('keeps the empty view clean and incrementally updates one assistant bubble', async () => {
+  it('keeps the empty view with only the mascot greeting, then incrementally updates one assistant bubble', async () => {
     const wrapper = await mountReadyDrawer()
-    expect(wrapper.findAll('.msg-row')).toHaveLength(0)
+    expect(wrapper.findAll('.msg-row')).toHaveLength(1)
+    expect(wrapper.text()).toContain('我是小菱')
 
     await wrapper.find('.chat-input').setValue('审查当前项目')
     void wrapper.find('.send-btn').trigger('click')
@@ -229,19 +234,22 @@ describe('AgentChatDrawer Responses stream', () => {
     emit(0, { type: 'response.output_text.delta', delta: '' })
     emit(0, { type: 'response.output_text.delta', delta: '\n' })
     await flushPromises()
-    expect(wrapper.findAll('.msg-row.assistant .markdown-body')).toHaveLength(0)
-
-    emit(0, { type: 'response.output_text.delta', delta: '发现 1 个问题\n\n正在定位' })
-    await flushPromises()
     expect(wrapper.findAll('.msg-row.assistant .markdown-body')).toHaveLength(1)
-    expect(wrapper.find('.msg-row.assistant .markdown-body').html()).toContain('发现 1 个问题<br>')
+
+    emit(0, { type: 'response.output_text.delta', delta: '发现 1 个问题\n\n<wbr>\n    •正在定位' })
+    await flushPromises()
+    expect(wrapper.findAll('.msg-row.assistant .markdown-body')).toHaveLength(2)
+    const streamed = wrapper.findAll('.msg-row.assistant .markdown-body')[1]
+    expect(streamed.html()).toContain('发现 1 个问题<br>')
+    expect(streamed.text()).not.toContain('<wbr>')
 
     emit(0, { type: 'response.output_text.delta', delta: '\n```ts\n\nconst ok = true\n```' })
     await flushPromises()
 
-    expect(wrapper.findAll('.msg-row.assistant .markdown-body')).toHaveLength(1)
-    const html = wrapper.find('.msg-row.assistant .markdown-body').html()
+    expect(wrapper.findAll('.msg-row.assistant .markdown-body')).toHaveLength(2)
+    const html = wrapper.findAll('.msg-row.assistant .markdown-body')[1].html()
     expect(html).not.toContain('<br><br>')
+    expect(html).not.toContain('&lt;wbr&gt;')
     expect(html).toContain('const ok = true')
 
     emit(0, { type: 'response.completed', response: { id: 'run-user' } })
@@ -257,6 +265,7 @@ describe('AgentChatDrawer Responses stream', () => {
         { role: 'user', content: '继续检查' },
       ],
     })
+    expect(JSON.stringify(streams.records[1].body)).not.toContain('<wbr>')
     await finish(1)
   })
 

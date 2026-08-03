@@ -1,4 +1,5 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
@@ -25,6 +26,28 @@ vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: {
 
 import SandboxWorkstation from './SandboxWorkstation.vue'
 
+const mountOptions = {
+  global: {
+    stubs: {
+      'el-alert': { template: '<div><slot /></div>' },
+      'el-button': { template: '<button><slot /></button>' },
+      'el-checkbox': { template: '<label><slot /></label>' },
+      'el-empty': { template: '<div />' },
+      'el-form': { template: '<form><slot /></form>' },
+      'el-form-item': { template: '<div><slot /></div>' },
+      'el-icon': { template: '<i><slot /></i>' },
+      'el-input': { template: '<input />' },
+      'el-input-number': { template: '<input />' },
+      'el-option': true,
+      'el-radio-button': { template: '<span><slot /></span>' },
+      'el-radio-group': { template: '<div><slot /></div>' },
+      'el-select': { template: '<div><slot /></div>' },
+      'el-tag': { template: '<span><slot /></span>' },
+    },
+    directives: { loading: {} },
+  },
+}
+
 beforeEach(() => {
   projectApi.getProjects.mockResolvedValue({
     items: [{ id: 7, project_name: '项目 A', status: 'active', file_count: 1, create_time: '' }],
@@ -37,27 +60,7 @@ beforeEach(() => {
 
 describe('SandboxWorkstation Agent output ordering', () => {
   it('renders the complete Agent call timeline before the conclusion', async () => {
-    const wrapper = shallowMount(SandboxWorkstation, {
-      global: {
-        stubs: {
-          'el-alert': { template: '<div><slot /></div>' },
-          'el-button': { template: '<button><slot /></button>' },
-          'el-checkbox': { template: '<label><slot /></label>' },
-          'el-empty': { template: '<div />' },
-          'el-form': { template: '<form><slot /></form>' },
-          'el-form-item': { template: '<div><slot /></div>' },
-          'el-icon': { template: '<i><slot /></i>' },
-          'el-input': { template: '<input />' },
-          'el-input-number': { template: '<input />' },
-          'el-option': true,
-          'el-radio-button': { template: '<span><slot /></span>' },
-          'el-radio-group': { template: '<div><slot /></div>' },
-          'el-select': { template: '<div><slot /></div>' },
-          'el-tag': { template: '<span><slot /></span>' },
-        },
-        directives: { loading: {} },
-      },
-    })
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
     await flushPromises()
 
     const timeline = wrapper.get('[data-testid="agent-timeline"]')
@@ -65,6 +68,32 @@ describe('SandboxWorkstation Agent output ordering', () => {
     expect(timeline.text()).toContain('已调用 worker')
     expect(timeline.text().indexOf('已调用 worker')).toBeLessThan(timeline.text().indexOf('测试通过'))
     expect(timeline.element.compareDocumentPosition(conclusion.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('synchronizes the deployment runtime whenever the selected project changes', async () => {
+    projectApi.getProjects.mockResolvedValue({
+      items: [
+        { id: 7, project_name: 'Python 项目', language: 'python', status: 'active', file_count: 1, create_time: '' },
+        { id: 8, project_name: 'PHP 项目', language: 'php', status: 'active', file_count: 1, create_time: '' },
+      ],
+      total: 2,
+    })
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      form: { project_id: number | null; purpose: string; language: string }
+    }
+
+    expect(vm.form.language).toBe('python')
+    vm.form.project_id = 8
+    await nextTick()
+    expect(vm.form.language).toBe('php')
+
+    vm.form.language = 'python'
+    vm.form.purpose = 'deploy'
+    await nextTick()
+    expect(vm.form.language).toBe('php')
     wrapper.unmount()
   })
 })

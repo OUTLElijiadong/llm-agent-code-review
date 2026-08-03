@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
-  ChatDotRound,
   Close,
   DocumentCopy,
   Promotion,
@@ -12,10 +12,15 @@ import {
   type AdminCopilotMessage,
 } from '@/api/adminCopilot'
 import { getAgentResponseSession, type AgentResponseSession } from '@/api/agentResponses'
+import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
+import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
+import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import { renderMarkdown } from '@/utils/markdown'
+import { extractNavigateDirectives, isAutoNavigateDirective } from '@/utils/agentNavigation'
+import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { streamResponses } from '@/utils/responsesStream'
 import {
   applyResponseToolEvent,
@@ -40,7 +45,10 @@ import {
   AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS,
   isAgentResponseSessionActive,
   isAgentResponseSessionOccupied,
+  isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
+import { normalizeAgentText } from '@/utils/agentText'
+import { saveAgentChatSnapshot } from '@/utils/agentChatSessions'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 interface ChatEntry {
@@ -59,10 +67,14 @@ interface ChatEntry {
   }
   toolCalls?: ResponseToolCall[]
   sensitiveResult?: ResponseSensitiveResultEvent
+  /** 助手回复末尾解析出的"带我去"导航指令 */
+  navigations?: AgentNavigateDirective[]
 }
 
-const ASSISTANT_NAME = 'Prism 管理副驾驶'
-const SESSION_KEY = 'prism-admin-copilot-session'
+const ASSISTANT_NAME = '小菱 · 管理副驾驶'
+const MASCOT_NAME = '小菱'
+const WELCOME_TEXT = `你好,我是${MASCOT_NAME},Prism 的管理副驾驶!我可以帮你巡查系统态势、审批运维操作、生成平台报表。点击「+」可开新对话,多个任务并行处理。`
+const LEGACY_SESSION_KEY = 'prism-admin-copilot-session'
 
 const visible = ref(false)
 const loading = ref(false)
@@ -75,8 +87,11 @@ const expandedTables = ref<Set<string>>(new Set())
 const messages = ref<ChatEntry[]>([])
 const sessionRun = ref<AgentResponseSession['run']>(null)
 const sessionRestoring = ref(true)
+const router = useRouter()
 
-const sessionId = getOrCreateSessionId()
+const sessionId = ref('')
+const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+const lastActiveToolName = ref('')
 let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
 let sessionPollTimer: number | undefined
@@ -84,6 +99,17 @@ let sessionPollStopped = false
 let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
+
+/** 吉祥物与标题栏共享的 agent 状态:运行中/等待用户/空闲 */
+const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
+  const status = sessionRun.value?.status
+  if (loading.value || isAgentResponseSessionActive(status)) return 'running'
+  if (isAgentResponseSessionWaiting(status)) return 'waiting'
+  return 'idle'
+})
+const runStatusLabel = computed(() => (
+  mascotStatus.value === 'running' ? '运行中' : mascotStatus.value === 'waiting' ? '等待你操作' : '空闲'
+))
 const canSend = computed(() => (
   inputText.value.trim().length > 0
   && !loading.value
@@ -91,12 +117,51 @@ const canSend = computed(() => (
   && !sessionBusy.value
 ))
 
-function getOrCreateSessionId(): string {
-  const current = window.localStorage.getItem(SESSION_KEY)
-  if (current) return current
-  const id = `admin-${crypto.randomUUID()}`
-  window.localStorage.setItem(SESSION_KEY, id)
-  return id
+function welcomeEntry(): ChatEntry {
+  return assistantEntry({ type: 'text', content: WELCOME_TEXT, status: 'completed' })
+}
+
+/** 把当前会话的关键上下文写入本地快照,供切换会话与忙碌标记使用。 */
+function persistSnapshot(): void {
+  if (!sessionId.value) return
+  saveAgentChatSnapshot(sessionId.value, {
+    messages: messages.value.map((entry) => ({ role: entry.role, content: entry.payload.content ?? '' })),
+    runStatus: sessionRun.value?.status ?? null,
+    updatedAt: Date.now(),
+  })
+}
+
+/** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
+async function handleSessionSelect(nextSessionId: string): Promise<void> {
+  // 旧会话若在流式/运行中,保持其快照忙碌标记;服务端运行不受影响,可稍后切回接管。
+  const wasBusy = isAgentResponseSessionOccupied(sessionRun.value?.status)
+  persistSnapshot()
+  if (wasBusy) switcherRef.value?.setBusy(sessionId.value, true)
+  activeResponse?.abort()
+  activeResponse = null
+  sessionPollStopped = true
+  invalidateSessionPoll()
+  sessionPollStopped = false
+  sessionSnapshotSignature = ''
+  sessionRestoreStarted = false
+  sessionId.value = nextSessionId
+  sessionRun.value = null
+  loading.value = false
+  showTyping.value = false
+  lastActiveToolName.value = ''
+  sessionRestoring.value = true
+  messages.value = [welcomeEntry()]
+  await scrollToBottom()
+  void restoreSession()
+}
+
+/** 切换器初始化后补同步一次忙碌状态,避免初始化竞态导致标记丢失。 */
+function handleSwitcherReady(): void {
+  syncBusy()
+}
+
+function syncBusy(): void {
+  switcherRef.value?.setBusy(sessionId.value, isAgentResponseSessionOccupied(sessionRun.value?.status))
 }
 
 function now(): string {
@@ -157,17 +222,27 @@ function pendingEntry(session: AgentResponseSession, restoredTime: string): Chat
 }
 
 function restoredEntries(session: AgentResponseSession, restoredTime: string): ChatEntry[] {
-  const restored: ChatEntry[] = session.messages.map((message) => ({
-    id: crypto.randomUUID(),
-    role: message.role,
-    time: restoredTime,
-    payload: {
-      type: 'text' as const,
-      content: message.role === 'assistant'
-        ? compactOutsideCodeBlocks(message.content)
-        : message.content,
-    },
-  }))
+  // 早期版本曾把本地欢迎语带入模型上下文并被服务端持久化,恢复时去重
+  const restored: ChatEntry[] = session.messages
+    .filter((message) => message.content.trim() !== WELCOME_TEXT.trim())
+    .map((message) => {
+      if (message.role !== 'assistant') {
+        return {
+          id: crypto.randomUUID(),
+          role: message.role,
+          time: restoredTime,
+          payload: { type: 'text' as const, content: message.content },
+        }
+      }
+      const { cleaned, directives } = extractNavigateDirectives(message.content)
+      return {
+        id: crypto.randomUUID(),
+        role: message.role,
+        time: restoredTime,
+        payload: { type: 'text' as const, content: compactOutsideCodeBlocks(cleaned) },
+        navigations: directives.length ? directives : undefined,
+      }
+    })
   const toolCalls = responseToolCallsFromEvents(session.events)
   if (!toolCalls.length) return restored
   const timeline: ChatEntry = {
@@ -207,7 +282,9 @@ function applySessionSnapshot(session: AgentResponseSession): void {
   const restoredTime = session.run?.updated_at
     ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(session.run.updated_at))
     : now()
-  messages.value = restoredEntries(session, restoredTime)
+  const restored = restoredEntries(session, restoredTime)
+  // 服务端恢复出历史时,按欢迎语+历史整体重建,避免与本地占位重复
+  if (restored.length) messages.value = [welcomeEntry(), ...restored]
   const pending = pendingEntry(session, restoredTime)
   if (pending) messages.value.push(pending)
 }
@@ -219,12 +296,14 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
     || !isAgentResponseSessionActive(sessionRun.value?.status)
   ) return
   try {
-    const session = await getAgentResponseSession('admin', sessionId)
+    const session = await getAgentResponseSession('admin', sessionId.value)
     if (sessionPollStopped || generation !== sessionPollGeneration) return
     applySessionSnapshot(session)
   } catch {
     // SSE remains the primary live channel; a transient poll failure is retried.
   } finally {
+    syncBusy()
+    persistSnapshot()
     if (
       !sessionPollStopped
       && generation === sessionPollGeneration
@@ -237,41 +316,33 @@ async function restoreSession(): Promise<void> {
   if (sessionRestoreStarted) return
   sessionRestoreStarted = true
   try {
-    const session = await getAgentResponseSession('admin', sessionId)
+    const session = await getAgentResponseSession('admin', sessionId.value)
     applySessionSnapshot(session)
   } catch {
     // HTTP 层已给出错误提示；保留空对话仍允许用户重试。
   } finally {
     sessionRestoring.value = false
+    syncBusy()
+    persistSnapshot()
     await scrollToBottom()
   }
 }
 
-/** 删除代码围栏之外的空白行，围栏内文本保持原样。 */
+/** 删除代码围栏之外的空白行和旧版展示哨兵。 */
 function compactOutsideCodeBlocks(value: string): string {
-  const lines = value.replace(/\r\n?/g, '\n').split('\n')
-  const output: string[] = []
-  let fence: '```' | '~~~' | null = null
-  for (const line of lines) {
-    const marker = line.trimStart().startsWith('```')
-      ? '```'
-      : line.trimStart().startsWith('~~~') ? '~~~' : null
-    if (marker) {
-      if (!fence) fence = marker
-      else if (fence === marker) fence = null
-      output.push(line)
-      continue
-    }
-    if (!fence && line.trim() === '') continue
-    output.push(line)
-  }
-  return output.join('\n')
+  return normalizeAgentText(value)
+}
+
+/** 流式渲染与历史恢复使用同一文本契约。 */
+function formatStreamContent(value: string): string {
+  return normalizeAgentText(value)
 }
 
 function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
   return messages.value
     .map((entry) => ({ role: entry.role, content: entry.payload.content ?? '' }))
-    .filter((entry) => entry.content.trim().length > 0)
+    // 欢迎语是本地开屏气泡,不参与模型上下文,避免被服务端持久化后恢复重复
+    .filter((entry) => entry.content.trim().length > 0 && entry.content.trim() !== WELCOME_TEXT.trim())
 }
 
 function eventErrorMessage(event: ResponseStreamEvent): string {
@@ -295,6 +366,30 @@ function requestErrorMessage(error: unknown): string {
 async function scrollToBottom(): Promise<void> {
   await nextTick()
   if (messageArea.value) messageArea.value.scrollTop = messageArea.value.scrollHeight
+}
+
+/**
+ * 执行指令导航:仅跳站内路由,目标由 AgentNavLink 同源守卫再次校验。
+ * 导航前收起面板,让目标管理页完整呈现,模拟管理员真实操作路径。
+ */
+function followNavigation(directive: AgentNavigateDirective): void {
+  if (!directive.route.startsWith('/')) return
+  visible.value = false
+  void router.push(directive.route)
+}
+
+/**
+ * 拦截助手回复中的站内 markdown 链接点击:
+ * 命中路由表则由 AgentNavLink 同源守卫决定是否渲染,点击后 SPA 内跳转。
+ */
+function onMessageClick(event: MouseEvent): void {
+  const anchor = (event.target as HTMLElement | null)?.closest?.('a')
+  if (!anchor) return
+  const href = anchor.getAttribute('href') ?? ''
+  if (!href.startsWith('/') || href.startsWith('//')) return
+  event.preventDefault()
+  const label = anchor.textContent?.trim() || '前往页面'
+  followNavigation({ action: 'navigate', route: href, label })
 }
 
 function openPanel(): void {
@@ -366,6 +461,25 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     return timelineTarget
   }
 
+  /** 应用文本增量:剥离导航指令,单一指令在流结束后自动跳转到对应管理页 */
+  let pendingNavigate: AgentNavigateDirective | null = null
+  let navigateHandled = false
+  const applyTextDelta = (): void => {
+    const { cleaned, directives } = extractNavigateDirectives(rawText)
+    pendingNavigate = isAutoNavigateDirective(directives) ? directives[0] : null
+    const content = formatStreamContent(cleaned)
+    if (!content.trim()) return
+    showTyping.value = false
+    if (!textTarget) {
+      messages.value.push(assistantEntry({ type: 'text', content, status: 'completed' }))
+      textTarget = messages.value[messages.value.length - 1]
+      if (!visible.value) unreadAlerts.value += 1
+    } else {
+      textTarget.payload.content = content
+    }
+    textTarget.navigations = directives.length ? directives : undefined
+  }
+
   const handle = streamResponses(payload, {
     onEvent(event) {
       if (event.type === 'response.created') {
@@ -381,22 +495,17 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
+        if (event.type === 'response.tool.started' && typeof event.tool_name === 'string' && event.tool_name) {
+          lastActiveToolName.value = event.tool_name
+        }
         if (!applyExistingTimelineToolEvent(event)) {
           applyResponseToolEvent(runToolCalls, event)
           syncTimeline()
         }
+        syncBusy()
       } else if (event.type === 'response.output_text.delta') {
         rawText += event.delta
-        const content = compactOutsideCodeBlocks(rawText)
-        if (!content.trim()) return
-        showTyping.value = false
-        if (!textTarget) {
-          messages.value.push(assistantEntry({ type: 'text', content, status: 'completed' }))
-          textTarget = messages.value[messages.value.length - 1]
-          if (!visible.value) unreadAlerts.value += 1
-        } else {
-          textTarget.payload.content = content
-        }
+        applyTextDelta()
       } else if (event.type === 'response.approval.required') {
         showTyping.value = false
         activeRunId = event.run_id
@@ -439,12 +548,15 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         || event.type === 'error'
       ) {
         showTyping.value = false
+        lastActiveToolName.value = ''
         protocolError ||= eventErrorMessage(event)
         const terminalStatus = event.type === 'response.completed'
           ? 'completed'
           : event.type === 'response.cancelled' ? 'cancelled' : 'failed'
         if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: terminalStatus, error: protocolError }
         invalidateSessionPoll()
+        syncBusy()
+        persistSnapshot()
         const failed = event.type !== 'response.completed'
         const terminalError = failed ? protocolError : '响应已结束，但工具未返回完成事件'
         finishResponseToolCalls(
@@ -454,6 +566,10 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         )
         finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
+        if (event.type === 'response.completed' && pendingNavigate && !navigateHandled) {
+          navigateHandled = true
+          followNavigation(pendingNavigate)
+        }
       }
       void scrollToBottom()
     },
@@ -490,7 +606,7 @@ async function sendMessage(): Promise<void> {
   await runResponse({
     action: 'start',
     surface: 'admin',
-    session_id: sessionId,
+    session_id: sessionId.value,
     messages: conversationHistory(),
   })
 }
@@ -504,7 +620,7 @@ async function decideApproval(entry: ChatEntry, decision: ResponseApprovalDecisi
   const succeeded = await runResponse({
     action,
     surface: 'admin',
-    session_id: sessionId,
+    session_id: sessionId.value,
     messages: conversationHistory(),
     run_id: approval.run_id,
     call_id: approval.call_id,
@@ -540,7 +656,7 @@ async function submitInput(entry: ChatEntry, selectedAnswer?: string): Promise<v
   const succeeded = await runResponse({
     action: 'answer',
     surface: 'admin',
-    session_id: sessionId,
+    session_id: sessionId.value,
     messages: conversationHistory(),
     run_id: request.run_id,
     call_id: request.call_id ?? '',
@@ -584,10 +700,6 @@ function handleAlertAction(prompt?: string): void {
   void sendMessage()
 }
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKeydown)
-  void restoreSession()
-})
 onBeforeUnmount(() => {
   sessionPollStopped = true
   invalidateSessionPoll()
@@ -601,22 +713,36 @@ onBeforeUnmount(() => {
     <button
       v-if="!visible"
       class="copilot-trigger"
+      :class="{ 'is-busy': mascotStatus !== 'idle' }"
       type="button"
-      aria-label="打开管理副驾驶"
-      title="管理副驾驶"
+      :aria-label="`打开${ASSISTANT_NAME}`"
+      :title="ASSISTANT_NAME"
       @click="openPanel"
     >
-      <el-icon><ChatDotRound /></el-icon>
+      <PrismMascot :size="44" :status="mascotStatus !== 'idle' ? 'running' : 'idle'" />
       <span v-if="unreadAlerts" class="unread-dot" aria-label="有未读异常"></span>
     </button>
 
     <section v-else class="copilot-panel" role="dialog" aria-label="管理副驾驶对话">
       <header class="copilot-header">
         <div class="copilot-identity">
-          <div class="copilot-avatar"><ChatDotRound /></div>
-          <div>
-            <strong>{{ ASSISTANT_NAME }}</strong>
-            <span><i></i>在线</span>
+          <div class="copilot-avatar">
+            <PrismMascot :size="30" :status="mascotStatus" />
+          </div>
+          <div class="copilot-title-block">
+            <div class="copilot-title-line">
+              <strong>{{ ASSISTANT_NAME }}</strong>
+              <span class="copilot-run-badge" :class="`run-${mascotStatus}`"><i></i>{{ runStatusLabel }}</span>
+            </div>
+            <AgentSessionSwitcher
+              ref="switcherRef"
+              class="copilot-session-switch"
+              storage-key="admin"
+              :legacy-key="LEGACY_SESSION_KEY"
+              id-prefix="admin"
+              @select="handleSessionSelect"
+              @sessions-changed="handleSwitcherReady"
+            />
           </div>
         </div>
         <button class="icon-button" type="button" aria-label="收起管理副驾驶" title="收起" @click="closePanel">
@@ -624,14 +750,20 @@ onBeforeUnmount(() => {
         </button>
       </header>
 
-      <div ref="messageArea" class="copilot-messages" aria-live="polite">
+      <div v-if="mascotStatus === 'running' && lastActiveToolName" class="copilot-progress">
+        正在执行 <code>{{ lastActiveToolName }}</code>
+      </div>
+
+      <div ref="messageArea" class="copilot-messages" aria-live="polite" @click="onMessageClick">
         <article
           v-for="entry in messages"
           :key="entry.id"
           class="message-row"
           :class="`is-${entry.role}`"
         >
-          <div v-if="entry.role === 'assistant'" class="message-avatar"><ChatDotRound /></div>
+          <div v-if="entry.role === 'assistant'" class="message-avatar">
+            <PrismMascot :size="22" :status="'idle'" />
+          </div>
           <div class="message-stack" :class="{ 'has-response-control': entry.toolCalls?.length || entry.approval || entry.inputRequest }">
             <div
               v-if="entry.payload.type === 'text' && entry.payload.content && entry.role === 'assistant'"
@@ -643,6 +775,18 @@ onBeforeUnmount(() => {
               class="message-bubble"
             >
               {{ entry.payload.content }}
+            </div>
+
+            <!-- 页面引导:模型约定路由 + 指令导航按钮,鉴权由 AgentNavLink 同源守卫裁决 -->
+            <div v-if="entry.role === 'assistant' && entry.navigations?.length" class="nav-directives">
+              <AgentNavLink
+                v-for="nav in entry.navigations"
+                :key="nav.route"
+                :href="nav.route"
+                :label="nav.label || '前往对应管理页'"
+                :hint="nav.hint"
+                prominent
+              />
             </div>
 
             <ResponseToolTimeline v-if="entry.toolCalls?.length" :calls="entry.toolCalls" />
@@ -739,7 +883,9 @@ onBeforeUnmount(() => {
         </article>
 
         <div v-if="showTyping" class="typing-row">
-          <div class="message-avatar"><ChatDotRound /></div>
+          <div class="message-avatar">
+            <PrismMascot :size="22" :status="'running'" />
+          </div>
           <div class="typing-bubble"><i></i><i></i><i></i></div>
         </div>
       </div>
@@ -750,7 +896,7 @@ onBeforeUnmount(() => {
             v-model="inputText"
             rows="1"
             maxlength="2000"
-            :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? '请先处理当前 Agent 任务' : '输入管理指令'"
+            :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入管理指令'"
             aria-label="输入管理指令"
             :disabled="loading || sessionRestoring || sessionBusy"
             @keydown="handleSubmitKey"
@@ -787,48 +933,101 @@ textarea,
 input { font: inherit; }
 
 .copilot-trigger {
-  width: 56px;
-  height: 56px;
+  position: relative;
+  width: 60px;
+  height: 60px;
   display: grid;
   place-items: center;
   border: 0;
   border-radius: 50%;
-  color: #fff;
-  background: var(--agent-primary);
-  box-shadow: 0 8px 24px rgba(0, 110, 255, 0.3);
+  background: linear-gradient(145deg, #ffffff, #eef0fb);
+  box-shadow: 0 8px 24px rgba(0, 110, 255, 0.24), 0 2px 6px rgba(15, 18, 34, 0.1);
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
-.copilot-trigger:hover { transform: scale(1.05); box-shadow: 0 10px 28px rgba(0, 110, 255, 0.38); }
-.copilot-trigger .el-icon { font-size: 26px; }
+.copilot-trigger:hover { transform: scale(1.06) translateY(-2px); box-shadow: 0 12px 30px rgba(0, 110, 255, 0.32), 0 3px 8px rgba(15, 18, 34, 0.12); }
+.copilot-trigger.is-busy::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--agent-primary);
+  border-right-color: #2ba471;
+  animation: copilot-fab-spin 1.2s linear infinite;
+}
+@keyframes copilot-fab-spin { to { transform: rotate(360deg); } }
 .unread-dot { position: absolute; top: 1px; right: 1px; width: 11px; height: 11px; border: 2px solid #fff; border-radius: 50%; background: var(--agent-danger); }
 
 .copilot-panel {
-  width: 380px;
-  height: 600px;
+  width: 400px;
+  height: 620px;
   max-width: calc(100vw - 32px);
   max-height: calc(100dvh - 32px);
   display: grid;
-  grid-template-rows: 64px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--agent-border);
-  border-radius: var(--agent-radius);
+  border: 1px solid rgba(0, 110, 255, 0.14);
+  border-radius: 18px;
   background: var(--agent-bg);
-  box-shadow: var(--agent-shadow);
+  box-shadow: 0 18px 48px rgba(0, 60, 140, 0.16), 0 4px 14px rgba(15, 18, 34, 0.08);
 }
 
-.copilot-header { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 0 16px; border-bottom: 1px solid var(--agent-border); }
+.copilot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px 10px 16px;
+  border-bottom: 1px solid var(--agent-border);
+  background: linear-gradient(135deg, rgba(0, 110, 255, 0.06), rgba(61, 188, 217, 0.05) 70%, transparent);
+}
 .copilot-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.copilot-title-block { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.copilot-title-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .copilot-identity strong { display: block; font-size: 15px; line-height: 20px; }
-.copilot-identity span { display: flex; align-items: center; gap: 5px; margin-top: 2px; color: var(--agent-text-secondary); font-size: 12px; }
-.copilot-identity span i { width: 7px; height: 7px; border-radius: 50%; background: #2ba471; }
 .copilot-avatar,
-.message-avatar { display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: #fff; background: var(--agent-primary); }
-.copilot-avatar { width: 36px; height: 36px; }
+.message-avatar { display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: linear-gradient(145deg, #f2f3ff, #e4ecfb); box-shadow: inset 0 0 0 1px rgba(0, 110, 255, 0.16); overflow: hidden; }
+.copilot-avatar { width: 40px; height: 40px; }
 .message-avatar { width: 26px; height: 26px; margin-top: 3px; }
-.copilot-avatar svg,
-.message-avatar svg { width: 18px; height: 18px; }
+
+.copilot-run-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.copilot-run-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.copilot-run-badge.run-idle { color: var(--agent-text-secondary); background: #f2f3f5; border-color: var(--agent-border); }
+.copilot-run-badge.run-running { color: #2f7a3d; background: rgba(43, 164, 113, 0.12); border-color: rgba(43, 164, 113, 0.35); }
+.copilot-run-badge.run-running i { animation: copilot-run-blink 1s ease-in-out infinite; }
+.copilot-run-badge.run-waiting { color: #b68039; background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
+.copilot-run-badge.run-waiting i { animation: copilot-run-blink 1s ease-in-out infinite; }
+@keyframes copilot-run-blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+.copilot-progress {
+  padding: 6px 16px;
+  font-size: 11px;
+  color: var(--agent-text-secondary);
+  background: linear-gradient(90deg, rgba(0, 110, 255, 0.05), rgba(61, 188, 217, 0.05));
+  border-bottom: 1px solid var(--agent-border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.copilot-progress code {
+  font-family: monospace;
+  color: var(--agent-primary);
+  font-size: 10.5px;
+  background: rgba(0, 110, 255, 0.08);
+  padding: 0 5px;
+  border-radius: 3px;
+}
 .icon-button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; color: var(--agent-text-secondary); background: transparent; cursor: pointer; }
 .icon-button:hover { color: var(--agent-text); background: #f2f3f5; }
 
@@ -848,6 +1047,21 @@ input { font: inherit; }
   -webkit-overflow-scrolling: touch;
 }
 .message-bubble.markdown-body :deep(p) { margin: 0; }
+.message-bubble.markdown-body :deep(ul) { list-style: none; padding-left: 0; margin: 0; }
+.message-bubble.markdown-body :deep(li) { margin: 2px 0; }
+/* 站内页面引导链接:品牌色导航样式,未授权目标已由守卫隐藏 */
+.message-bubble.markdown-body :deep(a) {
+  color: var(--agent-primary, #5b58e8);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dashed var(--agent-primary, #5b58e8);
+  cursor: pointer;
+}
+.nav-directives {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .message-bubble.markdown-body :deep(table) {
   width: auto;
   min-width: 100%;
@@ -966,6 +1180,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 @media (max-width: 520px) {
   .admin-copilot { right: 12px; bottom: 12px; left: 12px; }
   .copilot-trigger { margin-left: auto; }
-  .copilot-panel { width: 100%; height: min(600px, calc(100dvh - 24px)); max-width: none; max-height: none; }
+  .copilot-panel { width: 100%; height: min(620px, calc(100dvh - 24px)); max-width: none; max-height: none; }
 }
 </style>
