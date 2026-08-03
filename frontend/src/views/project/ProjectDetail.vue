@@ -290,7 +290,7 @@
     <input
       ref="auditArchiveInputRef"
       type="file"
-      accept=".zip,application/zip"
+      :accept="archiveAcceptTypes"
       style="display: none"
       @change="onAuditArchiveSelected"
     />
@@ -378,7 +378,16 @@ const auditArchiveInputRef = ref<HTMLInputElement>()
 const uploading = ref(false)
 const uploadingAudit = ref(false)
 const downloadingSource = ref(false)
-const acceptFileTypes = '.py,.js,.ts,.jsx,.tsx,.vue,.java,.go,.c,.cpp,.h,.hpp,.css,.html,.json,.yaml,.yml,.xml,.zip,.tar,.gz,.tgz,.bz2,.xz'
+const archiveExtensions = [
+  '.zip', '.7z', '.rar', '.tar', '.gz', '.tgz', '.bz2', '.tbz2', '.xz', '.txz',
+  '.zst', '.tzst', '.lz', '.lzma', '.lzip', '.z', '.cpio', '.cab', '.ar', '.xar',
+  '.lha', '.lzh', '.iso',
+]
+const archiveAcceptTypes = archiveExtensions.join(',')
+const acceptFileTypes = [
+  '.py', '.js', '.ts', '.jsx', '.tsx', '.vue', '.java', '.go', '.c', '.cpp', '.h',
+  '.hpp', '.css', '.html', '.json', '.yaml', '.yml', '.xml', ...archiveExtensions,
+].join(',')
 
 function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`
@@ -510,7 +519,7 @@ function getExtDetail(filename: string): string {
 }
 
 /** v2: 压缩包扩展名集合,后端将自动解压并批量创建文件 */
-const ARCHIVE_EXTS = new Set(['.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz'])
+const ARCHIVE_EXTS = new Set(archiveExtensions)
 
 /**
  * 判断文件是否为压缩包
@@ -529,7 +538,7 @@ const VALID_EXTS_DETAIL = new Set([
   '.html', '.htm', '.json', '.yaml', '.yml', '.toml', '.xml',
   '.sql', '.sh', '.bash', '.md', '.txt', '.cfg', '.ini',
   // v2: 压缩包扩展名,后端自动解压
-  '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz',
+  ...archiveExtensions,
 ])
 
 async function onFileSelected(e: Event): Promise<void> {
@@ -640,13 +649,8 @@ async function onAuditArchiveSelected(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file || uploadingAudit.value) return
-  if (!file.name.toLowerCase().endsWith('.zip')) {
-    ElMessage.warning('审计包必须是 ZIP 归档')
-    input.value = ''
-    return
-  }
-  if (file.size > 20 * 1024 * 1024) {
-    ElMessage.warning('审计包不能超过 20 MiB')
+  if (!isArchiveFile(file.name)) {
+    ElMessage.warning('请选择受支持的源码归档')
     input.value = ''
     return
   }
