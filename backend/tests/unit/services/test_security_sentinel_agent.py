@@ -1517,6 +1517,9 @@ def test_scan_project_full_does_not_truncate_above_legacy_top_n(monkeypatch):
 
 def test_scan_project_bounds_retained_findings_but_preserves_total_counts(monkeypatch):
     agent = SecuritySentinelAgent()
+    # 本用例断言「保留条数有上限但总计数保留」的原始边界行为,
+    # 需关闭 v3.3 的去重+对抗复检(它会合并重复 finding)。
+    agent._verify_enabled = False
     db = MagicMock()
     project = _make_project()
     files = [

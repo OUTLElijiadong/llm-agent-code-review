@@ -15,6 +15,7 @@ from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import Resp
 from app.schemas.security import (
+    FullChainAuditIn,
     SecurityChecklistOut,
     SecurityDashboardSummaryOut,
     SecurityScanAllProjectsIn,
@@ -108,6 +109,37 @@ def scan_project(
     if not result.success:
         raise AiServiceError(result.error or "项目安全扫描失败", code=50220)
     return Resp(data=SecurityScanOut(**result.data))
+
+
+@router.post(
+    "/fullchain-audit",
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_SCAN))],
+)
+def fullchain_audit(
+    payload: FullChainAuditIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """全链路源码审计 (v3.3): Recon → Analysis → Verification → Report.
+
+    四角色分工协作,黑板共享上下文,知识库压误报,可选沙箱实测验证漏洞可利用性。
+    返回完整 findings + 全链路各阶段产出(侦察攻击面/分析结论/验证可复现清单/报告)。
+    """
+    from app.agents.fullchain_audit_agent import FullChainAuditOrchestrator
+
+    orch = get_request_orchestrator(db, user=user)
+    orchestrator = FullChainAuditOrchestrator(orch.security_sentinel)
+    result = orchestrator.run(
+        project_id=payload.project_id,
+        actor=user,
+        top_n=payload.top_n,
+        trace_dataflow=payload.trace_dataflow,
+        enable_sandbox=payload.enable_sandbox,
+        ctx=_ctx(user),
+    )
+    if not result.success:
+        raise AiServiceError(result.error or "全链路审计失败", code=50220)
+    return Resp(data=result.data)
 
 
 @router.post(
