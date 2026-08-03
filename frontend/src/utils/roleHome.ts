@@ -86,6 +86,10 @@ export function canRoleOpenPath(role: string | null | undefined, path: string): 
  * @param role - 后端用户角色
  * @param redirect - 登录前记录的重定向路径
  * @returns 登录成功后应进入的路径
+ *
+ * 管理员固定回到总览大屏:管理后台页面间跳转产生的 redirect 参数
+ * (如超时回登录页)不应把重新登录后的落脚点带离总览;
+ * 普通用户按 redirect 回原页面。
  */
 export function resolvePostLoginPath(role: string | null | undefined, redirect?: string | null): string {
   const homePath = getRoleHomePath(role)
@@ -93,5 +97,7 @@ export function resolvePostLoginPath(role: string | null | undefined, redirect?:
   if (!redirect || redirect === '/' || redirect === '/dashboard') return homePath
   if (redirect.startsWith('/login') || redirect.startsWith('/register')) return homePath
   if (!canRoleOpenPath(normalizedRole, redirect)) return homePath
+  // 管理员重新登录默认落总览大屏;仅当 redirect 明确指向另一个管理页时才跟随
+  if (normalizedRole === 'admin' && !redirect.startsWith('/admin')) return homePath
   return redirect
 }

@@ -967,7 +967,7 @@ input { font: inherit; }
   max-height: calc(100dvh - 32px);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  overflow: hidden;
+  /* 会话切换下拉挂在 header 内,面板自身不能裁剪;圆角由内部各行自身承担 */
   border: 1px solid rgba(0, 110, 255, 0.14);
   border-radius: 18px;
   background: var(--agent-bg);
@@ -982,6 +982,11 @@ input { font: inherit; }
   padding: 10px 14px 10px 16px;
   border-bottom: 1px solid var(--agent-border);
   background: linear-gradient(135deg, rgba(0, 110, 255, 0.06), rgba(61, 188, 217, 0.05) 70%, transparent);
+  /* 会话切换下拉(.session-menu)绝对定位在 header 内,不能被裁剪 */
+  overflow: visible;
+  position: relative;
+  z-index: 6;
+  border-radius: 18px 18px 0 0;
 }
 .copilot-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .copilot-title-block { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -1171,7 +1176,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .typing-bubble i:nth-child(3) { animation-delay: 240ms; }
 @keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
 
-.copilot-input-area { border-top: 1px solid var(--agent-border); background: #fff; }
+.copilot-input-area { border-top: 1px solid var(--agent-border); background: #fff; border-radius: 0 0 18px 18px; }
 .composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
 .composer textarea { min-height: 38px; max-height: 84px; resize: none; padding: 9px 10px; border: 1px solid #d8dade; border-radius: 7px; color: var(--agent-text); outline: none; line-height: 18px; }
 .composer textarea:focus { border-color: var(--agent-primary); box-shadow: 0 0 0 2px rgba(0, 110, 255, 0.1); }

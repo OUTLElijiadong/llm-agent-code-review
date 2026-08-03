@@ -85,7 +85,9 @@ it('resolves post-login redirects to a safe role home', function testPostLoginRe
   expect(resolvePostLoginPath('user', '/login?redirect=/projects')).toBe('/dashboard')
   expect(resolvePostLoginPath('user', '/register')).toBe('/dashboard')
   expect(resolvePostLoginPath('user', '/admin/users')).toBe('/dashboard')
-  expect(resolvePostLoginPath('admin', '/projects')).toBe('/projects')
+  // 管理员重新登录固定回总览大屏;仅显式管理页 redirect 才跟随
+  expect(resolvePostLoginPath('admin', '/projects')).toBe('/admin/overview')
+  expect(resolvePostLoginPath('admin', '/admin/users')).toBe('/admin/users')
   expect(resolvePostLoginPath('reviewer', '/projects/7')).toBe('/projects/7')
 })
 
