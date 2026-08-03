@@ -57,7 +57,7 @@ def _executor(db, user: User, run_id: str = "run_user_capability") -> PrismToolE
 def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
     openapi = app.openapi()
 
-    assert len(USER_CAPABILITIES) == 109
+    assert len(USER_CAPABILITIES) == 113
     assert len(CAPABILITY_BY_CODE) == len(USER_CAPABILITIES)
     for spec in USER_CAPABILITIES:
         assert not spec.path.startswith(("/api/admin", "/api/auth", "/api/rbac", "/api/users"))
@@ -86,6 +86,13 @@ def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
         "security.scan_project",
         "security.scan_all_projects",
     }
+
+    sandbox_codes = {spec.code for spec in USER_CAPABILITIES if spec.page == "/sandboxes"}
+    assert sandbox_codes == {"sandboxes.list", "sandboxes.get"}
+    # 沙箱创建/停止/续期属于副作用操作,只能走专用固定工具,不开放通用执行器
+    assert not any(
+        spec.page == "/sandboxes" and spec.method != "GET" for spec in USER_CAPABILITIES
+    )
 
 
 def test_registry_excludes_binary_stream_multipart_admin_and_secret_routes() -> None:

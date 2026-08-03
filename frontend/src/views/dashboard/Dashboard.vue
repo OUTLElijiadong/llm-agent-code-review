@@ -28,6 +28,24 @@
     />
 
     <template v-else>
+    <!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+    <el-alert
+      v-if="showChangelog"
+      class="changelog-alert"
+      type="info"
+      :closable="true"
+      @close="dismissChangelog"
+    >
+      <template #title>
+        <span class="changelog-title">v3.4 全链路源码审计已上线</span>
+      </template>
+      <div class="changelog-body">
+        四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 +
+        <b>真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。
+        <router-link to="/project" class="changelog-link">去发起全链路审计 →</router-link>
+      </div>
+    </el-alert>
+
     <!-- ============ 6 张统计卡 ============ -->
     <section class="stat-grid">
       <div v-for="card in statCards" :key="card.label" class="stat" :class="{ feature: card.feature }">
@@ -180,6 +198,14 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 const router = useRouter()
 const timeRange = ref(30)
 const loading = ref(true)
+
+// v3.4 更新公告:关闭后写入 localStorage,同版本不再弹出
+const CHANGELOG_VERSION = 'v3.4'
+const showChangelog = ref(localStorage.getItem('prism_changelog_dismissed') !== CHANGELOG_VERSION)
+function dismissChangelog() {
+  showChangelog.value = false
+  localStorage.setItem('prism_changelog_dismissed', CHANGELOG_VERSION)
+}
 
 const summary = ref<SummaryOut>({
   project_count: 0,
@@ -565,6 +591,31 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.changelog-alert {
+  margin-bottom: 4px;
+  border-radius: 8px;
+
+  :deep(.el-alert__content) { width: 100%; }
+}
+.changelog-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+.changelog-body {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--prism-text-secondary, #5c6672);
+}
+.changelog-link {
+  margin-left: 6px;
+  color: var(--prism-accent, #2f6bff);
+  text-decoration: none;
+  font-weight: 600;
+
+  &:hover { text-decoration: underline; }
+}
+
 .dashboard-page {
   display: flex;
   flex-direction: column;

@@ -215,6 +215,17 @@ run_blackbox() {
       case "$status" in
         [23][0-9][0-9])
           printf 'blackbox loopback status=%s\n' "$status"
+          # ── v3.4 真实 PoC 验证 ──
+          # 服务已在固定 loopback 端口就绪。若源码携带审计平台生成的 _prism_poc.sh,
+          # 在隔离环境内执行它(发起 PoC 请求拿真实响应),输出 PRISM_POC_RESULT 供后端
+          # 经 docker logs 回收判定。PoC 由后端按 CRUD 数据隔离红线生成,只读写自身
+          # 创建的数据;脚本缺失或失败不阻断黑盒就绪结论。
+          if [ -f ./_prism_poc.sh ]; then
+            printf '%s\n' 'prism poc script detected, executing'
+            PRISM_POC_PORT="$preview_port" sh ./_prism_poc.sh || printf '%s\n' 'prism poc script exited non-zero'
+          else
+            printf '%s\n' 'no _prism_poc.sh present, skip poc execution'
+          fi
           kill "$app_pid" >/dev/null 2>&1 || true
           wait "$app_pid" 2>/dev/null || true
           trap - EXIT INT TERM

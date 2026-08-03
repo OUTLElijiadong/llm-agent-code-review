@@ -185,6 +185,9 @@ class SecuritySentinelAgent(BaseAgent):
         )
         self._db: Optional[Session] = None
         self._user: Optional[User] = None
+        # v3.3: 是否在项目审计末尾执行「去重 + 对抗复检」。生产默认开启;
+        # 单测可置 False 以保留未经复检的原始 findings 计数做边界断言。
+        self._verify_enabled: bool = True
 
     def _init_skills(self) -> None:
         """子类 override:挂载 SecuritySentinelSelfImprovementSkill + SecuritySentinelProactiveSkill
@@ -968,9 +971,28 @@ class SecuritySentinelAgent(BaseAgent):
             for severity, count in finding_severity_counts.items()
         )
         risk_score = max(0, min(100, 100 - deduct))
+
+        # ── v3.3 全链路: 去重 + 对抗复检(解决「假警报多 / 真假难辨」) ──
+        verification: dict = {"confirmed": 0, "refuted": 0, "reviewed": 0}
+        if self._verify_enabled:
+            try:
+                all_findings = self._dedup_findings(all_findings)
+                verification = self._adversarial_verify(all_findings, ctx=ctx)
+                self._emit(
+                    AgentEventType.PROGRESS, ctx,
+                    message=(
+                        f"对抗复检: 确认 {verification['confirmed']} 条 / "
+                        f"证伪 {verification['refuted']} 条"
+                    ),
+                    payload={"phase": "adversarial_verify", **verification},
+                )
+            except Exception:
+                logger.exception("[security_sentinel] 对抗复检异常,跳过")
+
         sev_counts = dict(finding_severity_counts)
         compliance = self._compute_compliance(all_findings)
         compliance.update({
+            "verification": verification,
             "owasp_coverage": sorted(finding_owasp_hits),
             "gb_t_22239": (
                 f"等保 2.0 应用安全相关命中风险 {len(finding_owasp_hits)} 类"
@@ -2541,6 +2563,7 @@ class SecuritySentinelAgent(BaseAgent):
             "如果当前源码存在超过上述任一条数上限的合格结果，必须把 output_limited 设为 true；"
             "否则必须设为 false。不得为了返回 false 而漏掉合格结果。\n\n"
             f"{repair_instruction}"
+            f"{_knowledge_context('analysis')}"
             f"{source}"
         )
         result = self.call_json(
@@ -3050,6 +3073,99 @@ class SecuritySentinelAgent(BaseAgent):
 
         return sorted(files, key=score)
 
+    # ============ v3.3 全链路: 对抗复检 / 去重 / 攻击面 ============
+
+    def _dedup_findings(self, findings: List[dict]) -> List[dict]:
+        """按 (文件, 行号归组, 类别) 去重,合并多来源重复报告(压误报第一步)"""
+        seen: dict[tuple, dict] = {}
+        order: List[tuple] = []
+        for f in findings:
+            if not isinstance(f, dict):
+                continue
+            path = str(f.get("file_path") or "")
+            line = self._coerce_int(f.get("line_number"), 0)
+            bucket = line // 4
+            cat = str(f.get("category") or f.get("title") or "")[:12]
+            key = (path, bucket, cat)
+            if key in seen:
+                cur = seen[key]
+                if (float(f.get("confidence", 0) or 0),
+                        _SEVERITY_DEDUCT.get(f.get("severity", "中"), 3)) > \
+                   (float(cur.get("confidence", 0) or 0),
+                        _SEVERITY_DEDUCT.get(cur.get("severity", "中"), 3)):
+                    seen[key] = f
+            else:
+                seen[key] = f
+                order.append(key)
+        return [seen[k] for k in order]
+
+    def _adversarial_verify(self, findings: List[dict],
+                            ctx: Optional[AgentContext],
+                            max_review: int = 12) -> dict:
+        """对抗式复检: 以质疑者视角 + 已知误报模式复核高危 finding,确认或证伪.
+
+        解决「漏洞真假难辨」: 初判(LLM 易幻觉)→ 对抗复检(试图证伪)→ 确证/证伪。
+        注入知识库的「已知误报模式」,让模型识别框架自动转义/参数绑定/类型约束等
+        常见误报,显著压掉误报。只复核 严重/高 危且数量受控,避免 token 爆炸。
+        """
+        confirmed = 0
+        refuted = 0
+        reviewed = 0
+        high = [f for f in findings
+                if isinstance(f, dict) and f.get("severity") in {"严重", "高"}]
+        high.sort(key=lambda x: (
+            -_SEVERITY_DEDUCT.get(x.get("severity", "中"), 3),
+            -float(x.get("confidence", 0) or 0),
+        ))
+        targets = high[:max_review]
+        if not targets:
+            return {"confirmed": 0, "refuted": 0, "reviewed": 0,
+                    "note": "无高危 finding 需复检"}
+
+        items = []
+        for i, f in enumerate(targets, 1):
+            items.append(
+                f"[{i}] {f.get('severity')} {f.get('category','')} "
+                f"{f.get('file_path','')}:{f.get('lines','')}\n"
+                f"  证据: {str(f.get('evidence',''))[:160]}\n"
+                f"  描述: {str(f.get('exploit_scenario',''))[:160]}"
+            )
+        prompt = (
+            "你是资深安全审计员,下面是某项目自动扫描出的高危漏洞候选。"
+            "请以**质疑者**视角逐条复核,结合 PHP 常见误报模式"
+            "(框架自动转义、ORM 参数绑定、路由类型约束、整数强转、该参数非用户可控、"
+            "全局过滤器已拦截、仅是日志/注释等),判断每条是否**真实可利用**。\n"
+            "对每条输出 verdict: confirmed(确认可利用)/plausible(疑似,需人工)/"
+            "refuted(误报,给出理由)。\n\n"
+            f"{_knowledge_context('verification')}"
+            "候选漏洞:\n" + "\n\n".join(items) + "\n\n"
+            "严格输出 JSON(不要 markdown): "
+            '{"reviews":[{"index":1,"verdict":"confirmed|plausible|refuted","reason":"..."}]}'
+        )
+        result = self.call_json(prompt, ctx=ctx, thinking=False)
+        if result.success and isinstance(result.data, dict):
+            reviews = result.data.get("reviews") or []
+            verdict_by_index = {}
+            for r in reviews:
+                if isinstance(r, dict):
+                    try:
+                        verdict_by_index[int(r.get("index"))] = str(r.get("verdict") or "")
+                    except (TypeError, ValueError):
+                        continue
+            for i, f in enumerate(targets, 1):
+                reviewed += 1
+                verdict = verdict_by_index.get(i, "")
+                f["verification"] = verdict or "unreviewed"
+                if verdict == "confirmed":
+                    confirmed += 1
+                    f["confidence"] = min(1.0, float(f.get("confidence", 0.8) or 0) + 0.15)
+                elif verdict == "refuted":
+                    refuted += 1
+                    f["confidence"] = min(float(f.get("confidence", 0.8) or 0), 0.3)
+        else:
+            logger.warning("[security_sentinel] 对抗复检 LLM 调用失败,跳过错杀")
+        return {"confirmed": confirmed, "refuted": refuted, "reviewed": reviewed}
+
     def _upgrade_findings_on_dataflow(self, findings: List[dict],
                                      data_flows: List[dict]) -> None:
         """若 finding 出现在 dataflow 链路上,severity 升一档"""
@@ -3080,6 +3196,26 @@ class SecuritySentinelAgent(BaseAgent):
 
 
 # ============ 模块级辅助函数(v2 新增 2026-06-25)============
+
+from functools import lru_cache
+
+
+@lru_cache(maxsize=8)
+def _knowledge_context(role: str) -> str:
+    """加载 PHP 全链路审计知识库并按角色分层注入(v3.3).
+
+    结果缓存——同一进程内多次批次调用共享,避免重复读盘。
+    迁移自 yunmengya/PHP_AUDIT_SKILLS 的反幻觉/误报/sink/攻击链等知识,
+    用于压低误报率、约束模型不乱报(对应「假警报多」痛点)。
+    加载失败时静默降级为空串,不影响主审计流程。
+    """
+    try:
+        from app.ai import audit_knowledge_loader
+        ctx = audit_knowledge_loader.build_prompt_context(role)
+        return ("\n\n" + ctx + "\n\n") if ctx else ""
+    except Exception:
+        return ""
+
 
 def _normalized_dict_to_finding(normalized: dict) -> "Finding":
     """将 _normalize_finding 输出的 dict 转换为 Finding 数据类

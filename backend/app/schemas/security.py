@@ -31,6 +31,17 @@ class SecurityScanAllProjectsIn(BaseModel):
     trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
 
 
+class FullChainAuditIn(BaseModel):
+    """全链路源码审计输入 (v3.3)"""
+
+    project_id: int = Field(..., description="项目 ID")
+    top_n: int = Field(100, ge=1, le=200, description="语义审计候选文件数")
+    trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
+    enable_sandbox: bool = Field(
+        False, description="是否在验证阶段调用真实沙箱跑 PoC(需有在线 worker)",
+    )
+
+
 # ---- Output ----
 
 

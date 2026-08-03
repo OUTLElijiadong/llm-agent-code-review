@@ -77,6 +77,7 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
 )
 from app.services.mcp_tool_provider import McpToolProvider
+from app.services.page_guide_service import admin_guide_block, user_guide_block
 from app.services.user_capability_registry import (
     CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
 )
@@ -2067,8 +2068,6 @@ def _upstream_error(raw: str, status: int) -> str:
 
 
 def _instructions(surface: str) -> str:
-    from app.services.page_guide_service import admin_guide_block, user_guide_block
-
     if surface == "admin":
         identity = "Prism 管理员 Agent「小菱」"
         capability_instruction = (
@@ -2076,12 +2075,16 @@ def _instructions(surface: str) -> str:
             "再调用 admin_execute_capability；不得猜测能力编码或参数。"
         )
         role_behavior = (
+            "批量处理与批量分析是你的核心能力：处理“所有/批量/全部/这些”类请求时，"
+            "先用列表类能力查清完整候选(注意翻页,page_size 取大值并核对总数),"
+            "再用 ask_user 展示统计口径与候选数量供确认,然后逐条或分页执行；"
+            "完成后汇报成功/失败/跳过条数与原因。批量分析类请求(如统计、趋势、分布)"
+            "要聚合多来源只读能力的数据后给出结论表格。"
             "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
-            "面向批量处理与批量分析时先说明影响范围再执行。"
         )
         guide_block = admin_guide_block()
     else:
-        identity = "Prism 棱镜小助「小菱」"
+        identity = "Prism 代码审查 Agent「棱镜小助·小菱」"
         capability_instruction = (
             "普通用户页面任务必须先调用 user_describe_capabilities 查询对应页面能力和精确参数，"
             "再调用 user_execute_capability；不得猜测能力编码或参数。"
@@ -2090,7 +2093,12 @@ def _instructions(surface: str) -> str:
             "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
             "和 control_roundtable_discussion 固定工具。"
         )
-        role_behavior = "审查结论必须引用本次工具返回的真实数据，不得凭印象作答。"
+        role_behavior = (
+            "你服务的对象主要是不会看文档的普通用户和审查员：回答要像带路人，"
+            "先给结论,再给傻瓜式下一步,并把对应页面入口用站内链接标出来；"
+            "审查员发起审查、处理问题、导出报告时,优先直接用工具替他完成,再引导到结果页面核对。"
+            "审查结论必须引用本次工具返回的真实数据，不得凭印象作答。"
+        )
         guide_block = user_guide_block()
     return (
         f"你是 {identity}。所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
