@@ -139,7 +139,13 @@ function renameActive(title: string): void {
   notify()
 }
 
-defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen })
+/** 重新从本地存储加载会话列表(自动命名等外部改动后刷新标题)。 */
+function reload(): void {
+  sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+  notify()
+}
+
+defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload })
 </script>
 
 <template>

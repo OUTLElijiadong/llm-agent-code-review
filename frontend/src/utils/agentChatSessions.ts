@@ -99,6 +99,26 @@ export function renameAgentChatSession(
   writeIndex(storageKey, metas)
 }
 
+/**
+ * 新对话自动命名:仅当会话仍是占位标题(新对话/默认对话)时,
+ * 用首条用户消息提炼一个标题。返回是否已命名。
+ */
+export function autoTitleAgentChatSession(
+  storageKey: string,
+  sessionId: string,
+  firstUserText: string,
+): boolean {
+  const metas = readIndex(storageKey)
+  const target = metas.find((item) => item.id === sessionId)
+  if (!target) return false
+  if (target.title !== '新对话' && target.title !== '默认对话') return false
+  const cleaned = firstUserText.replace(/\s+/g, ' ').trim()
+  if (!cleaned) return false
+  target.title = cleaned.length > 18 ? `${cleaned.slice(0, 18)}…` : cleaned
+  writeIndex(storageKey, metas)
+  return true
+}
+
 export function removeAgentChatSession(storageKey: string, sessionId: string): void {
   writeIndex(storageKey, readIndex(storageKey).filter((item) => item.id !== sessionId))
   try {

@@ -6,7 +6,8 @@ import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { getAgentResponseSession } from '@/api/agentResponses'
-import { getProjects } from '@/api/project'
+import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
+import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
@@ -15,7 +16,7 @@ import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
-import { extractNavigateDirectives, isAutoNavigateDirective } from '@/utils/agentNavigation'
+import { extractNavigateDirectives } from '@/utils/agentNavigation'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
 import type { AgentStatus } from '@/types/agent'
@@ -36,7 +37,7 @@ import {
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
-import { saveAgentChatSnapshot } from '@/utils/agentChatSessions'
+import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
 import {
   applyResponseToolEvent,
   attachApprovalToToolCall,
@@ -129,6 +130,7 @@ const sessionRestoring = ref(true)
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
 const lastActiveToolName = ref('')
+const uploading = ref(false)
 
 /** 吉祥物与标题栏共享的agent状态:运行中/等待用户/空闲 */
 const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
@@ -143,6 +145,7 @@ const runStatusLabel = computed(() => (
 const canSend = computed(() => (
   inputText.value.trim().length > 0
   && !loading.value
+  && !uploading.value
   && !sessionRestoring.value
   && !sessionBusy.value
 ))
@@ -464,12 +467,9 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     return timelineTarget
   }
 
-  /** 应用文本增量:剥离导航指令,单一指令在流结束后自动跳转到对应页面 */
-  let pendingNavigate: AgentNavigateDirective | null = null
-  let navigateHandled = false
+  /** 应用文本增量:剥离导航指令并渲染为可点击的「前往页面」确认按钮(不自动跳转) */
   const applyTextDelta = (): void => {
     const { cleaned, directives } = extractNavigateDirectives(rawText)
-    pendingNavigate = isAutoNavigateDirective(directives) ? directives[0] : null
     const content = formatStreamContent(cleaned)
     if (!content.trim()) return
     showTyping.value = false
@@ -568,10 +568,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         )
         finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
-        if (event.type === 'response.completed' && pendingNavigate && !navigateHandled) {
-          navigateHandled = true
-          followNavigation(pendingNavigate)
-        }
+        // 导航不再自动跳转:PRISM_NAVIGATE 已由 AgentNavLink 渲染为「前往页面」按钮,
+        // 是否跳转交给用户点击确认,且跳转不关闭悬浮窗。
       }
       void nextTick().then(scrollToBottom)
     },
@@ -832,6 +830,10 @@ async function sendMessage(): Promise<void> {
 
   messages.value.push({ id: messageId(), role: 'user', content: text, time: dayjs().format('HH:mm') })
   inputText.value = ''
+  // 新对话自动命名:首条用户消息提炼为会话标题
+  if (autoTitleAgentChatSession('user', sessionId.value, text)) {
+    switcherRef.value?.reload?.()
+  }
 
   await nextTick()
   scrollToBottom()
@@ -922,7 +924,7 @@ function planTotalMs(steps: PlanStep[]): number {
  */
 function followNavigation(directive: AgentNavigateDirective): void {
   if (!directive.route.startsWith('/')) return
-  emit('update:visible', false)
+  // 仅站内跳转,不再关闭悬浮窗——用户可能还要参考对话内容继续操作。
   void router.push(directive.route)
 }
 
@@ -945,6 +947,135 @@ function scrollToBottom(): void {
   if (chatBody.value) {
     chatBody.value.scrollTop = chatBody.value.scrollHeight
   }
+}
+
+/* ── 拖拽上传文件建项目 ─────────────────────────────── */
+const dragActive = ref(false)
+/** 拖拽上传的实时状态,显示在输入区上方让用户知道进展 */
+const uploadStatus = ref('')
+
+function onDragEnter(event: DragEvent): void {
+  if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
+}
+function onDragOver(event: DragEvent): void {
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+function onDragLeave(event: DragEvent): void {
+  if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)) {
+    dragActive.value = false
+  }
+}
+
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
+const CODE_EXTS = new Set(['py', 'js', 'jsx', 'ts', 'tsx', 'vue', 'html', 'css', 'java', 'go', 'php', 'rb', 'c', 'h', 'cpp', 'cc', 'cs', 'rs'])
+const LANGUAGE_BY_EXT: Record<string, string> = {
+  py: 'Python', js: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript',
+  vue: 'JavaScript', html: 'JavaScript', css: 'JavaScript', java: 'Java', go: 'Go',
+  php: 'PHP', rb: 'Ruby', c: 'C', h: 'C', cpp: 'C++', cc: 'C++', cs: 'C#', rs: 'Rust',
+}
+
+function inferProjectLanguage(files: File[]): string {
+  for (const file of files) {
+    const language = LANGUAGE_BY_EXT[file.name.split('.').pop()?.toLowerCase() ?? '']
+    if (language) return language
+  }
+  return 'Python'
+}
+
+async function onDrop(event: DragEvent): Promise<void> {
+  dragActive.value = false
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  if (!files.length || uploading.value) return
+  uploading.value = true
+  uploadStatus.value = `准备上传 ${files.length} 个文件…`
+  try {
+    const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    if (images.length && !codeFiles.length) {
+      uploadStatus.value = ''
+      ElMessage.info('图片会作为项目附件上传；若要让小菱帮你创建代码项目，请再拖入至少一个代码文件')
+      return
+    }
+    const targets = files.slice(0, 20)
+    const skipped = files.length - targets.length
+    if (skipped > 0) ElMessage.warning(`单次最多上传 20 个文件,已跳过后面的 ${skipped} 个`)
+    await uploadFilesAsProject(targets, images.length)
+  } catch (err) {
+    uploadStatus.value = ''
+    ElMessage.error(`上传失败: ${err instanceof Error ? err.message : '请重试'}`)
+  } finally {
+    uploading.value = false
+  }
+}
+
+/** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
+async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
+  uploadStatus.value = `正在验证 ${files.length} 个文件…`
+  // 创建项目前先逐个读取,空文件/读取失败时不调用创建接口,避免留下空项目。
+  const readableFiles: File[] = []
+  const preflightFailures: string[] = []
+  for (const file of files) {
+    try {
+      if (file.size <= 0) throw new Error('文件为空')
+      await file.slice(0, 1).arrayBuffer()
+      readableFiles.push(file)
+    } catch (err) {
+      preflightFailures.push(`${file.name}: ${err instanceof Error ? err.message : '文件不可读取'}`)
+    }
+  }
+  if (!readableFiles.length) {
+    uploadStatus.value = ''
+    throw new Error(`没有可上传的文件${preflightFailures.length ? ` (${preflightFailures[0]})` : ''}`)
+  }
+  const base = readableFiles.find((file) => !IMAGE_EXTS.has(file.name.split('.').pop()?.toLowerCase() ?? ''))?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
+  const suffix = `${new Date().toISOString().slice(5, 10).replace('-', '')}-${crypto.randomUUID().slice(0, 6)}`
+  const projectName = `${base}-${suffix}`
+  const language = inferProjectLanguage(readableFiles)
+  uploadStatus.value = `正在创建项目「${projectName}」…`
+  const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
+  const projectId = created.id
+  let okCount = 0
+  const failures: string[] = [...preflightFailures]
+  const targets = readableFiles
+  for (let i = 0; i < targets.length; i++) {
+    const file = targets[i]
+    uploadStatus.value = `正在上传 ${i + 1}/${targets.length}: ${file.name}`
+    try {
+      const fd = new FormData()
+      fd.append('project_id', String(projectId))
+      fd.append('file', file)
+      fd.append('file_path', file.name)
+      await uploadCodeFile(fd)
+      okCount += 1
+    } catch (err) {
+      failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
+    }
+  }
+  uploadStatus.value = ''
+  // 若所有上传请求都失败,立即软删除刚建的空项目,不把失败项目留给用户。
+  if (!okCount) {
+    try { await deleteProject(projectId) } catch { /* 仍优先把真实上传失败反馈给用户 */ }
+    throw new Error(`所有文件上传失败,未保留项目${failures.length ? ` (${failures[0]})` : ''}`)
+  }
+  // 后端逐文件上传会分别识别语言;若首个可识别源码文件更可靠,回填项目主语言。
+  const uploadedLanguage = inferProjectLanguage(targets.filter((f) => !IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? '')))
+  if (uploadedLanguage !== language) {
+    try { await updateProject(projectId, { language: uploadedLanguage }) } catch { /* 不影响已上传文件 */ }
+  }
+  const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
+  const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
+  messages.value.push({ id: messageId(), role: 'assistant', content: summary, time: dayjs().format('HH:mm') })
+  await nextTick()
+  scrollToBottom()
+  if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
+  else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
+  // 交给 Agent 接手:把上传结果作为一条用户消息发给 Agent,让它按操作手册引导下一步
+  await runResponse({
+    action: 'start',
+    surface: 'user',
+    session_id: sessionId.value,
+    messages: [...conversationHistory(), { role: 'user', content: `我刚通过拖拽上传了 ${okCount} 个文件,已建好项目「${projectName}」(id=${projectId},语言 ${language})。请告诉我下一步可以做什么。` }],
+  })
 }
 
 function close(): void {
@@ -996,12 +1127,19 @@ onBeforeUnmount(() => {
         <div
           ref="panelRef"
           class="chat-drawer"
-          :class="{ 'is-dragging': dragging }"
+          :class="{ 'is-dragging': dragging, 'drag-over': dragActive }"
           :style="panelStyle"
           @pointermove="moveDrag"
           @pointerup="endDrag"
           @pointercancel="endDrag"
+          @dragenter.prevent="onDragEnter"
+          @dragover.prevent="onDragOver"
+          @dragleave.prevent="onDragLeave"
+          @drop.prevent="onDrop"
         >
+          <div v-if="dragActive" class="drop-mask">
+            <div class="drop-mask-text">松开鼠标,把文件交给小菱建项目</div>
+          </div>
           <div class="chat-header">
             <button class="panel-drag-handle" type="button" aria-label="移动 Agent 助手窗口" title="拖拽移动窗口" @pointerdown="beginDrag">⠿</button>
             <div class="chat-title">
@@ -1321,12 +1459,16 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="chat-input-area">
+            <div v-if="uploadStatus" class="upload-status">
+              <span class="upload-status-spinner" />
+              <span class="upload-status-text">{{ uploadStatus }}</span>
+            </div>
             <textarea
               v-model="inputText"
               class="chat-input"
-              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送,Shift+Enter 换行'"
+              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送,Shift+Enter 换行;也可直接拖入代码文件帮你建项目'"
               rows="2"
-              :disabled="loading || sessionRestoring || sessionBusy"
+              :disabled="loading || uploading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
             />
             <button
@@ -1364,6 +1506,35 @@ onBeforeUnmount(() => {
     0 18px 48px rgba(51, 48, 140, 0.16),
     0 4px 14px rgba(15, 18, 34, 0.08);
   overflow: hidden;
+  position: relative;
+}
+
+.chat-drawer.drag-over {
+  border-color: var(--brand-500, #5b58e8);
+  border-style: dashed;
+  border-width: 2px;
+}
+
+.drop-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(91, 88, 232, 0.08);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.drop-mask-text {
+  padding: 14px 22px;
+  border-radius: 12px;
+  background: var(--brand-50, #f5f6ff);
+  border: 1.5px dashed var(--brand-400, #8f8cf0);
+  color: var(--brand-600, #5b58e8);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .chat-fab {
@@ -1981,6 +2152,41 @@ onBeforeUnmount(() => {
   padding: 12px 20px;
   border-top: 1px solid var(--color-border-light);
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.upload-status {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 2px;
+  border-radius: 8px;
+  background: var(--brand-50, #f5f6ff);
+  border: 1px solid var(--brand-200, #d4d2f8);
+  font-size: 12.5px;
+  color: var(--brand-600, #5b58e8);
+}
+
+.upload-status-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--brand-200, #d4d2f8);
+  border-top-color: var(--brand-500, #5b58e8);
+  border-radius: 50%;
+  animation: upload-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes upload-spin {
+  to { transform: rotate(360deg); }
+}
+
+.upload-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-input {

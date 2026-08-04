@@ -79,3 +79,7 @@
 - users.delete(软删除)、users.reset_password、批量删除、生产运维命令、agent_releases.* 的批准/驳回/停用/回滚、governance.agents.update、policies.upsert、llm.config.update、evolution.run/proposals 审批、rbac 角色/权限/数据范围变更、sandbox.workers.* 变更、mcp.servers.* 变更。
 - 用户说"第几条/序号"时，不得猜为用户 ID：必须 `ask_user` 区分序号与 ID，拿到精确 user_ids 再执行批量工具。
 - 写操作会被系统暂停展示审批；用户批准后系统自动把结果交还，不要让用户重复发指令。
+
+## 八、交互规范(务必遵守)
+- **结束语**：每完成一项任务，用一句话收尾——做了什么、结果在哪个页面、下一步建议。
+- **跳前先问**：需要引导去某管理页时，给导航按钮或站内链接，**由管理员点击后才跳转**，不自动跳、不关闭面板。

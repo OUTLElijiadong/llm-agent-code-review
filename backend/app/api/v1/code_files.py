@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import ValidationError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
@@ -57,10 +58,14 @@ def upload_code(
     user: User = Depends(get_current_user),
 ):
     """上传代码文件(Multipart)"""
-    file_id, lang, ver = code_file_service.upload(
-        db=db, user=user, project_id=project_id,
-        upload_file=file, file_path=file_path, language=language,
-    )
+    try:
+        file_id, lang, ver = code_file_service.upload(
+            db=db, user=user, project_id=project_id,
+            upload_file=file, file_path=file_path, language=language,
+        )
+    except ValueError as exc:
+        # 恶意软件/归档安全扫描拒绝属于可预期的用户输入结果,不能升级为 500。
+        raise ValidationError(str(exc), code=40001) from exc
     return Resp(data={"file_id": file_id, "language": lang, "version_no": ver})
 
 

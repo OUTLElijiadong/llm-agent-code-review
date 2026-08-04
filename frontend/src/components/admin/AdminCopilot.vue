@@ -19,7 +19,7 @@ import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import { renderMarkdown } from '@/utils/markdown'
-import { extractNavigateDirectives, isAutoNavigateDirective } from '@/utils/agentNavigation'
+import { extractNavigateDirectives } from '@/utils/agentNavigation'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { streamResponses } from '@/utils/responsesStream'
 import {
@@ -49,7 +49,7 @@ import {
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
-import { saveAgentChatSnapshot } from '@/utils/agentChatSessions'
+import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 interface ChatEntry {
@@ -376,7 +376,7 @@ async function scrollToBottom(): Promise<void> {
  */
 function followNavigation(directive: AgentNavigateDirective): void {
   if (!directive.route.startsWith('/')) return
-  visible.value = false
+  // 仅站内跳转,不再收起面板——管理员可能还要参考对话内容继续操作。
   void router.push(directive.route)
 }
 
@@ -466,12 +466,9 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     return timelineTarget
   }
 
-  /** 应用文本增量:剥离导航指令,单一指令在流结束后自动跳转到对应管理页 */
-  let pendingNavigate: AgentNavigateDirective | null = null
-  let navigateHandled = false
+  /** 应用文本增量:剥离导航指令并渲染为可点击的「前往页面」确认按钮(不自动跳转) */
   const applyTextDelta = (): void => {
     const { cleaned, directives } = extractNavigateDirectives(rawText)
-    pendingNavigate = isAutoNavigateDirective(directives) ? directives[0] : null
     const content = formatStreamContent(cleaned)
     if (!content.trim()) return
     showTyping.value = false
@@ -571,10 +568,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         )
         finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
-        if (event.type === 'response.completed' && pendingNavigate && !navigateHandled) {
-          navigateHandled = true
-          followNavigation(pendingNavigate)
-        }
+        // 导航不再自动跳转:PRISM_NAVIGATE 已渲染为「前往页面」按钮,由管理员点击确认,且不关闭面板。
       }
       void scrollToBottom()
     },
@@ -607,6 +601,10 @@ async function sendMessage(): Promise<void> {
   if (!content || loading.value || sessionRestoring.value || sessionBusy.value) return
   messages.value.push(userEntry(content))
   inputText.value = ''
+  // 新对话自动命名:首条用户消息提炼为会话标题
+  if (autoTitleAgentChatSession('admin', sessionId.value, content)) {
+    switcherRef.value?.reload?.()
+  }
   await scrollToBottom()
   await runResponse({
     action: 'start',
