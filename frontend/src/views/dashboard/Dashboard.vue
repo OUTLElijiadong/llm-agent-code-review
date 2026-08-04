@@ -199,12 +199,15 @@ const router = useRouter()
 const timeRange = ref(30)
 const loading = ref(true)
 
-// v3.4 更新公告:关闭后写入 localStorage,同版本不再弹出
+// v3.4 更新公告:每个用户只显示一次——本次展示后立即记录,之后不再出现
 const CHANGELOG_VERSION = 'v3.4'
-const showChangelog = ref(localStorage.getItem('prism_changelog_dismissed') !== CHANGELOG_VERSION)
+const CHANGELOG_KEY = 'prism_changelog_seen'
+const showChangelog = ref(localStorage.getItem(CHANGELOG_KEY) !== CHANGELOG_VERSION)
+if (showChangelog.value) {
+  localStorage.setItem(CHANGELOG_KEY, CHANGELOG_VERSION)
+}
 function dismissChangelog() {
   showChangelog.value = false
-  localStorage.setItem('prism_changelog_dismissed', CHANGELOG_VERSION)
 }
 
 const summary = ref<SummaryOut>({
