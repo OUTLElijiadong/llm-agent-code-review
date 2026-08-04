@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.ai.language_detector import detect_language
 from app.core.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.models.agent_capability import SandboxEnvironment
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.project import Project
@@ -133,9 +134,85 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
         # 普通文件:校验扩展名
         safe_name = validate_filename(filename, settings.allowed_extensions)
         return _upload_single_file(db, user, project_id, safe_name, raw, file_path, language)
+    except MaliciousUploadError as exc:
+        # 命中恶意内容:若项目干净(无已入库文件),自动转投隔离归档而非拒绝,
+        # 让后续审计/测试/沙箱内部署可以安全进行;沙箱外绝不裸跑。
+        db.rollback()
+        quarantine = _try_auto_quarantine(db, user, project_id, raw, filename, exc.threat_name)
+        if quarantine is not None:
+            return quarantine
+        raise
     except Exception:
         db.rollback()
         raise
+
+
+def _try_auto_quarantine(
+    db: Session,
+    user: User,
+    project_id: int,
+    raw: bytes,
+    filename: str,
+    threat_name: str,
+) -> Optional[tuple]:
+    """把命中恶意的上传自动转投隔离归档链路。
+
+    仅当项目当前完全干净(无可编辑文件、无活动归档、无活动部署)时执行,
+    避免清空用户已有源码或破坏既有隔离语义。不符合条件时返回 None,
+    由上层保持原拒绝语义。
+
+    Args:
+        db: 数据库会话。
+        user: 当前用户。
+        project_id: 项目ID。
+        raw: 上传原始字节。
+        filename: 原始文件名(应为归档)。
+        threat_name: 命中的威胁名,写入归档摘要。
+
+    Returns:
+        Optional[tuple]: 隔离成功后返回 (0, "quarantined", 0),否则 None。
+    """
+    try:
+        existing_files = db.query(CodeFile.id).filter(
+            CodeFile.project_id == project_id,
+            CodeFile.status == "active",
+        ).count()
+        if existing_files:
+            return None
+        if db.query(ProjectSourceArchive.id).filter(
+            ProjectSourceArchive.project_id == project_id,
+            ProjectSourceArchive.storage_status == "active",
+        ).first():
+            return None
+        active_deployment = db.query(SandboxEnvironment.id).filter(
+            SandboxEnvironment.project_id == project_id,
+            SandboxEnvironment.purpose == "deploy",
+            SandboxEnvironment.status.in_(("queued", "dispatching", "running", "ready", "stopping")),
+        ).first()
+        if active_deployment is not None:
+            return None
+
+        from app.services import project_source_service
+
+        archive_data = project_source_service.ingest_source_archive_bytes(
+            db,
+            user,
+            project_id,
+            raw=raw,
+            filename=filename,
+        )
+        logger.info(
+            "[upload] 恶意上传已自动隔离 project=%s file=%s threat=%s status=%s",
+            project_id,
+            filename,
+            threat_name,
+            archive_data.get("malware_status"),
+        )
+        return (0, "quarantined", 0)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("[upload] 自动隔离失败,保持拒绝 project=%s err=%s", project_id, str(exc))
+        return None
 
 
 def _validate_upload_security(
@@ -167,6 +244,14 @@ def _validate_upload_security(
     _enforce_scan_result(scan_result, filename)
 
 
+class MaliciousUploadError(ValueError):
+    """扫描命中恶意内容。携带威胁名称供上层决定隔离或拒绝。"""
+
+    def __init__(self, message: str, threat_name: str) -> None:
+        super().__init__(message)
+        self.threat_name = threat_name
+
+
 def _enforce_scan_result(
     scan_result, filename: str, archive_member: bool = False,
 ) -> None:
@@ -181,12 +266,14 @@ def _enforce_scan_result(
         None: 允许继续上传时静默返回。
 
     Raises:
-        ValueError: 检测到威胁，或生产 fail-closed 下扫描能力不可信。
+        MaliciousUploadError: 检测到威胁，上层可转为隔离归档或拒绝。
+        ValueError: 生产 fail-closed 下扫描能力不可信。
     """
     prefix = f"压缩包内文件 {filename} " if archive_member else ""
     if scan_result.result == "infected":
-        raise ValueError(
-            f"{prefix}检测到恶意软件: {scan_result.threat_name},文件已被拒绝"
+        raise MaliciousUploadError(
+            f"{prefix}检测到恶意软件: {scan_result.threat_name}",
+            threat_name=scan_result.threat_name or "unknown",
         )
 
     scan_untrusted = (

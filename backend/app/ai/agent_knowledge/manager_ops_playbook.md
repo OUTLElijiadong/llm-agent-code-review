@@ -77,6 +77,7 @@
 
 ## 七、危险操作红线(必须先审批)
 - users.delete(软删除)、users.reset_password、批量删除、生产运维命令、agent_releases.* 的批准/驳回/停用/回滚、governance.agents.update、policies.upsert、llm.config.update、evolution.run/proposals 审批、rbac 角色/权限/数据范围变更、sandbox.workers.* 变更、mcp.servers.* 变更。
+- **项目归属**：管理员对话中可查看全部项目（监管），但**写操作仅限管理员自有项目**；用户项目只读，不要把用户项目当作管理员自己的项目来改/删。
 - 用户说"第几条/序号"时，不得猜为用户 ID：必须 `ask_user` 区分序号与 ID，拿到精确 user_ids 再执行批量工具。
 - 写操作会被系统暂停展示审批；用户批准后系统自动把结果交还，不要让用户重复发指令。
 

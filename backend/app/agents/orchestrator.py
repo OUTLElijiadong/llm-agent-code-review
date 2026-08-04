@@ -230,6 +230,19 @@ class Orchestrator(BaseAgent):
         """通过当前请求用户更新项目元数据。"""
         if self._db is None or self._user is None:
             return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if self._user.role in {"admin", "super_admin"}:
+            from app.models.project import Project as _Project
+            target = self._db.get(_Project, project_id)
+            if target is None or target.status == "deleted":
+                return AgentResult(success=False, error=f"项目 #{project_id} 不存在")
+            if target.user_id != self._user.id:
+                return AgentResult(
+                    success=False,
+                    error=(
+                        f"项目 #{project_id}「{target.project_name}」不是管理员自有项目，"
+                        "管理员对话中仅可修改自己拥有的项目；其他用户的项目只读。"
+                    ),
+                )
         try:
             project = project_service.update_project(
                 self._db, self._user, project_id,

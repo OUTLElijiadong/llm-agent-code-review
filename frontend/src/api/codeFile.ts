@@ -24,8 +24,16 @@ export function list(params: Record<string, unknown>): Promise<Page<CodeFileOut>
  * @param body FormData
  * @returns 上传结果
  */
-export function upload(body: FormData): Promise<{ file_id: number; language: string; version_no: number }> {
-  return post<{ file_id: number; language: string; version_no: number }>('/code-files/upload', body)
+export interface UploadOut {
+  file_id: number
+  language: string
+  version_no: number
+  /** 命中恶意内容自动转投隔离归档时为 true */
+  quarantined?: boolean
+}
+
+export function upload(body: FormData): Promise<UploadOut> {
+  return post<UploadOut>('/code-files/upload', body)
 }
 
 /**

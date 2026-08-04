@@ -692,11 +692,8 @@ def _proxy_worker_preview(
 
 def create_preview_session(db: Session, actor: User, public_id: str) -> dict[str, Any]:
     environment = _get_visible(db, actor, public_id)
-    if db.query(ProjectSourceArchive.id).filter(
-        ProjectSourceArchive.project_id == environment.project_id,
-        ProjectSourceArchive.storage_status == "active",
-    ).first():
-        raise ForbiddenError("项目已进入隔离源码审计，持续部署预览已禁用", code=40341)
+    # 隔离归档允许部署,但只允许通过受 JWT 保护的 backend→worker 预览代理访问。
+    # 它不会获得 host network、宿主端口映射或任何无保护的服务器执行路径。
     if environment.purpose != "deploy" or environment.status != "ready":
         raise ValidationError("持续部署沙箱尚未处于可预览状态", code=40901)
     if environment.expires_at <= _utcnow():
@@ -751,11 +748,8 @@ def authenticate_preview_session(db: Session, public_id: str, token: str) -> tup
     if not actor or actor.status != 1 or int(actor.token_version or 0) != token_version:
         raise AuthError("预览会话已失效", code=40102)
     environment = _get_visible(db, actor, public_id)
-    if db.query(ProjectSourceArchive.id).filter(
-        ProjectSourceArchive.project_id == environment.project_id,
-        ProjectSourceArchive.storage_status == "active",
-    ).first():
-        raise ForbiddenError("项目已进入隔离源码审计，持续部署预览已禁用", code=40341)
+    # 隔离归档允许部署,但只允许通过受 JWT 保护的 backend→worker 预览代理访问。
+    # 它不会获得 host network、宿主端口映射或任何无保护的服务器执行路径。
     if environment.purpose != "deploy" or environment.status != "ready" or environment.expires_at <= _utcnow():
         raise ValidationError("持续部署沙箱当前不可预览", code=40901)
     worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
@@ -1138,11 +1132,8 @@ def _create_environment_locked(
         ProjectSourceArchive.project_id == project_id,
         ProjectSourceArchive.storage_status == "active",
     ).first()
-    if source_archive is not None and purpose == "deploy":
-        raise ForbiddenError(
-            "隔离源码归档只能审计或测试，不得部署或开放预览",
-            code=40341,
-        )
+    # 隔离归档的 source snapshot 可交给固定 profile 的 runsc 容器运行;绝不在宿主机执行。
+    # 预览始终经受 JWT 保护的 backend 代理访问,而非暴露容器端口。
     requested_language = str(payload["language"] or "").strip().lower()
     if requested_language not in LANGUAGES:
         raise ValidationError("沙箱语言或模式不受支持", code=40001)

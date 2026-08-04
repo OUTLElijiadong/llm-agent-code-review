@@ -1472,9 +1472,10 @@ class ChatAssistantAgent(BaseAgent):
         lines = [f"**项目列表** (共 {total} 个)\n"]
         for p in items:
             lang = p.get("language", "—")
+            marker = "✏️ 可操作" if p.get("can_update") else "🔒 只读"
             lines.append(
                 f"- **#{p['id']}** {p['project_name']} "
-                f"| 语言: `{lang}` | 文件: {p['file_count']} | 状态: {p['status']}"
+                f"| 语言: `{lang}` | 文件: {p['file_count']} | 状态: {p['status']} | {marker}"
             )
         if not items:
             lines.append("还没有项目，去新建一个吧！")
