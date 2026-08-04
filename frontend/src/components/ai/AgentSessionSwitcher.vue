@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
   createAgentChatSession,
+  findPristineAgentChatSession,
+  isPristineAgentChatSession,
   loadAgentChatSessions,
   loadAgentChatSnapshot,
   removeAgentChatSession,
@@ -18,6 +20,8 @@ interface Props {
   legacyKey: string
   /** 新会话 id 前缀 */
   idPrefix: string
+  /** 本地欢迎语不计入有效消息,用于判断空会话能否复用 */
+  welcomeText?: string
 }
 
 const props = defineProps<Props>()
@@ -66,6 +70,7 @@ function createSession(): void {
 }
 
 function dropSession(sessionId: string): void {
+  if (inferBusy(sessions.value.find((item) => item.id === sessionId) ?? { id: sessionId, title: '', createdAt: 0 })) return
   const wasActive = sessionId === activeId.value
   removeAgentChatSession(props.storageKey, sessionId)
   sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
@@ -75,6 +80,20 @@ function dropSession(sessionId: string): void {
   }
   notify()
   if (wasActive) select(sessions.value[0].id)
+}
+
+function ensureFreshOnOpen(): void {
+  const welcomeText = props.welcomeText ?? ''
+  const current = sessions.value.find((item) => item.id === activeId.value)
+  // 运行/等待中的会话不能自动切走,否则用户会失去正在执行任务的上下文。
+  if (current && inferBusy(current)) return
+  if (current && isPristineAgentChatSession(current.id, welcomeText)) return
+  const reusable = findPristineAgentChatSession(sessions.value, welcomeText, busyIds.value)
+  if (reusable) {
+    select(reusable.id)
+    return
+  }
+  createSession()
 }
 
 function toggleMenu(): void {
@@ -120,7 +139,7 @@ function renameActive(title: string): void {
   notify()
 }
 
-defineExpose({ setBusy, renameActive, createSession })
+defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen })
 </script>
 
 <template>

@@ -35,6 +35,7 @@ import {
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
+import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { saveAgentChatSnapshot } from '@/utils/agentChatSessions'
 import {
   applyResponseToolEvent,
@@ -114,6 +115,7 @@ const loading = ref(false)
 const showTyping = ref(false)
 const modelName = ref('deepseek-v4-flash')
 const chatBody = ref<HTMLElement>()
+const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('user')
 const LEGACY_SESSION_KEY = 'prism-user-agent-session'
 const sessionId = ref('')
 let activeResponse: ResponsesStreamHandle | null = null
@@ -949,10 +951,12 @@ function close(): void {
   emit('update:visible', false)
 }
 
-watch(() => props.visible, (val) => {
-  if (val) {
-    nextTick(() => scrollToBottom())
-  }
+watch(() => props.visible, async (val) => {
+  if (!val) return
+  await nextTick()
+  restoreOrAnchor()
+  switcherRef.value?.ensureFreshOnOpen()
+  scrollToBottom()
 })
 
 watch(() => props.prefill, (prefill) => {
@@ -989,8 +993,17 @@ onBeforeUnmount(() => {
     </button>
     <Transition name="drawer">
       <div v-if="visible" class="chat-overlay">
-        <div class="chat-drawer">
+        <div
+          ref="panelRef"
+          class="chat-drawer"
+          :class="{ 'is-dragging': dragging }"
+          :style="panelStyle"
+          @pointermove="moveDrag"
+          @pointerup="endDrag"
+          @pointercancel="endDrag"
+        >
           <div class="chat-header">
+            <button class="panel-drag-handle" type="button" aria-label="移动 Agent 助手窗口" title="拖拽移动窗口" @pointerdown="beginDrag">⠿</button>
             <div class="chat-title">
               <span class="mascot-badge">
                 <PrismMascot :size="34" :status="mascotStatus" />
@@ -1009,6 +1022,7 @@ onBeforeUnmount(() => {
                   storage-key="user"
                   :legacy-key="LEGACY_SESSION_KEY"
                   id-prefix="user"
+                  :welcome-text="WELCOME_TEXT"
                   @select="handleSessionSelect"
                 />
               </div>
@@ -1447,6 +1461,10 @@ onBeforeUnmount(() => {
   border-radius: 3px;
 }
 
+.chat-drawer.is-dragging { user-select: none; }
+.panel-drag-handle { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 30px; margin-left: -8px; border: 0; border-radius: 6px; background: transparent; color: var(--color-text-placeholder, #8f959e); font-size: 18px; line-height: 1; cursor: grab; touch-action: none; }
+.panel-drag-handle:hover { color: var(--primary-color, #5b58e8); background: rgba(91, 88, 232, .08); }
+.chat-drawer.is-dragging .panel-drag-handle { cursor: grabbing; }
 .chat-header {
   display: flex;
   align-items: center;

@@ -3,6 +3,8 @@
  * 会话 id 存 localStorage:一个固定索引键 + 每个会话一个快照键。
  */
 
+import { isAgentResponseSessionOccupied } from '@/utils/agentResponseSession'
+
 export interface AgentChatSessionMeta {
   id: string
   title: string
@@ -116,6 +118,26 @@ export function loadAgentChatSnapshot(sessionId: string): AgentChatSnapshot | nu
   } catch {
     return null
   }
+}
+
+export function isPristineAgentChatSession(sessionId: string, welcomeText: string): boolean {
+  const snapshot = loadAgentChatSnapshot(sessionId)
+  if (!snapshot) return true
+  if (isAgentResponseSessionOccupied(snapshot.runStatus)) return false
+  return !snapshot.messages.some((message) => (
+    message.content.trim().length > 0 && message.content.trim() !== welcomeText.trim()
+  ))
+}
+
+/** 复用既有空会话，避免用户关闭未输入的新对话后不断生成空白条目。 */
+export function findPristineAgentChatSession(
+  sessions: AgentChatSessionMeta[],
+  welcomeText: string,
+  busyIds: ReadonlySet<string> = new Set(),
+): AgentChatSessionMeta | undefined {
+  return sessions.find((session) => (
+    !busyIds.has(session.id) && isPristineAgentChatSession(session.id, welcomeText)
+  ))
 }
 
 export function saveAgentChatSnapshot(sessionId: string, snapshot: AgentChatSnapshot): void {

@@ -48,6 +48,7 @@ import {
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
+import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { saveAgentChatSnapshot } from '@/utils/agentChatSessions'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
@@ -82,6 +83,7 @@ const showTyping = ref(false)
 const inputText = ref('')
 const unreadAlerts = ref(0)
 const messageArea = ref<HTMLElement | null>(null)
+const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('admin')
 const expandedTables = ref<Set<string>>(new Set())
 
 const messages = ref<ChatEntry[]>([])
@@ -392,10 +394,13 @@ function onMessageClick(event: MouseEvent): void {
   followNavigation({ action: 'navigate', route: href, label })
 }
 
-function openPanel(): void {
+async function openPanel(): Promise<void> {
   visible.value = true
   unreadAlerts.value = 0
-  void scrollToBottom()
+  await nextTick()
+  restoreOrAnchor()
+  switcherRef.value?.ensureFreshOnOpen()
+  await scrollToBottom()
 }
 
 function closePanel(): void {
@@ -723,8 +728,22 @@ onBeforeUnmount(() => {
       <span v-if="unreadAlerts" class="unread-dot" aria-label="有未读异常"></span>
     </button>
 
-    <section v-else class="copilot-panel" role="dialog" aria-label="管理副驾驶对话">
+    <section
+      v-else
+      ref="panelRef"
+      class="copilot-panel"
+      :class="{ 'is-dragging': dragging }"
+      :style="panelStyle"
+      role="dialog"
+      aria-label="管理副驾驶对话"
+      @pointermove="moveDrag"
+      @pointerup="endDrag"
+      @pointercancel="endDrag"
+    >
       <header class="copilot-header">
+        <button class="panel-drag-handle" type="button" aria-label="移动管理副驾驶窗口" title="拖拽移动窗口" @pointerdown="beginDrag">
+          ⠿
+        </button>
         <div class="copilot-identity">
           <div class="copilot-avatar">
             <PrismMascot :size="30" :status="mascotStatus" />
@@ -740,6 +759,7 @@ onBeforeUnmount(() => {
               storage-key="admin"
               :legacy-key="LEGACY_SESSION_KEY"
               id-prefix="admin"
+              :welcome-text="WELCOME_TEXT"
               @select="handleSessionSelect"
               @sessions-changed="handleSwitcherReady"
             />
@@ -966,9 +986,12 @@ input { font: inherit; }
   max-width: calc(100vw - 32px);
   max-height: calc(100dvh - 32px);
   display: grid;
+  grid-template-areas:
+    'header'
+    'progress'
+    'messages'
+    'input';
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  /* max-height 需要 overflow 才能约束 grid 子行,否则消息区会把输入框顶出视口;
-     会话切换下拉由 header 的 overflow:visible 单独豁免 */
   overflow: hidden;
   border: 1px solid rgba(0, 110, 255, 0.14);
   border-radius: 18px;
@@ -976,8 +999,12 @@ input { font: inherit; }
   box-shadow: 0 18px 48px rgba(0, 60, 140, 0.16), 0 4px 14px rgba(15, 18, 34, 0.08);
 }
 
+.copilot-panel.is-dragging { user-select: none; }
+.panel-drag-handle { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 30px; margin-left: -10px; border: 0; border-radius: 6px; background: transparent; color: var(--agent-text-secondary); font-size: 18px; line-height: 1; cursor: grab; touch-action: none; }
+.panel-drag-handle:hover { color: var(--agent-primary); background: rgba(0, 110, 255, 0.08); }
+.copilot-panel.is-dragging .panel-drag-handle { cursor: grabbing; }
 .copilot-header {
-  display: flex;
+  grid-area: header;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -1018,7 +1045,7 @@ input { font: inherit; }
 @keyframes copilot-run-blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 .copilot-progress {
-  padding: 6px 16px;
+  grid-area: progress;
   font-size: 11px;
   color: var(--agent-text-secondary);
   background: linear-gradient(90deg, rgba(0, 110, 255, 0.05), rgba(61, 188, 217, 0.05));
@@ -1038,7 +1065,7 @@ input { font: inherit; }
 .icon-button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; color: var(--agent-text-secondary); background: transparent; cursor: pointer; }
 .icon-button:hover { color: var(--agent-text); background: #f2f3f5; }
 
-.copilot-messages { min-height: 0; overflow-y: auto; padding: 16px 14px; background: #f7f8fa; }
+.copilot-messages { grid-area: messages; min-height: 0; overflow-y: auto; padding: 16px 14px; background: #f7f8fa; }
 .message-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 14px; }
 .message-row.is-user { justify-content: flex-end; }
 .message-stack { max-width: calc(100% - 34px); min-width: 0; }
@@ -1178,7 +1205,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .typing-bubble i:nth-child(3) { animation-delay: 240ms; }
 @keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
 
-.copilot-input-area { border-top: 1px solid var(--agent-border); background: #fff; border-radius: 0 0 18px 18px; }
+.copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: #fff; border-radius: 0 0 18px 18px; }
 .composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
 .composer textarea { min-height: 38px; max-height: 84px; resize: none; padding: 9px 10px; border: 1px solid #d8dade; border-radius: 7px; color: var(--agent-text); outline: none; line-height: 18px; }
 .composer textarea:focus { border-color: var(--agent-primary); box-shadow: 0 0 0 2px rgba(0, 110, 255, 0.1); }
