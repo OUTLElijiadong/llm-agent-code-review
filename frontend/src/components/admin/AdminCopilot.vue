@@ -967,7 +967,9 @@ input { font: inherit; }
   max-height: calc(100dvh - 32px);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  /* 会话切换下拉挂在 header 内,面板自身不能裁剪;圆角由内部各行自身承担 */
+  /* max-height 需要 overflow 才能约束 grid 子行,否则消息区会把输入框顶出视口;
+     会话切换下拉由 header 的 overflow:visible 单独豁免 */
+  overflow: hidden;
   border: 1px solid rgba(0, 110, 255, 0.14);
   border-radius: 18px;
   background: var(--agent-bg);
