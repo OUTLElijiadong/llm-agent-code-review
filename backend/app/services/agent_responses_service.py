@@ -78,6 +78,7 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
 )
 from app.services.mcp_tool_provider import McpToolProvider
+from app.services import agent_knowledge_service
 from app.services.page_guide_service import admin_guide_block, user_guide_block
 from app.services.user_capability_registry import (
     CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
@@ -1833,9 +1834,12 @@ class AgentResponsesService:
     ) -> RuntimeResult:
         executor, runtime = await self._runtime(run_id, event_sink)
         tools = await executor.tool_schemas()
+        query = _latest_user_query(messages)
         result = await runtime.start(
             messages,
-            instructions=_instructions(self._surface),
+            instructions=_instructions(self._surface) + _knowledge_block(
+                self._db, self._surface, self._user.id, query
+            ),
             tools=tools,
             run_id=run_id,
         )
@@ -2128,6 +2132,47 @@ def _upstream_error(raw: str, status: int) -> str:
     if isinstance(error, Mapping) and error.get("message"):
         return f"Responses 上游 HTTP {status}: {str(error['message'])[:500]}"
     return f"Responses 上游 HTTP {status}"
+
+
+def _latest_user_query(messages: Sequence[Mapping[str, Any]]) -> str:
+    """取最近一条用户消息文本作为 RAG 检索 query。"""
+    for msg in reversed(list(messages or [])):
+        if str(msg.get("role") or "") == "user":
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()[:500]
+    return ""
+
+
+def _knowledge_block(db: Session, surface: str, user_id: int, query: str) -> str:
+    """检索操作知识库(含个人知识)拼成可引用的上下文块。
+
+    chat_assistant 融合其操作手册与当前用户的个人知识(user_id 隔离);
+    manager 检索运维手册。任何检索/嵌入失败都静默降级,不影响主流程。
+    """
+    if not query:
+        return ""
+    agent_code = "manager" if surface == "admin" else "chat_assistant"
+    try:
+        hits = agent_knowledge_service.unified_retrieve(
+            db, user_id=user_id, agent_code=agent_code, query=query, top_k=5
+        )
+    except Exception:  # noqa: BLE001 - 检索失败不阻断 Agent
+        return ""
+    if not hits:
+        return ""
+    lines = []
+    for h in hits[:5]:
+        src = "个人知识库" if h.get("owner_type") == "user" else "操作知识库"
+        content = str(h.get("content") or "").strip().replace("\n", " ")[:600]
+        if content:
+            lines.append(f"- ({src}·{h.get('title','')}) {content}")
+    if not lines:
+        return ""
+    return (
+        "\n\n【知识库参考】以下为与你的问题最相关的操作手册/个人知识条目,回答时优先引用,"
+        "并注明来源(如「按操作手册」「根据你的个人知识库」):\n" + "\n".join(lines)
+    )
 
 
 def _instructions(surface: str) -> str:

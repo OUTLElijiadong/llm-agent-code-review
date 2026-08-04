@@ -723,45 +723,47 @@ def _title_from_text(content: str) -> str:
 
 
 def unified_retrieve(db: Session, *, user_id: int, agent_code: str, query: str, top_k: int = 5) -> list[dict]:
-    """统一检索用户知识库与 Agent 知识库。
+    """统一检索 Agent 操作知识库与用户个人知识库。
 
-    Args:
-        db: 数据库会话。
-        user_id: 用户 ID。
-        agent_code: Agent 编码。
-        query: 检索文本。
-        top_k: 最大返回条数。
+    Agent 操作手册与个人知识**分开各取 top_k 后合并**:语义检索里个人代码/历史
+    chunk 常与"怎么用"类查询更相似,若混排打分会把操作手册挤出 top_k。分开配额
+    保证操作手册必出现,个人知识作为补充。
 
     Returns:
-        list[dict]: 检索命中结果。
+        list[dict]: 检索命中结果(agent 手册在前,按各自相关度)。
     """
-    hits = knowledge_service.retrieve(db, user_id, query, top_k)
-    for item in hits:
-        item["owner_type"] = "user"
-
-    qvec, _ = embedding_service.embed_one(db, query)
-    rows = (
-        db.query(AgentKnowledgeChunk, AgentKnowledgeDoc.title, AgentKnowledgeDoc.source_type)
-        .join(AgentKnowledgeDoc, AgentKnowledgeChunk.doc_id == AgentKnowledgeDoc.id)
-        .filter(
-            AgentKnowledgeChunk.agent_code == agent_code,
-            AgentKnowledgeDoc.status == "active",
-        )
-        .all()
-    )
+    # Agent 操作手册
     agent_hits: list[dict] = []
-    for chunk, title, source_type in rows:
-        score = embedding_service.cosine(qvec, embedding_service.parse_vector(chunk.embedding))
-        if score <= 0:
-            continue
-        agent_hits.append({
-            "content": chunk.content,
-            "score": round(score, 4),
-            "doc_id": chunk.doc_id,
-            "title": title,
-            "source_type": source_type,
-            "owner_type": "agent",
-        })
-    merged = hits + agent_hits
-    merged.sort(key=lambda x: x.get("score", 0), reverse=True)
-    return merged[:top_k]
+    qvec, _ = embedding_service.embed_one(db, query)
+    if qvec:
+        rows = (
+            db.query(AgentKnowledgeChunk, AgentKnowledgeDoc.title, AgentKnowledgeDoc.source_type)
+            .join(AgentKnowledgeDoc, AgentKnowledgeChunk.doc_id == AgentKnowledgeDoc.id)
+            .filter(
+                AgentKnowledgeChunk.agent_code == agent_code,
+                AgentKnowledgeDoc.status == "active",
+            )
+            .all()
+        )
+        for chunk, title, source_type in rows:
+            score = embedding_service.cosine(qvec, embedding_service.parse_vector(chunk.embedding))
+            if score <= 0:
+                continue
+            agent_hits.append({
+                "content": chunk.content,
+                "score": round(score, 4),
+                "doc_id": chunk.doc_id,
+                "title": title,
+                "source_type": source_type,
+                "owner_type": "agent",
+            })
+        agent_hits.sort(key=lambda x: x["score"], reverse=True)
+
+    # 个人知识(user_id 隔离),只对操作手册未覆盖的补充
+    personal: list[dict] = []
+    if user_id:
+        personal = knowledge_service.retrieve(db, user_id, query, top_k)
+        for item in personal:
+            item["owner_type"] = "user"
+
+    return agent_hits[:top_k] + personal[:top_k]
