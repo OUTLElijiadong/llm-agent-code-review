@@ -6,7 +6,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { getAgentResponseSession } from '@/api/agentResponses'
-import { getProjects, createProject, updateProject } from '@/api/project'
+import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
@@ -1008,15 +1008,32 @@ async function onDrop(event: DragEvent): Promise<void> {
 
 /** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
 async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
-  const base = files.find((file) => !IMAGE_EXTS.has(file.name.split('.').pop()?.toLowerCase() ?? ''))?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
+  uploadStatus.value = `正在验证 ${files.length} 个文件…`
+  // 创建项目前先逐个读取,空文件/读取失败时不调用创建接口,避免留下空项目。
+  const readableFiles: File[] = []
+  const preflightFailures: string[] = []
+  for (const file of files) {
+    try {
+      if (file.size <= 0) throw new Error('文件为空')
+      await file.slice(0, 1).arrayBuffer()
+      readableFiles.push(file)
+    } catch (err) {
+      preflightFailures.push(`${file.name}: ${err instanceof Error ? err.message : '文件不可读取'}`)
+    }
+  }
+  if (!readableFiles.length) {
+    uploadStatus.value = ''
+    throw new Error(`没有可上传的文件${preflightFailures.length ? ` (${preflightFailures[0]})` : ''}`)
+  }
+  const base = readableFiles.find((file) => !IMAGE_EXTS.has(file.name.split('.').pop()?.toLowerCase() ?? ''))?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
   const projectName = `${base}-${new Date().toISOString().slice(5, 10).replace('-', '')}`
-  const language = inferProjectLanguage(files)
+  const language = inferProjectLanguage(readableFiles)
   uploadStatus.value = `正在创建项目「${projectName}」…`
-  const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${files.map((f) => f.name).join(', ')})`, language })
+  const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
   const projectId = created.id
   let okCount = 0
-  const failures: string[] = []
-  const targets = files
+  const failures: string[] = [...preflightFailures]
+  const targets = readableFiles
   for (let i = 0; i < targets.length; i++) {
     const file = targets[i]
     uploadStatus.value = `正在上传 ${i + 1}/${targets.length}: ${file.name}`
@@ -1032,6 +1049,11 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     }
   }
   uploadStatus.value = ''
+  // 若所有上传请求都失败,立即软删除刚建的空项目,不把失败项目留给用户。
+  if (!okCount) {
+    try { await deleteProject(projectId) } catch { /* 仍优先把真实上传失败反馈给用户 */ }
+    throw new Error(`所有文件上传失败,未保留项目${failures.length ? ` (${failures[0]})` : ''}`)
+  }
   // 后端逐文件上传会分别识别语言;若首个可识别源码文件更可靠,回填项目主语言。
   const uploadedLanguage = inferProjectLanguage(targets.filter((f) => !IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? '')))
   if (uploadedLanguage !== language) {
