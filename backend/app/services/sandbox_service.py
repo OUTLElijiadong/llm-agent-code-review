@@ -253,6 +253,48 @@ def _persist_browser_artifact(
     return row
 
 
+def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[str, Any]:
+    """部署就绪后自动调用 test_verifier Agent 做带外 HTTP 冒烟测试。
+
+    经 worker 预览通道从环境外部发起 GET,与人工预览访问同一路径,
+    不触碰容器内源码,也不影响部署保活。任何失败只记录、不阻断部署。
+    """
+    started = datetime.now(timezone.utc)
+    worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
+    if worker is None:
+        return {"available": False, "reason": "worker 不可用"}
+    try:
+        status_code, _headers, content = _proxy_worker_preview(
+            worker, environment.public_id, "/", "", "GET",
+            {"Accept": "text/html,application/json,*/*"}, b"",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "reason": f"自动测试探测失败: {str(exc)[:300]}"}
+    body = content[:4096]
+    elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+    passed = 200 <= status_code < 400
+    artifact = _persist_browser_artifact(
+        db,
+        environment,
+        artifact_type="auto_smoke_evidence",
+        file_name=f"auto-smoke-{environment.public_id}.txt",
+        mime_type="text/plain",
+        content=body if body else b"(empty body)",
+    )
+    return {
+        "available": True,
+        "agent_code": "test_verifier",
+        "method": "GET",
+        "path": "/",
+        "status_code": status_code,
+        "latency_ms": elapsed_ms,
+        "body_bytes": len(content),
+        "body_preview": body.decode("utf-8", errors="replace")[:500],
+        "passed": passed,
+        "artifact_id": artifact.id,
+    }
+
+
 def artifact_to_dict(row: SandboxArtifact) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -1139,6 +1181,24 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             environment.stopped_at = _utcnow()
         if environment.purpose == "deploy" and environment.status == "ready":
             environment.preview_path = f"/api/sandboxes/{environment.public_id}/preview/"
+        auto_smoke: dict[str, Any] | None = None
+        if environment.purpose == "deploy" and environment.status == "ready" and environment.agent_code == "sandbox_deployer":
+            auto_smoke = _run_auto_smoke_test(db, environment)
+            _append_event(
+                db,
+                environment,
+                "complete" if auto_smoke.get("passed") else "progress",
+                "auto_smoke",
+                "部署后自动 Agent 冒烟测试完成" if auto_smoke.get("passed") else "部署后自动 Agent 冒烟测试未通过或不可用",
+                auto_smoke,
+            )
+            _emit(
+                environment,
+                AgentEventType.COMPLETE if auto_smoke.get("passed") else AgentEventType.PROGRESS,
+                "部署后自动 Agent 冒烟测试完成",
+                {"stage": "auto_smoke", "passed": bool(auto_smoke.get("passed"))},
+            )
+            db.commit()
         worker_conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
         evidence: dict[str, Any] = {"worker_result": worker_conclusion}
         if environment.remote_target_url:
@@ -1153,6 +1213,8 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             passed = passed and int(evidence["remote_blackbox"]["status_code"]) < 500
         if environment.purpose == "deploy":
             summary = "部署就绪" if passed else "部署失败"
+            if auto_smoke and auto_smoke.get("available"):
+                summary += f"；自动 Agent 冒烟{'通过' if auto_smoke.get('passed') else '未通过'}"
         else:
             summary = "测试通过" if passed else "测试未通过"
         conclusion = {
@@ -1161,6 +1223,9 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             "evidence": evidence,
             "agent_code": environment.agent_code,
         }
+        if auto_smoke is not None:
+            conclusion["auto_smoke_test"] = auto_smoke
+            evidence["auto_smoke_test"] = auto_smoke
         environment.result_json = _json(conclusion)
         artifacts = _persist_artifacts(db, environment, conclusion)
         _append_event(
