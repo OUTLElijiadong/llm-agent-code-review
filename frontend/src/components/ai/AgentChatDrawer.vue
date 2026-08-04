@@ -948,6 +948,8 @@ function scrollToBottom(): void {
 /* ── 拖拽上传文件建项目 ─────────────────────────────── */
 const dragActive = ref(false)
 const uploading = ref(false)
+/** 拖拽上传的实时状态,显示在输入区上方让用户知道进展 */
+const uploadStatus = ref('')
 
 function onDragEnter(event: DragEvent): void {
   if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
@@ -968,14 +970,19 @@ async function onDrop(event: DragEvent): Promise<void> {
   const files = Array.from(event.dataTransfer?.files ?? [])
   if (!files.length || uploading.value) return
   uploading.value = true
+  uploadStatus.value = `准备上传 ${files.length} 个文件…`
   try {
     const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     const docs = files.filter((f) => !IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     if (images.length && !docs.length) {
+      uploadStatus.value = ''
       ElMessage.info('暂不支持仅上传图片,请搭配代码文件一起拖入,或先用文字描述你的需求')
       return
     }
     await uploadFilesAsProject(docs)
+  } catch (err) {
+    uploadStatus.value = ''
+    ElMessage.error(`上传失败: ${err instanceof Error ? err.message : '请重试'}`)
   } finally {
     uploading.value = false
   }
@@ -985,16 +992,21 @@ async function onDrop(event: DragEvent): Promise<void> {
 async function uploadFilesAsProject(files: File[]): Promise<void> {
   const base = files[0]?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
   const projectName = `${base}-${new Date().toISOString().slice(5, 10).replace('-', '')}`
+  uploadStatus.value = '正在识别项目语言…'
   let language = 'Python'
   try {
     const detected = await detectLanguage({ project_name: projectName, description: files.map((f) => f.name).join(', ') })
     if (detected?.language) language = detected.language
   } catch { /* 语言检测失败用默认 */ }
+  uploadStatus.value = `正在创建项目「${projectName}」…`
   const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${files.map((f) => f.name).join(', ')})`, language })
   const projectId = created.id
   let okCount = 0
   const failures: string[] = []
-  for (const file of files.slice(0, 20)) {
+  const targets = files.slice(0, 20)
+  for (let i = 0; i < targets.length; i++) {
+    const file = targets[i]
+    uploadStatus.value = `正在上传 ${i + 1}/${targets.length}: ${file.name}`
     try {
       const fd = new FormData()
       fd.append('project_id', String(projectId))
@@ -1006,11 +1018,13 @@ async function uploadFilesAsProject(files: File[]): Promise<void> {
       failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
     }
   }
+  uploadStatus.value = ''
   const summary = `我已帮你把 ${okCount} 个文件上传到项目「${projectName}」(#${projectId},语言 ${language})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
   messages.value.push({ id: messageId(), role: 'assistant', content: summary, time: dayjs().format('HH:mm') })
   await nextTick()
   scrollToBottom()
-  ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
+  if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
+  else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
   // 交给 Agent 接手:把上传结果作为一条用户消息发给 Agent,让它按操作手册引导下一步
   await runResponse({
     action: 'start',
@@ -1392,6 +1406,10 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="chat-input-area">
+            <div v-if="uploadStatus" class="upload-status">
+              <span class="upload-status-spinner" />
+              <span class="upload-status-text">{{ uploadStatus }}</span>
+            </div>
             <textarea
               v-model="inputText"
               class="chat-input"
@@ -2077,6 +2095,41 @@ onBeforeUnmount(() => {
   padding: 12px 20px;
   border-top: 1px solid var(--color-border-light);
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.upload-status {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 2px;
+  border-radius: 8px;
+  background: var(--brand-50, #f5f6ff);
+  border: 1px solid var(--brand-200, #d4d2f8);
+  font-size: 12.5px;
+  color: var(--brand-600, #5b58e8);
+}
+
+.upload-status-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--brand-200, #d4d2f8);
+  border-top-color: var(--brand-500, #5b58e8);
+  border-radius: 50%;
+  animation: upload-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes upload-spin {
+  to { transform: rotate(360deg); }
+}
+
+.upload-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-input {
