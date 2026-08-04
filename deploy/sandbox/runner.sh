@@ -104,6 +104,11 @@ export HOME=/workspace/.prism-home
 export TMPDIR=/workspace/.prism-tmp
 
 run_test() {
+  # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
+  if [ -f ./_prism_verify.sh ]; then
+    sh ./_prism_verify.sh whitebox
+    return $?
+  fi
   case "$language" in
     python)
       python -m compileall -q .
@@ -194,6 +199,11 @@ run_deploy() {
 }
 
 run_blackbox() {
+  # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
+  if [ -f ./_prism_verify.sh ]; then
+    sh ./_prism_verify.sh blackbox
+    return $?
+  fi
   run_deploy &
   app_pid="$!"
   trap 'kill "$app_pid" >/dev/null 2>&1 || true' EXIT INT TERM

@@ -11,6 +11,7 @@ import binascii
 import hashlib
 import hmac
 import html
+import io
 import ipaddress
 import json
 import re
@@ -18,6 +19,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -293,6 +295,177 @@ def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[s
         "passed": passed,
         "artifact_id": artifact.id,
     }
+
+
+# deploy 后自动白盒/黑盒所用的内嵌 runner:作为 `_prism_verify.sh` 随源码注入,
+# 用 deploy 镜像自带的解释器运行,不依赖项目镜像 runner.sh 的 test 分支(deploy 镜像通常不含)。
+# 白盒做编译/静态检查与单测发现,黑盒在隔离网内起服务并对多个路径探活+首页断言。
+_DEPLOY_VERIFY_RUNNER = r"""#!/bin/sh
+set -u
+# runner.sh 已把源码(含本脚本)拷到 /workspace 并 cd 进去,这里就地运行。
+MODE="${1:-combined}"
+LANG_="${PRISM_LANGUAGE:-python}"
+PORT="${PRISM_PREVIEW_PORT:-8080}"
+cd /workspace 2>/dev/null || true
+
+run_whitebox() {
+  case "$LANG_" in
+    python)
+      python -m compileall -q . || return 1
+      if find . -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
+        if python -c 'import pytest' >/dev/null 2>&1; then python -m pytest -q --disable-warnings --maxfail=50 || return 1
+        else python -m unittest discover -v || return 1; fi
+      fi
+      ;;
+    node)
+      find . -type f -name '*.js' -not -path './node_modules/*' -exec node --check '{}' ';' || return 1
+      ;;
+    java)
+      find . -type f -name '*.java' -print > /tmp/javasrc 2>/dev/null
+      [ -s /tmp/javasrc ] && { mkdir -p .prism-classes; javac -d .prism-classes @/tmp/javasrc || return 1; }
+      ;;
+    go)
+      command -v go >/dev/null 2>&1 && { go vet ./... >/dev/null 2>&1 || true; }
+      ;;
+    php)
+      find . -type f -name '*.php' -exec php -l '{}' ';' >/dev/null || return 1
+      ;;
+  esac
+  return 0
+}
+
+start_app() {
+  case "$LANG_" in
+    python)
+      if [ -f app.py ] && python -c 'import flask' >/dev/null 2>&1; then python -m flask --app app run --host 127.0.0.1 --port "$PORT" &
+      elif [ -f main.py ]; then python main.py &
+      elif [ -f app.py ]; then python app.py &
+      else return 1; fi
+      ;;
+    node)   [ -f package.json ] || return 1; npm start --if-present & ;;
+    java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" & ;;
+    go)     go run . & ;;
+    php)    ROOT=.; [ -d public ] && ROOT=public; php -S "127.0.0.1:$PORT" -t "$ROOT" & ;;
+  esac
+  echo $!
+}
+
+http_probe() {
+  url_path="$1"
+  python -c "import urllib.request,sys
+try:
+  r=urllib.request.urlopen('http://127.0.0.1:$PORT'+sys.argv[1],timeout=3); print(r.status)
+except Exception as e:
+  print(getattr(e,'code',0) or 0)" "$url_path" 2>/dev/null || echo 0
+}
+
+run_blackbox() {
+  APP_PID=$(start_app) || { echo "blackbox: 无法启动应用"; return 1; }
+  sleep 1
+  i=0; READY=0
+  while [ $i -lt 30 ]; do
+    S=$(http_probe "/")
+    case "$S" in 2*|3*) READY=1; break;; esac
+    kill -0 "$APP_PID" 2>/dev/null || break
+    i=$((i+1)); sleep 1
+  done
+  if [ "$READY" != "1" ]; then kill "$APP_PID" 2>/dev/null; echo "blackbox: 应用未在回环端口就绪"; return 1; fi
+  # 首页内容断言:首页非空则判通过
+  BYTES=$(python -c "import urllib.request;print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))" 2>/dev/null || echo 0)
+  # 常见路径探活
+  for p in / /index /health /api /login; do
+    printf 'blackbox probe %s -> %s\n' "$p" "$(http_probe "$p")"
+  done
+  kill "$APP_PID" 2>/dev/null
+  wait "$APP_PID" 2>/dev/null
+  [ "${BYTES:-0}" -gt 0 ] || { echo "blackbox: 首页响应为空"; return 1; }
+  echo "blackbox: 首页 $BYTES 字节, 探活完成"
+  return 0
+}
+
+case "$MODE" in
+  whitebox) run_whitebox && { echo "PRISM_VERIFY whitebox ok"; exit 0; } || { echo "PRISM_VERIFY whitebox fail"; exit 1; } ;;
+  blackbox) run_blackbox && { echo "PRISM_VERIFY blackbox ok"; exit 0; } || { echo "PRISM_VERIFY blackbox fail"; exit 1; } ;;
+  combined)
+    run_whitebox; WHITEBOX_OK=$?
+    run_blackbox; BB=$?
+    [ $WHITEBOX_OK -eq 0 ] && [ $BB -eq 0 ] && { echo "PRISM_VERIFY combined ok"; exit 0; } || { echo "PRISM_VERIFY combined fail"; exit 1; }
+    ;;
+  *) echo "unknown mode"; exit 64 ;;
+esac
+"""
+
+
+def _run_deploy_auto_tests(
+    db: Session,
+    environment: SandboxEnvironment,
+    worker: SandboxWorker,
+    source_archive_base64: str,
+    modes: tuple = ("whitebox", "blackbox"),
+) -> list[dict[str, Any]]:
+    """部署就绪后自动执行 白盒→黑盒 测试链(test_verifier Agent)。
+
+    复用同一 worker 与不可变源码快照,注入内嵌 `_prism_verify.sh` 作为 deploy 专用
+    runner,每次起一次性测试容器跑完即回收,与常驻 deploy 预览互不影响。失败只记录。
+    """
+    language = environment.language
+    results: list[dict[str, Any]] = []
+    zip_bytes = base64.b64decode(source_archive_base64)
+    buf = io.BytesIO(zip_bytes)
+    with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("_prism_verify.sh", _DEPLOY_VERIFY_RUNNER)
+    augmented = base64.b64encode(buf.getvalue()).decode("ascii")
+    sha = hashlib.sha256(buf.getvalue()).hexdigest()
+    ttl = max(120, int((environment.expires_at - _utcnow()).total_seconds()))
+    for mode in modes:
+        request_id = f"{environment.public_id}-verify-{mode}"
+        try:
+            response = _call_worker(worker, "POST", "/execute", {
+                "request_id": request_id,
+                "purpose": "test",
+                "language": language,
+                "test_mode": mode,
+                "source_archive_base64": augmented,
+                "source_sha256": sha,
+                "ttl_seconds": ttl,
+                "image_digest": environment.image_digest or "",
+            })
+            result = response.get("result") if isinstance(response.get("result"), dict) else response
+            last_seq = 0
+            deadline = time.monotonic() + 300
+            while str(result.get("status") or "") not in {"succeeded", "failed", "blocked", "stopped", "expired"}:
+                if time.monotonic() >= deadline:
+                    result = {"status": "failed", "result": {"exit_code": 124, "logs": {"text": "自动测试轮询超时"}}}
+                    break
+                time.sleep(1)
+                status_response = _call_worker(worker, "POST", "/status", {"request_id": request_id, "after_sequence": last_seq})
+                result = status_response.get("result") if isinstance(status_response.get("result"), dict) else status_response
+                last_seq = int(result.get("last_sequence") or last_seq)
+            conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
+            exit_code = int(conclusion.get("exit_code") or 0) if isinstance(conclusion, dict) else 0
+            logs = conclusion.get("logs") if isinstance(conclusion, dict) else {}
+            log_text = str((logs or {}).get("text") or "")
+            passed = str(result.get("status")) == "succeeded" and exit_code == 0
+            results.append({"mode": mode, "passed": passed, "exit_code": exit_code, "log": log_text[-1500:]})
+            _append_event(
+                db, environment,
+                "complete" if passed else "progress", f"auto_{mode}",
+                f"部署后自动白盒测试{'通过' if passed else '未通过'}" if mode == "whitebox" else f"部署后自动黑盒测试{'通过' if passed else '未通过'}",
+                {"mode": mode, "passed": passed, "exit_code": exit_code},
+            )
+            _persist_browser_artifact(
+                db, environment,
+                artifact_type=f"auto_{mode}_log",
+                file_name=f"auto-{mode}-{environment.public_id}.log",
+                mime_type="text/plain",
+                content=log_text.encode("utf-8", errors="replace")[:65536] or b"(no log)",
+            )
+            db.commit()
+        except Exception as exc:  # noqa: BLE001 - 自动测试失败不阻断部署
+            results.append({"mode": mode, "passed": False, "error": str(exc)[:300]})
+            _append_event(db, environment, "progress", f"auto_{mode}", f"部署后自动{mode}测试异常: {str(exc)[:120]}")
+            db.commit()
+    return results
 
 
 def artifact_to_dict(row: SandboxArtifact) -> dict[str, Any]:
@@ -1103,6 +1276,10 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         db.commit()
         _emit(environment, AgentEventType.PROGRESS, "独立执行器已接收任务", {"stage": "executor"})
         worker_mode = config.get("worker_mode", environment.test_mode)
+        # deploy 前自动白盒:测试容器跑完即回收、不占槽,避免常驻 deploy 把单槽 worker 占成 429。
+        pre_whitebox: dict[str, Any] | None = None
+        if worker and environment.purpose == "deploy" and environment.agent_code == "sandbox_deployer":
+            pre_whitebox = _run_deploy_auto_tests(db, environment, worker, source_archive_base64, modes=("whitebox",))[0]
         if worker:
             execute_response = _call_worker(worker, "POST", "/execute", {
                 "request_id": environment.public_id,
@@ -1182,7 +1359,9 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         if environment.purpose == "deploy" and environment.status == "ready":
             environment.preview_path = f"/api/sandboxes/{environment.public_id}/preview/"
         auto_smoke: dict[str, Any] | None = None
+        auto_test_chain: list[dict[str, Any]] = []
         if environment.purpose == "deploy" and environment.status == "ready" and environment.agent_code == "sandbox_deployer":
+            # 预览冒烟 = 黑盒(从环境外部对运行中的服务发真实 HTTP,单槽下无法另起黑盒容器)。
             auto_smoke = _run_auto_smoke_test(db, environment)
             _append_event(
                 db,
@@ -1199,6 +1378,17 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 {"stage": "auto_smoke", "passed": bool(auto_smoke.get("passed"))},
             )
             db.commit()
+        if environment.purpose == "deploy":
+            if pre_whitebox:
+                auto_test_chain.append(pre_whitebox)
+            if auto_smoke is not None and auto_smoke.get("available"):
+                auto_test_chain.append({
+                    "mode": "blackbox",
+                    "passed": bool(auto_smoke.get("passed")),
+                    "status_code": auto_smoke.get("status_code"),
+                    "latency_ms": auto_smoke.get("latency_ms"),
+                    "via": "preview_smoke",
+                })
         worker_conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
         evidence: dict[str, Any] = {"worker_result": worker_conclusion}
         if environment.remote_target_url:
@@ -1213,8 +1403,15 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             passed = passed and int(evidence["remote_blackbox"]["status_code"]) < 500
         if environment.purpose == "deploy":
             summary = "部署就绪" if passed else "部署失败"
+            if auto_test_chain:
+                wb = next((r for r in auto_test_chain if r.get("mode") == "whitebox"), None)
+                bb = next((r for r in auto_test_chain if r.get("mode") == "blackbox"), None)
+                summary += (
+                    f"；自动测试链 白盒{'✓' if wb and wb.get('passed') else '✗'}"
+                    f"/黑盒{'✓' if bb and bb.get('passed') else '✗'}"
+                )
             if auto_smoke and auto_smoke.get("available"):
-                summary += f"；自动 Agent 冒烟{'通过' if auto_smoke.get('passed') else '未通过'}"
+                summary += f"；预览冒烟{'✓' if auto_smoke.get('passed') else '✗'}"
         else:
             summary = "测试通过" if passed else "测试未通过"
         conclusion = {
@@ -1223,6 +1420,9 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             "evidence": evidence,
             "agent_code": environment.agent_code,
         }
+        if auto_test_chain:
+            conclusion["auto_test_chain"] = auto_test_chain
+            evidence["auto_test_chain"] = auto_test_chain
         if auto_smoke is not None:
             conclusion["auto_smoke_test"] = auto_smoke
             evidence["auto_smoke_test"] = auto_smoke
