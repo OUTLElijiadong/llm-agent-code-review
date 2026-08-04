@@ -6,7 +6,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { getAgentResponseSession } from '@/api/agentResponses'
-import { getProjects, createProject } from '@/api/project'
+import { getProjects, createProject, updateProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
@@ -128,6 +128,7 @@ const sessionRestoring = ref(true)
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
 const lastActiveToolName = ref('')
+const uploading = ref(false)
 
 /** 吉祥物与标题栏共享的agent状态:运行中/等待用户/空闲 */
 const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
@@ -142,6 +143,7 @@ const runStatusLabel = computed(() => (
 const canSend = computed(() => (
   inputText.value.trim().length > 0
   && !loading.value
+  && !uploading.value
   && !sessionRestoring.value
   && !sessionBusy.value
 ))
@@ -947,7 +949,6 @@ function scrollToBottom(): void {
 
 /* ── 拖拽上传文件建项目 ─────────────────────────────── */
 const dragActive = ref(false)
-const uploading = ref(false)
 /** 拖拽上传的实时状态,显示在输入区上方让用户知道进展 */
 const uploadStatus = ref('')
 
@@ -964,6 +965,20 @@ function onDragLeave(event: DragEvent): void {
 }
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
+const CODE_EXTS = new Set(['py', 'js', 'jsx', 'ts', 'tsx', 'vue', 'html', 'css', 'java', 'go', 'php', 'rb', 'c', 'h', 'cpp', 'cc', 'cs', 'rs'])
+const LANGUAGE_BY_EXT: Record<string, string> = {
+  py: 'Python', js: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript',
+  vue: 'JavaScript', html: 'JavaScript', css: 'JavaScript', java: 'Java', go: 'Go',
+  php: 'PHP', rb: 'Ruby', c: 'C', h: 'C', cpp: 'C++', cc: 'C++', cs: 'C#', rs: 'Rust',
+}
+
+function inferProjectLanguage(files: File[]): string {
+  for (const file of files) {
+    const language = LANGUAGE_BY_EXT[file.name.split('.').pop()?.toLowerCase() ?? '']
+    if (language) return language
+  }
+  return 'Python'
+}
 
 async function onDrop(event: DragEvent): Promise<void> {
   dragActive.value = false
@@ -973,13 +988,16 @@ async function onDrop(event: DragEvent): Promise<void> {
   uploadStatus.value = `准备上传 ${files.length} 个文件…`
   try {
     const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
-    const docs = files.filter((f) => !IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
-    if (images.length && !docs.length) {
+    const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    if (images.length && !codeFiles.length) {
       uploadStatus.value = ''
-      ElMessage.info('暂不支持仅上传图片,请搭配代码文件一起拖入,或先用文字描述你的需求')
+      ElMessage.info('图片会作为项目附件上传；若要让小菱帮你创建代码项目，请再拖入至少一个代码文件')
       return
     }
-    await uploadFilesAsProject(docs)
+    const targets = files.slice(0, 20)
+    const skipped = files.length - targets.length
+    if (skipped > 0) ElMessage.warning(`单次最多上传 20 个文件,已跳过后面的 ${skipped} 个`)
+    await uploadFilesAsProject(targets, images.length)
   } catch (err) {
     uploadStatus.value = ''
     ElMessage.error(`上传失败: ${err instanceof Error ? err.message : '请重试'}`)
@@ -989,23 +1007,16 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 
 /** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
-async function uploadFilesAsProject(files: File[]): Promise<void> {
-  const base = files[0]?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
+async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
+  const base = files.find((file) => !IMAGE_EXTS.has(file.name.split('.').pop()?.toLowerCase() ?? ''))?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
   const projectName = `${base}-${new Date().toISOString().slice(5, 10).replace('-', '')}`
-  // 不预调 LLM 检测语言:后端 uploadCodeFile 会自动识别每个文件的语言,
-  // 预检失败会阻断整个上传。直接建项目,语言用第一个文件的后缀推断。
-  const extMap: Record<string, string> = {
-    py: 'Python', js: 'JavaScript', ts: 'TypeScript', java: 'Java', go: 'Go',
-    php: 'PHP', rb: 'Ruby', c: 'C', cpp: 'C++', cs: 'C#', rs: 'Rust',
-  }
-  const firstExt = files[0]?.name.split('.').pop()?.toLowerCase() ?? ''
-  const language = extMap[firstExt] ?? 'Python'
+  const language = inferProjectLanguage(files)
   uploadStatus.value = `正在创建项目「${projectName}」…`
   const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${files.map((f) => f.name).join(', ')})`, language })
   const projectId = created.id
   let okCount = 0
   const failures: string[] = []
-  const targets = files.slice(0, 20)
+  const targets = files
   for (let i = 0; i < targets.length; i++) {
     const file = targets[i]
     uploadStatus.value = `正在上传 ${i + 1}/${targets.length}: ${file.name}`
@@ -1021,7 +1032,13 @@ async function uploadFilesAsProject(files: File[]): Promise<void> {
     }
   }
   uploadStatus.value = ''
-  const summary = `我已帮你把 ${okCount} 个文件上传到项目「${projectName}」(#${projectId},语言 ${language})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
+  // 后端逐文件上传会分别识别语言;若首个可识别源码文件更可靠,回填项目主语言。
+  const uploadedLanguage = inferProjectLanguage(targets.filter((f) => !IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? '')))
+  if (uploadedLanguage !== language) {
+    try { await updateProject(projectId, { language: uploadedLanguage }) } catch { /* 不影响已上传文件 */ }
+  }
+  const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
+  const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
   messages.value.push({ id: messageId(), role: 'assistant', content: summary, time: dayjs().format('HH:mm') })
   await nextTick()
   scrollToBottom()
@@ -1417,7 +1434,7 @@ onBeforeUnmount(() => {
               class="chat-input"
               :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送,Shift+Enter 换行;也可直接拖入代码文件帮你建项目'"
               rows="2"
-              :disabled="loading || sessionRestoring || sessionBusy"
+              :disabled="loading || uploading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
             />
             <button
