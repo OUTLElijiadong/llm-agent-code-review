@@ -414,8 +414,10 @@ describe('AdminCopilot Responses stream', () => {
     const timeline = wrapper.find('.response-tool-timeline')
     expect(timeline.text()).toContain('admin_execute_capability')
     expect(timeline.text()).toContain('失败')
-    expect(timeline.text()).toContain('响应已结束，但工具未返回完成事件')
-    expect(timeline.text()).not.toContain('已完成')
+    // 失败详情默认折叠,点击后展示
+    await wrapper.find('.response-tool-call-head').trigger('click')
+    expect(wrapper.find('.response-tool-timeline').text()).toContain('响应已结束，但工具未返回完成事件')
+    expect(wrapper.find('.response-tool-timeline').text()).not.toContain('已完成')
   })
 
   it('shows one-time sensitive results without sending them into the next model request', async () => {
