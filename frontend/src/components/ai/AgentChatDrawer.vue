@@ -1026,7 +1026,8 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     throw new Error(`没有可上传的文件${preflightFailures.length ? ` (${preflightFailures[0]})` : ''}`)
   }
   const base = readableFiles.find((file) => !IMAGE_EXTS.has(file.name.split('.').pop()?.toLowerCase() ?? ''))?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
-  const projectName = `${base}-${new Date().toISOString().slice(5, 10).replace('-', '')}`
+  const suffix = `${new Date().toISOString().slice(5, 10).replace('-', '')}-${crypto.randomUUID().slice(0, 6)}`
+  const projectName = `${base}-${suffix}`
   const language = inferProjectLanguage(readableFiles)
   uploadStatus.value = `正在创建项目「${projectName}」…`
   const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
