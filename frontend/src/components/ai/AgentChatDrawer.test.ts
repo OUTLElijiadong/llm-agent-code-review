@@ -481,6 +481,8 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(timeline.text()).toContain('read_file')
     expect(timeline.text()).toContain('project_agent')
     expect(timeline.text()).toContain('失败')
-    expect(timeline.text()).toContain('文件不存在')
+    // 已完成/失败的调用默认折叠,点击后展示错误详情
+    await wrapper.find('.response-tool-call-head').trigger('click')
+    expect(wrapper.find('.response-tool-timeline').text()).toContain('文件不存在')
   })
 })

@@ -824,6 +824,11 @@ function stepLabel(s: StepBubble): string {
   return TYPE_LABELS[s.type] ?? s.type
 }
 
+/** 调度链中含进行中/思考中的步骤时保持展开,便于观察实时进度。 */
+function stepStreamOpen(steps: StepBubble[]): boolean {
+  return steps.some((s) => s.type === 'dispatch' || s.type === 'thinking' || s.type === 'progress')
+}
+
 async function sendMessage(): Promise<void> {
   const text = inputText.value.trim()
   if (!text || loading.value || sessionRestoring.value || sessionBusy.value) return
@@ -1198,7 +1203,7 @@ onBeforeUnmount(() => {
                 <details
                   v-if="msg.role === 'assistant' && msg.steps && msg.steps.length"
                   class="step-stream"
-                  open
+                  :open="stepStreamOpen(msg.steps)"
                 >
                   <summary class="step-summary">
                     Agent 调度链 · 共 {{ msg.steps.length }} 步
