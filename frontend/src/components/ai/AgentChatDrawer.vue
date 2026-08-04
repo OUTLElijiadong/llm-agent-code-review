@@ -6,7 +6,8 @@ import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { getAgentResponseSession } from '@/api/agentResponses'
-import { getProjects } from '@/api/project'
+import { getProjects, createProject, detectLanguage } from '@/api/project'
+import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
@@ -15,7 +16,7 @@ import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
-import { extractNavigateDirectives, isAutoNavigateDirective } from '@/utils/agentNavigation'
+import { extractNavigateDirectives } from '@/utils/agentNavigation'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
 import type { AgentStatus } from '@/types/agent'
@@ -35,7 +36,7 @@ import {
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
-import { saveAgentChatSnapshot } from '@/utils/agentChatSessions'
+import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
 import {
   applyResponseToolEvent,
   attachApprovalToToolCall,
@@ -462,12 +463,9 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     return timelineTarget
   }
 
-  /** 应用文本增量:剥离导航指令,单一指令在流结束后自动跳转到对应页面 */
-  let pendingNavigate: AgentNavigateDirective | null = null
-  let navigateHandled = false
+  /** 应用文本增量:剥离导航指令并渲染为可点击的「前往页面」确认按钮(不自动跳转) */
   const applyTextDelta = (): void => {
     const { cleaned, directives } = extractNavigateDirectives(rawText)
-    pendingNavigate = isAutoNavigateDirective(directives) ? directives[0] : null
     const content = formatStreamContent(cleaned)
     if (!content.trim()) return
     showTyping.value = false
@@ -566,10 +564,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         )
         finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
-        if (event.type === 'response.completed' && pendingNavigate && !navigateHandled) {
-          navigateHandled = true
-          followNavigation(pendingNavigate)
-        }
+        // 导航不再自动跳转:PRISM_NAVIGATE 已由 AgentNavLink 渲染为「前往页面」按钮,
+        // 是否跳转交给用户点击确认,且跳转不关闭悬浮窗。
       }
       void nextTick().then(scrollToBottom)
     },
@@ -830,6 +826,10 @@ async function sendMessage(): Promise<void> {
 
   messages.value.push({ id: messageId(), role: 'user', content: text, time: dayjs().format('HH:mm') })
   inputText.value = ''
+  // 新对话自动命名:首条用户消息提炼为会话标题
+  if (autoTitleAgentChatSession('user', sessionId.value, text)) {
+    switcherRef.value?.reload?.()
+  }
 
   await nextTick()
   scrollToBottom()
@@ -920,7 +920,7 @@ function planTotalMs(steps: PlanStep[]): number {
  */
 function followNavigation(directive: AgentNavigateDirective): void {
   if (!directive.route.startsWith('/')) return
-  emit('update:visible', false)
+  // 仅站内跳转,不再关闭悬浮窗——用户可能还要参考对话内容继续操作。
   void router.push(directive.route)
 }
 
@@ -943,6 +943,81 @@ function scrollToBottom(): void {
   if (chatBody.value) {
     chatBody.value.scrollTop = chatBody.value.scrollHeight
   }
+}
+
+/* ── 拖拽上传文件建项目 ─────────────────────────────── */
+const dragActive = ref(false)
+const uploading = ref(false)
+
+function onDragEnter(event: DragEvent): void {
+  if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
+}
+function onDragOver(event: DragEvent): void {
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+function onDragLeave(event: DragEvent): void {
+  if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)) {
+    dragActive.value = false
+  }
+}
+
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
+
+async function onDrop(event: DragEvent): Promise<void> {
+  dragActive.value = false
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  if (!files.length || uploading.value) return
+  uploading.value = true
+  try {
+    const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    const docs = files.filter((f) => !IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    if (images.length && !docs.length) {
+      ElMessage.info('暂不支持仅上传图片,请搭配代码文件一起拖入,或先用文字描述你的需求')
+      return
+    }
+    await uploadFilesAsProject(docs)
+  } finally {
+    uploading.value = false
+  }
+}
+
+/** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
+async function uploadFilesAsProject(files: File[]): Promise<void> {
+  const base = files[0]?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
+  const projectName = `${base}-${new Date().toISOString().slice(5, 10).replace('-', '')}`
+  let language = 'Python'
+  try {
+    const detected = await detectLanguage({ project_name: projectName, description: files.map((f) => f.name).join(', ') })
+    if (detected?.language) language = detected.language
+  } catch { /* 语言检测失败用默认 */ }
+  const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${files.map((f) => f.name).join(', ')})`, language })
+  const projectId = created.id
+  let okCount = 0
+  const failures: string[] = []
+  for (const file of files.slice(0, 20)) {
+    try {
+      const fd = new FormData()
+      fd.append('project_id', String(projectId))
+      fd.append('file', file)
+      fd.append('file_path', file.name)
+      await uploadCodeFile(fd)
+      okCount += 1
+    } catch (err) {
+      failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
+    }
+  }
+  const summary = `我已帮你把 ${okCount} 个文件上传到项目「${projectName}」(#${projectId},语言 ${language})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
+  messages.value.push({ id: messageId(), role: 'assistant', content: summary, time: dayjs().format('HH:mm') })
+  await nextTick()
+  scrollToBottom()
+  ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
+  // 交给 Agent 接手:把上传结果作为一条用户消息发给 Agent,让它按操作手册引导下一步
+  await runResponse({
+    action: 'start',
+    surface: 'user',
+    session_id: sessionId.value,
+    messages: [...conversationHistory(), { role: 'user', content: `我刚通过拖拽上传了 ${okCount} 个文件,已建好项目「${projectName}」(id=${projectId},语言 ${language})。请告诉我下一步可以做什么。` }],
+  })
 }
 
 function close(): void {
@@ -989,7 +1064,17 @@ onBeforeUnmount(() => {
     </button>
     <Transition name="drawer">
       <div v-if="visible" class="chat-overlay">
-        <div class="chat-drawer">
+        <div
+          class="chat-drawer"
+          :class="{ 'drag-over': dragActive }"
+          @dragenter.prevent="onDragEnter"
+          @dragover.prevent="onDragOver"
+          @dragleave.prevent="onDragLeave"
+          @drop.prevent="onDrop"
+        >
+          <div v-if="dragActive" class="drop-mask">
+            <div class="drop-mask-text">松开鼠标,把文件交给小菱建项目</div>
+          </div>
           <div class="chat-header">
             <div class="chat-title">
               <span class="mascot-badge">
@@ -1310,7 +1395,7 @@ onBeforeUnmount(() => {
             <textarea
               v-model="inputText"
               class="chat-input"
-              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送,Shift+Enter 换行'"
+              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送,Shift+Enter 换行;也可直接拖入代码文件帮你建项目'"
               rows="2"
               :disabled="loading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
@@ -1350,6 +1435,35 @@ onBeforeUnmount(() => {
     0 18px 48px rgba(51, 48, 140, 0.16),
     0 4px 14px rgba(15, 18, 34, 0.08);
   overflow: hidden;
+  position: relative;
+}
+
+.chat-drawer.drag-over {
+  border-color: var(--brand-500, #5b58e8);
+  border-style: dashed;
+  border-width: 2px;
+}
+
+.drop-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(91, 88, 232, 0.08);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.drop-mask-text {
+  padding: 14px 22px;
+  border-radius: 12px;
+  background: var(--brand-50, #f5f6ff);
+  border: 1.5px dashed var(--brand-400, #8f8cf0);
+  color: var(--brand-600, #5b58e8);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .chat-fab {

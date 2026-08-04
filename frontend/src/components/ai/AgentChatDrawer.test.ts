@@ -33,6 +33,7 @@ function mountDrawer(prefill?: string): VueWrapper {
         'el-option': true,
         'el-select': true,
         AgentAvatar: true,
+        AgentNavLink: { props: ['href', 'label', 'hint', 'prominent'], template: '<button class="agent-nav-link-stub">{{ label }}</button>' },
         CircleCheck: true,
         Close: true,
         Promotion: true,
@@ -267,6 +268,31 @@ describe('AgentChatDrawer Responses stream', () => {
     })
     expect(JSON.stringify(streams.records[1].body)).not.toContain('<wbr>')
     await finish(1)
+  })
+
+  it('导航指令完成后渲染为确认按钮,不自动跳转', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('帮我看看审查记录')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    emit(0, {
+      type: 'response.output_text.delta',
+      delta: '审查结果在这里,你可以点下面按钮去查看。\n\n<!--PRISM_NAVIGATE {"action":"navigate","route":"/reviews","label":"查看审查记录"}-->',
+    })
+    await flushPromises()
+    emit(0, { type: 'response.completed', response: { id: 'run-nav' } })
+    await finish(0)
+
+    // 不自动跳转:悬浮窗不关闭、router 未被调用(组件内无 router mock,跳转会报错),
+    // 指令被剥离正文并渲染为导航确认按钮
+    expect(wrapper.emitted('update:visible')).toBeFalsy()
+    expect(wrapper.find('.nav-directives').exists()).toBe(true)
+    const navText = wrapper.find('.nav-directives').text()
+    expect(navText).toContain('查看审查记录')
+    // 正文里不残留 PRISM_NAVIGATE 指令
+    expect(wrapper.find('.msg-row.assistant .markdown-body').text()).not.toContain('PRISM_NAVIGATE')
+    wrapper.unmount()
   })
 
   it('resumes a non-danger approval directly without a confirmation phrase or fake reply', async () => {
