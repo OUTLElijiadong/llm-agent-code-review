@@ -6,7 +6,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { getAgentResponseSession } from '@/api/agentResponses'
-import { getProjects, createProject, detectLanguage } from '@/api/project'
+import { getProjects, createProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
@@ -992,12 +992,14 @@ async function onDrop(event: DragEvent): Promise<void> {
 async function uploadFilesAsProject(files: File[]): Promise<void> {
   const base = files[0]?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
   const projectName = `${base}-${new Date().toISOString().slice(5, 10).replace('-', '')}`
-  uploadStatus.value = '正在识别项目语言…'
-  let language = 'Python'
-  try {
-    const detected = await detectLanguage({ project_name: projectName, description: files.map((f) => f.name).join(', ') })
-    if (detected?.language) language = detected.language
-  } catch { /* 语言检测失败用默认 */ }
+  // 不预调 LLM 检测语言:后端 uploadCodeFile 会自动识别每个文件的语言,
+  // 预检失败会阻断整个上传。直接建项目,语言用第一个文件的后缀推断。
+  const extMap: Record<string, string> = {
+    py: 'Python', js: 'JavaScript', ts: 'TypeScript', java: 'Java', go: 'Go',
+    php: 'PHP', rb: 'Ruby', c: 'C', cpp: 'C++', cs: 'C#', rs: 'Rust',
+  }
+  const firstExt = files[0]?.name.split('.').pop()?.toLowerCase() ?? ''
+  const language = extMap[firstExt] ?? 'Python'
   uploadStatus.value = `正在创建项目「${projectName}」…`
   const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${files.map((f) => f.name).join(', ')})`, language })
   const projectId = created.id

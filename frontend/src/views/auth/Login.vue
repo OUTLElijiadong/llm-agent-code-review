@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 
 import { User, Lock } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { resolvePostLoginPath } from '@/utils/roleHome'
+import { getRoleHomePath } from '@/utils/roleHome'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
-const route = useRoute()
 const userStore = useUserStore()
 
 const formRef = ref<FormInstance>()
@@ -43,9 +42,9 @@ async function handleLogin(): Promise<void> {
     try {
       await userStore.login({ username: form.username, password: form.password })
       ElMessage.success('登录成功')
-      const queryRedirect = route.query.redirect
-      const redirect = Array.isArray(queryRedirect) ? queryRedirect[0] : queryRedirect
-      router.replace(resolvePostLoginPath(userStore.profile?.role, redirect))
+      // 登录后一律回角色首页(工作台/总览),不跟随 redirect——
+      // 避免从旧链接/过期会话跳转时落到非预期页面。
+      router.replace(getRoleHomePath(userStore.profile?.role))
     } catch {
       /* 请求拦截器会展示后端返回的错误信息，避免重复 toast。 */
     } finally {
