@@ -55,6 +55,14 @@ async function finish(index: number): Promise<void> {
   await flushPromises()
 }
 
+/** 整块调用链默认折叠,断言前先展开。 */
+async function expandTimeline(wrapper: VueWrapper): Promise<void> {
+  const summary = wrapper.find('.response-tool-summary')
+  if (summary.exists() && summary.attributes('aria-expanded') !== 'true') {
+    await summary.trigger('click')
+  }
+}
+
 beforeEach(() => {
   sessionApi.get.mockReset()
   sessionApi.get.mockResolvedValue({
@@ -114,6 +122,7 @@ describe('AdminCopilot Responses stream', () => {
     expect(rows).toHaveLength(4)
     expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('is-user')
+    await expandTimeline(wrapper)
     expect(rows[2].find('.response-tool-timeline').text()).toContain('admin_list_users')
     expect(rows[2].text()).toContain('已完成')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 3 个用户')
@@ -352,6 +361,7 @@ describe('AdminCopilot Responses stream', () => {
     await finish(1)
     expect(wrapper.text()).toContain('操作已完成')
     expect(wrapper.text()).toContain('已批准')
+    await expandTimeline(wrapper)
     const timelineText = wrapper.findAll('.response-tool-timeline').map((node) => node.text()).join('\n')
     expect(timelineText).toContain('已完成')
   })
@@ -388,6 +398,7 @@ describe('AdminCopilot Responses stream', () => {
     emit(1, { type: 'response.completed', response: { id: 'run-admin-resume-missing-tool' } })
     await finish(1)
 
+    await expandTimeline(wrapper)
     const timelineText = wrapper.find('.response-tool-timeline').text()
     expect(timelineText).toContain('失败')
     expect(timelineText).toContain('响应已结束，但工具未返回完成事件')
@@ -411,6 +422,7 @@ describe('AdminCopilot Responses stream', () => {
     emit(0, { type: 'response.completed', response: { id: 'run-unproven', status: 'completed' } })
     await finish(0)
 
+    await expandTimeline(wrapper)
     const timeline = wrapper.find('.response-tool-timeline')
     expect(timeline.text()).toContain('admin_execute_capability')
     expect(timeline.text()).toContain('失败')
