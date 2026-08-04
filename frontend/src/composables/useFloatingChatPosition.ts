@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, type CSSProperties } from 'vue'
 
 interface Point { left: number; top: number }
 
@@ -24,7 +24,8 @@ export function useFloatingChatPosition(storageKey: string) {
   let start: Point | null = null
   let origin: Point | null = null
 
-  const style = computed(() => position.value ? {
+  const style = computed<CSSProperties>(() => position.value ? {
+    position: 'fixed',
     left: `${position.value.left}px`,
     top: `${position.value.top}px`,
     right: 'auto',

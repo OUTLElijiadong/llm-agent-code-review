@@ -979,6 +979,7 @@ input { font: inherit; }
 .unread-dot { position: absolute; top: 1px; right: 1px; width: 11px; height: 11px; border: 2px solid #fff; border-radius: 50%; background: var(--agent-danger); }
 
 .copilot-panel {
+  position: fixed;
   width: 400px;
   height: 620px;
   max-width: calc(100vw - 32px);

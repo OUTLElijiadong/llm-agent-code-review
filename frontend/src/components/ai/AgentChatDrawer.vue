@@ -1495,6 +1495,7 @@ onBeforeUnmount(() => {
 }
 
 .chat-drawer {
+  position: fixed;
   width: min(400px, calc(100vw - 32px));
   height: min(620px, calc(100dvh - 48px));
   background: #fff;
@@ -1506,7 +1507,6 @@ onBeforeUnmount(() => {
     0 18px 48px rgba(51, 48, 140, 0.16),
     0 4px 14px rgba(15, 18, 34, 0.08);
   overflow: hidden;
-  position: relative;
 }
 
 .chat-drawer.drag-over {
