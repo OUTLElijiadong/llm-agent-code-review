@@ -1035,16 +1035,18 @@ def _tool_request_options(
     *,
     non_thinking_repair: bool = False,
 ) -> Dict[str, Any]:
-    """构造工具轮参数；V4 证据修复轮关闭思考后才能强制调用。"""
+    """构造工具轮参数；Thinking 模型不能携带显式 ``tool_choice``。"""
 
     if non_thinking_repair and _model_supports_non_thinking_tool_repair(model):
         return {
             "tool_choice": "required" if force_tool_rounds > 0 else "auto",
             "thinking": {"type": "disabled"},
         }
-    if force_tool_rounds <= 0:
-        return {"tool_choice": "auto"}
+    # DeepSeek Thinking 模式拒绝 ``tool_choice=auto/required``，而不是只
+    # 拒绝 required。省略字段仍允许模型按工具定义自主决定是否调用工具。
     if _model_disallows_required_tool_choice(model):
+        return {}
+    if force_tool_rounds <= 0:
         return {"tool_choice": "auto"}
     return {"tool_choice": "required"}
 
@@ -1052,7 +1054,7 @@ def _tool_request_options(
 def _tool_choice_for_round(model: str, force_tool_rounds: int) -> str:
     """兼容旧调用方；新运行时使用包含 thinking 开关的完整参数。"""
 
-    return str(_tool_request_options(model, force_tool_rounds)["tool_choice"])
+    return str(_tool_request_options(model, force_tool_rounds).get("tool_choice", "auto"))
 
 
 def _model_supports_non_thinking_tool_repair(model: str) -> bool:

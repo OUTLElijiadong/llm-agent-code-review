@@ -112,7 +112,7 @@ async def test_replays_two_tool_rounds_without_previous_response_id() -> None:
     assert result.output_text == "任务完成"
     assert result.rounds == 3
     assert [call.name for call, _ in executor.calls] == ["lookup", "calculate"]
-    assert all(payload["tool_choice"] == "auto" for payload in transport.payloads)
+    assert all("tool_choice" not in payload for payload in transport.payloads)
     assert all("previous_response_id" not in payload for payload in transport.payloads)
     second_input = transport.payloads[1]["input"]
     assert second_input[-2]["call_id"] == "call_1"
@@ -536,11 +536,12 @@ async def test_completion_guard_retry_disables_thinking_and_requires_tool_for_de
     )
 
     assert result.status == "completed"
-    assert [payload["tool_choice"] for payload in transport.payloads] == [
-        "auto",
+    assert [payload.get("tool_choice") for payload in transport.payloads] == [
+        None,
         "required",
         "auto",
     ]
+    assert "tool_choice" not in transport.payloads[0]
     assert "thinking" not in transport.payloads[0]
     assert transport.payloads[1]["thinking"] == {"type": "disabled"}
     assert transport.payloads[2]["thinking"] == {"type": "disabled"}
@@ -591,12 +592,14 @@ async def test_answered_admin_question_uses_v4_non_thinking_evidence_repair() ->
     completed = await runtime.answer("run_answered_admin_guard", "review_admin", "call_question")
 
     assert completed.status == "completed"
-    assert [payload["tool_choice"] for payload in transport.payloads] == [
-        "auto",
-        "auto",
+    assert [payload.get("tool_choice") for payload in transport.payloads] == [
+        None,
+        None,
         "required",
         "auto",
     ]
+    assert "tool_choice" not in transport.payloads[0]
+    assert "tool_choice" not in transport.payloads[1]
     assert transport.payloads[2]["thinking"] == {"type": "disabled"}
     assert [call.name for call, _approved in executor.calls] == ["create_admin"]
 
