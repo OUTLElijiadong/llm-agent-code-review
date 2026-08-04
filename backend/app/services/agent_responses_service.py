@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Literal, Mapping, Optional, Sequence
 from urllib.parse import urlencode
 
+import asyncio
 import httpx
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -202,6 +203,18 @@ _USER_CAPABILITY_NAMES = {
     "deploy_project_sandbox",
     "close_sandbox",
     "extend_sandbox",
+}
+_SANDBOX_TOOL_AGENTS = {
+    "run_project_tests": "test_verifier",
+    "deploy_project_sandbox": "sandbox_deployer",
+    "close_sandbox": "sandbox_deployer",
+    "extend_sandbox": "sandbox_deployer",
+}
+_SANDBOX_GOVERNANCE_TOOLS = {
+    "run_project_tests": "evaluation_runner",
+    "deploy_project_sandbox": "workflow_dispatch",
+    "close_sandbox": "workflow_dispatch",
+    "extend_sandbox": "workflow_dispatch",
 }
 _CN_MUTATION_VERB = (
     r"(?:创建|新增|添加|修改|调整|编辑|更改|更新|设置|启用|停用|禁用|下线|"
@@ -475,38 +488,58 @@ class NativeResponsesTransport:
             "Host": target.host_header,
         }
         timeout = httpx.Timeout(float(settings.deepseek_timeout), read=float(settings.deepseek_timeout))
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            async with client.stream(
-                "POST",
-                target.request_url,
-                headers=headers,
-                json=dict(payload),
-                extensions=target.request_extensions,
-            ) as response:
-                if response.status_code >= 400:
-                    raw = (await response.aread()).decode("utf-8", errors="replace")
-                    raise RuntimeError(_upstream_error(raw, response.status_code))
-                event_name = ""
-                data_lines: list[str] = []
-                async for line in response.aiter_lines():
-                    if line == "":
+        # 上游间歇性过载(实测 503 "Service is too busy" 与 200 交替出现),
+        # 对尚未产出任何 SSE 事件的失败做有限重试;一旦开始吐字就不再重试,
+        # 避免重复生成。仅重试可恢复的传输层/5xx 错误,4xx 立即抛出。
+        max_attempts = 4
+        attempt = 0
+        while True:
+            attempt += 1
+            produced_event = False
+            try:
+                async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+                    async with client.stream(
+                        "POST",
+                        target.request_url,
+                        headers=headers,
+                        json=dict(payload),
+                        extensions=target.request_extensions,
+                    ) as response:
+                        if response.status_code >= 400:
+                            raw = (await response.aread()).decode("utf-8", errors="replace")
+                            raise _UpstreamHttpError(response.status_code, _upstream_error(raw, response.status_code))
+                        event_name = ""
+                        data_lines: list[str] = []
+                        async for line in response.aiter_lines():
+                            if line == "":
+                                event = _decode_sse_event(event_name, data_lines)
+                                event_name, data_lines = "", []
+                                if event is None:
+                                    continue
+                                produced_event = True
+                                await _emit(self._event_sink, event)
+                                yield event
+                                continue
+                            if line.startswith(":"):
+                                continue
+                            if line.startswith("event:"):
+                                event_name = line[6:].strip()
+                            elif line.startswith("data:"):
+                                data_lines.append(line[5:].lstrip())
                         event = _decode_sse_event(event_name, data_lines)
-                        event_name, data_lines = "", []
-                        if event is None:
-                            continue
-                        await _emit(self._event_sink, event)
-                        yield event
-                        continue
-                    if line.startswith(":"):
-                        continue
-                    if line.startswith("event:"):
-                        event_name = line[6:].strip()
-                    elif line.startswith("data:"):
-                        data_lines.append(line[5:].lstrip())
-                event = _decode_sse_event(event_name, data_lines)
-                if event is not None:
-                    await _emit(self._event_sink, event)
-                    yield event
+                        if event is not None:
+                            await _emit(self._event_sink, event)
+                            yield event
+                return
+            except Exception as exc:  # noqa: BLE001 - 统一判断是否可重试
+                retryable_status = isinstance(exc, _UpstreamHttpError) and exc.status in {408, 409, 425, 429, 500, 502, 503, 504}
+                retryable_transport = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ReadError, httpx.RemoteProtocolError))
+                if produced_event or attempt >= max_attempts or not (retryable_status or retryable_transport):
+                    if isinstance(exc, _UpstreamHttpError):
+                        raise RuntimeError(exc.message) from None
+                    raise
+                # 指数退避 + 微抖动:0.6s / 1.1s / 2.1s
+                await asyncio.sleep(min(0.5 * (2 ** (attempt - 1)), 2.0) + 0.1 * attempt)
 
 
 class PrismToolExecutor:
@@ -818,10 +851,29 @@ class PrismToolExecutor:
             return await self._execute_once(call, lambda: self._control_roundtable_discussion(call))
 
         if call.name in _USER_CAPABILITY_NAMES:
+            sandbox_agent = _SANDBOX_TOOL_AGENTS.get(call.name)
+            sandbox_policy_decision = policy_engine.ALLOW
+            if sandbox_agent:
+                resource_id = call.arguments.get("project_id") or call.arguments.get("public_id") or "*"
+                policy = tool_gateway.authorize(
+                    self._db,
+                    agent_code=sandbox_agent,
+                    tool_code=_SANDBOX_GOVERNANCE_TOOLS[call.name],
+                    action=f"sandbox.{call.name}",
+                    resource=f"sandbox:{resource_id}",
+                    actor=self._user,
+                    context={
+                        "copilot_request_id": _request_id(self._run_id, call.call_id),
+                        "surface": self._surface,
+                    },
+                )
+                sandbox_policy_decision = policy.decision
+                if policy.decision == policy_engine.DENY:
+                    return await self._failed_attempt(call, f"策略阻断沙箱 Agent 工具: {policy.reason}")
             if call.name in _WRITE_TOOLS and not approved:
                 return self._approval(
                     call,
-                    danger=False,
+                    danger=bool(sandbox_agent and sandbox_policy_decision == policy_engine.ESCALATE),
                     impact="将使用当前登录用户权限执行项目写操作",
                 )
             if call.name in _WRITE_TOOLS:
@@ -1190,6 +1242,8 @@ class PrismToolExecutor:
             return str(call.arguments.get("agent_code") or "custom_agent")
         if call.name in self._skill_bindings:
             return self._skill_bindings[call.name].split(".", 1)[0]
+        if call.name in _SANDBOX_TOOL_AGENTS:
+            return _SANDBOX_TOOL_AGENTS[call.name]
         return "manager" if self._surface == "admin" else "chat_assistant"
 
     async def _execute_once(
@@ -1318,7 +1372,7 @@ class PrismToolExecutor:
             }
             row = ApprovalItem(
                 title=f"Responses Agent 请求执行 {operation or call.name}",
-                agent_code="manager" if self._surface == "admin" else "chat_assistant",
+                agent_code=self._tool_agent_code(call),
                 action=f"responses.{call.name}",
                 resource=f"response_run:{self._run_id}",
                 risk_level="critical" if danger else "high",
@@ -2056,6 +2110,15 @@ def _decode_sse_event(event_name: str, data_lines: Sequence[str]) -> Optional[Ma
     return event
 
 
+class _UpstreamHttpError(Exception):
+    """上游 HTTP 错误(保留状态码以判断是否可重试)。"""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
 def _upstream_error(raw: str, status: int) -> str:
     try:
         payload = json.loads(raw)
@@ -2092,6 +2155,9 @@ def _instructions(surface: str) -> str:
             "download_code_file 和 download_project_source 固定工具。"
             "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
             "和 control_roundtable_discussion 固定工具。"
+            "沙箱测试和部署是页面发现协议的例外：白盒、黑盒和组合测试直接使用 "
+            "run_project_tests，持续部署、关闭和续期分别使用 deploy_project_sandbox、"
+            "close_sandbox 和 extend_sandbox，不要先通过 user_describe_capabilities 搜索这四项固定工具。"
         )
         role_behavior = (
             "你服务的对象主要是不会看文档的普通用户和审查员：回答要像带路人，"
