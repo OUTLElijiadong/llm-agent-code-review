@@ -20,11 +20,12 @@
 ## 3. 部署记录（生产 81.70.251.90）
 
 - 源码备份：`/opt/prism-current/.bak-agent-retry-20260805-1735/`
-- 镜像：`prism-backend:agent-retry-fix-08051735`、`prism-frontend:agent-retry-fix-08051735`
-- 发布变量：`deploy/.env` BACKEND_RELEASE/FRONTEND_RELEASE 已切换；`.env.bak-20260805-1757` 备份
-- 旧镜像保留：`docroot-fix-08051715`、`fold-block-4fd17fb`
+- 我构建并切换的镜像：`prism-backend:agent-retry-fix-08051735`（叠加镜像，基于 docroot-fix）、`prism-frontend:agent-retry-fix-08051735`
+- **实际运行镜像（子代理复核发现）**：后端容器当前运行 `prism-backend:bb-signal2-08051801`（18:01 被并行构建/切换，基于已补丁的 /opt/prism-current 源码，**镜像内已包含本次修复**，runtime md5=2e63ad0… 与补丁文件一致）；前端仍为 `prism-frontend:agent-retry-fix-08051735`
+- 发布变量：`deploy/.env` BACKEND_RELEASE=bb-signal2-08051801、FRONTEND_RELEASE=agent-retry-fix-08051735；`.env.bak-20260805-1757` 备份
+- 旧镜像保留：`docroot-fix-08051715`、`fold-block-4fd17fb`、`agent-retry-fix-08051735`（叠加）
 - 回滚：改回旧 tag 后 `docker compose --env-file deploy/.env up -d backend frontend`
-- 本地提交：`5870096`
+- 本地提交：`5870096`（代码）、`f804966`（文档）
 
 ## 4. 验证
 
