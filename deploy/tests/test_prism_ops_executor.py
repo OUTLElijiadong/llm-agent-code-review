@@ -177,17 +177,19 @@ def test_parse_db_general_log_classifies_threats() -> None:
     rows = [
         {"user_host": "root[root] @ localhost []", "argument": "DROP TABLE users", "event_time": "2026-08-05 10:00:00"},
         {"user_host": "app[app] @ 10.0.0.1 []", "argument": "DELETE FROM project WHERE id=1234", "event_time": "2026-08-05 10:01:00"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "UPDATE agent_alert SET detail_json='x' WHERE id=1", "event_time": "2026-08-05 10:01:30"},
         {"user_host": "app[app] @ 10.0.0.1 []", "argument": "SELECT * FROM user INTO OUTFILE '/tmp/dump.sql'", "event_time": "2026-08-05 10:02:00"},
         {"user_host": "app[app] @ 10.0.0.1 []", "argument": "select password from users limit 1", "event_time": "2026-08-05 10:03:00"},
         {"user_host": "app[app] @ 10.0.0.1 []", "argument": "Access denied for user 'app'", "event_time": "2026-08-05 10:04:00"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "INSERT INTO tool_call_log (error) VALUES (NULL)", "event_time": "2026-08-05 10:04:30"},
         {"user_host": "app[app] @ 10.0.0.1 []", "argument": "SELECT * FROM project LIMIT 10", "event_time": "2026-08-05 10:05:00"},
     ]
     parsed = executor.parse_db_general_log(rows)
-    # DROP + DELETE → destructive
+    # DROP + DELETE → destructive；业务单行 UPDATE 不计入（避免误伤应用 ORM）
     assert parsed["destructive_total"] == 2
     # INTO OUTFILE → dump_exfil
     assert parsed["dump_exfil_total"] == 1
-    # Access denied → error（普通 SELECT 不计入任何类别）
+    # Access denied → error；含 error 列名的 INSERT、普通 SELECT 不计入
     assert parsed["error_total"] == 1
     assert parsed["destructive_by_user"][0]["value"].startswith("root[root]")
     # 样本 SQL 已脱敏：字符串/长数字字面量被替换

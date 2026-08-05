@@ -591,13 +591,15 @@ def _backup_audit() -> dict[str, Any]:
 # ── 生产数据库内部威胁信号（mysql.general_log 只读采样） ──
 # 归一化 SQL 文本后按类别正则归类；仅返回聚合统计与截断样本，绝不回传参数/数据。
 DB_SQL_MAX_LEN = 160
+# 真正的破坏性结构/批量删除/权限变更；不含业务单行 UPDATE/INSERT（避免监控误伤应用 ORM）。
 _DB_DESTRUCTIVE_RE = re.compile(
     r"\b(drop\s+table|drop\s+database|truncate\s+table|delete\s+from|"
-    r"update\s+\w+\s+set|alter\s+table|rename\s+table|grant\b|revoke\b|"
+    r"alter\s+table|rename\s+table|grant\b|revoke\b|"
     r"create\s+user|drop\s+user|set\s+password)\b"
 )
 _DB_DUMP_RE = re.compile(r"\b(select\s+.+\s+into\s+(out|dump)file|load_file\s*\()\b")
-_DB_ERROR_RE = re.compile(r"\b(error|denied|access\s+denied)\b")
+# MySQL 报错文本（access denied / error NNNN），不匹配含 error 列名的普通 INSERT。
+_DB_ERROR_RE = re.compile(r"\b(access\s+denied|error\s+\d{3,5}|you have an error)\b")
 _DB_SQL_REDACT_RE = re.compile(r"('[^']*'|\"[^\"]*\"|\b\d{4,}\b)")
 
 
@@ -715,7 +717,7 @@ def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
     return parsed
 
 
-_DB_RESTART_RE = re.compile(r"ready for connections", re.IGNORECASE)
+_DB_RESTART_RE = re.compile(r"/usr/sbin/mysqld: ready for connections", re.IGNORECASE)
 _DB_RECOVERY_RE = re.compile(
     r"(InnoDB: (Starting crash recovery|Doing recovery|Database was not shutdown normally)|"
     r"Starting crash recovery|crash recovery|forcing InnoDB Recovery)", re.IGNORECASE,

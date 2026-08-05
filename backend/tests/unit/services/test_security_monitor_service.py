@@ -574,10 +574,28 @@ def test_db_health_restart_creates_critical_alert(db, super_admin_user, monkeypa
 def test_db_health_clean_no_alert(db, super_admin_user, monkeypatch, emitted):
     """数据库健康（无重启/恢复）不产生告警。"""
     payloads = _base_payloads()
-    payloads["db_health"] = {"restart_count": 0, "recovery_detected": False, "restart_lines": []}
+    payloads["db_health"] = {"restart_count": 0, "recovery_detected": False, "container_restart_count": "0", "restart_lines": []}
     monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
 
     result = security_monitor_service.run_security_monitor(db)
 
     assert result["created_alerts"] == []
+    assert db.query(AgentAlert).filter(AgentAlert.fingerprint == "db:health_restart").count() == 0
+
+
+def test_db_health_normal_restart_no_alert(db, super_admin_user, monkeypatch, emitted):
+    """正常发布重启（有启动日志但无崩溃恢复、容器restart=0）不应误报 OOM。"""
+    payloads = _base_payloads()
+    payloads["db_health"] = {
+        "restart_count": 2,  # 正常启动日志被识别
+        "recovery_detected": False,  # 无 InnoDB 崩溃恢复
+        "container_restart_count": "0",  # Docker 未记录非正常重启
+        "mem_usage": "190MiB / 900MiB",
+        "restart_lines": ["/usr/sbin/mysqld: ready for connections"],
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    # 不应产生 db:health_restart 告警
     assert db.query(AgentAlert).filter(AgentAlert.fingerprint == "db:health_restart").count() == 0

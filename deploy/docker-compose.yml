@@ -27,6 +27,9 @@ services:
       # 实测 mysqld 常驻 ~497MB，其中 performance_schema 占 ~150MB；关闭后
       # 叠加连接/临时表护栏，常驻可稳在 ~350MB 以下，为 343MB 大表备份留余量。
       - --performance-schema=OFF
+      # 开启 SQL 审计日志到表，供安全监控只读采样数据库内部威胁（破坏性写/外泄）。
+      - --general-log=1
+      - --log-output=TABLE
       - --innodb-buffer-pool-size=192M
       - --max-connections=60
       - --table-open-cache=512

@@ -472,32 +472,43 @@ def _evaluate_db(db: Session, db_signals: dict[str, Any], created: list[dict[str
 
 
 def _evaluate_db_health(db: Session, health: dict[str, Any], created: list[dict[str, Any]]) -> None:
-    """数据库可用性规则：OOM 误杀/崩溃恢复/频繁重启 → critical（直接威胁生产数据）。"""
+    """数据库可用性规则：仅真实异常（InnoDB 崩溃恢复 / Docker 容器重启）→ critical。
+
+    正常发布重启（container_restart_count=0 且无崩溃恢复日志）不告警——
+    部署事务本身会重启 MySQL，不能据此误报 OOM。
+    """
     restart_lines = health.get("restart_lines") or []
     recovery_detected = bool(health.get("recovery_detected"))
     restart_count = int(health.get("restart_count") or 0)
-    # 近 24h 内出现崩溃恢复或重启日志，说明 mysqld 曾被杀/崩溃（本系统 OOM 主因）。
-    if recovery_detected or restart_count > 0:
-        _record_alert(
-            db,
-            created,
-            category="db_threat",
-            severity="critical",
-            fingerprint="db:health_restart",
-            title=f"数据库近 24h 异常重启 {restart_count} 次"
-                  + ("（检测到崩溃恢复）" if recovery_detected else "（疑似 OOM 误杀）"),
-            suggestion=(
-                "数据库曾被杀重启，可能导致批准/写入中断。检查容器内存限额与 mysqld "
-                "内存配置（performance_schema/buffer_pool），防止 OOM 复发；必要时提高 mem_limit"
-            ),
-            detail={
-                "restart_count": restart_count,
-                "recovery_detected": recovery_detected,
-                "container_restart_count": health.get("container_restart_count"),
-                "mem_usage": health.get("mem_usage"),
-                "restart_lines": restart_lines[:5],
-            },
-        )
+    try:
+        container_restart = int(str(health.get("container_restart_count") or "0"))
+    except (TypeError, ValueError):
+        container_restart = 0
+    # 仅当出现崩溃恢复日志，或 Docker 记录的非正常容器重启时告警。
+    if not (recovery_detected or container_restart > 0):
+        return
+    _record_alert(
+        db,
+        created,
+        category="db_threat",
+        severity="critical",
+        fingerprint="db:health_restart",
+        title=(
+            f"数据库异常重启（容器重启 {container_restart} 次"
+            + ("，检测到 InnoDB 崩溃恢复）" if recovery_detected else "）")
+        ),
+        suggestion=(
+            "数据库曾被杀/崩溃，可能导致批准/写入中断。检查容器内存限额与 mysqld "
+            "内存配置（performance_schema/buffer_pool），防止 OOM 复发；必要时提高 mem_limit"
+        ),
+        detail={
+            "restart_count": restart_count,
+            "recovery_detected": recovery_detected,
+            "container_restart_count": health.get("container_restart_count"),
+            "mem_usage": health.get("mem_usage"),
+            "restart_lines": restart_lines[:5],
+        },
+    )
 
 
 def _evaluate_status(db: Session, status: dict[str, Any], created: list[dict[str, Any]]) -> None:
