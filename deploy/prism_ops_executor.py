@@ -75,6 +75,11 @@ ACTION_PARAM_KEYS = {
     "firewall_action": {"operation", "target_type", "value", "zone"},
     "account_action": {"operation", "username", "shell", "remove_home"},
     "ssh_authorized_key_action": {"operation", "username", "public_key", "fingerprint"},
+    "ssh_login_events": {"since_hours", "limit", "focus"},
+    "flytrap_attack_events": {"since_hours", "limit"},
+    "nginx_attack_events": {"since_hours", "limit"},
+    "backup_audit": set(),
+    "ip_attribution": {"ip"},
 }
 
 
@@ -189,6 +194,16 @@ def execute(action: str, params: dict[str, Any], request_id: str = "") -> dict[s
         return _account_action(params)
     if action == "ssh_authorized_key_action":
         return _ssh_authorized_key_action(params, request_id=request_id)
+    if action == "ssh_login_events":
+        return _ssh_login_events(params)
+    if action == "flytrap_attack_events":
+        return _flytrap_attack_events(params)
+    if action == "nginx_attack_events":
+        return _nginx_attack_events(params)
+    if action == "backup_audit":
+        return _backup_audit()
+    if action == "ip_attribution":
+        return _ip_attribution(params)
     raise ValueError("动作不在白名单")
 
 
@@ -319,6 +334,279 @@ def _journal_query(params: dict[str, Any]) -> dict[str, Any]:
     return run([
         "journalctl", "-u", unit, "--since", since, "--no-pager", "--output=short-iso", "-n", str(lines),
     ], timeout=60, allow_failure=True)
+
+
+MAX_SINCE_HOURS = 720
+MAX_EVENT_LIMIT = 5000
+SSH_FOCUS_VALUES = {"all", "accepted", "failed"}
+
+
+def _since_hours_arg(params: dict[str, Any], default: int = 24) -> int:
+    raw = params.get("since_hours")
+    since_hours = int(raw) if raw is not None else default
+    if since_hours < 1 or since_hours > MAX_SINCE_HOURS:
+        raise ValueError(f"since_hours 必须在 1 到 {MAX_SINCE_HOURS} 之间")
+    return since_hours
+
+
+def _event_limit_arg(params: dict[str, Any], default: int = 1000) -> int:
+    raw = params.get("limit")
+    limit = int(raw) if raw is not None else default
+    if limit < 1 or limit > MAX_EVENT_LIMIT:
+        raise ValueError(f"limit 必须在 1 到 {MAX_EVENT_LIMIT} 之间")
+    return limit
+
+
+def parse_ssh_log(lines: list[str]) -> dict[str, Any]:
+    accepted_pattern = re.compile(
+        r"Accepted (publickey|password|keyboard-interactive) for (\S+) from "
+        r"([0-9a-fA-F:.]+) port \d+ ssh2(?::?\s*(.*))?$"
+    )
+    failed_pattern = re.compile(
+        r"Failed password for (?:invalid user )?(\S+) from ([0-9a-fA-F:.]+) port \d+"
+    )
+    invalid_pattern = re.compile(r"Invalid user (\S+) from ([0-9a-fA-F:.]+) port \d+")
+    accepted: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for raw in lines:
+        line = raw.rstrip("\n")
+        match = accepted_pattern.search(line)
+        if match:
+            accepted.append({
+                "method": match.group(1),
+                "user": match.group(2),
+                "ip": match.group(3),
+                "detail": match.group(4) or "",
+            })
+            continue
+        match = failed_pattern.search(line)
+        if match:
+            failed.append({
+                "user": match.group(1),
+                "ip": match.group(2),
+                "detail": "failed_password",
+            })
+            continue
+        match = invalid_pattern.search(line)
+        if match:
+            failed.append({
+                "user": match.group(1),
+                "ip": match.group(2),
+                "detail": "invalid_user",
+            })
+    return {"accepted": accepted, "failed": failed}
+
+
+def parse_flytrap_log(lines: list[str]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        remote = str(payload.get("remote") or "")
+        ip = remote.rsplit(":", 1)[0] if ":" in remote else remote
+        events.append({
+            "time": payload.get("time") or "",
+            "username": payload.get("username") or "",
+            "ip": ip,
+            "message": payload.get("message") or "",
+        })
+    return events
+
+
+def parse_nginx_log(lines: list[str]) -> list[dict[str, Any]]:
+    access_pattern = re.compile(
+        r'^(\S+) - - \[[^\]]+\] "([^"]*)" (\d{3})'
+    )
+    events: list[dict[str, Any]] = []
+    for raw in lines:
+        line = raw.strip()
+        match = access_pattern.match(line)
+        if not match:
+            continue
+        ip = match.group(1)
+        request = match.group(2)
+        status = match.group(3)
+        method = request.split(" ", 1)[0] if request else ""
+        detail = "normal"
+        if method == "CONNECT":
+            detail = "proxy_connect"
+        elif method.startswith("\\x") or not method.isalpha():
+            detail = "tls_gibberish"
+        elif status in {"400", "403", "444"}:
+            detail = f"http_{status}"
+        else:
+            continue
+        events.append({
+            "ip": ip,
+            "method": method,
+            "path": request[:200],
+            "status": status,
+            "detail": detail,
+        })
+    return events
+
+
+def _aggregate(events: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for event in events:
+        value = str(event.get(key) or "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    return [
+        {"value": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    ][:30]
+
+
+def _ssh_login_events(params: dict[str, Any]) -> dict[str, Any]:
+    since_hours = _since_hours_arg(params)
+    limit = _event_limit_arg(params, default=1000)
+    focus = str(params.get("focus") or "all")
+    if focus not in SSH_FOCUS_VALUES:
+        raise ValueError("focus 必须是 all/accepted/failed")
+    result = run([
+        "journalctl", "-u", "sshd", "--since", f"{since_hours} hours ago", "--no-pager",
+        "--output=short-iso", "-n", "20000",
+    ], timeout=90, allow_failure=True)
+    parsed = parse_ssh_log(result["stdout"].splitlines())
+    accepted = parsed["accepted"]
+    failed = parsed["failed"]
+    selected: list[dict[str, Any]] = []
+    if focus in {"all", "accepted"}:
+        selected.extend(accepted)
+    if focus in {"all", "failed"}:
+        selected.extend(failed)
+    selected = selected[-limit:]
+    return {
+        "since_hours": since_hours,
+        "focus": focus,
+        "accepted_total": len(accepted),
+        "failed_total": len(failed),
+        "accepted_by_ip": _aggregate(accepted, "ip"),
+        "accepted_by_detail": _aggregate(accepted, "detail"),
+        "failed_by_ip": _aggregate(failed, "ip"),
+        "recent": selected[-min(limit, 200):],
+        "stdout_capped": len(result["stdout"]) >= 100_000,
+    }
+
+
+def _flytrap_attack_events(params: dict[str, Any]) -> dict[str, Any]:
+    since_hours = _since_hours_arg(params)
+    limit = _event_limit_arg(params, default=1000)
+    result = run([
+        "journalctl", "-u", "flytrap-agent", "--since", f"{since_hours} hours ago",
+        "--no-pager", "--output=short-iso", "-n", "30000",
+    ], timeout=90, allow_failure=True)
+    events = parse_flytrap_log(result["stdout"].splitlines())
+    return {
+        "since_hours": since_hours,
+        "total": len(events),
+        "by_ip": _aggregate(events, "ip"),
+        "by_username": _aggregate(events, "username"),
+        "recent": events[-min(limit, 300):],
+        "stdout_capped": len(result["stdout"]) >= 100_000,
+    }
+
+
+def _nginx_attack_events(params: dict[str, Any]) -> dict[str, Any]:
+    since_hours = _since_hours_arg(params)
+    limit = _event_limit_arg(params, default=1000)
+    result = run([
+        "docker", "logs", "--since", f"{since_hours}h", "-n", "30000", "cr_frontend",
+    ], timeout=90, allow_failure=True)
+    events = parse_nginx_log(result["stdout"].splitlines())
+    return {
+        "since_hours": since_hours,
+        "total": len(events),
+        "by_ip": _aggregate(events, "ip"),
+        "by_detail": _aggregate(events, "detail"),
+        "recent": events[-min(limit, 300):],
+        "stdout_capped": len(result["stdout"]) >= 100_000,
+    }
+
+
+def _backup_audit() -> dict[str, Any]:
+    backup_dir = BACKUP_DIR
+    if not backup_dir.is_dir():
+        return {"error": "备份目录不存在", "dir": str(backup_dir)}
+    gzip_files = sorted(backup_dir.glob("*.sql.gz"))
+    now = datetime.now(timezone.utc)
+    rows: list[dict[str, Any]] = []
+    total_gzip_bytes = 0
+    for path in gzip_files:
+        if not path.is_file() or path.is_symlink():
+            continue
+        size = path.stat().st_size
+        total_gzip_bytes += size
+        modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        rows.append({
+            "name": path.name,
+            "size": size,
+            "age_hours": round((now - modified).total_seconds() / 3600, 2),
+            "has_sha256": path.with_name(path.name + ".sha256").is_file(),
+            "has_meta": path.with_name(path.name + ".meta").is_file(),
+            "modified_at": modified.isoformat(),
+        })
+    rows.sort(key=lambda item: item["modified_at"], reverse=True)
+    other_bytes = 0
+    other_count = 0
+    for path in backup_dir.iterdir():
+        if path.name.endswith((".sql.gz", ".sha256", ".meta")):
+            continue
+        try:
+            if path.is_file():
+                other_bytes += path.stat().st_size
+                other_count += 1
+            elif path.is_dir():
+                sub_total = sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+                other_bytes += sub_total
+                other_count += 1
+        except OSError:
+            continue
+    return {
+        "dir": str(backup_dir),
+        "sql_gz_count": len(rows),
+        "sql_gz_bytes": total_gzip_bytes,
+        "other_entries_count": other_count,
+        "other_bytes": other_bytes,
+        "older_than_14_days": sum(1 for row in rows if row["age_hours"] > 24 * 14),
+        "newest": rows[0] if rows else None,
+        "oldest": rows[-1] if rows else None,
+        "recent": rows[:100],
+    }
+
+
+def _threat_intel_base() -> str:
+    try:
+        value = _read_env("THREAT_INTEL_BASE_URL")
+    except RuntimeError:
+        return "http://ip-api.com/json"
+    if not re.fullmatch(r"https?://[A-Za-z0-9.-]+", value):
+        raise ValueError("THREAT_INTEL_BASE_URL 不合法")
+    return value.rstrip("/")
+
+
+def _ip_attribution(params: dict[str, Any]) -> dict[str, Any]:
+    import ipaddress
+    ip = str(params.get("ip") or "")
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError as exc:
+        raise ValueError("ip 不是合法地址") from exc
+    base_url = _threat_intel_base()
+    url = f"{base_url}/{ip}?fields=status,message,country,regionName,city,isp,org,as,query"
+    result = run(["curl", "-fsS", "--max-time", "15", url], timeout=20, allow_failure=True)
+    try:
+        data = json.loads(result["stdout"])
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        data = {"error": "无法解析情报响应", "exit_code": result["exit_code"]}
+    return {"ip": ip, "attribution": data, "command_exit": result["exit_code"]}
 
 
 def _systemd_unit_action(params: dict[str, Any]) -> dict[str, Any]:

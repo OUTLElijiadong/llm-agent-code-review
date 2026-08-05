@@ -823,6 +823,8 @@ const STATUS_BY_TYPE: Record<AgentEvent['type'], AgentStatus> = {
   complete: 'idle',
   failed: 'error',
   clarify: 'blocked',
+  // 安全告警为系统级事件,不改变气泡进度状态,仅展示标签
+  admin_alert: 'idle',
 }
 
 const TYPE_LABELS: Record<AgentEvent['type'], string> = {
@@ -832,6 +834,7 @@ const TYPE_LABELS: Record<AgentEvent['type'], string> = {
   complete: '完成',
   failed: '失败',
   clarify: '等待用户',
+  admin_alert: '安全告警',
 }
 
 function stepStatus(s: StepBubble): AgentStatus {
@@ -840,11 +843,6 @@ function stepStatus(s: StepBubble): AgentStatus {
 
 function stepLabel(s: StepBubble): string {
   return TYPE_LABELS[s.type] ?? s.type
-}
-
-/** 调度链中含进行中/思考中的步骤时保持展开,便于观察实时进度。 */
-function stepStreamOpen(steps: StepBubble[]): boolean {
-  return steps.some((s) => s.type === 'dispatch' || s.type === 'thinking' || s.type === 'progress')
 }
 
 async function sendMessage(): Promise<void> {
@@ -990,7 +988,6 @@ function onDragLeave(event: DragEvent): void {
 }
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
-const ARCHIVE_EXTS = new Set(['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar'])
 const CODE_EXTS = new Set(['py', 'js', 'jsx', 'ts', 'tsx', 'vue', 'html', 'css', 'java', 'go', 'php', 'rb', 'c', 'h', 'cpp', 'cc', 'cs', 'rs'])
 const LANGUAGE_BY_EXT: Record<string, string> = {
   py: 'Python', js: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript',
@@ -1014,7 +1011,7 @@ async function onDrop(event: DragEvent): Promise<void> {
   uploadStatus.value = `准备上传 ${files.length} 个文件…`
   try {
     const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
-    const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? '') || ARCHIVE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     if (images.length && !codeFiles.length) {
       uploadStatus.value = ''
       ElMessage.info('图片会作为项目附件上传；若要让小菱帮你创建代码项目，请再拖入至少一个代码文件')
@@ -1229,7 +1226,7 @@ onBeforeUnmount(() => {
                 <details
                   v-if="msg.role === 'assistant' && msg.steps && msg.steps.length"
                   class="step-stream"
-                  :open="stepStreamOpen(msg.steps)"
+                  open
                 >
                   <summary class="step-summary">
                     Agent 调度链 · 共 {{ msg.steps.length }} 步

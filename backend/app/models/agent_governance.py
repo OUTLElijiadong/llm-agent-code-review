@@ -328,6 +328,8 @@ class AgentAlert(Base, IdMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_agent_alert_status", "status"),
         Index("ix_agent_alert_severity", "severity"),
+        Index("ix_agent_alert_user_read", "user_id", "read_at"),
+        Index("ix_agent_alert_fingerprint", "fingerprint"),
     )
 
     alert_type = Column(String(80), nullable=False, comment="告警类型")
@@ -337,6 +339,12 @@ class AgentAlert(Base, IdMixin, TimestampMixin):
     detail_json = Column(Text, comment="详情 JSON")
     resolved_by = Column(BigInteger, comment="处理人")
     resolved_at = Column(DateTime, comment="处理时间")
+    # 安全监控扩展：告警类别 / 来源 / 弹窗归属用户 / 已读时间 / 去重指纹
+    category = Column(String(40), comment="告警类别（login/brute_force/attack/proxy_abuse/scanner/backup）")
+    source = Column(String(40), comment="告警来源（security_monitor/manual/agent）")
+    user_id = Column(BigInteger, comment="弹窗目标管理员（唯一超级管理员），FK users.id")
+    read_at = Column(DateTime, comment="弹窗已读时间")
+    fingerprint = Column(String(120), comment="去重指纹（如 login:{ip}:{user}）")
 
 
 class AgentMetricSnapshot(Base, IdMixin, TimestampMixin):

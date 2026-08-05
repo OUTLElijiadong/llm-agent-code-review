@@ -6,17 +6,17 @@
 
 | 事实 | 数量/值 |
 | --- | ---: |
-| 业务 HTTP 路由 | 232 |
-| HTTP 操作 | 232 |
+| 业务 HTTP 路由 | 272 |
+| HTTP 操作 | 272 |
 | WebSocket 路由 | 1 |
-| ORM 表 | 64 |
-| Agent | 15 |
-| Vue 页面 | 56 |
-| 后端 Python 模块 | 259 |
-| 后端测试文件 | 92 |
-| 前端测试文件 | 15 |
-| Alembic 迁移 | 20 |
-| Alembic head | 020 |
+| ORM 表 | 73 |
+| Agent | 17 |
+| Vue 页面 | 60 |
+| 后端 Python 模块 | 281 |
+| 后端测试文件 | 117 |
+| 前端测试文件 | 23 |
+| Alembic 迁移 | 27 |
+| Alembic head | 027 |
 
 ## HTTP 路由
 
@@ -57,9 +57,30 @@
 | GET | `/api/admin/llm/config` | get_config |
 | PUT | `/api/admin/llm/config` | update_config |
 | POST | `/api/admin/llm/test` | test_config |
+| GET | `/api/admin/mcp/aliases` | list_aliases |
+| POST | `/api/admin/mcp/aliases` | create_alias |
+| DELETE | `/api/admin/mcp/aliases/{alias_id}` | delete_alias |
+| PUT | `/api/admin/mcp/aliases/{alias_id}` | update_alias |
+| GET | `/api/admin/mcp/bindings` | list_bindings |
+| PUT | `/api/admin/mcp/bindings` | upsert_binding |
+| DELETE | `/api/admin/mcp/bindings/{binding_id}` | delete_binding |
+| GET | `/api/admin/mcp/capabilities/search` | search_capabilities |
+| GET | `/api/admin/mcp/servers` | list_servers |
+| POST | `/api/admin/mcp/servers` | create_server |
+| POST | `/api/admin/mcp/servers/recommended` | seed_recommended_servers |
+| DELETE | `/api/admin/mcp/servers/{server_id}` | delete_server |
+| PUT | `/api/admin/mcp/servers/{server_id}` | update_server |
+| POST | `/api/admin/mcp/servers/{server_id}/health` | check_server_health |
+| POST | `/api/admin/mcp/servers/{server_id}/sync` | sync_server_tools |
+| GET | `/api/admin/mcp/tools` | list_tools |
+| PUT | `/api/admin/mcp/tools/{tool_id}` | update_tool |
 | GET | `/api/admin/observability/alerts` | list_alerts |
+| GET | `/api/admin/observability/alerts/unread` | list_unread_alerts |
+| POST | `/api/admin/observability/alerts/{alert_id}/read` | mark_alert_read |
 | POST | `/api/admin/observability/alerts/{alert_id}/resolve` | resolve_alert |
 | GET | `/api/admin/observability/overview` | observability_overview |
+| POST | `/api/admin/observability/security/run-monitor` | run_security_monitor_endpoint |
+| GET | `/api/admin/observability/security/status` | security_status |
 | GET | `/api/admin/overview/agents-activity` | overview_agents_activity |
 | GET | `/api/admin/overview/geo` | overview_geo |
 | GET | `/api/admin/overview/security` | overview_security |
@@ -196,13 +217,18 @@
 | POST | `/api/me/profile/relearn` | relearn_profile |
 | GET | `/api/projects` | list_projects |
 | POST | `/api/projects` | create_project |
+| POST | `/api/projects/import-remote` | import_remote_project |
 | DELETE | `/api/projects/{project_id}` | delete_project |
 | GET | `/api/projects/{project_id}` | get_project |
 | PUT | `/api/projects/{project_id}` | update_project |
+| GET | `/api/projects/{project_id}/audit-source-archive` | get_audit_source_archive |
+| POST | `/api/projects/{project_id}/audit-source-archive` | upload_audit_source_archive |
+| GET | `/api/projects/{project_id}/audit-source-archive/result` | get_audit_source_archive_result |
 | GET | `/api/projects/{project_id}/members` | list_members |
 | POST | `/api/projects/{project_id}/members` | add_member |
 | DELETE | `/api/projects/{project_id}/members/{user_id}` | remove_member |
 | PUT | `/api/projects/{project_id}/members/{user_id}` | update_member_role |
+| GET | `/api/projects/{project_id}/source-archive` | download_project_source |
 | GET | `/api/rbac/menus` | list_menus_tree |
 | GET | `/api/rbac/permissions` | list_permissions |
 | GET | `/api/rbac/roles` | list_roles |
@@ -242,9 +268,23 @@
 | DELETE | `/api/rules/{rule_id}` | delete_rule |
 | PUT | `/api/rules/{rule_id}` | update_rule |
 | POST | `/api/rules/{rule_id}/toggle` | toggle_rule |
+| GET | `/api/sandboxes` | list_sandboxes |
+| POST | `/api/sandboxes` | create_sandbox |
+| GET | `/api/sandboxes/capabilities/search` | search_capabilities |
+| GET | `/api/sandboxes/workers` | list_workers |
+| POST | `/api/sandboxes/workers` | create_worker |
+| POST | `/api/sandboxes/workers/seed-production` | seed_production_worker |
+| PUT | `/api/sandboxes/workers/{worker_id}` | update_worker |
+| POST | `/api/sandboxes/workers/{worker_id}/health` | check_worker |
+| GET | `/api/sandboxes/{public_id}` | get_sandbox |
+| GET | `/api/sandboxes/{public_id}/artifacts/{artifact_id}` | download_sandbox_artifact |
+| POST | `/api/sandboxes/{public_id}/extend` | extend_sandbox |
+| POST | `/api/sandboxes/{public_id}/preview-session` | create_preview_session |
+| POST | `/api/sandboxes/{public_id}/stop` | stop_sandbox |
 | GET | `/api/security/checklist` | get_checklist |
 | GET | `/api/security/dashboard-summary` | dashboard_summary |
 | GET | `/api/security/findings` | list_findings |
+| POST | `/api/security/fullchain-audit` | fullchain_audit |
 | POST | `/api/security/scan-all-projects` | scan_all_projects |
 | POST | `/api/security/scan-file` | scan_file |
 | POST | `/api/security/scan-project` | scan_project |
@@ -267,13 +307,15 @@
 | --- | ---: |
 | `admin_chat_message` | 12 |
 | `admin_chat_session` | 8 |
-| `agent_alert` | 10 |
+| `agent_alert` | 15 |
 | `agent_artifact_version` | 9 |
+| `agent_capability_alias` | 9 |
 | `agent_job` | 10 |
 | `agent_job_run` | 9 |
 | `agent_knowledge_chunk` | 9 |
 | `agent_knowledge_doc` | 13 |
 | `agent_knowledge_source` | 9 |
+| `agent_mcp_binding` | 9 |
 | `agent_memory` | 10 |
 | `agent_metric_snapshot` | 8 |
 | `agent_profile` | 16 |
@@ -305,6 +347,8 @@
 | `knowledge_doc` | 10 |
 | `maintenance_ticket` | 12 |
 | `malware_scan_log` | 9 |
+| `mcp_server` | 16 |
+| `mcp_tool` | 13 |
 | `menu` | 12 |
 | `ops_execution` | 15 |
 | `permission` | 8 |
@@ -312,6 +356,7 @@
 | `policy_rule` | 13 |
 | `project` | 8 |
 | `project_member` | 6 |
+| `project_source_archive` | 24 |
 | `report_template` | 9 |
 | `review_experience` | 15 |
 | `review_issue` | 29 |
@@ -322,6 +367,10 @@
 | `review_task_file` | 4 |
 | `role` | 9 |
 | `role_permission` | 5 |
+| `sandbox_artifact` | 11 |
+| `sandbox_environment` | 27 |
+| `sandbox_event` | 7 |
+| `sandbox_worker` | 19 |
 | `system_config` | 5 |
 | `tool_call_log` | 17 |
 | `user` | 12 |
@@ -341,14 +390,16 @@
 | `dashboard` | analytics | 3 | 获取平台统计数据: 汇总指标/风险分布/评分趋势/审查频次 |
 | `evolution` | meta | 4 | 自进化代理:从审查反馈蒸馏规则进化提案,经闸门+审批后生效 |
 | `language_detector` | analyzer | 3 | 根据项目名称和描述智能识别编程语言 |
-| `operations` | operations | 14 | 生产宿主机全域巡检、受批准变更、验证和回滚 |
+| `operations` | operations | 19 | 最高管理员管理 Agent：全域巡检、安全监控与攻击溯源、备份治理、受批准变更、验证和回滚 |
 | `orchestrator` | meta | 4 | 主调度 Agent, 协调所有子 Agent 完成全平台功能 |
 | `project_analyzer` | analyzer | 4 | 根据文件夹名称和文件列表智能分析项目元数据 |
 | `project_manager` | manager | 3 | 管理项目: 创建/查询/编辑/删除项目 |
 | `reporter` | output | 4 | 查询审查报告列表和详情 |
 | `review_orchestrator` | orchestrator | 4 | 启动代码审查任务/查询审查记录/列出审查问题 |
 | `rule_manager` | manager | 3 | 管理审查规则: 列出/创建/启用/禁用 |
+| `sandbox_deployer` | operations | 5 | 在隔离 worker 部署项目并管理预览、续期和关闭生命周期 |
 | `security_sentinel` | security | 4 | 网络安全深度审查: OWASP Top10 / CWE / 敏感信息 / 项目级威胁建模 |
+| `test_verifier` | review | 4 | 调用隔离 worker 执行项目级动态白盒、黑盒或组合测试 |
 
 ## Vue 页面
 
@@ -364,6 +415,8 @@
 - `frontend/src/views/admin/JobCenter.vue`
 - `frontend/src/views/admin/KnowledgeGovernance.vue`
 - `frontend/src/views/admin/LlmConfig.vue`
+- `frontend/src/views/admin/McpWorkerGovernance 2.vue`
+- `frontend/src/views/admin/McpWorkerGovernance.vue`
 - `frontend/src/views/admin/ObservabilityCenter.vue`
 - `frontend/src/views/admin/PermissionList.vue`
 - `frontend/src/views/admin/PolicyCenter.vue`
@@ -405,6 +458,8 @@
 - `frontend/src/views/review/ReviewTaskDetail.vue`
 - `frontend/src/views/review/ReviewTaskList.vue`
 - `frontend/src/views/rule/RuleConfig.vue`
+- `frontend/src/views/sandbox/SandboxWorkstation 2.vue`
+- `frontend/src/views/sandbox/SandboxWorkstation.vue`
 - `frontend/src/views/security/SecurityCenter.vue`
 - `frontend/src/views/support/FeedbackCenter.vue`
 - `frontend/src/views/support/MaintenanceCenter.vue`
@@ -433,3 +488,10 @@
 | `018` | `017` | `backend/alembic/versions/018_expand_agent_response_payloads.py` |
 | `019` | `018` | `backend/alembic/versions/019_server_ops_permissions.py` |
 | `020` | `019` | `backend/alembic/versions/020_manager_admin_capability_contract.py` |
+| `021` | `020` | `backend/alembic/versions/021_grant_project_import_to_users.py` |
+| `022` | `021` | `backend/alembic/versions/022_unique_super_admin.py` |
+| `023` | `022` | `backend/alembic/versions/023_agent_capabilities_mcp_sandbox.py` |
+| `024` | `023` | `backend/alembic/versions/024_quarantined_source_archives.py` |
+| `025` | `024` | `backend/alembic/versions/025_seed_capability_aliases.py` |
+| `026` | `025` | `backend/alembic/versions/026_expand_source_binary_capacity.py` |
+| `027` | `026` | `backend/alembic/versions/027_add_security_alert_fields.py` |

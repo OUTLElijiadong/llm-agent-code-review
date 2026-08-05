@@ -1,12 +1,15 @@
 """Agent 治理平台管理端 API。"""
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import require_admin, require_super_admin
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.agent_governance import (
+    AgentAlert,
     AgentArtifactVersion,
     AgentJob,
     AgentJobRun,
@@ -41,6 +44,8 @@ from app.schemas.agent_governance import (
     PolicyEvaluateIn,
     PolicyRuleOut,
     PolicyRuleUpsertIn,
+    SecurityMonitorRunOut,
+    SecurityStatusOut,
     ToolCallLogOut,
 )
 from app.schemas.common import Resp
@@ -54,6 +59,7 @@ from app.services import (
     reward_service,
     rollback_service,
     scheduler_service,
+    security_monitor_service,
 )
 
 router = APIRouter()
@@ -694,6 +700,106 @@ def resolve_alert(
     """
     row = observability_service.resolve_alert(db, alert_id, admin.id, note=payload.note)
     return Resp(data=AgentAlertOut.model_validate(row))
+
+
+@router.get("/observability/alerts/unread", response_model=Resp[list[AgentAlertOut]])
+def list_unread_alerts(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    """查询当前管理员的未读弹窗告警。
+
+    仅返回 status=open 且 read_at IS NULL 且归属当前管理员（user_id==当前用户）的
+    告警，按 id 倒序最多 50 条。
+
+    Args:
+        db: 数据库会话。
+        admin: 当前登录管理员。
+
+    Returns:
+        Resp[list[AgentAlertOut]]: 未读告警列表。
+    """
+    rows = (
+        db.query(AgentAlert)
+        .filter(
+            AgentAlert.status == "open",
+            AgentAlert.read_at.is_(None),
+            AgentAlert.user_id == admin.id,
+        )
+        .order_by(AgentAlert.id.desc())
+        .limit(50)
+        .all()
+    )
+    return Resp(data=[AgentAlertOut.model_validate(row) for row in rows])
+
+
+@router.post("/observability/alerts/{alert_id}/read", response_model=Resp[AgentAlertOut])
+def mark_alert_read(
+    alert_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """标记安全弹窗告警为已读。
+
+    校验归属：user_id 为空（系统级告警）或等于当前管理员时才允许标记，
+    否则返回 403；告警不存在返回 404。
+
+    Args:
+        alert_id: 告警 ID。
+        db: 数据库会话。
+        admin: 当前登录管理员。
+
+    Returns:
+        Resp[AgentAlertOut]: 已读后的告警。
+
+    Raises:
+        NotFoundError: 告警不存在。
+        ForbiddenError: 告警归属其他管理员。
+    """
+    alert = db.get(AgentAlert, alert_id)
+    if not alert:
+        raise NotFoundError("治理告警不存在", code=40400)
+    if alert.user_id is not None and alert.user_id != admin.id:
+        raise ForbiddenError("无权操作该告警", code=40300)
+    alert.read_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(alert)
+    return Resp(data=AgentAlertOut.model_validate(alert))
+
+
+@router.post("/observability/security/run-monitor", response_model=Resp[SecurityMonitorRunOut])
+def run_security_monitor_endpoint(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """手动触发一轮安全巡检（供最高管理员/Agent 运维使用）。
+
+    Args:
+        db: 数据库会话。
+        _: 唯一超级管理员。
+
+    Returns:
+        Resp[SecurityMonitorRunOut]: 巡检摘要（新建告警/错误）。
+    """
+    result = security_monitor_service.run_security_monitor(db)
+    return Resp(data=SecurityMonitorRunOut(**result))
+
+
+@router.get("/observability/security/status", response_model=Resp[SecurityStatusOut])
+def security_status(
+    since_hours: int = Query(24, ge=1, le=720),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_super_admin),
+):
+    """查询安全态势聚合（登录/攻击/备份/最近 open 告警）。
+
+    Args:
+        since_hours: 回看窗口（小时）。
+        db: 数据库会话。
+        _: 唯一超级管理员。
+
+    Returns:
+        Resp[SecurityStatusOut]: 安全态势聚合。
+    """
+    result = security_monitor_service.query_security_status(db, since_hours=since_hours)
+    return Resp(data=SecurityStatusOut(**result))
 
 
 @router.get("/rollback/versions", response_model=Resp[list[dict]])

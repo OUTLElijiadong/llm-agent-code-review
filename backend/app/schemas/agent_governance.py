@@ -115,7 +115,6 @@ class GovernanceOverviewOut(BaseModel):
 
     agents_total: int = 0
     agents_enabled: int = 0
-    callable_agents_total: int = 0
     approvals_pending: int = 0
     approvals_auto_today: int = 0
     policy_decisions_today: int = 0
@@ -513,6 +512,12 @@ class AgentAlertOut(BaseModel):
     status: str
     title: str
     detail_json: Optional[Union[dict, list]] = None
+    # 安全监控弹窗扩展字段（旧字段保持兼容）
+    category: Optional[str] = None
+    source: Optional[str] = None
+    user_id: Optional[int] = None
+    read_at: Optional[str] = None
+    fingerprint: Optional[str] = None
     create_time: Optional[str] = None
 
     model_config = {"from_attributes": True}
@@ -530,10 +535,10 @@ class AgentAlertOut(BaseModel):
         """
         return parse_json_value(value)
 
-    @field_validator("create_time", mode="before")
+    @field_validator("create_time", "read_at", mode="before")
     @classmethod
     def serialize_time(cls, value: Any) -> Optional[str]:
-        """序列化创建时间。
+        """序列化时间字段。
 
         Args:
             value: 原始时间值。
@@ -542,6 +547,27 @@ class AgentAlertOut(BaseModel):
             Optional[str]: ISO 时间字符串。
         """
         return to_datetime_str(value)
+
+
+class SecurityStatusOut(BaseModel):
+    """安全态势聚合输出。"""
+
+    since_hours: int = 24
+    ssh: dict = Field(default_factory=dict)
+    attacks: dict = Field(default_factory=dict)
+    backup: dict = Field(default_factory=dict)
+    open_alerts: list[dict] = Field(default_factory=list)
+    errors: list[dict] = Field(default_factory=list)
+
+
+class SecurityMonitorRunOut(BaseModel):
+    """安全巡检执行摘要输出。"""
+
+    success: bool = True
+    created_alerts: list[dict] = Field(default_factory=list)
+    actions: dict = Field(default_factory=dict)
+    errors: list[dict] = Field(default_factory=list)
+    job_id: Optional[int] = None
 
 
 class AgentToolPermissionOut(BaseModel):

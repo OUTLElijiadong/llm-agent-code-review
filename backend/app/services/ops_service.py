@@ -45,12 +45,22 @@ ACTION_RISKS = {
     "firewall_action": "critical",
     "account_action": "critical",
     "ssh_authorized_key_action": "critical",
+    "ssh_login_events": "low",
+    "flytrap_attack_events": "low",
+    "nginx_attack_events": "low",
+    "backup_audit": "low",
+    "ip_attribution": "low",
 }
 # 无交互系统身份只服务于固定健康巡检。其他只读动作同样可能泄露
 # 目录、日志或主机拓扑，必须由唯一超级管理员在交互会话中发起。
 AUTO_ACTIONS = frozenset({"status", "certificate_status"})
 READ_ONLY_ACTIONS = frozenset({
     "status", "certificate_status", "host_inventory", "list_directory", "read_text_file", "journal_query",
+    "ssh_login_events", "flytrap_attack_events", "nginx_attack_events", "backup_audit", "ip_attribution",
+})
+# 无交互安全监控调度可自动执行的只读安全动作；交互调用仍要求唯一超级管理员。
+SCHEDULER_READ_ACTIONS = frozenset({
+    "ssh_login_events", "flytrap_attack_events", "nginx_attack_events", "backup_audit", "ip_attribution",
 })
 ACTION_PARAM_KEYS = {
     "status": set(),
@@ -76,6 +86,11 @@ ACTION_PARAM_KEYS = {
     "firewall_action": {"operation", "target_type", "value", "zone"},
     "account_action": {"operation", "username", "shell", "remove_home"},
     "ssh_authorized_key_action": {"operation", "username", "public_key", "fingerprint"},
+    "ssh_login_events": {"since_hours", "limit", "focus"},
+    "flytrap_attack_events": {"since_hours", "limit"},
+    "nginx_attack_events": {"since_hours", "limit"},
+    "backup_audit": set(),
+    "ip_attribution": {"ip"},
 }
 ACTION_REQUIRED_PARAMS = {
     "restart_service": {"service"},
@@ -91,6 +106,7 @@ ACTION_REQUIRED_PARAMS = {
     "firewall_action": {"operation", "target_type", "value"},
     "account_action": {"operation", "username"},
     "ssh_authorized_key_action": {"operation", "username"},
+    "ip_attribution": {"ip"},
 }
 ACTION_PARAM_TYPES = {
     "file": str,
@@ -117,6 +133,9 @@ ACTION_PARAM_TYPES = {
     "remove_home": bool,
     "public_key": str,
     "fingerprint": str,
+    "since_hours": int,
+    "focus": str,
+    "ip": str,
 }
 
 
@@ -154,6 +173,11 @@ ACTION_PARAM_SCHEMAS = {
     "firewall_action": _object_schema({"operation": {"type": "string", "enum": ["add", "remove"]}, "target_type": {"type": "string", "enum": ["port", "service"]}, "value": {"type": "string", "maxLength": 64}, "zone": {"type": "string", "maxLength": 32}}, {"operation", "target_type", "value"}),  # noqa: E501
     "account_action": _object_schema({"operation": {"type": "string", "enum": ["create_system", "lock", "unlock", "delete"]}, "username": {"type": "string", "maxLength": 32}, "shell": {"type": "string", "enum": ["/sbin/nologin", "/usr/sbin/nologin", "/bin/bash"]}, "remove_home": {"type": "boolean"}}, {"operation", "username"}),  # noqa: E501
     "ssh_authorized_key_action": _object_schema({"operation": {"type": "string", "enum": ["add", "remove"]}, "username": {"type": "string", "maxLength": 32}, "public_key": {"type": "string", "maxLength": 16_384}, "fingerprint": {"type": "string", "maxLength": 80}}, {"operation", "username"}),  # noqa: E501
+    "ssh_login_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}, "focus": {"type": "string", "enum": ["all", "accepted", "failed"]}}),  # noqa: E501
+    "flytrap_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
+    "nginx_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
+    "backup_audit": _object_schema({}),
+    "ip_attribution": _object_schema({"ip": {"type": "string", "maxLength": 64}}, {"ip"}),  # noqa: E501
 }
 
 
@@ -172,7 +196,9 @@ def execute(
     safe_params = validate_action_params(action, params or {})
     if actor is not None and not rbac_service.is_super_admin_user(db, actor.id):
         raise PermissionError("仅超级管理员 admin 可执行运维动作")
-    if actor is None and action not in AUTO_ACTIONS:
+    if actor is None and action not in AUTO_ACTIONS and not (
+        source == "scheduler" and action in SCHEDULER_READ_ACTIONS
+    ):
         raise PermissionError("无交互调度只允许运维只读动作")
     request_id = request_id or uuid.uuid4().hex
     existing = db.query(OpsExecution).filter(OpsExecution.request_id == request_id).first()

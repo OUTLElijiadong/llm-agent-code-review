@@ -395,7 +395,13 @@ _CONTRACTS = (
 
 
 def _service_contract(
-    code: str, name: str, mission: str, skill: SkillSpec, accepts: Iterable[str], delegates: Iterable[str]
+    code: str,
+    name: str,
+    mission: str,
+    skill: SkillSpec,
+    accepts: Iterable[str],
+    delegates: Iterable[str],
+    extra_skills: Iterable[SkillSpec] = (),
 ) -> AgentContract:
     return _contract(
         code,
@@ -405,7 +411,7 @@ def _service_contract(
         (mission, "通过现有确定性 service 执行并记录审计"),
         ("只调用已绑定的服务能力", "基于事实快照给出受限分析", "返回结构化结果和日志引用"),
         ("不得把分析当作已执行结果", "不得越过工具网关和确认边界"),
-        (skill,),
+        (skill, *extra_skills),
         accepts,
         delegates,
         COMMON_OUTPUT,
@@ -415,8 +421,10 @@ def _service_contract(
 _SERVICE_CONTRACTS = (
     _service_contract(
         "operations",
-        "全服管理 Agent",
-        "巡检并通过宿主机结构化执行器管理 systemd、容器、文件、软件包、防火墙、账户、SSH 公钥、数据库、证书和备份",
+        "最高管理员管理 Agent",
+        "巡检并通过宿主机结构化执行器管理 systemd、容器、文件、软件包、防火墙、账户、SSH 公钥、数据库、证书和备份；"
+        "持续监控每一次登录与疑似网络攻击，被动溯源攻击来源与手法，监控对生产数据的威胁，"
+        "治理备份与清理旧备份释放空间，并给出服务器优化建议与解决建议",
         _skill(
             "operations.maintain_platform",
             "全服受控运维",
@@ -425,6 +433,15 @@ _SERVICE_CONTRACTS = (
         ),
         ("manager", "monitor", "alert", "incident_responder", "scheduler", "system"),
         ("monitor", "alert", "incident_responder", "test_verifier", "data_integrity", "manager"),
+        extra_skills=(
+            _skill(
+                "operations.security_monitor",
+                "安全监控与主动告警",
+                "监控 SSH 登录/失败爆破/蜜罐触碰/代理滥用/TLS 探测，按规则生成安全告警并推送右上角弹窗；"
+                "对高危来源 IP 做被动溯源（归属地/ASN/ISP）；检查备份新鲜度、校验与体积并给出清理建议",
+                "定时巡检或管理员查询安全态势时使用；只读自动执行，处置类写操作必须走审批",
+            ),
+        ),
     ),
     _service_contract(
         "approval",

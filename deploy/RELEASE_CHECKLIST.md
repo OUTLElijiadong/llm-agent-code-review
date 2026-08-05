@@ -86,3 +86,16 @@ cd /path/to/project/deploy
 - [ ] **不自动执行 Alembic downgrade，不自动恢复生产数据库。**
 - [ ] 若数据库变更不向后兼容，保持停写并由负责人基于已验证备份制定独立恢复方案。
 - [ ] 回滚后重新执行健康、HTTPS、业务、ClamAV 和 Alembic 检查，并记录事故时间线。
+
+## 8. 安全监控（最高管理员管理 Agent）发布验收
+
+> 适用于包含 `deploy/prism_ops_executor.py` 新只读安全动作或 `security_monitor` 调度的发布。
+
+- [ ] 发布树中的 `deploy/prism_ops_executor.py` 已同步到生产（如 `/opt/prism-releases/<sha>/deploy/`），且 `prism-ops-executor.service` 的 `WorkingDirectory/ExecStart` 指向该发布树；发布后 `systemctl restart prism-ops-executor.service` 并确认 active。
+- [ ] `deploy/.env` 已按需配置 `SECURITY_MONITOR_*`、`SECURITY_SSH_ALLOWLIST_CIDRS`（本人常用 IP 段）与 `THREAT_INTEL_BASE_URL`（默认 http://ip-api.com/json，可覆盖）。
+- [ ] Alembic 迁移 027 已执行：`agent_alert` 含 category/source/user_id/read_at/fingerprint 列与索引。
+- [ ] `security_monitor` 调度任务已注册（interval@5m）且仅超级管理员可改；`AGENT_GOVERNANCE_SCHEDULER_ENABLED=true`。
+- [ ] 手动触发 `POST /api/admin/observability/security/run-monitor` 可生成告警；SSH 成功登录（非白名单 IP）产生 high 告警。
+- [ ] 超级管理员前端右上角弹出安全告警；离线期间告警在下次登录自动弹出并标记已读；普通管理员不可调用 run-monitor/status。
+- [ ] `ip_attribution` 被动溯源返回归属/ASN；失败时不中断告警流程。
+- [ ] 备份审计动作返回最新备份年龄/校验/体积；超阈值告警含清理建议；清理动作仍走 critical 审批。

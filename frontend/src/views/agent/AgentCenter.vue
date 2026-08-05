@@ -447,6 +447,8 @@ const STATUS_BY_EVENT: Record<AgentEventType, AgentStatus> = {
   complete: 'idle',
   failed: 'error',
   clarify: 'blocked',
+  // 安全告警为系统级事件,不反映某个 agent 工位状态,由 handleAgentEvent 显式跳过
+  admin_alert: 'idle',
 }
 
 const ERROR_TIMEOUT_MS = 6_000
@@ -486,6 +488,8 @@ function clearErrorTimer(code: string): void {
 }
 
 function handleAgentEvent(ev: AgentEvent): void {
+  // 安全告警为系统级事件,不更新任何 agent 工位状态
+  if (ev.type === 'admin_alert') return
   if (!ev.agent) return
   const nextStatus = STATUS_BY_EVENT[ev.type]
   if (!nextStatus) return

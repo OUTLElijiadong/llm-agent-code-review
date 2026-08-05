@@ -1,5 +1,6 @@
 export type AgentEventType =
   | 'dispatch' | 'thinking' | 'progress' | 'complete' | 'failed' | 'clarify'
+  | 'admin_alert'
 
 export interface AgentEvent {
   type: AgentEventType

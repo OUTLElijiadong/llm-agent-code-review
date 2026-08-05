@@ -1,6 +1,6 @@
 {
   "agents": {
-    "count": 15,
+    "count": 17,
     "items": [
       {
         "category": "output",
@@ -83,20 +83,25 @@
       {
         "category": "operations",
         "code": "operations",
-        "description": "生产宿主机全域巡检、受批准变更、验证和回滚",
+        "description": "最高管理员管理 Agent：全域巡检、安全监控与攻击溯源、备份治理、受批准变更、验证和回滚",
         "name": "operations",
         "skills": [
           "Agent 故障诊断",
           "MySQL 与 Redis",
           "Nginx 与证书",
           "operations.maintain_platform",
+          "operations.security_monitor",
           "systemd 服务管理",
           "主机巡检",
           "任务队列监测",
           "备份恢复",
+          "备份治理与清理",
           "容器处置",
           "宿主机文件与软件包",
+          "攻击被动溯源",
+          "服务器优化建议",
           "模型接口监测",
+          "登录与攻击监控",
           "自进化运行态",
           "配置维护",
           "防火墙、账户与 SSH 公钥"
@@ -173,6 +178,19 @@
         ]
       },
       {
+        "category": "operations",
+        "code": "sandbox_deployer",
+        "description": "在隔离 worker 部署项目并管理预览、续期和关闭生命周期",
+        "name": "sandbox_deployer",
+        "skills": [
+          "sandbox.manage_deployment",
+          "健康验证",
+          "到期回收",
+          "沙箱项目部署",
+          "环境续期"
+        ]
+      },
+      {
         "category": "security",
         "code": "security_sentinel",
         "description": "网络安全深度审查: OWASP Top10 / CWE / 敏感信息 / 项目级威胁建模",
@@ -183,14 +201,26 @@
           "security_sentinel.proactive",
           "security_sentinel.self_improve"
         ]
+      },
+      {
+        "category": "review",
+        "code": "test_verifier",
+        "description": "调用隔离 worker 执行项目级动态白盒、黑盒或组合测试",
+        "name": "test_verifier",
+        "skills": [
+          "verification.run_suite",
+          "原始证据归档",
+          "授权远程黑盒测试",
+          "项目动态白盒测试"
+        ]
       }
     ]
   },
   "alembic": {
     "heads": [
-      "020"
+      "027"
     ],
-    "migration_count": 20,
+    "migration_count": 27,
     "revisions": [
       {
         "down_revisions": [],
@@ -329,16 +359,66 @@
         ],
         "file": "backend/alembic/versions/020_manager_admin_capability_contract.py",
         "revision": "020"
+      },
+      {
+        "down_revisions": [
+          "020"
+        ],
+        "file": "backend/alembic/versions/021_grant_project_import_to_users.py",
+        "revision": "021"
+      },
+      {
+        "down_revisions": [
+          "021"
+        ],
+        "file": "backend/alembic/versions/022_unique_super_admin.py",
+        "revision": "022"
+      },
+      {
+        "down_revisions": [
+          "022"
+        ],
+        "file": "backend/alembic/versions/023_agent_capabilities_mcp_sandbox.py",
+        "revision": "023"
+      },
+      {
+        "down_revisions": [
+          "023"
+        ],
+        "file": "backend/alembic/versions/024_quarantined_source_archives.py",
+        "revision": "024"
+      },
+      {
+        "down_revisions": [
+          "024"
+        ],
+        "file": "backend/alembic/versions/025_seed_capability_aliases.py",
+        "revision": "025"
+      },
+      {
+        "down_revisions": [
+          "025"
+        ],
+        "file": "backend/alembic/versions/026_expand_source_binary_capacity.py",
+        "revision": "026"
+      },
+      {
+        "down_revisions": [
+          "026"
+        ],
+        "file": "backend/alembic/versions/027_add_security_alert_fields.py",
+        "revision": "027"
       }
     ]
   },
   "code": {
-    "backend_python_module_count": 259,
+    "backend_python_module_count": 281,
     "backend_python_modules": [
       "backend/app/__init__.py",
       "backend/app/agents/__init__.py",
       "backend/app/agents/admin_copilot_agent.py",
       "backend/app/agents/ai_prompt_agent.py",
+      "backend/app/agents/audit_board.py",
       "backend/app/agents/base.py",
       "backend/app/agents/chat_agent.py",
       "backend/app/agents/chat_planner.py",
@@ -350,6 +430,7 @@
       "backend/app/agents/events.py",
       "backend/app/agents/evolution_agent.py",
       "backend/app/agents/file_agent.py",
+      "backend/app/agents/fullchain_audit_agent.py",
       "backend/app/agents/language_agent.py",
       "backend/app/agents/metagpt/__init__.py",
       "backend/app/agents/metagpt/environment.py",
@@ -366,6 +447,7 @@
       "backend/app/agents/review_agent.py",
       "backend/app/agents/review_orchestrator_agent.py",
       "backend/app/agents/rule_agent.py",
+      "backend/app/agents/sandbox_agents.py",
       "backend/app/agents/security_sentinel_agent.py",
       "backend/app/agents/skills/__init__.py",
       "backend/app/agents/skills/ai_prompt.py",
@@ -386,14 +468,17 @@
       "backend/app/agents/skills/rule_manager.py",
       "backend/app/agents/skills/security_sentinel.py",
       "backend/app/agents/skills/self_improvement.py",
+      "backend/app/agents/test_review_reporter_agent.py",
       "backend/app/agents/tool_contracts.py",
       "backend/app/ai/__init__.py",
+      "backend/app/ai/audit_knowledge_loader.py",
       "backend/app/ai/code_chunker.py",
       "backend/app/ai/deepseek_agent.py",
       "backend/app/ai/discussion_orchestrator.py",
       "backend/app/ai/exceptions.py",
       "backend/app/ai/language_detector.py",
       "backend/app/ai/multi_agent.py",
+      "backend/app/ai/php_attack_surface.py",
       "backend/app/ai/prompt_builder.py",
       "backend/app/ai/result_parser.py",
       "backend/app/ai/scoring.py",
@@ -428,12 +513,14 @@
       "backend/app/api/v1/knowledge.py",
       "backend/app/api/v1/llm_config.py",
       "backend/app/api/v1/maintenance.py",
+      "backend/app/api/v1/mcp_governance.py",
       "backend/app/api/v1/project_members.py",
       "backend/app/api/v1/projects.py",
       "backend/app/api/v1/rbac.py",
       "backend/app/api/v1/reports.py",
       "backend/app/api/v1/review.py",
       "backend/app/api/v1/rules.py",
+      "backend/app/api/v1/sandboxes.py",
       "backend/app/api/v1/security.py",
       "backend/app/api/v1/user_profile.py",
       "backend/app/api/v1/users.py",
@@ -454,12 +541,14 @@
       "backend/app/core/rate_limit.py",
       "backend/app/core/rbac_dependency.py",
       "backend/app/core/security.py",
+      "backend/app/core/super_admin.py",
       "backend/app/exporters/__init__.py",
       "backend/app/exporters/pdf_exporter.py",
       "backend/app/exporters/word_exporter.py",
       "backend/app/main.py",
       "backend/app/models/__init__.py",
       "backend/app/models/admin_chat.py",
+      "backend/app/models/agent_capability.py",
       "backend/app/models/agent_governance.py",
       "backend/app/models/agent_response_run.py",
       "backend/app/models/agent_skill_record.py",
@@ -481,6 +570,7 @@
       "backend/app/models/malware_scan_log.py",
       "backend/app/models/project.py",
       "backend/app/models/project_member.py",
+      "backend/app/models/project_source_archive.py",
       "backend/app/models/rbac.py",
       "backend/app/models/report_template.py",
       "backend/app/models/review_experience.py",
@@ -495,6 +585,7 @@
       "backend/app/models/user_profile.py",
       "backend/app/schemas/__init__.py",
       "backend/app/schemas/agent.py",
+      "backend/app/schemas/agent_capability.py",
       "backend/app/schemas/agent_governance.py",
       "backend/app/schemas/agent_studio.py",
       "backend/app/schemas/ai_log.py",
@@ -543,6 +634,7 @@
       "backend/app/services/audit_service.py",
       "backend/app/services/auth_service.py",
       "backend/app/services/beta_invite_service.py",
+      "backend/app/services/capability_catalog_service.py",
       "backend/app/services/code_file_service.py",
       "backend/app/services/dashboard_service.py",
       "backend/app/services/declarative_agent_runtime.py",
@@ -559,14 +651,18 @@
       "backend/app/services/issue_service.py",
       "backend/app/services/knowledge_service.py",
       "backend/app/services/maintenance_service.py",
+      "backend/app/services/managed_mcp_adapter.py",
+      "backend/app/services/mcp_governance_service.py",
       "backend/app/services/mcp_tool_provider.py",
       "backend/app/services/observability_service.py",
       "backend/app/services/ops_service.py",
+      "backend/app/services/page_guide_service.py",
       "backend/app/services/personalization_service.py",
       "backend/app/services/policy_engine.py",
       "backend/app/services/profile_service.py",
       "backend/app/services/project_member_service.py",
       "backend/app/services/project_service.py",
+      "backend/app/services/project_source_service.py",
       "backend/app/services/published_agent_tools.py",
       "backend/app/services/rbac_service.py",
       "backend/app/services/report_exporter.py",
@@ -578,13 +674,16 @@
       "backend/app/services/reward_service.py",
       "backend/app/services/rollback_service.py",
       "backend/app/services/rule_service.py",
+      "backend/app/services/sandbox_service.py",
       "backend/app/services/scheduler_service.py",
+      "backend/app/services/security_monitor_service.py",
       "backend/app/services/security_posture_service.py",
       "backend/app/services/security_service.py",
       "backend/app/services/skill_service.py",
       "backend/app/services/system_config_service.py",
       "backend/app/services/system_service.py",
       "backend/app/services/tool_gateway.py",
+      "backend/app/services/user_capability_registry.py",
       "backend/app/services/user_feedback_service.py",
       "backend/app/services/user_service.py",
       "backend/app/utils/__init__.py",
@@ -593,15 +692,18 @@
       "backend/app/utils/encoding_utils.py",
       "backend/app/utils/file_validator.py",
       "backend/app/utils/malware_scanner.py",
-      "backend/app/utils/sanitize.py"
+      "backend/app/utils/public_http.py",
+      "backend/app/utils/sanitize.py",
+      "backend/app/utils/source_archive_gate.py"
     ],
-    "backend_test_file_count": 92,
+    "backend_test_file_count": 117,
     "backend_test_files": [
       "backend/tests/test_code_file_service.py",
       "backend/tests/test_compliance_dict.py",
       "backend/tests/test_issue_merger.py",
       "backend/tests/test_malware_scanner.py",
       "backend/tests/test_observability.py",
+      "backend/tests/test_prism_sandbox_executor.py",
       "backend/tests/test_rbac_api.py",
       "backend/tests/test_rbac_service.py",
       "backend/tests/test_report_api.py",
@@ -625,6 +727,7 @@
       "backend/tests/unit/agents/test_tool_contracts.py",
       "backend/tests/unit/agents/test_ws_discussion_coverage.py",
       "backend/tests/unit/ai/test_deepseek_agent_label.py",
+      "backend/tests/unit/ai/test_deepseek_agent_response.py",
       "backend/tests/unit/ai/test_multi_agent.py",
       "backend/tests/unit/ai/test_prompt_builder.py",
       "backend/tests/unit/ai/test_security_patterns.py",
@@ -633,8 +736,13 @@
       "backend/tests/unit/api/test_admin_overview.py",
       "backend/tests/unit/api/test_agents_api_coverage.py",
       "backend/tests/unit/api/test_beta_invites_api.py",
+      "backend/tests/unit/api/test_mcp_governance_api.py",
+      "backend/tests/unit/api/test_project_source_download_audit 2.py",
+      "backend/tests/unit/api/test_project_source_download_audit.py",
       "backend/tests/unit/api/test_responses_api.py",
+      "backend/tests/unit/api/test_security_monitor_api.py",
       "backend/tests/unit/core/test_config_security.py",
+      "backend/tests/unit/core/test_single_device_session.py",
       "backend/tests/unit/scripts/test_project_contract_scripts.py",
       "backend/tests/unit/services/test_admin_capability_registry.py",
       "backend/tests/unit/services/test_admin_copilot_service.py",
@@ -664,53 +772,79 @@
       "backend/tests/unit/services/test_feedback_service.py",
       "backend/tests/unit/services/test_frontend_api_contract.py",
       "backend/tests/unit/services/test_fuzzy_project_resolve.py",
+      "backend/tests/unit/services/test_managed_mcp_adapter.py",
+      "backend/tests/unit/services/test_mcp_governance_service 2.py",
+      "backend/tests/unit/services/test_mcp_governance_service.py",
       "backend/tests/unit/services/test_mcp_tool_provider.py",
+      "backend/tests/unit/services/test_page_guide_service.py",
       "backend/tests/unit/services/test_personalization_service_coverage.py",
+      "backend/tests/unit/services/test_php_document_root.py",
       "backend/tests/unit/services/test_project_member_service.py",
+      "backend/tests/unit/services/test_project_source_service.py",
+      "backend/tests/unit/services/test_published_agent_capability_search.py",
       "backend/tests/unit/services/test_real_data_sources.py",
       "backend/tests/unit/services/test_report_service.py",
       "backend/tests/unit/services/test_review_service_helpers.py",
       "backend/tests/unit/services/test_review_service_state_coverage.py",
       "backend/tests/unit/services/test_review_service_v2.py",
+      "backend/tests/unit/services/test_sandbox_multi_agent_review.py",
       "backend/tests/unit/services/test_scheduler_skill_contract.py",
       "backend/tests/unit/services/test_security_hardening.py",
+      "backend/tests/unit/services/test_security_monitor_service.py",
       "backend/tests/unit/services/test_security_sentinel_agent.py",
       "backend/tests/unit/services/test_security_service_coverage.py",
       "backend/tests/unit/services/test_server_ops_service.py",
       "backend/tests/unit/services/test_skill_service_coverage.py",
       "backend/tests/unit/services/test_system_config_api_key_rotation.py",
+      "backend/tests/unit/services/test_user_capability_registry.py",
       "backend/tests/unit/test_ac2_e2e_fixes.py",
       "backend/tests/unit/test_discussion_orchestrator_coverage.py",
       "backend/tests/unit/test_json_field_serialization_check.py",
       "backend/tests/unit/test_migration_020_manager_admin_capability.py",
+      "backend/tests/unit/test_migration_021_project_import.py",
+      "backend/tests/unit/test_migration_022_unique_super_admin.py",
+      "backend/tests/unit/test_migration_023_agent_capabilities.py",
+      "backend/tests/unit/test_migration_024_source_archives.py",
+      "backend/tests/unit/test_migration_025_capability_aliases.py",
+      "backend/tests/unit/test_migration_026_source_binary_capacity.py",
+      "backend/tests/unit/test_migration_027_security_alert_fields.py",
       "backend/tests/unit/test_pure_logic_export_coverage.py",
       "backend/tests/unit/test_schema_field_coverage_r1_r8.py",
+      "backend/tests/unit/test_seed_rules_security.py",
       "backend/tests/unit/utils/test_api_resolver.py",
       "backend/tests/unit/utils/test_api_url_security.py",
       "backend/tests/unit/utils/test_archive_extractor.py",
       "backend/tests/unit/utils/test_pdf_exporter.py"
     ],
-    "frontend_test_file_count": 15,
+    "frontend_test_file_count": 23,
     "frontend_test_files": [
       "frontend/src/api/http.test.ts",
+      "frontend/src/api/mcpGovernance.test.ts",
+      "frontend/src/api/sandbox.test.ts",
       "frontend/src/components/admin/AdminCopilot.test.ts",
       "frontend/src/components/ai/AgentChatDrawer.test.ts",
       "frontend/src/components/security/SecurityPostureCard.test.ts",
+      "frontend/src/composables/useSecurityAlerts.test.ts",
       "frontend/src/router/guards.test.ts",
       "frontend/src/stores/user.test.ts",
       "frontend/src/utils/agentEventStream.test.ts",
+      "frontend/src/utils/agentNavigation.test.ts",
+      "frontend/src/utils/agentText.test.ts",
       "frontend/src/utils/clarifyProjectOptions.test.ts",
       "frontend/src/utils/coreUtils.test.ts",
       "frontend/src/utils/discussionStream.test.ts",
       "frontend/src/utils/responsesStream.test.ts",
       "frontend/src/utils/responsesTimeline.test.ts",
+      "frontend/src/utils/sandboxPresentation.test.ts",
       "frontend/src/utils/tilt.test.ts",
       "frontend/src/views/admin/AgentReleaseAdmin.test.ts",
-      "frontend/src/views/admin/RoleManage.test.ts"
+      "frontend/src/views/admin/RoleManage.test.ts",
+      "frontend/src/views/project/ProjectList.test.ts",
+      "frontend/src/views/sandbox/SandboxWorkstation.test.ts"
     ]
   },
   "frontend": {
-    "view_count": 56,
+    "view_count": 60,
     "views": [
       "frontend/src/views/admin/AdminOverview.vue",
       "frontend/src/views/admin/AgentGovernance.vue",
@@ -724,6 +858,8 @@
       "frontend/src/views/admin/JobCenter.vue",
       "frontend/src/views/admin/KnowledgeGovernance.vue",
       "frontend/src/views/admin/LlmConfig.vue",
+      "frontend/src/views/admin/McpWorkerGovernance 2.vue",
+      "frontend/src/views/admin/McpWorkerGovernance.vue",
       "frontend/src/views/admin/ObservabilityCenter.vue",
       "frontend/src/views/admin/PermissionList.vue",
       "frontend/src/views/admin/PolicyCenter.vue",
@@ -765,14 +901,16 @@
       "frontend/src/views/review/ReviewTaskDetail.vue",
       "frontend/src/views/review/ReviewTaskList.vue",
       "frontend/src/views/rule/RuleConfig.vue",
+      "frontend/src/views/sandbox/SandboxWorkstation 2.vue",
+      "frontend/src/views/sandbox/SandboxWorkstation.vue",
       "frontend/src/views/security/SecurityCenter.vue",
       "frontend/src/views/support/FeedbackCenter.vue",
       "frontend/src/views/support/MaintenanceCenter.vue"
     ]
   },
   "http": {
-    "business_route_count": 232,
-    "operation_count": 232,
+    "business_route_count": 272,
+    "operation_count": 272,
     "routes": [
       {
         "methods": [
@@ -1023,8 +1161,141 @@
         "methods": [
           "GET"
         ],
+        "name": "list_aliases",
+        "path": "/api/admin/mcp/aliases"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "create_alias",
+        "path": "/api/admin/mcp/aliases"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "name": "delete_alias",
+        "path": "/api/admin/mcp/aliases/{alias_id}"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "name": "update_alias",
+        "path": "/api/admin/mcp/aliases/{alias_id}"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "list_bindings",
+        "path": "/api/admin/mcp/bindings"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "name": "upsert_binding",
+        "path": "/api/admin/mcp/bindings"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "name": "delete_binding",
+        "path": "/api/admin/mcp/bindings/{binding_id}"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "search_capabilities",
+        "path": "/api/admin/mcp/capabilities/search"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "list_servers",
+        "path": "/api/admin/mcp/servers"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "create_server",
+        "path": "/api/admin/mcp/servers"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "seed_recommended_servers",
+        "path": "/api/admin/mcp/servers/recommended"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "name": "delete_server",
+        "path": "/api/admin/mcp/servers/{server_id}"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "name": "update_server",
+        "path": "/api/admin/mcp/servers/{server_id}"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "check_server_health",
+        "path": "/api/admin/mcp/servers/{server_id}/health"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "sync_server_tools",
+        "path": "/api/admin/mcp/servers/{server_id}/sync"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "list_tools",
+        "path": "/api/admin/mcp/tools"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "name": "update_tool",
+        "path": "/api/admin/mcp/tools/{tool_id}"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
         "name": "list_alerts",
         "path": "/api/admin/observability/alerts"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "list_unread_alerts",
+        "path": "/api/admin/observability/alerts/unread"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "mark_alert_read",
+        "path": "/api/admin/observability/alerts/{alert_id}/read"
       },
       {
         "methods": [
@@ -1039,6 +1310,20 @@
         ],
         "name": "observability_overview",
         "path": "/api/admin/observability/overview"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "run_security_monitor_endpoint",
+        "path": "/api/admin/observability/security/run-monitor"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "security_status",
+        "path": "/api/admin/observability/security/status"
       },
       {
         "methods": [
@@ -1994,6 +2279,13 @@
       },
       {
         "methods": [
+          "POST"
+        ],
+        "name": "import_remote_project",
+        "path": "/api/projects/import-remote"
+      },
+      {
+        "methods": [
           "DELETE"
         ],
         "name": "delete_project",
@@ -2012,6 +2304,27 @@
         ],
         "name": "update_project",
         "path": "/api/projects/{project_id}"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "get_audit_source_archive",
+        "path": "/api/projects/{project_id}/audit-source-archive"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "upload_audit_source_archive",
+        "path": "/api/projects/{project_id}/audit-source-archive"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "get_audit_source_archive_result",
+        "path": "/api/projects/{project_id}/audit-source-archive/result"
       },
       {
         "methods": [
@@ -2040,6 +2353,13 @@
         ],
         "name": "update_member_role",
         "path": "/api/projects/{project_id}/members/{user_id}"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "download_project_source",
+        "path": "/api/projects/{project_id}/source-archive"
       },
       {
         "methods": [
@@ -2318,6 +2638,97 @@
         "methods": [
           "GET"
         ],
+        "name": "list_sandboxes",
+        "path": "/api/sandboxes"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "create_sandbox",
+        "path": "/api/sandboxes"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "search_capabilities",
+        "path": "/api/sandboxes/capabilities/search"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "list_workers",
+        "path": "/api/sandboxes/workers"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "create_worker",
+        "path": "/api/sandboxes/workers"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "seed_production_worker",
+        "path": "/api/sandboxes/workers/seed-production"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "name": "update_worker",
+        "path": "/api/sandboxes/workers/{worker_id}"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "check_worker",
+        "path": "/api/sandboxes/workers/{worker_id}/health"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "get_sandbox",
+        "path": "/api/sandboxes/{public_id}"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "download_sandbox_artifact",
+        "path": "/api/sandboxes/{public_id}/artifacts/{artifact_id}"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "extend_sandbox",
+        "path": "/api/sandboxes/{public_id}/extend"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "create_preview_session",
+        "path": "/api/sandboxes/{public_id}/preview-session"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "stop_sandbox",
+        "path": "/api/sandboxes/{public_id}/stop"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
         "name": "get_checklist",
         "path": "/api/security/checklist"
       },
@@ -2334,6 +2745,13 @@
         ],
         "name": "list_findings",
         "path": "/api/security/findings"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "fullchain_audit",
+        "path": "/api/security/fullchain-audit"
       },
       {
         "methods": [
@@ -2408,7 +2826,7 @@
     ]
   },
   "orm": {
-    "table_count": 64,
+    "table_count": 73,
     "tables": [
       {
         "column_count": 12,
@@ -2563,7 +2981,7 @@
         "name": "admin_chat_session"
       },
       {
-        "column_count": 10,
+        "column_count": 15,
         "columns": [
           {
             "foreign_keys": [],
@@ -2613,6 +3031,41 @@
             "nullable": true,
             "primary_key": false,
             "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "category",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(40)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "source",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(40)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "user_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "read_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "fingerprint",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(120)"
           },
           {
             "foreign_keys": [],
@@ -2706,6 +3159,75 @@
           }
         ],
         "name": "agent_artifact_version"
+      },
+      {
+        "column_count": 9,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "capability_code",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(255)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "alias",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(160)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "normalized_alias",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(160)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "locale",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(20)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "weight",
+            "nullable": false,
+            "primary_key": false,
+            "type": "FLOAT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "enabled",
+            "nullable": false,
+            "primary_key": false,
+            "type": "SMALLINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "agent_capability_alias"
       },
       {
         "column_count": 10,
@@ -3086,6 +3608,75 @@
           }
         ],
         "name": "agent_knowledge_source"
+      },
+      {
+        "column_count": 9,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "agent_code",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(80)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "tool_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "permission",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "requires_approval",
+            "nullable": false,
+            "primary_key": false,
+            "type": "SMALLINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "bound_schema_sha256",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "enabled",
+            "nullable": false,
+            "primary_key": false,
+            "type": "SMALLINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "agent_mcp_binding"
       },
       {
         "column_count": 10,
@@ -4292,7 +4883,7 @@
             "name": "size_bytes",
             "nullable": false,
             "primary_key": false,
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "foreign_keys": [],
@@ -4334,14 +4925,14 @@
             "name": "original_blob",
             "nullable": true,
             "primary_key": false,
-            "type": "BLOB"
+            "type": "LONGBLOB"
           },
           {
             "foreign_keys": [],
             "name": "raw_size",
             "nullable": false,
             "primary_key": false,
-            "type": "INTEGER"
+            "type": "BIGINT"
           },
           {
             "foreign_keys": [],
@@ -5661,6 +6252,221 @@
         "name": "malware_scan_log"
       },
       {
+        "column_count": 16,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "code",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(80)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "name",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(160)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "description",
+            "nullable": true,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "transport",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "url",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(500)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "auth_type",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "encrypted_headers",
+            "nullable": true,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "managed_kind",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(50)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "status",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "enabled",
+            "nullable": false,
+            "primary_key": false,
+            "type": "SMALLINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "credential_required",
+            "nullable": false,
+            "primary_key": false,
+            "type": "SMALLINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "last_health_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "last_error",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(1000)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "mcp_server"
+      },
+      {
+        "column_count": 13,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "server_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "tool_name",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(160)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "model_name",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(160)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "display_name",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(200)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "description",
+            "nullable": true,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "input_schema_json",
+            "nullable": false,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "annotations_json",
+            "nullable": true,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "schema_sha256",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "risk_level",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "enabled",
+            "nullable": false,
+            "primary_key": false,
+            "type": "SMALLINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "mcp_tool"
+      },
+      {
         "column_count": 12,
         "columns": [
           {
@@ -6219,6 +7025,180 @@
           }
         ],
         "name": "project_member"
+      },
+      {
+        "column_count": 24,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "project_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "owner_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "original_filename",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(255)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "media_type",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(120)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "archive_sha256",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "compressed_size",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "expanded_size",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "file_count",
+            "nullable": false,
+            "primary_key": false,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "max_member_size",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "max_compression_ratio",
+            "nullable": false,
+            "primary_key": false,
+            "type": "FLOAT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "storage_status",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "malware_status",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "audit_status",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "audit_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "audit_started_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "audit_heartbeat_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "audit_completed_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "audit_result_json",
+            "nullable": true,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "threat_count",
+            "nullable": false,
+            "primary_key": false,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "scan_summary_json",
+            "nullable": false,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "archive_blob",
+            "nullable": false,
+            "primary_key": false,
+            "type": "LONGBLOB"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "project_source_archive"
       },
       {
         "column_count": 9,
@@ -7133,6 +8113,478 @@
           }
         ],
         "name": "role_permission"
+      },
+      {
+        "column_count": 11,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "environment_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "artifact_type",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(50)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "file_name",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(240)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "mime_type",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(120)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "byte_size",
+            "nullable": false,
+            "primary_key": false,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "sha256",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "storage_ref",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(500)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "content_base64",
+            "nullable": false,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "sandbox_artifact"
+      },
+      {
+        "column_count": 27,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "public_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(40)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "project_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "owner_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "worker_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "agent_code",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(80)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "purpose",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "language",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "test_mode",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "status",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "runtime",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(50)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "image_ref",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(300)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "image_digest",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(100)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "source_sha256",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "resource_policy_json",
+            "nullable": false,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "agent_config_json",
+            "nullable": false,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "executor_ref",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(160)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "preview_path",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(240)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "remote_target_url",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(500)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "remote_target_authorized_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "expires_at",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "started_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "stopped_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "result_json",
+            "nullable": true,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "error",
+            "nullable": true,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "sandbox_environment"
+      },
+      {
+        "column_count": 7,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "environment_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "event_type",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(40)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "stage",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(50)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "message",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(500)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "payload_json",
+            "nullable": true,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          }
+        ],
+        "name": "sandbox_event"
+      },
+      {
+        "column_count": 19,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "code",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(80)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "name",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(160)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "worker_type",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "transport",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "endpoint",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(500)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "encrypted_token",
+            "nullable": true,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "supported_languages_json",
+            "nullable": false,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "supported_modes_json",
+            "nullable": false,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "runtime",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(50)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "max_concurrency",
+            "nullable": false,
+            "primary_key": false,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "priority",
+            "nullable": false,
+            "primary_key": false,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "status",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(30)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "enabled",
+            "nullable": false,
+            "primary_key": false,
+            "type": "SMALLINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "last_seen_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "last_error",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(1000)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "fingerprint_json",
+            "nullable": true,
+            "primary_key": false,
+            "type": "TEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "sandbox_worker"
       },
       {
         "column_count": 5,

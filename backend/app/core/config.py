@@ -143,6 +143,22 @@ class Settings(BaseSettings):
     ops_executor_token: str = ""
     ops_automation_enabled: bool = True
 
+    # ── 安全监控（security_monitor_service 规则阈值） ──
+    security_monitor_enabled: bool = True
+    security_monitor_interval_minutes: int = 5
+    # SSH 登录来源白名单 CIDR；命中白名单的成功登录只入库不弹窗。
+    security_ssh_allowlist_cidrs: List[str] = []
+    security_failed_login_threshold: int = 20
+    security_failed_login_window_hours: int = 1
+    security_flytrap_threshold: int = 10
+    security_flytrap_window_hours: int = 1
+    security_backup_max_age_hours: int = 30
+    security_backup_dir_max_gb: int = 10
+    # 弹窗最低严重度：info<warning<high<critical
+    security_popup_min_severity: str = "warning"
+    # 被动溯源情报服务固定前缀（执行器侧再做 URL 白名单校验）
+    threat_intel_base_url: str = "http://ip-api.com/json"
+
     max_upload_size: int = 20 * 1024 * 1024  # 20MB
     allowed_extensions: List[str] = ["*"]
 

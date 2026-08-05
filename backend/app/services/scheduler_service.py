@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.agent_governance import AgentJob, AgentJobRun
 from app.models.user import User
@@ -24,12 +25,13 @@ _DEFAULT_JOBS = (
     ("daily_agent_reflection", "reflection", "reflection", "daily@03:00"),
     ("daily_agent_evolution", "evolution", "evolution", "daily@04:00"),
     ("ops_health_check", "ops_health_check", "operations", "interval@5m"),
+    ("security_monitor", "security_monitor", "operations", "interval@5m"),
 )
 
 # These tasks either reach externally configured sources or inspect the host.
 # Unattended scheduler execution remains allowed, but interactive access is
 # reserved for the unique super administrator.
-SUPER_ADMIN_JOB_TYPES = frozenset({"crawl", "ops_health_check"})
+SUPER_ADMIN_JOB_TYPES = frozenset({"crawl", "ops_health_check", "security_monitor"})
 
 # v3.0 AgentSkill: per-Agent 进化任务(每日 03:00 跑 self_improve action=evolve)
 # 14 个 Agent 各一条,与原 daily_agent_evolution 共存(后者保持兼容)
@@ -284,6 +286,8 @@ def _execute_job(db: Session, job: AgentJob) -> dict:
         return {"message": "自进化任务已记录，详细执行由 evolution_service 承接"}
     if job.job_type == "ops_health_check":
         return _execute_ops_health_check(db, job)
+    if job.job_type == "security_monitor":
+        return _execute_security_monitor(db, job)
     # v3.0 AgentSkill: Skill 调度任务
     if job.job_type == "skill_evolution":
         return _execute_skill_evolution(db, job)
@@ -505,6 +509,33 @@ def _collect_application_health(db: Session, current_job_id: int) -> Dict[str, A
             "enabled_jobs": sum(1 for item in enabled_jobs if item.job_type in {"evolution", "skill_evolution"}),
             "failed_jobs": failed_evolution_jobs,
         },
+    }
+
+
+def _execute_security_monitor(db: Session, job: AgentJob) -> Dict[str, Any]:
+    """执行安全监控巡检调度任务。
+
+    安全监控总开关关闭时直接返回提示；否则调用
+    ``security_monitor_service.run_security_monitor`` 拉取只读安全事件并按规则
+    生成告警（单动作失败不中断整体）。
+
+    Args:
+        db: 数据库会话。
+        job: 调度任务。
+
+    Returns:
+        Dict[str, Any]: 执行摘要（success/created_alerts/errors）。
+    """
+    from app.services import security_monitor_service
+
+    if not settings.security_monitor_enabled:
+        return {"message": "security monitor disabled"}
+    result = security_monitor_service.run_security_monitor(db, job=job)
+    return {
+        "success": bool(result.get("success")),
+        "created_alerts": result.get("created_alerts") or [],
+        "errors": result.get("errors") or [],
+        "job_id": job.id,
     }
 
 

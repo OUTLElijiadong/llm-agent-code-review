@@ -87,3 +87,87 @@ def test_audit_never_persists_file_content_or_public_key() -> None:
     serialized = json.dumps(key_params)
     assert public_key not in serialized
     assert key_params["fingerprint"].startswith("SHA256:")
+
+
+# ── 最高管理员安全监控：只读安全动作 ──────────────────────────
+
+
+def test_parse_ssh_log_classifies_accepted_failed_invalid() -> None:
+    lines = [
+        (
+            "2026-08-05T17:39:58+0800 vm sshd[1247]: Accepted publickey for root from "
+            "45.135.228.155 port 33249 ssh2: ED25519 SHA256:wbLkqbw/AAAA"
+        ),
+        (
+            "2026-08-05T17:40:01+0800 vm sshd[1247]: Failed password for invalid user "
+            "admin from 193.32.162.30 port 35828 ssh2"
+        ),
+        "2026-08-05T17:40:02+0800 vm sshd[1247]: Invalid user li from 45.135.228.155 port 43553",
+        "2026-08-05T17:40:03+0800 vm sshd[1247]: Accepted password for root from 10.0.0.2 port 1000 ssh2",
+    ]
+    parsed = executor.parse_ssh_log(lines)
+    assert len(parsed["accepted"]) == 2
+    assert parsed["accepted"][0]["ip"] == "45.135.228.155"
+    assert parsed["accepted"][0]["detail"].startswith("ED25519")
+    assert parsed["accepted"][1]["method"] == "password"
+    assert [item["detail"] for item in parsed["failed"]] == ["failed_password", "invalid_user"]
+
+
+def test_parse_flytrap_log_skips_non_json_lines() -> None:
+    lines = [
+        (
+            '{"level":"info","username":"lyf","remote":"193.32.162.30:35828",'
+            '"time":"2026-08-05T17:39:58+08:00","caller":"x","message":"捕获 SSH 密码认证尝试"}'
+        ),
+        "not json",
+        (
+            '{"level":"info","username":"rp","remote":"138.197.180.155:40284",'
+            '"time":"2026-08-05T17:40:01+08:00","caller":"y","message":"捕获 SSH 密码认证尝试"}'
+        ),
+    ]
+    events = executor.parse_flytrap_log(lines)
+    assert len(events) == 2
+    assert events[0]["ip"] == "193.32.162.30"
+    assert events[1]["username"] == "rp"
+
+
+def test_parse_nginx_log_connects_gibberish_and_normal() -> None:
+    lines = [
+        '104.249.59.148 - - [04/Aug/2026:16:46:06 +0000] "CONNECT dnspod.qcloud.com:443 HTTP/1.1" 400 157 "-" "-" "-"',
+        '172.236.228.227 - - [04/Aug/2026:17:46:19 +0000] "\\x16\\x03\\x01\\x01" 400 157 "-" "-" "-"',
+        '43.157.38.131 - - [04/Aug/2026:17:23:50 +0000] "GET / HTTP/1.1" 200 255 "-" "Mozilla" "-"',
+    ]
+    events = executor.parse_nginx_log(lines)
+    assert [item["detail"] for item in events] == ["proxy_connect", "tls_gibberish"]
+
+
+def test_security_actions_reject_invalid_params() -> None:
+    with pytest.raises(ValueError, match="since_hours"):
+        executor._ssh_login_events({"since_hours": 0})
+    with pytest.raises(ValueError, match="since_hours"):
+        executor._flytrap_attack_events({"since_hours": 9999})
+    with pytest.raises(ValueError, match="limit"):
+        executor._nginx_attack_events({"limit": 99999})
+    with pytest.raises(ValueError, match="focus"):
+        executor._ssh_login_events({"focus": "bogus"})
+    with pytest.raises(ValueError, match="ip 不是合法"):
+        executor._ip_attribution({"ip": "not-an-ip"})
+
+
+def test_backup_audit_reports_retention_and_other_entries(tmp_path: Path, monkeypatch) -> None:
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    (backup_dir / "code_review_20260804T000000Z_abcd.sql.gz").write_bytes(b"x" * 1024)
+    (backup_dir / "code_review_20260804T000000Z_abcd.sql.gz.sha256").write_text("x", encoding="utf-8")
+    (backup_dir / "manual-snapshot.tar.gz").write_bytes(b"y" * 2048)
+    (backup_dir / "release_20260701").mkdir()
+    (backup_dir / "release_20260701" / "payload.bin").write_bytes(b"z" * 512)
+    monkeypatch.setattr(executor, "BACKUP_DIR", backup_dir)
+
+    audit = executor._backup_audit()
+    assert audit["sql_gz_count"] == 1
+    assert audit["sql_gz_bytes"] == 1024
+    assert audit["newest"]["has_sha256"] is True
+    assert audit["older_than_14_days"] == 0
+    assert audit["other_entries_count"] == 2
+    assert audit["other_bytes"] == 2048 + 512

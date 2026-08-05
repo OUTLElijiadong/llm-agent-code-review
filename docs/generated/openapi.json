@@ -377,6 +377,17 @@
             "title": "Alert Type",
             "type": "string"
           },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
           "create_time": {
             "anyOf": [
               {
@@ -404,13 +415,46 @@
             ],
             "title": "Detail Json"
           },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
           },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
           "severity": {
             "title": "Severity",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           },
           "status": {
             "title": "Status",
@@ -419,6 +463,17 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "required": [
@@ -1156,7 +1211,8 @@
               "start",
               "approve",
               "reject",
-              "answer"
+              "answer",
+              "retry"
             ],
             "title": "Action",
             "type": "string"
@@ -3024,6 +3080,20 @@
         "title": "BetaInviteOut",
         "type": "object"
       },
+      "Body_upload_audit_source_archive_api_projects__project_id__audit_source_archive_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_audit_source_archive_api_projects__project_id__audit_source_archive_post",
+        "type": "object"
+      },
       "Body_upload_code_api_code_files_upload_post": {
         "properties": {
           "file": {
@@ -3071,6 +3141,102 @@
           "files"
         ],
         "title": "Body_upload_folder_api_code_files_upload_folder_post",
+        "type": "object"
+      },
+      "CapabilityAliasIn": {
+        "properties": {
+          "alias": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Alias",
+            "type": "string"
+          },
+          "capability_code": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Capability Code",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "locale": {
+            "default": "zh-CN",
+            "maxLength": 20,
+            "title": "Locale",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1.0,
+            "maximum": 3.0,
+            "minimum": 0.1,
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "capability_code",
+          "alias"
+        ],
+        "title": "CapabilityAliasIn",
+        "type": "object"
+      },
+      "CapabilitySearchOut": {
+        "properties": {
+          "agent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Code"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_approval": {
+            "default": false,
+            "title": "Requires Approval",
+            "type": "boolean"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description",
+          "source",
+          "score"
+        ],
+        "title": "CapabilitySearchOut",
         "type": "object"
       },
       "CatalogAgentOut": {
@@ -4566,6 +4732,41 @@
         "title": "FrequencyItem",
         "type": "object"
       },
+      "FullChainAuditIn": {
+        "description": "全链路源码审计输入 (v3.3)",
+        "properties": {
+          "enable_sandbox": {
+            "default": false,
+            "description": "是否在验证阶段调用真实沙箱跑 PoC(需有在线 worker)",
+            "title": "Enable Sandbox",
+            "type": "boolean"
+          },
+          "project_id": {
+            "description": "项目 ID",
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "top_n": {
+            "default": 100,
+            "description": "语义审计候选文件数",
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Top N",
+            "type": "integer"
+          },
+          "trace_dataflow": {
+            "default": true,
+            "description": "是否启用跨文件数据流追踪",
+            "title": "Trace Dataflow",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "FullChainAuditIn",
+        "type": "object"
+      },
       "GovernanceOverviewOut": {
         "description": "管理端治理大屏总览输出。",
         "properties": {
@@ -5594,6 +5795,199 @@
         "title": "LoginOut",
         "type": "object"
       },
+      "McpBindingIn": {
+        "properties": {
+          "agent_code": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Agent Code",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "permission": {
+            "default": "allow",
+            "enum": [
+              "allow",
+              "deny",
+              "escalate"
+            ],
+            "title": "Permission",
+            "type": "string"
+          },
+          "requires_approval": {
+            "default": false,
+            "title": "Requires Approval",
+            "type": "boolean"
+          },
+          "tool_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Tool Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent_code",
+          "tool_id"
+        ],
+        "title": "McpBindingIn",
+        "type": "object"
+      },
+      "McpServerUpsertIn": {
+        "properties": {
+          "auth_type": {
+            "default": "none",
+            "enum": [
+              "none",
+              "bearer",
+              "headers",
+              "oauth_required"
+            ],
+            "title": "Auth Type",
+            "type": "string"
+          },
+          "code": {
+            "pattern": "^[a-z][a-z0-9_-]{1,79}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "credential_required": {
+            "default": false,
+            "title": "Credential Required",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "headers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers"
+          },
+          "managed_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "prism-code",
+                  "prism-sandbox",
+                  "playwright"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Kind"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "transport": {
+            "default": "streamable_http",
+            "enum": [
+              "streamable_http",
+              "managed"
+            ],
+            "title": "Transport",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "McpServerUpsertIn",
+        "type": "object"
+      },
+      "McpToolUpdateIn": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "risk_level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Level"
+          }
+        },
+        "title": "McpToolUpdateIn",
+        "type": "object"
+      },
       "MemberAddIn": {
         "description": "添加项目成员请求体",
         "properties": {
@@ -6349,6 +6743,22 @@
           "pages"
         ],
         "title": "PageOut[VersionOut]",
+        "type": "object"
+      },
+      "PasswordResetOut": {
+        "description": "只在本次管理员响应中返回的随机密码。",
+        "properties": {
+          "temporary_password": {
+            "maxLength": 24,
+            "minLength": 24,
+            "title": "Temporary Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "temporary_password"
+        ],
+        "title": "PasswordResetOut",
         "type": "object"
       },
       "PermissionOut": {
@@ -7174,6 +7584,16 @@
       "ProjectDetailOut": {
         "description": "项目详情响应",
         "properties": {
+          "can_delete": {
+            "default": false,
+            "title": "Can Delete",
+            "type": "boolean"
+          },
+          "can_update": {
+            "default": false,
+            "title": "Can Update",
+            "type": "boolean"
+          },
           "create_time": {
             "format": "date-time",
             "title": "Create Time",
@@ -7221,6 +7641,21 @@
             },
             "title": "Recent Tasks",
             "type": "array"
+          },
+          "source_archive": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectSourceArchiveOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_mode": {
+            "default": "files",
+            "title": "Source Mode",
+            "type": "string"
           },
           "status": {
             "title": "Status",
@@ -7285,6 +7720,16 @@
       "ProjectOut": {
         "description": "项目列表项响应\n\nv2.0 新增 `score`: 最近一次成功审查的评分,前端 ProjectList 使用真实评分,\n不再 hash 派生假数字。无审查记录时为 None。\nR6 修复(2026-06-25):补齐 update_time,对齐 Project ORM。",
         "properties": {
+          "can_delete": {
+            "default": false,
+            "title": "Can Delete",
+            "type": "boolean"
+          },
+          "can_update": {
+            "default": false,
+            "title": "Can Update",
+            "type": "boolean"
+          },
           "create_time": {
             "format": "date-time",
             "title": "Create Time",
@@ -7348,6 +7793,22 @@
             ],
             "title": "Score"
           },
+          "source_malware_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Malware Status"
+          },
+          "source_mode": {
+            "default": "files",
+            "title": "Source Mode",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -7372,6 +7833,111 @@
           "create_time"
         ],
         "title": "ProjectOut",
+        "type": "object"
+      },
+      "ProjectSourceArchiveOut": {
+        "description": "隔离整包源码的安全摘要，不包含原包字节或源码。",
+        "properties": {
+          "archive_sha256": {
+            "title": "Archive Sha256",
+            "type": "string"
+          },
+          "audit_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Completed At"
+          },
+          "audit_heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Heartbeat At"
+          },
+          "audit_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Started At"
+          },
+          "audit_status": {
+            "title": "Audit Status",
+            "type": "string"
+          },
+          "compressed_size": {
+            "title": "Compressed Size",
+            "type": "integer"
+          },
+          "expanded_size": {
+            "title": "Expanded Size",
+            "type": "integer"
+          },
+          "file_count": {
+            "title": "File Count",
+            "type": "integer"
+          },
+          "malware_status": {
+            "title": "Malware Status",
+            "type": "string"
+          },
+          "max_compression_ratio": {
+            "title": "Max Compression Ratio",
+            "type": "number"
+          },
+          "max_member_size": {
+            "title": "Max Member Size",
+            "type": "integer"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "quarantined": {
+            "title": "Quarantined",
+            "type": "boolean"
+          },
+          "storage_status": {
+            "title": "Storage Status",
+            "type": "string"
+          },
+          "threat_count": {
+            "title": "Threat Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "original_filename",
+          "archive_sha256",
+          "compressed_size",
+          "expanded_size",
+          "file_count",
+          "max_member_size",
+          "max_compression_ratio",
+          "storage_status",
+          "malware_status",
+          "audit_status",
+          "quarantined",
+          "threat_count"
+        ],
+        "title": "ProjectSourceArchiveOut",
         "type": "object"
       },
       "ProjectUpdateIn": {
@@ -7761,6 +8327,58 @@
           "published_at"
         ],
         "title": "ReleaseOut",
+        "type": "object"
+      },
+      "RemoteProjectImportIn": {
+        "description": "公开 HTTPS 源码归档导入请求。",
+        "properties": {
+          "audit_mode": {
+            "default": false,
+            "title": "Audit Mode",
+            "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "project_name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Project Name",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 12,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "project_name"
+        ],
+        "title": "RemoteProjectImportIn",
         "type": "object"
       },
       "RenameIn": {
@@ -9609,6 +10227,32 @@
         "title": "Resp[PageOut[VersionOut]]",
         "type": "object"
       },
+      "Resp_PasswordResetOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PasswordResetOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[PasswordResetOut]",
+        "type": "object"
+      },
       "Resp_PolicyDecisionOut_": {
         "properties": {
           "code": {
@@ -9895,6 +10539,32 @@
         "title": "Resp[RoleOut]",
         "type": "object"
       },
+      "Resp_SandboxEnvironmentOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SandboxEnvironmentOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[SandboxEnvironmentOut]",
+        "type": "object"
+      },
       "Resp_SecurityChecklistOut_": {
         "properties": {
           "code": {
@@ -9947,6 +10617,32 @@
         "title": "Resp[SecurityDashboardSummaryOut]",
         "type": "object"
       },
+      "Resp_SecurityMonitorRunOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecurityMonitorRunOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[SecurityMonitorRunOut]",
+        "type": "object"
+      },
       "Resp_SecurityScanOut_": {
         "properties": {
           "code": {
@@ -9971,6 +10667,32 @@
           }
         },
         "title": "Resp[SecurityScanOut]",
+        "type": "object"
+      },
+      "Resp_SecurityStatusOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecurityStatusOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[SecurityStatusOut]",
         "type": "object"
       },
       "Resp_SkillInvokeOut_": {
@@ -10127,6 +10849,34 @@
           }
         },
         "title": "Resp[Union[DataScopeOut, NoneType]]",
+        "type": "object"
+      },
+      "Resp_Union_dict__NoneType__": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[Union[dict, NoneType]]",
         "type": "object"
       },
       "Resp_UserOut_": {
@@ -10623,6 +11373,36 @@
         "title": "Resp[list[AssetOut]]",
         "type": "object"
       },
+      "Resp_list_CapabilitySearchOut__": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CapabilitySearchOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[list[CapabilitySearchOut]]",
+        "type": "object"
+      },
       "Resp_list_CatalogAgentOut__": {
         "properties": {
           "code": {
@@ -10981,6 +11761,36 @@
           }
         },
         "title": "Resp[list[RuleOut]]",
+        "type": "object"
+      },
+      "Resp_list_SandboxEnvironmentOut__": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SandboxEnvironmentOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[list[SandboxEnvironmentOut]]",
         "type": "object"
       },
       "Resp_list_ScoreTrendItem__": {
@@ -11784,6 +12594,434 @@
         "title": "RunIn",
         "type": "object"
       },
+      "SandboxArtifactOut": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "byte_size": {
+            "title": "Byte Size",
+            "type": "integer"
+          },
+          "file_name": {
+            "title": "File Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "artifact_type",
+          "file_name",
+          "mime_type",
+          "byte_size",
+          "sha256"
+        ],
+        "title": "SandboxArtifactOut",
+        "type": "object"
+      },
+      "SandboxCreateIn": {
+        "properties": {
+          "language": {
+            "enum": [
+              "python",
+              "node",
+              "java",
+              "go",
+              "php"
+            ],
+            "title": "Language",
+            "type": "string"
+          },
+          "project_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "purpose": {
+            "enum": [
+              "test",
+              "deploy"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "remote_target_authorized": {
+            "default": false,
+            "title": "Remote Target Authorized",
+            "type": "boolean"
+          },
+          "remote_target_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Target Url"
+          },
+          "test_mode": {
+            "default": "whitebox",
+            "enum": [
+              "whitebox",
+              "blackbox",
+              "combined",
+              "deploy"
+            ],
+            "title": "Test Mode",
+            "type": "string"
+          },
+          "ttl_hours": {
+            "default": 72,
+            "maximum": 168.0,
+            "minimum": 1.0,
+            "title": "Ttl Hours",
+            "type": "integer"
+          },
+          "worker_code": {
+            "default": "",
+            "maxLength": 80,
+            "title": "Worker Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "purpose",
+          "language"
+        ],
+        "title": "SandboxCreateIn",
+        "type": "object"
+      },
+      "SandboxEnvironmentOut": {
+        "properties": {
+          "agent_code": {
+            "title": "Agent Code",
+            "type": "string"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/SandboxArtifactOut"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/SandboxEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "integer"
+          },
+          "preview_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Path"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "public_id": {
+            "title": "Public Id",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "remote_target_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Target Url"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "runtime": {
+            "title": "Runtime",
+            "type": "string"
+          },
+          "source_sha256": {
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "stopped_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stopped At"
+          },
+          "test_mode": {
+            "title": "Test Mode",
+            "type": "string"
+          },
+          "worker_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Code"
+          }
+        },
+        "required": [
+          "public_id",
+          "project_id",
+          "owner_id",
+          "agent_code",
+          "purpose",
+          "language",
+          "test_mode",
+          "status",
+          "runtime",
+          "source_sha256",
+          "expires_at"
+        ],
+        "title": "SandboxEnvironmentOut",
+        "type": "object"
+      },
+      "SandboxEventOut": {
+        "properties": {
+          "create_time": {
+            "format": "date-time",
+            "title": "Create Time",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_type",
+          "stage",
+          "message",
+          "create_time"
+        ],
+        "title": "SandboxEventOut",
+        "type": "object"
+      },
+      "SandboxExtendIn": {
+        "properties": {
+          "hours": {
+            "maximum": 168.0,
+            "minimum": 1.0,
+            "title": "Hours",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hours"
+        ],
+        "title": "SandboxExtendIn",
+        "type": "object"
+      },
+      "SandboxWorkerUpsertIn": {
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z0-9_-]{1,79}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "endpoint": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "max_concurrency": {
+            "default": 1,
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "priority": {
+            "default": 50,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "runtime": {
+            "default": "runsc",
+            "maxLength": 50,
+            "title": "Runtime",
+            "type": "string"
+          },
+          "supported_languages": {
+            "items": {
+              "enum": [
+                "python",
+                "node",
+                "java",
+                "go",
+                "php"
+              ],
+              "type": "string"
+            },
+            "title": "Supported Languages",
+            "type": "array"
+          },
+          "supported_modes": {
+            "items": {
+              "enum": [
+                "whitebox",
+                "blackbox",
+                "combined",
+                "deploy"
+              ],
+              "type": "string"
+            },
+            "title": "Supported Modes",
+            "type": "array"
+          },
+          "token": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Token",
+            "type": "string"
+          },
+          "transport": {
+            "enum": [
+              "unix",
+              "https"
+            ],
+            "title": "Transport",
+            "type": "string"
+          },
+          "worker_type": {
+            "enum": [
+              "local",
+              "managed",
+              "production_fallback"
+            ],
+            "title": "Worker Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "worker_type",
+          "transport",
+          "endpoint",
+          "supported_languages",
+          "supported_modes"
+        ],
+        "title": "SandboxWorkerUpsertIn",
+        "type": "object"
+      },
       "ScoreTrendItem": {
         "description": "评分趋势项",
         "properties": {
@@ -12153,6 +13391,50 @@
         "title": "SecurityFindingOut",
         "type": "object"
       },
+      "SecurityMonitorRunOut": {
+        "description": "安全巡检执行摘要输出。",
+        "properties": {
+          "actions": {
+            "additionalProperties": true,
+            "title": "Actions",
+            "type": "object"
+          },
+          "created_alerts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Created Alerts",
+            "type": "array"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "title": "SecurityMonitorRunOut",
+        "type": "object"
+      },
       "SecurityScanAllProjectsIn": {
         "properties": {
           "top_n_per_project": {
@@ -12235,6 +13517,21 @@
             "title": "Risk Score",
             "type": "integer"
           },
+          "source_archive_bytes": {
+            "default": 0,
+            "title": "Source Archive Bytes",
+            "type": "integer"
+          },
+          "source_archive_filename": {
+            "default": "",
+            "title": "Source Archive Filename",
+            "type": "string"
+          },
+          "source_archive_sha256": {
+            "default": "",
+            "title": "Source Archive Sha256",
+            "type": "string"
+          },
           "summary": {
             "default": "",
             "title": "Summary",
@@ -12261,9 +13558,16 @@
             "title": "Project Id",
             "type": "integer"
           },
+          "scan_mode": {
+            "default": "static_full",
+            "description": "full=全量语义, static_full=整包静态+有界语义, triage=风险优先抽样",
+            "pattern": "^(full|static_full|triage)$",
+            "title": "Scan Mode",
+            "type": "string"
+          },
           "top_n": {
             "default": 50,
-            "description": "最多扫描的文件数",
+            "description": "triage 模式最多扫描的文件数; full 模式忽略",
             "maximum": 200.0,
             "minimum": 1.0,
             "title": "Top N",
@@ -12294,6 +13598,49 @@
           "task_id"
         ],
         "title": "SecurityScanTaskIn",
+        "type": "object"
+      },
+      "SecurityStatusOut": {
+        "description": "安全态势聚合输出。",
+        "properties": {
+          "attacks": {
+            "additionalProperties": true,
+            "title": "Attacks",
+            "type": "object"
+          },
+          "backup": {
+            "additionalProperties": true,
+            "title": "Backup",
+            "type": "object"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "open_alerts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Open Alerts",
+            "type": "array"
+          },
+          "since_hours": {
+            "default": 24,
+            "title": "Since Hours",
+            "type": "integer"
+          },
+          "ssh": {
+            "additionalProperties": true,
+            "title": "Ssh",
+            "type": "object"
+          }
+        },
+        "title": "SecurityStatusOut",
         "type": "object"
       },
       "SkillBindingIn": {
@@ -14459,7 +15806,7 @@
     },
     "/api/admin/approvals": {
       "get": {
-        "description": "查询治理审批事项。\n\nArgs:\n    status: 可选状态过滤。\n    db: 数据库会话。\n    _: 管理员用户。\n\nReturns:\n    Resp[list[ApprovalItemOut]]: 审批事项列表。",
+        "description": "查询治理审批事项。\n\nArgs:\n    status: 可选状态过滤。\n    db: 数据库会话。\n    actor: 当前管理员。\n\nReturns:\n    Resp[list[ApprovalItemOut]]: 审批事项列表。",
         "operationId": "list_approvals_api_admin_approvals_get",
         "parameters": [
           {
@@ -16077,7 +17424,7 @@
     },
     "/api/admin/llm/config": {
       "get": {
-        "description": "查看当前全局 LLM 配置(Key 脱敏)",
+        "description": "由唯一超级管理员查看当前全局 LLM 配置(Key 脱敏)。",
         "operationId": "get_config_api_admin_llm_config_get",
         "parameters": [
           {
@@ -16125,7 +17472,7 @@
         ]
       },
       "put": {
-        "description": "更新全局 LLM 配置",
+        "description": "由唯一超级管理员更新全局 LLM 配置。",
         "operationId": "update_config_api_admin_llm_config_put",
         "parameters": [
           {
@@ -16185,7 +17532,7 @@
     },
     "/api/admin/llm/test": {
       "post": {
-        "description": "测试连通性;留空字段则用已保存配置",
+        "description": "由唯一超级管理员测试连通性;留空字段则用已保存配置。",
         "operationId": "test_config_api_admin_llm_test_post",
         "parameters": [
           {
@@ -16240,6 +17587,1017 @@
         "summary": "Test Config",
         "tags": [
           "大模型配置"
+        ]
+      }
+    },
+    "/api/admin/mcp/aliases": {
+      "get": {
+        "operationId": "list_aliases_api_admin_mcp_aliases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "capability_code",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 255,
+              "title": "Capability Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_dict__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Aliases",
+        "tags": [
+          "MCP 治理"
+        ]
+      },
+      "post": {
+        "operationId": "create_alias_api_admin_mcp_aliases_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilityAliasIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Alias",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/aliases/{alias_id}": {
+      "delete": {
+        "operationId": "delete_alias_api_admin_mcp_aliases__alias_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alias_id",
+            "required": true,
+            "schema": {
+              "title": "Alias Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_NoneType_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Alias",
+        "tags": [
+          "MCP 治理"
+        ]
+      },
+      "put": {
+        "operationId": "update_alias_api_admin_mcp_aliases__alias_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alias_id",
+            "required": true,
+            "schema": {
+              "title": "Alias Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilityAliasIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Alias",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/bindings": {
+      "get": {
+        "operationId": "list_bindings_api_admin_mcp_bindings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agent_code",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 80,
+              "title": "Agent Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_dict__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bindings",
+        "tags": [
+          "MCP 治理"
+        ]
+      },
+      "put": {
+        "operationId": "upsert_binding_api_admin_mcp_bindings_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpBindingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Binding",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/bindings/{binding_id}": {
+      "delete": {
+        "operationId": "delete_binding_api_admin_mcp_bindings__binding_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "title": "Binding Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_NoneType_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Binding",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/capabilities/search": {
+      "get": {
+        "operationId": "search_capabilities_api_admin_mcp_capabilities_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_dict__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Capabilities",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/servers": {
+      "get": {
+        "operationId": "list_servers_api_admin_mcp_servers_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_dict__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Servers",
+        "tags": [
+          "MCP 治理"
+        ]
+      },
+      "post": {
+        "operationId": "create_server_api_admin_mcp_servers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerUpsertIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Server",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/servers/recommended": {
+      "post": {
+        "operationId": "seed_recommended_servers_api_admin_mcp_servers_recommended_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_dict__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Seed Recommended Servers",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/servers/{server_id}": {
+      "delete": {
+        "operationId": "delete_server_api_admin_mcp_servers__server_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_NoneType_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Server",
+        "tags": [
+          "MCP 治理"
+        ]
+      },
+      "put": {
+        "operationId": "update_server_api_admin_mcp_servers__server_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerUpsertIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Server",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/servers/{server_id}/health": {
+      "post": {
+        "operationId": "check_server_health_api_admin_mcp_servers__server_id__health_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Server Health",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/servers/{server_id}/sync": {
+      "post": {
+        "operationId": "sync_server_tools_api_admin_mcp_servers__server_id__sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_dict__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Server Tools",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/tools": {
+      "get": {
+        "operationId": "list_tools_api_admin_mcp_tools_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "server_id",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Server Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_dict__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tools",
+        "tags": [
+          "MCP 治理"
+        ]
+      }
+    },
+    "/api/admin/mcp/tools/{tool_id}": {
+      "put": {
+        "operationId": "update_tool_api_admin_mcp_tools__tool_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tool_id",
+            "required": true,
+            "schema": {
+              "title": "Tool Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpToolUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Tool",
+        "tags": [
+          "MCP 治理"
         ]
       }
     },
@@ -16298,6 +18656,115 @@
           }
         },
         "summary": "List Alerts",
+        "tags": [
+          "Agent治理"
+        ]
+      }
+    },
+    "/api/admin/observability/alerts/unread": {
+      "get": {
+        "description": "查询当前管理员的未读弹窗告警。\n\n仅返回 status=open 且 read_at IS NULL 且归属当前管理员（user_id==当前用户）的\n告警，按 id 倒序最多 50 条。\n\nArgs:\n    db: 数据库会话。\n    admin: 当前登录管理员。\n\nReturns:\n    Resp[list[AgentAlertOut]]: 未读告警列表。",
+        "operationId": "list_unread_alerts_api_admin_observability_alerts_unread_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_AgentAlertOut__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Unread Alerts",
+        "tags": [
+          "Agent治理"
+        ]
+      }
+    },
+    "/api/admin/observability/alerts/{alert_id}/read": {
+      "post": {
+        "description": "标记安全弹窗告警为已读。\n\n校验归属：user_id 为空（系统级告警）或等于当前管理员时才允许标记，\n否则返回 403；告警不存在返回 404。\n\nArgs:\n    alert_id: 告警 ID。\n    db: 数据库会话。\n    admin: 当前登录管理员。\n\nReturns:\n    Resp[AgentAlertOut]: 已读后的告警。\n\nRaises:\n    NotFoundError: 告警不存在。\n    ForbiddenError: 告警归属其他管理员。",
+        "operationId": "mark_alert_read_api_admin_observability_alerts__alert_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "required": true,
+            "schema": {
+              "title": "Alert Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_AgentAlertOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Alert Read",
         "tags": [
           "Agent治理"
         ]
@@ -16417,6 +18884,118 @@
           }
         },
         "summary": "Observability Overview",
+        "tags": [
+          "Agent治理"
+        ]
+      }
+    },
+    "/api/admin/observability/security/run-monitor": {
+      "post": {
+        "description": "手动触发一轮安全巡检（供最高管理员/Agent 运维使用）。\n\nArgs:\n    db: 数据库会话。\n    _: 唯一超级管理员。\n\nReturns:\n    Resp[SecurityMonitorRunOut]: 巡检摘要（新建告警/错误）。",
+        "operationId": "run_security_monitor_endpoint_api_admin_observability_security_run_monitor_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_SecurityMonitorRunOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Security Monitor Endpoint",
+        "tags": [
+          "Agent治理"
+        ]
+      }
+    },
+    "/api/admin/observability/security/status": {
+      "get": {
+        "description": "查询安全态势聚合（登录/攻击/备份/最近 open 告警）。\n\nArgs:\n    since_hours: 回看窗口（小时）。\n    db: 数据库会话。\n    _: 唯一超级管理员。\n\nReturns:\n    Resp[SecurityStatusOut]: 安全态势聚合。",
+        "operationId": "security_status_api_admin_observability_security_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since_hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 720,
+              "minimum": 1,
+              "title": "Since Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_SecurityStatusOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Security Status",
         "tags": [
           "Agent治理"
         ]
@@ -20320,8 +22899,26 @@
     },
     "/api/auth/logout": {
       "post": {
-        "description": "退出登录(后端无状态,前端清除token即可)",
+        "description": "退出登录并使当前账号已签发的会话令牌失效。",
         "operationId": "logout_api_auth_logout_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -20332,6 +22929,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Logout",
@@ -23842,7 +26449,7 @@
     },
     "/api/knowledge/embedding-config": {
       "get": {
-        "description": "查看 embedding 配置(管理员;不回显明文 Key)",
+        "description": "由唯一超级管理员查看 embedding 配置(不回显明文 Key)。",
         "operationId": "get_embedding_config_api_knowledge_embedding_config_get",
         "parameters": [
           {
@@ -23890,7 +26497,7 @@
         ]
       },
       "put": {
-        "description": "更新 embedding 配置(管理员)",
+        "description": "由唯一超级管理员更新 embedding 配置。",
         "operationId": "update_embedding_config_api_knowledge_embedding_config_put",
         "parameters": [
           {
@@ -24816,6 +27423,66 @@
         ]
       }
     },
+    "/api/projects/import-remote": {
+      "post": {
+        "description": "导入公开 HTTPS 源码归档，入库为普通项目文件。",
+        "operationId": "import_remote_project_api_projects_import_remote_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteProjectImportIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Remote Project",
+        "tags": [
+          "项目"
+        ]
+      }
+    },
     "/api/projects/{project_id}": {
       "delete": {
         "description": "删除项目(软删除)",
@@ -24994,6 +27661,191 @@
           }
         },
         "summary": "Update Project",
+        "tags": [
+          "项目"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/audit-source-archive": {
+      "get": {
+        "description": "查询隔离归档的存储、恶意代码和审计状态。",
+        "operationId": "get_audit_source_archive_api_projects__project_id__audit_source_archive_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_Union_dict__NoneType__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Audit Source Archive",
+        "tags": [
+          "项目"
+        ]
+      },
+      "post": {
+        "description": "上传待审计源码归档；命中恶意规则时保留隔离证据。",
+        "operationId": "upload_audit_source_archive_api_projects__project_id__audit_source_archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_audit_source_archive_api_projects__project_id__audit_source_archive_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Audit Source Archive",
+        "tags": [
+          "项目"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/audit-source-archive/result": {
+      "get": {
+        "description": "读取与当前隔离原包 SHA-256 绑定的持久化白盒审计结果。",
+        "operationId": "get_audit_source_archive_result_api_projects__project_id__audit_source_archive_result_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_Union_dict__NoneType__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Audit Source Archive Result",
         "tags": [
           "项目"
         ]
@@ -25266,6 +28118,63 @@
         "summary": "Update Member Role",
         "tags": [
           "项目成员"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/source-archive": {
+      "get": {
+        "description": "下载当前用户可访问项目的完整源码归档。",
+        "operationId": "download_project_source_api_projects__project_id__source_archive_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Project Source",
+        "tags": [
+          "项目"
         ]
       }
     },
@@ -26321,7 +29230,7 @@
     },
     "/api/reports/generate": {
       "post": {
-        "description": "生成报告(支持 JSON / HTML / PDF / Word 四种格式)。\n\n根据 payload.format 调用对应导出器:\n- json: 返回 JSON 响应\n- html: 返回 HTML 响应(使用指定模板渲染)\n- pdf:  返回 PDF 字节流下载\n- word: 返回 Word 字节流下载\n\nArgs:\n    payload: 报告生成请求体(task_id / format / template_type)。\n    db: 数据库会话(由 Depends 注入)。\n    user: 当前用户(由 require_permission 注入,已校验 report:generate 权限)。\n\nReturns:\n    Response: 根据格式返回 JSONResponse / HTMLResponse / StreamingResponse。\n\nRaises:\n    NotFoundError: 任务不存在或未完成(404)。",
+        "description": "生成报告(支持 JSON / HTML / PDF / Word 四种格式)。\n\n根据 payload.format 调用对应导出器:\n- json: 返回 JSON 响应\n- html: 返回 HTML 响应(使用指定模板渲染)\n- pdf:  返回 PDF 字节流下载\n- word: 返回 Word 字节流下载\n\nArgs:\n    payload: 报告生成请求体(task_id / format / template_type)。\n    db: 数据库会话(由 Depends 注入)。\n    user: 当前用户(由 require_permission 注入,已校验 report:view 权限)。\n\nReturns:\n    Response: 根据格式返回 JSONResponse / HTMLResponse / StreamingResponse。\n\nRaises:\n    NotFoundError: 任务不存在或未完成(404)。",
         "operationId": "generate_report_api_reports_generate_post",
         "parameters": [
           {
@@ -26379,7 +29288,7 @@
     },
     "/api/reports/tasks/{task_id}": {
       "get": {
-        "description": "预览报告(返回 HTML,便于前端 iframe 嵌入)。\n\nArgs:\n    task_id: 审查任务 ID(路径参数)。\n    template_type: 模板类型(simple/detailed/compliance),默认 detailed。\n    db: 数据库会话(由 Depends 注入)。\n    user: 当前用户(由 require_permission 注入,已校验 report:read 权限)。\n\nReturns:\n    HTMLResponse: 渲染后的 HTML 报告字符串。\n\nRaises:\n    NotFoundError: 任务不存在或未完成(404)。",
+        "description": "预览报告(返回 HTML,便于前端 iframe 嵌入)。\n\nArgs:\n    task_id: 审查任务 ID(路径参数)。\n    template_type: 模板类型(simple/detailed/compliance),默认 detailed。\n    db: 数据库会话(由 Depends 注入)。\n    user: 当前用户(由 require_permission 注入,已校验 report:view 权限)。\n\nReturns:\n    HTMLResponse: 渲染后的 HTML 报告字符串。\n\nRaises:\n    NotFoundError: 任务不存在或未完成(404)。",
         "operationId": "preview_report_api_reports_tasks__task_id__get",
         "parameters": [
           {
@@ -26447,7 +29356,7 @@
     },
     "/api/reports/tasks/{task_id}/export": {
       "get": {
-        "description": "导出报告(直接下载文件,返回 StreamingResponse with Content-Disposition: attachment)。\n\nArgs:\n    task_id: 审查任务 ID(路径参数)。\n    format: 导出格式(json/html/pdf/word),默认 pdf。\n    template_type: 模板类型(simple/detailed/compliance),默认 detailed。\n    db: 数据库会话(由 Depends 注入)。\n    user: 当前用户(由 require_permission 注入,已校验 report:export 权限)。\n\nReturns:\n    StreamingResponse: 带下载头的流式响应;JSON/HTML 格式同样以文件下载方式返回。\n\nRaises:\n    NotFoundError: 任务不存在或未完成(404)。",
+        "description": "导出报告(直接下载文件,返回 StreamingResponse with Content-Disposition: attachment)。\n\nArgs:\n    task_id: 审查任务 ID(路径参数)。\n    format: 导出格式(json/html/pdf/word),默认 pdf。\n    template_type: 模板类型(simple/detailed/compliance),默认 detailed。\n    db: 数据库会话(由 Depends 注入)。\n    user: 当前用户(按 format 校验对应 report:export:* 权限)。\n\nReturns:\n    StreamingResponse: 带下载头的流式响应;JSON/HTML 格式同样以文件下载方式返回。\n\nRaises:\n    NotFoundError: 任务不存在或未完成(404)。",
         "operationId": "export_report_api_reports_tasks__task_id__export_get",
         "parameters": [
           {
@@ -27774,6 +30683,784 @@
         ]
       }
     },
+    "/api/sandboxes": {
+      "get": {
+        "operationId": "list_sandboxes_api_sandboxes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_SandboxEnvironmentOut__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sandboxes",
+        "tags": [
+          "代码沙箱"
+        ]
+      },
+      "post": {
+        "operationId": "create_sandbox_api_sandboxes_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_SandboxEnvironmentOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Sandbox",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/capabilities/search": {
+      "get": {
+        "operationId": "search_capabilities_api_sandboxes_capabilities_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_CapabilitySearchOut__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Capabilities",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/workers": {
+      "get": {
+        "operationId": "list_workers_api_sandboxes_workers_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_dict__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workers",
+        "tags": [
+          "代码沙箱"
+        ]
+      },
+      "post": {
+        "operationId": "create_worker_api_sandboxes_workers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxWorkerUpsertIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Worker",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/workers/seed-production": {
+      "post": {
+        "operationId": "seed_production_worker_api_sandboxes_workers_seed_production_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Seed Production Worker",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/workers/{worker_id}": {
+      "put": {
+        "operationId": "update_worker_api_sandboxes_workers__worker_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxWorkerUpsertIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Worker",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/workers/{worker_id}/health": {
+      "post": {
+        "operationId": "check_worker_api_sandboxes_workers__worker_id__health_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Worker",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/{public_id}": {
+      "get": {
+        "operationId": "get_sandbox_api_sandboxes__public_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_id",
+            "required": true,
+            "schema": {
+              "title": "Public Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_SandboxEnvironmentOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sandbox",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/{public_id}/artifacts/{artifact_id}": {
+      "get": {
+        "operationId": "download_sandbox_artifact_api_sandboxes__public_id__artifacts__artifact_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_id",
+            "required": true,
+            "schema": {
+              "title": "Public Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Sandbox Artifact",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/{public_id}/extend": {
+      "post": {
+        "operationId": "extend_sandbox_api_sandboxes__public_id__extend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_id",
+            "required": true,
+            "schema": {
+              "title": "Public Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxExtendIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_SandboxEnvironmentOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extend Sandbox",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/{public_id}/preview-session": {
+      "post": {
+        "operationId": "create_preview_session_api_sandboxes__public_id__preview_session_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_id",
+            "required": true,
+            "schema": {
+              "title": "Public Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Preview Session",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
+    "/api/sandboxes/{public_id}/stop": {
+      "post": {
+        "operationId": "stop_sandbox_api_sandboxes__public_id__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_id",
+            "required": true,
+            "schema": {
+              "title": "Public Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_SandboxEnvironmentOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Sandbox",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
     "/api/security/checklist": {
       "get": {
         "description": "返回 OWASP Top10 + 内置敏感信息正则规则清单",
@@ -27944,6 +31631,64 @@
           }
         },
         "summary": "List Findings",
+        "tags": [
+          "安全审计"
+        ]
+      }
+    },
+    "/api/security/fullchain-audit": {
+      "post": {
+        "description": "全链路源码审计 (v3.3): Recon → Analysis → Verification → Report.\n\n四角色分工协作,黑板共享上下文,知识库压误报,可选沙箱实测验证漏洞可利用性。\n返回完整 findings + 全链路各阶段产出(侦察攻击面/分析结论/验证可复现清单/报告)。",
+        "operationId": "fullchain_audit_api_security_fullchain_audit_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FullChainAuditIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fullchain Audit",
         "tags": [
           "安全审计"
         ]
@@ -28387,7 +32132,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Resp_dict_"
+                  "$ref": "#/components/schemas/Resp_PasswordResetOut_"
                 }
               }
             },
