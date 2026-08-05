@@ -427,3 +427,157 @@ def test_no_admin_skips_sse_but_alert_created(db, monkeypatch, emitted):
     alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == "login:8.8.8.8:root").one()
     assert alert.user_id is None
     assert emitted == []
+
+
+def _db_payload(*, ok=True, destructive=0, dump=0, error=0, reason=None):
+    """构造 db_threat_signals 负载。"""
+    payload = {
+        "ok": ok,
+        "destructive_total": destructive,
+        "dump_exfil_total": dump,
+        "error_total": error,
+        "destructive_by_user": [{"value": "root[root] @ localhost []", "count": destructive}] if destructive else [],
+        "error_by_user": [{"value": "app[app] @ 10.0.0.1 []", "count": error}] if error else [],
+        "samples": {
+            "destructive": [{"user_host": "root[root] @ localhost []", "sql": "DROP TABLE ?", "event_time": "2026-08-05 10:00:00"}] * min(destructive, 1),
+            "dump_exfil": [{"user_host": "app[app] @ 10.0.0.1 []", "sql": "SELECT ? INTO OUTFILE ?", "event_time": "2026-08-05 10:02:00"}] * min(dump, 1),
+            "error": [],
+        },
+    }
+    if reason:
+        payload["reason"] = reason
+    return payload
+
+
+def _base_payloads():
+    return {
+        "ssh_login_events": _ssh_payload(),
+        "flytrap_attack_events": {"total": 0, "by_ip": [], "recent": []},
+        "nginx_attack_events": {"total": 0, "by_ip": [], "by_detail": [], "recent": []},
+        "backup_audit": {"sql_gz_count": 0, "sql_gz_bytes": 0, "other_bytes": 0, "recent": [], "newest": None},
+        "status": {"checks": {"disk": {"used_percent": 40}}},
+    }
+
+
+def test_db_destructive_creates_critical_alert_and_popup(db, super_admin_user, monkeypatch, emitted):
+    """数据库破坏性操作应生成 critical 告警并推送 SSE。"""
+    payloads = _base_payloads()
+    payloads["db_threat_signals"] = _db_payload(destructive=2)
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert len(result["created_alerts"]) == 1
+    alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == "db:destructive").one()
+    assert alert.severity == "critical"
+    assert alert.category == "db_threat"
+    assert "破坏性操作" in alert.title
+    assert len(emitted) == 1
+    _, kwargs = emitted[0]
+    assert kwargs["payload"]["category"] == "db_threat"
+    assert kwargs["payload"]["severity"] == "critical"
+
+
+def test_db_dump_exfil_creates_critical_alert(db, super_admin_user, monkeypatch, emitted):
+    """数据库批量导出/外泄应生成 critical 告警。"""
+    payloads = _base_payloads()
+    payloads["db_threat_signals"] = _db_payload(dump=1)
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert len(result["created_alerts"]) == 1
+    alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == "db:dump_exfil").one()
+    assert alert.severity == "critical"
+    assert "外泄" in alert.title
+
+
+def test_db_errors_threshold_creates_warning(db, super_admin_user, monkeypatch, emitted):
+    """数据库访问异常达阈值生成 warning 告警。"""
+    monkeypatch.setattr(settings, "security_db_error_threshold", 3)
+    payloads = _base_payloads()
+    payloads["db_threat_signals"] = _db_payload(error=3)
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert len(result["created_alerts"]) == 1
+    alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == "db:errors").one()
+    assert alert.severity == "warning"
+
+
+def test_db_general_log_disabled_no_alert(db, super_admin_user, monkeypatch, emitted):
+    """general_log 未开启（ok=False）不应产生任何数据库告警。"""
+    payloads = _base_payloads()
+    payloads["db_threat_signals"] = _db_payload(ok=False, reason="general_log 未开启")
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert result["created_alerts"] == []
+    assert db.query(AgentAlert).filter(AgentAlert.category == "db_threat").count() == 0
+
+
+def test_db_monitor_disabled_skips_action(db, super_admin_user, monkeypatch, emitted):
+    """security_db_monitor_enabled=False 时不调用 db_threat_signals 动作。"""
+    monkeypatch.setattr(settings, "security_db_monitor_enabled", False)
+    called = []
+
+    def spy(db_, actor, *, action, params=None, request_id="", session_db_id=None, source=""):
+        called.append(action)
+        return _fake_execute(_base_payloads())(db_, actor, action=action, params=params, request_id=request_id)
+
+    monkeypatch.setattr(ops_service, "execute", spy)
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert "db_threat_signals" not in called
+    assert "db_threat_signals" not in result["actions"]
+
+
+def test_query_security_status_includes_db_threat(db, super_admin_user, monkeypatch):
+    """安全态势聚合应包含数据库威胁统计。"""
+    payloads = _base_payloads()
+    payloads["db_threat_signals"] = _db_payload(destructive=1, error=2)
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    status = security_monitor_service.query_security_status(db)
+
+    assert status["db_threat"]["enabled"] is True
+    assert status["db_threat"]["ok"] is True
+    assert status["db_threat"]["destructive_total"] == 1
+    assert status["db_threat"]["error_total"] == 2
+
+
+def test_db_health_restart_creates_critical_alert(db, super_admin_user, monkeypatch, emitted):
+    """数据库近24h异常重启/崩溃恢复应生成 critical 告警并弹窗。"""
+    payloads = _base_payloads()
+    payloads["db_health"] = {
+        "restart_count": 1,
+        "recovery_detected": True,
+        "container_restart_count": "1",
+        "mem_usage": "455MiB / 640MiB",
+        "restart_lines": ["ready for connections"],
+        "recovery_lines": ["InnoDB: Starting crash recovery"],
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert len(result["created_alerts"]) == 1
+    alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == "db:health_restart").one()
+    assert alert.severity == "critical"
+    assert alert.category == "db_threat"
+    assert "异常重启" in alert.title
+    assert len(emitted) == 1
+
+
+def test_db_health_clean_no_alert(db, super_admin_user, monkeypatch, emitted):
+    """数据库健康（无重启/恢复）不产生告警。"""
+    payloads = _base_payloads()
+    payloads["db_health"] = {"restart_count": 0, "recovery_detected": False, "restart_lines": []}
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert result["created_alerts"] == []
+    assert db.query(AgentAlert).filter(AgentAlert.fingerprint == "db:health_restart").count() == 0

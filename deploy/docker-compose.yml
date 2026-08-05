@@ -9,7 +9,7 @@ services:
     image: ${MYSQL_IMAGE:-mysql:8.0}
     container_name: cr_mysql
     restart: unless-stopped
-    mem_limit: ${MYSQL_MEM_LIMIT:-640m}
+    mem_limit: ${MYSQL_MEM_LIMIT:-900m}
     cpus: ${MYSQL_CPUS:-1.0}
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -21,6 +21,18 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --max-allowed-packet=64M
+      - --binlog-expire-logs-seconds=259200
+      - --innodb-redo-log-capacity=268435456
+      # ── 内存护栏：把 mysqld 常驻内存压进 mem_limit 安全区，防止 OOM 误杀 ──
+      # 实测 mysqld 常驻 ~497MB，其中 performance_schema 占 ~150MB；关闭后
+      # 叠加连接/临时表护栏，常驻可稳在 ~350MB 以下，为 343MB 大表备份留余量。
+      - --performance-schema=OFF
+      - --innodb-buffer-pool-size=192M
+      - --max-connections=60
+      - --table-open-cache=512
+      - --tmp-table-size=16M
+      - --max-heap-table-size=16M
+      - --thread-cache-size=16
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro

@@ -395,6 +395,105 @@ def _evaluate_backup(db: Session, backup: dict[str, Any], created: list[dict[str
         )
 
 
+def _evaluate_db(db: Session, db_signals: dict[str, Any], created: list[dict[str, Any]]) -> None:
+    """数据库内部威胁规则：破坏性写/数据外泄 critical；访问拒绝告警 warning。"""
+    # general_log 未开启时 executor 返回 ok=False，不产出告警（不视为攻击）。
+    if not db_signals.get("ok"):
+        return
+    destructive_threshold = settings.security_db_destructive_threshold
+    destructive_total = int(db_signals.get("destructive_total") or 0)
+    if destructive_total >= destructive_threshold:
+        samples = (db_signals.get("samples") or {}).get("destructive") or []
+        top_users = db_signals.get("destructive_by_user") or []
+        _record_alert(
+            db,
+            created,
+            category="db_threat",
+            severity="critical",
+            fingerprint="db:destructive",
+            title=f"数据库破坏性操作：{destructive_total} 条（DROP/TRUNCATE/DELETE/权限变更）",
+            suggestion=(
+                "立即核对变更窗口与操作账号；若非授权变更，备份当前库并回滚，"
+                "排查应用层注入或被盗账号"
+            ),
+            detail={
+                "count": destructive_total,
+                "window_hours": settings.security_db_window_hours,
+                "by_user": top_users[:10],
+                "samples": samples[:10],
+            },
+        )
+
+    dump_threshold = settings.security_db_dump_threshold
+    dump_total = int(db_signals.get("dump_exfil_total") or 0)
+    if dump_total >= dump_threshold:
+        samples = (db_signals.get("samples") or {}).get("dump_exfil") or []
+        _record_alert(
+            db,
+            created,
+            category="db_threat",
+            severity="critical",
+            fingerprint="db:dump_exfil",
+            title=f"数据库疑似批量导出/外泄：{dump_total} 条（SELECT INTO OUTFILE/LOAD_FILE）",
+            suggestion=(
+                "立即排查是否发生数据外泄，审查导出文件落点与发起账号；"
+                "必要时隔离数据库并轮换凭据"
+            ),
+            detail={
+                "count": dump_total,
+                "window_hours": settings.security_db_window_hours,
+                "samples": samples[:10],
+            },
+        )
+
+    error_threshold = settings.security_db_error_threshold
+    error_total = int(db_signals.get("error_total") or 0)
+    if error_total >= error_threshold:
+        _record_alert(
+            db,
+            created,
+            category="db_threat",
+            severity="warning",
+            fingerprint="db:errors",
+            title=f"数据库访问异常/拒绝：{error_total} 条",
+            suggestion="核对应用账号权限与连接来源，排查注入探测或异常调用",
+            detail={
+                "count": error_total,
+                "window_hours": settings.security_db_window_hours,
+                "by_user": (db_signals.get("error_by_user") or [])[:10],
+            },
+        )
+
+
+def _evaluate_db_health(db: Session, health: dict[str, Any], created: list[dict[str, Any]]) -> None:
+    """数据库可用性规则：OOM 误杀/崩溃恢复/频繁重启 → critical（直接威胁生产数据）。"""
+    restart_lines = health.get("restart_lines") or []
+    recovery_detected = bool(health.get("recovery_detected"))
+    restart_count = int(health.get("restart_count") or 0)
+    # 近 24h 内出现崩溃恢复或重启日志，说明 mysqld 曾被杀/崩溃（本系统 OOM 主因）。
+    if recovery_detected or restart_count > 0:
+        _record_alert(
+            db,
+            created,
+            category="db_threat",
+            severity="critical",
+            fingerprint="db:health_restart",
+            title=f"数据库近 24h 异常重启 {restart_count} 次"
+                  + ("（检测到崩溃恢复）" if recovery_detected else "（疑似 OOM 误杀）"),
+            suggestion=(
+                "数据库曾被杀重启，可能导致批准/写入中断。检查容器内存限额与 mysqld "
+                "内存配置（performance_schema/buffer_pool），防止 OOM 复发；必要时提高 mem_limit"
+            ),
+            detail={
+                "restart_count": restart_count,
+                "recovery_detected": recovery_detected,
+                "container_restart_count": health.get("container_restart_count"),
+                "mem_usage": health.get("mem_usage"),
+                "restart_lines": restart_lines[:5],
+            },
+        )
+
+
 def _evaluate_status(db: Session, status: dict[str, Any], created: list[dict[str, Any]]) -> None:
     """磁盘规则：ops-check used_percent ≥80 触发 optimization warning。"""
     checks = status.get("checks") if isinstance(status.get("checks"), dict) else {}
@@ -427,6 +526,8 @@ def _evaluate(db: Session, results: dict[str, Any]) -> list[dict[str, Any]]:
     _evaluate_flytrap(db, results.get("flytrap_attack_events") or {}, created)
     _evaluate_nginx(db, results.get("nginx_attack_events") or {}, created)
     _evaluate_backup(db, results.get("backup_audit") or {}, created)
+    _evaluate_db(db, results.get("db_threat_signals") or {}, created)
+    _evaluate_db_health(db, results.get("db_health") or {}, created)
     _evaluate_status(db, results.get("status") or {}, created)
     return created
 
@@ -446,13 +547,22 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
     """
     ssh_window = settings.security_failed_login_window_hours
     attack_window = settings.security_flytrap_window_hours
-    actions = (
+    actions = [
         ("ssh_login_events", {"since_hours": ssh_window, "limit": 2000, "focus": "all"}),
         ("flytrap_attack_events", {"since_hours": attack_window, "limit": 2000}),
         ("nginx_attack_events", {"since_hours": attack_window, "limit": 2000}),
         ("backup_audit", {}),
+        ("db_health", {}),
         ("status", {}),
-    )
+    ]
+    if settings.security_db_monitor_enabled:
+        actions.insert(
+            4,
+            (
+                "db_threat_signals",
+                {"since_hours": settings.security_db_window_hours, "limit": settings.security_db_sample_limit},
+            ),
+        )
     results: dict[str, Any] = {}
     errors: list[dict[str, Any]] = []
     for action, params in actions:
@@ -487,12 +597,16 @@ def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
     Returns:
         dict[str, Any]: SSH 登录统计、攻击 Top IP、备份摘要与最近 open 告警。
     """
-    actions = (
+    actions = [
         ("ssh_login_events", {"since_hours": since_hours, "limit": 2000, "focus": "all"}),
         ("flytrap_attack_events", {"since_hours": since_hours, "limit": 2000}),
         ("nginx_attack_events", {"since_hours": since_hours, "limit": 2000}),
         ("backup_audit", {}),
-    )
+    ]
+    if settings.security_db_monitor_enabled:
+        actions.append(
+            ("db_threat_signals", {"since_hours": since_hours, "limit": settings.security_db_sample_limit})
+        )
     results: dict[str, Any] = {}
     errors: list[dict[str, Any]] = []
     for action, params in actions:
@@ -505,6 +619,7 @@ def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
     flytrap = results.get("flytrap_attack_events") or {}
     nginx = results.get("nginx_attack_events") or {}
     backup = results.get("backup_audit") or {}
+    db_signals = results.get("db_threat_signals") or {}
     open_alerts = (
         db.query(AgentAlert)
         .filter(AgentAlert.status == "open")
@@ -534,6 +649,16 @@ def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
             "older_than_14_days": backup.get("older_than_14_days"),
             "newest": backup.get("newest"),
             "oldest": backup.get("oldest"),
+        },
+        "db_threat": {
+            "enabled": bool(settings.security_db_monitor_enabled),
+            "ok": bool(db_signals.get("ok")),
+            "reason": db_signals.get("reason"),
+            "destructive_total": int(db_signals.get("destructive_total") or 0),
+            "dump_exfil_total": int(db_signals.get("dump_exfil_total") or 0),
+            "error_total": int(db_signals.get("error_total") or 0),
+            "destructive_by_user": db_signals.get("destructive_by_user") or [],
+            "error_by_user": db_signals.get("error_by_user") or [],
         },
         "open_alerts": [
             {

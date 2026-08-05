@@ -158,6 +158,18 @@ class Settings(BaseSettings):
     security_popup_min_severity: str = "warning"
     # 被动溯源情报服务固定前缀（执行器侧再做 URL 白名单校验）
     threat_intel_base_url: str = "http://ip-api.com/json"
+    # 生产数据库内部威胁信号巡检（只读 mysql.general_log 采样；须先由运维开启
+    # general_log 且 log_output=TABLE，未开启时该动作返回 ok=False 不影响整体巡检）。
+    security_db_monitor_enabled: bool = True
+    security_db_window_hours: int = 1
+    security_db_sample_limit: int = 4000
+    security_db_destructive_threshold: int = 1
+    security_db_dump_threshold: int = 1
+    security_db_error_threshold: int = 3
+    # 生产数据库自动备份（调度）。开关默认关闭，须由最高管理员在 .env 显式开启；
+    # 备份目录自动轮换清理由 backup.sh 按 BACKUP_RETENTION_DAYS 完成。
+    backup_schedule_enabled: bool = False
+    backup_schedule_retention_days: int = 14
 
     max_upload_size: int = 20 * 1024 * 1024  # 20MB
     allowed_extensions: List[str] = ["*"]

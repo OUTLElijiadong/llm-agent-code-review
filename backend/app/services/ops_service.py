@@ -49,6 +49,8 @@ ACTION_RISKS = {
     "flytrap_attack_events": "low",
     "nginx_attack_events": "low",
     "backup_audit": "low",
+    "db_threat_signals": "low",
+    "db_health": "low",
     "ip_attribution": "low",
 }
 # 无交互系统身份只服务于固定健康巡检。其他只读动作同样可能泄露
@@ -56,11 +58,13 @@ ACTION_RISKS = {
 AUTO_ACTIONS = frozenset({"status", "certificate_status"})
 READ_ONLY_ACTIONS = frozenset({
     "status", "certificate_status", "host_inventory", "list_directory", "read_text_file", "journal_query",
-    "ssh_login_events", "flytrap_attack_events", "nginx_attack_events", "backup_audit", "ip_attribution",
+    "ssh_login_events", "flytrap_attack_events", "nginx_attack_events", "backup_audit", "db_threat_signals",
+    "db_health", "ip_attribution",
 })
 # 无交互安全监控调度可自动执行的只读安全动作；交互调用仍要求唯一超级管理员。
 SCHEDULER_READ_ACTIONS = frozenset({
-    "ssh_login_events", "flytrap_attack_events", "nginx_attack_events", "backup_audit", "ip_attribution",
+    "ssh_login_events", "flytrap_attack_events", "nginx_attack_events", "backup_audit", "db_threat_signals",
+    "db_health", "ip_attribution",
 })
 ACTION_PARAM_KEYS = {
     "status": set(),
@@ -90,6 +94,8 @@ ACTION_PARAM_KEYS = {
     "flytrap_attack_events": {"since_hours", "limit"},
     "nginx_attack_events": {"since_hours", "limit"},
     "backup_audit": set(),
+    "db_threat_signals": {"since_hours", "limit"},
+    "db_health": set(),
     "ip_attribution": {"ip"},
 }
 ACTION_REQUIRED_PARAMS = {
@@ -177,6 +183,8 @@ ACTION_PARAM_SCHEMAS = {
     "flytrap_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
     "nginx_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
     "backup_audit": _object_schema({}),
+    "db_threat_signals": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 20000}}),  # noqa: E501
+    "db_health": _object_schema({}),
     "ip_attribution": _object_schema({"ip": {"type": "string", "maxLength": 64}}, {"ip"}),  # noqa: E501
 }
 
@@ -198,6 +206,10 @@ def execute(
         raise PermissionError("仅超级管理员 admin 可执行运维动作")
     if actor is None and action not in AUTO_ACTIONS and not (
         source == "scheduler" and action in SCHEDULER_READ_ACTIONS
+    ) and not (
+        # 自动备份：仅当最高管理员显式开启 backup_schedule_enabled 时，
+        # 无交互调度身份才允许触发 backup_database（中等风险写动作）。
+        source == "scheduler" and action == "backup_database" and settings.backup_schedule_enabled
     ):
         raise PermissionError("无交互调度只允许运维只读动作")
     request_id = request_id or uuid.uuid4().hex
