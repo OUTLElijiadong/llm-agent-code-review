@@ -394,7 +394,9 @@ run_whitebox() {
       command -v go >/dev/null 2>&1 && { go vet ./... >/dev/null 2>&1 || true; }
       ;;
     php)
-      find . -type f -name '*.php' -exec php -l '{}' ';' >/dev/null || return 1
+      # 逐文件起进程在大项目上必超时(3400+ 文件 × 进程开销 > profile 上限)。
+      # 分批(xargs 一批一进程)收集错误;任一文件语法错误即判失败,但跑完以给出完整清单。
+      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r sh -c 'php -l "$@" 2>&1 | grep -v "No syntax errors detected"' _ || return 1
       ;;
   esac
   return 0

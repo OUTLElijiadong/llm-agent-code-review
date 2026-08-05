@@ -147,7 +147,10 @@ run_test() {
       fi
       ;;
     php)
-      find . -type f -name '*.php' -exec php -l '{}' ';'
+      # 分批语法检查:逐文件起进程在大项目上必超时,且 php -l 对致命解析错误
+      # 退出码恒为 0,必须靠输出捕获。xargs 一批一进程,grep 过滤通过项,
+      # 任一文件报错即非空输出 -> 判失败(与 sandbox_service 内嵌 runner 一致)。
+      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r sh -c 'php -l "$@" 2>&1 | grep -v "No syntax errors detected"' _ || return 1
       if [ -f vendor/bin/phpunit ]; then
         php vendor/bin/phpunit --colors=never
       fi
