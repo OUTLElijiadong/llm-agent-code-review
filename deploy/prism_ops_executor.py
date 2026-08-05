@@ -587,7 +587,7 @@ def _threat_intel_base() -> str:
         value = _read_env("THREAT_INTEL_BASE_URL")
     except RuntimeError:
         return "http://ip-api.com/json"
-    if not re.fullmatch(r"https?://[A-Za-z0-9.-]+", value):
+    if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)*", value):
         raise ValueError("THREAT_INTEL_BASE_URL 不合法")
     return value.rstrip("/")
 
