@@ -387,9 +387,12 @@ def governance_overview(db: Session) -> dict:
     recent_alerts = (
         db.query(AgentAlert).filter(AgentAlert.status == "open").order_by(AgentAlert.id.desc()).limit(5).all()
     )
+    from app.services import agent_service
+
     return {
         "agents_total": agents_total,
         "agents_enabled": agents_enabled,
+        "callable_agents_total": agent_service.get_runtime_summary(db)["total"],
         "approvals_pending": db.query(ApprovalItem).filter(ApprovalItem.status == "pending").count(),
         "approvals_auto_today": db.query(ApprovalItem).filter(ApprovalItem.status == "auto_approved").count(),
         "policy_decisions_today": (

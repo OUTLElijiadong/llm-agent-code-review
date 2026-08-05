@@ -115,6 +115,7 @@ class GovernanceOverviewOut(BaseModel):
 
     agents_total: int = 0
     agents_enabled: int = 0
+    callable_agents_total: int = 0
     approvals_pending: int = 0
     approvals_auto_today: int = 0
     policy_decisions_today: int = 0

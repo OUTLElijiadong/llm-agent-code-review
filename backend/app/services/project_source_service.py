@@ -84,6 +84,22 @@ def _scan_result_payload(result: ScanResult) -> dict:
     }
 
 
+def _dominant_source_language(members: list[ArchiveMember]) -> str | None:
+    """按可审计源码成员数推断归档主语言,用于纠正隔离项目建档语言。"""
+    counts: dict[str, int] = {}
+    for member in members:
+        path = member.path
+        if not path or path.endswith("/"):
+            continue
+        language = detect_language(path)
+        if language in {"plaintext", "binary"}:
+            continue
+        counts[language] = counts.get(language, 0) + 1
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda item: item[1])[0]
+
+
 def _scan_quarantined_zip(
     raw: bytes,
     filename: str,
@@ -428,6 +444,11 @@ def _ingest_source_archive_bytes_locked(
         safe_filename,
         members,
     )
+    # 隔离项目没有可编辑 CodeFile,建档时填写的语言常与真实源码不符;
+    # 以归档内容推断的主语言纠正,确保后续白盒/黑盒测试选中正确的受控运行时。
+    detected_language = _dominant_source_language(members)
+    if detected_language and str(project.language or "").strip().lower() != detected_language:
+        project.language = detected_language
     row = ProjectSourceArchive(
         project_id=project_id,
         owner_id=user.id,

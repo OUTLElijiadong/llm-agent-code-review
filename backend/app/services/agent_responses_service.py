@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Literal, Mapping, Optional, Sequence
 from urllib.parse import urlencode
 
-import asyncio
 import httpx
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -78,7 +77,6 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
 )
 from app.services.mcp_tool_provider import McpToolProvider
-from app.services import agent_knowledge_service
 from app.services.page_guide_service import admin_guide_block, user_guide_block
 from app.services.user_capability_registry import (
     CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
@@ -489,58 +487,38 @@ class NativeResponsesTransport:
             "Host": target.host_header,
         }
         timeout = httpx.Timeout(float(settings.deepseek_timeout), read=float(settings.deepseek_timeout))
-        # 上游间歇性过载(实测 503 "Service is too busy" 与 200 交替出现),
-        # 对尚未产出任何 SSE 事件的失败做有限重试;一旦开始吐字就不再重试,
-        # 避免重复生成。仅重试可恢复的传输层/5xx 错误,4xx 立即抛出。
-        max_attempts = 4
-        attempt = 0
-        while True:
-            attempt += 1
-            produced_event = False
-            try:
-                async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-                    async with client.stream(
-                        "POST",
-                        target.request_url,
-                        headers=headers,
-                        json=dict(payload),
-                        extensions=target.request_extensions,
-                    ) as response:
-                        if response.status_code >= 400:
-                            raw = (await response.aread()).decode("utf-8", errors="replace")
-                            raise _UpstreamHttpError(response.status_code, _upstream_error(raw, response.status_code))
-                        event_name = ""
-                        data_lines: list[str] = []
-                        async for line in response.aiter_lines():
-                            if line == "":
-                                event = _decode_sse_event(event_name, data_lines)
-                                event_name, data_lines = "", []
-                                if event is None:
-                                    continue
-                                produced_event = True
-                                await _emit(self._event_sink, event)
-                                yield event
-                                continue
-                            if line.startswith(":"):
-                                continue
-                            if line.startswith("event:"):
-                                event_name = line[6:].strip()
-                            elif line.startswith("data:"):
-                                data_lines.append(line[5:].lstrip())
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            async with client.stream(
+                "POST",
+                target.request_url,
+                headers=headers,
+                json=dict(payload),
+                extensions=target.request_extensions,
+            ) as response:
+                if response.status_code >= 400:
+                    raw = (await response.aread()).decode("utf-8", errors="replace")
+                    raise RuntimeError(_upstream_error(raw, response.status_code))
+                event_name = ""
+                data_lines: list[str] = []
+                async for line in response.aiter_lines():
+                    if line == "":
                         event = _decode_sse_event(event_name, data_lines)
-                        if event is not None:
-                            await _emit(self._event_sink, event)
-                            yield event
-                return
-            except Exception as exc:  # noqa: BLE001 - 统一判断是否可重试
-                retryable_status = isinstance(exc, _UpstreamHttpError) and exc.status in {408, 409, 425, 429, 500, 502, 503, 504}
-                retryable_transport = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ReadError, httpx.RemoteProtocolError))
-                if produced_event or attempt >= max_attempts or not (retryable_status or retryable_transport):
-                    if isinstance(exc, _UpstreamHttpError):
-                        raise RuntimeError(exc.message) from None
-                    raise
-                # 指数退避 + 微抖动:0.6s / 1.1s / 2.1s
-                await asyncio.sleep(min(0.5 * (2 ** (attempt - 1)), 2.0) + 0.1 * attempt)
+                        event_name, data_lines = "", []
+                        if event is None:
+                            continue
+                        await _emit(self._event_sink, event)
+                        yield event
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line[6:].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                event = _decode_sse_event(event_name, data_lines)
+                if event is not None:
+                    await _emit(self._event_sink, event)
+                    yield event
 
 
 class PrismToolExecutor:
@@ -1834,12 +1812,9 @@ class AgentResponsesService:
     ) -> RuntimeResult:
         executor, runtime = await self._runtime(run_id, event_sink)
         tools = await executor.tool_schemas()
-        query = _latest_user_query(messages)
         result = await runtime.start(
             messages,
-            instructions=_instructions(self._surface) + _knowledge_block(
-                self._db, self._surface, self._user.id, query
-            ),
+            instructions=_instructions(self._surface),
             tools=tools,
             run_id=run_id,
         )
@@ -2114,15 +2089,6 @@ def _decode_sse_event(event_name: str, data_lines: Sequence[str]) -> Optional[Ma
     return event
 
 
-class _UpstreamHttpError(Exception):
-    """上游 HTTP 错误(保留状态码以判断是否可重试)。"""
-
-    def __init__(self, status: int, message: str) -> None:
-        super().__init__(message)
-        self.status = status
-        self.message = message
-
-
 def _upstream_error(raw: str, status: int) -> str:
     try:
         payload = json.loads(raw)
@@ -2132,47 +2098,6 @@ def _upstream_error(raw: str, status: int) -> str:
     if isinstance(error, Mapping) and error.get("message"):
         return f"Responses 上游 HTTP {status}: {str(error['message'])[:500]}"
     return f"Responses 上游 HTTP {status}"
-
-
-def _latest_user_query(messages: Sequence[Mapping[str, Any]]) -> str:
-    """取最近一条用户消息文本作为 RAG 检索 query。"""
-    for msg in reversed(list(messages or [])):
-        if str(msg.get("role") or "") == "user":
-            content = msg.get("content")
-            if isinstance(content, str) and content.strip():
-                return content.strip()[:500]
-    return ""
-
-
-def _knowledge_block(db: Session, surface: str, user_id: int, query: str) -> str:
-    """检索操作知识库(含个人知识)拼成可引用的上下文块。
-
-    chat_assistant 融合其操作手册与当前用户的个人知识(user_id 隔离);
-    manager 检索运维手册。任何检索/嵌入失败都静默降级,不影响主流程。
-    """
-    if not query:
-        return ""
-    agent_code = "manager" if surface == "admin" else "chat_assistant"
-    try:
-        hits = agent_knowledge_service.unified_retrieve(
-            db, user_id=user_id, agent_code=agent_code, query=query, top_k=5
-        )
-    except Exception:  # noqa: BLE001 - 检索失败不阻断 Agent
-        return ""
-    if not hits:
-        return ""
-    lines = []
-    for h in hits[:5]:
-        src = "个人知识库" if h.get("owner_type") == "user" else "操作知识库"
-        content = str(h.get("content") or "").strip().replace("\n", " ")[:600]
-        if content:
-            lines.append(f"- ({src}·{h.get('title','')}) {content}")
-    if not lines:
-        return ""
-    return (
-        "\n\n【知识库参考】以下为与你的问题最相关的操作手册/个人知识条目,回答时优先引用,"
-        "并注明来源(如「按操作手册」「根据你的个人知识库」):\n" + "\n".join(lines)
-    )
 
 
 def _instructions(surface: str) -> str:

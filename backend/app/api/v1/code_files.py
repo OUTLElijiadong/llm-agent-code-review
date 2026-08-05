@@ -100,12 +100,15 @@ def upload_folder(
     success_count = 0
     fail_count = 0
     errors: List[dict] = []
+    logical_paths = code_file_service.normalize_folder_upload_paths([
+        upload_file.filename or "" for upload_file in files
+    ])
 
-    for upload_file in files:
+    for upload_file, logical_path in zip(files, logical_paths):
         try:
             file_id, lang, ver = code_file_service.upload(
                 db=db, user=user, project_id=project_id,
-                upload_file=upload_file, file_path=None, language=None,
+                upload_file=upload_file, file_path=logical_path, language=None,
             )
             results.append({
                 "file_name": upload_file.filename,

@@ -12,6 +12,7 @@ T06 增强(2026-06-25):
 - CodeFile 入库时写入 raw_size 字段(用于项目总大小校验)
 """
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Optional, Tuple
 
 from fastapi import UploadFile
@@ -133,7 +134,8 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
 
         # 普通文件:校验扩展名
         safe_name = validate_filename(filename, settings.allowed_extensions)
-        return _upload_single_file(db, user, project_id, safe_name, raw, file_path, language)
+        logical_path = normalize_source_path(file_path, safe_name)
+        return _upload_single_file(db, user, project_id, safe_name, raw, logical_path, language)
     except MaliciousUploadError as exc:
         # 命中恶意内容:若项目干净(无已入库文件),自动转投隔离归档而非拒绝,
         # 让后续审计/测试/沙箱内部署可以安全进行;沙箱外绝不裸跑。
@@ -213,6 +215,31 @@ def _try_auto_quarantine(
         db.rollback()
         logger.warning("[upload] 自动隔离失败,保持拒绝 project=%s err=%s", project_id, str(exc))
         return None
+
+
+def normalize_source_path(path: Optional[str], fallback_name: str) -> str:
+    """把浏览器上传的相对路径收敛为可入库的 POSIX 项目路径。"""
+    normalized = str(path or fallback_name).replace("\\", "/").strip()
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or normalized.startswith("//")
+        or len(normalized) > 500
+        or any(ord(character) < 32 or ord(character) == 127 for character in normalized)
+    ):
+        raise ValidationError("文件相对路径不合法", code=40001)
+    parts = PurePosixPath(normalized).parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise ValidationError("文件相对路径不合法", code=40001)
+    return "/".join(parts)
+
+
+def normalize_folder_upload_paths(paths: list[str]) -> list[str]:
+    """保留文件夹子目录，并去掉浏览器附带的共同根目录。"""
+    normalized = [normalize_source_path(path, PurePosixPath(path).name) for path in paths]
+    parts = [PurePosixPath(path).parts for path in normalized]
+    common_root = bool(parts) and all(len(item) > 1 and item[0] == parts[0][0] for item in parts)
+    return ["/".join(item[1:] if common_root else item) for item in parts]
 
 
 def _validate_upload_security(
@@ -537,7 +564,7 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
     code_file = CodeFile(
         project_id=project_id,
         file_name=file_name,
-        file_path=file_path or file_name,
+        file_path=normalize_source_path(file_path, file_name),
         language=language,
         size_bytes=size_bytes,
         line_count=line_count,
