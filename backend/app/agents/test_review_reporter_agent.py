@@ -96,13 +96,18 @@ class TestReviewReporterAgent(BaseAgent):
             return ""
         return "\n\n【审查方法论参考】\n" + "\n---\n".join(lines)[:2000]
 
-    def _role_call(self, system: str, user: str, ctx: Optional[AgentContext]) -> AgentResult:
+    def _role_call(self, system: str, user: str, ctx: Optional[AgentContext],
+                   max_tokens: Optional[int] = None) -> AgentResult:
         old = self._system_prompt
+        old_max = self._max_tokens
         self._system_prompt = system
+        if max_tokens is not None:
+            self._max_tokens = max_tokens
         try:
             return self.call(user, ctx=ctx, thinking=False)
         finally:
             self._system_prompt = old
+            self._max_tokens = old_max
 
     @staticmethod
     def _collect_facts(conclusion: dict[str, Any]) -> dict[str, Any]:
@@ -168,7 +173,7 @@ class TestReviewReporterAgent(BaseAgent):
             ctx,
         )
         roles["verify"] = {"ok": vf.success, "text": (vf.data or "")[:3000] if vf.success else f"未执行: {vf.error}"}
-        # 4) 报告角色
+        # 4) 报告角色(七段报告在大量语法错误时输出较长,放宽 token 上限防截断)
         rp = self._role_call(
             _REPORT_PROMPT,
             "白盒结论:\n" + str(roles["whitebox"]["text"])[:3000]
@@ -177,8 +182,20 @@ class TestReviewReporterAgent(BaseAgent):
             + "\n\n原始证据:\n" + evidence[:3000]
             + self._knowledge_refs(db, owner_id, "report"),
             ctx,
+            max_tokens=8192,
         )
         roles["report"] = {"ok": rp.success, "text": ""}
+
+        # 截断兜底:8192 仍截断时降级为精简重试(只求核心三段),保证总能产出报告
+        if (not rp.success or not (isinstance(rp.data, str) and rp.data.strip())) and rp.finish_reason == "length":
+            rp = self._role_call(
+                _REPORT_PROMPT + "\n(上次输出超长被截断。本次只输出 ## 总体结论 / ## 问题清单 / ## 下一步建议 三段,问题清单最多列15条。)",
+                "白盒结论:\n" + str(roles["whitebox"]["text"])[:2000]
+                + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])[:2000]
+                + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:2000],
+                ctx,
+                max_tokens=8192,
+            )
 
         if not rp.success or not isinstance(rp.data, str) or not rp.data.strip():
             return AgentResult(
