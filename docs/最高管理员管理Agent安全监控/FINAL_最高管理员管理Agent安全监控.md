@@ -50,3 +50,10 @@
 - **工作区共享且存在外部 reset**：开发期间发生过一次 `git reset --hard`（短暂清空后恢复），建议尽快把本分支推送到远端并提醒其他会话不要在 main 工作区执行破坏性 git 操作。
 - **SSH 白名单为空**：生产上线前必须配置 SECURITY_SSH_ALLOWLIST_CIDRS，否则每次非白名单登录都会 high 弹窗。
 - **两把 ED25519 密钥归属未认领**：wbLkqbw.../QMGEeLXiu... 若非本人/CI，需走 SSH 授权清理审批。
+
+## 四、生产部署（已完成）
+
+- 已部署到 81.70.251.90（`deploy-security-monitor` 分支，HEAD `c77656b4`，Alembic 027，全容器 healthy）。
+- 生产 .env 已配置 `SECURITY_SSH_ALLOWLIST_CIDRS=["117.141.0.0/16","39.144.0.0/16"]` 等阈值。
+- 上线调试期修复：alembic 022-026 补齐、调度 system_scheduled 身份、容器 env 文件对齐、爆破/备份规则细化。
+- 待办：生产部署分支与本地 main 分叉待合并；APP_RELEASE 环境显示旧值（.env 内 3ffbfe）属展示问题；SSH 白名单网段为默认家宽段，可按需调整。

@@ -40,3 +40,14 @@
 
 - 工作区在开发期间被外部 `git reset --hard`（reflog HEAD@{0}）短暂清空后恢复；成果已提交到 `codex/admin-security-monitor` 分支（a87ba07）保护。恢复前状态与当前状态已复核一致。
 - 生产部署（干净 commit 后）按 RELEASE_CHECKLIST §8 执行。
+
+## 五、生产部署实况（2026-08-05）
+
+- 部署分支：`deploy-security-monitor`（基于生产运行版本基线 80b80f2 + 功能合并）；当前 HEAD `c77656b4`。
+- 镜像：`prism-backend:c77656b4…`、`prism-frontend:1ea1f67…`；Alembic `027`；全部容器 healthy；HTTPS 冒烟通过。
+- 部署过程发现并修复：
+  1. 生产源码缺失 alembic 022–026 → 补齐后迁移链完整；
+  2. 定时任务未以 `system_scheduled=True` 运行被超管门禁拦截 → 修复调度运行时；
+  3. 后端容器未读到 `SECURITY_*` 环境（env 文件漂移）→ 显式 `DEPLOY_ENV_FILE=/opt/code-review/deploy/.env` 重建；
+  4. 爆破规则未跳过白名单 IP、备份 SHA256 校验误含超期文件 → 规则修复并验证。
+- 生产运行验证：security_monitor 每 5 分钟成功巡检；白名单 IP 登录 → info（不弹窗）；爆破跳过白名单；真实告警：备份 SHA256 缺失 critical（5 份 7/31 备份）、Nginx 代理探测 info。

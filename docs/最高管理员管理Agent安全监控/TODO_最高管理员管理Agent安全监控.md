@@ -1,38 +1,28 @@
-# TODO：最高管理员管理 Agent 安全监控与主动告警（待办清单）
+# TODO：最高管理员管理 Agent 安全监控与主动告警（生产已部署）
 
-> 更新日期：2026-08-05（全任务完成后修订）
-> 代码已提交：`a87ba07`（分支 `codex/admin-security-monitor`）
+> 更新日期：2026-08-05；生产已部署（deploy-security-monitor @ c77656b4，Alembic 027）
 
 ## 一、需要你确认/决策
 
-1. **SSH 白名单 CIDR 尚未配置**：`SECURITY_SSH_ALLOWLIST_CIDRS=[]` 默认为空。
-   → 请在 `deploy/.env`（生产）配置你的家宽/办公出口网段（如 `["117.141.246.0/24","39.144.135.0/24"]`），否则所有非白名单成功登录都会 high 弹窗。
-2. **两把 ED25519 密钥归属待认领**（ALIGNMENT Q7）：
-   - `SHA256:wbLkqbw/WvhqS4M84/JZO2Lm+LdU59ovc+N70q/SVf4`
+1. **两把 ED25519 密钥归属待认领**（最重要）：
+   - `SHA256:wbLkqbw/WvhqS4M84/JZO2Lm+LdU59ovc+N70q/SVf4`（6/12 从 217.28.137.70、8/4 从 45.135.228.155 以 root 登录）
    - `SHA256:QMGEeLXiu6IGGJj6thdv29zLHkWVUs0tUiyh2+ZAwDw`
-   → 若不属于你本人/CI，请走 SSH 授权清理流程（写操作需唯一超级管理员审批）。**若你确认不是自己的，这是 Agent 上线后要立即处理的最高优先级事件（疑似密钥泄露/入侵）。**
-3. **安全监控调度间隔**：默认 `interval@5m`（任务字面值）。如想改用 `SECURITY_MONITOR_INTERVAL_MINUTES` 配置控制，可在管理端"调度任务"页修改 security_monitor 的 schedule，或后续把 `_DEFAULT_JOBS` 改为读取配置（当前配置项已注册但未被默认任务引用）。
-4. **生产部署时机**：等待干净 commit + CI 全绿后，按 `deploy/RELEASE_CHECKLIST.md §8` 执行（同步执行器 → alembic 027 → 重建 Backend/Frontend → 验收弹窗闭环）。
+   - 若不属于你本人/CI，请立即走 SSH 授权清理流程（写操作需唯一超级管理员审批）。**这是 Agent 上线后优先级最高的事件。**
+2. **备份完整性**：5 份 2026-07-31 手工备份缺少 SHA256 校验文件（已产生 critical 告警）。请确认是否可补校验（`sha256sum`）或删除；保留期内备份应全部可校验。
+3. **SSH 白名单**：生产已配置 `["117.141.0.0/16","39.144.0.0/16"]`（你常用家宽段）。如有其他办公/云服务器出口，请补充，否则会收到对应 high 登录告警。
+4. **调度间隔**：`security_monitor` interval@5m 固定字面量；如想用 `SECURITY_MONITOR_INTERVAL_MINUTES` 控制需后续改造。
+5. **生产部署分支与本地 main 分叉**：`deploy-security-monitor` 基于生产基线（含其他会话 8 月未提交工作）；本地 main 是另一条线。建议后续由你或其他会话把两边合并统一。
 
-## 二、生产部署前必须做的
+## 二、观察项（上线后）
 
-1. **跑迁移**：`alembic upgrade head`（027：agent_alert 加 5 列 + 2 索引）。
-2. **同步执行器与 .env**：生产 `deploy/prism_ops_executor.py` 需包含 5 个只读安全动作；`.env` 配置 `SECURITY_*` 与 `THREAT_INTEL_BASE_URL`（可选覆盖，默认 http://ip-api.com/json）。
-3. **确认唯一超级管理员存在**：弹窗目标 `User.username=="admin" 且 role=="super_admin"`；不存在则 SSE 弹窗不推送（告警仍入库）。
-4. **配置 SSH 白名单**（见上）；确认 45.135.228.155/217.28.137.70 等来源是否本人。
-5. **重建并重启 Backend/Frontend**；验证 `POST /api/admin/observability/security/run-monitor` 与前端弹窗。
+- 前端右上角弹窗/未读队列：请以超级管理员登录 `https://lijiadong.cn` 验证（应看到离线期间产生的告警弹窗）。
+- 安全态势查询：`GET /api/admin/observability/security/status?since_hours=24`（超管）。
+- 手动巡检：`POST /api/admin/observability/security/run-monitor`（超管）。
+- 告警已读：弹窗自动标记；也可 `POST /api/admin/observability/alerts/{id}/read`。
+- `APP_RELEASE` 环境显示旧值（.env 内 3ffbfe）属展示问题，不影响功能，可后续更新 .env。
 
-## 三、运维操作指引
+## 三、运维指引（简要）
 
-- 手动巡检：`POST /api/admin/observability/security/run-monitor`（唯一超级管理员）。
-- 查看态势：`GET /api/admin/observability/security/status?since_hours=24`。
-- 未读弹窗：`GET /api/admin/observability/alerts/unread`；已读：`POST /api/admin/observability/alerts/{id}/read`。
-- 清理备份/磁盘等写操作：必须在管理 Agent 会话中审批（critical 需输入"确认执行"）后执行。
-- 与最高管理员管理 Agent 对话可查询：登录/攻击/备份/优化建议（通过 admin_execute_capability 固定能力）。
-
-## 四、工作区风险提示（重要）
-
-- 开发期间主工作区被外部执行 `git reset --hard`（reflog HEAD@{0}），短暂清空未提交改动后自动恢复。**建议**：
-  1. 尽快把 `codex/admin-security-monitor` 推送到远端备份；
-  2. 确认没有其他 Codex/Claude 会话在 main 工作区执行破坏性 git 命令；
-  3. 后续并行会话改用各自 worktree/分支，避免互相覆盖。
+- 备份清理/磁盘优化等写操作：必须通过管理 Agent 审批（critical 输入"确认执行"）。
+- ip_attribution 使用 http://ip-api.com/json 被动溯源；如需 HTTPS/付费可改 `THREAT_INTEL_BASE_URL`。
+- 发布树执行器已指向 `/opt/code-review/deploy/prism_ops_executor.py`（systemd 已更新）。
