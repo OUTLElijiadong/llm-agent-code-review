@@ -536,15 +536,17 @@ async def test_completion_guard_retry_uses_auto_tool_choice_for_deepseek_v4() ->
     )
 
     assert result.status == "completed"
+    # 上游思考模式拒绝任何显式 tool_choice（即使带 thinking=disabled 也 400），
+    # 修复后证据修复轮同样不得携带 tool_choice，只靠守卫提示词驱动工具调用。
     assert [payload.get("tool_choice") for payload in transport.payloads] == [
         None,
-        "auto",
-        "auto",
+        None,
+        None,
     ]
     assert "tool_choice" not in transport.payloads[0]
     assert "thinking" not in transport.payloads[0]
-    assert transport.payloads[1]["thinking"] == {"type": "disabled"}
-    assert transport.payloads[2]["thinking"] == {"type": "disabled"}
+    assert "tool_choice" not in transport.payloads[1]
+    assert "tool_choice" not in transport.payloads[2]
     projected_text = json.dumps(transport.payloads[1]["input"], ensure_ascii=False)
     assert "runtime_completion_guard" in projected_text
     assert [call.name for call, _approved in executor.calls] == ["delete_template"]
@@ -592,15 +594,16 @@ async def test_answered_admin_question_uses_v4_non_thinking_evidence_repair() ->
     completed = await runtime.answer("run_answered_admin_guard", "review_admin", "call_question")
 
     assert completed.status == "completed"
+    # 同上：deepseek-v4 的 evidence repair 轮也不允许携带 tool_choice。
     assert [payload.get("tool_choice") for payload in transport.payloads] == [
         None,
         None,
-        "auto",
-        "auto",
+        None,
+        None,
     ]
     assert "tool_choice" not in transport.payloads[0]
     assert "tool_choice" not in transport.payloads[1]
-    assert transport.payloads[2]["thinking"] == {"type": "disabled"}
+    assert "tool_choice" not in transport.payloads[2]
     assert [call.name for call, _approved in executor.calls] == ["create_admin"]
 
 
@@ -839,3 +842,136 @@ async def test_concurrent_approve_and_reject_persists_only_winning_decision() ->
     assert sum(isinstance(item, InvalidRunStateError) for item in outcomes) == 1
     approved_count = sum(1 for _, approved in executor.calls if approved)
     assert (approved_count, len(executor.rejections)) in {(1, 0), (0, 1)}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 生产 400 根因修复与失败运行回退策略测试
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_tool_request_options_never_sends_tool_choice_for_thinking_models() -> None:
+    from app.services.deepseek_responses_runtime import (
+        _tool_choice_for_round,
+        _tool_request_options,
+    )
+
+    for model in ("deepseek-v4-flash", "deepseek-v4", "deepseek-r1", "custom-reasoner"):
+        assert _tool_request_options(model, 0) == {}
+        assert _tool_request_options(model, 1) == {}
+        assert _tool_request_options(model, 1, non_thinking_repair=True) == {}
+        assert "tool_choice" not in _tool_request_options(model, 1, non_thinking_repair=True)
+    # 非 Thinking 模型保持原有强制工具轮行为
+    assert _tool_request_options("deepseek-chat", 0) == {"tool_choice": "auto"}
+    assert _tool_request_options("deepseek-chat", 1) == {"tool_choice": "required"}
+    # 兼容旧调用方：省略 tool_choice 时返回 auto 而不是 KeyError
+    assert _tool_choice_for_round("deepseek-v4-flash", 1) == "auto"
+    assert _tool_choice_for_round("deepseek-chat", 1) == "required"
+
+
+@pytest.mark.asyncio
+async def test_retry_recovers_failed_checkpoint() -> None:
+    def boom() -> Any:
+        raise RuntimeError("Responses 上游 HTTP 400: Thinking mode does not support this tool_choice")
+
+    transport = ScriptedTransport([boom, _message_response("恢复完成")])
+    runtime = _runtime(transport, RecordingExecutor())
+
+    failed = await runtime.start("执行任务", run_id="run_retry_failed")
+
+    assert failed.status == FAILED
+    assert "HTTP 400" in failed.error
+    assert (await runtime.get_checkpoint("run_retry_failed")).status == FAILED
+
+    recovered = await runtime.retry("run_retry_failed")
+
+    assert recovered.status == "completed"
+    assert recovered.output_text == "恢复完成"
+    assert (await runtime.get_checkpoint("run_retry_failed")).status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_retry_rejects_non_recoverable_status() -> None:
+    class ApproveRequiredExecutor(RecordingExecutor):
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            if not approved:
+                return ToolExecutionResult.approval_required(operation="写操作", impact="改变资源", danger=True)
+            return ToolExecutionResult.success({"done": True})
+
+    transport = ScriptedTransport(
+        [
+            _function_response(("call_write", "write", {})),
+            _message_response("完成"),
+        ]
+    )
+    executor = ApproveRequiredExecutor()
+    runtime = _runtime(transport, executor)
+    waiting = await runtime.start("写操作", run_id="run_retry_waiting")
+    assert waiting.status == WAITING_APPROVAL
+
+    with pytest.raises(InvalidRunStateError):
+        await runtime.retry("run_retry_waiting")
+
+
+@pytest.mark.asyncio
+async def test_approve_after_terminal_failure_with_evidence_resumes() -> None:
+    """生产场景：审批副作用已执行，但后续模型轮 400 导致 failed；再次批准应幂等续跑。"""
+
+    def boom() -> Any:
+        raise RuntimeError("Responses 上游 HTTP 400: Thinking mode does not support this tool_choice")
+
+    class ApproveRequiredExecutor(RecordingExecutor):
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            if not approved:
+                return ToolExecutionResult.approval_required(operation="写操作", impact="改变资源", danger=True)
+            return ToolExecutionResult.success({"done": True})
+
+    transport = ScriptedTransport(
+        [
+            _function_response(("call_write", "write", {})),
+            boom,
+            _message_response("操作已全部完成"),
+        ]
+    )
+    executor = ApproveRequiredExecutor()
+    runtime = _runtime(transport, executor)
+    waiting = await runtime.start("执行写操作", run_id="run_approve_recover")
+    assert waiting.status == WAITING_APPROVAL
+
+    first = await runtime.approve("run_approve_recover", "call_write", confirmation="确认执行")
+    assert first.status == FAILED
+    assert "HTTP 400" in first.error
+    # 工具确实执行过一次
+    assert sum(1 for _, approved in executor.calls if approved) == 1
+
+    # 再次批准：不再抛“不能执行该恢复动作”，而是从失败点继续
+    recovered = await runtime.approve("run_approve_recover", "call_write", confirmation="确认执行")
+
+    assert recovered.status == "completed"
+    assert recovered.output_text == "操作已全部完成"
+    # 不重放写操作
+    assert sum(1 for _, approved in executor.calls if approved) == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_with_pending_returns_to_waiting_decision() -> None:
+    class PendingExecutor(RecordingExecutor):
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            return ToolExecutionResult.approval_required(operation="写操作", impact="改变资源", danger=True)
+
+    transport = ScriptedTransport([_function_response(("call_write", "write", {}))])
+    runtime = _runtime(transport, PendingExecutor())
+    waiting = await runtime.start("写操作", run_id="run_retry_pending")
+    assert waiting.status == WAITING_APPROVAL
+
+    checkpoint = await runtime.get_checkpoint("run_retry_pending")
+    checkpoint.status = FAILED
+    await runtime._store.save(checkpoint)
+
+    recovered = await runtime.retry("run_retry_pending")
+
+    assert recovered.status == WAITING_APPROVAL
+    assert recovered.pending is not None
+    assert recovered.pending["tool_call_id"] == "call_write"

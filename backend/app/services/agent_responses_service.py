@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import hmac
@@ -13,7 +14,6 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Literal, Mapping, Optional, Sequence
 from urllib.parse import urlencode
 
-import asyncio
 import httpx
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -42,6 +42,7 @@ from app.services import (
     admin_agent_tools,
     admin_capability_service,
     agent_governance_service,
+    agent_knowledge_service,
     code_file_service,
     ops_service,
     policy_engine,
@@ -78,7 +79,6 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
 )
 from app.services.mcp_tool_provider import McpToolProvider
-from app.services import agent_knowledge_service
 from app.services.page_guide_service import admin_guide_block, user_guide_block
 from app.services.user_capability_registry import (
     CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
@@ -533,8 +533,26 @@ class NativeResponsesTransport:
                             yield event
                 return
             except Exception as exc:  # noqa: BLE001 - 统一判断是否可重试
-                retryable_status = isinstance(exc, _UpstreamHttpError) and exc.status in {408, 409, 425, 429, 500, 502, 503, 504}
-                retryable_transport = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ReadError, httpx.RemoteProtocolError))
+                retryable_status = isinstance(exc, _UpstreamHttpError) and exc.status in {
+                    408,
+                    409,
+                    425,
+                    429,
+                    500,
+                    502,
+                    503,
+                    504,
+                }
+                retryable_transport = isinstance(
+                    exc,
+                    (
+                        httpx.ConnectError,
+                        httpx.ConnectTimeout,
+                        httpx.ReadTimeout,
+                        httpx.ReadError,
+                        httpx.RemoteProtocolError,
+                    ),
+                )
                 if produced_event or attempt >= max_attempts or not (retryable_status or retryable_transport):
                     if isinstance(exc, _UpstreamHttpError):
                         raise RuntimeError(exc.message) from None
@@ -1872,6 +1890,8 @@ class AgentResponsesService:
             if not answer.strip():
                 raise ValueError("回答不能为空")
             result = await runtime.answer(run_id, answer, call_id or None)
+        elif action == "retry":
+            result = await runtime.retry(run_id)
         else:
             raise ValueError("不支持的恢复动作")
         await self._emit_validated_output(event_sink, result)

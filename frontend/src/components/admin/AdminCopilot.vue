@@ -102,6 +102,12 @@ let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
 
+/** 失败/未完成/超轮数的运行可手动重试（回退策略入口） */
+const canRetryRun = computed(() => {
+  const status = sessionRun.value?.status
+  return Boolean(status && ['failed', 'incomplete', 'max_rounds_exceeded'].includes(status) && !loading.value)
+})
+
 /** 吉祥物与标题栏共享的 agent 状态:运行中/等待用户/空闲 */
 const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
   const status = sessionRun.value?.status
@@ -439,6 +445,18 @@ function finishExistingTimelineToolCalls(runId: string | undefined, error: strin
   }
 }
 
+async function retryRun(): Promise<void> {
+  const runId = sessionRun.value?.run_id
+  if (!runId || loading.value || !canRetryRun.value) return
+  await runResponse({
+    action: 'retry',
+    surface: 'admin',
+    session_id: sessionId.value,
+    messages: conversationHistory(),
+    run_id: runId,
+  })
+}
+
 async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   invalidateSessionPoll()
   loading.value = true
@@ -750,6 +768,13 @@ onBeforeUnmount(() => {
             <div class="copilot-title-line">
               <strong>{{ ASSISTANT_NAME }}</strong>
               <span class="copilot-run-badge" :class="`run-${mascotStatus}`"><i></i>{{ runStatusLabel }}</span>
+              <button
+                v-if="canRetryRun"
+                class="retry-run-btn"
+                type="button"
+                title="从失败位置继续运行，不会重放已执行的审批操作"
+                @click="retryRun()"
+              >重试运行</button>
             </div>
             <AgentSessionSwitcher
               ref="switcherRef"
@@ -1025,6 +1050,18 @@ input { font: inherit; }
 .copilot-avatar { width: 40px; height: 40px; }
 .message-avatar { width: 26px; height: 26px; margin-top: 3px; }
 
+.retry-run-btn {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid #d9dce0;
+  border-radius: 999px;
+  background: #fff;
+  color: #1769d2;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.retry-run-btn:hover { border-color: #1769d2; background: #eef5ff; }
 .copilot-run-badge {
   display: inline-flex;
   align-items: center;

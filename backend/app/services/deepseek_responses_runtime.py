@@ -43,6 +43,9 @@ INCOMPLETE = "incomplete"
 FAILED = "failed"
 MAX_ROUNDS_EXCEEDED = "max_rounds_exceeded"
 
+# 可通过 retry / 幂等续跑恢复的终态；cancelled 与 completed 不可恢复。
+_TERMINAL_RECOVERABLE_STATUSES = frozenset({FAILED, INCOMPLETE, MAX_ROUNDS_EXCEEDED})
+
 DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000
 DEFAULT_MAX_OUTPUT_TOKENS = 32_768
 DEFAULT_COMPACTION_THRESHOLD_TOKENS = 850_000
@@ -429,6 +432,8 @@ class DeepSeekResponsesRuntime:
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
             preview = await self._require_checkpoint(run_id)
+            if await self._recover_if_applied(preview, tool_call_id):
+                return await self._drive(preview)
             pending_preview = self._require_pending(
                 preview,
                 WAITING_APPROVAL,
@@ -473,6 +478,9 @@ class DeepSeekResponsesRuntime:
         """拒绝精确调用，并把拒绝结果回灌模型继续判断。"""
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
+            preview = await self._require_checkpoint(run_id)
+            if await self._recover_if_applied(preview, tool_call_id):
+                return await self._drive(preview)
             checkpoint = await self._claim_pending(
                 run_id,
                 expected_status=WAITING_APPROVAL,
@@ -513,6 +521,9 @@ class DeepSeekResponsesRuntime:
         """回答模型动态生成的问题，并从该 ``ask_user`` 调用自动续跑。"""
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
+            preview = await self._require_checkpoint(run_id)
+            if await self._recover_if_applied(preview, tool_call_id):
+                return await self._drive(preview)
             checkpoint = await self._claim_pending(
                 run_id,
                 expected_status=WAITING_INPUT,
@@ -544,6 +555,58 @@ class DeepSeekResponsesRuntime:
             await self._store.save(checkpoint)
             paused = await self._process_calls(checkpoint, pending.remaining_calls)
             return paused or await self._drive(checkpoint)
+
+    async def retry(self, run_id: str) -> RuntimeResult:
+        """从失败/未完成/超轮数状态恢复运行（管理 Agent 与成员 Agent 通用回退）。
+
+        未处理动作仍等待用户重新决策；已落库的工具证据不会被重放。
+        """
+
+        lock = self._locks.setdefault(run_id, asyncio.Lock())
+        async with lock:
+            checkpoint = await self._require_checkpoint(run_id)
+            if checkpoint.status not in _TERMINAL_RECOVERABLE_STATUSES:
+                raise InvalidRunStateError(
+                    f"运行 {run_id} 当前状态为 {checkpoint.status}，只有失败/未完成/超轮数运行可以重试"
+                )
+            if checkpoint.pending is not None:
+                checkpoint.status = (
+                    WAITING_INPUT if checkpoint.pending.kind == "input" else WAITING_APPROVAL
+                )
+                checkpoint.error = ""
+                await self._store.save(checkpoint)
+                return self._result(checkpoint)
+            if checkpoint.status == MAX_ROUNDS_EXCEEDED:
+                checkpoint.rounds = 0
+            checkpoint.status = RUNNING
+            checkpoint.error = ""
+            await self._store.save(checkpoint)
+            return await self._drive(checkpoint)
+
+    async def _recover_if_applied(
+        self,
+        checkpoint: RunCheckpoint,
+        tool_call_id: Optional[str],
+    ) -> bool:
+        """失败运行的回退：若该调用的决策副作用已执行（transcript 有终态证据），
+        则幂等重置为运行中并继续模型循环，而不是再次抛出“不能执行该恢复动作”。
+
+        只有当运行处于可恢复终态、没有待处理动作、且指定调用已有终态输出时
+        才触发；不会重放任何写操作，审批记录也不会被重复处理。
+        """
+
+        if checkpoint.status not in _TERMINAL_RECOVERABLE_STATUSES:
+            return False
+        if checkpoint.pending is not None or not tool_call_id:
+            return False
+        if not _has_tool_evidence(checkpoint.transcript, tool_call_id):
+            return False
+        if checkpoint.status == MAX_ROUNDS_EXCEEDED:
+            checkpoint.rounds = 0
+        checkpoint.status = RUNNING
+        checkpoint.error = ""
+        await self._store.save(checkpoint)
+        return True
 
     async def get_checkpoint(self, run_id: str) -> RunCheckpoint:
         """读取检查点副本，供 API 适配器展示状态。"""
@@ -1029,6 +1092,16 @@ def _validate_context_budget(
         raise ValueError("keep_recent_tokens 必须大于 0 且不超过压缩阈值")
 
 
+def _has_tool_evidence(transcript: Sequence[Mapping[str, Any]], tool_call_id: str) -> bool:
+    """判断某个工具调用是否已在 transcript 中留下终态输出（幂等续跑依据）。"""
+
+    return any(
+        str(item.get("type") or "") == "function_call_output"
+        and str(item.get("call_id") or "") == tool_call_id
+        for item in transcript
+    )
+
+
 def _tool_request_options(
     model: str,
     force_tool_rounds: int,
@@ -1037,17 +1110,18 @@ def _tool_request_options(
 ) -> Dict[str, Any]:
     """构造工具轮参数；Thinking 模型不能携带显式 ``tool_choice``。"""
 
+    # DeepSeek Thinking 模式拒绝 ``tool_choice=auto/required``（即使同时发送
+    # thinking=disabled 也一样，实测上游仍返回 HTTP 400）。该判断必须先于
+    # non_thinking_repair 分支，否则证据修复轮会触发上游 400 导致整个运行
+    # 失败。省略字段仍允许模型按工具定义自主决定是否调用工具。
+    if _model_disallows_required_tool_choice(model):
+        return {}
     if non_thinking_repair and _model_supports_non_thinking_tool_repair(model):
         return {
-            # 此上游即使收到 thinking=disabled 仍拒绝 required；守卫会
-            # 继续核验实际工具证据，不能用协议不支持的强制策略换取表面成功。
+            # 非 Thinking 模型可关闭思考后强制工具调用。
             "tool_choice": "auto",
             "thinking": {"type": "disabled"},
         }
-    # DeepSeek Thinking 模式拒绝 ``tool_choice=auto/required``，而不是只
-    # 拒绝 required。省略字段仍允许模型按工具定义自主决定是否调用工具。
-    if _model_disallows_required_tool_choice(model):
-        return {}
     if force_tool_rounds <= 0:
         return {"tool_choice": "auto"}
     return {"tool_choice": "required"}

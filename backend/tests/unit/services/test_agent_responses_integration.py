@@ -2058,3 +2058,49 @@ async def test_client_disconnect_discards_burst_events_without_blocking_worker(m
         await pending
 
     await asyncio.wait_for(finished.wait(), timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_api_request_accepts_retry_action_and_dispatches_resume(monkeypatch) -> None:
+    """失败运行回退：API 契约接受 retry，并把它分发到 resume。"""
+
+    seen: dict[str, str] = {}
+
+    class FakeService:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
+            raise AssertionError("retry 不应走 start")
+
+        async def resume(
+            self,
+            *,
+            run_id: str,
+            action: str,
+            call_id: str = "",
+            answer: str = "",
+            confirmation: str = "",
+            event_sink=None,
+        ) -> RuntimeResult:
+            seen["run_id"] = run_id
+            seen["action"] = action
+            return RuntimeResult(run_id=run_id, status="completed", output_text="重试完成", rounds=1)
+
+    monkeypatch.setattr(api_module, "AgentResponsesService", FakeService)
+    request = api_module.AgentResponsesRequest(
+        action="retry",
+        surface="user",
+        session_id="session-retry",
+        run_id="run_retry_me",
+    )
+    response = await api_module.stream_agent_response(
+        request,
+        db=object(),
+        user=SimpleNamespace(id=7, role="user"),
+    )
+    body = await _collect_stream(response)
+
+    assert seen == {"run_id": "run_retry_me", "action": "retry"}
+    assert "event: response.completed" in body
+    assert '"id": "run_retry_me"' in body

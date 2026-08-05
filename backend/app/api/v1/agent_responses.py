@@ -89,7 +89,7 @@ class AgentResponseMessage(BaseModel):
 
 
 class AgentResponsesRequest(BaseModel):
-    action: Literal["start", "approve", "reject", "answer"] = "start"
+    action: Literal["start", "approve", "reject", "answer", "retry"] = "start"
     surface: Literal["user", "admin"] = "user"
     session_id: str = Field(min_length=8, max_length=128)
     messages: List[AgentResponseMessage] = Field(default_factory=list, max_length=100)
