@@ -5,7 +5,6 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin_agent_releases,
-    admin_copilot,
     admin_overview,
     agent_catalog,
     agent_governance,
@@ -28,14 +27,12 @@ from app.api.v1 import (
     knowledge,
     llm_config,
     maintenance,
-    mcp_governance,
     project_members,
     projects,
     rbac,
     reports,
     review,
     rules,
-    sandboxes,
     security,
     user_profile,
     users,
@@ -57,7 +54,6 @@ api_router.include_router(ai_logs.router, prefix="/ai-logs", tags=["AI日志"])
 api_router.include_router(ai_chat.router, prefix="/ai", tags=["AI助手"])
 api_router.include_router(ai_prompt.router, prefix="/ai-prompt", tags=["AI提示词"])
 api_router.include_router(security.router, prefix="/security", tags=["安全审计"])
-api_router.include_router(sandboxes.router, prefix="/sandboxes", tags=["代码沙箱"])
 api_router.include_router(agents.router, prefix="/agents", tags=["Agent中心"])
 api_router.include_router(evolution.router, prefix="/evolution", tags=["Agent自进化"])
 api_router.include_router(audit.router, prefix="/admin/audit", tags=["操作审计"])
@@ -68,10 +64,8 @@ api_router.include_router(forum.router, prefix="/forum", tags=["开发者论坛"
 api_router.include_router(user_profile.router, prefix="/me", tags=["用户画像"])
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["个人知识库"])
 api_router.include_router(llm_config.router, prefix="/admin/llm", tags=["大模型配置"])
-api_router.include_router(mcp_governance.router, prefix="/admin/mcp", tags=["MCP 治理"])
 api_router.include_router(agent_governance.router, prefix="/admin", tags=["Agent治理"])
 api_router.include_router(admin_overview.router, prefix="/admin", tags=["管理员总览"])
-api_router.include_router(admin_copilot.router, prefix="/admin/copilot", tags=["管理员副驾驶"])
 api_router.include_router(agent_studio.router, prefix="/agent-studio", tags=["Agent 工坊"])
 api_router.include_router(agent_responses.router, prefix="/agent-responses", tags=["Responses Agent"])
 api_router.include_router(agent_catalog.router, prefix="/agent-catalog", tags=["Agent 目录"])

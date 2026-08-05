@@ -66,13 +66,7 @@ def upload_code(
     except ValueError as exc:
         # 恶意软件/归档安全扫描拒绝属于可预期的用户输入结果,不能升级为 500。
         raise ValidationError(str(exc), code=40001) from exc
-    quarantined = lang == "quarantined"
-    return Resp(data={
-        "file_id": file_id,
-        "language": lang,
-        "version_no": ver,
-        "quarantined": quarantined,
-    })
+    return Resp(data={"file_id": file_id, "language": lang, "version_no": ver})
 
 
 @router.post("/upload-folder", response_model=Resp[dict],
@@ -100,15 +94,12 @@ def upload_folder(
     success_count = 0
     fail_count = 0
     errors: List[dict] = []
-    logical_paths = code_file_service.normalize_folder_upload_paths([
-        upload_file.filename or "" for upload_file in files
-    ])
 
-    for upload_file, logical_path in zip(files, logical_paths):
+    for upload_file in files:
         try:
             file_id, lang, ver = code_file_service.upload(
                 db=db, user=user, project_id=project_id,
-                upload_file=upload_file, file_path=logical_path, language=None,
+                upload_file=upload_file, file_path=None, language=None,
             )
             results.append({
                 "file_name": upload_file.filename,

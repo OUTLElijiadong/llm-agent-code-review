@@ -49,9 +49,17 @@ from app.schemas.agent import (
 )
 from app.schemas.common import Resp
 from app.services import agent_service, skill_service
+from app.services.declarative_agent_runtime import PublishedAgentCatalog
 
 router = APIRouter()
 _SSE_SESSION_CHECK_INTERVAL = 2.0
+
+
+def _custom_runtime_metadata(db: Session) -> list[dict]:
+    """真实请求合并数据库目录；轻量测试桩没有 query 时返回空目录。"""
+    if not hasattr(db, "query"):
+        return []
+    return PublishedAgentCatalog.runtime_metadata(db)
 
 
 @router.get("", response_model=Resp[list[AgentProfileOut]],
@@ -107,6 +115,7 @@ def list_runtime_agents(
     """
     user_id = None if user.role in {"admin", "super_admin"} else user.id
     rows = agent_service.get_runtime_agents(db, user_id)
+    rows.extend(_custom_runtime_metadata(db))
     return Resp(data=[AgentRuntimeOut(**r) for r in rows])
 
 
@@ -117,7 +126,15 @@ def get_runtime_summary(
     db: Session = Depends(get_db),
 ):
     """返回内置注册中心与已发布自定义 Agent 的合并汇总。"""
-    return Resp(data=AgentRuntimeSummaryOut(**agent_service.get_runtime_summary(db)))
+    summary = agent_service.get_runtime_summary()
+    custom = _custom_runtime_metadata(db)
+    buckets = {item["category"]: item["count"] for item in summary["by_category"]}
+    if custom:
+        buckets["custom_review"] = buckets.get("custom_review", 0) + len(custom)
+    return Resp(data=AgentRuntimeSummaryOut(
+        total=summary["total"] + len(custom),
+        by_category=[{"category": key, "count": value} for key, value in sorted(buckets.items())],
+    ))
 
 
 @router.get("/situation", response_model=Resp[AgentSituationOut],
