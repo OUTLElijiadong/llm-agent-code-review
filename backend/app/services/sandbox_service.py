@@ -414,12 +414,19 @@ run_whitebox() {
 
 # 与 deploy/sandbox/runner.sh 的 php_document_root 保持一致:入口在顶层子目录时仅下探唯一候选。
 php_doc_root() {
-  for candidate in . public; do
-    if [ -d "$candidate" ] && { [ -f "$candidate/index.php" ] || [ -f "$candidate/index.html" ]; }; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
+  # 优先:当前目录直接有入口
+  if [ -f ./index.php ] || [ -f ./index.html ]; then
+    printf '%s
+' .
+    return 0
+  fi
+  # 其次:public 子目录有入口(且当前目录无入口)
+  if [ -d public ] && { [ -f public/index.php ] || [ -f public/index.html ]; }; then
+    printf '%s
+' public
+    return 0
+  fi
+  # 嵌套包(zip 多套一层目录)递归下探唯一候选
   nested_root=""
   nested_count=0
   for directory in */; do
@@ -436,10 +443,12 @@ php_doc_root() {
     nested_count=$((nested_count + 1))
   done
   if [ "$nested_count" -eq 1 ]; then
-    printf '%s\n' "$nested_root"
+    printf '%s
+' "$nested_root"
     return 0
   fi
-  printf '%s\n' .
+  printf '%s
+' .
 }
 
 start_app() {

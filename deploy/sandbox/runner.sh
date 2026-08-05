@@ -33,7 +33,8 @@ proxy_request() {
   esac
   case "$request_target$accept$accept_language$content_type" in
     *"
-"*|*""*) exit 64 ;;
+"*|*"
+"*) exit 64 ;;
   esac
 
   exec bash -c '
@@ -201,13 +202,14 @@ run_deploy() {
       exec go run .
       ;;
     php)
+      # 与 sandbox_service 内嵌 runner 一致:顶层入口优先,空 public 不抢占,
+      # 嵌套包(zip 多套一层目录)递归下探唯一候选。
       document_root=.
-      if [ -d public ]; then
+      if [ -f ./index.php ] || [ -f ./index.html ]; then
+        document_root=.
+      elif [ -d public ] && { [ -f public/index.php ] || [ -f public/index.html ]; }; then
         document_root=public
-      fi
-      # 嵌套包(zip 多套一层目录,如 iwebshop/index.php)递归下探唯一候选,与
-      # sandbox_service 内嵌 _DEPLOY_VERIFY_RUNNER 的 php_doc_root 保持一致。
-      if [ ! -f "$document_root/index.php" ] && [ ! -f "$document_root/index.html" ]; then
+      else
         nested_root=""
         nested_count=0
         for directory in */; do
