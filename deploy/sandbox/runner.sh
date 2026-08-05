@@ -244,6 +244,11 @@ run_blackbox() {
   app_pid="$!"
   trap 'kill "$app_pid" >/dev/null 2>&1 || true' EXIT INT TERM
   attempts=0
+  http_ready=""
+  http_status=""
+  # 探活:服务"就绪"= 进程监听并返回了任何合法 HTTP 状态行(含 5xx)。
+  # 5xx 说明服务已起来,只是应用自身(如缺DB)报错——这是运行态证据,不该判黑盒失败;
+  # 真正的失败是"一直没监听/进程死了/完全无响应"。
   while [ "$attempts" -lt 45 ]; do
     if status="$(bash -c '
       port="$1"
@@ -251,33 +256,16 @@ run_blackbox() {
       printf "GET / HTTP/1.0\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n" >&3
       IFS= read -r line <&3
       case "$line" in
-        HTTP/*\ [23][0-9][0-9]\ *)
+        HTTP/*\ [1-5][0-9][0-9]\ *)
           code="${line#HTTP/* }"
           printf "%s" "${code%% *}"
           ;;
         *) exit 1 ;;
       esac
     ' prism-health "$preview_port" 2>/dev/null)"; then
-      case "$status" in
-        [23][0-9][0-9])
-          printf 'blackbox loopback status=%s\n' "$status"
-          # ── v3.4 真实 PoC 验证 ──
-          # 服务已在固定 loopback 端口就绪。若源码携带审计平台生成的 _prism_poc.sh,
-          # 在隔离环境内执行它(发起 PoC 请求拿真实响应),输出 PRISM_POC_RESULT 供后端
-          # 经 docker logs 回收判定。PoC 由后端按 CRUD 数据隔离红线生成,只读写自身
-          # 创建的数据;脚本缺失或失败不阻断黑盒就绪结论。
-          if [ -f ./_prism_poc.sh ]; then
-            printf '%s\n' 'prism poc script detected, executing'
-            PRISM_POC_PORT="$preview_port" sh ./_prism_poc.sh || printf '%s\n' 'prism poc script exited non-zero'
-          else
-            printf '%s\n' 'no _prism_poc.sh present, skip poc execution'
-          fi
-          kill "$app_pid" >/dev/null 2>&1 || true
-          wait "$app_pid" 2>/dev/null || true
-          trap - EXIT INT TERM
-          return 0
-          ;;
-      esac
+      http_status="$status"
+      http_ready=1
+      break
     fi
     if ! kill -0 "$app_pid" >/dev/null 2>&1; then
       wait "$app_pid"
@@ -286,8 +274,28 @@ run_blackbox() {
     attempts=$((attempts + 1))
     sleep 1
   done
-  printf '%s\n' 'application did not become ready on the fixed loopback port' >&2
-  return 1
+  if [ -z "$http_ready" ]; then
+    printf '%s\n' 'application did not become ready on the fixed loopback port' >&2
+    return 1
+  fi
+  printf 'blackbox loopback status=%s\n' "$http_status"
+  # ── v3.4 真实 PoC 验证 ──
+  # 服务已在固定 loopback 端口就绪。若源码携带审计平台生成的 _prism_poc.sh,
+  # 在隔离环境内执行它(发起 PoC 请求拿真实响应),输出 PRISM_POC_RESULT 供后端
+  # 经 docker logs 回收判定。PoC 由后端按 CRUD 数据隔离红线生成,只读写自身
+  # 创建的数据;脚本缺失或失败不阻断黑盒就绪结论。
+  if [ -f ./_prism_poc.sh ]; then
+    printf '%s\n' 'prism poc script detected, executing'
+    PRISM_POC_PORT="$preview_port" sh ./_prism_poc.sh || printf '%s\n' 'prism poc script exited non-zero'
+  else
+    printf '%s\n' 'no _prism_poc.sh present, skip poc execution'
+  fi
+  kill "$app_pid" >/dev/null 2>&1 || true
+  wait "$app_pid" 2>/dev/null || true
+  trap - EXIT INT TERM
+  # 5xx(应用自身错误,如缺DB)不算服务失败;1xx/4xx 也算服务已就绪。
+  # 只有完全没起监听才在上面 return 1。
+  return 0
 }
 
 if [ "$action" = test ]; then

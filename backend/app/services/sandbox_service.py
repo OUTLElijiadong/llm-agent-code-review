@@ -482,13 +482,17 @@ run_blackbox() {
   i=0; READY=0
   while [ $i -lt 30 ]; do
     S=$(http_probe "/")
-    case "$S" in 2*|3*) READY=1; break;; esac
+    case "$S" in 1*|2*|3*|4*|5*) READY=1; break;; esac  # 任何合法HTTP状态=服务已就绪(5xx多为应用缺DB等自身错误,属运行态证据)
     kill -0 "$APP_PID" 2>/dev/null || break
     i=$((i+1)); sleep 1
   done
   if [ "$READY" != "1" ]; then kill "$APP_PID" 2>/dev/null; echo "blackbox: 应用未在回环端口就绪"; return 1; fi
   # 首页内容断言:首页非空则判通过
-  BYTES=$(python -c "import urllib.request;print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))" 2>/dev/null || echo 0)
+  BYTES=$(python -c "import urllib.request,urllib.error
+try:
+  print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))
+except urllib.error.HTTPError as e:
+  print(len(e.read()))" 2>/dev/null || echo 0)  # 5xx 响应体也计入(服务已起来)
   # 常见路径探活
   for p in / /index /health /api /login; do
     printf 'blackbox probe %s -> %s\n' "$p" "$(http_probe "$p")"
