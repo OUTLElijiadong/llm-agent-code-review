@@ -412,7 +412,7 @@
     ]
   },
   "code": {
-    "backend_python_module_count": 281,
+    "backend_python_module_count": 280,
     "backend_python_modules": [
       "backend/app/__init__.py",
       "backend/app/agents/__init__.py",
@@ -489,7 +489,6 @@
       "backend/app/api/responses.py",
       "backend/app/api/v1/__init__.py",
       "backend/app/api/v1/admin_agent_releases.py",
-      "backend/app/api/v1/admin_copilot.py",
       "backend/app/api/v1/admin_overview.py",
       "backend/app/api/v1/agent_catalog.py",
       "backend/app/api/v1/agent_governance.py",
@@ -909,8 +908,8 @@
     ]
   },
   "http": {
-    "business_route_count": 272,
-    "operation_count": 272,
+    "business_route_count": 238,
+    "operation_count": 238,
     "routes": [
       {
         "methods": [
@@ -1009,20 +1008,6 @@
         ],
         "name": "revoke_beta_code",
         "path": "/api/admin/beta-codes/{invite_id}/revoke"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "chat",
-        "path": "/api/admin/copilot/chat"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "history",
-        "path": "/api/admin/copilot/history"
       },
       {
         "methods": [
@@ -1156,125 +1141,6 @@
         ],
         "name": "test_config",
         "path": "/api/admin/llm/test"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "list_aliases",
-        "path": "/api/admin/mcp/aliases"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "create_alias",
-        "path": "/api/admin/mcp/aliases"
-      },
-      {
-        "methods": [
-          "DELETE"
-        ],
-        "name": "delete_alias",
-        "path": "/api/admin/mcp/aliases/{alias_id}"
-      },
-      {
-        "methods": [
-          "PUT"
-        ],
-        "name": "update_alias",
-        "path": "/api/admin/mcp/aliases/{alias_id}"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "list_bindings",
-        "path": "/api/admin/mcp/bindings"
-      },
-      {
-        "methods": [
-          "PUT"
-        ],
-        "name": "upsert_binding",
-        "path": "/api/admin/mcp/bindings"
-      },
-      {
-        "methods": [
-          "DELETE"
-        ],
-        "name": "delete_binding",
-        "path": "/api/admin/mcp/bindings/{binding_id}"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "search_capabilities",
-        "path": "/api/admin/mcp/capabilities/search"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "list_servers",
-        "path": "/api/admin/mcp/servers"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "create_server",
-        "path": "/api/admin/mcp/servers"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "seed_recommended_servers",
-        "path": "/api/admin/mcp/servers/recommended"
-      },
-      {
-        "methods": [
-          "DELETE"
-        ],
-        "name": "delete_server",
-        "path": "/api/admin/mcp/servers/{server_id}"
-      },
-      {
-        "methods": [
-          "PUT"
-        ],
-        "name": "update_server",
-        "path": "/api/admin/mcp/servers/{server_id}"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "check_server_health",
-        "path": "/api/admin/mcp/servers/{server_id}/health"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "sync_server_tools",
-        "path": "/api/admin/mcp/servers/{server_id}/sync"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "list_tools",
-        "path": "/api/admin/mcp/tools"
-      },
-      {
-        "methods": [
-          "PUT"
-        ],
-        "name": "update_tool",
-        "path": "/api/admin/mcp/tools/{tool_id}"
       },
       {
         "methods": [
@@ -1712,24 +1578,10 @@
       },
       {
         "methods": [
-          "GET"
-        ],
-        "name": "list_agents",
-        "path": "/api/ai/agents"
-      },
-      {
-        "methods": [
           "POST"
         ],
         "name": "agent_analyze_folder",
         "path": "/api/ai/analyze-folder"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "agent_chat",
-        "path": "/api/ai/chat"
       },
       {
         "methods": [
@@ -2633,97 +2485,6 @@
         ],
         "name": "toggle_rule",
         "path": "/api/rules/{rule_id}/toggle"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "list_sandboxes",
-        "path": "/api/sandboxes"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "create_sandbox",
-        "path": "/api/sandboxes"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "search_capabilities",
-        "path": "/api/sandboxes/capabilities/search"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "list_workers",
-        "path": "/api/sandboxes/workers"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "create_worker",
-        "path": "/api/sandboxes/workers"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "seed_production_worker",
-        "path": "/api/sandboxes/workers/seed-production"
-      },
-      {
-        "methods": [
-          "PUT"
-        ],
-        "name": "update_worker",
-        "path": "/api/sandboxes/workers/{worker_id}"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "check_worker",
-        "path": "/api/sandboxes/workers/{worker_id}/health"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "get_sandbox",
-        "path": "/api/sandboxes/{public_id}"
-      },
-      {
-        "methods": [
-          "GET"
-        ],
-        "name": "download_sandbox_artifact",
-        "path": "/api/sandboxes/{public_id}/artifacts/{artifact_id}"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "extend_sandbox",
-        "path": "/api/sandboxes/{public_id}/extend"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "create_preview_session",
-        "path": "/api/sandboxes/{public_id}/preview-session"
-      },
-      {
-        "methods": [
-          "POST"
-        ],
-        "name": "stop_sandbox",
-        "path": "/api/sandboxes/{public_id}/stop"
       },
       {
         "methods": [

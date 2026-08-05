@@ -6,13 +6,13 @@
 
 | 事实 | 数量/值 |
 | --- | ---: |
-| 业务 HTTP 路由 | 272 |
-| HTTP 操作 | 272 |
+| 业务 HTTP 路由 | 238 |
+| HTTP 操作 | 238 |
 | WebSocket 路由 | 1 |
 | ORM 表 | 73 |
 | Agent | 17 |
 | Vue 页面 | 60 |
-| 后端 Python 模块 | 281 |
+| 后端 Python 模块 | 280 |
 | 后端测试文件 | 117 |
 | 前端测试文件 | 23 |
 | Alembic 迁移 | 27 |
@@ -36,8 +36,6 @@
 | GET | `/api/admin/beta-codes` | list_beta_codes |
 | POST | `/api/admin/beta-codes` | generate_beta_codes |
 | POST | `/api/admin/beta-codes/{invite_id}/revoke` | revoke_beta_code |
-| POST | `/api/admin/copilot/chat` | chat |
-| GET | `/api/admin/copilot/history` | history |
 | GET | `/api/admin/governance/agents` | list_governance_agents |
 | GET | `/api/admin/governance/agents/{agent_code}` | get_governance_agent |
 | PUT | `/api/admin/governance/agents/{agent_code}` | update_governance_agent |
@@ -57,23 +55,6 @@
 | GET | `/api/admin/llm/config` | get_config |
 | PUT | `/api/admin/llm/config` | update_config |
 | POST | `/api/admin/llm/test` | test_config |
-| GET | `/api/admin/mcp/aliases` | list_aliases |
-| POST | `/api/admin/mcp/aliases` | create_alias |
-| DELETE | `/api/admin/mcp/aliases/{alias_id}` | delete_alias |
-| PUT | `/api/admin/mcp/aliases/{alias_id}` | update_alias |
-| GET | `/api/admin/mcp/bindings` | list_bindings |
-| PUT | `/api/admin/mcp/bindings` | upsert_binding |
-| DELETE | `/api/admin/mcp/bindings/{binding_id}` | delete_binding |
-| GET | `/api/admin/mcp/capabilities/search` | search_capabilities |
-| GET | `/api/admin/mcp/servers` | list_servers |
-| POST | `/api/admin/mcp/servers` | create_server |
-| POST | `/api/admin/mcp/servers/recommended` | seed_recommended_servers |
-| DELETE | `/api/admin/mcp/servers/{server_id}` | delete_server |
-| PUT | `/api/admin/mcp/servers/{server_id}` | update_server |
-| POST | `/api/admin/mcp/servers/{server_id}/health` | check_server_health |
-| POST | `/api/admin/mcp/servers/{server_id}/sync` | sync_server_tools |
-| GET | `/api/admin/mcp/tools` | list_tools |
-| PUT | `/api/admin/mcp/tools/{tool_id}` | update_tool |
 | GET | `/api/admin/observability/alerts` | list_alerts |
 | GET | `/api/admin/observability/alerts/unread` | list_unread_alerts |
 | POST | `/api/admin/observability/alerts/{alert_id}/read` | mark_alert_read |
@@ -136,9 +117,7 @@
 | POST | `/api/ai-prompt/project` | generate_for_project |
 | POST | `/api/ai-prompt/task` | generate_for_task |
 | GET | `/api/ai-prompt/tools` | list_tools |
-| GET | `/api/ai/agents` | list_agents |
 | POST | `/api/ai/analyze-folder` | agent_analyze_folder |
-| POST | `/api/ai/chat` | agent_chat |
 | POST | `/api/ai/detect-language` | agent_detect_language |
 | DELETE | `/api/api-config` | delete_config |
 | GET | `/api/api-config` | get_config |
@@ -268,19 +247,6 @@
 | DELETE | `/api/rules/{rule_id}` | delete_rule |
 | PUT | `/api/rules/{rule_id}` | update_rule |
 | POST | `/api/rules/{rule_id}/toggle` | toggle_rule |
-| GET | `/api/sandboxes` | list_sandboxes |
-| POST | `/api/sandboxes` | create_sandbox |
-| GET | `/api/sandboxes/capabilities/search` | search_capabilities |
-| GET | `/api/sandboxes/workers` | list_workers |
-| POST | `/api/sandboxes/workers` | create_worker |
-| POST | `/api/sandboxes/workers/seed-production` | seed_production_worker |
-| PUT | `/api/sandboxes/workers/{worker_id}` | update_worker |
-| POST | `/api/sandboxes/workers/{worker_id}/health` | check_worker |
-| GET | `/api/sandboxes/{public_id}` | get_sandbox |
-| GET | `/api/sandboxes/{public_id}/artifacts/{artifact_id}` | download_sandbox_artifact |
-| POST | `/api/sandboxes/{public_id}/extend` | extend_sandbox |
-| POST | `/api/sandboxes/{public_id}/preview-session` | create_preview_session |
-| POST | `/api/sandboxes/{public_id}/stop` | stop_sandbox |
 | GET | `/api/security/checklist` | get_checklist |
 | GET | `/api/security/dashboard-summary` | dashboard_summary |
 | GET | `/api/security/findings` | list_findings |
