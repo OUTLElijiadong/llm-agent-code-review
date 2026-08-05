@@ -5,6 +5,16 @@
 1. 打开管理员的管理 Agent（小菱），当前会话会自动恢复 run_ede09… 的失败运行，点击标题栏 **“重试运行”**，验证 run 从失败点继续并完成。
 2. 若该会话被其它新会话覆盖，可在会话下拉选择原会话；重试只续跑模型循环，**不会重放已批准的写操作**（审批已全部 approved，告警已处置）。
 
+## 已解决（2026-08-05 最终）
+
+- 生产真正源确认为 `/opt/code-review`（活跃 git 仓库），修复已合入其源码并固化提交：
+  `97e3426`（后端 runtime/service/api）、`97b14d2`（前端两组件重试按钮），分支 `deploy-security-monitor`。
+- 生产后端 `agent-retry-prodsrc-08052145`、前端 `agent-retry-prodsrc-08052158`，5 容器 healthy，
+  复现测试 7/7 通过，真实登录冒烟通过（run_ede09 已 completed）。
+- **deploy-security-monitor 不上 GitHub**（用户决策）：分支历史含 175MB 数据库备份
+  `deploy/.releases/responses-20260801-005011/backup/database.sql`（b5e7073 引入），GitHub 100MB 上限拒绝；
+  修复已随远端 main（0d7a8c8）存在，生产基线保留在服务器本地 git。
+
 ## 工程侧待办
 
 0. **后端镜像 tag 被并行构建取代（已核实无风险）**：部署约 4 分钟后后端被切换为 `bb-signal2-08051801`（已核实该镜像内含本次修复，md5 与 /opt/prism-current 补丁一致）。请确认该 tag 的构建来源（可能是你的构建自动化/并行操作）；若它基于 /opt/prism-current 构建，后续重建不会丢修复。
