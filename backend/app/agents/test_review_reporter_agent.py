@@ -146,8 +146,24 @@ class TestReviewReporterAgent(BaseAgent):
             "status": getattr(environment, "status", ""),
             "project_id": getattr(environment, "project_id", None),
         }
+        # 提取黑盒关键信号(loopback 状态/PoC/探活),单独标注避免被大日志淹没
+        blackbox_signals = []
+        full_log = ""
+        try:
+            wr = (conclusion.get("evidence") or {}).get("worker_result") or {}
+            full_log = str((wr.get("logs") or {}).get("text") or "")
+        except Exception:
+            pass
+        for line in full_log.splitlines():
+            if any(k in line for k in ("blackbox loopback status", "PRISM_VERIFY", "prism poc", "Development Server", "did not become ready")):
+                blackbox_signals.append(line.strip())
         evidence = json.dumps(
-            {"environment": env_brief, "recon_facts": facts, "conclusion": safe_conclusion},
+            {
+                "environment": env_brief,
+                "recon_facts": facts,
+                "blackbox_signals": blackbox_signals[-20:],
+                "conclusion": safe_conclusion,
+            },
             ensure_ascii=False, default=str,
         )
 
