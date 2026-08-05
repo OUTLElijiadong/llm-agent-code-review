@@ -252,6 +252,9 @@ def _evaluate_ssh(db: Session, ssh: dict[str, Any], created: list[dict[str, Any]
         count = int(agg.get("count") or 0)
         if not ip or count < failed_threshold:
             continue
+        # 白名单来源（本人/办公网段）不计入爆破，避免误报
+        if _ip_allowed(ip, allowlist):
+            continue
         _record_alert(
             db,
             created,
@@ -361,9 +364,12 @@ def _evaluate_backup(db: Session, backup: dict[str, Any], created: list[dict[str
                 detail={"age_hours": age_hours, "max_age_hours": settings.security_backup_max_age_hours},
             )
 
+    retention_hours = 24 * 14  # 与 backup.sh 默认保留期一致；超期文件将删除，不再告警
     unverified = [
         row.get("name") for row in (backup.get("recent") or [])
-        if isinstance(row, dict) and row.get("has_sha256") is False
+        if isinstance(row, dict)
+        and row.get("has_sha256") is False
+        and float(row.get("age_hours") or 0) <= retention_hours
     ]
     if unverified:
         _record_alert(
