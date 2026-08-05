@@ -29,7 +29,6 @@ from sqlalchemy.orm import Session, object_session
 
 from app.agents.event_bus import emit_event
 from app.agents.events import AgentEventType
-from app.ai.language_detector import detect_language
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.exceptions import AuthError, ForbiddenError, NotFoundError, ValidationError
@@ -400,36 +399,6 @@ run_whitebox() {
   return 0
 }
 
-# 与 deploy/sandbox/runner.sh 的 php_document_root 保持一致:入口在顶层子目录时仅下探唯一候选。
-php_doc_root() {
-  for candidate in . public; do
-    if [ -d "$candidate" ] && { [ -f "$candidate/index.php" ] || [ -f "$candidate/index.html" ]; }; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  nested_root=""
-  nested_count=0
-  for directory in */; do
-    [ -d "$directory" ] || continue
-    case "$directory" in .*|prism-tmp/*|prism-home/*|prism-cache/*) continue ;; esac
-    nested_candidate=""
-    if [ -f "${directory}index.php" ] || [ -f "${directory}index.html" ]; then
-      nested_candidate="${directory%/}"
-    elif [ -f "${directory}public/index.php" ] || [ -f "${directory}public/index.html" ]; then
-      nested_candidate="${directory%/}/public"
-    fi
-    [ -n "$nested_candidate" ] || continue
-    nested_root="$nested_candidate"
-    nested_count=$((nested_count + 1))
-  done
-  if [ "$nested_count" -eq 1 ]; then
-    printf '%s\n' "$nested_root"
-    return 0
-  fi
-  printf '%s\n' .
-}
-
 start_app() {
   case "$LANG_" in
     python)
@@ -441,7 +410,7 @@ start_app() {
     node)   [ -f package.json ] || return 1; npm start --if-present & ;;
     java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" & ;;
     go)     go run . & ;;
-    php)    ROOT=$(php_doc_root); php -S "127.0.0.1:$PORT" -t "$ROOT" & ;;
+    php)    ROOT=.; [ -d public ] && ROOT=public; php -S "127.0.0.1:$PORT" -t "$ROOT" & ;;
   esac
   echo $!
 }
@@ -697,31 +666,6 @@ def _project_deployment_language(project_language: str | None) -> str | None:
     return None
 
 
-def _dominant_archive_language(source_archive_base64: str) -> str | None:
-    """从待测源码压缩包推断主语言(按可审计源码文件数)。
-
-    仅读取文件名清单(不解压到磁盘、不执行内容),安全且开销可忽略。
-    隔离源码项目建档语言常与真实源码不符,白盒/黑盒测试据此纠正运行时。
-    """
-    try:
-        raw = base64.b64decode(source_archive_base64)
-        counts: dict[str, int] = {}
-        with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
-            for info in bundle.infolist():
-                if info.is_dir():
-                    continue
-                language = detect_language(info.filename)
-                if language in {"plaintext", "binary"}:
-                    continue
-                counts[language] = counts.get(language, 0) + 1
-        if not counts:
-            return None
-        dominant = max(counts.items(), key=lambda item: item[1])[0]
-        return dominant if dominant in LANGUAGES else None
-    except Exception:
-        return None
-
-
 def _worker_token(worker: SandboxWorker) -> str:
     if not worker.encrypted_token:
         return settings.sandbox_executor_token if worker.transport == "unix" else ""
@@ -911,8 +855,11 @@ def _proxy_worker_preview(
 
 def create_preview_session(db: Session, actor: User, public_id: str) -> dict[str, Any]:
     environment = _get_visible(db, actor, public_id)
-    # 隔离归档允许部署,但只允许通过受 JWT 保护的 backend→worker 预览代理访问。
-    # 它不会获得 host network、宿主端口映射或任何无保护的服务器执行路径。
+    if db.query(ProjectSourceArchive.id).filter(
+        ProjectSourceArchive.project_id == environment.project_id,
+        ProjectSourceArchive.storage_status == "active",
+    ).first():
+        raise ForbiddenError("项目已进入隔离源码审计，持续部署预览已禁用", code=40341)
     if environment.purpose != "deploy" or environment.status != "ready":
         raise ValidationError("持续部署沙箱尚未处于可预览状态", code=40901)
     if environment.expires_at <= _utcnow():
@@ -967,8 +914,11 @@ def authenticate_preview_session(db: Session, public_id: str, token: str) -> tup
     if not actor or actor.status != 1 or int(actor.token_version or 0) != token_version:
         raise AuthError("预览会话已失效", code=40102)
     environment = _get_visible(db, actor, public_id)
-    # 隔离归档允许部署,但只允许通过受 JWT 保护的 backend→worker 预览代理访问。
-    # 它不会获得 host network、宿主端口映射或任何无保护的服务器执行路径。
+    if db.query(ProjectSourceArchive.id).filter(
+        ProjectSourceArchive.project_id == environment.project_id,
+        ProjectSourceArchive.storage_status == "active",
+    ).first():
+        raise ForbiddenError("项目已进入隔离源码审计，持续部署预览已禁用", code=40341)
     if environment.purpose != "deploy" or environment.status != "ready" or environment.expires_at <= _utcnow():
         raise ValidationError("持续部署沙箱当前不可预览", code=40901)
     worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
@@ -1351,8 +1301,11 @@ def _create_environment_locked(
         ProjectSourceArchive.project_id == project_id,
         ProjectSourceArchive.storage_status == "active",
     ).first()
-    # 隔离归档的 source snapshot 可交给固定 profile 的 runsc 容器运行;绝不在宿主机执行。
-    # 预览始终经受 JWT 保护的 backend 代理访问,而非暴露容器端口。
+    if source_archive is not None and purpose == "deploy":
+        raise ForbiddenError(
+            "隔离源码归档只能审计或测试，不得部署或开放预览",
+            code=40341,
+        )
     requested_language = str(payload["language"] or "").strip().lower()
     if requested_language not in LANGUAGES:
         raise ValidationError("沙箱语言或模式不受支持", code=40001)
@@ -1486,22 +1439,6 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         db.commit()
         _emit(environment, AgentEventType.PROGRESS, "独立执行器已接收任务", {"stage": "executor"})
         worker_mode = config.get("worker_mode", environment.test_mode)
-        # 隔离源码项目建档语言可能与真实源码不符(上传时手动选择)。白盒/黑盒测试
-        # 以源码内容推断的主语言为准纠正受控运行时,避免 PHP 项目被按 Python 跑而
-        # 找不到部署入口。deploy 目的仍由 create_environment 以项目主语言严格裁决。
-        source_language = _dominant_archive_language(source_archive_base64)
-        if source_language and source_language != environment.language:
-            if environment.purpose == "test" and source_language in LANGUAGES:
-                _append_event(
-                    db,
-                    environment,
-                    "dispatch",
-                    "language",
-                    f"已按源码内容将测试运行时从 {environment.language} 纠正为 {source_language}",
-                    {"declared_language": environment.language, "resolved_language": source_language},
-                )
-                environment.language = source_language
-                db.commit()
         # deploy 前自动白盒:测试容器跑完即回收、不占槽,避免常驻 deploy 把单槽 worker 占成 429。
         pre_whitebox: dict[str, Any] | None = None
         if worker and environment.purpose == "deploy" and environment.agent_code == "sandbox_deployer":

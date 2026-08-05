@@ -29,7 +29,6 @@ from sqlalchemy.orm import Session, object_session
 
 from app.agents.event_bus import emit_event
 from app.agents.events import AgentEventType
-from app.ai.language_detector import detect_language
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.exceptions import AuthError, ForbiddenError, NotFoundError, ValidationError
@@ -309,71 +308,6 @@ LANG_="${PRISM_LANGUAGE:-python}"
 PORT="${PRISM_PREVIEW_PORT:-8080}"
 cd /workspace 2>/dev/null || true
 
-# ── v3.5 多Agent测试: Recon 事实采集(零LLM,结构化facts供沙箱外Agent推理) ──
-collect_facts() {
-python3 - <<'PYEOF' 2>/dev/null || true
-import json, os, re
-facts = {"entrypoints": [], "test_files": {"found": 0, "framework": ""},
-         "endpoints": [], "param_hints": [], "hardcoded_secrets": []}
-entry_names = {"main.py", "app.py", "manage.py", "wsgi.py", "asgi.py", "index.js",
-               "server.js", "app.js", "main.go", "go.mod", "pom.xml", "index.php"}
-test_re = re.compile(r"(^test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)")
-route_re = re.compile(
-    r"(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
-    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
-    r"path\s*\(\s*['\"]([^'\"]+)['\"]", re.I)
-secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"]([^'\"]{6,})['\"]", re.I)
-param_names = {"file", "path", "filename", "download", "url", "callback", "id", "userid",
-               "orderid", "template", "export", "redirect", "next", "upload"}
-endpoints, secrets, params, tests = [], [], set(), 0
-framework = ""
-for root, dirs, files in os.walk("."):
-    dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", "venv", ".venv", "vendor"}]
-    for fn in files:
-        p = os.path.join(root, fn)
-        if fn in entry_names:
-            facts["entrypoints"].append(p.lstrip("./"))
-        if test_re.search(fn):
-            tests += 1
-            if fn.endswith(".py"): framework = framework or "pytest"
-            if fn.endswith(".js"): framework = framework or "jest"
-        if not fn.endswith((".py", ".js", ".ts", ".go", ".java", ".php")):
-            continue
-        try:
-            with open(p, "r", errors="ignore") as fh:
-                src = fh.read(200000)
-        except OSError:
-            continue
-        for m in route_re.finditer(src):
-            ep = m.group(1) or m.group(2) or m.group(3)
-            if ep and ep.startswith("/") and len(endpoints) < 60:
-                endpoints.append({"path": ep, "file": p.lstrip("./")})
-        for m in secret_re.finditer(src):
-            if len(secrets) < 20:
-                secrets.append({"file": p.lstrip("./"), "kind": m.group(1)})
-        for name in param_names:
-            if re.search(r"[?&\"'\s]" + name + r"[\"'=:\s]", src, re.I):
-                params.add(name)
-facts["test_files"] = {"found": tests, "framework": framework}
-facts["endpoints"] = endpoints
-facts["hardcoded_secrets"] = secrets
-facts["param_hints"] = sorted(params)
-with open("/tmp/prism_facts.json", "w") as out:
-    json.dump(facts, out, ensure_ascii=False)
-print("facts: entries=%d endpoints=%d secrets=%d tests=%d" % (
-    len(facts["entrypoints"]), len(endpoints), len(secrets), tests))
-PYEOF
-}
-
-emit_facts() {  # 把 facts 打到日志,后端经 docker logs 回收
-  if [ -f /tmp/prism_facts.json ]; then
-    echo "PRISM_FACTS_BEGIN"
-    cat /tmp/prism_facts.json
-    echo ""
-    echo "PRISM_FACTS_END"
-  fi
-}
-
 run_whitebox() {
   case "$LANG_" in
     python)
@@ -400,36 +334,6 @@ run_whitebox() {
   return 0
 }
 
-# 与 deploy/sandbox/runner.sh 的 php_document_root 保持一致:入口在顶层子目录时仅下探唯一候选。
-php_doc_root() {
-  for candidate in . public; do
-    if [ -d "$candidate" ] && { [ -f "$candidate/index.php" ] || [ -f "$candidate/index.html" ]; }; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  nested_root=""
-  nested_count=0
-  for directory in */; do
-    [ -d "$directory" ] || continue
-    case "$directory" in .*|prism-tmp/*|prism-home/*|prism-cache/*) continue ;; esac
-    nested_candidate=""
-    if [ -f "${directory}index.php" ] || [ -f "${directory}index.html" ]; then
-      nested_candidate="${directory%/}"
-    elif [ -f "${directory}public/index.php" ] || [ -f "${directory}public/index.html" ]; then
-      nested_candidate="${directory%/}/public"
-    fi
-    [ -n "$nested_candidate" ] || continue
-    nested_root="$nested_candidate"
-    nested_count=$((nested_count + 1))
-  done
-  if [ "$nested_count" -eq 1 ]; then
-    printf '%s\n' "$nested_root"
-    return 0
-  fi
-  printf '%s\n' .
-}
-
 start_app() {
   case "$LANG_" in
     python)
@@ -441,7 +345,7 @@ start_app() {
     node)   [ -f package.json ] || return 1; npm start --if-present & ;;
     java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" & ;;
     go)     go run . & ;;
-    php)    ROOT=$(php_doc_root); php -S "127.0.0.1:$PORT" -t "$ROOT" & ;;
+    php)    ROOT=.; [ -d public ] && ROOT=public; php -S "127.0.0.1:$PORT" -t "$ROOT" & ;;
   esac
   echo $!
 }
@@ -480,23 +384,11 @@ run_blackbox() {
 }
 
 case "$MODE" in
-  whitebox)
-    collect_facts
-    run_whitebox; WB=$?
-    emit_facts
-    [ $WB -eq 0 ] && { echo "PRISM_VERIFY whitebox ok"; exit 0; } || { echo "PRISM_VERIFY whitebox fail"; exit 1; }
-    ;;
-  blackbox)
-    collect_facts
-    run_blackbox; BB=$?
-    emit_facts
-    [ $BB -eq 0 ] && { echo "PRISM_VERIFY blackbox ok"; exit 0; } || { echo "PRISM_VERIFY blackbox fail"; exit 1; }
-    ;;
+  whitebox) run_whitebox && { echo "PRISM_VERIFY whitebox ok"; exit 0; } || { echo "PRISM_VERIFY whitebox fail"; exit 1; } ;;
+  blackbox) run_blackbox && { echo "PRISM_VERIFY blackbox ok"; exit 0; } || { echo "PRISM_VERIFY blackbox fail"; exit 1; } ;;
   combined)
-    collect_facts
     run_whitebox; WHITEBOX_OK=$?
     run_blackbox; BB=$?
-    emit_facts
     [ $WHITEBOX_OK -eq 0 ] && [ $BB -eq 0 ] && { echo "PRISM_VERIFY combined ok"; exit 0; } || { echo "PRISM_VERIFY combined fail"; exit 1; }
     ;;
   *) echo "unknown mode"; exit 64 ;;
@@ -555,17 +447,6 @@ def _run_deploy_auto_tests(
             log_text = str((logs or {}).get("text") or "")
             passed = str(result.get("status")) == "succeeded" and exit_code == 0
             results.append({"mode": mode, "passed": passed, "exit_code": exit_code, "log": log_text[-1500:]})
-            # 提取 Recon 结构化事实(PRISM_FACTS_BEGIN/END 包裹),供多Agent审查使用
-            facts = _extract_prism_facts(log_text)
-            if facts:
-                results[-1]["facts"] = facts
-                _persist_browser_artifact(
-                    db, environment,
-                    artifact_type="recon_facts",
-                    file_name=f"recon-facts-{mode}-{environment.public_id}.json",
-                    mime_type="application/json",
-                    content=json.dumps(facts, ensure_ascii=False).encode("utf-8"),
-                )
             _append_event(
                 db, environment,
                 "complete" if passed else "progress", f"auto_{mode}",
@@ -585,81 +466,6 @@ def _run_deploy_auto_tests(
             _append_event(db, environment, "progress", f"auto_{mode}", f"部署后自动{mode}测试异常: {str(exc)[:120]}")
             db.commit()
     return results
-
-
-def _extract_prism_facts(log_text: str) -> dict[str, Any] | None:
-    """从容器日志提取 PRISM_FACTS_BEGIN/END 包裹的 Recon 结构化事实。"""
-    m = re.search(r"PRISM_FACTS_BEGIN\s*(\{.*?\})\s*PRISM_FACTS_END", log_text, re.S)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(1))
-    except (ValueError, TypeError):
-        return None
-
-
-def _run_test_review_report(
-    db: Session,
-    environment: SandboxEnvironment,
-    conclusion: dict[str, Any],
-) -> dict[str, Any] | None:
-    """黑白盒测试终态后,调用多Agent审查编排产出中文报告并落制品。
-
-    失败静默(只记事件不阻断):LLM 未配置/超时/任一角色异常都不影响测试结论。
-    返回写入 result_json 的摘要 dict,未执行或失败返回 None。
-    """
-    try:
-        from app.agents.test_review_reporter_agent import TestReviewReporterAgent
-        from app.agents.base import AgentContext
-
-        agent = TestReviewReporterAgent()
-        if not agent._api_key:
-            _append_event(db, environment, "progress", "multi_agent_review",
-                          "LLM 未配置,跳过多 Agent 测试审查报告")
-            db.commit()
-            return None
-        ctx = AgentContext(
-            user_id=environment.owner_id,
-            project_id=environment.project_id,
-            extra={"trace_id": environment.public_id},
-        )
-        result = agent.review(db, environment=environment, conclusion=conclusion, ctx=ctx)
-        if not result.success:
-            _append_event(db, environment, "progress", "multi_agent_review",
-                          f"多 Agent 测试审查未生成: {str(result.error)[:120]}")
-            db.commit()
-            return None
-        data = result.data if isinstance(result.data, dict) else {}
-        report_md = str(data.get("report_md") or "")
-        roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
-        if not report_md:
-            return None
-        artifact = _persist_browser_artifact(
-            db, environment,
-            artifact_type="review_report",
-            file_name=f"sandbox-review-report-{environment.public_id}.md",
-            mime_type="text/markdown",
-            content=report_md.encode("utf-8", errors="replace"),
-        )
-        summary = {
-            "agent_code": "test_reviewer",
-            "artifact_id": artifact.id,
-            "roles_executed": int(data.get("roles_executed") or 0),
-            "roles": {k: {"ok": bool(v.get("ok"))} for k, v in roles.items() if isinstance(v, dict)},
-            "report_bytes": len(report_md.encode("utf-8")),
-        }
-        _append_event(
-            db, environment, "complete", "multi_agent_review",
-            f"多 Agent 测试审查报告已生成(角色 {summary['roles_executed']}/4)",
-            summary,
-        )
-        db.commit()
-        return summary
-    except Exception as exc:  # noqa: BLE001 - 审查增强失败不阻断测试结论
-        _append_event(db, environment, "progress", "multi_agent_review",
-                      f"多 Agent 测试审查异常: {str(exc)[:120]}")
-        db.commit()
-        return None
 
 
 def artifact_to_dict(row: SandboxArtifact) -> dict[str, Any]:
@@ -695,31 +501,6 @@ def _project_deployment_language(project_language: str | None) -> str | None:
         if compact == alias or (compact.startswith(alias) and compact[len(alias):].isdigit()):
             return runtime
     return None
-
-
-def _dominant_archive_language(source_archive_base64: str) -> str | None:
-    """从待测源码压缩包推断主语言(按可审计源码文件数)。
-
-    仅读取文件名清单(不解压到磁盘、不执行内容),安全且开销可忽略。
-    隔离源码项目建档语言常与真实源码不符,白盒/黑盒测试据此纠正运行时。
-    """
-    try:
-        raw = base64.b64decode(source_archive_base64)
-        counts: dict[str, int] = {}
-        with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
-            for info in bundle.infolist():
-                if info.is_dir():
-                    continue
-                language = detect_language(info.filename)
-                if language in {"plaintext", "binary"}:
-                    continue
-                counts[language] = counts.get(language, 0) + 1
-        if not counts:
-            return None
-        dominant = max(counts.items(), key=lambda item: item[1])[0]
-        return dominant if dominant in LANGUAGES else None
-    except Exception:
-        return None
 
 
 def _worker_token(worker: SandboxWorker) -> str:
@@ -911,8 +692,11 @@ def _proxy_worker_preview(
 
 def create_preview_session(db: Session, actor: User, public_id: str) -> dict[str, Any]:
     environment = _get_visible(db, actor, public_id)
-    # 隔离归档允许部署,但只允许通过受 JWT 保护的 backend→worker 预览代理访问。
-    # 它不会获得 host network、宿主端口映射或任何无保护的服务器执行路径。
+    if db.query(ProjectSourceArchive.id).filter(
+        ProjectSourceArchive.project_id == environment.project_id,
+        ProjectSourceArchive.storage_status == "active",
+    ).first():
+        raise ForbiddenError("项目已进入隔离源码审计，持续部署预览已禁用", code=40341)
     if environment.purpose != "deploy" or environment.status != "ready":
         raise ValidationError("持续部署沙箱尚未处于可预览状态", code=40901)
     if environment.expires_at <= _utcnow():
@@ -967,8 +751,11 @@ def authenticate_preview_session(db: Session, public_id: str, token: str) -> tup
     if not actor or actor.status != 1 or int(actor.token_version or 0) != token_version:
         raise AuthError("预览会话已失效", code=40102)
     environment = _get_visible(db, actor, public_id)
-    # 隔离归档允许部署,但只允许通过受 JWT 保护的 backend→worker 预览代理访问。
-    # 它不会获得 host network、宿主端口映射或任何无保护的服务器执行路径。
+    if db.query(ProjectSourceArchive.id).filter(
+        ProjectSourceArchive.project_id == environment.project_id,
+        ProjectSourceArchive.storage_status == "active",
+    ).first():
+        raise ForbiddenError("项目已进入隔离源码审计，持续部署预览已禁用", code=40341)
     if environment.purpose != "deploy" or environment.status != "ready" or environment.expires_at <= _utcnow():
         raise ValidationError("持续部署沙箱当前不可预览", code=40901)
     worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
@@ -1351,8 +1138,11 @@ def _create_environment_locked(
         ProjectSourceArchive.project_id == project_id,
         ProjectSourceArchive.storage_status == "active",
     ).first()
-    # 隔离归档的 source snapshot 可交给固定 profile 的 runsc 容器运行;绝不在宿主机执行。
-    # 预览始终经受 JWT 保护的 backend 代理访问,而非暴露容器端口。
+    if source_archive is not None and purpose == "deploy":
+        raise ForbiddenError(
+            "隔离源码归档只能审计或测试，不得部署或开放预览",
+            code=40341,
+        )
     requested_language = str(payload["language"] or "").strip().lower()
     if requested_language not in LANGUAGES:
         raise ValidationError("沙箱语言或模式不受支持", code=40001)
@@ -1486,22 +1276,6 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         db.commit()
         _emit(environment, AgentEventType.PROGRESS, "独立执行器已接收任务", {"stage": "executor"})
         worker_mode = config.get("worker_mode", environment.test_mode)
-        # 隔离源码项目建档语言可能与真实源码不符(上传时手动选择)。白盒/黑盒测试
-        # 以源码内容推断的主语言为准纠正受控运行时,避免 PHP 项目被按 Python 跑而
-        # 找不到部署入口。deploy 目的仍由 create_environment 以项目主语言严格裁决。
-        source_language = _dominant_archive_language(source_archive_base64)
-        if source_language and source_language != environment.language:
-            if environment.purpose == "test" and source_language in LANGUAGES:
-                _append_event(
-                    db,
-                    environment,
-                    "dispatch",
-                    "language",
-                    f"已按源码内容将测试运行时从 {environment.language} 纠正为 {source_language}",
-                    {"declared_language": environment.language, "resolved_language": source_language},
-                )
-                environment.language = source_language
-                db.commit()
         # deploy 前自动白盒:测试容器跑完即回收、不占槽,避免常驻 deploy 把单槽 worker 占成 429。
         pre_whitebox: dict[str, Any] | None = None
         if worker and environment.purpose == "deploy" and environment.agent_code == "sandbox_deployer":
@@ -1654,18 +1428,13 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             evidence["auto_smoke_test"] = auto_smoke
         environment.result_json = _json(conclusion)
         artifacts = _persist_artifacts(db, environment, conclusion)
-        # 黑白盒链路结束后,由多Agent审查编排产出中文报告(失败只记录,不阻断)
-        review_report = _run_test_review_report(db, environment, conclusion)
-        if review_report is not None:
-            conclusion["multi_agent_review"] = review_report
-            environment.result_json = _json(conclusion)
         _append_event(
             db,
             environment,
             "complete" if passed else "failed",
             "conclusion",
             conclusion["summary"],
-            {"passed": passed, "artifact_count": len(artifacts), "multi_agent_review": bool(review_report)},
+            {"passed": passed, "artifact_count": len(artifacts)},
         )
         db.commit()
         _emit(
