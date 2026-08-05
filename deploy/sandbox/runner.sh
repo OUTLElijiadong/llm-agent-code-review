@@ -148,9 +148,16 @@ run_test() {
       ;;
     php)
       # 分批语法检查:逐文件起进程在大项目上必超时,且 php -l 对致命解析错误
-      # 退出码恒为 0,必须靠输出捕获。xargs 一批一进程,grep 过滤通过项,
-      # 任一文件报错即非空输出 -> 判失败(与 sandbox_service 内嵌 runner 一致)。
-      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r sh -c 'php -l "$@" 2>&1 | grep -v "No syntax errors detected"' _ || return 1
+      # 退出码恒为 0,必须靠输出捕获。xargs 一批一进程。仅 Fatal/Parse error 判失败;
+      # PHP8 对老库的 Deprecated/Warning 是提示级(退出码 0),输出供审查但不判失败。
+      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r php -l 2>&1 \
+        | grep -v 'No syntax errors detected' > /tmp/.lint_all || true
+      grep -E 'Fatal error|Parse error|Errors parsing' /tmp/.lint_all > /tmp/.lint_fatal || true
+      if [ -s /tmp/.lint_fatal ]; then
+        cat /tmp/.lint_fatal
+        return 1
+      fi
+      cat /tmp/.lint_all
       if [ -f vendor/bin/phpunit ]; then
         php vendor/bin/phpunit --colors=never
       fi
@@ -195,7 +202,31 @@ run_deploy() {
       ;;
     php)
       document_root=.
-      [ ! -d public ] || document_root=public
+      if [ -d public ]; then
+        document_root=public
+      fi
+      # 嵌套包(zip 多套一层目录,如 iwebshop/index.php)递归下探唯一候选,与
+      # sandbox_service 内嵌 _DEPLOY_VERIFY_RUNNER 的 php_doc_root 保持一致。
+      if [ ! -f "$document_root/index.php" ] && [ ! -f "$document_root/index.html" ]; then
+        nested_root=""
+        nested_count=0
+        for directory in */; do
+          [ -d "$directory" ] || continue
+          case "$directory" in .*|prism-tmp/*|prism-home/*|prism-cache/*) continue ;; esac
+          candidate=""
+          if [ -f "${directory}index.php" ] || [ -f "${directory}index.html" ]; then
+            candidate="${directory%/}"
+          elif [ -f "${directory}public/index.php" ] || [ -f "${directory}public/index.html" ]; then
+            candidate="${directory%/}/public"
+          fi
+          [ -n "$candidate" ] || continue
+          nested_root="$candidate"
+          nested_count=$((nested_count + 1))
+        done
+        if [ "$nested_count" -eq 1 ]; then
+          document_root="$nested_root"
+        fi
+      fi
       exec php -S "127.0.0.1:$preview_port" -t "$document_root"
       ;;
   esac

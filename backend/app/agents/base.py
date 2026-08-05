@@ -98,6 +98,23 @@ class BaseAgent:
         except Exception as e:
             logger.warning(f"[{self.name}] emit 事件失败: {e}")
 
+    def _project_input(self, user_message: str) -> tuple[str, bool]:
+        """按 1M 上下文窗口对输入做投影(超长时截断尾部并标记)。
+
+        BaseAgent 直连 chat/completions,不经过 responses runtime 的压缩管线;
+        这里按 settings.deepseek_context_window_tokens 做保守预算,防止单条
+        user_message(如沙箱大日志/全量证据)顶爆模型上下文导致 400/截断。
+        粗略按 1 token ≈ 2 个字符(中英混合)估算,留 8K token 头部余量。
+        """
+        window = int(getattr(settings, "deepseek_context_window_tokens", 1_000_000) or 1_000_000)
+        budget_chars = max(8_000, (window - 8_192) * 2)
+        system_len = len(self._system_prompt or "")
+        if system_len + len(user_message) <= budget_chars:
+            return user_message, False
+        keep = max(0, budget_chars - system_len - 200)
+        truncated = user_message[:keep] + "\n\n…[输入按 1M 上下文窗口投影截断]"
+        return truncated, True
+
     def call(self, user_message: str, ctx: Optional[AgentContext] = None,
              json_mode: bool = False,
              api_config: Optional["ApiConfig"] = None,
@@ -130,7 +147,8 @@ class BaseAgent:
                    payload={"model": model, "json_mode": json_mode})
 
         messages = [{"role": "system", "content": self._system_prompt}]
-        messages.append({"role": "user", "content": user_message})
+        projected_message, input_truncated = self._project_input(user_message)
+        messages.append({"role": "user", "content": projected_message})
 
         payload = {
             "model": model,
@@ -138,6 +156,10 @@ class BaseAgent:
             "temperature": self._temperature,
             "max_tokens": self._max_tokens,
         }
+        if input_truncated:
+            self._emit(AgentEventType.PROGRESS, ctx,
+                       message=f"{self.name} 输入按 1M 上下文窗口投影截断",
+                       payload={"input_truncated": True})
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         if thinking is not None:

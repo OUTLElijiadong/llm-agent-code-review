@@ -61,7 +61,10 @@ class TestReviewReporterAgent(BaseAgent):
     skills = ("白盒结论审查", "黑盒冒烟审查", "对抗复检", "测试报告生成", "攻击面待验证清单")
 
     def __init__(self) -> None:
-        super().__init__(system_prompt="", temperature=0.2, max_tokens=4096)
+        # 报告输出预算顶到 DeepSeek 输出上限(65536),输入由 BaseAgent 按 1M 窗口投影。
+        from app.core.config import settings
+        super().__init__(system_prompt="", temperature=0.2,
+                         max_tokens=min(65536, int(settings.deepseek_max_output_tokens)))
 
     # ── 工具 ──────────────────────────────────────────────
     @staticmethod
@@ -146,7 +149,7 @@ class TestReviewReporterAgent(BaseAgent):
         evidence = json.dumps(
             {"environment": env_brief, "recon_facts": facts, "conclusion": safe_conclusion},
             ensure_ascii=False, default=str,
-        )[:12000]
+        )
 
         roles: dict[str, Any] = {}
         # 1) 白盒角色
@@ -155,34 +158,34 @@ class TestReviewReporterAgent(BaseAgent):
             "请审查白盒测试证据并输出 ## 白盒结果 小节:\n" + evidence + self._knowledge_refs(db, owner_id, "whitebox"),
             ctx,
         )
-        roles["whitebox"] = {"ok": wb.success, "text": (wb.data or "")[:3000] if wb.success else f"未执行: {wb.error}"}
+        roles["whitebox"] = {"ok": wb.success, "text": (wb.data or "")[:16000] if wb.success else f"未执行: {wb.error}"}
         # 2) 黑盒角色
         bb = self._role_call(
             _BLACKBOX_PROMPT,
             "请审查黑盒/冒烟测试证据并输出 ## 黑盒结果 小节:\n" + evidence + self._knowledge_refs(db, owner_id, "blackbox"),
             ctx,
         )
-        roles["blackbox"] = {"ok": bb.success, "text": (bb.data or "")[:3000] if bb.success else f"未执行: {bb.error}"}
+        roles["blackbox"] = {"ok": bb.success, "text": (bb.data or "")[:16000] if bb.success else f"未执行: {bb.error}"}
         # 3) 对抗复检角色(gate:无证据降级)
         vf = self._role_call(
             _VERIFY_PROMPT,
-            "白盒草稿:\n" + str(roles["whitebox"]["text"])[:3000]
-            + "\n\n黑盒草稿:\n" + str(roles["blackbox"]["text"])[:3000]
-            + "\n\n原始证据:\n" + evidence[:4000]
+            "白盒草稿:\n" + str(roles["whitebox"]["text"])[:16000]
+            + "\n\n黑盒草稿:\n" + str(roles["blackbox"]["text"])[:16000]
+            + "\n\n原始证据:\n" + evidence
             + self._knowledge_refs(db, owner_id, "verify"),
             ctx,
         )
-        roles["verify"] = {"ok": vf.success, "text": (vf.data or "")[:3000] if vf.success else f"未执行: {vf.error}"}
-        # 4) 报告角色(七段报告在大量语法错误时输出较长,放宽 token 上限防截断)
+        roles["verify"] = {"ok": vf.success, "text": (vf.data or "")[:16000] if vf.success else f"未执行: {vf.error}"}
+        # 4) 报告角色(七段报告在大量语法错误时输出较长,用满输出预算防截断)
         rp = self._role_call(
             _REPORT_PROMPT,
-            "白盒结论:\n" + str(roles["whitebox"]["text"])[:3000]
-            + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])[:3000]
-            + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:3000]
-            + "\n\n原始证据:\n" + evidence[:3000]
+            "白盒结论:\n" + str(roles["whitebox"]["text"])[:16000]
+            + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])[:16000]
+            + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:16000]
+            + "\n\n原始证据:\n" + evidence
             + self._knowledge_refs(db, owner_id, "report"),
             ctx,
-            max_tokens=8192,
+            max_tokens=self._max_tokens,
         )
         roles["report"] = {"ok": rp.success, "text": ""}
 

@@ -394,9 +394,19 @@ run_whitebox() {
       command -v go >/dev/null 2>&1 && { go vet ./... >/dev/null 2>&1 || true; }
       ;;
     php)
-      # 逐文件起进程在大项目上必超时(3400+ 文件 × 进程开销 > profile 上限)。
-      # 分批(xargs 一批一进程)收集错误;任一文件语法错误即判失败,但跑完以给出完整清单。
-      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r sh -c 'php -l "$@" 2>&1 | grep -v "No syntax errors detected"' _ || return 1
+      # 逐文件起进程在大项目上必超时(3400+ 文件 × 进程开销 > profile 上限);
+      # php -l 对致命解析错误退出码恒为 0,必须靠输出捕获。分批:外层 sh -c 提供
+      # 参数基址(_ 为 $0,文件从 $1 起),每批 50 个文件一次进程。
+      # 判定:仅 Fatal/Parse error 算失败(PHP8 对老库大量 Deprecated/Warning 是
+      # 提示级,`php -l` 对其退出码为 0,不该判白盒失败);Deprecated/Warning 仍输出供审查。
+      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r php -l 2>&1 \
+        | grep -v 'No syntax errors detected' > /tmp/.lint_all || true
+      grep -E 'Fatal error|Parse error|Errors parsing' /tmp/.lint_all > /tmp/.lint_fatal || true
+      if [ -s /tmp/.lint_fatal ]; then
+        cat /tmp/.lint_fatal
+        return 1
+      fi
+      cat /tmp/.lint_all
       ;;
   esac
   return 0
