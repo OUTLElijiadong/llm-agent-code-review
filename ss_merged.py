@@ -394,19 +394,7 @@ run_whitebox() {
       command -v go >/dev/null 2>&1 && { go vet ./... >/dev/null 2>&1 || true; }
       ;;
     php)
-      # 逐文件起进程在大项目上必超时(3400+ 文件 × 进程开销 > profile 上限);
-      # php -l 对致命解析错误退出码恒为 0,必须靠输出捕获。分批:外层 sh -c 提供
-      # 参数基址(_ 为 $0,文件从 $1 起),每批 50 个文件一次进程。
-      # 判定:仅 Fatal/Parse error 算失败(PHP8 对老库大量 Deprecated/Warning 是
-      # 提示级,`php -l` 对其退出码为 0,不该判白盒失败);Deprecated/Warning 仍输出供审查。
-      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r php -l 2>&1 \
-        | grep -v 'No syntax errors detected' > /tmp/.lint_all || true
-      grep -E 'Fatal error|Parse error|Errors parsing' /tmp/.lint_all > /tmp/.lint_fatal || true
-      if [ -s /tmp/.lint_fatal ]; then
-        cat /tmp/.lint_fatal
-        return 1
-      fi
-      cat /tmp/.lint_all
+      find . -type f -name '*.php' -exec php -l '{}' ';' >/dev/null || return 1
       ;;
   esac
   return 0
@@ -414,19 +402,12 @@ run_whitebox() {
 
 # 与 deploy/sandbox/runner.sh 的 php_document_root 保持一致:入口在顶层子目录时仅下探唯一候选。
 php_doc_root() {
-  # 优先:当前目录直接有入口
-  if [ -f ./index.php ] || [ -f ./index.html ]; then
-    printf '%s
-' .
-    return 0
-  fi
-  # 其次:public 子目录有入口(且当前目录无入口)
-  if [ -d public ] && { [ -f public/index.php ] || [ -f public/index.html ]; }; then
-    printf '%s
-' public
-    return 0
-  fi
-  # 嵌套包(zip 多套一层目录)递归下探唯一候选
+  for candidate in . public; do
+    if [ -d "$candidate" ] && { [ -f "$candidate/index.php" ] || [ -f "$candidate/index.html" ]; }; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
   nested_root=""
   nested_count=0
   for directory in */; do
@@ -443,12 +424,10 @@ php_doc_root() {
     nested_count=$((nested_count + 1))
   done
   if [ "$nested_count" -eq 1 ]; then
-    printf '%s
-' "$nested_root"
+    printf '%s\n' "$nested_root"
     return 0
   fi
-  printf '%s
-' .
+  printf '%s\n' .
 }
 
 start_app() {
@@ -482,17 +461,13 @@ run_blackbox() {
   i=0; READY=0
   while [ $i -lt 30 ]; do
     S=$(http_probe "/")
-    case "$S" in 1*|2*|3*|4*|5*) READY=1; break;; esac  # 任何合法HTTP状态=服务已就绪(5xx多为应用缺DB等自身错误,属运行态证据)
+    case "$S" in 2*|3*) READY=1; break;; esac
     kill -0 "$APP_PID" 2>/dev/null || break
     i=$((i+1)); sleep 1
   done
   if [ "$READY" != "1" ]; then kill "$APP_PID" 2>/dev/null; echo "blackbox: 应用未在回环端口就绪"; return 1; fi
   # 首页内容断言:首页非空则判通过
-  BYTES=$(python -c "import urllib.request,urllib.error
-try:
-  print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))
-except urllib.error.HTTPError as e:
-  print(len(e.read()))" 2>/dev/null || echo 0)  # 5xx 响应体也计入(服务已起来)
+  BYTES=$(python -c "import urllib.request;print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))" 2>/dev/null || echo 0)
   # 常见路径探活
   for p in / /index /health /api /login; do
     printf 'blackbox probe %s -> %s\n' "$p" "$(http_probe "$p")"

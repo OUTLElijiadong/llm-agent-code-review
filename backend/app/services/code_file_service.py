@@ -12,6 +12,7 @@ T06 增强(2026-06-25):
 - CodeFile 入库时写入 raw_size 字段(用于项目总大小校验)
 """
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Optional, Tuple
 
 from fastapi import UploadFile
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.ai.language_detector import detect_language
 from app.core.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.models.agent_capability import SandboxEnvironment
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.project import Project
@@ -132,10 +134,112 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
 
         # 普通文件:校验扩展名
         safe_name = validate_filename(filename, settings.allowed_extensions)
-        return _upload_single_file(db, user, project_id, safe_name, raw, file_path, language)
+        logical_path = normalize_source_path(file_path, safe_name)
+        return _upload_single_file(db, user, project_id, safe_name, raw, logical_path, language)
+    except MaliciousUploadError as exc:
+        # 命中恶意内容:若项目干净(无已入库文件),自动转投隔离归档而非拒绝,
+        # 让后续审计/测试/沙箱内部署可以安全进行;沙箱外绝不裸跑。
+        db.rollback()
+        quarantine = _try_auto_quarantine(db, user, project_id, raw, filename, exc.threat_name)
+        if quarantine is not None:
+            return quarantine
+        raise
     except Exception:
         db.rollback()
         raise
+
+
+def _try_auto_quarantine(
+    db: Session,
+    user: User,
+    project_id: int,
+    raw: bytes,
+    filename: str,
+    threat_name: str,
+) -> Optional[tuple]:
+    """把命中恶意的上传自动转投隔离归档链路。
+
+    仅当项目当前完全干净(无可编辑文件、无活动归档、无活动部署)时执行,
+    避免清空用户已有源码或破坏既有隔离语义。不符合条件时返回 None,
+    由上层保持原拒绝语义。
+
+    Args:
+        db: 数据库会话。
+        user: 当前用户。
+        project_id: 项目ID。
+        raw: 上传原始字节。
+        filename: 原始文件名(应为归档)。
+        threat_name: 命中的威胁名,写入归档摘要。
+
+    Returns:
+        Optional[tuple]: 隔离成功后返回 (0, "quarantined", 0),否则 None。
+    """
+    try:
+        existing_files = db.query(CodeFile.id).filter(
+            CodeFile.project_id == project_id,
+            CodeFile.status == "active",
+        ).count()
+        if existing_files:
+            return None
+        if db.query(ProjectSourceArchive.id).filter(
+            ProjectSourceArchive.project_id == project_id,
+            ProjectSourceArchive.storage_status == "active",
+        ).first():
+            return None
+        active_deployment = db.query(SandboxEnvironment.id).filter(
+            SandboxEnvironment.project_id == project_id,
+            SandboxEnvironment.purpose == "deploy",
+            SandboxEnvironment.status.in_(("queued", "dispatching", "running", "ready", "stopping")),
+        ).first()
+        if active_deployment is not None:
+            return None
+
+        from app.services import project_source_service
+
+        archive_data = project_source_service.ingest_source_archive_bytes(
+            db,
+            user,
+            project_id,
+            raw=raw,
+            filename=filename,
+        )
+        logger.info(
+            "[upload] 恶意上传已自动隔离 project=%s file=%s threat=%s status=%s",
+            project_id,
+            filename,
+            threat_name,
+            archive_data.get("malware_status"),
+        )
+        return (0, "quarantined", 0)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("[upload] 自动隔离失败,保持拒绝 project=%s err=%s", project_id, str(exc))
+        return None
+
+
+def normalize_source_path(path: Optional[str], fallback_name: str) -> str:
+    """把浏览器上传的相对路径收敛为可入库的 POSIX 项目路径。"""
+    normalized = str(path or fallback_name).replace("\\", "/").strip()
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or normalized.startswith("//")
+        or len(normalized) > 500
+        or any(ord(character) < 32 or ord(character) == 127 for character in normalized)
+    ):
+        raise ValidationError("文件相对路径不合法", code=40001)
+    parts = PurePosixPath(normalized).parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise ValidationError("文件相对路径不合法", code=40001)
+    return "/".join(parts)
+
+
+def normalize_folder_upload_paths(paths: list[str]) -> list[str]:
+    """保留文件夹子目录，并去掉浏览器附带的共同根目录。"""
+    normalized = [normalize_source_path(path, PurePosixPath(path).name) for path in paths]
+    parts = [PurePosixPath(path).parts for path in normalized]
+    common_root = bool(parts) and all(len(item) > 1 and item[0] == parts[0][0] for item in parts)
+    return ["/".join(item[1:] if common_root else item) for item in parts]
 
 
 def _validate_upload_security(
@@ -167,6 +271,14 @@ def _validate_upload_security(
     _enforce_scan_result(scan_result, filename)
 
 
+class MaliciousUploadError(ValueError):
+    """扫描命中恶意内容。携带威胁名称供上层决定隔离或拒绝。"""
+
+    def __init__(self, message: str, threat_name: str) -> None:
+        super().__init__(message)
+        self.threat_name = threat_name
+
+
 def _enforce_scan_result(
     scan_result, filename: str, archive_member: bool = False,
 ) -> None:
@@ -181,12 +293,14 @@ def _enforce_scan_result(
         None: 允许继续上传时静默返回。
 
     Raises:
-        ValueError: 检测到威胁，或生产 fail-closed 下扫描能力不可信。
+        MaliciousUploadError: 检测到威胁，上层可转为隔离归档或拒绝。
+        ValueError: 生产 fail-closed 下扫描能力不可信。
     """
     prefix = f"压缩包内文件 {filename} " if archive_member else ""
     if scan_result.result == "infected":
-        raise ValueError(
-            f"{prefix}检测到恶意软件: {scan_result.threat_name},文件已被拒绝"
+        raise MaliciousUploadError(
+            f"{prefix}检测到恶意软件: {scan_result.threat_name}",
+            threat_name=scan_result.threat_name or "unknown",
         )
 
     scan_untrusted = (
@@ -450,7 +564,7 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
     code_file = CodeFile(
         project_id=project_id,
         file_name=file_name,
-        file_path=file_path or file_name,
+        file_path=normalize_source_path(file_path, file_name),
         language=language,
         size_bytes=size_bytes,
         line_count=line_count,

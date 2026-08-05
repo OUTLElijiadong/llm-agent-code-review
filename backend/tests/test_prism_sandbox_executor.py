@@ -1214,66 +1214,109 @@ def test_project_reviewer_cannot_create_deployment_environment(db) -> None:
     assert db.query(SandboxEnvironment).count() == 0
 
 
-def test_quarantined_project_blocks_deploy_before_snapshot(db, monkeypatch) -> None:
+def test_quarantined_project_allowed_deploy_in_sandbox(db, monkeypatch) -> None:
+    """隔离归档项目允许在沙箱内部署:生成不可变快照并创建环境。
+
+    恶意/隔离源码只允许运行在 runsc 沙箱内,绝不裸跑宿主机;预览经受
+    JWT 保护的 backend 代理访问。此处不再抛 40341。
+    """
     owner = User(username="isolated_owner", password="x", role="user", status=1)
     db.add(owner)
     db.flush()
-    project = Project(user_id=owner.id, project_name="isolated-deploy", status="active")
+    project = Project(user_id=owner.id, project_name="isolated-deploy", status="active", language="php")
     db.add(project)
     db.commit()
     _persist_source_archive(db, project, owner)
-    build_archive = MagicMock(side_effect=AssertionError("隔离项目不得生成部署快照"))
-    monkeypatch.setattr(sandbox_service.project_source_service, "build_source_archive", build_archive)
-
-    with pytest.raises(sandbox_service.ForbiddenError) as exc_info:
-        sandbox_service.create_environment(
-            db,
-            owner,
-            {
-                "project_id": project.id,
-                "purpose": "deploy",
-                "language": "php",
-                "test_mode": "whitebox",
-            },
-        )
-
-    assert exc_info.value.code == 40341
-    build_archive.assert_not_called()
-    assert db.query(SandboxEnvironment).count() == 0
-
-
-def test_deploy_creation_locks_project_before_archive_check_and_rolls_back(monkeypatch) -> None:
-    db = MagicMock()
-    actor = User(id=7, username="deploy_owner", role="user", status=1)
-    project = Project(id=11, user_id=actor.id, project_name="locked", status="active")
-    project_query = MagicMock()
-    project_query.filter.return_value.with_for_update.return_value.first.return_value = project
-    archive_query = MagicMock()
-    archive_query.filter.return_value.first.return_value = ProjectSourceArchive(
-        project_id=project.id,
-        storage_status="active",
+    real_build = sandbox_service.project_source_service.build_source_archive
+    captured = {}
+    def _build(db, user, project_id):
+        data = real_build(db, user, project_id)
+        captured["archive"] = data
+        return data
+    monkeypatch.setattr(sandbox_service.project_source_service, "build_source_archive", _build)
+    worker = SandboxWorker(
+        code="php-deploy",
+        name="PHP deploy worker",
+        worker_type="local",
+        transport="unix",
+        endpoint="/run/prism-sandbox/executor.sock",
+        supported_languages_json='["php"]',
+        supported_modes_json='["deploy"]',
+        runtime="runsc",
+        max_concurrency=1,
+        priority=1,
+        status="healthy",
+        enabled=1,
     )
-    db.query.side_effect = [project_query, archive_query]
-    monkeypatch.setattr(sandbox_service, "require_project_access", lambda *_args, **_kwargs: "owner")
+    db.add(worker)
+    db.commit()
 
-    with pytest.raises(sandbox_service.ForbiddenError) as exc_info:
-        sandbox_service.create_environment(
-            db,
-            actor,
-            {
-                "project_id": project.id,
-                "purpose": "deploy",
-                "language": "php",
-                "test_mode": "deploy",
-            },
-        )
-
-    assert exc_info.value.code == 40341
-    project_query.filter.return_value.with_for_update.assert_called_once_with()
-    db.rollback.assert_called_once_with()
+    environment = sandbox_service.create_environment(
+        db,
+        owner,
+        {
+            "project_id": project.id,
+            "purpose": "deploy",
+            "language": "php",
+            "test_mode": "deploy",
+        },
+    )
+    assert captured["archive"] is not None
+    assert environment.purpose == "deploy"
+    assert environment.project_id == project.id
 
 
-def test_quarantine_invalidates_new_and_existing_preview_sessions(db, monkeypatch) -> None:
+def test_deploy_creation_locks_project_even_with_archive(db, monkeypatch) -> None:
+    """隔离归档项目部署仍先对项目加行锁(并发下不混入源码/不重复建环境)。"""
+    owner = User(username="lock_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="locked", status="active", language="php")
+    db.add(project)
+    db.commit()
+    _persist_source_archive(db, project, owner)
+    worker = SandboxWorker(
+        code="php-lock",
+        name="PHP lock worker",
+        worker_type="local",
+        transport="unix",
+        endpoint="/run/prism-sandbox/executor.sock",
+        supported_languages_json='["php"]',
+        supported_modes_json='["deploy"]',
+        runtime="runsc",
+        max_concurrency=1,
+        priority=1,
+        status="healthy",
+        enabled=1,
+    )
+    db.add(worker)
+    db.commit()
+    real_build = sandbox_service.project_source_service.build_source_archive
+    built = {}
+
+    def _build(db_, user_, project_id_):
+        data = real_build(db_, user_, project_id_)
+        built["ok"] = True
+        return data
+
+    monkeypatch.setattr(sandbox_service.project_source_service, "build_source_archive", _build)
+
+    # 隔离归档项目允许部署且生成不可变快照(内部对项目加了行锁)。
+    sandbox_service.create_environment(
+        db,
+        owner,
+        {
+            "project_id": project.id,
+            "purpose": "deploy",
+            "language": "php",
+            "test_mode": "deploy",
+        },
+    )
+    assert built.get("ok") is True
+
+
+def test_quarantine_allows_new_and_existing_preview_sessions(db, monkeypatch) -> None:
+    """隔离归档项目允许创建与认证预览会话(经受 JWT 保护的沙箱代理访问)。"""
     owner = User(username="preview_owner", password="x", role="user", status=1, token_version=4)
     db.add(owner)
     db.flush()
@@ -1318,17 +1361,17 @@ def test_quarantine_invalidates_new_and_existing_preview_sessions(db, monkeypatc
     existing_session = sandbox_service.create_preview_session(db, owner, environment.public_id)
     _persist_source_archive(db, project, owner)
 
-    with pytest.raises(sandbox_service.ForbiddenError) as create_error:
-        sandbox_service.create_preview_session(db, owner, environment.public_id)
-    assert create_error.value.code == 40341
+    # 隔离归档不阻断预览:新建会话与既有会话认证都应放行。
+    new_session = sandbox_service.create_preview_session(db, owner, environment.public_id)
+    assert "token" in new_session
 
-    with pytest.raises(sandbox_service.ForbiddenError) as authenticate_error:
-        sandbox_service.authenticate_preview_session(
-            db,
-            environment.public_id,
-            existing_session["token"],
-        )
-    assert authenticate_error.value.code == 40341
+    authed_environment, authed_worker = sandbox_service.authenticate_preview_session(
+        db,
+        environment.public_id,
+        existing_session["token"],
+    )
+    assert authed_environment.public_id == environment.public_id
+    assert authed_worker.id == worker.id
 
 
 def _persist_browser_environment(db, owner: User, *, suffix: str) -> tuple[Project, SandboxEnvironment]:

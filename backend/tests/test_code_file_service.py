@@ -284,8 +284,12 @@ class TestUploadMalwareScan:
         )
         assert file_id > 0
 
-    def test_archive_with_malware_inside_rejected(self, db, monkeypatch):
-        """压缩包内含恶意文件应被拒绝(v2:外层不扫描,解包后逐成员扫描命中即拒绝)"""
+    def test_archive_with_malware_inside_auto_quarantined(self, db, monkeypatch):
+        """压缩包内含恶意文件自动转投隔离归档而非拒绝。
+
+        项目当前干净(无已入库文件)时,命中恶意的归档整体进入隔离审计链路,
+        允许后续在沙箱内审计/测试/部署预览,而不会混入可编辑源码。
+        """
         monkeypatch.setattr(
             "app.services.code_file_service.get_scanner",
             lambda: _make_infected_scanner("Webshell.PHP.Shell"),
@@ -295,10 +299,24 @@ class TestUploadMalwareScan:
         zip_bytes = _make_zip({"shell.php": b'<?php eval(base64_decode("x")); ?>'})
         upload_file = _make_upload_file("evil.zip", zip_bytes)
 
-        with pytest.raises(ValueError, match="压缩包内文件.*检测到恶意软件"):
-            code_file_service.upload(
-                db=db, user=user, project_id=project.id, upload_file=upload_file,
+        file_id, lang, ver = code_file_service.upload(
+            db=db, user=user, project_id=project.id, upload_file=upload_file,
+        )
+        assert (file_id, lang, ver) == (0, "quarantined", 0)
+
+        from app.models.project_source_archive import ProjectSourceArchive
+        archive = (
+            db.query(ProjectSourceArchive)
+            .filter(
+                ProjectSourceArchive.project_id == project.id,
+                ProjectSourceArchive.storage_status == "active",
             )
+            .first()
+        )
+        assert archive is not None
+        # 测试环境无 ClamAV/YARA 时归档扫描降级(degraded);只要进入隔离态即证明自动隔离生效,
+        # 生产环境双引擎就绪时命中恶意会标记为 infected。
+        assert archive.malware_status != "clean"
 
 
 # ============ 二进制文件入库 ============
@@ -561,7 +579,7 @@ class TestSecurityChainOrder:
             )
 
     def test_malware_scan_before_archive_extraction(self, db, monkeypatch):
-        """恶意软件扫描应优先于解压(外层扫描命中即拒绝)"""
+        """恶意软件扫描应优先于解压(外层扫描命中即自动隔离,不进入解包)"""
         monkeypatch.setattr(
             "app.services.code_file_service.get_scanner",
             lambda: _make_infected_scanner("Zip.Malware"),
@@ -571,10 +589,16 @@ class TestSecurityChainOrder:
         zip_bytes = _make_zip({"clean.py": "print('hi')\n"})
         upload_file = _make_upload_file("malware.zip", zip_bytes)
 
-        with pytest.raises(ValueError, match="检测到恶意软件"):
-            code_file_service.upload(
-                db=db, user=user, project_id=project.id, upload_file=upload_file,
-            )
+        file_id, lang, ver = code_file_service.upload(
+            db=db, user=user, project_id=project.id, upload_file=upload_file,
+        )
+        assert (file_id, lang, ver) == (0, "quarantined", 0)
+        # 外层扫描命中后进入隔离,不应有任何可编辑文件被解包入库。
+        from app.models.code_file import CodeFile
+        assert db.query(CodeFile.id).filter(
+            CodeFile.project_id == project.id,
+            CodeFile.status == "active",
+        ).count() == 0
 
 
 # ============ 集成:端到端 ============

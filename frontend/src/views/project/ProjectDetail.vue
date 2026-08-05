@@ -560,9 +560,11 @@ async function onFileSelected(e: Event): Promise<void> {
       const formData = new FormData()
       formData.append('file', files[0])
       formData.append('project_id', String(projectId))
-      await upload(formData)
-      // v2: 压缩包上传后后端自动解压,提示用户解压结果
-      if (isArchiveFile(files[0].name)) {
+      const uploaded = await upload(formData)
+      if (uploaded.quarantined) {
+        ElMessage.warning(`检测到恶意内容,源码包已隔离(仅限沙箱内审计/测试/部署)`)
+      } else if (isArchiveFile(files[0].name)) {
+        // v2: 压缩包上传后后端自动解压,提示用户解压结果
         ElMessage.success(`压缩包 ${files[0].name} 已上传并自动解压,请刷新文件列表查看`)
       } else {
         ElMessage.success('文件上传成功')

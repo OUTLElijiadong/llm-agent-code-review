@@ -25,6 +25,10 @@ PLAYBOOKS = {
         "title": "管理员运维操作知识库",
         "file": "manager_ops_playbook.md",
     },
+    "test_review": {
+        "title": "沙箱测试审查知识库",
+        "file": "sandbox_test_review_playbook.md",
+    },
 }
 
 CONTENT_DIR = Path(__file__).resolve().parent.parent / "app" / "ai" / "agent_knowledge"

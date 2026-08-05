@@ -309,71 +309,6 @@ LANG_="${PRISM_LANGUAGE:-python}"
 PORT="${PRISM_PREVIEW_PORT:-8080}"
 cd /workspace 2>/dev/null || true
 
-# ── v3.5 多Agent测试: Recon 事实采集(零LLM,结构化facts供沙箱外Agent推理) ──
-collect_facts() {
-python3 - <<'PYEOF' 2>/dev/null || true
-import json, os, re
-facts = {"entrypoints": [], "test_files": {"found": 0, "framework": ""},
-         "endpoints": [], "param_hints": [], "hardcoded_secrets": []}
-entry_names = {"main.py", "app.py", "manage.py", "wsgi.py", "asgi.py", "index.js",
-               "server.js", "app.js", "main.go", "go.mod", "pom.xml", "index.php"}
-test_re = re.compile(r"(^test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)")
-route_re = re.compile(
-    r"(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
-    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
-    r"path\s*\(\s*['\"]([^'\"]+)['\"]", re.I)
-secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"]([^'\"]{6,})['\"]", re.I)
-param_names = {"file", "path", "filename", "download", "url", "callback", "id", "userid",
-               "orderid", "template", "export", "redirect", "next", "upload"}
-endpoints, secrets, params, tests = [], [], set(), 0
-framework = ""
-for root, dirs, files in os.walk("."):
-    dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", "venv", ".venv", "vendor"}]
-    for fn in files:
-        p = os.path.join(root, fn)
-        if fn in entry_names:
-            facts["entrypoints"].append(p.lstrip("./"))
-        if test_re.search(fn):
-            tests += 1
-            if fn.endswith(".py"): framework = framework or "pytest"
-            if fn.endswith(".js"): framework = framework or "jest"
-        if not fn.endswith((".py", ".js", ".ts", ".go", ".java", ".php")):
-            continue
-        try:
-            with open(p, "r", errors="ignore") as fh:
-                src = fh.read(200000)
-        except OSError:
-            continue
-        for m in route_re.finditer(src):
-            ep = m.group(1) or m.group(2) or m.group(3)
-            if ep and ep.startswith("/") and len(endpoints) < 60:
-                endpoints.append({"path": ep, "file": p.lstrip("./")})
-        for m in secret_re.finditer(src):
-            if len(secrets) < 20:
-                secrets.append({"file": p.lstrip("./"), "kind": m.group(1)})
-        for name in param_names:
-            if re.search(r"[?&\"'\s]" + name + r"[\"'=:\s]", src, re.I):
-                params.add(name)
-facts["test_files"] = {"found": tests, "framework": framework}
-facts["endpoints"] = endpoints
-facts["hardcoded_secrets"] = secrets
-facts["param_hints"] = sorted(params)
-with open("/tmp/prism_facts.json", "w") as out:
-    json.dump(facts, out, ensure_ascii=False)
-print("facts: entries=%d endpoints=%d secrets=%d tests=%d" % (
-    len(facts["entrypoints"]), len(endpoints), len(secrets), tests))
-PYEOF
-}
-
-emit_facts() {  # 把 facts 打到日志,后端经 docker logs 回收
-  if [ -f /tmp/prism_facts.json ]; then
-    echo "PRISM_FACTS_BEGIN"
-    cat /tmp/prism_facts.json
-    echo ""
-    echo "PRISM_FACTS_END"
-  fi
-}
-
 run_whitebox() {
   case "$LANG_" in
     python)
@@ -394,19 +329,7 @@ run_whitebox() {
       command -v go >/dev/null 2>&1 && { go vet ./... >/dev/null 2>&1 || true; }
       ;;
     php)
-      # 逐文件起进程在大项目上必超时(3400+ 文件 × 进程开销 > profile 上限);
-      # php -l 对致命解析错误退出码恒为 0,必须靠输出捕获。分批:外层 sh -c 提供
-      # 参数基址(_ 为 $0,文件从 $1 起),每批 50 个文件一次进程。
-      # 判定:仅 Fatal/Parse error 算失败(PHP8 对老库大量 Deprecated/Warning 是
-      # 提示级,`php -l` 对其退出码为 0,不该判白盒失败);Deprecated/Warning 仍输出供审查。
-      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r php -l 2>&1 \
-        | grep -v 'No syntax errors detected' > /tmp/.lint_all || true
-      grep -E 'Fatal error|Parse error|Errors parsing' /tmp/.lint_all > /tmp/.lint_fatal || true
-      if [ -s /tmp/.lint_fatal ]; then
-        cat /tmp/.lint_fatal
-        return 1
-      fi
-      cat /tmp/.lint_all
+      find . -type f -name '*.php' -exec php -l '{}' ';' >/dev/null || return 1
       ;;
   esac
   return 0
@@ -414,19 +337,12 @@ run_whitebox() {
 
 # 与 deploy/sandbox/runner.sh 的 php_document_root 保持一致:入口在顶层子目录时仅下探唯一候选。
 php_doc_root() {
-  # 优先:当前目录直接有入口
-  if [ -f ./index.php ] || [ -f ./index.html ]; then
-    printf '%s
-' .
-    return 0
-  fi
-  # 其次:public 子目录有入口(且当前目录无入口)
-  if [ -d public ] && { [ -f public/index.php ] || [ -f public/index.html ]; }; then
-    printf '%s
-' public
-    return 0
-  fi
-  # 嵌套包(zip 多套一层目录)递归下探唯一候选
+  for candidate in . public; do
+    if [ -d "$candidate" ] && { [ -f "$candidate/index.php" ] || [ -f "$candidate/index.html" ]; }; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
   nested_root=""
   nested_count=0
   for directory in */; do
@@ -443,12 +359,10 @@ php_doc_root() {
     nested_count=$((nested_count + 1))
   done
   if [ "$nested_count" -eq 1 ]; then
-    printf '%s
-' "$nested_root"
+    printf '%s\n' "$nested_root"
     return 0
   fi
-  printf '%s
-' .
+  printf '%s\n' .
 }
 
 start_app() {
@@ -482,17 +396,13 @@ run_blackbox() {
   i=0; READY=0
   while [ $i -lt 30 ]; do
     S=$(http_probe "/")
-    case "$S" in 1*|2*|3*|4*|5*) READY=1; break;; esac  # 任何合法HTTP状态=服务已就绪(5xx多为应用缺DB等自身错误,属运行态证据)
+    case "$S" in 2*|3*) READY=1; break;; esac
     kill -0 "$APP_PID" 2>/dev/null || break
     i=$((i+1)); sleep 1
   done
   if [ "$READY" != "1" ]; then kill "$APP_PID" 2>/dev/null; echo "blackbox: 应用未在回环端口就绪"; return 1; fi
   # 首页内容断言:首页非空则判通过
-  BYTES=$(python -c "import urllib.request,urllib.error
-try:
-  print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))
-except urllib.error.HTTPError as e:
-  print(len(e.read()))" 2>/dev/null || echo 0)  # 5xx 响应体也计入(服务已起来)
+  BYTES=$(python -c "import urllib.request;print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))" 2>/dev/null || echo 0)
   # 常见路径探活
   for p in / /index /health /api /login; do
     printf 'blackbox probe %s -> %s\n' "$p" "$(http_probe "$p")"
@@ -505,23 +415,11 @@ except urllib.error.HTTPError as e:
 }
 
 case "$MODE" in
-  whitebox)
-    collect_facts
-    run_whitebox; WB=$?
-    emit_facts
-    [ $WB -eq 0 ] && { echo "PRISM_VERIFY whitebox ok"; exit 0; } || { echo "PRISM_VERIFY whitebox fail"; exit 1; }
-    ;;
-  blackbox)
-    collect_facts
-    run_blackbox; BB=$?
-    emit_facts
-    [ $BB -eq 0 ] && { echo "PRISM_VERIFY blackbox ok"; exit 0; } || { echo "PRISM_VERIFY blackbox fail"; exit 1; }
-    ;;
+  whitebox) run_whitebox && { echo "PRISM_VERIFY whitebox ok"; exit 0; } || { echo "PRISM_VERIFY whitebox fail"; exit 1; } ;;
+  blackbox) run_blackbox && { echo "PRISM_VERIFY blackbox ok"; exit 0; } || { echo "PRISM_VERIFY blackbox fail"; exit 1; } ;;
   combined)
-    collect_facts
     run_whitebox; WHITEBOX_OK=$?
     run_blackbox; BB=$?
-    emit_facts
     [ $WHITEBOX_OK -eq 0 ] && [ $BB -eq 0 ] && { echo "PRISM_VERIFY combined ok"; exit 0; } || { echo "PRISM_VERIFY combined fail"; exit 1; }
     ;;
   *) echo "unknown mode"; exit 64 ;;
@@ -580,17 +478,6 @@ def _run_deploy_auto_tests(
             log_text = str((logs or {}).get("text") or "")
             passed = str(result.get("status")) == "succeeded" and exit_code == 0
             results.append({"mode": mode, "passed": passed, "exit_code": exit_code, "log": log_text[-1500:]})
-            # 提取 Recon 结构化事实(PRISM_FACTS_BEGIN/END 包裹),供多Agent审查使用
-            facts = _extract_prism_facts(log_text)
-            if facts:
-                results[-1]["facts"] = facts
-                _persist_browser_artifact(
-                    db, environment,
-                    artifact_type="recon_facts",
-                    file_name=f"recon-facts-{mode}-{environment.public_id}.json",
-                    mime_type="application/json",
-                    content=json.dumps(facts, ensure_ascii=False).encode("utf-8"),
-                )
             _append_event(
                 db, environment,
                 "complete" if passed else "progress", f"auto_{mode}",
@@ -610,81 +497,6 @@ def _run_deploy_auto_tests(
             _append_event(db, environment, "progress", f"auto_{mode}", f"部署后自动{mode}测试异常: {str(exc)[:120]}")
             db.commit()
     return results
-
-
-def _extract_prism_facts(log_text: str) -> dict[str, Any] | None:
-    """从容器日志提取 PRISM_FACTS_BEGIN/END 包裹的 Recon 结构化事实。"""
-    m = re.search(r"PRISM_FACTS_BEGIN\s*(\{.*?\})\s*PRISM_FACTS_END", log_text, re.S)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(1))
-    except (ValueError, TypeError):
-        return None
-
-
-def _run_test_review_report(
-    db: Session,
-    environment: SandboxEnvironment,
-    conclusion: dict[str, Any],
-) -> dict[str, Any] | None:
-    """黑白盒测试终态后,调用多Agent审查编排产出中文报告并落制品。
-
-    失败静默(只记事件不阻断):LLM 未配置/超时/任一角色异常都不影响测试结论。
-    返回写入 result_json 的摘要 dict,未执行或失败返回 None。
-    """
-    try:
-        from app.agents.test_review_reporter_agent import TestReviewReporterAgent
-        from app.agents.base import AgentContext
-
-        agent = TestReviewReporterAgent()
-        if not agent._api_key:
-            _append_event(db, environment, "progress", "multi_agent_review",
-                          "LLM 未配置,跳过多 Agent 测试审查报告")
-            db.commit()
-            return None
-        ctx = AgentContext(
-            user_id=environment.owner_id,
-            project_id=environment.project_id,
-            extra={"trace_id": environment.public_id},
-        )
-        result = agent.review(db, environment=environment, conclusion=conclusion, ctx=ctx)
-        if not result.success:
-            _append_event(db, environment, "progress", "multi_agent_review",
-                          f"多 Agent 测试审查未生成: {str(result.error)[:120]}")
-            db.commit()
-            return None
-        data = result.data if isinstance(result.data, dict) else {}
-        report_md = str(data.get("report_md") or "")
-        roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
-        if not report_md:
-            return None
-        artifact = _persist_browser_artifact(
-            db, environment,
-            artifact_type="review_report",
-            file_name=f"sandbox-review-report-{environment.public_id}.md",
-            mime_type="text/markdown",
-            content=report_md.encode("utf-8", errors="replace"),
-        )
-        summary = {
-            "agent_code": "test_reviewer",
-            "artifact_id": artifact.id,
-            "roles_executed": int(data.get("roles_executed") or 0),
-            "roles": {k: {"ok": bool(v.get("ok"))} for k, v in roles.items() if isinstance(v, dict)},
-            "report_bytes": len(report_md.encode("utf-8")),
-        }
-        _append_event(
-            db, environment, "complete", "multi_agent_review",
-            f"多 Agent 测试审查报告已生成(角色 {summary['roles_executed']}/4)",
-            summary,
-        )
-        db.commit()
-        return summary
-    except Exception as exc:  # noqa: BLE001 - 审查增强失败不阻断测试结论
-        _append_event(db, environment, "progress", "multi_agent_review",
-                      f"多 Agent 测试审查异常: {str(exc)[:120]}")
-        db.commit()
-        return None
 
 
 def artifact_to_dict(row: SandboxArtifact) -> dict[str, Any]:
@@ -1679,18 +1491,13 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             evidence["auto_smoke_test"] = auto_smoke
         environment.result_json = _json(conclusion)
         artifacts = _persist_artifacts(db, environment, conclusion)
-        # 黑白盒链路结束后,由多Agent审查编排产出中文报告(失败只记录,不阻断)
-        review_report = _run_test_review_report(db, environment, conclusion)
-        if review_report is not None:
-            conclusion["multi_agent_review"] = review_report
-            environment.result_json = _json(conclusion)
         _append_event(
             db,
             environment,
             "complete" if passed else "failed",
             "conclusion",
             conclusion["summary"],
-            {"passed": passed, "artifact_count": len(artifacts), "multi_agent_review": bool(review_report)},
+            {"passed": passed, "artifact_count": len(artifacts)},
         )
         db.commit()
         _emit(
