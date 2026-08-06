@@ -67,9 +67,12 @@ class TestCaseGeneratorAgent(BaseAgent):
             "5. 输出 JSON 格式: {\"files\": [{\"path\": \"test_ai_1.py\", \"content\": \"...\"}]}\n"
         )
         try:
-            data = self.call_json(user_message, ctx=ctx)
+            agent_result = self.call_json(user_message, ctx=ctx)
         except Exception as exc:  # noqa: BLE001 - 生成失败由调用方降级
             return {"error": str(exc)[:300]}
+        if not getattr(agent_result, "success", False):
+            return {"error": str(getattr(agent_result, "error", "生成失败"))[:300]}
+        data = getattr(agent_result, "data", None)
         files = data.get("files") if isinstance(data, dict) else None
         if not isinstance(files, list):
             return {"error": "生成结果缺少 files 数组"}

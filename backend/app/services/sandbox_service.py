@@ -1759,16 +1759,18 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             agent_tests_result = _extract_agent_tests_result(str(worker_logs["text"]))
             if agent_tests_result is not None:
                 evidence["agent_tests"] = agent_tests_result
-                agent_ok = bool(agent_tests_result.get("passed"))
-                _append_event(
-                    db, environment,
-                    "complete" if agent_ok else "failed",
-                    "agent_tests",
-                    f"agent 动态测试{'通过' if agent_ok else '未通过'}"
-                    f"(生成 {int(agent_tests_result.get('generated') or 0)} 个,"
-                    f"通过 {int(agent_tests_result.get('passed_count') or 0)} 个)",
-                    agent_tests_result,
-                )
+                generated = int(agent_tests_result.get("generated") or 0)
+                agent_ok = bool(agent_tests_result.get("passed")) if generated else True
+                if generated == 0:
+                    message = "未注入 agent 动态测试用例,沿用常规测试结果"
+                    event_type = "progress"
+                else:
+                    message = (
+                        f"agent 动态测试{'通过' if agent_ok else '未通过'}"
+                        f"(生成 {generated} 个,通过 {int(agent_tests_result.get('passed_count') or 0)} 个)"
+                    )
+                    event_type = "complete" if agent_ok else "failed"
+                _append_event(db, environment, event_type, "agent_tests", message, agent_tests_result)
                 db.commit()
         if environment.remote_target_url:
             _append_event(db, environment, "progress", "remote_blackbox", "已在授权边界内调用远程 HTTP(S) 黑盒探测")
