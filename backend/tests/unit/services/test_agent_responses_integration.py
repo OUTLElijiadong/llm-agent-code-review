@@ -2104,3 +2104,35 @@ async def test_api_request_accepts_retry_action_and_dispatches_resume(monkeypatc
     assert seen == {"run_id": "run_retry_me", "action": "retry"}
     assert "event: response.completed" in body
     assert '"id": "run_retry_me"' in body
+
+
+def test_admin_completion_guard_allows_honest_conclusion_without_write_evidence() -> None:
+    """工具链中断/检查后无需写操作时，诚实结论不应被守卫吞掉。"""
+    checkpoint = RunCheckpoint(
+        run_id="run_honest_no_write",
+        model="test",
+        transcript=[
+            {"role": "user", "content": "请解决所有 open 告警"},
+            {
+                "type": "function_call",
+                "call_id": "call_list",
+                "name": "admin_execute_capability",
+                "arguments": json.dumps(
+                    {"capability": "observability.alerts.list", "params": {"status": "open"}},
+                    ensure_ascii=False,
+                ),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_list",
+                "output": json.dumps({"status": "success", "output": {"data": []}}, ensure_ascii=False),
+            },
+        ],
+        tools=[],
+    )
+    # 只读检查后诚实结论：当前没有需要解决的告警 → 放行（输出结论）
+    assert service_module._admin_completion_guard(checkpoint, "当前没有需要解决的 open 告警") is None
+    # 未调用写工具却声称“已解决全部” → 仍拦截（防编造）
+    assert service_module._admin_completion_guard(checkpoint, "已解决全部 open 告警") is not None
+    # 中性说明性结论 → 放行
+    assert service_module._admin_completion_guard(checkpoint, "已查询告警列表，共 0 条 open 告警") is None

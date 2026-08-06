@@ -254,6 +254,10 @@ _MUTATION_SUCCESS_PATTERNS = (
         re.I,
     ),
     re.compile(r'\b(?:deleted|updated|created)_count\b\s*[":=]+\s*[1-9]\d*', re.I),
+    # 通用完成声明（写请求语境下，未调用写工具却称“操作完成/已处理”同样拦截）。
+    # 只读请求已被 _ADMIN_READ_INTENT 短路，不会走到这里的成功声明判断。
+    re.compile(r"(?:操作|处理|任务|事项|全部|所有|批量)?(?:已)?(?:完成|结束|处理好|搞定)"),
+    re.compile(r"(?:已处理|已操作|已执行|处理完成|操作完成|执行完成|已完成)"),
 )
 _MUTATION_FAILURE_PATTERNS = (
     re.compile(
@@ -2279,7 +2283,12 @@ def _admin_completion_guard(
     if not mutation_requested and not attempted_calls:
         return None
     if not attempted_calls:
-        return "管理写请求在没有精确工具执行证据时就结束了"
+        # 未调用任何写工具时，只有“声称写操作已完成”才需要证据拦截；
+        # 模型诚实输出“无需处理/没有待处理/失败/说明性结论”不应被吞掉，
+        # 否则工具链中断或检查后无需写操作时前端永远收不到结论。
+        if claims_success:
+            return "管理写请求在没有精确工具执行证据时就结束了"
+        return None
 
     evidence = (
         _transcript_admin_write_evidence(checkpoint.transcript) if write_evidence is None else dict(write_evidence)
