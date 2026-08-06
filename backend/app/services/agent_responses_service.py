@@ -100,6 +100,11 @@ from app.services.user_capability_registry import (
 from app.utils.api_resolver import ApiConfig, resolve_api_config
 
 EventSink = Callable[[Mapping[str, Any]], Optional[Awaitable[None]]]
+SessionValidator = Callable[[], bool]
+
+
+class AgentSessionExpiredError(RuntimeError):
+    """当前 Responses 运行所属的登录版本已被更新登录取代。"""
 
 
 @dataclass(frozen=True)
@@ -149,6 +154,12 @@ class ControlRoundtableDiscussionArguments(FixedToolArguments):
 
 
 _ADMIN_TOOL_PREFIX = "admin_"
+_SUPER_ADMIN_FIXED_TOOLS = frozenset({"admin_system_status"})
+_SECURITY_SCAN_FIXED_TOOLS = frozenset({
+    "audit_security_for_file",
+    "audit_security_for_task",
+    "audit_security_for_project",
+})
 _WRITE_TOOLS = {
     "create_project",
     "update_project",
@@ -277,6 +288,12 @@ def _is_admin_actor(db: Session, user: User) -> bool:
     if str(getattr(user, "role", "")) in {"admin", "super_admin"}:
         return True
     return rbac_service.is_admin_user(db, int(user.id))
+
+
+def _is_super_admin_actor(db: Session, user: User) -> bool:
+    if str(getattr(user, "username", "")) != "admin" or str(getattr(user, "role", "")) != "super_admin":
+        return False
+    return rbac_service.is_super_admin_user(db, int(user.id))
 
 
 _OPS_READ_ONLY = ops_service.READ_ONLY_ACTIONS
@@ -510,18 +527,22 @@ class PrismToolExecutor:
         run_id: str,
         mcp_provider: McpToolProvider,
         event_sink: Optional[EventSink] = None,
+        session_validator: Optional[SessionValidator] = None,
     ) -> None:
         self._db = db
         self._user = user
         self._surface = surface
         self._run_id = run_id
         self._is_admin = surface == "admin" and _is_admin_actor(db, user)
+        self._is_super_admin = surface == "admin" and _is_super_admin_actor(db, user)
         self._mcp = mcp_provider
         self._event_sink = event_sink
+        self._session_validator = session_validator
         self._orch = get_request_orchestrator(db, user=user)
         self._skill_bindings: Dict[str, str] = {}
 
     async def tool_schemas(self) -> list[Dict[str, Any]]:
+        self._assert_session_active()
         tools: list[Dict[str, Any]] = []
         is_admin = self._surface == "admin" and self._is_admin
         legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
@@ -531,8 +552,20 @@ class PrismToolExecutor:
         can_view_projects = legacy_admin or rbac_service.check_permission(
             self._db, self._user.id, PermissionCode.PROJECT_VIEW,
         )
+        can_scan_security = legacy_admin or rbac_service.check_permission(
+            self._db,
+            self._user.id,
+            PermissionCode.SECURITY_SCAN,
+        )
+        can_configure_agents = self._has_permission(PermissionCode.AGENT_CONFIGURE)
         for name in get_fixed_tool_names():
             if name.startswith(_ADMIN_TOOL_PREFIX) and not is_admin:
+                continue
+            if name in _SUPER_ADMIN_FIXED_TOOLS and not self._is_super_admin:
+                continue
+            if name == "trigger_evolution" and not can_configure_agents:
+                continue
+            if name in _SECURITY_SCAN_FIXED_TOOLS and not can_scan_security:
                 continue
             if (
                 self._surface == "user"
@@ -573,7 +606,17 @@ class PrismToolExecutor:
             ))
 
         if is_admin:
-            tools.extend((discovery_tool_schema(), execution_tool_schema()))
+            available_admin_specs = [
+                spec
+                for spec in CAPABILITY_BY_CODE.values()
+                if not spec.permission or self._has_permission(spec.permission)
+            ]
+            tools.extend(
+                (
+                    discovery_tool_schema(),
+                    execution_tool_schema(available_admin_specs),
+                )
+            )
 
         for schema in SkillRegistry.instance().list_tools(invocable_only=True):
             function = schema.get("function") if isinstance(schema, Mapping) else None
@@ -581,6 +624,8 @@ class PrismToolExecutor:
                 continue
             original = str(function.get("name") or "")
             if not original:
+                continue
+            if not can_configure_agents:
                 continue
             model_name = _unique_tool_name(f"skill_{original}", set(self._skill_bindings) | {t["name"] for t in tools})
             self._skill_bindings[model_name] = original
@@ -594,15 +639,43 @@ class PrismToolExecutor:
                 }
             )
 
-        if is_admin and rbac_service.check_permission(self._db, self._user.id, PermissionCode.SERVER_OPS_VIEW):
+        if is_admin and self._has_permission(PermissionCode.SERVER_OPS_VIEW):
             if agent_governance_service.is_runtime_enabled(self._db, "operations"):
                 tools.append(_operations_tool_schema())
-        tools.extend(await self._mcp.discover())
+        # MCP 是外部动态能力，无法仅凭工具名证明它不会触达宿主机或其他
+        # 基础设施；因此只向唯一超级管理员发现，普通管理员按最小权限失败关闭。
+        if self._is_super_admin or bool(
+            getattr(self._mcp, "supports_user_scoped_managed_tools", False)
+        ):
+            tools.extend(await self._mcp.discover())
         return tools
 
+    def _assert_session_active(self) -> None:
+        if self._session_validator is not None and not self._session_validator():
+            raise AgentSessionExpiredError("账号已在另一台设备登录，当前设备已下线")
+
+    def _has_permission(self, permission_code: str) -> bool:
+        """普通管理员继续管理程序内容，服务器权限只认唯一 admin 超管。"""
+
+        if permission_code.startswith(rbac_service.SERVER_OPS_PERMISSION_PREFIX):
+            return self._is_super_admin
+        if str(getattr(self._user, "role", "")) in {"admin", "super_admin"}:
+            return True
+        return rbac_service.check_permission(self._db, self._user.id, permission_code)
+
     async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+        self._assert_session_active()
         if call.name.startswith(_ADMIN_TOOL_PREFIX) and not self._is_admin:
             return await self._failed_attempt(call, "当前用户没有管理员工具权限")
+        if call.name in _SUPER_ADMIN_FIXED_TOOLS and not self._is_super_admin:
+            return await self._failed_attempt(call, "仅超级管理员 admin 可使用服务器工具")
+        is_managed_mcp = bool(
+            getattr(self._mcp, "is_managed_tool", lambda _tool_name: False)(call.name)
+        )
+        if call.name.startswith("mcp_") and not self._is_super_admin and not is_managed_mcp:
+            return await self._failed_attempt(call, "仅超级管理员 admin 可使用外部 MCP 工具")
+        if call.name == "trigger_evolution" and not self._has_permission(PermissionCode.AGENT_CONFIGURE):
+            return await self._failed_attempt(call, "当前用户缺少 Agent 配置权限")
         if is_fixed_tool(call.name):
             try:
                 arguments = validate_fixed_tool_arguments(call.name, call.arguments)
@@ -905,7 +978,7 @@ class PrismToolExecutor:
         session = DiscussionBus.instance().get_session(session_id)
         if session is None:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
-        if int(session.owner_user_id) != int(self._user.id) and str(self._user.role) != "admin":
+        if int(session.owner_user_id) != int(self._user.id) and not _is_admin_actor(self._db, self._user):
             return ToolExecutionResult.failure("无权访问该圆桌讨论")
         return ToolExecutionResult.success({
             "session_id": session.session_id,
@@ -930,7 +1003,7 @@ class PrismToolExecutor:
         session = bus.get_session(session_id)
         if session is None:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
-        if int(session.owner_user_id) != int(self._user.id) and str(self._user.role) != "admin":
+        if int(session.owner_user_id) != int(self._user.id) and not _is_admin_actor(self._db, self._user):
             return ToolExecutionResult.failure("无权控制该圆桌讨论")
         if session.status == "concluded":
             return ToolExecutionResult.failure("圆桌讨论已经结束")
@@ -1168,6 +1241,9 @@ class PrismToolExecutor:
             return recorded
 
         try:
+            # 登录版本可能在占位账本提交后变化；真正触发任何外部副作用前
+            # 必须再次校验，旧设备不能利用校验与执行之间的窗口。
+            self._assert_session_active()
             raw_result = operation()
             if inspect.isawaitable(raw_result):
                 raw_result = await raw_result
@@ -1591,24 +1667,18 @@ class PrismToolExecutor:
         return protected
 
     async def _execute_operation(self, call: ToolCall, *, approved: bool) -> ToolExecutionResult:
-        if not self._is_admin:
-            return ToolExecutionResult.failure("仅管理员可执行运维工具")
+        if not self._is_super_admin:
+            return ToolExecutionResult.failure("仅超级管理员 admin 可执行运维工具")
         action = str(call.arguments.get("action") or "")
         if action not in ops_service.ACTION_RISKS:
             return ToolExecutionResult.failure(f"不支持的运维动作: {action}")
         if not agent_governance_service.is_runtime_enabled(self._db, "operations"):
             return ToolExecutionResult.failure("全服管理 Agent 当前已停用")
-        if not rbac_service.check_permission(self._db, self._user.id, PermissionCode.SERVER_OPS_VIEW):
+        if not self._has_permission(PermissionCode.SERVER_OPS_VIEW):
             return ToolExecutionResult.failure("当前管理员没有服务器运维查看权限")
-        if action not in _OPS_READ_ONLY and not rbac_service.check_permission(
-            self._db,
-            self._user.id,
-            PermissionCode.SERVER_OPS_EXECUTE,
-        ):
+        if action not in _OPS_READ_ONLY and not self._has_permission(PermissionCode.SERVER_OPS_EXECUTE):
             return ToolExecutionResult.failure("当前管理员没有服务器运维执行权限")
-        if ops_service.ACTION_RISKS[action] == "critical" and not rbac_service.check_permission(
-            self._db,
-            self._user.id,
+        if ops_service.ACTION_RISKS[action] == "critical" and not self._has_permission(
             PermissionCode.SERVER_OPS_CRITICAL,
         ):
             return ToolExecutionResult.failure("当前管理员没有服务器关键运维权限")

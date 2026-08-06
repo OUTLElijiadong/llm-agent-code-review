@@ -1,18 +1,19 @@
 """统一的源码归档识别与安全解包。
 
-归档格式由 libarchive 自动识别。上传大小不设置业务上限；仍保留文件数量、
-路径、文件类型和解压倍率约束，防止路径穿越、链接写出和压缩炸弹。
+基于 zipfile/tarfile 实现 zip/tar/tgz/tbz2/txz 等主流源码归档的安全读取
+(无需 libarchive 系统依赖)。仍保留文件数量、路径、文件类型和解压倍率约束,
+防止路径穿越、链接写出和压缩炸弹。
 """
 from __future__ import annotations
 
+import io
 import os
 import re
+import tarfile
 import unicodedata
+import zipfile
 from dataclasses import dataclass
-from typing import List, Optional
-
-import libarchive
-from libarchive.exception import ArchiveError
+from typing import Iterator, List, Optional
 
 from app.core.exceptions import ValidationError
 
@@ -70,6 +71,85 @@ def is_archive(filename: str) -> bool:
     return bool(lower) and lower.endswith(ARCHIVE_EXTENSIONS)
 
 
+class _ZipEntry:
+    """zipfile 成员适配为 read_archive_members 的统一遍历接口。"""
+
+    def __init__(self, info: zipfile.ZipInfo, archive: zipfile.ZipFile) -> None:
+        self._info = info
+        self._archive = archive
+        self.isdir = info.is_dir()
+        self.isfile = not info.is_dir()
+        self.isreg = self.isfile
+        self.issym = False
+        self.islnk = False
+        self.linkpath = None
+        self.pathname = info.filename
+        self.size = info.file_size
+
+    def get_blocks(self) -> Iterator[bytes]:
+        with self._archive.open(self._info) as handle:
+            while True:
+                chunk = handle.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+
+class _TarEntry:
+    """tarfile 成员适配为 read_archive_members 的统一遍历接口。"""
+
+    def __init__(self, member: tarfile.TarInfo, archive: tarfile.TarFile) -> None:
+        self._member = member
+        self._archive = archive
+        self.isdir = member.isdir()
+        self.isfile = member.isfile()
+        self.isreg = member.isfile()
+        self.issym = member.issym()
+        self.islnk = member.islnk()
+        self.linkpath = member.linkname or None
+        self.pathname = member.name
+        self.size = member.size
+
+    def get_blocks(self) -> Iterator[bytes]:
+        handle = self._archive.extractfile(self._member)
+        if handle is None:
+            return
+        try:
+            while True:
+                chunk = handle.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            handle.close()
+
+
+def _iter_archive_entries(raw: bytes, filename: str) -> Iterator[object]:
+    """按后缀选择 zip/tar 解析器,返回统一成员遍历器。"""
+    lower = filename.lower()
+    if lower.endswith(".zip"):
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            for info in archive.infolist():
+                yield _ZipEntry(info, archive)
+        return
+    if lower.endswith((".tar.gz", ".tgz")):
+        mode = "r:gz"
+    elif lower.endswith((".tar.bz2", ".tbz2")):
+        mode = "r:bz2"
+    elif lower.endswith((".tar.xz", ".txz")):
+        mode = "r:xz"
+    elif lower.endswith((".tar", ".tar.lz", ".tar.lzma", ".tar.lzip", ".tar.zst", ".tzst")):
+        mode = "r:*"
+    elif lower.endswith(_RAW_COMPRESSED_EXTENSIONS):
+        # 裸压缩流无法安全拆分成员,统一按 tar 流尝试,失败则拒绝。
+        mode = "r:*"
+    else:
+        raise ValidationError(f"不支持的压缩包格式: {filename}", code=41500)
+    with tarfile.open(fileobj=io.BytesIO(raw), mode=mode) as archive:
+        for member in archive.getmembers():
+            yield _TarEntry(member, archive)
+
+
 def read_archive_members(
     raw: bytes,
     filename: str,
@@ -84,7 +164,6 @@ def read_archive_members(
         raise ValidationError(f"不支持的压缩包格式: {filename}", code=41500)
 
     raw_stream = _is_raw_compressed(filename)
-    format_name = "raw" if raw_stream else "all"
     results: list[ArchiveMember] = []
     seen: set[str] = set()
     regular_count = 0
@@ -93,60 +172,59 @@ def read_archive_members(
     ratio_guard = max(MIN_RATIO_GUARD_BYTES, len(raw) * MAX_COMPRESSION_RATIO)
 
     try:
-        with libarchive.memory_reader(raw, format_name=format_name) as archive:
-            for entry in archive:
-                if entry.isdir:
-                    continue
-                if (
-                    not (entry.isfile or entry.isreg)
-                    or entry.issym
-                    or entry.islnk
-                    or entry.linkpath
-                ):
-                    raise ValidationError("压缩包包含链接或特殊文件", code=40001)
+        for entry in _iter_archive_entries(raw, filename):
+            if entry.isdir:
+                continue
+            if (
+                not (entry.isfile or entry.isreg)
+                or entry.issym
+                or entry.islnk
+                or entry.linkpath
+            ):
+                raise ValidationError("压缩包包含链接或特殊文件", code=40001)
 
-                regular_count += 1
-                _check_file_count(regular_count)
-                original_path = str(entry.pathname or "")
-                if raw_stream and original_path in {"", "data"}:
-                    original_path = _raw_member_name(filename)
-                safe_path = _validate_path(
-                    original_path,
-                    filter_sensitive=filter_sensitive,
-                    strict=strict_paths,
-                )
-                if safe_path is None:
-                    # libarchive 会在读取下一条记录时跳过当前成员数据。
-                    continue
+            regular_count += 1
+            _check_file_count(regular_count)
+            original_path = str(entry.pathname or "")
+            if raw_stream and original_path in {"", "data"}:
+                original_path = _raw_member_name(filename)
+            safe_path = _validate_path(
+                original_path,
+                filter_sensitive=filter_sensitive,
+                strict=strict_paths,
+            )
+            if safe_path is None:
+                # libarchive 会在读取下一条记录时跳过当前成员数据。
+                continue
 
-                collision_key = unicodedata.normalize("NFC", safe_path).casefold()
-                if collision_key in seen:
-                    raise ValidationError("压缩包包含重复或大小写冲突路径", code=40001)
-                seen.add(collision_key)
+            collision_key = unicodedata.normalize("NFC", safe_path).casefold()
+            if collision_key in seen:
+                raise ValidationError("压缩包包含重复或大小写冲突路径", code=40001)
+            seen.add(collision_key)
 
-                chunks: list[bytes] = []
-                member_size = 0
-                for block in entry.get_blocks():
-                    member_size += len(block)
-                    expanded_size += len(block)
-                    if expanded_size > ratio_guard:
-                        raise ValidationError(
-                            f"压缩包解压倍率超过安全上限 {MAX_COMPRESSION_RATIO}x",
-                            code=40001,
-                        )
-                    chunks.append(block)
-                declared_size = entry.size
-                if declared_size is not None and declared_size >= 0 and member_size != declared_size:
+            chunks: list[bytes] = []
+            member_size = 0
+            for block in entry.get_blocks():
+                member_size += len(block)
+                expanded_size += len(block)
+                if expanded_size > ratio_guard:
                     raise ValidationError(
-                        f"压缩包成员大小与声明不一致: {safe_path}",
+                        f"压缩包解压倍率超过安全上限 {MAX_COMPRESSION_RATIO}x",
                         code=40001,
                     )
-                content = b"".join(chunks)
-                max_member_size = max(max_member_size, member_size)
-                results.append(ArchiveMember(path=safe_path, content=content))
+                chunks.append(block)
+            declared_size = entry.size
+            if declared_size is not None and declared_size >= 0 and member_size != declared_size:
+                raise ValidationError(
+                    f"压缩包成员大小与声明不一致: {safe_path}",
+                    code=40001,
+                )
+            content = b"".join(chunks)
+            max_member_size = max(max_member_size, member_size)
+            results.append(ArchiveMember(path=safe_path, content=content))
     except ValidationError:
         raise
-    except (ArchiveError, OSError, ValueError) as exc:
+    except (zipfile.BadZipFile, tarfile.TarError, OSError, ValueError) as exc:
         detail = str(exc).lower()
         if "passphrase" in detail or "encrypted" in detail or "encryption" in detail:
             message = "不支持加密压缩包"

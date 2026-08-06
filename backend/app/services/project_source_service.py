@@ -651,6 +651,10 @@ def download_remote_archive(url: str) -> tuple[bytes, str]:
                         f"远程源码下载失败(HTTP {response.status_code})",
                         code=50201,
                     )
+                try:
+                    _ = int(response.headers.get("content-length") or 0)
+                except (TypeError, ValueError) as exc:
+                    raise ExternalServiceError("远程源码响应长度无效", code=50201) from exc
                 chunks: list[bytes] = []
                 received = 0
                 for chunk in response.iter_bytes():

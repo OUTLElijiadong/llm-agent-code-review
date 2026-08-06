@@ -177,7 +177,8 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
-    assert len(ADMIN_CAPABILITIES) == 118
+    # 122 = b4d301a 完整 118 项 + 服务器线安全监控 4 项(observability.security.*)
+    assert len(ADMIN_CAPABILITIES) == 122
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)

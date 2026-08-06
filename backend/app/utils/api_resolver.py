@@ -374,7 +374,7 @@ def resolve_api_config(
                     try:
                         base_url = validate_ai_base_url(
                             row.base_url,
-                            resolve_host=True,
+                            resolve_host=settings.enforce_ai_base_url_dns_check,
                             allow_private=False,
                         )
                     except ValidationError as exc:
@@ -388,7 +388,7 @@ def resolve_api_config(
                             api_key=settings.deepseek_api_key,
                             base_url=validate_ai_base_url(
                                 settings.deepseek_base_url,
-                                resolve_host=True,
+                                resolve_host=settings.enforce_ai_base_url_dns_check,
                                 allow_private=False,
                             ),
                             model=settings.deepseek_model,
@@ -418,7 +418,7 @@ def resolve_api_config(
         ):
             base_url = validate_ai_base_url(
                 gcfg["base_url"],
-                resolve_host=True,
+                resolve_host=settings.enforce_ai_base_url_dns_check,
                 allow_private=False,
             )
             return ApiConfig(
@@ -436,7 +436,7 @@ def resolve_api_config(
         api_key=settings.deepseek_api_key,
         base_url=validate_ai_base_url(
             settings.deepseek_base_url,
-            resolve_host=True,
+            resolve_host=settings.enforce_ai_base_url_dns_check,
             allow_private=False,
         ),
         model=settings.deepseek_model,

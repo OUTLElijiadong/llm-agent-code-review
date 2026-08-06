@@ -11,6 +11,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.agent_governance import (
     AgentAlert,
     AgentArtifactVersion,
+    AgentJob,
     AgentJobRun,
     AgentRewardEvent,
     AgentToolPermission,
@@ -268,7 +269,7 @@ def upsert_agent_knowledge_source(
     payload: AgentKnowledgeSourceUpsertIn,
     source_id: int = Query(0),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_super_admin),
 ):
     """创建或更新 Agent 知识来源配置。
 
@@ -276,7 +277,7 @@ def upsert_agent_knowledge_source(
         payload: 来源配置。
         source_id: 可选来源 ID。
         db: 数据库会话。
-        _: 管理员用户。
+        _: 唯一超级管理员。
 
     Returns:
         Resp[AgentKnowledgeSourceOut]: 来源记录。
@@ -298,14 +299,14 @@ def upsert_agent_knowledge_source(
 def crawl_agent_knowledge_sources(
     agent_code: str = Query(""),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_super_admin),
 ):
     """手动抓取 Agent 知识来源。
 
     Args:
         agent_code: 可选 Agent 编码。
         db: 数据库会话。
-        _: 管理员用户。
+        _: 唯一超级管理员。
 
     Returns:
         Resp[dict]: 抓取结果。
@@ -317,19 +318,19 @@ def crawl_agent_knowledge_sources(
 def list_approvals(
     status: str = Query(""),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    actor: User = Depends(require_admin),
 ):
     """查询治理审批事项。
 
     Args:
         status: 可选状态过滤。
         db: 数据库会话。
-        _: 管理员用户。
+        actor: 当前管理员。
 
     Returns:
         Resp[list[ApprovalItemOut]]: 审批事项列表。
     """
-    rows = approval_service.list_items(db, status=status)
+    rows = approval_service.list_items(db, status=status, actor=actor)
     return Resp(data=[ApprovalItemOut.model_validate(row) for row in rows])
 
 
@@ -559,17 +560,19 @@ def upsert_tool_permission(
 
 
 @router.get("/jobs", response_model=Resp[list[AgentJobOut]])
-def list_jobs(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def list_jobs(db: Session = Depends(get_db), actor: User = Depends(require_admin)):
     """查询 Agent 调度任务。
 
     Args:
         db: 数据库会话。
-        _: 管理员用户。
+        actor: 当前管理员。
 
     Returns:
         Resp[list[AgentJobOut]]: 调度任务列表。
     """
     rows = scheduler_service.ensure_default_jobs(db)
+    if not scheduler_service.can_access_restricted_jobs(db, actor):
+        rows = [row for row in rows if not scheduler_service.requires_super_admin(row.job_type)]
     return Resp(data=[AgentJobOut.model_validate(row) for row in rows])
 
 
@@ -578,7 +581,7 @@ def update_job(
     job_id: int,
     payload: AgentJobUpdateIn,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    actor: User = Depends(require_admin),
 ):
     """更新 Agent 调度任务配置。
 
@@ -586,28 +589,28 @@ def update_job(
         job_id: 调度任务 ID。
         payload: 更新输入。
         db: 数据库会话。
-        _: 管理员用户。
+        actor: 当前管理员。
 
     Returns:
         Resp[AgentJobOut]: 更新后的任务。
     """
-    row = scheduler_service.update_job(db, job_id, payload.model_dump(exclude_none=True))
+    row = scheduler_service.update_job(db, job_id, payload.model_dump(exclude_none=True), actor=actor)
     return Resp(data=AgentJobOut.model_validate(row))
 
 
 @router.post("/jobs/{job_id}/run", response_model=Resp[dict])
-def run_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def run_job(job_id: int, db: Session = Depends(get_db), actor: User = Depends(require_admin)):
     """手动运行 Agent 调度任务。
 
     Args:
         job_id: 调度任务 ID。
         db: 数据库会话。
-        _: 管理员用户。
+        actor: 当前管理员。
 
     Returns:
         Resp[dict]: 调度运行结果。
     """
-    row = scheduler_service.run_job(db, job_id)
+    row = scheduler_service.run_job(db, job_id, actor=actor)
     return Resp(data={
         "id": row.id,
         "job_id": row.job_id,
@@ -618,17 +621,20 @@ def run_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(requir
 
 
 @router.get("/jobs/runs", response_model=Resp[list[dict]])
-def list_job_runs(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def list_job_runs(db: Session = Depends(get_db), actor: User = Depends(require_admin)):
     """查询 Agent 调度运行记录。
 
     Args:
         db: 数据库会话。
-        _: 管理员用户。
+        actor: 当前管理员。
 
     Returns:
         Resp[list[dict]]: 调度运行记录。
     """
-    rows = db.query(AgentJobRun).order_by(AgentJobRun.id.desc()).limit(100).all()
+    query = db.query(AgentJobRun).join(AgentJob, AgentJob.id == AgentJobRun.job_id)
+    if not scheduler_service.can_access_restricted_jobs(db, actor):
+        query = query.filter(~AgentJob.job_type.in_(scheduler_service.SUPER_ADMIN_JOB_TYPES))
+    rows = query.order_by(AgentJobRun.id.desc()).limit(100).all()
     return Resp(data=[{
         "id": row.id,
         "job_id": row.job_id,
