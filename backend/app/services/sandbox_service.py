@@ -710,6 +710,66 @@ def _generate_agent_test_cases(
         return None
 
 
+def _generate_deployment_patch(
+    db: Session,
+    environment: "SandboxEnvironment",
+    source_archive_base64: str,
+    language: str,
+) -> dict[str, str] | None:
+    """完整部署核验:LLM 判断入口/依赖是否完整,生成受控补全启动脚本。
+
+    失败静默(只记事件不阻断):LLM 未配置/生成失败都回退 runner 内置部署逻辑。
+    返回 {"launch_script": str, "notes": str} 或 None。
+    """
+    try:
+        from app.agents.base import AgentContext
+        from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
+
+        agent = DeploymentCoordinatorAgent()
+        if not agent._api_key:
+            return None
+        summary = _source_summary_for_agent_tests(source_archive_base64, language)
+        ctx = AgentContext(
+            user_id=environment.owner_id,
+            project_id=environment.project_id,
+            extra={"trace_id": environment.public_id},
+        )
+        result = agent.plan(
+            language=language,
+            test_mode=str(getattr(environment, "test_mode", "") or "combined"),
+            source_summary=summary,
+            ctx=ctx,
+        )
+        launch_script = str(result.get("launch_script") or "").strip() if isinstance(result, dict) else ""
+        notes = str(result.get("notes") or "").strip() if isinstance(result, dict) else ""
+        if not launch_script:
+            if notes:
+                _append_event(db, environment, "progress", "deploy_verify",
+                              f"部署核验: 入口完整, {notes[:120]}")
+                db.commit()
+            return None
+        _append_event(
+            db, environment, "progress", "deploy_verify",
+            "部署核验: 生成补全启动脚本 _prism_launch.sh" + (f"({notes[:100]})" if notes else ""),
+        )
+        db.commit()
+        return {"launch_script": launch_script, "notes": notes}
+    except Exception as exc:  # noqa: BLE001 - 补全失败不阻断原测试链
+        _append_event(db, environment, "progress", "deploy_verify",
+                      f"部署核验异常: {str(exc)[:120]}")
+        db.commit()
+        return None
+
+
+def _inject_deployment_patch(source_archive_base64: str, launch_script: str) -> str:
+    """把部署补全启动脚本注入源码 zip 的 _prism_launch.sh。"""
+    raw = base64.b64decode(source_archive_base64)
+    buf = io.BytesIO(raw)
+    with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("_prism_launch.sh", launch_script)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def _extract_agent_tests_result(log_text: str) -> dict[str, Any] | None:
     """从容器日志提取 PRISM_AGENT_TESTS_BEGIN/END 包裹的动态测试结果。"""
     pattern = r"PRISM_AGENT_TESTS_BEGIN\s*(\{.*?\})\s*PRISM_AGENT_TESTS_END"
@@ -1629,12 +1689,19 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         effective_source = source_archive_base64
         effective_sha = environment.source_sha256
         if worker and environment.purpose == "test":
-            # agent 动态生成白盒/黑盒测试用例,注入 _agent_tests/ 后由沙箱 runner 确定性执行
+            # 1) 完整部署核验:LLM 判断入口/依赖,生成补全启动脚本 _prism_launch.sh
+            deploy_patch = _generate_deployment_patch(
+                db, environment, source_archive_base64, environment.language,
+            )
+            if deploy_patch and deploy_patch.get("launch_script"):
+                effective_source = _inject_deployment_patch(effective_source, deploy_patch["launch_script"])
+            # 2) agent 动态生成白盒/黑盒测试用例,注入 _agent_tests/ 后由沙箱 runner 确定性执行
             agent_test_files = _generate_agent_test_cases(
-                db, environment, source_archive_base64, environment.language, worker_mode,
+                db, environment, effective_source, environment.language, worker_mode,
             )
             if agent_test_files:
-                effective_source = _inject_agent_test_files(source_archive_base64, agent_test_files)
+                effective_source = _inject_agent_test_files(effective_source, agent_test_files)
+            if effective_source != source_archive_base64:
                 effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
                 environment.source_sha256 = effective_sha
                 db.commit()

@@ -308,11 +308,14 @@ run_blackbox() {
   app_pid="$!"
   trap 'kill "$app_pid" >/dev/null 2>&1 || true' EXIT INT TERM
   attempts=0
+  stable=0
   http_ready=""
   http_status=""
-  # 探活:服务"就绪"= 进程监听并返回了任何合法 HTTP 状态行(含 5xx)。
-  # 5xx 说明服务已起来,只是应用自身(如缺DB)报错——这是运行态证据,不该判黑盒失败;
-  # 真正的失败是"一直没监听/进程死了/完全无响应"。
+  # 完整部署核验:先离线补全依赖,再启动应用;服务"稳定运行"= 连续 3 次探活
+  # 返回任何合法 HTTP 状态行(含 5xx)。5xx 说明服务已起来,只是应用自身(如缺DB/
+  # 配置)报错——这是运行态证据,不该判黑盒失败;真正的失败是"一直没监听/
+  # 进程死了/完全无响应"。
+  prepare_deps
   while [ "$attempts" -lt 45 ]; do
     if status="$(bash -c '
       port="$1"
@@ -328,8 +331,13 @@ run_blackbox() {
       esac
     ' prism-health "$preview_port" 2>/dev/null)"; then
       http_status="$status"
-      http_ready=1
-      break
+      stable=$((stable + 1))
+      if [ "$stable" -ge 3 ]; then
+        http_ready=1
+        break
+      fi
+    else
+      stable=0
     fi
     if ! kill -0 "$app_pid" >/dev/null 2>&1; then
       wait "$app_pid"

@@ -1066,8 +1066,9 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
     monkeypatch.setattr(sandbox_service, "_call_worker", call_worker)
     monkeypatch.setattr(sandbox_service, "_append_event", append_event)
     monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
-    # 本用例聚焦 worker 事件顺序;跳过 agent 动态用例生成(另有专门测试)
+    # 本用例聚焦 worker 事件顺序;跳过 agent 动态用例生成与部署补丁(另有专门测试)
     monkeypatch.setattr(sandbox_service, "_generate_agent_test_cases", lambda *_a, **_k: None)
+    monkeypatch.setattr(sandbox_service, "_generate_deployment_patch", lambda *_a, **_k: None)
 
     sandbox_service._execute_environment(environment.id, "c291cmNl")
 

@@ -62,7 +62,11 @@ class TestCaseGeneratorAgent(BaseAgent):
             "   - go: 单个 main 包文件,用 panic/fmt 后 os.Exit(1) 表示失败。\n"
             "   - java: 单个 public class 含 main,失败 System.exit(1)。\n"
             "3. 黑盒模式额外生成一个 blackbox.py(用 urllib 请求 http://127.0.0.1:{port},\n"
-            "   端口取环境变量 PRISM_PREVIEW_PORT)。\n"
+            "   端口取环境变量 PRISM_PREVIEW_PORT)。黑盒脚本在应用稳定运行后执行,\n"
+            "   必须包含 DAST 注入渗透探测:SQL 注入(带 ' OR '1'='1 等 payload)、\n"
+            "   XSS(payload 回显检测)、SSRF(仅限 127.0.0.1 回环探测)、越权(未授权访问\n"
+            "   受保护路径)、目录/错误页泄露探测;每个探测记录状态码与响应片段,断言安全\n"
+            "   基线(如敏感错误不泄露),失败以 AssertionError 表示。\n"
             "4. 只生成测试代码,不生成 shell 命令;不读取环境密钥;不做网络外联(黑盒只访问本机回环端口)。\n"
             "5. 输出 JSON 格式: {\"files\": [{\"path\": \"test_ai_1.py\", \"content\": \"...\"}]}\n"
         )

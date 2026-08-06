@@ -38,11 +38,51 @@ _REPORT_PROMPT = (
     "禁止编造文件路径/行号/URL。"
 )
 
+# ── 动态专项角色(由编排 Agent 按证据追加) ──────────────
+_EXTRA_ROLE_PROMPTS = {
+    "sast": (
+        "你是 SAST 静态应用安全审查 Agent。输入含源码级证据(白盒测试、静态检查、agent 生成的静态审计用例结果)。"
+        "输出中文 Markdown 小节(## SAST 静态审计),含:危险函数/硬编码密钥/不安全的反序列化/SQL 拼接/越权逻辑发现,"
+        "每条挂证据(文件/用例),无证据只写'建议验证'。"
+    ),
+    "dast": (
+        "你是 DAST 动态应用安全测试审查 Agent。输入为运行态应用(已稳定部署)的黑盒探测与注入测试证据。"
+        "输出中文 Markdown 小节(## DAST 动态测试),含:SQL 注入/XSS/SSRF/越权/目录探测结果,"
+        "每条挂实际响应证据,未验证的写'建议验证',禁止写成已存在漏洞。"
+    ),
+    "injection": (
+        "你是注入测试专项审查 Agent。输入为黑盒注入探测证据(SQLi/XSS/SSRF/命令注入/文件包含)。"
+        "输出中文 Markdown 小节(## 注入测试结果),按危害排序,标注是否真实可利用(需要响应级证据)。"
+    ),
+    "dependency": (
+        "你是依赖与供应链审查 Agent(SCA)。输入含依赖清单与离线安装/补全记录。"
+        "输出中文 Markdown 小节(## 依赖审计),列出依赖来源(镜像内置/vendor/缺失)、已知风险提示、"
+        "缺失依赖对完整运行的影响;无漏洞库数据时写'建议在联网环境用 Trivy 复核'。"
+    ),
+    "penetration": (
+        "你是渗透测试审查 Agent。输入为应用稳定运行后的多路径探测证据(首页/接口/错误页/注入尝试)。"
+        "输出中文 Markdown 小节(## 渗透测试结果),按攻击链串联已验证或建议验证的利用路径,"
+        "强调证据纪律,禁止编造。"
+    ),
+}
+_ORCHESTRATOR_PROMPT = (
+    "你是审查编排 Agent。输入是沙箱测试证据(语言/模式/是否完整部署并稳定运行/是否含静态审计与动态注入证据/依赖清单)。"
+    "基础角色 whitebox/blackbox/verify/report 始终保留;根据证据追加专项角色,可选:"
+    "sast(有源码/静态审计证据), dast(有运行态注入/探测证据), injection(有注入探测证据), "
+    "dependency(有依赖清单或补全记录), penetration(应用稳定运行且证据充分)。"
+    "输出 JSON: {'extra_roles':['...']} 最多追加 3 个;不确定时输出 {'extra_roles':[]}。"
+)
+
 _QUERIES = {
     "whitebox": "白盒编译 静态检查 单元测试 跳过 警告 修复方向",
     "blackbox": "黑盒冒烟 状态码 响应头 错误页泄露 攻击面 待验证清单",
     "verify": "漏洞认定标准 误报熔断 证据纪律 无证据降级",
     "report": "审查顺序 报告结构 证据纪律 通过不等于安全",
+    "sast": "SAST 静态审计 危险函数 硬编码密钥 SQL注入 反序列化",
+    "dast": "DAST 动态测试 SQL注入 XSS SSRF 越权 探测证据",
+    "injection": "注入测试 SQLi XSS SSRF 命令注入 利用证据",
+    "dependency": "依赖审计 SCA 供应链 离线安装 缺失依赖",
+    "penetration": "渗透测试 攻击链 利用验证 证据纪律",
 }
 
 
@@ -192,12 +232,47 @@ class TestReviewReporterAgent(BaseAgent):
             ctx,
         )
         roles["verify"] = {"ok": vf.success, "text": (vf.data or "")[:16000] if vf.success else f"未执行: {vf.error}"}
-        # 4) 报告角色(七段报告在大量语法错误时输出较长,用满输出预算防截断)
+        # 4) 编排 Agent 按证据追加专项角色(SAST/DAST/注入/依赖/渗透),失败则保持基础四角色
+        extra_roles: list[str] = []
+        try:
+            orch = self._role_call(
+                _ORCHESTRATOR_PROMPT,
+                "测试证据:\n" + evidence[:12000] + self._knowledge_refs(db, owner_id, "report"),
+                ctx,
+                max_tokens=1024,
+            )
+            if orch.success and isinstance(orch.data, str) and orch.data.strip():
+                orch_data = json.loads(orch.data)
+                if isinstance(orch_data, dict) and isinstance(orch_data.get("extra_roles"), list):
+                    extra_roles = [
+                        str(r).strip() for r in orch_data["extra_roles"]
+                        if isinstance(r, str) and r.strip() in _EXTRA_ROLE_PROMPTS
+                    ][:3]
+        except (ValueError, TypeError):
+            extra_roles = []
+        for role_name in extra_roles:
+            prompt = _EXTRA_ROLE_PROMPTS[role_name]
+            rr = self._role_call(
+                prompt,
+                "请审查对应证据并输出小节:\n" + evidence[:16000]
+                + self._knowledge_refs(db, owner_id, role_name),
+                ctx,
+            )
+            roles[role_name] = {
+                "ok": rr.success,
+                "text": (rr.data or "")[:16000] if rr.success else f"未执行: {rr.error}",
+            }
+        # 5) 报告角色(七段报告在大量语法错误时输出较长,用满输出预算防截断)
+        extra_conclusions = "".join(
+            f"\n\n{role_name}专项结论:\n" + str(roles[role_name]["text"])[:16000]
+            for role_name in extra_roles
+        )
         rp = self._role_call(
             _REPORT_PROMPT,
             "白盒结论:\n" + str(roles["whitebox"]["text"])[:16000]
             + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])[:16000]
             + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:16000]
+            + extra_conclusions
             + "\n\n原始证据:\n" + evidence
             + self._knowledge_refs(db, owner_id, "report"),
             ctx,
@@ -207,11 +282,16 @@ class TestReviewReporterAgent(BaseAgent):
 
         # 截断兜底:8192 仍截断时降级为精简重试(只求核心三段),保证总能产出报告
         if (not rp.success or not (isinstance(rp.data, str) and rp.data.strip())) and rp.finish_reason == "length":
+            extra_short = "".join(
+                f"\n\n{role_name}专项结论(精简):\n" + str(roles[role_name]["text"])[:1500]
+                for role_name in extra_roles
+            )
             rp = self._role_call(
                 _REPORT_PROMPT + "\n(上次输出超长被截断。本次只输出 ## 总体结论 / ## 问题清单 / ## 下一步建议 三段,问题清单最多列15条。)",  # noqa: E501
                 "白盒结论:\n" + str(roles["whitebox"]["text"])[:2000]
                 + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])[:2000]
-                + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:2000],
+                + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:2000]
+                + extra_short,
                 ctx,
                 max_tokens=8192,
             )

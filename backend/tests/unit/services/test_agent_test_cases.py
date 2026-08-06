@@ -9,6 +9,7 @@ import zipfile
 from app.services.sandbox_service import (
     _extract_agent_tests_result,
     _inject_agent_test_files,
+    _inject_deployment_patch,
     _source_summary_for_agent_tests,
 )
 
@@ -55,3 +56,39 @@ def test_extract_agent_tests_result_parses_marker() -> None:
 
 def test_extract_agent_tests_result_none_when_missing() -> None:
     assert _extract_agent_tests_result("no marker") is None
+
+
+def test_inject_deployment_patch_adds_launch_script() -> None:
+    archive = _zip_with({"main.py": "print(1)"})
+    augmented = _inject_deployment_patch(archive, "exec python main.py\n")
+    with zipfile.ZipFile(io.BytesIO(base64.b64decode(augmented))) as zf:
+        assert "_prism_launch.sh" in zf.namelist()
+        assert zf.read("_prism_launch.sh").decode() == "exec python main.py\n"
+
+
+def test_generate_deployment_patch_uses_agent_plan(db, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.services.sandbox_service import _generate_deployment_patch
+
+    environment = SimpleNamespace(
+        id=1, public_id="sbx_deploy_patch", project_id=1, owner_id=1,
+        test_mode="blackbox", language="python",
+    )
+    captured: dict = {}
+
+    class FakeDeploymentAgent:
+        _api_key = "test-key"
+
+        def plan(self, **kwargs):
+            captured.update(kwargs)
+            return {"launch_script": "exec python -m http.server $PRISM_PREVIEW_PORT", "notes": "无入口,已补全"}
+
+    monkeypatch.setattr(
+        "app.agents.deployment_coordinator_agent.DeploymentCoordinatorAgent",
+        FakeDeploymentAgent,
+    )
+    result = _generate_deployment_patch(db, environment, _zip_with({"a.py": "x=1"}), "python")
+    assert result is not None
+    assert "launch_script" in result
+    assert captured["language"] == "python"
