@@ -173,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 
@@ -575,6 +575,12 @@ function goReviewList() {
  * 加载仪表盘首屏数据，并在请求期间显示统一的动画加载提示
  * @returns Promise<void>
  */
+let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined
+function onAgentTaskComplete(): void {
+  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  taskRefreshTimer = setTimeout(() => { void loadDashboard() }, 600)
+}
+
 async function loadDashboard(): Promise<void> {
   loading.value = true
   try {
@@ -590,6 +596,12 @@ async function loadDashboard(): Promise<void> {
 
 onMounted(() => {
   loadDashboard()
+  window.addEventListener('prism:agent-task-complete', onAgentTaskComplete)
+})
+
+onBeforeUnmount(() => {
+  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
 </script>
 

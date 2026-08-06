@@ -282,7 +282,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { Connection, Delete as DeleteIcon, Edit as EditIcon, Plus, Search } from '@element-plus/icons-vue'
 
@@ -486,8 +486,20 @@ async function onFormSubmit(data: { project_name: string; description?: string; 
   await fetchProjects()
 }
 
+let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined
+function onAgentTaskComplete(): void {
+  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  taskRefreshTimer = setTimeout(() => { void fetchProjects() }, 600)
+}
+
 onMounted(() => {
   fetchProjects()
+  window.addEventListener('prism:agent-task-complete', onAgentTaskComplete)
+})
+
+onBeforeUnmount(() => {
+  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
 </script>
 

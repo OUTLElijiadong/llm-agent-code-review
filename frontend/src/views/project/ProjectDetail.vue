@@ -337,7 +337,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 
@@ -777,9 +777,24 @@ async function handleRemoveMember(row: ProjectMemberOut): Promise<void> {
   }
 }
 
+let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined
+function onAgentTaskComplete(): void {
+  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  taskRefreshTimer = setTimeout(() => {
+    void fetchDetail()
+    void fetchMembers()
+  }, 600)
+}
+
 onMounted(() => {
   fetchDetail()
   fetchMembers()
+  window.addEventListener('prism:agent-task-complete', onAgentTaskComplete)
+})
+
+onBeforeUnmount(() => {
+  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
 </script>
 

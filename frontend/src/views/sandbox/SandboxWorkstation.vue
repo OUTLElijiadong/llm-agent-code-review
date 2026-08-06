@@ -288,6 +288,12 @@ async function openPreview(): Promise<void> {
   } finally { mutating.value = false }
 }
 
+function reviewReportArtifact(env: SandboxEnvironment | null): SandboxArtifact | null {
+  return env?.artifacts?.find((artifact) => artifact.artifact_type === 'review_report') ?? null
+}
+
+const reviewReport = computed(() => reviewReportArtifact(selected.value))
+
 async function downloadArtifact(artifact: SandboxArtifact): Promise<void> {
   if (!selected.value) return
   mutating.value = true
@@ -349,8 +355,24 @@ onMounted(async () => {
   }, POLL_INTERVAL_MS)
 })
 
+let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined
+function onAgentTaskComplete(): void {
+  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  taskRefreshTimer = setTimeout(() => { void refreshSelected(true) }, 600)
+}
+
+onMounted(async () => {
+  await loadInitial()
+  window.addEventListener('prism:agent-task-complete', onAgentTaskComplete)
+  pollTimer = setInterval(() => {
+    if (environments.value.some((item) => isSandboxActive(item.status))) void refreshSelected(true)
+  }, POLL_INTERVAL_MS)
+})
+
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
+  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
 </script>
 
@@ -521,6 +543,15 @@ onBeforeUnmount(() => {
               show-icon
             />
             <pre v-if="Object.keys(selected.result || {}).length" class="evidence-output">{{ resultEvidence(selected) }}</pre>
+          </section>
+
+          <section v-if="reviewReport" class="review-report-panel" data-testid="review-report-panel">
+            <div class="section-title"><span>多 Agent 测试审查报告</span></div>
+            <p class="report-hint">黑白盒测试完成后由多 Agent 审查编排生成(4 角色),点击下载 Markdown 报告。</p>
+            <button type="button" class="artifact-row" @click="downloadArtifact(reviewReport)">
+              <span><b>{{ reviewReport.file_name }}</b><small class="font-mono">review_report · {{ formatBytes(reviewReport.byte_size) }}</small></span>
+              <el-icon><Download /></el-icon>
+            </button>
           </section>
 
           <section v-if="selected.artifacts?.length" class="artifact-panel" data-testid="sandbox-artifacts">

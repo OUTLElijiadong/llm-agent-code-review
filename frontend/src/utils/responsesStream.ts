@@ -214,7 +214,15 @@ export function streamResponses(
     const decoder = new TextDecoder()
     let hasCompletionBoundary = false
     const parser = new SseParser((event) => {
-      if (isCompletionBoundary(event)) hasCompletionBoundary = true
+      if (isCompletionBoundary(event)) {
+        // 每个流只派发一次:小菱完成任务,让相关页面刷新数据
+        if (!hasCompletionBoundary) {
+          hasCompletionBoundary = true
+          window.dispatchEvent(new CustomEvent('prism:agent-task-complete', {
+            detail: { surface: (body as Record<string, unknown>).surface },
+          }))
+        }
+      }
       options.onEvent(event)
     })
 
