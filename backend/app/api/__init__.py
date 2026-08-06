@@ -33,6 +33,7 @@ from app.api.v1 import (
     reports,
     review,
     rules,
+    sandboxes,
     security,
     user_profile,
     users,
@@ -54,6 +55,7 @@ api_router.include_router(ai_logs.router, prefix="/ai-logs", tags=["AI日志"])
 api_router.include_router(ai_chat.router, prefix="/ai", tags=["AI助手"])
 api_router.include_router(ai_prompt.router, prefix="/ai-prompt", tags=["AI提示词"])
 api_router.include_router(security.router, prefix="/security", tags=["安全审计"])
+api_router.include_router(sandboxes.router, prefix="/sandboxes", tags=["代码沙箱"])
 api_router.include_router(agents.router, prefix="/agents", tags=["Agent中心"])
 api_router.include_router(evolution.router, prefix="/evolution", tags=["Agent自进化"])
 api_router.include_router(audit.router, prefix="/admin/audit", tags=["操作审计"])

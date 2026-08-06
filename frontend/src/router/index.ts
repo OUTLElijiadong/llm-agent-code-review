@@ -122,6 +122,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Agent 中心' },
       },
       {
+        path: 'sandboxes',
+        name: 'SandboxWorkstation',
+        component: () => import('@/views/sandbox/SandboxWorkstation.vue'),
+        meta: { title: '代码沙箱' },
+      },
+      {
         path: 'agent-studio',
         name: 'AgentStudio',
         component: () => import('@/views/agent/AgentStudio.vue'),
