@@ -96,8 +96,8 @@ def test_get_runtime_agents_fills_call_stats():
     """AiCallLog 中的调用应能按 code 回填到 Agent 卡"""
     now = datetime(2026, 5, 27, 10, 0, 0)
     rows = [
-        ("deepseek-chat", "success", now),                         # general
-        ("deepseek-chat/security-agent", "success", now),          # security
+        ("deepseek-chat", "success", now, None),                   # general
+        ("deepseek-chat/security-agent", "success", now, None),    # security
     ]
     runtime = agent_service.get_runtime_agents(_FakeDb(rows))
     by_code = {r["code"]: r for r in runtime}
