@@ -26,6 +26,21 @@ from app.services.project_member_service import (
 from app.utils.sanitize import sanitize_text
 
 
+def _agent_run_stats(db: Session, project_ids: list[int]) -> dict[int, tuple]:
+    """按项目统计 Agent 运转次数(工具调用日志)与最近运转时间。"""
+    from app.models.agent_governance import ToolCallLog
+
+    if not project_ids:
+        return {}
+    rows = (
+        db.query(ToolCallLog.project_id, func.count(ToolCallLog.id), func.max(ToolCallLog.create_time))
+        .filter(ToolCallLog.project_id.in_(project_ids))
+        .group_by(ToolCallLog.project_id)
+        .all()
+    )
+    return {project_id: (count, last_at) for project_id, count, last_at in rows}
+
+
 def list_projects(db: Session, user: User, keyword: str = "", language: str = "",
                   status: str = "active", page: int = 1, page_size: int = 20) -> dict:
     """查询当前用户可访问的项目列表(基于 project_member 关系)
@@ -66,7 +81,9 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
     source_archives: dict[int, ProjectSourceArchive] = {}
     last_tasks: dict[int, ReviewTask] = {}
     member_roles: dict[int, str] = {}
+    agent_runs: dict[int, tuple] = {}
     if proj_ids:
+        agent_runs = _agent_run_stats(db, proj_ids)
         file_counts = dict(
             db.query(CodeFile.project_id, func.count(CodeFile.id))
             .filter(CodeFile.project_id.in_(proj_ids), CodeFile.status == "active")
@@ -109,10 +126,13 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             or member_roles.get(row.id) == "owner"
         )
         # v2.0 B2: 用最近一次成功审查的真实评分,前端不再 hash 派生
+        run_stats = agent_runs.get(row.id)
         items.append({
             "id": row.id, "project_name": row.project_name,
             "description": row.description, "language": row.language,
             "status": row.status,
+            "agent_run_count": run_stats[0] if run_stats else 0,
+            "last_agent_run_at": run_stats[1] if run_stats else None,
             "file_count": file_counts.get(row.id, 0) or (source_archive.file_count if source_archive else 0),
             "source_mode": "audit_archive" if source_archive else "files",
             "source_malware_status": source_archive.malware_status if source_archive else None,
@@ -182,6 +202,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
     """
     project_role = require_project_access(db, project_id, user, need_write=False)
     project = db.get(Project, project_id)
+    agent_runs = _agent_run_stats(db, [project_id]).get(project_id)
 
     file_count = db.query(CodeFile.id).filter(
         CodeFile.project_id == project_id, CodeFile.status == "active").count()
@@ -223,6 +244,8 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         ),
         "can_update": project_role in {"admin", "owner"},
         "can_delete": project_role in {"admin", "owner"},
+        "agent_run_count": agent_runs[0] if agent_runs else 0,
+        "last_agent_run_at": agent_runs[1] if agent_runs else None,
         "create_time": project.create_time,
         "update_time": project.update_time,
         "recent_tasks": [

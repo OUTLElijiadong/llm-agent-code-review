@@ -24,6 +24,9 @@ from app.ai.multi_agent import (
 )
 from app.models.ai_call_log import AiCallLog
 
+# 普通成员 Agent 工作台不展示的管理/内部调度 Agent
+USER_HIDDEN_BUILTIN = frozenset({"manager", "operations", "evolution", "orchestrator"})
+
 # 注册顺序即前端展示顺序;通用代理在最前
 ALL_AGENTS: tuple[ReviewAgentProfile, ...] = (
     GENERAL_AGENT,
@@ -159,6 +162,7 @@ def _ai_log_base_query(db: Session, user_id: Optional[int]):
         AiCallLog.model_name,
         AiCallLog.status,
         AiCallLog.create_time,
+        AiCallLog.agent_label,
     )
     if user_id is not None:
         q = q.filter(AiCallLog.user_id == user_id)
@@ -317,8 +321,15 @@ def _aggregate_log_stats(
         for code in codes
     }
     rows = _ai_log_base_query(db, user_id).all()
-    for model_name, status, ctime in rows:
-        for code in _agent_codes_from_model_name(model_name, codes):
+    for model_name, status, ctime, agent_label in rows:
+        # 优先按 agent_label 精确归因(小菱等 Responses 调用直接写注册码);
+        # 旧记录无 label 时按 model_name 反推。
+        matched = (
+            {agent_label}
+            if agent_label and agent_label in codes
+            else _agent_codes_from_model_name(model_name, codes)
+        )
+        for code in matched:
             slot = stats[code]
             slot["call_count"] += 1
             if status == "success":
@@ -348,6 +359,22 @@ def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]
     codes = {r["code"] for r in runtime}
     stats = _aggregate_log_stats(db, user_id, codes)
     statuses = _derive_runtime_statuses(codes)
+    if user_id is not None:
+        # 普通成员工作台只显示自己实际运转过的 Agent(有调用记录),没运行过的不占工位;
+        # 管理/内部调度 Agent 即使有记录也隐藏;无自定义 Agent 调用权限时不展示已发布自定义 Agent。
+        from app.core.permission_codes import PermissionCode
+        from app.services import rbac_service
+
+        can_invoke = rbac_service.check_permission(db, user_id, PermissionCode.CUSTOM_AGENT_INVOKE)
+        runtime = [
+            item for item in runtime
+            if item.get("code") not in USER_HIDDEN_BUILTIN
+            and (stats.get(item["code"]) or {}).get("call_count", 0) > 0
+            and (
+                item.get("source") == "builtin"
+                or (item.get("source") == "custom" and can_invoke)
+            )
+        ]
     for item in runtime:
         s = stats.get(item["code"], {})
         item["status"] = statuses.get(item["code"], "idle")
@@ -384,9 +411,17 @@ def get_runtime_catalog(db: Session) -> list[dict]:
     return items
 
 
-def get_runtime_summary(db: Session) -> dict:
-    """可调用 Agent 目录汇总：总数与 category 分桶。"""
+def get_runtime_summary(db: Session, user_id: Optional[int] = None) -> dict:
+    """可调用 Agent 目录汇总：总数与 category 分桶(普通成员只统计运转过的 Agent)。"""
     runtime = get_runtime_catalog(db)
+    if user_id is not None:
+        codes = {r["code"] for r in runtime}
+        stats = _aggregate_log_stats(db, user_id, codes)
+        runtime = [
+            item for item in runtime
+            if item.get("code") not in USER_HIDDEN_BUILTIN
+            and (stats.get(item["code"]) or {}).get("call_count", 0) > 0
+        ]
     by_category: dict[str, int] = defaultdict(int)
     for item in runtime:
         by_category[str(item.get("category") or "general")] += 1

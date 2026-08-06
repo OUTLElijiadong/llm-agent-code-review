@@ -370,6 +370,7 @@ class DeepSeekResponsesRuntime:
         compaction_threshold_tokens: int = DEFAULT_COMPACTION_THRESHOLD_TOKENS,
         keep_recent_tokens: int = DEFAULT_KEEP_RECENT_TOKENS,
         completion_guard: Optional[CompletionGuard] = None,
+        on_round: Optional[Callable[[Mapping[str, Any]], None]] = None,
     ) -> None:
         if max_rounds < 1:
             raise ValueError("max_rounds 必须大于 0")
@@ -390,6 +391,7 @@ class DeepSeekResponsesRuntime:
         self._compaction_threshold_tokens = compaction_threshold_tokens
         self._keep_recent_tokens = keep_recent_tokens
         self._completion_guard = completion_guard
+        self._on_round = on_round
         self._locks: Dict[str, asyncio.Lock] = {}
 
     async def start(
@@ -659,6 +661,11 @@ class DeepSeekResponsesRuntime:
             try:
                 transport_output = await _invoke_transport(self._transport, payload)
                 response, turn_events = await _collect_response(transport_output)
+                if self._on_round is not None:
+                    try:
+                        self._on_round(response)
+                    except Exception:  # noqa: BLE001 - 调用日志失败不影响主流程
+                        pass
             except Exception as exc:  # noqa: BLE001 - transport 错误转为可恢复检查点
                 checkpoint.status = FAILED
                 checkpoint.error = f"Responses transport 调用失败: {exc}"

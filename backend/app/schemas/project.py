@@ -71,6 +71,8 @@ class ProjectOut(BaseModel):
     can_delete: bool = False
     last_review_at: Optional[datetime] = None
     score: Optional[int] = None
+    agent_run_count: int = 0
+    last_agent_run_at: Optional[datetime] = None
     create_time: datetime
     # R6 修复:补齐 update_time,对齐 Project ORM
     update_time: Optional[datetime] = None
@@ -99,6 +101,8 @@ class ProjectDetailOut(BaseModel):
     source_archive: Optional[ProjectSourceArchiveOut] = None
     can_update: bool = False
     can_delete: bool = False
+    agent_run_count: int = 0
+    last_agent_run_at: Optional[datetime] = None
     create_time: datetime
     update_time: datetime
     recent_tasks: list[RecentTaskOut] = []

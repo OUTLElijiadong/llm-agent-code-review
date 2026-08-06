@@ -160,6 +160,7 @@ class ToolCallLog(Base, IdMixin, TimestampMixin):
     policy_decision_id = Column(BigInteger, comment="策略决策日志 ID")
     approval_id = Column(BigInteger, comment="审批事项 ID")
     copilot_request_id = Column(String(64), comment="管理员副驾驶直接执行请求唯一标识")
+    project_id = Column(BigInteger, index=True, nullable=True, comment="关联项目 ID(用于项目级 Agent 运转统计)")
 
 
 class AgentMemory(Base, IdMixin, TimestampMixin):

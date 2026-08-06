@@ -1882,11 +1882,34 @@ class AgentResponsesService:
         # 工具事件必须先于结论文本到达用户端。DeepSeek 可能在工具调用前
         # 产生 output_text.delta，因此所有 surface 都先缓冲文本，完成后统一发出。
         transport_sink = _buffer_text_sink(event_sink)
+        fallback_model = config.model or settings.deepseek_model
+        agent_label = "manager" if self._surface == "admin" else "chat_assistant"
+
+        def _write_ai_call_log(response: Mapping[str, Any]) -> None:
+            """小菱每次 LLM 轮次落 AiCallLog,供 Agent 工作台按用户统计调用次数。"""
+            from app.models.ai_call_log import AiCallLog
+
+            usage = response.get("usage") if isinstance(response.get("usage"), Mapping) else {}
+            upstream_status = str(response.get("status") or "")
+            error_value = response.get("error")
+            log = AiCallLog(
+                user_id=int(self._user.id),
+                agent_label=agent_label,
+                model_name=str(response.get("model") or fallback_model),
+                prompt_tokens=_to_int(usage.get("input_tokens") or usage.get("prompt_tokens")),
+                completion_tokens=_to_int(usage.get("output_tokens") or usage.get("completion_tokens")),
+                total_tokens=_to_int(usage.get("total_tokens")),
+                status="success" if upstream_status == COMPLETED else "failed",
+                error_message=(str(error_value) if error_value else None)[:500] if error_value else None,
+            )
+            self._db.add(log)
+            self._db.commit()
+
         runtime = DeepSeekResponsesRuntime(
             transport=NativeResponsesTransport(config, transport_sink),
             tool_executor=executor,
             checkpoint_store=self._store,
-            model=config.model or settings.deepseek_model,
+            model=fallback_model,
             max_rounds=20,
             stream=True,
             context_window_tokens=settings.deepseek_context_window_tokens,
@@ -1894,6 +1917,7 @@ class AgentResponsesService:
             compaction_threshold_tokens=settings.deepseek_compaction_threshold_tokens,
             keep_recent_tokens=settings.deepseek_compaction_keep_recent_tokens,
             completion_guard=self._validate_admin_completion if self._surface == "admin" else None,
+            on_round=_write_ai_call_log,
         )
         return executor, runtime
 
@@ -2086,6 +2110,13 @@ def _upstream_error(raw: str, status: int) -> str:
     if isinstance(error, Mapping) and error.get("message"):
         return f"Responses 上游 HTTP {status}: {str(error['message'])[:500]}"
     return f"Responses 上游 HTTP {status}"
+
+
+def _to_int(value: Any) -> Optional[int]:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _instructions(surface: str, user: Optional[User] = None, is_super_admin: bool = False) -> str:

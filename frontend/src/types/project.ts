@@ -12,6 +12,9 @@ export interface ProjectOut {
   last_review_at?: string
   /** v2.0: 最近一次成功审查的真实评分,无审查记录时为 null */
   score?: number | null
+  /** 整个项目的 Agent 运转次数(工具调用日志统计) */
+  agent_run_count?: number
+  last_agent_run_at?: string | null
   create_time: string
 }
 
@@ -44,6 +47,8 @@ export interface ProjectDetailOut {
   source_archive?: ProjectSourceArchiveOut | null
   can_update: boolean
   can_delete: boolean
+  agent_run_count?: number
+  last_agent_run_at?: string | null
   create_time: string
   update_time: string
   recent_tasks: { id: number; score: number; total_issues: number; status: string; create_time: string }[]

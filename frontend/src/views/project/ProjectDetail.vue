@@ -68,6 +68,13 @@
               </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="文件数量">{{ project.file_count }}</el-descriptions-item>
+            <el-descriptions-item label="Agent 运转">
+              <span v-if="(project.agent_run_count ?? 0) > 0">
+                {{ project.agent_run_count }} 次
+                <span class="text-muted" style="font-size:12px">（最近 {{ project.last_agent_run_at ? formatDate(project.last_agent_run_at) : '—' }}）</span>
+              </span>
+              <span v-else class="text-muted">暂无运转</span>
+            </el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ formatDate(project.create_time) }}</el-descriptions-item>
             <el-descriptions-item label="更新时间">{{ formatDate(project.update_time) }}</el-descriptions-item>
             <el-descriptions-item v-if="project.description" label="描述" :span="3">

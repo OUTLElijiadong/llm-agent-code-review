@@ -71,6 +71,7 @@
             <th class="col-status">状态</th>
             <th class="col-score">评分</th>
             <th class="col-files">文件</th>
+            <th class="col-runs">Agent 运转</th>
             <th class="col-last">最近审查</th>
             <th class="col-create">创建时间</th>
             <th class="col-act">操作</th>
@@ -118,6 +119,12 @@
             </td>
             <td>
               <span class="file-count font-mono">{{ row.file_count }}</span>
+            </td>
+            <td>
+              <span v-if="(row.agent_run_count ?? 0) > 0" class="font-mono muted-2" :title="formatDate(row.last_agent_run_at ?? undefined) || ''">
+                {{ row.agent_run_count }} 次
+              </span>
+              <span v-else class="muted font-mono">—</span>
             </td>
             <td>
               <span v-if="row.last_review_at" class="font-mono muted-2">{{ formatDate(row.last_review_at) }}</span>
@@ -174,6 +181,9 @@
         <footer class="card-foot">
           <div class="foot-meta">
             <span class="font-mono">{{ formatDate(row.last_review_at) || '暂未审查' }}</span>
+            <span v-if="(row.agent_run_count ?? 0) > 0" class="font-mono runs-badge" :title="`最近运转 ${formatDate(row.last_agent_run_at ?? undefined) || ''}`">
+              Agent 运转 {{ row.agent_run_count }} 次
+            </span>
           </div>
           <div v-if="row.can_update || row.can_delete" class="card-actions" @click.stop>
             <el-tooltip v-if="row.can_update" content="编辑项目" placement="top">
@@ -623,6 +633,8 @@ onMounted(() => {
   .col-status { width: 100px; }
   .col-lang { width: 110px; }
   .col-last, .col-create { width: 160px; }
+  .col-runs { width: 110px; }
+  .runs-badge { color: var(--brand-600, #5b58e8); font-size: 12px; }
 }
 
 .cell-name {

@@ -113,11 +113,12 @@ def list_runtime_agents(
 @router.get("/runtime/summary", response_model=Resp[AgentRuntimeSummaryOut],
             dependencies=[Depends(require_permission(PermissionCode.AGENT_VIEW))])
 def get_runtime_summary(
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """返回内置注册中心与已发布自定义 Agent 的合并汇总。"""
-    return Resp(data=AgentRuntimeSummaryOut(**agent_service.get_runtime_summary(db)))
+    """返回内置注册中心与已发布自定义 Agent 的合并汇总(普通成员按可见范围过滤)。"""
+    user_id = None if user.role in {"admin", "super_admin"} else user.id
+    return Resp(data=AgentRuntimeSummaryOut(**agent_service.get_runtime_summary(db, user_id)))
 
 
 @router.get("/situation", response_model=Resp[AgentSituationOut],

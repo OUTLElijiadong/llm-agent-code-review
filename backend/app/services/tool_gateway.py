@@ -57,6 +57,7 @@ def execute(
         ToolGatewayResult: 工具调用结果。
     """
     t0 = time.time()
+    project_id = _extract_project_id(resource, context, input_summary)
     subject = f"agent:{agent_code}"
     decision = policy_engine.evaluate(
         db,
@@ -98,6 +99,7 @@ def execute(
             tool_code=tool_code,
             action=action,
             resource=resource,
+            project_id=project_id,
             status="escalated",
             risk_level=decision.risk_level,
             decision=decision.decision,
@@ -132,6 +134,7 @@ def execute(
             tool_code=tool_code,
             action=action,
             resource=resource,
+            project_id=project_id,
             status="denied",
             risk_level=decision.risk_level,
             decision=decision.decision,
@@ -166,6 +169,7 @@ def execute(
             tool_code=tool_code,
             action=action,
             resource=resource,
+            project_id=project_id,
             status="success",
             risk_level=decision.risk_level,
             decision=decision.decision,
@@ -191,6 +195,7 @@ def execute(
             tool_code=tool_code,
             action=action,
             resource=resource,
+            project_id=project_id,
             status="failed",
             risk_level=decision.risk_level,
             decision=decision.decision,
@@ -248,6 +253,48 @@ def authorize(
         decision=decision,
         context=context or {},
     )
+
+
+def _extract_project_id(resource: str, context: Optional[dict] = None, input_summary: str = "") -> Optional[int]:
+    """从资源编码/策略上下文/输入摘要中提取关联项目 ID。
+
+    覆盖常见形态: project:123 / projects/123 / project_id=123 /
+    resource 为 "project:1" 或 "projects/12" 或 context 内 project_id,
+    以及 input_summary 中 JSON 字段 project_id。解析失败返回 None。
+    """
+    import json as _json
+    import re as _re
+
+    text = f"{resource or ''} {input_summary or ''}"
+    match = _re.search(r"(?:project|projects)[:/#_-]?(\d+)", text)
+    if match:
+        return int(match.group(1))
+    if isinstance(context, dict):
+        for key in ("project_id", "projectId", "pid"):
+            value = context.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        raw = context.get("arguments")
+        if isinstance(raw, dict):
+            value = raw.get("project_id")
+            if isinstance(value, int) and value > 0:
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+    try:
+        parsed = _json.loads(input_summary or "{}")
+    except (ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        for key in ("project_id", "projectId"):
+            value = parsed.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+    return None
 
 
 def _elapsed_ms(start: float) -> int:
@@ -443,6 +490,7 @@ def _write_log(
     tool_code: str,
     action: str,
     resource: str,
+    project_id: Optional[int],
     status: str,
     risk_level: str,
     decision: str,
@@ -488,6 +536,7 @@ def _write_log(
         duration_ms=duration_ms,
         policy_decision_id=policy_decision_id,
         approval_id=approval_id,
+        project_id=project_id,
     )
     db.add(log)
     db.commit()
