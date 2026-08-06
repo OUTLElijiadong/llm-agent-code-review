@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "profiles": {
-    "python": {"image": "prism-sandbox-python:3.11", "digest": "", "memory_mb": 512, "cpus": 1.0, "pids": 128, "test_timeout_seconds": 120, "startup_timeout_seconds": 45, "workspace_mb": 256},
-    "node": {"image": "prism-sandbox-node:20", "digest": "", "memory_mb": 768, "cpus": 1.0, "pids": 256, "test_timeout_seconds": 180, "startup_timeout_seconds": 60, "workspace_mb": 512},
-    "java": {"image": "prism-sandbox-java:17", "digest": "", "memory_mb": 1024, "cpus": 1.0, "pids": 256, "test_timeout_seconds": 300, "startup_timeout_seconds": 90, "workspace_mb": 768},
-    "go": {"image": "prism-sandbox-go:1.23", "digest": "", "memory_mb": 768, "cpus": 1.0, "pids": 256, "test_timeout_seconds": 180, "startup_timeout_seconds": 60, "workspace_mb": 512},
-    "php": {"image": "prism-sandbox-php:8.3", "digest": "", "memory_mb": 512, "cpus": 1.0, "pids": 128, "test_timeout_seconds": 120, "startup_timeout_seconds": 45, "workspace_mb": 256}
+    "python": {"image": "prism-sandbox-python:3.11", "digest": "sha256:73be12d87a0f34f524c7be0c377d58851820f4a1e3931ca7b796f61eba0f896b", "memory_mb": 512, "cpus": 1.0, "pids": 128, "test_timeout_seconds": 120, "startup_timeout_seconds": 45, "workspace_mb": 256},
+    "node": {"image": "prism-sandbox-node:20", "digest": "sha256:bad8880f6b1cef8b8b9f9538c81edd5ecc45a021bd16004f1bc075a4f3da32cd", "memory_mb": 768, "cpus": 1.0, "pids": 256, "test_timeout_seconds": 180, "startup_timeout_seconds": 60, "workspace_mb": 512},
+    "java": {"image": "prism-sandbox-java:17", "digest": "sha256:cf240039c4dd2136cf3d1a81938de91465c716b1d6ce265d3a58afa2f2776aab", "memory_mb": 1024, "cpus": 1.0, "pids": 256, "test_timeout_seconds": 300, "startup_timeout_seconds": 90, "workspace_mb": 768},
+    "go": {"image": "prism-sandbox-go:1.23", "digest": "sha256:1ec75c336514032838741ea6a7a3228a776706e2d39f25754aabc6fe2bf4d586", "memory_mb": 768, "cpus": 1.0, "pids": 256, "test_timeout_seconds": 180, "startup_timeout_seconds": 60, "workspace_mb": 512},
+    "php": {"image": "prism-sandbox-php:8.3", "digest": "sha256:b75a7363a961015971d025d90a2a3660eb4ea18deae1a596dd246d098c1a30c7", "memory_mb": 512, "cpus": 1.0, "pids": 128, "test_timeout_seconds": 120, "startup_timeout_seconds": 45, "workspace_mb": 256}
   }
 }
