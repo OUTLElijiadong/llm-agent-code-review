@@ -104,6 +104,66 @@ export COMPOSER_DISABLE_NETWORK=1
 export HOME=/workspace/.prism-home
 export TMPDIR=/workspace/.prism-tmp
 
+run_agent_test_file() {
+  # agent 动态生成的测试文件必须自包含可执行;按扩展名调用,失败非 0 退出。
+  case "$1" in
+    *.py) python "$1" ;;
+    *.js|*.mjs) node "$1" ;;
+    *.php) php "$1" ;;
+    *.go) go run "$1" ;;
+    *.java)
+      cls_dir=".prism-ai-classes"
+      mkdir -p "$cls_dir"
+      javac -d "$cls_dir" "$1" || return 1
+      cls_name="$(basename "$1" .java)"
+      java -cp "$cls_dir" "$cls_name" ;;
+    *) return 0 ;;
+  esac
+}
+
+run_agent_tests() {
+  # 白盒:常规测试后执行 agent 动态生成的断言文件,输出结构化结果标记。
+  if [ ! -d ./_agent_tests ]; then
+    printf '%s\n' 'PRISM_AGENT_TESTS_BEGIN {"generated":0,"passed":0,"failed":0,"passed_count":0,"files":{}} PRISM_AGENT_TESTS_END'
+    return 0
+  fi
+  total=0; ok=0; failed=0; results=""
+  for f in ./_agent_tests/*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.py|*.js|*.mjs|*.php|*.go|*.java) ;; *) continue ;; esac
+    total=$((total + 1))
+    if run_agent_test_file "$f" >/tmp/agent-test-out 2>&1; then
+      ok=$((ok + 1)); status="pass"
+    else
+      failed=$((failed + 1)); status="fail"
+      printf '%s\n' "agent test failed: $f" >&2
+      tail -c 2000 /tmp/agent-test-out >&2 || true
+    fi
+    results="${results}\"$(basename "$f")\":\"$status\","
+  done
+  results="${results%,}"
+  printf 'PRISM_AGENT_TESTS_BEGIN {"generated":%s,"passed":%s,"failed":%s,"passed_count":%s,"files":{%s}} PRISM_AGENT_TESTS_END\n' "$total" "$ok" "$failed" "$ok" "$results"
+  [ "$failed" -eq 0 ]
+}
+
+run_agent_blackbox() {
+  # 黑盒:应用就绪后执行 agent 生成的 blackbox 脚本(仅本机回环),失败不阻断就绪结论。
+  for f in ./_agent_tests/blackbox.py ./_agent_tests/blackbox.js ./_agent_tests/blackbox.sh; do
+    if [ -f "$f" ]; then
+      printf '%s\n' "executing agent blackbox: $f"
+      if run_agent_test_file "$f" >/tmp/agent-bb-out 2>&1; then
+        printf 'PRISM_AGENT_TESTS_BEGIN {"generated":1,"passed":1,"failed":0,"passed_count":1,"files":{"%s":"pass"}} PRISM_AGENT_TESTS_END\n' "$(basename "$f")"
+      else
+        printf 'PRISM_AGENT_TESTS_BEGIN {"generated":1,"passed":0,"failed":1,"passed_count":0,"files":{"%s":"fail"}} PRISM_AGENT_TESTS_END\n' "$(basename "$f")"
+        tail -c 2000 /tmp/agent-bb-out >&2 || true
+      fi
+      return 0
+    fi
+  done
+  printf '%s\n' 'PRISM_AGENT_TESTS_BEGIN {"generated":0,"passed":0,"failed":0,"passed_count":0,"files":{}} PRISM_AGENT_TESTS_END'
+  return 0
+}
+
 run_test() {
   # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
   if [ -f ./_prism_verify.sh ]; then
@@ -165,6 +225,9 @@ run_test() {
       ;;
   esac
 }
+
+  # agent 动态测试:常规白盒之后执行动态生成的断言用例
+  run_agent_tests
 
 run_deploy() {
   export HOST=127.0.0.1
@@ -297,6 +360,9 @@ run_blackbox() {
   # 只有完全没起监听才在上面 return 1。
   return 0
 }
+
+  # agent 动态黑盒:应用就绪后执行 agent 生成的回环测试脚本
+  run_agent_blackbox
 
 if [ "$action" = test ]; then
   case "$test_mode" in

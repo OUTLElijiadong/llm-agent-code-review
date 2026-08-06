@@ -623,6 +623,105 @@ def _extract_prism_facts(log_text: str) -> dict[str, Any] | None:
         return None
 
 
+def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -> dict[str, Any]:
+    """从源码 zip 提取轻量摘要,供 LLM 生成测试用例(不展开全部内容)。"""
+    try:
+        raw = base64.b64decode(source_archive_base64)
+    except (binascii.Error, ValueError):
+        return {"language": language, "files": [], "entries": []}
+    entries: list[str] = []
+    file_names: list[str] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            for info in zf.infolist():
+                name = info.filename
+                if name.startswith("_prism") or name.startswith("__MACOSX") or name.endswith("/"):
+                    continue
+                if info.file_size > 400_000:
+                    continue
+                file_names.append(name)
+                if len(entries) < 120:
+                    entries.append(name)
+    except (zipfile.BadZipFile, OSError):
+        return {"language": language, "files": [], "entries": []}
+    return {"language": language, "files": file_names[:300], "entries": entries}
+
+
+def _inject_agent_test_files(source_archive_base64: str, files: list[dict[str, str]]) -> str:
+    """把 agent 生成的测试文件注入源码 zip 的 _agent_tests/ 目录,返回新 zip。"""
+    raw = base64.b64decode(source_archive_base64)
+    buf = io.BytesIO(raw)
+    with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as zf:
+        for item in files:
+            path = str(item.get("path") or "").strip()
+            content = str(item.get("content") or "")
+            if not path or not content:
+                continue
+            zf.writestr(f"_agent_tests/{path}", content)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _generate_agent_test_cases(
+    db: Session,
+    environment: "SandboxEnvironment",
+    source_archive_base64: str,
+    language: str,
+    test_mode: str,
+) -> list[dict[str, str]] | None:
+    """测试执行前调用 LLM 生成白盒/黑盒自包含断言测试文件。
+
+    失败静默(只记事件不阻断):LLM 未配置/生成失败/校验不通过都不影响原测试链。
+    返回注入用的文件列表;未生成返回 None。
+    """
+    try:
+        from app.agents.base import AgentContext
+        from app.agents.test_case_generator_agent import TestCaseGeneratorAgent
+
+        agent = TestCaseGeneratorAgent()
+        if not agent._api_key:
+            _append_event(db, environment, "progress", "agent_tests",
+                          "LLM 未配置,跳过快照 agent 测试用例生成")
+            db.commit()
+            return None
+        summary = _source_summary_for_agent_tests(source_archive_base64, language)
+        ctx = AgentContext(
+            user_id=environment.owner_id,
+            project_id=environment.project_id,
+            extra={"trace_id": environment.public_id},
+        )
+        result = agent.generate(language=language, test_mode=test_mode, source_summary=summary, ctx=ctx)
+        files = result.get("files") if isinstance(result, dict) else None
+        if not files:
+            _append_event(db, environment, "progress", "agent_tests",
+                          f"agent 测试用例未生成: {str(result.get('error') or '空结果')[:120]}")
+            db.commit()
+            return None
+        _append_event(
+            db, environment, "progress", "agent_tests",
+            f"agent 已生成 {len(files)} 个动态测试用例,注入沙箱执行",
+            {"count": len(files), "files": [f.get("path") for f in files]},
+        )
+        db.commit()
+        return files
+    except Exception as exc:  # noqa: BLE001 - 生成失败不阻断原测试链
+        _append_event(db, environment, "progress", "agent_tests",
+                      f"agent 测试用例生成异常: {str(exc)[:120]}")
+        db.commit()
+        return None
+
+
+def _extract_agent_tests_result(log_text: str) -> dict[str, Any] | None:
+    """从容器日志提取 PRISM_AGENT_TESTS_BEGIN/END 包裹的动态测试结果。"""
+    pattern = r"PRISM_AGENT_TESTS_BEGIN\s*(\{.*?\})\s*PRISM_AGENT_TESTS_END"
+    m = re.search(pattern, log_text, re.S)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1))
+    except (ValueError, TypeError):
+        return None
+
+
 def _run_test_review_report(
     db: Session,
     environment: SandboxEnvironment,
@@ -1527,14 +1626,26 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         pre_whitebox: dict[str, Any] | None = None
         if worker and environment.purpose == "deploy" and environment.agent_code == "sandbox_deployer":
             pre_whitebox = _run_deploy_auto_tests(db, environment, worker, source_archive_base64, modes=("whitebox",))[0]
+        effective_source = source_archive_base64
+        effective_sha = environment.source_sha256
+        if worker and environment.purpose == "test":
+            # agent 动态生成白盒/黑盒测试用例,注入 _agent_tests/ 后由沙箱 runner 确定性执行
+            agent_test_files = _generate_agent_test_cases(
+                db, environment, source_archive_base64, environment.language, worker_mode,
+            )
+            if agent_test_files:
+                effective_source = _inject_agent_test_files(source_archive_base64, agent_test_files)
+                effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
+                environment.source_sha256 = effective_sha
+                db.commit()
         if worker:
             execute_response = _call_worker(worker, "POST", "/execute", {
                 "request_id": environment.public_id,
                 "purpose": environment.purpose,
                 "language": environment.language,
                 "test_mode": worker_mode if worker_mode in {"whitebox", "blackbox", "combined"} else "whitebox",
-                "source_archive_base64": source_archive_base64,
-                "source_sha256": environment.source_sha256,
+                "source_archive_base64": effective_source,
+                "source_sha256": effective_sha,
                 "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
                 "image_digest": environment.image_digest or "",
             })
@@ -1638,6 +1749,27 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 })
         worker_conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
         evidence: dict[str, Any] = {"worker_result": worker_conclusion}
+        agent_tests_result: dict[str, Any] | None = None
+        worker_logs = (
+            worker_conclusion.get("logs")
+            if isinstance(worker_conclusion, dict) and isinstance(worker_conclusion.get("logs"), dict)
+            else None
+        )
+        if worker_logs and str(worker_logs.get("text") or ""):
+            agent_tests_result = _extract_agent_tests_result(str(worker_logs["text"]))
+            if agent_tests_result is not None:
+                evidence["agent_tests"] = agent_tests_result
+                agent_ok = bool(agent_tests_result.get("passed"))
+                _append_event(
+                    db, environment,
+                    "complete" if agent_ok else "failed",
+                    "agent_tests",
+                    f"agent 动态测试{'通过' if agent_ok else '未通过'}"
+                    f"(生成 {int(agent_tests_result.get('generated') or 0)} 个,"
+                    f"通过 {int(agent_tests_result.get('passed_count') or 0)} 个)",
+                    agent_tests_result,
+                )
+                db.commit()
         if environment.remote_target_url:
             _append_event(db, environment, "progress", "remote_blackbox", "已在授权边界内调用远程 HTTP(S) 黑盒探测")
             db.commit()
@@ -1667,6 +1799,8 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             "evidence": evidence,
             "agent_code": environment.agent_code,
         }
+        if agent_tests_result is not None:
+            conclusion["agent_tests"] = agent_tests_result
         if auto_test_chain:
             conclusion["auto_test_chain"] = auto_test_chain
             evidence["auto_test_chain"] = auto_test_chain
