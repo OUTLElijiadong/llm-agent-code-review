@@ -224,6 +224,21 @@ _CN_MUTATION_VERB = (
     r"备份|校验|验证|重启|重载|续期|维护|恢复|清理|安装|升级|卸载|锁定|解锁|"
     r"暂停|启动|停止|开放|关闭)"
 )
+# 只读意图：明确查询/查看/统计/巡检类请求不算写请求（防止“未解决告警”中的
+# “解决”被 _ADMIN_MUTATION_REQUEST 误判为写命令）。
+_ADMIN_READ_INTENT = re.compile(
+    r"(?:查询|查看|获取|读取|列出|统计|搜索|查找|展示|显示|看看|查一下|"
+    r"有多少|几个|多少条|多少|数量)"
+)
+# 强写动词（排除“解决/恢复/运行/记录/测试/验证/应用/调用/维护/检查”等
+# 在只读语境也常出现的歧义词）：出现时即使有只读词也按写请求处理。
+_ADMIN_CLEAR_WRITE_VERB = re.compile(
+    r"(?<![已未待不])(?:创建|新增|添加|删除|移除|修改|调整|编辑|更改|更新|设置|启用|停用|禁用|下线|"
+    r"重置|生成|撤销|发布|批准|驳回|拒绝|回滚|写入|保存|上传|导入|绑定|分配|激活|触发|"
+    r"试算|评测|重启|重载|续期|清理|安装|升级|卸载|锁定|解锁|暂停|启动|停止|开放|关闭|"
+    r"处置|执行|操作)"
+)
+
 _MUTATION_SUCCESS_PATTERNS = (
     re.compile(r"(?:成功(?:地)?|已经完成|已完成|完成了).{0,24}" + _CN_MUTATION_VERB),
     re.compile(_CN_MUTATION_VERB + r".{0,16}(?:已成功完成|成功完成|已完成|成功|完成了)"),
@@ -2343,6 +2358,10 @@ def _requests_admin_mutation(transcript: Sequence[Mapping[str, Any]]) -> bool:
         return True
     if _ADMIN_MUTATION_DISCUSSION.search(text):
         return False
+    # 只读意图优先：明确查询/查看/统计类请求，无强写动词按只读处理；
+    # 若同时含强写动词（如“查询后删除”）则按写请求处理，避免复合指令漏判。
+    if _ADMIN_READ_INTENT.search(text):
+        return bool(_ADMIN_CLEAR_WRITE_VERB.search(text))
     if _ADMIN_MUTATION_REQUEST.search(text):
         return True
     # 能力码本身不是执行授权；只有同时出现明确动作词时才算写命令。
