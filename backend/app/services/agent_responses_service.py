@@ -1795,6 +1795,7 @@ class AgentResponsesService:
         self._db = db
         self._user = user
         self._surface = surface
+        self._is_super_admin = surface == "admin" and _is_super_admin_actor(db, user)
         self._session_key = session_key
         self._store = DatabaseCheckpointStore(
             db,
