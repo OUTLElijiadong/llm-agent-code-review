@@ -499,3 +499,40 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.find('.response-tool-timeline').text()).toContain('文件不存在')
   })
 })
+
+it('恢复进行中会话时展示调用链、部分输出与运行状态', async () => {
+  sessionApi.get.mockResolvedValue({
+    surface: 'user',
+    session_id: 'user-inflight',
+    run: {
+      run_id: 'run-inflight',
+      status: 'running',
+      model: 'deepseek-v4-flash',
+      rounds: 2,
+      error: '',
+      output_text: '正在处理第 1 个告警',
+      updated_at: new Date().toISOString(),
+    },
+    messages: [{ role: 'user', content: '处理告警' }],
+    events: [
+      {
+        type: 'response.tool.started',
+        run_id: 'run-inflight',
+        call_id: 'call_inflight_1',
+        tool_name: 'admin_execute_capability',
+        arguments: { capability: 'observability.alerts.list' },
+        status: 'running',
+        sequence_number: 1,
+      },
+    ],
+    pending: null,
+  })
+  const wrapper = await mountReadyDrawer()
+  // 调用链(进行中工具)可见
+  expect(wrapper.text()).toContain('admin_execute_capability')
+  // 部分输出可见
+  expect(wrapper.text()).toContain('正在处理第 1 个告警')
+  // 运行状态徽标:运行中
+  expect(wrapper.text()).toContain('运行中')
+  wrapper.unmount()
+})

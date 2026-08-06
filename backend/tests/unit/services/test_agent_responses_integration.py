@@ -2005,3 +2005,83 @@ async def test_client_disconnect_discards_burst_events_without_blocking_worker(m
         await pending
 
     await asyncio.wait_for(finished.wait(), timeout=0.5)
+
+
+def test_public_completed_tool_events_includes_inflight_calls(db) -> None:
+    """恢复时保留进行中(未落账本)的调用链,不丢失运行状态可见性。"""
+    run = AgentResponseRun(
+        run_id="run_inflight",
+        user_id=7,
+        surface="user",
+        session_key="session-inflight",
+        status="running",
+        checkpoint_json="{}",
+    )
+    db.add(run)
+    db.flush()
+    db.add(
+        AgentToolExecution(
+            request_id="req-call-a",
+            run_id="run_inflight",
+            call_id="call_a",
+            user_id=7,
+            tool_name="list_projects",
+            status="success",
+            arguments_json='{"page": 1}',
+            result_json='{"status":"success","output":{"total":2}}',
+        )
+    )
+    db.commit()
+
+    checkpoint = {
+        "transcript": [
+            {
+                "type": "function_call",
+                "call_id": "call_a",
+                "name": "list_projects",
+                "arguments": '{"page": 1}',
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_a",
+                "output": '{"status":"success","output":{"total":2}}',
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_b",
+                "name": "delete_template",
+                "arguments": '{"id": 4}',
+            },
+        ],
+        "output_text": "正在处理",
+    }
+
+    events = api_module._public_completed_tool_events(db, run, checkpoint)
+
+    call_a = [event for event in events if event.get("call_id") == "call_a"]
+    call_b = [event for event in events if event.get("call_id") == "call_b"]
+    # 已落账本:started + completed
+    assert [event["type"] for event in call_a] == ["response.tool.started", "response.tool.completed"]
+    # 进行中:只有 started,状态 running
+    assert len(call_b) == 1
+    assert call_b[0]["type"] == "response.tool.started"
+    assert call_b[0]["status"] == "running"
+    assert call_b[0]["tool_name"] == "delete_template"
+
+
+def test_transcript_function_calls_parses_terminal_output(db) -> None:
+    checkpoint = {
+        "transcript": [
+            {"type": "function_call", "call_id": "ok", "name": "a", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "ok", "output": '{"status":"success"}'},
+            {"type": "function_call", "call_id": "err", "name": "b", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "err", "output": '{"status":"error","error":"x"}'},
+            {"type": "function_call", "call_id": "hang", "name": "c", "arguments": "{}"},
+        ],
+    }
+    calls = api_module._transcript_function_calls(checkpoint)
+    by_id = {call["call_id"]: call for call in calls}
+    assert by_id["ok"]["output_status"] == "success"
+    assert by_id["err"]["output_status"] == "failed"
+    assert by_id["hang"]["output"] is None
+    assert [call["call_id"] for call in calls] == ["ok", "err", "hang"]

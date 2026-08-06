@@ -171,6 +171,7 @@ def get_agent_response_session(
                 "model": str(checkpoint.get("model") or ""),
                 "rounds": int(checkpoint.get("rounds") or 0),
                 "error": _public_text(checkpoint.get("error")),
+                "output_text": _public_text(checkpoint.get("output_text"), limit=4000),
                 "updated_at": row.update_time.isoformat() if row.update_time else "",
             },
             "messages": _public_transcript_messages(checkpoint.get("transcript")),
@@ -264,6 +265,70 @@ def _public_text(value: Any, *, limit: int = 1000) -> str:
     return str(safe_value)[:limit]
 
 
+def _transcript_function_calls(checkpoint: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """按出现顺序提取 transcript 中的函数调用及对应终态输出（取每个 call_id 最后一次）。
+
+    用于恢复进行中/账本尚未覆盖的工具调用链。参数与输出只做结构化解析，
+    脱敏由调用方在生成公开事件时统一处理。
+    """
+
+    transcript = checkpoint.get("transcript") if isinstance(checkpoint, Mapping) else None
+    if not isinstance(transcript, list):
+        return []
+    calls: dict[str, dict[str, Any]] = {}
+    outputs: dict[str, Mapping[str, Any]] = {}
+    order: list[str] = []
+    for item in transcript:
+        if not isinstance(item, Mapping):
+            continue
+        item_type = str(item.get("type") or "")
+        if item_type == "function_call":
+            call_id = str(item.get("call_id") or "")
+            if not call_id:
+                continue
+            raw_args = item.get("arguments")
+            try:
+                arguments = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+            except (TypeError, json.JSONDecodeError):
+                arguments = {}
+            if call_id not in calls:
+                order.append(call_id)
+            calls[call_id] = {
+                "call_id": call_id,
+                "name": str(item.get("name") or ""),
+                "arguments": arguments if isinstance(arguments, Mapping) else {},
+                "output": None,
+                "output_status": "",
+            }
+        elif item_type == "function_call_output":
+            call_id = str(item.get("call_id") or "")
+            if not call_id:
+                continue
+            raw_output = item.get("output")
+            try:
+                output = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
+            except (TypeError, json.JSONDecodeError):
+                output = {}
+            if isinstance(output, Mapping):
+                outputs[call_id] = output
+    result: list[dict[str, Any]] = []
+    for call_id in order:
+        entry = dict(calls[call_id])
+        output = outputs.get(call_id)
+        if output is not None:
+            status = str(output.get("status") or "").casefold()
+            entry["output"] = output
+            entry["output_status"] = (
+                "success"
+                if status in {"success", "completed", "ok"}
+                else "failed"
+                if status in {"error", "failed", "rejected", "denied", "cancelled", "canceled"}
+                else ""
+            )
+        result.append(entry)
+    return result
+
+
 def _public_completed_tool_events(
     db: Session,
     run: AgentResponseRun,
@@ -289,6 +354,7 @@ def _public_completed_tool_events(
     events: list[dict[str, Any]] = []
     sequence = 0
     agent_code = "manager" if run.surface == "admin" else "chat_assistant"
+    covered_call_ids: set[str] = set()
     for row in rows:
         try:
             arguments = json.loads(row.arguments_json or "{}")
@@ -296,6 +362,7 @@ def _public_completed_tool_events(
             arguments = {}
         safe_arguments = redact_agent_event_value(arguments if isinstance(arguments, Mapping) else {})
         sequence += 1
+        covered_call_ids.add(str(row.call_id))
         events.append(
             {
                 "type": "response.tool.started",
@@ -347,6 +414,61 @@ def _public_completed_tool_events(
                     "sequence_number": sequence,
                 }
             )
+
+    # 从模型 transcript 补齐账本尚未覆盖的调用：进行中/未执行完的
+    # function_call 只发 started，让前端恢复时能看到“正在调用”的调用链；
+    # 已执行但账本缺失的调用按 transcript 终态补 completed/failed。
+    for call in _transcript_function_calls(checkpoint):
+        if call["call_id"] in covered_call_ids:
+            continue
+        safe_args = redact_agent_event_value(call["arguments"] if isinstance(call["arguments"], Mapping) else {})
+        sequence += 1
+        events.append(
+            {
+                "type": "response.tool.started",
+                "run_id": run.run_id,
+                "tool_call_id": call["call_id"],
+                "call_id": call["call_id"],
+                "tool_name": call["name"],
+                "agent_code": agent_code,
+                "arguments": safe_args,
+                "status": "running",
+                "cached": True,
+                "sequence_number": sequence,
+            }
+        )
+        if call["output"] is not None:
+            sequence += 1
+            if call["output_status"] == "success":
+                events.append(
+                    {
+                        "type": "response.tool.completed",
+                        "run_id": run.run_id,
+                        "tool_call_id": call["call_id"],
+                        "call_id": call["call_id"],
+                        "tool_name": call["name"],
+                        "agent_code": agent_code,
+                        "status": "success",
+                        "cached": True,
+                        "output_summary": _public_text(call["output"].get("output")),
+                        "sequence_number": sequence,
+                    }
+                )
+            else:
+                events.append(
+                    {
+                        "type": "response.tool.failed",
+                        "run_id": run.run_id,
+                        "tool_call_id": call["call_id"],
+                        "call_id": call["call_id"],
+                        "tool_name": call["name"],
+                        "agent_code": agent_code,
+                        "status": "failed",
+                        "cached": True,
+                        "error": _public_text(call["output"].get("error") or "工具执行失败"),
+                        "sequence_number": sequence,
+                    }
+                )
 
     # 目前前端仍可使用 messages 恢复完整对话；events 是按顺序
     # 重建工具时间线的增量契约。将助手文本统一置于工具后，

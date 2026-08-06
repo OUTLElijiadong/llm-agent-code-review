@@ -209,6 +209,14 @@ function restoredMessages(
   session: Awaited<ReturnType<typeof getAgentResponseSession>>,
   restoredTime: string,
 ): ChatMessage[] {
+  return restoredSessionMessages(session, restoredTime)
+}
+
+/** 恢复会话消息:完整历史 + 非终态运行的部分输出(模型已生成但尚未结束的文本)。 */
+function restoredSessionMessages(
+  session: Awaited<ReturnType<typeof getAgentResponseSession>>,
+  restoredTime: string,
+): ChatMessage[] {
   // 早期版本曾把本地欢迎语带入模型上下文并被服务端持久化,恢复时去重
   const restored: ChatMessage[] = session.messages
     .filter((message) => message.content.trim() !== WELCOME_TEXT.trim())
@@ -243,6 +251,21 @@ function restoredMessages(
     }
   }
   restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
+  // 非终态运行:把模型已生成的部分输出(尚未作为完整消息落库)展示出来。
+  const partialOutput = session.run?.output_text?.trim()
+  if (partialOutput && isAgentResponseSessionOccupied(session.run?.status)) {
+    const lastAssistant = [...restored].reverse().find(
+      (message) => message.role === 'assistant' && message.content.trim(),
+    )
+    if (!lastAssistant || lastAssistant.content.trim() !== partialOutput) {
+      restored.push({
+        id: messageId(),
+        role: 'assistant',
+        content: partialOutput,
+        time: restoredTime,
+      })
+    }
+  }
   return restored
 }
 

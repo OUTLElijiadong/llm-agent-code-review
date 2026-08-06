@@ -85,14 +85,22 @@ function dropSession(sessionId: string): void {
 function ensureFreshOnOpen(): void {
   const welcomeText = props.welcomeText ?? ''
   const current = sessions.value.find((item) => item.id === activeId.value)
-  // 运行/等待中的会话不能自动切走,否则用户会失去正在执行任务的上下文。
-  if (current && inferBusy(current)) return
+  // 1) 任一历史会话未完成(运行中/等待审批/等待输入) → 优先跳回该会话,
+  //    保留正在执行任务的上下文;当前就是这个会话时保持不动。
+  const busySession = sessions.value.find((item) => inferBusy(item))
+  if (busySession) {
+    if (busySession.id !== activeId.value) select(busySession.id)
+    return
+  }
+  // 2) 当前就是空的新对话(无输入输出) → 保留它,不重复创建空白条目。
   if (current && isPristineAgentChatSession(current.id, welcomeText)) return
+  // 3) 历史对话均已完成后:复用既有空对话。
   const reusable = findPristineAgentChatSession(sessions.value, welcomeText, busyIds.value)
   if (reusable) {
     select(reusable.id)
     return
   }
+  // 4) 全部为已完成对话且无空会话 → 新建空对话。
   createSession()
 }
 

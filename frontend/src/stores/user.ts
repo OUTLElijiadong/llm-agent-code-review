@@ -137,6 +137,15 @@ export const useUserStore = defineStore('user', () => {
   }
 
   /**
+   * 判断是否为唯一超级管理员(super_admin)
+   * 与后端 is_unique_super_admin 语义对齐,用于 meta.superAdmin 路由守卫
+   * @returns 是否为超级管理员
+   */
+  function isSuperAdmin(): boolean {
+    return roles.value.includes('super_admin') || profile.value?.role === 'super_admin'
+  }
+
+  /**
    * 用户登录,保存 token、获取用户信息并加载 RBAC 权限
    * @param data - 登录请求参数
    */
@@ -229,6 +238,7 @@ export const useUserStore = defineStore('user', () => {
     hasPermission,
     hasRole,
     isAdmin,
+    isSuperAdmin,
     logout,
   }
 })

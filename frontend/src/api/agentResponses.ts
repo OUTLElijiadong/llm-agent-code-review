@@ -17,6 +17,7 @@ export interface AgentResponseSessionRun {
   model: string
   rounds: number
   error: string
+  output_text?: string
   updated_at: string
 }
 

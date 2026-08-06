@@ -84,7 +84,8 @@ it('resolves post-login redirects to a safe role home', function testPostLoginRe
   expect(resolvePostLoginPath('user', '/login?redirect=/projects')).toBe('/dashboard')
   expect(resolvePostLoginPath('user', '/register')).toBe('/dashboard')
   expect(resolvePostLoginPath('user', '/admin/users')).toBe('/dashboard')
-  expect(resolvePostLoginPath('admin', '/projects')).toBe('/projects')
+  // 服务器版:管理员登录后非 /admin 重定向一律落总览大屏
+  expect(resolvePostLoginPath('admin', '/projects')).toBe('/admin/overview')
   expect(resolvePostLoginPath('reviewer', '/projects/7')).toBe('/projects/7')
 })
 

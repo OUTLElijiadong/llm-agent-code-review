@@ -24,7 +24,7 @@ class ApiConfigSaveIn(BaseModel):
     provider: str = Field(default="deepseek", description="提供商: deepseek | openai | custom")
     api_key: str = Field(..., min_length=1, max_length=256, description="API Key")
     base_url: str = Field(default="https://api.deepseek.com", max_length=512, description="API 端点")
-    model: str = Field(default="deepseek-chat", max_length=128, description="模型名称")
+    model: str = Field(default="deepseek-v4-flash", max_length=128, description="模型名称")
 
 
 class ApiConfigTestIn(BaseModel):
@@ -32,7 +32,7 @@ class ApiConfigTestIn(BaseModel):
     provider: str = Field(default="deepseek")
     api_key: str = Field(..., min_length=1, max_length=256)
     base_url: str = Field(default="https://api.deepseek.com", max_length=512)
-    model: str = Field(default="deepseek-chat", max_length=128)
+    model: str = Field(default="deepseek-v4-flash", max_length=128)
 
 
 class ApiConfigTestOut(BaseModel):
