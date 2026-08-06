@@ -13,6 +13,7 @@ from app.agents.event_bus import AgentEventBus
 from app.core.database import get_db
 from app.core.dependencies import require_admin, require_super_admin
 from app.models.agent_governance import AgentProfile, ToolCallLog
+from app.models.ai_call_log import AiCallLog
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.common import Resp
@@ -36,7 +37,7 @@ def _agent_activity(db: Session) -> list[dict]:
     today = now.date()
 
     profiles = db.query(AgentProfile).all()
-    # 今日各 agent 调用量
+    # 今日各 agent 调用量: 工具网关日志 + 小菱 Responses 调用(AiCallLog,按 agent_label 归因)
     today_rows = (
         db.query(ToolCallLog.agent_code, func.count(ToolCallLog.id).label("cnt"))
         .filter(func.date(ToolCallLog.create_time) == today)
@@ -44,6 +45,17 @@ def _agent_activity(db: Session) -> list[dict]:
         .all()
     )
     today_map = {r[0]: r[1] for r in today_rows}
+    ai_label_rows = (
+        db.query(AiCallLog.agent_label, func.count(AiCallLog.id).label("cnt"))
+        .filter(
+            func.date(AiCallLog.create_time) == today,
+            AiCallLog.agent_label.isnot(None),
+        )
+        .group_by(AiCallLog.agent_label)
+        .all()
+    )
+    for label, cnt in ai_label_rows:
+        today_map[label] = today_map.get(label, 0) + cnt
     profiles_by_code = {profile.code: profile for profile in profiles}
     event_status_map = {
         "dispatch": "thinking",
