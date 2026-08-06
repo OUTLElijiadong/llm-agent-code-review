@@ -156,6 +156,13 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
   compose build backend
   run_admin_alembic upgrade head
   assert_alembic_at_head || fatal "Alembic 未位于唯一 head"
+  # GeoLite2 以只读 bind 挂载进容器，而后端以非 root(prism, uid 10001)运行；
+  # 宿主机文件若属主 501 且权限 640，容器内将 Permission denied，导致
+  # /overview/geo 登录来源地图全部定位失败返回空。此处强制放开为 644 防复发。
+  geolite_host="${GEOLITE_DB_HOST_PATH:-/opt/code-review/backend/GeoLite2-City.mmdb}"
+  if [[ -f "$geolite_host" ]]; then
+    chmod 644 "$geolite_host" 2>/dev/null || log_warn "无法调整 GeoLite2 权限: $geolite_host"
+  fi
   compose up -d --no-deps backend
   wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || fatal "Backend 未恢复健康"
   smoke_backend "$target_sha" || fatal "Backend 冒烟失败"
