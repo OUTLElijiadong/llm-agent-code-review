@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive } from 'vue'
 import { ArrowRight, CircleCheck, Loading, WarningFilled } from '@element-plus/icons-vue'
 
 import type { ResponseToolCall, ResponseToolCallStatus } from '@/utils/responsesTimeline'
@@ -19,32 +19,8 @@ const STATUS_LABELS: Record<ResponseToolCallStatus, string> = {
 
 const visibleCalls = computed(() => props.calls.filter((call) => call.name || call.argumentsText))
 
-const ACTIVE_STATUSES: ReadonlySet<ResponseToolCallStatus> = new Set([
-  'streaming',
-  'running',
-  'waiting_approval',
-  'waiting_input',
-])
-
-/** 每条调用的展开状态;进行中的调用默认展开,完成后保持用户当前选择。 */
+/** 每条调用的展开状态;默认全部折叠,用户点击后展开,保持用户选择。 */
 const expandedKeys = reactive(new Set<string>())
-
-function isActive(status: ResponseToolCallStatus): boolean {
-  return ACTIVE_STATUSES.has(status)
-}
-
-function initExpanded(call: ResponseToolCall): void {
-  if (isActive(call.status) && !expandedKeys.has(call.key)) expandedKeys.add(call.key)
-}
-
-// 新加入的进行中调用自动展开
-watch(
-  () => props.calls.map((call) => `${call.key}:${call.status}`),
-  () => {
-    for (const call of props.calls) initExpanded(call)
-  },
-  { immediate: true },
-)
 
 function toggle(call: ResponseToolCall): void {
   if (expandedKeys.has(call.key)) expandedKeys.delete(call.key)

@@ -82,11 +82,9 @@ async function mountReadyDrawer(prefill?: string): Promise<VueWrapper> {
 }
 
 /** 整块调用链默认折叠,断言前先展开。 */
-async function expandTimeline(wrapper: VueWrapper): Promise<void> {
-  const summary = wrapper.find('.response-tool-summary')
-  if (summary.exists() && summary.attributes('aria-expanded') !== 'true') {
-    await summary.trigger('click')
-  }
+/** 调用链默认折叠;需要断言展开详情的用例自行点击 .response-tool-call-head。 */
+async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
+  // no-op:保留给历史用例的兼容入口
 }
 
 describe('AgentChatDrawer Responses stream', () => {
@@ -387,6 +385,9 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(1)
 
     await expandTimeline(wrapper)
+    // 调用链默认折叠:点击调用头展开后断言失败详情
+    await wrapper.find('.response-tool-call-head').trigger('click')
+    await flushPromises()
     const timelineText = wrapper.find('.response-tool-timeline').text()
     expect(timelineText).toContain('失败')
     expect(timelineText).toContain('响应已结束，但工具未返回完成事件')
@@ -496,6 +497,7 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(timeline.text()).toContain('失败')
     // 已完成/失败的调用默认折叠,点击后展示错误详情
     await wrapper.find('.response-tool-call-head').trigger('click')
+    await flushPromises()
     expect(wrapper.find('.response-tool-timeline').text()).toContain('文件不存在')
   })
 })

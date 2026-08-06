@@ -56,11 +56,9 @@ async function finish(index: number): Promise<void> {
 }
 
 /** 整块调用链默认折叠,断言前先展开。 */
-async function expandTimeline(wrapper: VueWrapper): Promise<void> {
-  const summary = wrapper.find('.response-tool-summary')
-  if (summary.exists() && summary.attributes('aria-expanded') !== 'true') {
-    await summary.trigger('click')
-  }
+/** 调用链默认折叠;需要断言展开详情的用例自行点击 .response-tool-call-head。 */
+async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
+  // no-op:保留给历史用例的兼容入口
 }
 
 beforeEach(() => {
@@ -399,6 +397,9 @@ describe('AdminCopilot Responses stream', () => {
     await finish(1)
 
     await expandTimeline(wrapper)
+    // 调用链默认折叠:点击调用头展开后断言失败详情
+    await wrapper.find('.response-tool-call-head').trigger('click')
+    await flushPromises()
     const timelineText = wrapper.find('.response-tool-timeline').text()
     expect(timelineText).toContain('失败')
     expect(timelineText).toContain('响应已结束，但工具未返回完成事件')
@@ -428,6 +429,7 @@ describe('AdminCopilot Responses stream', () => {
     expect(timeline.text()).toContain('失败')
     // 失败详情默认折叠,点击后展示
     await wrapper.find('.response-tool-call-head').trigger('click')
+    await flushPromises()
     expect(wrapper.find('.response-tool-timeline').text()).toContain('响应已结束，但工具未返回完成事件')
     expect(wrapper.find('.response-tool-timeline').text()).not.toContain('已完成')
   })
@@ -516,6 +518,9 @@ describe('AdminCopilot Responses stream', () => {
     })
     await finish(0)
 
+    // 调用链默认折叠:展开后断言调用参数
+    await wrapper.find('.response-tool-call-head').trigger('click')
+    await flushPromises()
     expect(wrapper.find('.response-tool-arguments').text()).toContain('"query": "李家栋"')
     expect(wrapper.findAll('.response-input-option')).toHaveLength(2)
     expect(wrapper.text()).toContain('其他（自定义输入）')
