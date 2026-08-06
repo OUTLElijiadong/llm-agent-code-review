@@ -5,32 +5,10 @@ export interface ProjectOut {
   language?: string
   status: string
   file_count: number
-  source_mode?: 'files' | 'audit_archive'
-  source_malware_status?: 'clean' | 'infected' | 'degraded' | 'error' | null
-  can_update: boolean
-  can_delete: boolean
   last_review_at?: string
   /** v2.0: 最近一次成功审查的真实评分,无审查记录时为 null */
   score?: number | null
   create_time: string
-}
-
-export interface ProjectSourceArchiveOut {
-  original_filename: string
-  archive_sha256: string
-  compressed_size: number
-  expanded_size: number
-  file_count: number
-  max_member_size: number
-  max_compression_ratio: number
-  storage_status: string
-  malware_status: 'clean' | 'infected' | 'degraded' | 'error'
-  audit_status: 'not_started' | 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked' | 'cancelled'
-  audit_started_at?: string | null
-  audit_heartbeat_at?: string | null
-  audit_completed_at?: string | null
-  quarantined: boolean
-  threat_count: number
 }
 
 export interface ProjectDetailOut {
@@ -40,10 +18,6 @@ export interface ProjectDetailOut {
   language?: string
   status: string
   file_count: number
-  source_mode: 'files' | 'audit_archive'
-  source_archive?: ProjectSourceArchiveOut | null
-  can_update: boolean
-  can_delete: boolean
   create_time: string
   update_time: string
   recent_tasks: { id: number; score: number; total_issues: number; status: string; create_time: string }[]

@@ -1,18 +1,7 @@
 """
 api_config_service 单元测试
 """
-import pytest
-
 from app.schemas.api_config import ApiConfigSaveIn
-
-
-@pytest.fixture(autouse=True)
-def _resolve_config_hosts_to_public_ip(monkeypatch):
-    """单元测试固定公网 DNS 结果，保留生产存储时的强制 SSRF 校验。"""
-    monkeypatch.setattr(
-        "app.utils.api_resolver._resolve_host",
-        lambda _host: {"8.8.8.8"},
-    )
 
 
 class TestGetConfig:

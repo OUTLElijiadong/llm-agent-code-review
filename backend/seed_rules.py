@@ -3,9 +3,7 @@
 
 128条规则: 通用28 + Python 22 + Java 18 + JavaScript/TS 20 + Go 14 + SQL 12 + 文档 14
 """
-import os
-import sys
-
+import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pymysql
@@ -151,38 +149,13 @@ RULES = [
 ]
 
 
-def _required_env(name: str) -> str:
-    """读取必需的数据库凭据，不提供可被误用的默认值。"""
-
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise RuntimeError(f"运行种子脚本前必须设置 {name}")
-    return value
-
-
-def _database_config() -> dict:
-    """从环境变量构建最小数据库连接配置。"""
-
-    port_text = os.getenv("DB_PORT", "3306").strip()
-    try:
-        port = int(port_text)
-    except ValueError as exc:
-        raise RuntimeError("DB_PORT 必须是有效整数") from exc
-    if not 1 <= port <= 65535:
-        raise RuntimeError("DB_PORT 必须在 1 到 65535 之间")
-    return {
-        "host": os.getenv("DB_HOST", "127.0.0.1").strip() or "127.0.0.1",
-        "port": port,
-        "user": _required_env("DB_USER"),
-        "password": _required_env("DB_PASSWORD"),
-        "database": os.getenv("DB_NAME", "code_review").strip() or "code_review",
-        "charset": "utf8mb4",
-        "connect_timeout": 5,
-    }
-
-
 def seed():
-    conn = pymysql.connect(**_database_config())
+    conn = pymysql.connect(
+        host='127.0.0.1', port=3307,
+        user='root', password='root123',
+        database='code_review',
+        charset='utf8mb4',
+    )
     cur = conn.cursor()
     cur.execute("DELETE FROM review_rule WHERE is_builtin = 1")
 

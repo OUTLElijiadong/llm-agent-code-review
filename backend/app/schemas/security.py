@@ -17,11 +17,7 @@ class SecurityScanTaskIn(BaseModel):
 
 class SecurityScanProjectIn(BaseModel):
     project_id: int = Field(..., description="项目 ID")
-    scan_mode: str = Field(
-        "static_full",
-        pattern="^(full|static_full|triage)$",
-        description="full=全量语义, static_full=整包静态+有界语义, triage=风险优先抽样",
-    )
+    scan_mode: str = Field("full", pattern="^(full|triage)$", description="full=整包白盒审计, triage=风险优先抽样")
     top_n: int = Field(50, ge=1, le=200, description="triage 模式最多扫描的文件数; full 模式忽略")
     trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
 
@@ -29,17 +25,6 @@ class SecurityScanProjectIn(BaseModel):
 class SecurityScanAllProjectsIn(BaseModel):
     top_n_per_project: int = Field(50, ge=1, le=200, description="每个项目最多扫描的文件数")
     trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
-
-
-class FullChainAuditIn(BaseModel):
-    """全链路源码审计输入 (v3.3)"""
-
-    project_id: int = Field(..., description="项目 ID")
-    top_n: int = Field(100, ge=1, le=200, description="语义审计候选文件数")
-    trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
-    enable_sandbox: bool = Field(
-        False, description="是否在验证阶段调用真实沙箱跑 PoC(需有在线 worker)",
-    )
 
 
 # ---- Output ----
@@ -151,9 +136,6 @@ class SecurityScanOut(BaseModel):
     summary: str = ""
     file_count: int = 0
     duration_ms: int = 0
-    source_archive_sha256: str = ""
-    source_archive_bytes: int = 0
-    source_archive_filename: str = ""
 
 
 # ---- Checklist ----

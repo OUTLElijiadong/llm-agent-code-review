@@ -178,12 +178,10 @@ def readyz() -> JSONResponse:
         return JSONResponse(
             status_code=200,
             content={"status": "ready", "release": settings.app_release},
-            headers={"Cache-Control": "no-store"},
         )
     return JSONResponse(
         status_code=503,
         content={"status": "not_ready", "release": settings.app_release},
-        headers={"Cache-Control": "no-store"},
     )
 
 

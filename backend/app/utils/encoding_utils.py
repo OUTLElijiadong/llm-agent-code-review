@@ -5,8 +5,6 @@ import base64
 
 BINARY_THRESHOLD = 0.3
 BASE64_PREFIX = "[BINARY:BASE64:]"
-# 避免审计规则对高行数文本反复 materialize 数百万个 Python 字符串。
-MAX_AUDIT_TEXT_LINES_PER_FILE = 100_000
 
 
 def to_utf8(raw: bytes) -> str:

@@ -2,6 +2,7 @@
 import ipaddress
 import json
 import re
+import socket
 from html import unescape
 from typing import List, Optional
 from urllib.parse import parse_qs, quote, urljoin, urlparse
@@ -10,19 +11,17 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import NotFoundError
 from app.models.agent_governance import AgentKnowledgeChunk, AgentKnowledgeDoc, AgentKnowledgeSource
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.services import approval_service, embedding_service, knowledge_service
-from app.utils.public_http import PinnedPublicUrl, pin_public_http_url
 
 _CHUNK_SIZE = 700
 _CHUNK_OVERLAP = 80
 _DEFAULT_USER_AGENT = "Prism-Agent-Governance/1.0"
 _BLOCKED_HOSTS = {"localhost", "localhost.localdomain"}
 _BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".localdomain", ".internal", ".lan", ".home", ".corp")
-_EXTERNAL_SOURCE_TYPES = {"url", "official", "docs", "github"}
 
 
 def chunk_text(content: str) -> List[str]:
@@ -191,11 +190,6 @@ def upsert_source(
     Returns:
         AgentKnowledgeSource: 来源记录。
     """
-    source_type = (source_type or "").strip().lower()
-    source_uri = (source_uri or "").strip()
-    if source_type in _EXTERNAL_SOURCE_TYPES and not _validate_knowledge_url(source_uri):
-        raise ValidationError("外部知识来源仅允许可解析的公网 HTTP(S) URL", code=40026)
-
     row = db.get(AgentKnowledgeSource, source_id) if source_id else None
     if not row:
         row = AgentKnowledgeSource(agent_code=agent_code, source_type=source_type, source_uri=source_uri)
@@ -279,9 +273,6 @@ def _resolve_source_payload(db: Session, source: AgentKnowledgeSource) -> list[d
     Returns:
         list[dict]: 文档 payload 列表。
     """
-    if source.source_type in _EXTERNAL_SOURCE_TYPES and not _validate_knowledge_url(source.source_uri):
-        return []
-
     config = {}
     if source.config_json:
         try:
@@ -508,27 +499,20 @@ def _safe_http_get(url: str) -> httpx.Response:
     Raises:
         httpx.HTTPError: 请求失败、跳转不安全或跳转次数过多。
     """
-    target = _pin_knowledge_url(url)
-    if not target:
-        raise httpx.HTTPError("unsafe knowledge URL")
-    for _ in range(4):
-        # 每一跳独立连接池，避免不同域名共用同一 IP 时复用错误 TLS 会话。
-        with httpx.Client(
-            timeout=settings.agent_knowledge_fetch_timeout,
-            follow_redirects=False,
-            trust_env=False,
-        ) as client:
-            resp = client.get(
-                target.request_url,
-                headers={**_fetch_headers(target.sni_hostname), "Host": target.host_header},
-                extensions=target.request_extensions,
-            )
+    current_url = url
+    with httpx.Client(
+        timeout=settings.agent_knowledge_fetch_timeout,
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
+        for _ in range(4):
+            resp = client.get(current_url, headers=_fetch_headers())
             if resp.status_code in {301, 302, 303, 307, 308}:
                 location = resp.headers.get("location", "")
-                next_target = _pin_knowledge_url(urljoin(target.original_url, location))
-                if not next_target:
+                next_url = _validate_knowledge_url(urljoin(current_url, location))
+                if not next_url:
                     raise httpx.HTTPError("unsafe redirect")
-                target = next_target
+                current_url = next_url
                 continue
             resp.raise_for_status()
             return resp
@@ -536,7 +520,7 @@ def _safe_http_get(url: str) -> httpx.Response:
 
 
 def _validate_knowledge_url(url: str) -> str:
-    """校验知识抓取 URL，仅允许可解析的公网地址。
+    """校验知识抓取 URL，默认阻止内网和保留地址。
 
     Args:
         url: 原始 URL。
@@ -544,36 +528,35 @@ def _validate_knowledge_url(url: str) -> str:
     Returns:
         str: 规范化 URL。
     """
-    target = _pin_knowledge_url(url)
-    return target.original_url if target else ""
-
-
-def _pin_knowledge_url(url: str) -> Optional[PinnedPublicUrl]:
-    """校验并固定知识抓取的公网连接目标。"""
-    value = (url or "").strip()
-    parsed = urlparse(value)
+    url = (url or "").strip()
+    parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None
+        return ""
     if parsed.username or parsed.password or parsed.fragment:
-        return None
-    try:
-        parsed.port
-    except ValueError:
-        return None
+        return ""
     host = (parsed.hostname or "").strip().lower()
     if not host:
-        return None
+        return ""
+    if settings.agent_knowledge_allow_private_urls:
+        return url
     if host in _BLOCKED_HOSTS or host.endswith(_BLOCKED_HOST_SUFFIXES) or "." not in host:
-        return None
+        return ""
     try:
         if _is_blocked_ip(host):
-            return None
+            return ""
     except ValueError:
         pass
-    try:
-        return pin_public_http_url(value)
-    except ValidationError:
-        return None
+    if settings.agent_knowledge_enforce_dns_check:
+        try:
+            for addr in _resolve_host(host):
+                try:
+                    if _is_blocked_ip(addr):
+                        return ""
+                except ValueError:
+                    continue
+        except socket.gaierror:
+            return ""
+    return url
 
 
 def _is_blocked_ip(ip_text: str) -> bool:
@@ -589,7 +572,20 @@ def _is_blocked_ip(ip_text: str) -> bool:
     return not ip.is_global
 
 
-def _fetch_headers(hostname: str = "") -> dict:
+def _resolve_host(host: str) -> set[str]:
+    """解析主机名。
+
+    Args:
+        host: 主机名。
+
+    Returns:
+        set[str]: IP 地址集合。
+    """
+    rows = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return {row[4][0] for row in rows}
+
+
+def _fetch_headers() -> dict:
     """构造知识抓取请求头。
 
     Returns:
@@ -599,7 +595,7 @@ def _fetch_headers(hostname: str = "") -> dict:
         "Accept": "application/vnd.github+json, text/html, text/plain, application/json;q=0.9, */*;q=0.8",
         "User-Agent": _DEFAULT_USER_AGENT,
     }
-    if hostname.lower() == "api.github.com" and settings.agent_knowledge_github_token:
+    if settings.agent_knowledge_github_token:
         headers["Authorization"] = f"Bearer {settings.agent_knowledge_github_token}"
         headers["X-GitHub-Api-Version"] = "2022-11-28"
     return headers

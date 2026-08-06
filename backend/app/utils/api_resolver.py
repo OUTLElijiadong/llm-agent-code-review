@@ -374,8 +374,7 @@ def resolve_api_config(
                     try:
                         base_url = validate_ai_base_url(
                             row.base_url,
-                            resolve_host=True,
-                            allow_private=False,
+                            resolve_host=settings.enforce_ai_base_url_dns_check,
                         )
                     except ValidationError as exc:
                         logger.warning(
@@ -386,11 +385,7 @@ def resolve_api_config(
                     if not base_url:
                         return ApiConfig(
                             api_key=settings.deepseek_api_key,
-                            base_url=validate_ai_base_url(
-                                settings.deepseek_base_url,
-                                resolve_host=True,
-                                allow_private=False,
-                            ),
+                            base_url=validate_ai_base_url(settings.deepseek_base_url),
                             model=settings.deepseek_model,
                             provider="deepseek",
                             source="system",
@@ -416,14 +411,9 @@ def resolve_api_config(
             and gcfg.get("base_url")
             and gcfg.get("model")
         ):
-            base_url = validate_ai_base_url(
-                gcfg["base_url"],
-                resolve_host=True,
-                allow_private=False,
-            )
             return ApiConfig(
                 api_key=gcfg["api_key"],
-                base_url=base_url,
+                base_url=gcfg["base_url"],
                 model=gcfg["model"],
                 provider=gcfg.get("provider", "custom"),
                 source="global",
@@ -434,11 +424,7 @@ def resolve_api_config(
     # 回退系统默认
     return ApiConfig(
         api_key=settings.deepseek_api_key,
-        base_url=validate_ai_base_url(
-            settings.deepseek_base_url,
-            resolve_host=True,
-            allow_private=False,
-        ),
+        base_url=validate_ai_base_url(settings.deepseek_base_url),
         model=settings.deepseek_model,
         provider="deepseek",
         source="system",

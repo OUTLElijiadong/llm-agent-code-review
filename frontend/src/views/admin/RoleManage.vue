@@ -21,8 +21,6 @@
         </el-table-column>
         <el-table-column label="操作" width="320" fixed="right">
           <template #default="{ row }">
-            <span v-if="row.code === 'super_admin'" class="protected-role">固定最高权限</span>
-            <template v-else>
             <el-button link type="primary" size="small" @click="onEdit(row)">编辑</el-button>
             <el-button link type="success" size="small" @click="onAssignPermissions(row)">分配权限</el-button>
             <el-button link type="warning" size="small" @click="onSetDataScope(row)">数据范围</el-button>
@@ -35,7 +33,6 @@
             >
               删除
             </el-button>
-            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -472,10 +469,5 @@ onMounted(() => {
 .perm-drawer-body {
   padding: 0 16px 16px;
   min-height: 200px;
-}
-
-.protected-role {
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
 }
 </style>

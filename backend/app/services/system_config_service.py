@@ -12,9 +12,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import ValidationError
 from app.models.system_config import SystemConfig
-from app.utils.api_resolver import validate_ai_base_url
 
 # 配置键常量
 EMBEDDING_KEY = "embedding"
@@ -63,13 +61,6 @@ def get_embedding_config(db: Session) -> dict:
         except (json.JSONDecodeError, AttributeError):
             pass
 
-    if enabled:
-        try:
-            base_url = validate_ai_base_url(base_url, resolve_host=True, allow_private=False)
-        except ValidationError as exc:
-            logger.warning(f"[system_config] embedding 端点已安全停用: {exc.message}")
-            enabled = False
-
     return {"base_url": base_url, "api_key": api_key, "model": model, "enabled": enabled}
 
 
@@ -104,12 +95,7 @@ def update_embedding_config(
             data = {}
 
     if base_url is not None:
-        value = base_url.strip()
-        data["base_url"] = (
-            validate_ai_base_url(value, resolve_host=True, allow_private=False)
-            if value
-            else ""
-        )
+        data["base_url"] = base_url.strip()
     if model is not None:
         data["model"] = model.strip()
     if api_key is not None:
@@ -241,12 +227,7 @@ def update_llm_config(
     if provider is not None:
         data["provider"] = provider
     if base_url is not None:
-        value = base_url.strip()
-        data["base_url"] = (
-            validate_ai_base_url(value, resolve_host=True, allow_private=False)
-            if value
-            else ""
-        )
+        data["base_url"] = base_url.strip()
     if model is not None:
         data["model"] = model.strip()
     if api_key is not None:

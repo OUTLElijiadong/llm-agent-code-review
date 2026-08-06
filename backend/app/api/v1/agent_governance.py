@@ -11,7 +11,6 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.agent_governance import (
     AgentAlert,
     AgentArtifactVersion,
-    AgentJob,
     AgentJobRun,
     AgentRewardEvent,
     AgentToolPermission,
@@ -269,7 +268,7 @@ def upsert_agent_knowledge_source(
     payload: AgentKnowledgeSourceUpsertIn,
     source_id: int = Query(0),
     db: Session = Depends(get_db),
-    _: User = Depends(require_super_admin),
+    _: User = Depends(require_admin),
 ):
     """创建或更新 Agent 知识来源配置。
 
@@ -299,7 +298,7 @@ def upsert_agent_knowledge_source(
 def crawl_agent_knowledge_sources(
     agent_code: str = Query(""),
     db: Session = Depends(get_db),
-    _: User = Depends(require_super_admin),
+    _: User = Depends(require_admin),
 ):
     """手动抓取 Agent 知识来源。
 
@@ -318,19 +317,19 @@ def crawl_agent_knowledge_sources(
 def list_approvals(
     status: str = Query(""),
     db: Session = Depends(get_db),
-    actor: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """查询治理审批事项。
 
     Args:
         status: 可选状态过滤。
         db: 数据库会话。
-        actor: 当前管理员。
+        _: 管理员用户。
 
     Returns:
         Resp[list[ApprovalItemOut]]: 审批事项列表。
     """
-    rows = approval_service.list_items(db, status=status, actor=actor)
+    rows = approval_service.list_items(db, status=status)
     return Resp(data=[ApprovalItemOut.model_validate(row) for row in rows])
 
 
@@ -560,7 +559,7 @@ def upsert_tool_permission(
 
 
 @router.get("/jobs", response_model=Resp[list[AgentJobOut]])
-def list_jobs(db: Session = Depends(get_db), actor: User = Depends(require_admin)):
+def list_jobs(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     """查询 Agent 调度任务。
 
     Args:
@@ -571,8 +570,6 @@ def list_jobs(db: Session = Depends(get_db), actor: User = Depends(require_admin
         Resp[list[AgentJobOut]]: 调度任务列表。
     """
     rows = scheduler_service.ensure_default_jobs(db)
-    if not scheduler_service.can_access_restricted_jobs(db, actor):
-        rows = [row for row in rows if not scheduler_service.requires_super_admin(row.job_type)]
     return Resp(data=[AgentJobOut.model_validate(row) for row in rows])
 
 
@@ -581,7 +578,7 @@ def update_job(
     job_id: int,
     payload: AgentJobUpdateIn,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """更新 Agent 调度任务配置。
 
@@ -594,12 +591,12 @@ def update_job(
     Returns:
         Resp[AgentJobOut]: 更新后的任务。
     """
-    row = scheduler_service.update_job(db, job_id, payload.model_dump(exclude_none=True), actor=actor)
+    row = scheduler_service.update_job(db, job_id, payload.model_dump(exclude_none=True))
     return Resp(data=AgentJobOut.model_validate(row))
 
 
 @router.post("/jobs/{job_id}/run", response_model=Resp[dict])
-def run_job(job_id: int, db: Session = Depends(get_db), actor: User = Depends(require_admin)):
+def run_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
     """手动运行 Agent 调度任务。
 
     Args:
@@ -610,7 +607,7 @@ def run_job(job_id: int, db: Session = Depends(get_db), actor: User = Depends(re
     Returns:
         Resp[dict]: 调度运行结果。
     """
-    row = scheduler_service.run_job(db, job_id, actor=actor)
+    row = scheduler_service.run_job(db, job_id)
     return Resp(data={
         "id": row.id,
         "job_id": row.job_id,
@@ -621,7 +618,7 @@ def run_job(job_id: int, db: Session = Depends(get_db), actor: User = Depends(re
 
 
 @router.get("/jobs/runs", response_model=Resp[list[dict]])
-def list_job_runs(db: Session = Depends(get_db), actor: User = Depends(require_admin)):
+def list_job_runs(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     """查询 Agent 调度运行记录。
 
     Args:
@@ -631,10 +628,7 @@ def list_job_runs(db: Session = Depends(get_db), actor: User = Depends(require_a
     Returns:
         Resp[list[dict]]: 调度运行记录。
     """
-    query = db.query(AgentJobRun).join(AgentJob, AgentJob.id == AgentJobRun.job_id)
-    if not scheduler_service.can_access_restricted_jobs(db, actor):
-        query = query.filter(~AgentJob.job_type.in_(scheduler_service.SUPER_ADMIN_JOB_TYPES))
-    rows = query.order_by(AgentJobRun.id.desc()).limit(100).all()
+    rows = db.query(AgentJobRun).order_by(AgentJobRun.id.desc()).limit(100).all()
     return Resp(data=[{
         "id": row.id,
         "job_id": row.job_id,
@@ -700,7 +694,6 @@ def resolve_alert(
     """
     row = observability_service.resolve_alert(db, alert_id, admin.id, note=payload.note)
     return Resp(data=AgentAlertOut.model_validate(row))
-
 
 @router.get("/observability/alerts/unread", response_model=Resp[list[AgentAlertOut]])
 def list_unread_alerts(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
@@ -800,6 +793,8 @@ def security_status(
     """
     result = security_monitor_service.query_security_status(db, since_hours=since_hours)
     return Resp(data=SecurityStatusOut(**result))
+
+
 
 
 @router.get("/rollback/versions", response_model=Resp[list[dict]])

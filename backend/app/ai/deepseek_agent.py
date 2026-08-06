@@ -20,125 +20,35 @@ from sqlalchemy.orm import Session
 from app.ai.exceptions import AiServiceError
 from app.core.config import settings
 from app.models.ai_call_log import AiCallLog
-from app.utils.public_http import pin_public_http_url
 
 if TYPE_CHECKING:
     from app.utils.api_resolver import ApiConfig
 
-# 固定 IP 后 httpx 会以 IP 作为连接池 origin，因此必须同时按 Host/SNI 隔离池。
-_SHARED_CLIENTS: dict[tuple[str, str], httpx.Client] = {}
-_MAX_SHARED_CLIENTS = 32
+# 进程级共享 HTTP 客户端(带连接池) —— 一次审查会发起数十次请求,
+# 复用 keep-alive 连接可省去重复的 TCP+TLS 握手开销。
+_SHARED_CLIENT: Optional[httpx.Client] = None
 _CLIENT_LOCK = threading.Lock()
 
 
-class DeepSeekResponseError(RuntimeError):
-    """DeepSeek 返回了无法安全消费的非流式响应。"""
+def _get_http_client() -> httpx.Client:
+    """返回进程级共享的 httpx.Client。
 
-    def __init__(self, message: str, *, finish_reason: Optional[str] = None):
-        super().__init__(message)
-        self.finish_reason = finish_reason
-
-
-class DeepSeekOutputTruncatedError(DeepSeekResponseError):
-    """DeepSeek 因 token 上限截断了响应。"""
-
-
-def _parse_completion_response(resp: httpx.Response) -> tuple[str, dict, str]:
-    """解析并校验非流式 Chat Completions 响应。
-
-    这里必须在业务层解析 JSON 之前拒绝 ``finish_reason=length``。
-    即使截断后的 ``content`` 恰好是合法 JSON，它也不是可信的完整结果。
+    httpx.Client 的请求方法是线程安全的,可被并行感知阶段的多个线程共享;
+    单次请求的超时通过 client.post(timeout=...) 覆盖,故无需为不同超时重建客户端。
     """
-    try:
-        body = resp.json()
-    except (TypeError, ValueError) as exc:
-        raise DeepSeekResponseError("DeepSeek 响应不是合法 JSON") from exc
-
-    if not isinstance(body, dict):
-        raise DeepSeekResponseError("DeepSeek 响应根节点必须是对象")
-
-    choices = body.get("choices")
-    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        raise DeepSeekResponseError("DeepSeek 响应缺少有效 choices[0]")
-
-    choice = choices[0]
-    finish_reason = choice.get("finish_reason")
-    if finish_reason == "length":
-        raise DeepSeekOutputTruncatedError(
-            "DeepSeek 输出被截断 (finish_reason=length)",
-            finish_reason=finish_reason,
-        )
-    if not isinstance(finish_reason, str) or not finish_reason.strip():
-        raise DeepSeekResponseError("DeepSeek 响应缺少有效 finish_reason")
-    if finish_reason != "stop":
-        raise DeepSeekResponseError(
-            f"DeepSeek 输出以不完整终态结束 (finish_reason={finish_reason})",
-            finish_reason=finish_reason,
-        )
-
-    message = choice.get("message")
-    if not isinstance(message, dict):
-        raise DeepSeekResponseError(
-            "DeepSeek 响应缺少有效 message",
-            finish_reason=finish_reason,
-        )
-    content = message.get("content")
-    if not isinstance(content, str):
-        raise DeepSeekResponseError(
-            "DeepSeek 响应 content 必须是字符串",
-            finish_reason=finish_reason,
-        )
-    if not content.strip():
-        raise DeepSeekResponseError(
-            "DeepSeek 响应 content 为空",
-            finish_reason=finish_reason,
-        )
-
-    usage = body.get("usage")
-    if usage is None:
-        usage = {}
-    if not isinstance(usage, dict):
-        raise DeepSeekResponseError(
-            "DeepSeek 响应 usage 必须是对象",
-            finish_reason=finish_reason,
-        )
-    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
-        value = usage.get(field)
-        if value is not None and (
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-        ):
-            raise DeepSeekResponseError(
-                f"DeepSeek 响应 usage.{field} 必须是非负整数",
-                finish_reason=finish_reason,
-            )
-
-    return content, usage, finish_reason
-
-
-def _get_http_client(pool_key: tuple[str, str]) -> tuple[httpx.Client, bool]:
-    """返回按原域名和固定 IP 隔离的 HTTP 客户端。
-
-    返回值的第二项表示是否为一次性客户端，调用方必须关闭。
-    """
-    client = _SHARED_CLIENTS.get(pool_key)
-    if client is not None:
-        return client, False
-    with _CLIENT_LOCK:
-        client = _SHARED_CLIENTS.get(pool_key)
-        if client is not None:
-            return client, False
-        client = httpx.Client(
-            limits=httpx.Limits(
-                max_keepalive_connections=20,
-                max_connections=40,
-            ),
-            timeout=httpx.Timeout(settings.deepseek_timeout),
-            trust_env=False,
-        )
-        if len(_SHARED_CLIENTS) < _MAX_SHARED_CLIENTS:
-            _SHARED_CLIENTS[pool_key] = client
-            return client, False
-        return client, True
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is None:
+        with _CLIENT_LOCK:
+            if _SHARED_CLIENT is None:
+                _SHARED_CLIENT = httpx.Client(
+                    limits=httpx.Limits(
+                        max_keepalive_connections=20,
+                        max_connections=40,
+                    ),
+                    timeout=httpx.Timeout(settings.deepseek_timeout),
+                    trust_env=False,
+                )
+    return _SHARED_CLIENT
 
 
 class DeepSeekAgent:
@@ -200,19 +110,8 @@ class DeepSeekAgent:
         不处理重试, 由调用方控制重试策略。
         """
         t0 = time.time()
-        target = pin_public_http_url(url)
-        client, close_after = _get_http_client((target.host_header, target.ip_address))
-        try:
-            resp = client.post(
-                target.request_url,
-                headers={**headers, "Host": target.host_header},
-                json=payload,
-                timeout=self.timeout,
-                extensions=target.request_extensions,
-            )
-        finally:
-            if close_after:
-                client.close()
+        client = _get_http_client()
+        resp = client.post(url, headers=headers, json=payload, timeout=self.timeout)
         return resp, int((time.time() - t0) * 1000)
 
     # ── 并行线程调用 (不带 db, 返回 meta 供事后补录) ──
@@ -258,20 +157,12 @@ class DeepSeekAgent:
             payload["max_tokens"] = max(128, min(4096, int(max_tokens)))
 
         for attempt in range(self.max_retries + 1):
-            try:
-                resp, duration_ms = self._do_request(url, headers, payload)
-            except (httpx.TimeoutException, httpx.TransportError) as exc:
-                err = f"DeepSeek 网络请求失败: {exc}"
-                logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} {err}")
-                if attempt >= self.max_retries:
-                    raise RuntimeError(
-                        f"[call_raw] {agent_label} 全部 {self.max_retries+1} 次重试均失败: {err}",
-                    ) from exc
-                time.sleep(min(60, 2 ** (attempt + 1)))
-                continue
+            resp, duration_ms = self._do_request(url, headers, payload)
 
             if resp.status_code == 200:
-                content, usage, finish_reason = _parse_completion_response(resp)
+                body = resp.json()
+                usage = body.get("usage", {})
+                content = body["choices"][0]["message"]["content"]
                 return content, {
                     "model_tag": model_tag,
                     "model_name": self.model,
@@ -280,7 +171,6 @@ class DeepSeekAgent:
                     "completion_tokens": usage.get("completion_tokens", 0),
                     "total_tokens": usage.get("total_tokens", 0),
                     "duration_ms": duration_ms,
-                    "finish_reason": finish_reason,
                     "user_prompt": user_prompt,
                     "response": content,
                     "create_time": datetime.now(timezone.utc),
@@ -292,8 +182,6 @@ class DeepSeekAgent:
                 err = f"DeepSeek 服务异常 {resp.status_code}"
             else:
                 err = f"DeepSeek {resp.status_code}: {resp.text[:200]}"
-                logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} {err}")
-                raise RuntimeError(f"[call_raw] {agent_label} 确定性请求失败: {err}")
             logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} {err}")
 
             if attempt >= self.max_retries:
@@ -329,49 +217,17 @@ class DeepSeekAgent:
         attempt = 0
         last_err: Optional[Exception] = None
         while attempt <= self.max_retries:
-            try:
-                resp, duration_ms = self._do_request(url, headers, payload)
-            except (httpx.TimeoutException, httpx.TransportError) as exc:
-                err = AiServiceError(f"DeepSeek 网络请求失败: {exc}", code=50201)
-                last_err = err
-                self._log(
-                    db, task_id=task_id, user_id=user_id, file_id=file_id,
-                    chunk_index=chunk_index, prompt=user_prompt, response=None,
-                    status="retry" if attempt < self.max_retries else "failed",
-                    error=str(err)[:500], meta={"duration_ms": 0},
-                    model_name=model_tag, agent_label=agent_label,
-                )
-                if attempt >= self.max_retries:
-                    break
-                logger.warning(f"DeepSeek 调用失败({err}), 第 {attempt+1} 次重试")
-                time.sleep(min(60, 2 ** (attempt + 1)))
-                attempt += 1
-                continue
+            resp, duration_ms = self._do_request(url, headers, payload)
 
             if resp.status_code == 200:
-                try:
-                    content, usage, finish_reason = _parse_completion_response(resp)
-                except DeepSeekResponseError as exc:
-                    self._log(
-                        db, task_id=task_id, user_id=user_id, file_id=file_id,
-                        chunk_index=chunk_index, prompt=user_prompt, response=None,
-                        status="failed", error=str(exc)[:500],
-                        meta={
-                            "duration_ms": duration_ms,
-                            "finish_reason": exc.finish_reason,
-                        },
-                        model_name=model_tag,
-                        agent_label=agent_label,
-                    )
-                    raise AiServiceError(
-                        f"DeepSeek 响应无效: {exc}", code=50201,
-                    ) from exc
+                body = resp.json()
+                content = body["choices"][0]["message"]["content"]
+                usage = body.get("usage", {})
                 meta = {
                     "prompt_tokens": usage.get("prompt_tokens"),
                     "completion_tokens": usage.get("completion_tokens"),
                     "total_tokens": usage.get("total_tokens"),
                     "duration_ms": duration_ms,
-                    "finish_reason": finish_reason,
                 }
                 self._log(
                     db, task_id=task_id, user_id=user_id, file_id=file_id,
@@ -384,29 +240,26 @@ class DeepSeekAgent:
 
             if resp.status_code == 429:
                 err = AiServiceError("DeepSeek 限流", code=42900)
-                retryable = True
             elif resp.status_code >= 500:
                 err = AiServiceError(
                     f"DeepSeek 服务异常 {resp.status_code}", code=50201,
                 )
-                retryable = True
             else:
                 err = AiServiceError(
                     f"DeepSeek 返回 {resp.status_code}: {resp.text[:200]}",
                     code=50201,
                 )
-                retryable = False
             last_err = err
             self._log(
                 db, task_id=task_id, user_id=user_id, file_id=file_id,
                 chunk_index=chunk_index, prompt=user_prompt, response=None,
-                status="retry" if retryable and attempt < self.max_retries else "failed",
+                status="retry" if attempt < self.max_retries else "failed",
                 error=str(err)[:500],
                 meta={"duration_ms": duration_ms},
                 model_name=model_tag,
                 agent_label=agent_label,
             )
-            if not retryable or attempt >= self.max_retries:
+            if attempt >= self.max_retries:
                 break
             logger.warning(f"DeepSeek 调用失败({err}), 第 {attempt+1} 次重试")
             time.sleep(min(60, 2 ** (attempt + 1)))

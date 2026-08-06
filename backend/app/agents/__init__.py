@@ -12,7 +12,6 @@ from app.agents.report_agent import ReportAgent
 from app.agents.review_agent import CodeReviewerAgent
 from app.agents.review_orchestrator_agent import ReviewOrchestratorAgent
 from app.agents.rule_agent import RuleManagerAgent
-from app.agents.sandbox_agents import SandboxDeployerAgent, TestVerifierAgent
 from app.agents.security_sentinel_agent import SecuritySentinelAgent
 
 __all__ = [
@@ -23,5 +22,5 @@ __all__ = [
     "ProjectManagerAgent", "ReviewOrchestratorAgent",
     "CodeFileManagerAgent", "DashboardAgent",
     "RuleManagerAgent", "ReportAgent", "AiPromptAgent",
-    "SecuritySentinelAgent", "TestVerifierAgent", "SandboxDeployerAgent",
+    "SecuritySentinelAgent",
 ]

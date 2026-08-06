@@ -19,9 +19,7 @@ usage() {
   2. 超出保留数的 rollback-from-*.env 历史状态；
   3. 指定年龄以前的 dangling 镜像与 Docker builder cache。
 
-如果 sandbox/.env 配置了按 digest 固定的 Playwright 镜像，脚本会先建立
-本地保护 tag，再执行 dangling 镜像清理。本脚本不会删除数据库卷、
-证书、备份、current.env、previous.env 或 pending.env。
+本脚本不会删除数据库卷、证书、备份、current.env、previous.env 或 pending.env。
 USAGE
 }
 
@@ -63,15 +61,14 @@ done
 
 [[ "$keep_release_images" =~ ^[0-9]+$ ]] || fatal "镜像保留数必须是非负整数"
 [[ "$keep_release_states" =~ ^[0-9]+$ ]] || fatal "状态保留数必须是非负整数"
-[[ "$cache_until" =~ ^[0-9]+[smh]$ ]] || fatal "缓存年龄格式必须类似 168h"
+[[ "$cache_until" =~ ^[0-9]+[smhdw]$ ]] || fatal "缓存年龄格式必须类似 168h 或 7d"
 require_commands docker find sort awk
 
 docker compose version >/dev/null 2>&1 || fatal "docker compose 不可用"
 release_dir="${RELEASE_STATE_DIR:-.releases}"
-process_root="${PROC_ROOT:-/proc}"
 current_state="$release_dir/current.env"
 previous_state="$release_dir/previous.env"
-lock_dir="$(maintenance_lock_path)"
+lock_dir="$release_dir/.deploy.lock"
 if [[ "$apply" == "1" ]]; then
   mkdir -p "$release_dir"
   acquire_directory_lock "$lock_dir"
@@ -174,96 +171,6 @@ cleanup_release_history() {
     run_mutation rm -f -- "$state_file"
   done < <(find "$release_dir" -maxdepth 1 -type f -name 'rollback-from-*.env' -print | sort -r)
 }
-
-# 已建立保护引用的摘要，避免进程环境和单元环境重复打 tag。
-protected_playwright_digests=""
-
-# 对一组固定的 Playwright 镜像配置建立按摘要区分的保护 tag。
-# 参数: $1 完整镜像引用；$2 sha256 摘要；$3 配置来源。
-# 返回: 配置完整且镜像存在时返回 0，否则失败关闭。
-protect_playwright_reference() {
-  local browser_image="$1"
-  local browser_digest="$2"
-  local source_name="$3"
-  local digest_hex protected_tag
-  if [[ -z "$browser_image" && -z "$browser_digest" ]]; then
-    return 1
-  fi
-  [[ "$browser_digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
-    || fatal "$source_name 的 PLAYWRIGHT_IMAGE_DIGEST 必须是完整 sha256 摘要"
-  [[ "$browser_image" == *"@$browser_digest" ]] \
-    || fatal "$source_name 的 PLAYWRIGHT_IMAGE 必须与 PLAYWRIGHT_IMAGE_DIGEST 固定到同一摘要"
-  case " $protected_playwright_digests " in
-    *" $browser_digest "*) return 0 ;;
-  esac
-  docker image inspect "$browser_image" >/dev/null 2>&1 \
-    || fatal "$source_name 固定的 Playwright 镜像不存在，拒绝执行任何清理"
-  digest_hex="${browser_digest#sha256:}"
-  protected_tag="prism-sandbox-playwright:protected-${digest_hex}"
-  log_info "保护 Playwright 镜像(source=$source_name, tag=$protected_tag)"
-  run_mutation docker image tag "$browser_image" "$protected_tag"
-  protected_playwright_digests="$protected_playwright_digests $browser_digest"
-  return 0
-}
-
-# 从当前运行进程的 NUL 分隔环境中读取精确键值。
-# 参数: $1 键名；$2 进程 PID。
-# 返回: 找到时输出值，否则非 0。
-read_process_env_value() {
-  local key="$1"
-  local pid="$2"
-  tr '\0' '\n' < "$process_root/$pid/environ" \
-    | awk -F= -v wanted="$key" '$1 == wanted { sub(/^[^=]*=/, ""); print; found=1; exit } END { exit !found }'
-}
-
-# 保护运行中进程实际使用的镜像，以及 systemd 下次启动要使用的镜像。
-# 参数: 无；SANDBOX_ENV_FILE 可显式指定候选环境文件。
-# 返回: 未配置 Playwright 时返回 0；半配置或镜像缺失时失败关闭。
-protect_playwright_images() {
-  local sandbox_env=""
-  local systemd_env=""
-  local main_pid=""
-  local browser_image=""
-  local browser_digest=""
-  local protected_source_count=0
-  if command -v systemctl >/dev/null 2>&1; then
-    main_pid="$(systemctl show prism-sandbox-executor.service \
-      --property=MainPID --value 2>/dev/null | awk 'NR == 1 { print $1 }' || true)"
-    if [[ "$main_pid" =~ ^[1-9][0-9]*$ ]]; then
-      [[ -r "$process_root/$main_pid/environ" ]] \
-        || fatal "运行中沙箱执行器的进程环境不可读，拒绝执行任何清理: pid=$main_pid"
-      browser_image="$(read_process_env_value PLAYWRIGHT_IMAGE "$main_pid" || true)"
-      browser_digest="$(read_process_env_value PLAYWRIGHT_IMAGE_DIGEST "$main_pid" || true)"
-      protect_playwright_reference "$browser_image" "$browser_digest" "running-process:$main_pid" \
-        || fatal "运行中沙箱执行器缺少 Playwright 固定镜像配置，拒绝执行任何清理: pid=$main_pid"
-      protected_source_count="$((protected_source_count + 1))"
-    fi
-    systemd_env="$(systemctl show prism-sandbox-executor.service \
-      --property=EnvironmentFiles --value 2>/dev/null | awk 'NR == 1 { print $1 }' || true)"
-  fi
-  if [[ -n "${SANDBOX_ENV_FILE:-}" ]]; then
-    sandbox_env="$SANDBOX_ENV_FILE"
-    [[ -f "$sandbox_env" ]] || fatal "显式指定的沙箱环境文件不存在: $sandbox_env"
-  elif [[ -f "sandbox/.env" ]]; then
-    sandbox_env="sandbox/.env"
-  elif [[ "$systemd_env" == /* && -f "$systemd_env" ]]; then
-    sandbox_env="$systemd_env"
-    log_info "使用沙箱 systemd 单元环境文件: $sandbox_env"
-  fi
-  if [[ -n "$sandbox_env" ]]; then
-    browser_image="$(read_env_value PLAYWRIGHT_IMAGE "$sandbox_env" || true)"
-    browser_digest="$(read_env_value PLAYWRIGHT_IMAGE_DIGEST "$sandbox_env" || true)"
-    if protect_playwright_reference "$browser_image" "$browser_digest" "env-file:$sandbox_env"; then
-      protected_source_count="$((protected_source_count + 1))"
-    fi
-  fi
-  if [[ "$protected_source_count" == "0" ]]; then
-    log_info "当前进程和单元均未配置 Playwright 镜像，跳过保护"
-  fi
-}
-
-# 保护必须先于任何删除。这样半配置或镜像缺失时，整个清理交易保持零删除。
-protect_playwright_images
 
 if [[ ! -f "$current_state" ]]; then
   log_warn "缺少 current.env，无法证明历史 tag 非当前版本；跳过 tagged release 镜像清理"

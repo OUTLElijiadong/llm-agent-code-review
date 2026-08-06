@@ -13,7 +13,6 @@ import binascii
 import hashlib
 import hmac
 import io
-import ipaddress
 import json
 import os
 import re
@@ -35,7 +34,7 @@ from typing import Any
 
 
 DEPLOY_DIR = Path(__file__).resolve().parent
-SOCKET_PATH = Path(os.environ.get("SANDBOX_EXECUTOR_SOCKET", "/var/lib/prism-sandbox/agent.sock"))
+SOCKET_PATH = Path(os.environ.get("SANDBOX_EXECUTOR_SOCKET", "/run/prism-sandbox/agent.sock"))
 TOKEN = os.environ.get("SANDBOX_EXECUTOR_TOKEN", "")
 EXECUTOR_MODE = os.environ.get("SANDBOX_EXECUTOR_MODE", "strict").strip().lower()
 REQUIRED_RUNTIME = os.environ.get("SANDBOX_RUNTIME", "runsc").strip()
@@ -44,12 +43,6 @@ PROFILE_FILE = Path(os.environ.get("SANDBOX_PROFILE_FILE", str(DEPLOY_DIR / "san
 STATE_DIR = Path(os.environ.get("SANDBOX_STATE_DIR", "/var/lib/prism-sandbox/state"))
 JOB_DIR = Path(os.environ.get("SANDBOX_JOB_DIR", "/var/lib/prism-sandbox/jobs"))
 AUDIT_LOG = Path(os.environ.get("SANDBOX_AUDIT_LOG", "/var/log/prism-sandbox/events.jsonl"))
-BROWSER_IMAGE = os.environ.get("PLAYWRIGHT_IMAGE", "").strip()
-BROWSER_IMAGE_DIGEST = os.environ.get("PLAYWRIGHT_IMAGE_DIGEST", "").strip()
-BROWSER_TIMEOUT_SECONDS = int(os.environ.get("PLAYWRIGHT_TIMEOUT_SECONDS", "90"))
-BROWSER_SCRIPT = DEPLOY_DIR / "sandbox" / "browser_blackbox.js"
-BROWSER_PROXY_SCRIPT = DEPLOY_DIR / "sandbox" / "browser_target_proxy.py"
-BROWSER_EXECUTABLE = "/ms-playwright/chromium-1232/chrome-linux64/chrome"
 
 MAX_CONCURRENCY = int(os.environ.get("SANDBOX_MAX_CONCURRENCY", "1"))
 MAX_ARCHIVE_BYTES = int(os.environ.get("SANDBOX_MAX_ARCHIVE_BYTES", str(32 * 1024 * 1024)))
@@ -91,7 +84,6 @@ EXECUTE_KEYS = frozenset(
 STATUS_KEYS = frozenset({"request_id", "after_sequence"})
 STOP_KEYS = frozenset({"request_id"})
 EXTEND_KEYS = frozenset({"request_id", "extend_seconds"})
-BROWSER_KEYS = frozenset({"request_id", "target_url", "target_ip"})
 SAFE_RESPONSE_HEADERS = frozenset(
     {"cache-control", "content-disposition", "content-language", "content-type", "etag", "last-modified", "location"}
 )
@@ -101,7 +93,6 @@ STATE_CONDITION = threading.Condition(STATE_LOCK)
 MONITOR_THREADS: dict[str, threading.Thread] = {}
 PENDING_SUBMISSIONS: dict[str, str] = {}
 JANITOR_STOP = threading.Event()
-BROWSER_LOCK = threading.Lock()
 
 
 class SandboxError(RuntimeError):
@@ -367,256 +358,6 @@ def _resolve_image(profile: Profile, requested_digest: str = "") -> ResolvedImag
         local_id=local_id,
         run_ref=local_id,
     )
-
-
-def _resolve_fixed_image(image_ref: str, digest: str, label: str) -> ResolvedImage:
-    if not image_ref or not IMAGE_RE.fullmatch(image_ref):
-        raise BlockedError(f"{label} 镜像未配置")
-    if not SHA256_RE.fullmatch(digest):
-        raise BlockedError(f"{label} 镜像缺少不可变 digest")
-    try:
-        result = _run_command(["docker", "image", "inspect", image_ref], timeout=30)
-        documents = json.loads(result["stdout"])
-        document = documents[0]
-        local_id = str(document["Id"])
-        repo_digests = [str(item) for item in (document.get("RepoDigests") or [])]
-    except Exception as exc:
-        raise BlockedError(f"{label} 镜像不可用") from exc
-    if not SHA256_RE.fullmatch(local_id):
-        raise BlockedError(f"{label} 镜像本地 ID 不合法")
-    if local_id != digest and not any(item.endswith(f"@{digest}") for item in repo_digests):
-        raise BlockedError(f"{label} 镜像 digest 校验失败")
-    return ResolvedImage(
-        configured_ref=image_ref,
-        configured_digest=digest,
-        local_id=local_id,
-        run_ref=local_id,
-    )
-
-
-def _browser_self_test_script() -> str:
-    return (
-        "const {chromium}=require('/app/node_modules/playwright');"
-        f"chromium.launch({{headless:true,executablePath:'{BROWSER_EXECUTABLE}',"
-        "args:['--no-sandbox','--disable-dev-shm-usage','--disable-background-networking']})"
-        ".then(async b=>{await b.close()}).catch(e=>{console.error(String(e));process.exit(2)})"
-    )
-
-
-def _browser_health(runtime: str, profiles: dict[str, Profile]) -> dict[str, Any]:
-    policy = {
-        "runtime": "runsc",
-        "network": "private_browser_to_fixed_target_proxy",
-        "dns": "disabled_in_browser_container",
-        "target": "single_https_origin_and_pinned_public_ip",
-        "read_only_root": True,
-        "cap_drop": ["ALL"],
-        "no_new_privileges": True,
-        "memory_mb": 1024,
-        "cpus": 1.0,
-        "pids": 256,
-        "timeout_seconds": BROWSER_TIMEOUT_SECONDS,
-        "service_workers": "blocked",
-        "downloads": "blocked",
-    }
-    try:
-        if runtime != "runsc":
-            raise BlockedError("Playwright 必须使用 runsc")
-        if not 30 <= BROWSER_TIMEOUT_SECONDS <= 180:
-            raise BlockedError("Playwright 超时配置必须在 30 到 180 秒之间")
-        for path in (BROWSER_SCRIPT, BROWSER_PROXY_SCRIPT):
-            current = path.lstat()
-            if path.is_symlink() or not path.is_file() or current.st_mode & 0o022:
-                raise BlockedError("Playwright 固定脚本不是只读普通文件")
-        browser = _resolve_fixed_image(BROWSER_IMAGE, BROWSER_IMAGE_DIGEST, "Playwright")
-        browser_self_test = _browser_self_test_script()
-        _run_command([
-            "docker", "run", "--rm", "--runtime", runtime, "--network", "none",
-            "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-            "--user", "1000:1000", "--pids-limit", "256", "--memory", "1024m",
-            "--memory-swap", "1024m", "--cpus", "1.0", "--ipc", "none",
-            "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=256m,mode=1777,uid=1000,gid=1000",
-            "--tmpfs", "/home/node:rw,exec,nosuid,nodev,size=64m,mode=0700,uid=1000,gid=1000",
-            "--env", "HOME=/home/node", "--env", "XDG_CONFIG_HOME=/tmp/.chromium",
-            "--env", "XDG_CACHE_HOME=/tmp/.cache",
-            "--entrypoint", "node", browser.run_ref, "-e", browser_self_test,
-        ], timeout=60)
-        python_profile = profiles.get("python")
-        if python_profile is None:
-            raise BlockedError("Playwright 目标代理缺少 Python 固定镜像")
-        proxy = _resolve_image(python_profile)
-        fingerprint = hashlib.sha256(
-            json.dumps(
-                {
-                    "browser": browser.configured_digest,
-                    "proxy": proxy.configured_digest,
-                    "policy": policy,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        return {
-            "ready": True,
-            "image_ref": browser.configured_ref,
-            "image_digest": browser.configured_digest,
-            "proxy_image_digest": proxy.configured_digest,
-            "egress_policy_fingerprint": fingerprint,
-            "resource_policy": policy,
-        }
-    except Exception as exc:  # noqa: BLE001 - health must explain the fail-closed reason
-        return {
-            "ready": False,
-            "image_ref": BROWSER_IMAGE,
-            "image_digest": BROWSER_IMAGE_DIGEST,
-            "resource_policy": policy,
-            "error": _redact(str(exc))[:1000],
-        }
-
-
-def _browser_names(request_id: str) -> tuple[str, str, str, str]:
-    suffix = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:20]
-    return (
-        f"prism-bbx-browser-{suffix}",
-        f"prism-bbx-proxy-{suffix}",
-        f"prism-bbx-private-{suffix}",
-        f"prism-bbx-egress-{suffix}",
-    )
-
-
-def _remove_browser_resources(names: tuple[str, str, str, str]) -> None:
-    browser_name, proxy_name, private_network, egress_network = names
-    for container in (browser_name, proxy_name):
-        _run_command(["docker", "rm", "-f", container], timeout=30, allow_failure=True)
-    for network in (private_network, egress_network):
-        _run_command(["docker", "network", "rm", network], timeout=30, allow_failure=True)
-
-
-def run_browser_blackbox(payload: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise ValueError("浏览器请求体必须是对象")
-    _check_exact_keys(payload, BROWSER_KEYS)
-    request_id = _validate_request_id(payload.get("request_id"))
-    target_url = str(payload.get("target_url") or "")
-    parsed = urllib.parse.urlsplit(target_url)
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username
-        or parsed.password
-        or parsed.fragment
-        or len(target_url) > 2048
-    ):
-        raise ValueError("浏览器目标必须是不含凭据和片段的 HTTPS URL")
-    try:
-        target_port = parsed.port or 443
-        target_ip = ipaddress.ip_address(str(payload.get("target_ip") or ""))
-    except ValueError as exc:
-        raise ValueError("浏览器目标端口或固定 IP 无效") from exc
-    if target_ip.version != 4 or not target_ip.is_global:
-        raise ValueError("浏览器目标必须固定到公网 IPv4")
-    runtime = _resolve_runtime()
-    profiles = _load_profiles()
-    browser_health = _browser_health(runtime, profiles)
-    if not browser_health.get("ready"):
-        raise BlockedError(str(browser_health.get("error") or "Playwright profile 未就绪"))
-    if not BROWSER_LOCK.acquire(blocking=False):
-        raise CapacityError("Playwright worker 已达到最大并发")
-
-    names = _browser_names(request_id)
-    browser_name, proxy_name, private_network, egress_network = names
-    try:
-        _remove_browser_resources(names)
-        _run_command(["docker", "network", "create", "--driver", "bridge", egress_network], timeout=30)
-        _run_command(
-            ["docker", "network", "create", "--driver", "bridge", "--internal", private_network],
-            timeout=30,
-        )
-        proxy_image = _resolve_image(profiles["python"])
-        _run_command([
-            "docker", "create", "--name", proxy_name,
-            "--label", "prism.browser_blackbox=true",
-            "--runtime", runtime, "--network", egress_network,
-            "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-            "--user", "65532:65532", "--pids-limit", "64", "--memory", "96m",
-            "--memory-swap", "96m", "--cpus", "0.25", "--restart", "no", "--init",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777",
-            "--mount", f"type=bind,src={BROWSER_PROXY_SCRIPT},dst=/opt/prism/browser_target_proxy.py,readonly,bind-propagation=rprivate",
-            "--env", f"PRISM_TARGET_HOST={parsed.hostname.rstrip('.').casefold()}",
-            "--env", f"PRISM_TARGET_PORT={target_port}", "--env", f"PRISM_TARGET_IP={target_ip}",
-            "--entrypoint", "python", proxy_image.run_ref, "/opt/prism/browser_target_proxy.py",
-        ], timeout=60)
-        _run_command(["docker", "network", "connect", "--alias", "target-proxy", private_network, proxy_name], timeout=30)
-        _run_command(["docker", "start", proxy_name], timeout=30)
-        proxy_address_result = _run_command([
-            "docker", "inspect", "--format",
-            f'{{{{with index .NetworkSettings.Networks "{private_network}"}}}}{{{{.IPAddress}}}}{{{{end}}}}',
-            proxy_name,
-        ], timeout=30)
-        try:
-            proxy_address = ipaddress.ip_address(proxy_address_result["stdout"].strip())
-        except ValueError as exc:
-            raise RuntimeError("Playwright 固定代理私网地址无效") from exc
-        if proxy_address.version != 4 or not proxy_address.is_private:
-            raise RuntimeError("Playwright 固定代理没有获得私有 IPv4 地址")
-
-        browser_image = _resolve_fixed_image(BROWSER_IMAGE, BROWSER_IMAGE_DIGEST, "Playwright")
-        _run_command([
-            "docker", "create", "--name", browser_name,
-            "--label", "prism.browser_blackbox=true", "--label", f"prism.browser_blackbox.request_id={request_id}",
-            "--runtime", runtime, "--network", private_network,
-            "--dns", "127.0.0.1", "--add-host", f"target-proxy:{proxy_address}",
-            "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-            "--user", "1000:1000", "--pids-limit", "256", "--memory", "1024m",
-            "--memory-swap", "1024m", "--cpus", "1.0", "--ipc", "none", "--restart", "no", "--init",
-            "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=256m,mode=1777,uid=1000,gid=1000",
-            "--tmpfs", "/home/node:rw,exec,nosuid,nodev,size=64m,mode=0700,uid=1000,gid=1000",
-            "--mount", f"type=bind,src={BROWSER_SCRIPT},dst=/opt/prism/browser_blackbox.js,readonly,bind-propagation=rprivate",
-            "--env", f"PRISM_TARGET_URL={target_url}", "--env", "PRISM_PROXY_SERVER=http://target-proxy:3128",
-            "--env", f"PRISM_BROWSER_TIMEOUT_MS={BROWSER_TIMEOUT_SECONDS * 1000}",
-            "--env", "HOME=/home/node", "--env", "XDG_CONFIG_HOME=/tmp/.chromium",
-            "--env", "XDG_CACHE_HOME=/tmp/.cache", "--env", "NO_PROXY=",
-            "--env", "HTTP_PROXY=", "--env", "HTTPS_PROXY=",
-            "--entrypoint", "node", browser_image.run_ref, "/opt/prism/browser_blackbox.js",
-        ], timeout=60)
-        time.sleep(0.25)
-        output = _run_command(
-            ["docker", "start", "--attach", browser_name],
-            timeout=BROWSER_TIMEOUT_SECONDS + 30,
-            allow_failure=True,
-            max_output_bytes=5 * 1024 * 1024,
-        )
-        lines = [line for line in output["stdout"].splitlines() if line.strip()]
-        if not lines:
-            raise RuntimeError(f"Playwright 未返回结构化证据: {output['stderr'][:500]}")
-        try:
-            result = json.loads(lines[-1])
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("Playwright 结构化证据格式无效") from exc
-        if not isinstance(result, dict) or result.get("protocol_version") != "1.0":
-            raise RuntimeError("Playwright 结构化证据协议不匹配")
-        result.update({
-            "request_id": request_id,
-            "runtime": runtime,
-            "image_ref": browser_health["image_ref"],
-            "image_digest": browser_health["image_digest"],
-            "resolved_ip": str(target_ip),
-            "egress_policy_fingerprint": browser_health["egress_policy_fingerprint"],
-            "resource_policy": browser_health["resource_policy"],
-            "output_truncated": output["output_truncated"],
-        })
-        _append_audit({
-            "request_id": request_id,
-            "event_type": "browser_blackbox",
-            "timestamp": _iso(),
-            "target_origin": f"https://{parsed.hostname}:{target_port}",
-            "resolved_ip": str(target_ip),
-            "passed": bool(result.get("passed")),
-        })
-        return result
-    finally:
-        _remove_browser_resources(names)
-        BROWSER_LOCK.release()
 
 
 def _ensure_directory(path: Path, mode: int) -> None:
@@ -1680,7 +1421,6 @@ def health() -> dict[str, Any]:
                 "profile_fingerprint": profile.fingerprint,
                 "error": _redact(str(exc))[:1000],
             }
-    browser_blackbox = _browser_health(runtime, profiles)
     ready = bool(runtime) and set(profile_results) == LANGUAGES and all(item["ready"] for item in profile_results.values())
     return {
         "ready": ready,
@@ -1696,7 +1436,6 @@ def health() -> dict[str, Any]:
         "supported_test_modes": ["whitebox", "blackbox", "combined"],
         "preview_supported": True,
         "profiles": profile_results,
-        "browser_blackbox": browser_blackbox,
     }
 
 
@@ -1984,8 +1723,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True, "duplicate": duplicate, "result": result})
             elif self.path == "/extend":
                 self._json(200, {"ok": True, "result": extend_job(self._read_json(64 * 1024))})
-            elif self.path == "/browser-blackbox":
-                self._json(200, {"ok": True, "result": run_browser_blackbox(self._read_json(64 * 1024))})
             else:
                 self._json(404, {"ok": False, "error": "not found"})
         except Exception as exc:  # noqa: BLE001

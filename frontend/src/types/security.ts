@@ -87,9 +87,6 @@ export interface SecurityScanOut {
   summary: string
   file_count: number
   duration_ms: number
-  source_archive_sha256?: string
-  source_archive_bytes?: number
-  source_archive_filename?: string
 }
 
 export interface SecurityScanFileIn {
@@ -103,7 +100,7 @@ export interface SecurityScanTaskIn {
 
 export interface SecurityScanProjectIn {
   project_id: number
-  scan_mode?: 'full' | 'static_full' | 'triage'
+  scan_mode?: 'full' | 'triage'
   top_n?: number
   trace_dataflow?: boolean
 }

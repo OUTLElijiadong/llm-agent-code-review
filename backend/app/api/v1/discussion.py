@@ -46,7 +46,7 @@ def start_discussion(
     project = db.get(Project, project_id)
     if not project or project.status == "deleted":
         raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if project.user_id != user.id and user.role != "admin":
         raise ForbiddenError("无访问权限", code=40300)
 
     code_file = db.query(CodeFile).filter(
@@ -85,7 +85,6 @@ def start_discussion(
         file_id=file_id,
         review_type=review_type,
         max_rounds=rounds,
-        session_token_version=int(getattr(user, "token_version", 0) or 0),
     )
 
     agent_list = [

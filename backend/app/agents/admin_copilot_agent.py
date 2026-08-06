@@ -57,19 +57,9 @@ class AdminCopilotAgent(BaseAgent):
         )
         api_config = resolve_api_config(db, None)
         result = self.call_json(prompt, ctx, api_config=api_config)
-        if not result.success and result.failure_kind in {"invalid_json", "output_truncated"}:
-            compact_prompt = json.dumps(
-                {
-                    "管理员问题": message[:500],
-                    "事实快照": snapshot,
-                    "可用Agent": agents,
-                    "纠正要求": "只输出一行完整 JSON；answer 最多 200 字；不要 Markdown。",
-                },
-                ensure_ascii=False,
-                default=str,
-            )
+        if not result.success and "JSON 解析失败" in str(result.error or ""):
             result = self.call_json(
-                compact_prompt,
+                prompt + "\n上次结构化输出不完整。重新输出一行精简 JSON，answer 最多 200 字，不要 Markdown。",
                 ctx,
                 api_config=api_config,
             )

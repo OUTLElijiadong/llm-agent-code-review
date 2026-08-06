@@ -43,7 +43,7 @@ def _executor(db, user: User, run_id: str, events: list[dict[str, Any]] | None =
     return PrismToolExecutor(
         db,
         user,
-        surface="admin" if user.role in {"admin", "super_admin"} else "user",
+        surface="admin" if user.role == "admin" else "user",
         run_id=run_id,
         mcp_provider=EmptyMcp(),
         event_sink=sink,
@@ -496,7 +496,7 @@ async def test_normal_chatagent_can_fuzzy_search_and_delegate_published_agent(db
 
 
 @pytest.mark.asyncio
-async def test_tool_sse_lifecycle_redacts_sensitive_arguments(db, super_admin_user) -> None:
+async def test_tool_sse_lifecycle_redacts_sensitive_arguments(db, admin_user) -> None:
     class SecretMcp(EmptyMcp):
         def has_tool(self, name: str) -> bool:
             return name == "mcp_secret_tool"
@@ -511,7 +511,7 @@ async def test_tool_sse_lifecycle_redacts_sensitive_arguments(db, super_admin_us
 
     executor = PrismToolExecutor(
         db,
-        super_admin_user,
+        admin_user,
         surface="admin",
         run_id="run_redaction",
         mcp_provider=SecretMcp(),

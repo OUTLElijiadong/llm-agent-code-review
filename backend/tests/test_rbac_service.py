@@ -209,9 +209,6 @@ class TestAssignRolesToUser:
         roles = get_user_roles(db, user.id)
         assert len(roles) == 1
         assert roles[0].code == "reviewer"
-        db.refresh(user)
-        assert user.role == "reviewer"
-        assert user.token_version == 1
 
     def test_assign_multiple_roles(self, db):
         """分配多个角色后用户应拥有全部角色"""
@@ -245,23 +242,6 @@ class TestAssignRolesToUser:
         # 清空
         assign_roles_to_user(db, user.id, [])
         assert get_user_roles(db, user.id) == []
-        db.refresh(user)
-        assert user.role == "user"
-
-    def test_assign_and_remove_admin_keeps_legacy_role_consistent(self, db):
-        """RBAC 管理员变更必须同步历史角色，避免降级后仍绕过权限。"""
-        user = _make_user(db, 1, "u1")
-        admin = _make_role(db, 11, "admin", "管理员")
-        member = _make_role(db, 12, "user", "普通用户")
-
-        assign_roles_to_user(db, user.id, [admin.id])
-        db.refresh(user)
-        assert user.role == "admin"
-
-        assign_roles_to_user(db, user.id, [member.id])
-        db.refresh(user)
-        assert user.role == "user"
-        assert is_admin_user(db, user.id) is False
 
 
 # ============================================================================
@@ -366,20 +346,6 @@ class TestCheckPermission:
         user = _make_user(db, 1, "admin", role="admin")
         # admin 用户无任何 RBAC 角色与权限分配
         assert check_permission(db, user.id, "any:permission") is True
-
-    def test_ordinary_admin_cannot_bypass_server_ops(self, db):
-        """普通管理员的程序内绕过不能扩张为服务器权限。"""
-        user = _make_user(db, 50, "ordinary-admin", role="admin")
-
-        assert check_permission(db, user.id, "server_ops:view") is False
-
-    def test_only_consistent_admin_super_binding_gets_server_ops(self, db):
-        """服务器权限要求用户名、旧角色与 RBAC 超级角色三者一致。"""
-        user = _make_user(db, 51, "admin", role="super_admin")
-        role = _make_role(db, 51, "super_admin", "超级管理员")
-        _link_user_role(db, user.id, role.id)
-
-        assert check_permission(db, user.id, "server_ops:view") is True
 
     def test_admin_bypass_via_rbac_role(self, db):
         """admin 角色(新版 RBAC)应绕过权限检查"""

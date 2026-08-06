@@ -150,7 +150,7 @@ def assign_user_roles(
     user_id: int,
     payload: UserRoleAssignIn,
     db: Session = Depends(get_db),
-    current: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """分配用户角色(覆盖式)
 
@@ -166,7 +166,7 @@ def assign_user_roles(
     Returns:
         Resp[None]: 操作结果,data 为 None
     """
-    rbac_service.assign_roles_to_user(db, user_id, payload.role_ids, actor=current)
+    rbac_service.assign_roles_to_user(db, user_id, payload.role_ids)
     return Resp(data=None)
 
 
@@ -217,8 +217,6 @@ def list_user_permissions(
     if current.id != user_id and not rbac_service.is_admin_user(db, current.id):
         raise ForbiddenError("无权查看他人权限", code=40301)
     codes = rbac_service.get_user_permissions(db, user_id)
-    if not rbac_service.is_super_admin_user(db, current.id):
-        codes = {code for code in codes if not code.startswith("server_ops:")}
     return Resp(data=sorted(codes))
 
 
@@ -292,7 +290,7 @@ def get_user_data_scope(
 @router.get("/roles", response_model=Resp[List[RoleOut]])
 def list_roles(
     db: Session = Depends(get_db),
-    current: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """列出全部角色
 
@@ -310,10 +308,7 @@ def list_roles(
     result: List[RoleOut] = []
     for r in roles:
         perms = rbac_service.get_role_permissions(db, r.id)
-        codes = [p.code for p in perms]
-        if not rbac_service.is_super_admin_user(db, current.id):
-            codes = [code for code in codes if not code.startswith("server_ops:")]
-        result.append(_role_to_out(r, codes))
+        result.append(_role_to_out(r, [p.code for p in perms]))
     return Resp(data=result)
 
 
@@ -321,7 +316,7 @@ def list_roles(
 def create_role(
     payload: RoleCreateIn,
     db: Session = Depends(get_db),
-    current: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """创建角色
 
@@ -336,7 +331,7 @@ def create_role(
     Returns:
         Resp[RoleOut]: 新建的角色信息(含权限编码列表)
     """
-    role = rbac_service.create_role(db, payload, actor=current)
+    role = rbac_service.create_role(db, payload)
     perms = rbac_service.get_role_permissions(db, role.id)
     return Resp(data=_role_to_out(role, [p.code for p in perms]))
 
@@ -346,7 +341,7 @@ def update_role(
     role_id: int,
     payload: RoleUpdateIn,
     db: Session = Depends(get_db),
-    current: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """更新角色
 
@@ -362,7 +357,7 @@ def update_role(
     Returns:
         Resp[RoleOut]: 更新后的角色信息(含权限编码列表)
     """
-    role = rbac_service.update_role(db, role_id, payload, actor=current)
+    role = rbac_service.update_role(db, role_id, payload)
     perms = rbac_service.get_role_permissions(db, role.id)
     return Resp(data=_role_to_out(role, [p.code for p in perms]))
 
@@ -409,7 +404,7 @@ def delete_role(
 def list_role_permissions(
     role_id: int,
     db: Session = Depends(get_db),
-    current: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """查询角色权限列表
 
@@ -424,8 +419,6 @@ def list_role_permissions(
         Resp[List[PermissionOut]]: 角色权限点列表
     """
     perms = rbac_service.get_role_permissions(db, role_id)
-    if not rbac_service.is_super_admin_user(db, current.id):
-        perms = [p for p in perms if not p.code.startswith("server_ops:")]
     return Resp(data=[PermissionOut.model_validate(p) for p in perms])
 
 
@@ -434,7 +427,7 @@ def assign_role_permissions(
     role_id: int,
     payload: RolePermissionAssignIn,
     db: Session = Depends(get_db),
-    current: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """分配角色权限(覆盖式)
 
@@ -450,7 +443,7 @@ def assign_role_permissions(
     Returns:
         Resp[None]: 操作结果,data 为 None
     """
-    rbac_service.assign_permissions_to_role(db, role_id, payload.permission_ids, actor=current)
+    rbac_service.assign_permissions_to_role(db, role_id, payload.permission_ids)
     return Resp(data=None)
 
 
@@ -459,7 +452,7 @@ def update_role_data_scope(
     role_id: int,
     payload: DataScopeUpdateIn,
     db: Session = Depends(get_db),
-    current: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """更新角色数据范围
 
@@ -481,7 +474,7 @@ def update_role_data_scope(
         scope_type=payload.scope_type,
         project_ids=payload.project_ids,
     )
-    scope = rbac_service.update_data_scope(db, role_id, scope_in, actor=current)
+    scope = rbac_service.update_data_scope(db, role_id, scope_in)
     return Resp(data=DataScopeOut.model_validate(scope))
 
 
@@ -540,7 +533,7 @@ def list_users_by_role(
 @router.get("/permissions", response_model=Resp[List[PermissionOut]])
 def list_permissions(
     db: Session = Depends(get_db),
-    current: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     """列出全部权限点
 
@@ -554,8 +547,6 @@ def list_permissions(
         Resp[List[PermissionOut]]: 全部权限点列表
     """
     perms = rbac_service.list_permissions(db)
-    if not rbac_service.is_super_admin_user(db, current.id):
-        perms = [p for p in perms if not p.code.startswith("server_ops:")]
     return Resp(data=[PermissionOut.model_validate(p) for p in perms])
 
 

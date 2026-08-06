@@ -333,7 +333,7 @@ def _aggregate_log_stats(
 
 
 def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]:
-    """返回内置运行时与已发布自定义 Agent 的唯一可调用目录。
+    """v2.0: 从 AgentRegistry 真实枚举 Agent + 回填 AiCallLog 统计
 
     保证前端看到的 Agent 数量 / 名称 / 描述与后端实际注册的 BaseAgent 完全一致。
 
@@ -344,7 +344,7 @@ def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]
     Returns:
         list[dict]: 符合 AgentRuntimeOut Schema 的字段
     """
-    runtime = get_runtime_catalog(db)
+    runtime = AgentRegistry.instance().list_runtime()
     codes = {r["code"] for r in runtime}
     stats = _aggregate_log_stats(db, user_id, codes)
     statuses = _derive_runtime_statuses(codes)
@@ -358,45 +358,9 @@ def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]
     return runtime
 
 
-def get_runtime_catalog(db: Session) -> list[dict]:
-    """读取当前真正可调用的 Agent 目录，并按 code 去重。"""
-    from app.services.declarative_agent_runtime import PublishedAgentCatalog
-
-    items = AgentRegistry.instance().list_runtime()
-    # 一些纯单元测试只提供统计查询桩，不具备完整 SQLAlchemy Session。
-    # 此时仍应返回内置目录；生产请求会使用真实 Session 并合并已发布 Agent。
-    if not hasattr(db, "query"):
-        return items
-    known_codes = {str(item.get("code") or "") for item in items}
-    try:
-        published_items = PublishedAgentCatalog.runtime_metadata(db)
-    except AttributeError as exc:
-        # 兼容只实现 filter/all 的轻量测试 Session；真实 SQLAlchemy
-        # Session 具备 join，不会进入此分支。
-        if "join" not in str(exc):
-            raise
-        published_items = []
-    for item in published_items:
-        code = str(item.get("code") or "")
-        if code and code not in known_codes:
-            items.append(item)
-            known_codes.add(code)
-    return items
-
-
-def get_runtime_summary(db: Session) -> dict:
-    """可调用 Agent 目录汇总：总数与 category 分桶。"""
-    runtime = get_runtime_catalog(db)
-    by_category: dict[str, int] = defaultdict(int)
-    for item in runtime:
-        by_category[str(item.get("category") or "general")] += 1
-    return {
-        "total": len(runtime),
-        "by_category": [
-            {"category": category, "count": count}
-            for category, count in sorted(by_category.items())
-        ],
-    }
+def get_runtime_summary() -> dict:
+    """注册中心汇总: 总数 + category 分桶 (不查 DB,纯运行时)"""
+    return AgentRegistry.instance().summary()
 
 
 def get_situation(db: Session, user_id: Optional[int] = None,
@@ -414,7 +378,7 @@ def get_situation(db: Session, user_id: Optional[int] = None,
     Returns:
         dict: 符合 AgentSituationOut Schema
     """
-    runtime = get_runtime_catalog(db)
+    runtime = AgentRegistry.instance().list_runtime()
     online = len(runtime)
     agent_codes = {r["code"] for r in runtime}
 

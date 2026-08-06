@@ -9,7 +9,7 @@ import {
 } from '@/api/feedback'
 
 const userStore = useUserStore()
-const isAdmin = computed(() => userStore.isAdmin())
+const isAdmin = computed(() => userStore.profile?.role === 'admin')
 
 const TYPE: Record<string, string> = {
   suggestion: '建议', complaint: '投诉', praise: '表扬', bug: '问题', other: '其他',

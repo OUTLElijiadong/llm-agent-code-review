@@ -13,6 +13,7 @@ import pytest
 from app.core.exceptions import ValidationError
 from app.utils.archive_extractor import (
     MAX_EXTRACTED_FILES,
+    MAX_SINGLE_FILE_SIZE,
     extract_archive,
     is_archive,
 )
@@ -31,10 +32,10 @@ class TestIsArchive:
         assert is_archive(filename) is True
 
     @pytest.mark.parametrize("filename", [
-        "test.py", "test.js", "test.txt", "test.json", "",
+        "test.py", "test.js", "test.txt", "test.json", "test.rar", "test.7z", "",
     ])
     def test_unsupported_formats(self, filename):
-        """不支持的格式应返回 False(rar/7z 等由 libarchive 支持)"""
+        """不支持的格式应返回 False"""
         assert is_archive(filename) is False
 
 
@@ -174,14 +175,6 @@ class TestSecurityChecks:
         with pytest.raises(ValidationError, match="zip slip"):
             extract_archive(buf.getvalue(), "evil.zip")
 
-    def test_posix_absolute_path_rejected_before_normalization(self):
-        """POSIX 绝对路径不得被去掉前导斜杠后接受。"""
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("/etc/evil.py", "import os\n")
-        with pytest.raises(ValidationError, match="绝对路径"):
-            extract_archive(buf.getvalue(), "evil.zip")
-
     def test_too_many_files_rejected(self):
         """超过文件数量上限应被拒绝"""
         buf = io.BytesIO()
@@ -191,16 +184,14 @@ class TestSecurityChecks:
         with pytest.raises(ValidationError, match="文件数量"):
             extract_archive(buf.getvalue(), "big.zip")
 
-    def test_single_large_member_accepted(self):
-        """v2.6 起解包不设单文件业务上限,大成员应正常解出(数量/倍率约束保留)"""
+    def test_single_file_too_large_rejected(self):
+        """单个文件超过大小上限应被拒绝"""
         buf = io.BytesIO()
-        big_content = b"x" * (12 * 1024 * 1024)
+        big_content = b"x" * (MAX_SINGLE_FILE_SIZE + 1)
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("big.bin", big_content)
-        files = extract_archive(buf.getvalue(), "big.zip")
-        assert len(files) == 1
-        assert files[0].name == "big.bin"
-        assert len(files[0].raw_bytes or files[0].content.encode("utf-8")) == len(big_content)
+        with pytest.raises(ValidationError, match="大小"):
+            extract_archive(buf.getvalue(), "big.zip")
 
     def test_sensitive_files_filtered(self):
         """敏感文件(.env/.ssh 等)应被过滤跳过"""

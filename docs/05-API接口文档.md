@@ -1,8 +1,6 @@
 # 05 · API 接口文档
 
-> 本文提供核心接口的人工说明与示例。**当前契约权威来源是 FastAPI 路由、Pydantic Schema 和生成的 OpenAPI，而不是手工维护的数量。**截至 2026-07-10，代码包含 194 条 `/api/*` 业务 HTTP 操作和 1 条 WebSocket；本文件对后续新增的治理、RBAC、社区、知识库、工单等接口仅做分组索引，未逐条展开全部 194 条。
->
-> 本地可在 `OPENAPI_ENABLED=true` 时通过 `/docs` 查看；当前生产虽关闭 `/docs`，但 `/openapi.json` 仍公开，这是待修复的 P1 偏差，不应视为既定安全策略。
+> 本文给出系统所有 REST 接口契约。以本文档为基准实现,前后端解耦开发;Swagger UI 在 `/docs` 由 FastAPI 自动生成,二者保持一致。
 
 ## 1. 通用约定
 
@@ -93,44 +91,29 @@ token 过期返回 `401 40101`,前端需引导用户重新登录。
 | 50201 | 502 | DeepSeek 服务不可达 |
 | 50301 | 503 | 服务暂不可用(任务系统繁忙) |
 
-### 1.6 当前接口基线与分组
+### 1.6 接口分组
 
-统计口径：FastAPI `APIRoute` 的 HTTP 方法数；同一路径存在多个方法时分别计数；不含 `/healthz`，WebSocket 单独统计。
-
-| 前缀/模块 | HTTP 操作数 | 说明 |
-| --- | ---: | --- |
-| `/api/auth` | 5 | 注册、登录、当前用户、改密、退出 |
-| `/api/users` | 4 | 用户管理 |
-| `/api/projects` | 5 | 项目 CRUD |
-| `/api/projects/{project_id}/members` | 4 | 项目成员 |
-| `/api/code-files` | 13 | 文件、上传、版本、回滚 |
-| `/api/rules` | 5 | 审查规则 |
-| `/api/review` | 6 | 审查任务 |
-| `/api/issues` | 4 | 问题闭环 |
-| `/api/reports` | 12 | 报告、预览、模板、导出 |
-| `/api/dashboard` | 5 | 仪表盘 |
-| `/api/ai-logs` | 2 | AI 调用日志 |
-| `/api/ai` | 4 | AI 助手与调度 |
-| `/api/ai-prompt` | 4 | 修复提示词 |
-| `/api/security` | 7 | 安全审计 |
-| `/api/agents` | 14 | Agent 中心与 Skill 调用 |
-| `/api/evolution` | 11 | Agent 自进化 |
-| `/api/admin/audit` | 1 | 操作审计 |
-| API 配置相关路由 | 4 | 用户 API 配置 |
-| `/api/maintenance` | 6 | 维修工单 |
-| `/api/feedback` | 5 | 用户反馈 |
-| `/api/forum` | 9 | 开发者论坛 |
-| `/api/me` | 3 | 用户画像 |
-| `/api/knowledge` | 8 | 个人知识库 |
-| `/api/admin/llm` | 3 | 全局大模型配置 |
-| `/api/admin/*` Agent 治理 | 34 | Profile、权限、策略、记忆、知识、任务、反思、奖励、产物、告警、指标 |
-| `/api/rbac` | 15 | 角色、权限、菜单、数据范围 |
-| `/api/discuss` | 1 | 圆桌讨论预检 |
-| **合计** | **194** | 业务 HTTP 操作 |
-
-WebSocket：`/api/ws/discuss/{session_id}`，共 1 条。
-
-> 逐条契约应从当前 OpenAPI 生成并归档。本文后续章节保留核心手工说明，但不再宣称覆盖“所有接口”。
+| 前缀 | 模块 |
+| --- | --- |
+| `/api/auth/*` | 鉴权 |
+| `/api/users/*` | 用户(管理员) |
+| `/api/projects/*` | 项目 |
+| `/api/code-files/*` | 代码文件 |
+| `/api/code-files/{id}/versions/*` | 代码版本 |
+| `/api/rules/*` | 审查规则 |
+| `/api/review/*` | 审查任务 |
+| `/api/issues/*` | 审查问题 |
+| `/api/reports/*` | 审查报告 |
+| `/api/dashboard/*` | 仪表盘 |
+| `/api/ai-logs/*` | AI 调用日志 |
+| `/api/agents/*` | Agent 中心 (v2.0) |
+| `/api/ai/*` | AI 助手对话 (v2.0) |
+| `/api/ai-prompt/*` | AI 提示词生成 (v2.0) |
+| `/api/security/*` | 安全审计 (v2.1) |
+| `/api/evolution/*` | Agent 自进化 (v3.0, 管理员) |
+| `/api/admin/audit/*` | 操作审计 (v2.0) |
+| `/api/discuss/*` | 圆桌讨论审预检 (v2.3) |
+| `/api/ws/discuss/{id}` | 圆桌讨论审 WebSocket (v2.3) |
 
 ---
 
@@ -1421,19 +1404,13 @@ data: {"event":"dispatch","trace_id":"abc123","agent_id":"security","timestamp":
 
 ## 19. OpenAPI / Swagger
 
-FastAPI 默认端点：
+FastAPI 自动暴露:
 
-- Swagger UI：`GET /docs`
-- ReDoc：`GET /redoc`
-- OpenAPI JSON：`GET /openapi.json`
+- Swagger UI:`GET /docs`
+- ReDoc:`GET /redoc`
+- OpenAPI JSON:`GET /openapi.json`
 
-当前代码只根据 `OPENAPI_ENABLED` 设置 `docs_url` 和 `redoc_url`，没有同步设置 `openapi_url`。因此生产 `OPENAPI_ENABLED=false` 时：
-
-- `/docs`、`/redoc` 关闭；
-- `/openapi.json` 仍由 FastAPI 生成；
-- `frontend/nginx.conf` 还显式代理 `/openapi.json`。
-
-目标方案应二选一：生产全部关闭，或通过内网/管理员鉴权访问。修复前，文档不得再描述为“生产 OpenAPI 已关闭”。
+生产环境关闭 `/docs` 与 `/redoc`,通过环境变量 `OPENAPI_ENABLED=false` 控制。
 
 ## 20. 速率限制
 
@@ -1457,8 +1434,6 @@ FastAPI 默认端点：
 当前代码未提供 `/readyz`;容器健康检查由 MySQL 容器自身 healthcheck 和后端 `/healthz` 共同承担。
 
 ## 22. Schema 速查(Pydantic 命名约定)
-
-当前 `backend/app/schemas` 有 28 个业务模块；下列仅为早期核心模块示例，不是完整目录。实际字段和新增模块以源码与 OpenAPI 为准。
 
 ```
 schemas/

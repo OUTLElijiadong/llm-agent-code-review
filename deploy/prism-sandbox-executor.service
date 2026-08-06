@@ -10,12 +10,12 @@ Group=prism-sandbox
 SupplementaryGroups=docker
 WorkingDirectory=@DEPLOY_DIR@
 EnvironmentFile=@DEPLOY_DIR@/sandbox/.env
-# socket 直接落在持久 StateDirectory:执行器 unlink+重建同一路径,Backend
-# 容器挂载该目录,挂载点始终跟随文件路径,执行器重启后容器内的 socket
-# 引用依然有效。StateDirectoryMode=0770 让 Backend(group 992)可进入读取。
-Environment=SANDBOX_EXECUTOR_SOCKET=/var/lib/prism-sandbox/agent.sock
+Environment=SANDBOX_EXECUTOR_SOCKET=/run/prism-sandbox/agent.sock
+RuntimeDirectory=prism-sandbox
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=restart
 StateDirectory=prism-sandbox
-StateDirectoryMode=0770
+StateDirectoryMode=0700
 LogsDirectory=prism-sandbox
 LogsDirectoryMode=0700
 UMask=0007

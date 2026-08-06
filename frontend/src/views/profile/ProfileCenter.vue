@@ -93,8 +93,6 @@ const profile = computed(() => userStore.profile)
 
 const roleLabel = computed(() => {
   switch (profile.value?.role) {
-    case 'super_admin':
-      return '超级管理员'
     case 'admin':
       return '管理员'
     case 'reviewer':
@@ -105,7 +103,7 @@ const roleLabel = computed(() => {
 })
 
 const roleTagType = computed<'danger' | 'warning' | 'primary'>(() => {
-  if (profile.value?.role === 'admin' || profile.value?.role === 'super_admin') return 'danger'
+  if (profile.value?.role === 'admin') return 'danger'
   if (profile.value?.role === 'reviewer') return 'warning'
   return 'primary'
 })
@@ -149,7 +147,7 @@ function goApiConfig(): void {
 async function handleLogout(): Promise<void> {
   try {
     await ElMessageBox.confirm('确认退出登录?', '提示', { type: 'warning' })
-    await userStore.logout()
+    userStore.logout()
     router.push('/login')
   } catch {
     /* user cancelled */

@@ -26,6 +26,8 @@ from app.models.project import Project
 from app.models.user import User
 from app.services import code_file_service
 from app.utils.archive_extractor import MAX_EXTRACTED_FILES
+from app.utils.archive_extractor import MAX_SINGLE_FILE_SIZE as ARCHIVE_MAX_SINGLE
+from app.utils.file_validator import MAX_SINGLE_FILE_SIZE
 from app.utils.malware_scanner import ScanResult
 
 # ============ 辅助函数 ============
@@ -233,9 +235,126 @@ class TestUploadMimeValidation:
 
 
 # ============ 单文件大小校验 ============
-# v2.6 起单文件 10MB 与项目总 500MB 业务上限已移除(改为 ZIP64 流式 + 解压倍率/
-# 文件数约束,由 archive_extractor 与远程下载 MAX_REMOTE_BYTES 兜底),
-# 对应校验函数已从 file_validator 删除,此处不再保留过时测试。
+
+class TestUploadSingleFileSize:
+    """单文件 10MB 上限校验测试"""
+
+    def test_single_file_over_10mb_rejected(self, db, monkeypatch):
+        """单文件超过 10MB 应被拒绝"""
+        monkeypatch.setattr(
+            "app.services.code_file_service.get_scanner", _make_clean_scanner
+        )
+        user, project = _setup_project(db)
+
+        # 构造 10MB + 1 字节的文本文件
+        big_content = b"x" * (MAX_SINGLE_FILE_SIZE + 1)
+        upload_file = _make_upload_file("big.py", big_content)
+
+        with pytest.raises(ValueError, match="超过单文件上限"):
+            code_file_service.upload(
+                db=db, user=user, project_id=project.id, upload_file=upload_file,
+            )
+
+    def test_single_file_exact_10mb_success(self, db, monkeypatch):
+        """单文件恰好 10MB 应上传成功(边界值)"""
+        monkeypatch.setattr(
+            "app.services.code_file_service.get_scanner", _make_clean_scanner
+        )
+        user, project = _setup_project(db)
+
+        # 恰好 10MB:用 ASCII 文本填充(避免触发二进制检测)
+        exact_content = b"a" * MAX_SINGLE_FILE_SIZE
+        upload_file = _make_upload_file("exact.py", exact_content)
+
+        file_id, _, _ = code_file_service.upload(
+            db=db, user=user, project_id=project.id, upload_file=upload_file,
+        )
+        assert file_id > 0
+
+    def test_single_file_under_limit_success(self, db, monkeypatch):
+        """单文件 1MB 应上传成功"""
+        monkeypatch.setattr(
+            "app.services.code_file_service.get_scanner", _make_clean_scanner
+        )
+        user, project = _setup_project(db)
+
+        content = b"x" * (1024 * 1024)
+        upload_file = _make_upload_file("normal.py", content)
+        file_id, _, _ = code_file_service.upload(
+            db=db, user=user, project_id=project.id, upload_file=upload_file,
+        )
+        assert file_id > 0
+
+
+# ============ 项目总大小校验 ============
+
+class TestUploadProjectTotalSize:
+    """项目总 500MB 上限校验测试"""
+
+    def test_project_total_over_500mb_rejected(self, db, monkeypatch):
+        """项目总大小超过 500MB 应被拒绝"""
+        monkeypatch.setattr(
+            "app.services.code_file_service.get_scanner", _make_clean_scanner
+        )
+        user, project = _setup_project(db)
+
+        # 预先插入一个接近 500MB 的文件(用 raw_size 模拟,不实际分配大内存)
+        huge_file = CodeFile(
+            project_id=project.id,
+            file_name="huge.py",
+            file_path="huge.py",
+            language="python",
+            size_bytes=495 * 1024 * 1024,
+            raw_size=495 * 1024 * 1024,
+            line_count=1,
+            version_no=1,
+            content="x",
+            status="active",
+            is_binary=0,
+        )
+        db.add(huge_file)
+        db.commit()
+
+        # 再上传 6MB 文件(≤ 10MB 单文件上限),总计 501MB 超限
+        new_content = b"x" * (6 * 1024 * 1024)
+        upload_file = _make_upload_file("new.py", new_content)
+
+        with pytest.raises(ValueError, match="超过项目上限"):
+            code_file_service.upload(
+                db=db, user=user, project_id=project.id, upload_file=upload_file,
+            )
+
+    def test_project_total_under_500mb_success(self, db, monkeypatch):
+        """项目总大小未超过 500MB 应上传成功"""
+        monkeypatch.setattr(
+            "app.services.code_file_service.get_scanner", _make_clean_scanner
+        )
+        user, project = _setup_project(db)
+
+        # 预先插入 400MB(用 raw_size 模拟)
+        existing = CodeFile(
+            project_id=project.id,
+            file_name="existing.py",
+            file_path="existing.py",
+            language="python",
+            size_bytes=400 * 1024 * 1024,
+            raw_size=400 * 1024 * 1024,
+            line_count=1,
+            version_no=1,
+            content="x",
+            status="active",
+            is_binary=0,
+        )
+        db.add(existing)
+        db.commit()
+
+        # 再上传 8MB(≤ 10MB 单文件上限),总计 408MB 未超限
+        new_content = b"x" * (8 * 1024 * 1024)
+        upload_file = _make_upload_file("new.py", new_content)
+        file_id, _, _ = code_file_service.upload(
+            db=db, user=user, project_id=project.id, upload_file=upload_file,
+        )
+        assert file_id > 0
 
 
 # ============ 恶意软件扫描 ============
@@ -284,39 +403,30 @@ class TestUploadMalwareScan:
         )
         assert file_id > 0
 
-    def test_archive_with_malware_inside_auto_quarantined(self, db, monkeypatch):
-        """压缩包内含恶意文件自动转投隔离归档而非拒绝。
-
-        项目当前干净(无已入库文件)时,命中恶意的归档整体进入隔离审计链路,
-        允许后续在沙箱内审计/测试/部署预览,而不会混入可编辑源码。
-        """
+    def test_archive_with_malware_inside_rejected(self, db, monkeypatch):
+        """压缩包内含恶意文件应被拒绝"""
+        # 外层扫描通过,内层扫描命中
+        outer_scanner = _make_clean_scanner()
+        # scan 第一次(外层)返回 clean,第二次(内层)返回 infected
+        outer_scanner.scan.side_effect = [
+            ScanResult(engine="heuristic", result="clean", degraded=True),
+            ScanResult(
+                engine="heuristic", result="infected",
+                threat_name="Webshell.PHP.Shell", degraded=True,
+            ),
+        ]
         monkeypatch.setattr(
-            "app.services.code_file_service.get_scanner",
-            lambda: _make_infected_scanner("Webshell.PHP.Shell"),
+            "app.services.code_file_service.get_scanner", lambda: outer_scanner
         )
         user, project = _setup_project(db)
 
         zip_bytes = _make_zip({"shell.php": b'<?php eval(base64_decode("x")); ?>'})
         upload_file = _make_upload_file("evil.zip", zip_bytes)
 
-        file_id, lang, ver = code_file_service.upload(
-            db=db, user=user, project_id=project.id, upload_file=upload_file,
-        )
-        assert (file_id, lang, ver) == (0, "quarantined", 0)
-
-        from app.models.project_source_archive import ProjectSourceArchive
-        archive = (
-            db.query(ProjectSourceArchive)
-            .filter(
-                ProjectSourceArchive.project_id == project.id,
-                ProjectSourceArchive.storage_status == "active",
+        with pytest.raises(ValueError, match="压缩包内文件.*检测到恶意软件"):
+            code_file_service.upload(
+                db=db, user=user, project_id=project.id, upload_file=upload_file,
             )
-            .first()
-        )
-        assert archive is not None
-        # 测试环境无 ClamAV/YARA 时归档扫描降级(degraded);只要进入隔离态即证明自动隔离生效,
-        # 生产环境双引擎就绪时命中恶意会标记为 infected。
-        assert archive.malware_status != "clean"
 
 
 # ============ 二进制文件入库 ============
@@ -491,25 +601,20 @@ class TestUploadArchive:
             )
 
     def test_archive_single_file_too_large_rejected(self, db, monkeypatch):
-        """压缩包内单文件超过大小上限应被拒绝
-
-        v2.6 起归档解包不设单文件业务上限(数量/倍率约束保留),
-        超大成员由压缩炸弹倍率守卫与文件数上限拦截;此用例验证
-        大成员压缩包仍可正常入库而非按旧 10MB 上限拒绝。
-        """
+        """压缩包内单文件超过大小上限应被拒绝"""
         monkeypatch.setattr(
             "app.services.code_file_service.get_scanner", _make_clean_scanner
         )
         user, project = _setup_project(db)
 
-        big_content = b"x" * (12 * 1024 * 1024)
+        big_content = b"x" * (ARCHIVE_MAX_SINGLE + 1)
         zip_bytes = _make_zip({"big.bin": big_content})
         upload_file = _make_upload_file("big.zip", zip_bytes)
 
-        file_id, _, _ = code_file_service.upload(
-            db=db, user=user, project_id=project.id, upload_file=upload_file,
-        )
-        assert file_id > 0
+        with pytest.raises(ValueError, match="压缩包解压失败"):
+            code_file_service.upload(
+                db=db, user=user, project_id=project.id, upload_file=upload_file,
+            )
 
     def test_archive_creates_independent_records(self, db, monkeypatch):
         """压缩包内每个文件应创建独立的 CodeFile 记录"""
@@ -566,11 +671,12 @@ class TestUploadArchive:
 class TestSecurityChainOrder:
     """校验链执行顺序测试"""
 
-    def test_mime_check_rejects_executable(self, db):
-        """可执行文件应在 MIME 校验处被拒绝(单文件大小校验已随 v2.6 移除)"""
+    def test_mime_check_before_size_check(self, db):
+        """MIME 校验应优先于大小校验(错误信息为 MIME)"""
         user, project = _setup_project(db)
 
-        big_exe = b"MZ" + b"\x00" * (1024 + 10)
+        # .exe 文件 + 超大内容:应先触发 MIME 错误
+        big_exe = b"MZ" + b"\x00" * (MAX_SINGLE_FILE_SIZE + 10)
         upload_file = _make_upload_file("evil.exe", big_exe)
 
         with pytest.raises(ValueError, match="不支持的文件类型"):
@@ -578,8 +684,29 @@ class TestSecurityChainOrder:
                 db=db, user=user, project_id=project.id, upload_file=upload_file,
             )
 
+    def test_size_check_before_malware_scan(self, db, monkeypatch):
+        """大小校验应优先于恶意软件扫描(不触发扫描)"""
+        scan_called = MagicMock(return_value=False)
+        scanner = MagicMock()
+        scanner.scan = scan_called
+        monkeypatch.setattr(
+            "app.services.code_file_service.get_scanner", lambda: scanner
+        )
+        user, project = _setup_project(db)
+
+        # 合法 .py 文件 + 超大内容:应触发大小错误,不触发扫描
+        big_content = b"x" * (MAX_SINGLE_FILE_SIZE + 1)
+        upload_file = _make_upload_file("big.py", big_content)
+
+        with pytest.raises(ValueError, match="超过单文件上限"):
+            code_file_service.upload(
+                db=db, user=user, project_id=project.id, upload_file=upload_file,
+            )
+        # 扫描器不应被调用(大小校验先失败)
+        assert scan_called.call_count == 0
+
     def test_malware_scan_before_archive_extraction(self, db, monkeypatch):
-        """恶意软件扫描应优先于解压(外层扫描命中即自动隔离,不进入解包)"""
+        """恶意软件扫描应优先于解压(外层扫描命中即拒绝)"""
         monkeypatch.setattr(
             "app.services.code_file_service.get_scanner",
             lambda: _make_infected_scanner("Zip.Malware"),
@@ -589,16 +716,10 @@ class TestSecurityChainOrder:
         zip_bytes = _make_zip({"clean.py": "print('hi')\n"})
         upload_file = _make_upload_file("malware.zip", zip_bytes)
 
-        file_id, lang, ver = code_file_service.upload(
-            db=db, user=user, project_id=project.id, upload_file=upload_file,
-        )
-        assert (file_id, lang, ver) == (0, "quarantined", 0)
-        # 外层扫描命中后进入隔离,不应有任何可编辑文件被解包入库。
-        from app.models.code_file import CodeFile
-        assert db.query(CodeFile.id).filter(
-            CodeFile.project_id == project.id,
-            CodeFile.status == "active",
-        ).count() == 0
+        with pytest.raises(ValueError, match="检测到恶意软件"):
+            code_file_service.upload(
+                db=db, user=user, project_id=project.id, upload_file=upload_file,
+            )
 
 
 # ============ 集成:端到端 ============
@@ -646,18 +767,20 @@ class TestEndToEnd:
         assert code_file.raw_size == len(png_bytes)
 
     def test_multiple_uploads_accumulate_raw_size(self, db, monkeypatch):
-        """多次上传应正确记录 raw_size(v2.6 起不再做 500MB 项目总大小拦截)"""
+        """多次上传应累积 raw_size 用于项目总大小校验"""
         monkeypatch.setattr(
             "app.services.code_file_service.get_scanner", _make_clean_scanner
         )
         user, project = _setup_project(db)
 
+        # 第一次上传 5MB
         content1 = b"x" * (5 * 1024 * 1024)
         upload1 = _make_upload_file("a.py", content1)
         code_file_service.upload(
             db=db, user=user, project_id=project.id, upload_file=upload1,
         )
 
+        # 第二次上传 6MB,总计 11MB(未超 500MB,应成功)
         content2 = b"y" * (6 * 1024 * 1024)
         upload2 = _make_upload_file("b.py", content2)
         file_id2, _, _ = code_file_service.upload(
@@ -665,12 +788,9 @@ class TestEndToEnd:
         )
         assert file_id2 > 0
 
-        sizes = {
-            row.file_name: row.raw_size
-            for row in db.query(CodeFile).filter(CodeFile.project_id == project.id).all()
-        }
-        assert sizes["a.py"] == len(content1)
-        assert sizes["b.py"] == len(content2)
+        # 验证项目总 raw_size 累积正确
+        total = code_file_service._get_project_total_size(db, project.id)
+        assert total == len(content1) + len(content2)
 
 
 def test_fail_closed_rejects_degraded_scan_result(db, monkeypatch):

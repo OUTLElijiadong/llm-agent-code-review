@@ -71,10 +71,6 @@ class ContextBudgetError(RuntimeError):
     """Agent 上下文无法在不破坏协议完整性的前提下压缩到预算内。"""
 
 
-class FatalToolExecutionError(RuntimeError):
-    """必须终止工具循环的请求级异常，不允许转换为模型可继续处理的失败结果。"""
-
-
 @dataclass(frozen=True)
 class ToolCall:
     """模型发出的单个函数工具调用。"""
@@ -449,13 +445,7 @@ class DeepSeekResponsesRuntime:
             )
             pending = checkpoint.pending
             assert pending is not None
-            try:
-                execution = await self._execute_tool(pending.call, approved=True)
-            except FatalToolExecutionError as exc:
-                checkpoint.status = FAILED
-                checkpoint.error = str(exc)
-                await self._store.save(checkpoint)
-                raise
+            execution = await self._execute_tool(pending.call, approved=True)
             if _is_approval_required(execution.status):
                 checkpoint.error = "工具在已批准后仍要求审批，已停止以避免重复审批循环"
                 checkpoint.status = FAILED
@@ -590,9 +580,6 @@ class DeepSeekResponsesRuntime:
     ) -> bool:
         """失败运行的回退：若该调用的决策副作用已执行（transcript 有终态证据），
         则幂等重置为运行中并继续模型循环，而不是再次抛出“不能执行该恢复动作”。
-
-        只有当运行处于可恢复终态、没有待处理动作、且指定调用已有终态输出时
-        才触发；不会重放任何写操作，审批记录也不会被重复处理。
         """
 
         if checkpoint.status not in _TERMINAL_RECOVERABLE_STATUSES:
@@ -623,19 +610,12 @@ class DeepSeekResponsesRuntime:
 
             guard_retries = int(checkpoint.context_metadata.get("completion_guard_retries") or 0)
             force_tool_rounds = int(checkpoint.context_metadata.get("force_tool_rounds") or 0)
-            non_thinking_repair = bool(
-                checkpoint.context_metadata.get("completion_guard_non_thinking_repair")
-            )
-            tool_options = _tool_request_options(
-                checkpoint.model,
-                force_tool_rounds,
-                non_thinking_repair=non_thinking_repair,
-            )
+            tool_choice = _tool_choice_for_round(checkpoint.model, force_tool_rounds)
             overhead_tokens = estimate_tokens(
                 {
                     "instructions": checkpoint.instructions,
                     "tools": checkpoint.tools,
-                    **tool_options,
+                    "tool_choice": tool_choice,
                 }
             )
             try:
@@ -660,17 +640,17 @@ class DeepSeekResponsesRuntime:
                 context_metadata["compaction_count"] = previous_compactions
             context_metadata["completion_guard_retries"] = guard_retries
             context_metadata["force_tool_rounds"] = max(force_tool_rounds - 1, 0)
-            context_metadata["completion_guard_non_thinking_repair"] = non_thinking_repair
             checkpoint.context_metadata = context_metadata
 
             payload: Dict[str, Any] = {
                 "model": checkpoint.model,
                 "input": projected_input,
                 "tools": copy.deepcopy(checkpoint.tools),
-                **tool_options,
                 "stream": self._stream,
                 "max_output_tokens": self._max_output_tokens,
             }
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
             if checkpoint.instructions:
                 payload["instructions"] = checkpoint.instructions
 
@@ -746,8 +726,6 @@ class DeepSeekResponsesRuntime:
                 if guard_retries < COMPLETION_GUARD_RETRY_LIMIT:
                     checkpoint.context_metadata["completion_guard_retries"] = guard_retries + 1
                     checkpoint.context_metadata["force_tool_rounds"] = 1
-                    if _model_supports_non_thinking_tool_repair(checkpoint.model):
-                        checkpoint.context_metadata["completion_guard_non_thinking_repair"] = True
                     checkpoint.transcript.append(
                         {
                             "role": "system",
@@ -834,13 +812,7 @@ class DeepSeekResponsesRuntime:
                 }
                 return self._result(checkpoint, events=[event])
 
-            try:
-                execution = await self._execute_tool(call, approved=False)
-            except FatalToolExecutionError as exc:
-                checkpoint.status = FAILED
-                checkpoint.error = str(exc)
-                await self._store.save(checkpoint)
-                raise
+            execution = await self._execute_tool(call, approved=False)
             if _is_approval_required(execution.status):
                 checkpoint.status = WAITING_APPROVAL
                 checkpoint.pending = PendingAction(
@@ -876,8 +848,6 @@ class DeepSeekResponsesRuntime:
         try:
             raw_result = await _invoke_tool_executor(self._tool_executor, call, approved=approved)
             return _normalize_execution_result(raw_result)
-        except FatalToolExecutionError:
-            raise
         except Exception as exc:  # noqa: BLE001 - 工具异常必须回灌模型继续推理
             return ToolExecutionResult.failure(f"工具 {call.name} 执行失败: {exc}")
 
@@ -1102,40 +1072,18 @@ def _has_tool_evidence(transcript: Sequence[Mapping[str, Any]], tool_call_id: st
     )
 
 
-def _tool_request_options(
-    model: str,
-    force_tool_rounds: int,
-    *,
-    non_thinking_repair: bool = False,
-) -> Dict[str, Any]:
-    """构造工具轮参数；Thinking 模型不能携带显式 ``tool_choice``。"""
+def _tool_choice_for_round(model: str, force_tool_rounds: int) -> Optional[str]:
+    """选择本轮工具策略；DeepSeek 思考模式不支持任何显式 tool_choice。
 
-    # DeepSeek Thinking 模式拒绝 ``tool_choice=auto/required``（即使同时发送
-    # thinking=disabled 也一样，实测上游仍返回 HTTP 400）。该判断必须先于
-    # non_thinking_repair 分支，否则证据修复轮会触发上游 400 导致整个运行
-    # 失败。省略字段仍允许模型按工具定义自主决定是否调用工具。
+    上游对 thinking 模型返回 HTTP 400: Thinking mode does not support this
+    tool_choice（auto/required 都拒绝），必须整体省略该字段，而不是降级为
+    auto。省略字段仍允许模型按工具定义自主决定是否调用工具。
+    """
     if _model_disallows_required_tool_choice(model):
-        return {}
-    if non_thinking_repair and _model_supports_non_thinking_tool_repair(model):
-        return {
-            # 非 Thinking 模型可关闭思考后强制工具调用。
-            "tool_choice": "auto",
-            "thinking": {"type": "disabled"},
-        }
+        return None
     if force_tool_rounds <= 0:
-        return {"tool_choice": "auto"}
-    return {"tool_choice": "required"}
-
-
-def _tool_choice_for_round(model: str, force_tool_rounds: int) -> str:
-    """兼容旧调用方；新运行时使用包含 thinking 开关的完整参数。"""
-
-    return str(_tool_request_options(model, force_tool_rounds).get("tool_choice", "auto"))
-
-
-def _model_supports_non_thinking_tool_repair(model: str) -> bool:
-    normalized = model.casefold()
-    return "deepseek-v4" in normalized
+        return "auto"
+    return "required"
 
 
 def _model_disallows_required_tool_choice(model: str) -> bool:

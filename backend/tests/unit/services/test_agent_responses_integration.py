@@ -1588,7 +1588,6 @@ async def test_admin_transport_sink_buffers_only_text_deltas() -> None:
 @pytest.mark.asyncio
 async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger(db, monkeypatch) -> None:
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
-    monkeypatch.setattr(service_module, "_is_super_admin_actor", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         service_module.tool_gateway,
         "authorize",
@@ -1601,7 +1600,7 @@ async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger
     monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
     executor = PrismToolExecutor(
         db,
-        SimpleNamespace(id=7, username="admin", role="super_admin", token_version=0),
+        SimpleNamespace(id=7, role="admin", token_version=0),
         surface="admin",
         run_id="run_admin_secret",
         mcp_provider=EmptyMcp(),
@@ -1642,7 +1641,7 @@ async def test_admin_critical_capability_redacts_secret_from_approval_and_ledger
         (
             "users.reset_password",
             {"user_id": 9},
-            {"temporary_password": "TEMP-PASSWORD-SECRET"},
+            {"default_password": "TEMP-PASSWORD-SECRET"},
             "TEMP-PASSWORD-SECRET",
             "password_reset",
         ),
@@ -1770,58 +1769,6 @@ async def test_api_stream_filters_empty_deltas_and_emits_one_final_event(monkeyp
     assert "第一行\\n第二行" in body
     assert body.count("event: response.completed") == 1
     assert "[DONE]" not in body
-
-
-@pytest.mark.asyncio
-async def test_api_stream_emits_auth_expired_and_discards_events_after_session_replacement(monkeypatch) -> None:
-    cancelled = False
-
-    class FakeService:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
-            nonlocal cancelled
-            try:
-                await event_sink(
-                    {
-                        "type": "response.tool.started",
-                        "run_id": run_id,
-                        "call_id": "call-expired",
-                        "tool_name": "list_projects",
-                    }
-                )
-                await asyncio.Event().wait()
-                return RuntimeResult(run_id=run_id, status="completed", rounds=1)
-            except asyncio.CancelledError:
-                cancelled = True
-                raise
-
-        async def cancel(self, _run_id: str) -> None:
-            return None
-
-    clock = iter((0.0, 11.0, 12.0))
-    monkeypatch.setattr(api_module, "AgentResponsesService", FakeService)
-    monkeypatch.setattr(api_module.time, "monotonic", lambda: next(clock, 12.0))
-    monkeypatch.setattr(api_module, "_is_session_version_active", lambda *_args: False)
-    request = api_module.AgentResponsesRequest(
-        surface="user",
-        session_id="session-auth-expired",
-        messages=[{"role": "user", "content": "执行"}],
-    )
-
-    response = await api_module.stream_agent_response(
-        request,
-        db=object(),
-        user=SimpleNamespace(id=7, role="user", token_version=3),
-    )
-    body = await _collect_stream(response)
-
-    assert body.count("event: auth_expired") == 1
-    assert '"code": 40102' in body
-    assert "event: response.tool.started" not in body
-    assert "event: response.completed" not in body
-    assert cancelled is True
 
 
 @pytest.mark.asyncio
@@ -2058,81 +2005,3 @@ async def test_client_disconnect_discards_burst_events_without_blocking_worker(m
         await pending
 
     await asyncio.wait_for(finished.wait(), timeout=0.5)
-
-
-@pytest.mark.asyncio
-async def test_api_request_accepts_retry_action_and_dispatches_resume(monkeypatch) -> None:
-    """失败运行回退：API 契约接受 retry，并把它分发到 resume。"""
-
-    seen: dict[str, str] = {}
-
-    class FakeService:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
-            raise AssertionError("retry 不应走 start")
-
-        async def resume(
-            self,
-            *,
-            run_id: str,
-            action: str,
-            call_id: str = "",
-            answer: str = "",
-            confirmation: str = "",
-            event_sink=None,
-        ) -> RuntimeResult:
-            seen["run_id"] = run_id
-            seen["action"] = action
-            return RuntimeResult(run_id=run_id, status="completed", output_text="重试完成", rounds=1)
-
-    monkeypatch.setattr(api_module, "AgentResponsesService", FakeService)
-    request = api_module.AgentResponsesRequest(
-        action="retry",
-        surface="user",
-        session_id="session-retry",
-        run_id="run_retry_me",
-    )
-    response = await api_module.stream_agent_response(
-        request,
-        db=object(),
-        user=SimpleNamespace(id=7, role="user"),
-    )
-    body = await _collect_stream(response)
-
-    assert seen == {"run_id": "run_retry_me", "action": "retry"}
-    assert "event: response.completed" in body
-    assert '"id": "run_retry_me"' in body
-
-
-def test_admin_completion_guard_allows_honest_conclusion_without_write_evidence() -> None:
-    """工具链中断/检查后无需写操作时，诚实结论不应被守卫吞掉。"""
-    checkpoint = RunCheckpoint(
-        run_id="run_honest_no_write",
-        model="test",
-        transcript=[
-            {"role": "user", "content": "请解决所有 open 告警"},
-            {
-                "type": "function_call",
-                "call_id": "call_list",
-                "name": "admin_execute_capability",
-                "arguments": json.dumps(
-                    {"capability": "observability.alerts.list", "params": {"status": "open"}},
-                    ensure_ascii=False,
-                ),
-            },
-            {
-                "type": "function_call_output",
-                "call_id": "call_list",
-                "output": json.dumps({"status": "success", "output": {"data": []}}, ensure_ascii=False),
-            },
-        ],
-        tools=[],
-    )
-    # 只读检查后诚实结论：当前没有需要解决的告警 → 放行（输出结论）
-    assert service_module._admin_completion_guard(checkpoint, "当前没有需要解决的 open 告警") is None
-    # 未调用写工具却声称“已解决全部” → 仍拦截（防编造）
-    assert service_module._admin_completion_guard(checkpoint, "已解决全部 open 告警") is not None
-    # 中性说明性结论 → 放行
-    assert service_module._admin_completion_guard(checkpoint, "已查询告警列表，共 0 条 open 告警") is None

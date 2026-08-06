@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.dependencies import require_admin
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
-from app.schemas.user import PasswordResetOut, RoleIn, StatusIn, UserListItem
+from app.schemas.user import RoleIn, StatusIn, UserListItem
 from app.services import audit_service, user_service
 
 router = APIRouter()
@@ -36,11 +36,11 @@ def list_users(
     return Resp(data=PageOut(**result))
 
 
-@router.post("/{user_id}/reset-password", response_model=Resp[PasswordResetOut])
+@router.post("/{user_id}/reset-password", response_model=Resp[dict])
 def reset_password(user_id: int, request: Request, db: Session = Depends(get_db),
                    admin: User = Depends(require_admin)):
     """重置密码(管理员)"""
-    data = user_service.reset_password(db, user_id, admin)
+    data = user_service.reset_password(db, user_id)
     audit_service.log(
         db, admin, "user",
         target_type="user", target_id=user_id,
@@ -55,7 +55,7 @@ def toggle_status(user_id: int, payload: StatusIn, request: Request,
                   db: Session = Depends(get_db),
                   admin: User = Depends(require_admin)):
     """启用/禁用用户(管理员)"""
-    user_service.toggle_status(db, user_id, payload.status, admin)
+    user_service.toggle_status(db, user_id, payload.status)
     audit_service.log(
         db, admin, "user",
         target_type="user", target_id=user_id,
@@ -70,7 +70,7 @@ def set_role(user_id: int, payload: RoleIn, request: Request,
              db: Session = Depends(get_db),
              admin: User = Depends(require_admin)):
     """设置用户角色(管理员)"""
-    user_service.set_role(db, user_id, payload.role, admin.id)
+    user_service.set_role(db, user_id, payload.role)
     audit_service.log(
         db, admin, "user",
         target_type="user", target_id=user_id,

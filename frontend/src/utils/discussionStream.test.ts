@@ -231,17 +231,13 @@ it('reconnects transient failures but stops on fatal or repeated closes', async 
   installFakeWebSocket()
   const fatalError = vi.fn()
   const fatalStatus = vi.fn()
-  const dispatch = vi.spyOn(window, 'dispatchEvent')
   subscribeDiscussion('fatal-session', vi.fn(), {
     onError: fatalError,
     onStatus: fatalStatus,
   })
-  FakeWebSocket.instances[0].serverClose(4001, '账号已在另一台设备登录')
-  expect(fatalError).toHaveBeenCalledWith('连接被服务端拒绝(4001): 账号已在另一台设备登录')
+  FakeWebSocket.instances[0].serverClose(4003, 'forbidden')
+  expect(fatalError).toHaveBeenCalledWith('连接被服务端拒绝(4003): forbidden')
   expect(fatalStatus).toHaveBeenLastCalledWith('error')
-  expect(dispatch).toHaveBeenCalledWith(
-    expect.objectContaining({ type: 'prism:auth-expired' }),
-  )
   await vi.runAllTimersAsync()
   expect(FakeWebSocket.instances).toHaveLength(1)
 

@@ -128,26 +128,6 @@ it('parses agent SSE frames and schedules reconnect after an unexpected end', as
   expect(onStatus).toHaveBeenLastCalledWith('closed')
 })
 
-/** 单设备会话被替换时停止 SSE 重连并通知全局鉴权层。 */
-it('closes the stream on auth_expired without reconnecting', async function testAuthExpired(): Promise<void> {
-  vi.useFakeTimers()
-  setToken('old-device-token')
-  const fetchMock = vi.fn().mockResolvedValue(createStreamResponse([
-    'event: auth_expired\ndata: {"code":40102}\n\n',
-  ]))
-  const onStatus = vi.fn()
-  const dispatch = vi.spyOn(window, 'dispatchEvent')
-  vi.stubGlobal('fetch', fetchMock)
-
-  subscribeAgentEvents(vi.fn(), { onStatus })
-  await flushMicrotasks()
-  await vi.runAllTimersAsync()
-
-  expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'prism:auth-expired' }))
-  expect(onStatus).toHaveBeenLastCalledWith('closed')
-  expect(fetchMock).toHaveBeenCalledTimes(1)
-})
-
 /** 验证缺少 token 时延迟请求，并在 token 就绪后处理 HTTP 失败。 */
 it('waits for a token before connecting and reports an invalid response', async function testMissingTokenAndBadResponse(): Promise<void> {
   vi.useFakeTimers()

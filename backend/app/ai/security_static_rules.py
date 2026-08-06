@@ -458,6 +458,7 @@ def apply_static_rules(content: str, file_name: str) -> List[StaticMatch]:
         return []
     ext = _file_extension(file_name)
     matches: List[StaticMatch] = []
+    lines = content.splitlines()
 
     # ===== 弱加密 / 危险 API: 直接搜命中 =====
     for rule in _WEAK_CRYPTO_RULES:
@@ -465,16 +466,12 @@ def apply_static_rules(content: str, file_name: str) -> List[StaticMatch]:
             continue
         # 单文件每条规则最多保留 10 处,避免规模化样本污染
         hits = 0
-        seen_lines: set[int] = set()
-        for match in rule.pattern.finditer(content):
+        for line_no, line_text in enumerate(lines, start=1):
             if hits >= 10:
                 break
-            line_no = content.count("\n", 0, match.start()) + 1
-            if line_no in seen_lines:
-                continue
-            matches.append(_make_match(rule, line_no, _evidence_at(content, match.start())))
-            seen_lines.add(line_no)
-            hits += 1
+            if rule.pattern.search(line_text):
+                matches.append(_make_match(rule, line_no, line_text))
+                hits += 1
 
     # ===== Cookie 安全标志规则: 检查"应有但缺失" =====
     for rule in _COOKIE_RULES:
@@ -496,8 +493,10 @@ def apply_static_rules(content: str, file_name: str) -> List[StaticMatch]:
         if rule.code == "cors_wildcard_with_credentials":
             m = rule.pattern.search(content)
             if m:
+                # 找到匹配片段所在行
                 line_no = content[: m.start()].count("\n") + 1
-                matches.append(_make_match(rule, line_no, _evidence_at(content, m.start())))
+                snippet = lines[line_no - 1] if 1 <= line_no <= len(lines) else ""
+                matches.append(_make_match(rule, line_no, snippet))
             continue
         # 缺失类: 必须先证明这是 web 配置(require_presence_of 命中)
         if rule.require_presence_of is None:
@@ -509,18 +508,6 @@ def apply_static_rules(content: str, file_name: str) -> List[StaticMatch]:
             matches.append(_make_match(rule, 0, "(整文件级 · 未发现该响应头声明)"))
 
     return matches
-
-
-def _evidence_at(content: str, position: int, limit: int = 200) -> str:
-    """从命中所在行提取有界证据，不复制整条超长行。"""
-    line_start = content.rfind("\n", 0, position) + 1
-    line_end = content.find("\n", position)
-    if line_end < 0:
-        line_end = len(content)
-    if line_end - line_start <= limit:
-        return content[line_start:line_end]
-    window_start = max(line_start, position - limit // 3)
-    return content[window_start:min(line_end, window_start + limit)]
 
 
 def _make_match(rule: StaticRule, line_no: int, line_text: str) -> StaticMatch:

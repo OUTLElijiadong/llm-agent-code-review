@@ -20,8 +20,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.services import system_config_service
-from app.utils.api_resolver import validate_ai_base_url
-from app.utils.public_http import pin_public_http_url
 
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+")
 _CJK_RE = re.compile(r"[一-鿿]")
@@ -65,25 +63,19 @@ def _l2_normalize(vec: List[float]) -> List[float]:
 def _api_embed(texts: List[str], cfg: dict) -> List[List[float]]:
     import httpx
 
-    base_url = validate_ai_base_url(
-        cfg["base_url"],
-        resolve_host=True,
-        allow_private=False,
-    )
-    target = pin_public_http_url(f"{base_url}/embeddings")
+    url = f"{cfg['base_url'].rstrip('/')}/embeddings"
     headers = {
         "Authorization": f"Bearer {cfg['api_key']}",
         "Content-Type": "application/json",
-        "Host": target.host_header,
     }
     out: List[List[float]] = []
     batch = 32
-    with httpx.Client(timeout=settings.embedding_timeout, trust_env=False) as client:
+    with httpx.Client(timeout=settings.embedding_timeout) as client:
         for i in range(0, len(texts), batch):
             chunk = texts[i:i + batch]
-            resp = client.post(target.request_url, headers=headers, json={
+            resp = client.post(url, headers=headers, json={
                 "model": cfg["model"], "input": chunk,
-            }, extensions=target.request_extensions)
+            })
             resp.raise_for_status()
             body = resp.json()
             # 按 index 排序,保证与输入顺序一致

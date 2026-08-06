@@ -60,8 +60,6 @@ def _bare_orchestrator() -> Orchestrator:
     orch._db = None
     orch._user = None
     orch._registry = SimpleNamespace(list=MagicMock(return_value={"a": "A"}), get=MagicMock(return_value="agent"))
-    orch.test_verifier = SimpleNamespace(inject=MagicMock())
-    orch.sandbox_deployer = SimpleNamespace(inject=MagicMock())
     return orch
 
 
@@ -150,7 +148,6 @@ def test_inject_db_requires_user_and_injects_all_operation_agents(monkeypatch: p
         orch.security_sentinel,
         orch.evolution_agent,
     ) = delegates
-    delegates.extend((orch.test_verifier, orch.sandbox_deployer))
     orch.chat_agent = SimpleNamespace(_base_url="", _api_key="", _model="")
     db = object()
     user = SimpleNamespace(id=42)
@@ -176,16 +173,11 @@ def test_inject_db_requires_user_and_injects_all_operation_agents(monkeypatch: p
     assert orch.get_api_config() is config
 
 
-def test_agent_wrapper_methods_forward_arguments_and_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_agent_wrapper_methods_forward_arguments_and_context() -> None:
     """所有固定业务包装器应把参数转发给正确的专业 Agent。"""
     orch = _bare_orchestrator()
     ctx = AgentContext(user_id=1)
     user = SimpleNamespace(id=1)
-    orch._db = object()
-    orch._user = user
-    monkeypatch.setattr(orchestrator_module, "check_permission", lambda *_args, **_kwargs: True)
     orch.lang_agent = SimpleNamespace(execute=MagicMock(return_value=_result("language")))
     orch.project_agent = SimpleNamespace(execute=MagicMock(return_value=_result("project")))
     orch.code_reviewer = SimpleNamespace(execute=MagicMock(return_value=_result("review")))
@@ -236,50 +228,6 @@ def test_agent_wrapper_methods_forward_arguments_and_context(
     assert "ctx" not in orch.lang_agent.execute.call_args.kwargs
     assert "ctx" not in orch.project_agent.execute.call_args.kwargs
     assert "ctx" not in orch.code_reviewer.execute.call_args.kwargs
-
-
-def test_archive_agent_wrappers_forward_static_full_and_remote_audit_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Agent 调度不得丢失整包扫描模式或隔离导入标志。"""
-    orch = _bare_orchestrator()
-    orch._db = object()
-    orch._user = SimpleNamespace(id=17, role="user")
-    monkeypatch.setattr(orchestrator_module, "check_permission", lambda *_args, **_kwargs: True)
-    orch.security_sentinel = SimpleNamespace(scan_project=MagicMock(return_value=_result("audit")))
-
-    result = orch.audit_security_for_project(11)
-
-    assert result.success is True
-    orch.security_sentinel.scan_project.assert_called_once_with(
-        11,
-        50,
-        True,
-        None,
-        "static_full",
-    )
-
-    import_remote = MagicMock(return_value={"id": 91, "source_mode": "quarantined_archive"})
-    monkeypatch.setattr(orchestrator_module.project_source_service, "import_remote_project", import_remote)
-
-    imported = orch.import_remote_project(
-        "https://example.test/source.zip",
-        "remote-audit",
-        description="whole archive",
-        language="php",
-        audit_mode=True,
-    )
-
-    assert imported.success is True
-    import_remote.assert_called_once_with(
-        orch._db,
-        orch._user,
-        url="https://example.test/source.zip",
-        project_name="remote-audit",
-        description="whole archive",
-        language="php",
-        audit_mode=True,
-    )
 
 
 def test_disabled_agent_blocks_fixed_runtime_before_delegate(db: Any) -> None:
@@ -364,13 +312,8 @@ def test_download_project_source_requires_same_permission_as_http_route(
     orch = _bare_orchestrator()
     orch._db = db
     orch._user = SimpleNamespace(id=17, role="user")
-    get_project = MagicMock(return_value={"id": 9, "project_name": "download-demo"})
+    get_project = MagicMock(return_value=SimpleNamespace(id=9))
     monkeypatch.setattr(orchestrator_module.project_service, "get_project", get_project)
-    monkeypatch.setattr(
-        orchestrator_module.project_source_service,
-        "get_source_archive_metadata",
-        MagicMock(return_value=None),
-    )
     monkeypatch.setattr(orchestrator_module, "check_permission", lambda *_args, **_kwargs: False)
 
     denied = orch.download_project_source(9)
@@ -524,7 +467,6 @@ def test_invoke_skill_requires_db_and_maps_service_result(monkeypatch: pytest.Mo
     ctx = AgentContext(user_id=2)
     orch._db = db
     orch._user = user
-    monkeypatch.setattr(orchestrator_module, "check_permission", lambda *_args: True)
     invoke = MagicMock(
         return_value={
             "success": False,

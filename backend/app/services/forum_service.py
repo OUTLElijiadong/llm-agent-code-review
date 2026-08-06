@@ -85,7 +85,7 @@ def update_post(db: Session, user: User, post_id: int, payload: dict) -> dict:
     post = db.get(ForumPost, post_id)
     if not post or post.status != "normal":
         raise NotFoundError("帖子不存在", code=40400)
-    if post.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if post.user_id != user.id and user.role != "admin":
         raise ForbiddenError("只能编辑自己的帖子", code=40300)
     if payload.get("title"):
         post.title = sanitize_text(payload["title"])[:200]
@@ -102,14 +102,14 @@ def delete_post(db: Session, user: User, post_id: int) -> None:
     post = db.get(ForumPost, post_id)
     if not post or post.status != "normal":
         raise NotFoundError("帖子不存在", code=40400)
-    if post.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if post.user_id != user.id and user.role != "admin":
         raise ForbiddenError("只能删除自己的帖子", code=40300)
     post.status = "deleted"
     db.commit()
 
 
 def pin_post(db: Session, admin: User, post_id: int, pinned: bool) -> dict:
-    if admin.role not in {"admin", "super_admin"}:
+    if admin.role != "admin":
         raise ForbiddenError("需要管理员权限", code=40300)
     post = db.get(ForumPost, post_id)
     if not post or post.status != "normal":
@@ -138,7 +138,7 @@ def delete_reply(db: Session, user: User, reply_id: int) -> None:
     reply = db.get(ForumReply, reply_id)
     if not reply or reply.status != "normal":
         raise NotFoundError("回复不存在", code=40400)
-    if reply.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if reply.user_id != user.id and user.role != "admin":
         raise ForbiddenError("只能删除自己的回复", code=40300)
     reply.status = "deleted"
     post = db.get(ForumPost, reply.post_id)

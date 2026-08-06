@@ -33,7 +33,7 @@ def get_visible_project_ids(db: Session, user: Optional[User]) -> tuple[list[int
             - scope='global': 管理员视角,返回全部项目
             - scope='self': 普通用户视角,返回 owner ∪ member 项目
     """
-    if user is None or user.role in {"admin", "super_admin"}:
+    if user is None or user.role == "admin":
         rows = db.query(Project.id).filter(Project.status != "deleted").all()
         return [r[0] for r in rows], "global"
 
@@ -75,7 +75,7 @@ def is_project_member(
             - (True, "reviewer"): 项目成员(审查员)
             - (False, ""): 无访问权限
     """
-    if user.role in {"admin", "super_admin"}:
+    if user.role == "admin":
         return True, "admin"
 
     # owner 检查

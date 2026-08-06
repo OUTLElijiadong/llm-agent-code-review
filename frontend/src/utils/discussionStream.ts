@@ -200,9 +200,6 @@ export function subscribeDiscussion(
       stopHeartbeat()
       if (FATAL_CLOSE_CODES.has(event.code)) {
         closed = true
-        if (event.code === 4001) {
-          window.dispatchEvent(new Event('prism:auth-expired'))
-        }
         opts.onError?.(`连接被服务端拒绝(${event.code}): ${event.reason || '鉴权失败或会话不存在'}`)
         opts.onStatus?.('error')
         return

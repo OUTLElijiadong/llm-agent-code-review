@@ -58,13 +58,6 @@ _DEFAULT_GOVERNANCE_AGENTS = (
     ("alert", "告警Agent", "异常告警和升级通知", "operations", ("alert",)),
     ("test_verifier", "测试验证Agent", "执行回归验证并归档可复核结果", "quality", ("test", "verification")),
     (
-        "sandbox_deployer",
-        "沙箱部署Agent",
-        "部署、续期和关闭隔离运行环境",
-        "operations",
-        ("sandbox", "deploy", "lifecycle"),
-    ),
-    (
         "quality_evaluator",
         "质量评估Agent",
         "汇总代码质量信号并评估改进收益",
@@ -387,12 +380,9 @@ def governance_overview(db: Session) -> dict:
     recent_alerts = (
         db.query(AgentAlert).filter(AgentAlert.status == "open").order_by(AgentAlert.id.desc()).limit(5).all()
     )
-    from app.services import agent_service
-
     return {
         "agents_total": agents_total,
         "agents_enabled": agents_enabled,
-        "callable_agents_total": agent_service.get_runtime_summary(db)["total"],
         "approvals_pending": db.query(ApprovalItem).filter(ApprovalItem.status == "pending").count(),
         "approvals_auto_today": db.query(ApprovalItem).filter(ApprovalItem.status == "auto_approved").count(),
         "policy_decisions_today": (

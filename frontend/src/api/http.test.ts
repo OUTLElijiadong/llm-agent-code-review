@@ -136,14 +136,6 @@ describe('http interceptors', () => {
     expect(harness.messageError).toHaveBeenCalledWith('登录已过期')
   })
 
-  it('uses the forced-offline message for a superseded single-device session', async () => {
-    const data = { code: 40102, message: 'old message', data: null }
-    const error = { response: { status: 401, data }, message: 'Unauthorized' }
-
-    await expect(harness.state.responseRejected!(error)).rejects.toBe(data)
-    expect(harness.messageError).toHaveBeenCalledWith('账号已在另一台设备登录，当前设备已下线')
-  })
-
   it('reports 403 and network failures without clearing the token', async () => {
     /** 验证非 401 服务端错误与无响应网络错误映射。 */
     const forbidden = { code: 40300, message: '无权访问', data: null }

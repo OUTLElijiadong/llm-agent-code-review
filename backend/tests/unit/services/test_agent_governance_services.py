@@ -4,19 +4,10 @@ import json
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.core.exceptions import ForbiddenError, ValidationError
-from app.models.agent_governance import (
-    AgentJob,
-    AgentKnowledgeSource,
-    AgentProfile,
-    AgentToolPermission,
-    ApprovalItem,
-    PolicyRule,
-)
+from app.models.agent_governance import AgentProfile, AgentToolPermission, ApprovalItem, PolicyRule
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.services import (
-    admin_agent_tools,
     agent_governance_service,
     agent_knowledge_service,
     agent_scheduler_runtime,
@@ -98,36 +89,6 @@ def test_approval_service_auto_approves_low_risk(db, admin_user):
     assert item.decision == "allow"
 
 
-def test_sensitive_approval_never_uses_low_risk_auto_approval(db, super_admin_user):
-    """服务器动作即使被错误标为低风险，也必须进入人工超管审批。"""
-    item = approval_service.create_or_auto_decide(
-        db,
-        title="读取服务器日志",
-        action="shell.read",
-        resource="server",
-        risk_level="low",
-        decision="allow",
-        reason="错误的低风险策略",
-        actor=super_admin_user,
-    )
-
-    assert item.status == "pending"
-    assert item.decision is None
-
-    config_item = approval_service.create_or_auto_decide(
-        db,
-        title="更新生产配置",
-        action="production_config.update",
-        resource="production_config",
-        risk_level="low",
-        decision="allow",
-        reason="错误的低风险策略",
-        actor=super_admin_user,
-    )
-    assert config_item.status == "pending"
-    assert config_item.decision is None
-
-
 def test_copilot_request_id_is_database_unique(db, admin_user):
     """同一副驾驶确认请求只能创建一条审批，幂等不依赖进程锁。"""
     kwargs = {
@@ -180,154 +141,6 @@ def test_approval_side_effect_failure_rolls_back_status(db, admin_user, monkeypa
     persisted = db.get(ApprovalItem, item.id)
     assert persisted.status == "pending"
     assert persisted.decided_by is None
-
-
-def test_sensitive_approvals_are_super_admin_only_but_program_approvals_remain_available(
-    db, admin_user, super_admin_user
-):
-    """普通管理员不能读取或处理服务器审批，但仍能处理程序内容审批。"""
-    crawl_job = AgentJob(
-        job_code="approval-crawl",
-        job_type="crawl",
-        agent_code="knowledge_distiller",
-        schedule="manual",
-        status="enabled",
-    )
-    reflection_job = AgentJob(
-        job_code="approval-reflection",
-        job_type="reflection",
-        agent_code="reflection",
-        schedule="manual",
-        status="enabled",
-    )
-    db.add_all([crawl_job, reflection_job])
-    db.flush()
-    server_approval = ApprovalItem(
-        title="执行生产运维",
-        action="responses.admin_execute_operation",
-        resource="response_run:server-operation",
-        risk_level="critical",
-        status="pending",
-        decision="escalate",
-        request_json=json.dumps({"arguments": {"action": "restart_service"}}),
-    )
-    global_config_approval = ApprovalItem(
-        title="更新全局 LLM 配置",
-        action="responses.admin_execute_capability",
-        resource="response_run:global-config",
-        risk_level="critical",
-        status="pending",
-        decision="escalate",
-        request_json=json.dumps({"arguments": {"capability": "llm.config.update", "params": {}}}),
-    )
-    restricted_job_approval = ApprovalItem(
-        title="手动抓取外部知识",
-        action="responses.admin_execute_capability",
-        resource="response_run:crawl",
-        risk_level="critical",
-        status="pending",
-        decision="escalate",
-        request_json=json.dumps({
-            "owner_user_id": admin_user.id,
-            "arguments": {"capability": "jobs.run", "params": {"job_id": crawl_job.id}},
-        }),
-    )
-    owned_program_response = ApprovalItem(
-        title="更新程序内反思任务",
-        action="responses.admin_execute_capability",
-        resource="response_run:reflection",
-        risk_level="high",
-        status="pending",
-        decision="escalate",
-        request_json=json.dumps({
-            "owner_user_id": admin_user.id,
-            "arguments": {"capability": "jobs.update", "params": {"job_id": reflection_job.id}},
-        }),
-    )
-    foreign_program_response = ApprovalItem(
-        title="其他管理员的程序内审批",
-        action="responses.admin_execute_capability",
-        resource="response_run:foreign",
-        risk_level="high",
-        status="pending",
-        decision="escalate",
-        request_json=json.dumps({
-            "owner_user_id": super_admin_user.id,
-            "arguments": {"capability": "jobs.update", "params": {"job_id": reflection_job.id}},
-        }),
-    )
-    program_approval = ApprovalItem(
-        title="更新程序内项目",
-        action="project.update",
-        resource="project:1",
-        risk_level="high",
-        status="pending",
-        decision="escalate",
-    )
-    db.add_all([
-        server_approval,
-        global_config_approval,
-        restricted_job_approval,
-        owned_program_response,
-        foreign_program_response,
-        program_approval,
-    ])
-    db.commit()
-
-    ordinary_items = approval_service.list_items(db, actor=admin_user)
-    assert {item.id for item in ordinary_items} == {owned_program_response.id, program_approval.id}
-    agent_items = admin_agent_tools.admin_list_approvals(db, admin_user, status="")
-    assert agent_items.success is True
-    assert {item["id"] for item in agent_items.data} == {owned_program_response.id, program_approval.id}
-    super_items = approval_service.list_items(db, actor=super_admin_user)
-    assert {item.id for item in super_items} == {
-        server_approval.id,
-        global_config_approval.id,
-        restricted_job_approval.id,
-        owned_program_response.id,
-        foreign_program_response.id,
-        program_approval.id,
-    }
-    with pytest.raises(ForbiddenError, match="超级管理员"):
-        approval_service.decide_item(db, admin_user, server_approval.id, approve=True)
-    with pytest.raises(ForbiddenError, match="超级管理员"):
-        approval_service.decide_item(db, admin_user, server_approval.id, approve=False)
-    db.refresh(server_approval)
-    assert server_approval.status == "pending"
-    assert server_approval.decided_by is None
-
-    for item in (restricted_job_approval, foreign_program_response):
-        for approve in (True, False):
-            with pytest.raises(ForbiddenError, match="超级管理员"):
-                approval_service.decide_item(db, admin_user, item.id, approve=approve)
-        db.refresh(item)
-        assert item.status == "pending"
-        assert item.decided_by is None
-
-    assert approval_service.decide_item(db, admin_user, program_approval.id, approve=True).status == "approved"
-    assert approval_service.decide_item(db, super_admin_user, server_approval.id, approve=False).status == "rejected"
-
-
-def test_malformed_responses_approval_is_hidden_and_undecidable_for_normal_admin(db, admin_user):
-    """缺 owner 或损坏请求数据的 Responses 审批必须 fail closed。"""
-    item = ApprovalItem(
-        title="损坏的 Responses 审批",
-        action="responses.admin_execute_capability",
-        resource="response_run:malformed",
-        risk_level="high",
-        status="pending",
-        decision="escalate",
-        request_json="not-json",
-    )
-    db.add(item)
-    db.commit()
-
-    assert item.id not in {row.id for row in approval_service.list_items(db, actor=admin_user)}
-    with pytest.raises(ForbiddenError, match="超级管理员"):
-        approval_service.decide_item(db, admin_user, item.id, approve=True)
-    db.refresh(item)
-    assert item.status == "pending"
-    assert item.decided_by is None
 
 
 def test_tool_gateway_escalates_high_risk_action(db, admin_user):
@@ -616,10 +429,6 @@ def test_agent_knowledge_crawls_project_code_source(db, admin_user):
 def test_agent_knowledge_crawls_official_url_source(db, monkeypatch):
     """验证官方 URL 来源会抓取并抽取 HTML 文本。"""
     monkeypatch.setattr(
-        "app.utils.public_http.socket.getaddrinfo",
-        lambda _host, port, **_kwargs: [(None, None, None, None, ("93.184.216.34", port))],
-    )
-    monkeypatch.setattr(
         agent_knowledge_service,
         "_fetch_text_url",
         lambda url: "<html><body><h1>Policy Guide</h1><p>Use approvals.</p></body></html>",
@@ -641,10 +450,6 @@ def test_agent_knowledge_crawls_official_url_source(db, monkeypatch):
 
 def test_agent_knowledge_crawls_github_issue_source(db, monkeypatch):
     """验证 GitHub issue/PR 来源会通过 GitHub API 生成知识文档。"""
-    monkeypatch.setattr(
-        "app.utils.public_http.socket.getaddrinfo",
-        lambda _host, port, **_kwargs: [(None, None, None, None, ("140.82.112.4", port))],
-    )
     monkeypatch.setattr(
         agent_knowledge_service,
         "_fetch_json_url",
@@ -674,14 +479,9 @@ def test_agent_knowledge_crawls_github_issue_source(db, monkeypatch):
 
 
 def test_agent_knowledge_url_validation_blocks_private_urls(monkeypatch):
-    """验证外部知识抓取无视放宽开关，始终阻断内网 URL。"""
-    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_allow_private_urls", True)
+    """验证外部知识抓取默认阻断内网 URL，同时允许公网 URL 查询参数。"""
+    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_allow_private_urls", False)
     monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_enforce_dns_check", False)
-    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_github_token", "should-not-leak")
-    monkeypatch.setattr(
-        "app.utils.public_http.socket.getaddrinfo",
-        lambda _host, port, **_kwargs: [(None, None, None, None, ("140.82.112.4", port))],
-    )
 
     assert agent_knowledge_service._validate_knowledge_url("http://127.0.0.1:8000/admin") == ""
     assert (
@@ -692,79 +492,15 @@ def test_agent_knowledge_url_validation_blocks_private_urls(monkeypatch):
     )
 
 
-def test_agent_knowledge_upsert_rejects_dns_alias_to_loopback_without_http(db, monkeypatch):
-    """保存时就拒绝解析到回环地址的 DNS 别名，且不发起 HTTP。"""
-    calls = {"clients": 0}
-
-    class ForbiddenClient:
-        def __init__(self, *args, **kwargs):
-            calls["clients"] += 1
-            raise AssertionError("不应创建 HTTP 客户端")
-
-    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_allow_private_urls", True)
-    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_enforce_dns_check", False)
-    monkeypatch.setattr(
-        "app.utils.public_http.socket.getaddrinfo",
-        lambda _host, port, **_kwargs: [(None, None, None, None, ("127.0.0.1", port))],
-    )
-    monkeypatch.setattr(agent_knowledge_service.httpx, "Client", ForbiddenClient)
-
-    with pytest.raises(ValidationError, match=r"公网 HTTP\(S\) URL"):
-        agent_knowledge_service.upsert_source(
-            db,
-            agent_code="security",
-            source_type="official",
-            source_uri="https://metadata.attacker.example/latest",
-        )
-
-    assert calls["clients"] == 0
-    assert db.query(AgentKnowledgeSource).count() == 0
-
-
-def test_agent_knowledge_crawl_rejects_unsafe_legacy_source_without_http(db, monkeypatch):
-    """历史库中的不安全外部来源不会进入 HTTP 抓取。"""
-    calls = {"clients": 0}
-
-    class ForbiddenClient:
-        def __init__(self, *args, **kwargs):
-            calls["clients"] += 1
-            raise AssertionError("旧脏数据不应创建 HTTP 客户端")
-
-    db.add(AgentKnowledgeSource(
-        agent_code="security",
-        source_type="docs",
-        source_uri="https://legacy.attacker.example/internal",
-        whitelist=1,
-        enabled=1,
-        config_json="{}",
-    ))
-    db.commit()
-    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_allow_private_urls", True)
-    monkeypatch.setattr(
-        "app.utils.public_http.socket.getaddrinfo",
-        lambda _host, port, **_kwargs: [(None, None, None, None, ("169.254.169.254", port))],
-    )
-    monkeypatch.setattr(agent_knowledge_service.httpx, "Client", ForbiddenClient)
-
-    result = agent_knowledge_service.crawl_enabled_sources(db, agent_code="security")
-
-    assert result["doc_count"] == 0
-    assert result["skipped"] == [{"source_id": 1, "reason": "无可抓取内容"}]
-    assert calls["clients"] == 0
-
-
 def test_agent_knowledge_fetch_blocks_unsafe_redirect(monkeypatch):
-    """验证知识抓取会阻断 DNS 别名跳转到内网地址。"""
-    calls = {"get": 0, "client_kwargs": {}, "request": {}}
-    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_github_token", "should-not-leak")
-
+    """验证知识抓取会阻断跳转到内网地址的外部来源。"""
     class FakeResponse:
         """用于模拟 HTTP 跳转响应。"""
 
         status_code = 302
         content = b""
         encoding = "utf-8"
-        headers = {"location": "https://metadata.attacker.example/private"}
+        headers = {"location": "http://127.0.0.1:8000/private"}
 
         def raise_for_status(self):
             """模拟 httpx 响应接口。"""
@@ -775,7 +511,7 @@ def test_agent_knowledge_fetch_blocks_unsafe_redirect(monkeypatch):
 
         def __init__(self, *args, **kwargs):
             """保存构造参数以兼容真实 Client 接口。"""
-            calls["client_kwargs"] = kwargs
+            self.calls = 0
 
         def __enter__(self):
             """进入上下文。"""
@@ -785,29 +521,15 @@ def test_agent_knowledge_fetch_blocks_unsafe_redirect(monkeypatch):
             """退出上下文。"""
             return False
 
-        def get(self, url, headers=None, extensions=None):
+        def get(self, url, headers=None):
             """返回跳转到内网的响应。"""
-            calls["get"] += 1
-            calls["request"] = {"url": url, "headers": headers, "extensions": extensions}
+            self.calls += 1
             return FakeResponse()
 
-    def resolve(host: str, port: int, **_kwargs):
-        ip = "127.0.0.1" if host == "metadata.attacker.example" else "93.184.216.34"
-        return [(None, None, None, None, (ip, port))]
-
-    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_allow_private_urls", True)
-    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_enforce_dns_check", False)
-    monkeypatch.setattr("app.utils.public_http.socket.getaddrinfo", resolve)
+    monkeypatch.setattr(agent_knowledge_service.settings, "agent_knowledge_allow_private_urls", False)
     monkeypatch.setattr(agent_knowledge_service.httpx, "Client", FakeClient)
 
     assert agent_knowledge_service._fetch_text_url("https://docs.example.com/redirect") == ""
-    assert calls["get"] == 1
-    assert calls["request"]["url"] == "https://93.184.216.34/redirect"
-    assert calls["request"]["headers"]["Host"] == "docs.example.com"
-    assert "Authorization" not in calls["request"]["headers"]
-    assert calls["request"]["extensions"] == {"sni_hostname": "docs.example.com"}
-    assert calls["client_kwargs"]["trust_env"] is False
-    assert calls["client_kwargs"]["follow_redirects"] is False
 
 
 def test_policy_artifact_rollback_restores_policy_rule(db):

@@ -17,15 +17,6 @@ def test_redact_value_long_string_keeps_head_and_tail():
     assert out.startswith("sk-p")
     assert out.endswith("mnop")
     assert "*" in out
-    assert len(out) == 12
-
-
-def test_scan_secrets_bounds_million_character_token_evidence():
-    matches = scan_secrets("sk-" + ("A" * 1_000_000))
-
-    target = next(match for match in matches if match.pattern_name == "OpenAI API Key")
-    assert len(target.matched_text) < 600
-    assert len(target.evidence_redacted) == 12
 
 
 def test_scan_secrets_detects_openai_key():

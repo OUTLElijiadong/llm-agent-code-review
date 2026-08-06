@@ -15,8 +15,6 @@ RUN npx vite build
 
 FROM nginx:1.27-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY --from=builder /app/dist /opt/prism-dist
-COPY --chmod=0755 docker-entrypoint.d/30-retain-versioned-assets.sh /docker-entrypoint.d/30-retain-versioned-assets.sh
 # nginx.conf 是 http 块主配置(含 gzip);nginx.conf.template 是 server 块模板,
 # 由官方镜像 entrypoint 经 envsubst 渲染为 conf.d/default.conf。
 # 注意:生产实际生效的 server 配置当前由 docker-compose.override.yml 以

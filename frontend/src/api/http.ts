@@ -44,10 +44,7 @@ http.interceptors.response.use(
       // 用 replace 避免历史残留,防止后退键回到已失效的内页
       router.replace('/login')
     }
-    const message = data?.code === 40102
-      ? '账号已在另一台设备登录，当前设备已下线'
-      : data?.message || err.message || '网络错误'
-    ElMessage.error(message)
+    ElMessage.error(data?.message || err.message || '网络错误')
     return Promise.reject(data || err)
   },
 )

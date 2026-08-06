@@ -46,13 +46,6 @@ export function subscribeAgentEvents(
         dataLines.push(line.slice(5).trim())
       }
     }
-    if (eventName === 'auth_expired') {
-      window.dispatchEvent(new Event('prism:auth-expired'))
-      closedByUser = true
-      controller.abort()
-      options.onStatus?.('closed')
-      return
-    }
     if (!dataLines.length) return
     if (eventName && eventName !== 'agent') return
     try {

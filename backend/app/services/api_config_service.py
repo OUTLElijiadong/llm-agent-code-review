@@ -96,11 +96,7 @@ def get_config(db: Session, user_id: int) -> ApiConfigOut:
 
 def save_config(db: Session, user_id: int, payload: ApiConfigSaveIn) -> ApiConfigOut:
     """保存或更新用户的 API 配置"""
-    safe_base_url = validate_ai_base_url(
-        payload.base_url,
-        resolve_host=True,
-        allow_private=False,
-    )
+    safe_base_url = validate_ai_base_url(payload.base_url)
     encrypted = encrypt_api_key(payload.api_key)
 
     row = db.query(UserApiConfig).filter(UserApiConfig.user_id == user_id).first()
@@ -155,8 +151,7 @@ def test_connection(payload: ApiConfigTestIn) -> ApiConfigTestOut:
     try:
         base_url = validate_ai_base_url(
             payload.base_url,
-            resolve_host=True,
-            allow_private=False,
+            resolve_host=settings.enforce_ai_base_url_dns_check,
         )
     except ValidationError as exc:
         return ApiConfigTestOut(
@@ -170,16 +165,12 @@ def test_connection(payload: ApiConfigTestIn) -> ApiConfigTestOut:
 
     t0 = time.time()
     try:
-        from app.utils.public_http import pin_public_http_url
-
-        target = pin_public_http_url(f"{base_url}/chat/completions")
         with httpx.Client(timeout=15, trust_env=False) as client:
             resp = client.post(
-                target.request_url,
+                f"{base_url}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {payload.api_key}",
                     "Content-Type": "application/json",
-                    "Host": target.host_header,
                 },
                 json={
                     "model": payload.model,
@@ -187,7 +178,6 @@ def test_connection(payload: ApiConfigTestIn) -> ApiConfigTestOut:
                     "max_tokens": 5,
                     "temperature": 0,
                 },
-                extensions=target.request_extensions,
             )
         duration_ms = int((time.time() - t0) * 1000)
 

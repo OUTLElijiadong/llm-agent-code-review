@@ -240,28 +240,15 @@ class DiscussionOrchestrator:
 
         # ── 讨论开始即创建 ReviewTask(running),拿到 task_id 供日志/问题/报告 ──
         task_id = 0
-        cancelled = False
-        create_future = loop.run_in_executor(
-            None,
-            lambda: _create_review_task(
-                user_id=user_id, project_id=project_id, file_name=file_name,
-                file_id=file_id, review_type=review_type,
-                model_name=agent.model, profiles=profiles,
-            ),
-        )
         try:
-            task_id = await asyncio.shield(create_future)
-        except asyncio.CancelledError:
-            # shield 保证数据库创建原子完成；随后立即标记取消，避免留下 running 任务。
-            try:
-                task_id = await create_future
-            except Exception:
-                task_id = 0
-            if task_id:
-                await loop.run_in_executor(None, lambda: _cancel_review_task(task_id))
-            bus.publish_control(session_id, "cancelled", {"task_id": task_id})
-            bus.close_session(session_id)
-            raise
+            task_id = await loop.run_in_executor(
+                None,
+                lambda: _create_review_task(
+                    user_id=user_id, project_id=project_id, file_name=file_name,
+                    file_id=file_id, review_type=review_type,
+                    model_name=agent.model, profiles=profiles,
+                ),
+            )
         except Exception:
             logger.warning(f"[Discussion] 创建 ReviewTask 失败: {traceback.format_exc()}")
         self._task_id = task_id
@@ -410,50 +397,36 @@ class DiscussionOrchestrator:
             )
             self._emit(AgentEventType.COMPLETE, "orchestrator", "主持人已汇总共识")
 
-        except asyncio.CancelledError:
-            cancelled = True
-            logger.info(f"[Discussion] 会话任务已取消 session={session_id} task={task_id}")
-            raise
         except Exception:
             logger.error(f"[Discussion] 异常: {traceback.format_exc()}")
         finally:
             # ── 沉淀报告: 写调用日志 + 抽取问题 + 收尾 ReviewTask ──
             report_task_id = 0
             if task_id:
+                stopped = session.status != "active"
                 try:
-                    if cancelled:
-                        report_task_id = await loop.run_in_executor(
-                            None,
-                            lambda: _cancel_review_task(task_id),
-                        )
-                    else:
-                        stopped = session.status != "active"
-                        report_task_id = await loop.run_in_executor(
-                            None,
-                            lambda: _finalize_review(
-                                task_id=task_id,
-                                user_id=user_id,
-                                file_id=file_id,
-                                file_name=file_name,
-                                all_turns=all_turns,
-                                code=code,
-                                language=language,
-                                deferred_logs=deferred_logs,
-                                agent=agent,
-                                stopped=stopped,
-                                consensus=summary_text,
-                            ),
-                        )
+                    report_task_id = await loop.run_in_executor(
+                        None,
+                        lambda: _finalize_review(
+                            task_id=task_id,
+                            user_id=user_id,
+                            file_id=file_id,
+                            file_name=file_name,
+                            all_turns=all_turns,
+                            code=code,
+                            language=language,
+                            deferred_logs=deferred_logs,
+                            agent=agent,
+                            stopped=stopped,
+                            consensus=summary_text,
+                        ),
+                    )
                 except Exception:
                     logger.error(f"[Discussion] 收尾报告失败: {traceback.format_exc()}")
             sess = bus.get_session(session_id)
             if sess:
                 sess.report_task_id = report_task_id
-            bus.publish_control(
-                session_id,
-                "cancelled" if cancelled else "done",
-                {"task_id": report_task_id},
-            )
+            bus.publish_control(session_id, "done", {"task_id": report_task_id})
             bus.close_session(session_id)
 
     # ── 发言逻辑 ──
@@ -791,22 +764,6 @@ def _create_review_task(
         db.add(ReviewTaskFile(task_id=task.id, file_id=file_id))
         db.commit()
         return task.id
-    finally:
-        db.close()
-
-
-def _cancel_review_task(task_id: int) -> int:
-    """登录失效取消圆桌时只记录终态，不生成问题、报告或调用日志。"""
-
-    db = SessionLocal()
-    try:
-        task = db.get(ReviewTask, task_id)
-        if task and task.status == "running":
-            task.status = "cancelled"
-            task.summary = "登录会话已失效，圆桌讨论已取消。"
-            task.end_time = datetime.now(timezone.utc)
-            db.commit()
-        return task_id
     finally:
         db.close()
 

@@ -151,7 +151,7 @@ class AiPromptAgent(BaseAgent):
 
     def _authz_issue(self, issue: ReviewIssue) -> Optional[AgentResult]:
         """普通用户只能给自己任务下的问题生成提示词"""
-        if self._user is None or self._user.role in {"admin", "super_admin"}:
+        if self._user is None or self._user.role == "admin":
             return None
         task = self._db.get(ReviewTask, issue.task_id)
         if task is None or task.user_id != self._user.id:
@@ -388,7 +388,7 @@ class AiPromptAgent(BaseAgent):
         task = self._db.get(ReviewTask, task_id)
         if task is None:
             return AgentResult(success=False, error="审查任务不存在")
-        if self._user and self._user.role not in {"admin", "super_admin"} and task.user_id != self._user.id:
+        if self._user and self._user.role != "admin" and task.user_id != self._user.id:
             return AgentResult(success=False, error="无权访问该任务")
         q = self._db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id)
         if severity_filter:
@@ -434,7 +434,7 @@ class AiPromptAgent(BaseAgent):
         project = self._db.get(Project, project_id)
         if project is None:
             return AgentResult(success=False, error="项目不存在")
-        if self._user and self._user.role not in {"admin", "super_admin"} and project.user_id != self._user.id:
+        if self._user and self._user.role != "admin" and project.user_id != self._user.id:
             return AgentResult(success=False, error="无权访问该项目")
         # 严重度排序: 严重 > 高 > 中 > 低
         severity_order = ["严重", "高", "中", "低"]

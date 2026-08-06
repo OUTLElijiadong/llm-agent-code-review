@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, List, Literal, Mapping, Optional
@@ -15,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import SessionLocal, get_db
+from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.exceptions import ForbiddenError
 from app.core.permission_codes import PermissionCode
@@ -26,7 +25,6 @@ from app.schemas.common import Resp
 from app.services import rbac_service
 from app.services.agent_responses_service import (
     AgentResponsesService,
-    AgentSessionExpiredError,
     is_paused,
     redact_agent_event_value,
     redact_agent_output_text,
@@ -54,8 +52,6 @@ _TRANSITION_TO_WAITING = {
     "rejecting": "waiting_approval",
     "answering": "waiting_input",
 }
-_STREAM_SESSION_CHECK_INTERVAL = 1.0
-_STREAM_WAIT_TIMEOUT = 2.0
 
 
 def _is_admin_actor(db: Session, user: User) -> bool:
@@ -64,23 +60,6 @@ def _is_admin_actor(db: Session, user: User) -> bool:
     if str(getattr(user, "role", "")) in {"admin", "super_admin"}:
         return True
     return rbac_service.is_admin_user(db, int(user.id))
-
-
-def _is_session_version_active(user_id: int, token_version: int) -> bool:
-    """使用独立短会话检查长流所属登录是否仍是当前版本。"""
-
-    check_db = SessionLocal()
-    try:
-        current = check_db.get(User, user_id)
-        return bool(
-            current
-            and current.status == 1
-            and int(current.token_version or 0) == token_version
-        )
-    except Exception:
-        return False
-    finally:
-        check_db.close()
 
 
 class AgentResponseMessage(BaseModel):
@@ -570,12 +549,6 @@ def _public_stream_event(
             "message": _public_text(event.get("message")),
             "error": redact_agent_event_value(event.get("error")),
         }
-    if event_type == "auth_expired":
-        return {
-            "type": "auth_expired",
-            "code": 40102,
-            "message": "账号已在另一台设备登录，当前设备已下线",
-        }
     return None
 
 
@@ -592,34 +565,18 @@ async def stream_agent_response(
 
     if payload.surface == "admin" and not _is_admin_actor(db, user):
         raise ForbiddenError("仅管理员可使用管理员 Agent", code=40300)
-    session_user_id = int(user.id)
-    session_token_version = int(getattr(user, "token_version", 0) or 0)
-    session_is_active = lambda: _is_session_version_active(  # noqa: E731
-        session_user_id,
-        session_token_version,
-    )
     run_id = payload.run_id or f"run_{uuid.uuid4().hex}"
     service = AgentResponsesService(
         db,
         user,
         surface=payload.surface,
         session_key=payload.session_id,
-        session_validator=session_is_active,
     )
 
     async def event_source() -> AsyncIterator[str]:
         queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=128)
         sequence = 0
         discard_events = False
-        last_session_check = time.monotonic()
-
-        def session_expired() -> bool:
-            nonlocal last_session_check
-            now = time.monotonic()
-            if now - last_session_check < _STREAM_SESSION_CHECK_INTERVAL:
-                return False
-            last_session_check = now
-            return not session_is_active()
 
         async def sink(event: Mapping[str, Any]) -> None:
             nonlocal discard_events
@@ -653,15 +610,6 @@ async def stream_agent_response(
                 event_sink=sink,
             )
 
-        async def cancel_expired_run() -> None:
-            """取消旧登录的在途工作，并避免遗留 running 检查点。"""
-
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-            cancel = getattr(service, "cancel", None)
-            if callable(cancel):
-                await cancel(run_id)
-
         def encode(event: Mapping[str, Any]) -> str:
             nonlocal sequence
             sequence += 1
@@ -692,21 +640,10 @@ async def stream_agent_response(
                 event_task = asyncio.create_task(queue.get())
                 done, _ = await asyncio.wait(
                     {task, event_task},
-                    timeout=_STREAM_WAIT_TIMEOUT,
+                    timeout=15.0,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if event_task in done:
-                    if session_expired():
-                        discard_events = True
-                        yield encode(
-                            {
-                                "type": "auth_expired",
-                                "code": 40102,
-                                "message": "账号已在另一台设备登录，当前设备已下线",
-                            }
-                        )
-                        await cancel_expired_run()
-                        return
                     yield encode(event_task.result())
                     event_task = None
                     continue
@@ -714,17 +651,6 @@ async def stream_agent_response(
                 await asyncio.gather(event_task, return_exceptions=True)
                 event_task = None
                 if not done:
-                    if session_expired():
-                        discard_events = True
-                        yield encode(
-                            {
-                                "type": "auth_expired",
-                                "code": 40102,
-                                "message": "账号已在另一台设备登录，当前设备已下线",
-                            }
-                        )
-                        await cancel_expired_run()
-                        return
                     yield ": keep-alive\n\n"
 
             result = await task
@@ -755,16 +681,6 @@ async def stream_agent_response(
             # 浏览器关闭、代理断流不能中止已经开始的工具链。保持请求级数据库
             # 会话存活，直到运行时把完成/暂停/失败检查点可靠落库。
             await asyncio.gather(asyncio.shield(task), return_exceptions=True)
-            return
-        except AgentSessionExpiredError:
-            discard_events = True
-            yield encode(
-                {
-                    "type": "auth_expired",
-                    "code": 40102,
-                    "message": "账号已在另一台设备登录，当前设备已下线",
-                }
-            )
             return
         except Exception as exc:  # noqa: BLE001 - 流已开始，只能返回协议错误事件
             error = {

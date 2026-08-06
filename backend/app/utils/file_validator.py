@@ -77,10 +77,7 @@ ALLOWED_MIME_EXTENSIONS: frozenset = frozenset({
     ".yml", ".yaml", ".json", ".toml", ".ini", ".cfg", ".conf",
     ".md", ".txt", ".xml", ".html", ".htm", ".css", ".scss", ".less",
     ".gitignore", ".dockerignore", ".env.example",
-    ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".tgz",
-    ".tbz2", ".txz", ".zst", ".tzst", ".lz", ".lzma", ".lzip", ".z",
-    ".cpio", ".cab", ".ar", ".xar", ".lha", ".lzh", ".iso",
-    # 压缩包由 archive_extractor/libarchive 统一识别和解包
+    ".zip", ".tar", ".gz", ".bz2", ".xz", ".tgz",  # 压缩包由 archive_extractor 处理
     # T06: 图片资源文件(项目可能包含图片资源,需作为二进制文件入库)
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".bmp", ".webp",
 })
@@ -90,6 +87,13 @@ BLOCKED_EXECUTABLE_EXTENSIONS: frozenset = frozenset({
     ".exe", ".dll", ".so", ".dylib", ".bat", ".com", ".scr",
     ".msi", ".app", ".command", ".sh.bin", ".pif", ".jar",
 })
+
+# 单文件大小上限 10MB
+MAX_SINGLE_FILE_SIZE: int = 10 * 1024 * 1024
+
+# 项目总文件大小上限 500MB
+MAX_PROJECT_TOTAL_SIZE: int = 500 * 1024 * 1024
+
 
 def validate_mime(file_name: str) -> bool:
     """校验文件扩展名是否在 MIME 白名单内
@@ -113,3 +117,32 @@ def validate_mime(file_name: str) -> bool:
     if ext in ALLOWED_MIME_EXTENSIONS or base in ALLOWED_MIME_EXTENSIONS:
         return True
     return False
+
+
+def validate_single_file_size(file_size: int) -> bool:
+    """校验单文件大小是否超限
+
+    Args:
+        file_size: 文件字节数
+
+    Returns:
+        bool: True 表示未超限, False 表示超限
+    """
+    if file_size < 0:
+        return False
+    return file_size <= MAX_SINGLE_FILE_SIZE
+
+
+def validate_project_total_size(current_total: int, new_file_size: int) -> bool:
+    """校验项目总文件大小是否超限
+
+    Args:
+        current_total: 当前项目已有文件总字节数
+        new_file_size: 新上传文件字节数
+
+    Returns:
+        bool: True 表示未超限, False 表示超限
+    """
+    if current_total < 0 or new_file_size < 0:
+        return False
+    return (current_total + new_file_size) <= MAX_PROJECT_TOTAL_SIZE
