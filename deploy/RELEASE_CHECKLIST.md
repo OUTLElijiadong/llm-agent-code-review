@@ -29,6 +29,8 @@ cd /path/to/project/deploy
 ```bash
 ./deploy.sh backend --revision <FULL_COMMIT_SHA>
 # 验证稳定后，再按计划发布 frontend 或 all
+# 注意: 发布 frontend 后必须执行 ./sync-frontend-assets.sh 同步 assets 卷,
+#       否则 index.html 引用的新哈希文件 404 导致页面空白。
 ```
 
 - [ ] 目标 revision 解析为计划中的完整 SHA。

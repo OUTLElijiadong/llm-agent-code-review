@@ -174,6 +174,9 @@ fi
 if [[ "$target" == "all" || "$target" == "frontend" ]]; then
   compose build frontend
   compose up -d --no-deps frontend
+  # assets 是命名卷挂载，必须把新镜像 dist 同步进卷，否则 index.html 引用的
+  # 新哈希文件 404 导致页面空白。
+  ./sync-frontend-assets.sh "$desired_frontend" || fatal "前端 assets 卷同步失败"
   wait_for_service_health frontend "${FRONTEND_HEALTH_TIMEOUT:-120}" || fatal "Frontend 未恢复健康"
 fi
 
