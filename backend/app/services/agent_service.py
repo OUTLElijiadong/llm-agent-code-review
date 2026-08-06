@@ -371,7 +371,7 @@ def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]
             if item.get("code") not in USER_HIDDEN_BUILTIN
             and (stats.get(item["code"]) or {}).get("call_count", 0) > 0
             and (
-                item.get("source") == "builtin"
+                item.get("source") != "custom"
                 or (item.get("source") == "custom" and can_invoke)
             )
         ]
