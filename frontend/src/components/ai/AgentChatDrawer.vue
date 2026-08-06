@@ -1123,6 +1123,8 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
 }
 
 function close(): void {
+  // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
+  persistSnapshot()
   emit('update:visible', false)
 }
 
@@ -1145,6 +1147,7 @@ function handleEscape(event: KeyboardEvent): void {
 }
 
 onBeforeUnmount(() => {
+  persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
   activeResponse?.abort()

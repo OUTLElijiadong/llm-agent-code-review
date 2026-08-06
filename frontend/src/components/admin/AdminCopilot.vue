@@ -532,6 +532,8 @@ async function openPanel(): Promise<void> {
 }
 
 function closePanel(): void {
+  // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
+  persistSnapshot()
   visible.value = false
 }
 
@@ -844,6 +846,7 @@ function handleAlertAction(prompt?: string): void {
 }
 
 onBeforeUnmount(() => {
+  persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
   activeResponse?.abort()
