@@ -2085,3 +2085,15 @@ def test_transcript_function_calls_parses_terminal_output(db) -> None:
     assert by_id["err"]["output_status"] == "failed"
     assert by_id["hang"]["output"] is None
     assert [call["call_id"] for call in calls] == ["ok", "err", "hang"]
+
+
+def test_operations_tool_only_exposed_to_super_admin() -> None:
+    """服务器管理工具(admin_execute_operation)标记为仅超级管理员可用。"""
+    from app.core.permission_codes import PermissionCode
+    from app.services.agent_responses_service import _operations_tool_schema
+
+    schema = _operations_tool_schema()
+    assert schema["name"] == "admin_execute_operation"
+    assert "仅超级管理员" in schema["description"]
+    # 权限点存在,且 SERVER_OPS 前缀权限只授予唯一超级管理员(见 super_admin 常量)
+    assert PermissionCode.SERVER_OPS_VIEW == "server_ops:view"

@@ -62,25 +62,6 @@ from app.services.admin_capability_registry import (
 from app.services.admin_capability_registry import (
     READ as CAPABILITY_READ,
 )
-from app.services.user_capability_registry import (
-    CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
-)
-from app.services.user_capability_registry import USER_CAPABILITIES
-from app.services.user_capability_registry import (
-    CRITICAL as USER_CAPABILITY_CRITICAL,
-)
-from app.services.user_capability_registry import (
-    READ as USER_CAPABILITY_READ,
-)
-from app.services.user_capability_registry import (
-    describe_capabilities as describe_user_capabilities,
-)
-from app.services.user_capability_registry import (
-    discovery_tool_schema as user_discovery_tool_schema,
-)
-from app.services.user_capability_registry import (
-    execution_tool_schema as user_execution_tool_schema,
-)
 from app.services.deepseek_responses_runtime import (
     COMPLETED,
     FAILED,
@@ -96,6 +77,25 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
 )
 from app.services.mcp_tool_provider import McpToolProvider
+from app.services.user_capability_registry import (
+    CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
+)
+from app.services.user_capability_registry import (
+    CRITICAL as USER_CAPABILITY_CRITICAL,
+)
+from app.services.user_capability_registry import (
+    READ as USER_CAPABILITY_READ,
+)
+from app.services.user_capability_registry import USER_CAPABILITIES
+from app.services.user_capability_registry import (
+    describe_capabilities as describe_user_capabilities,
+)
+from app.services.user_capability_registry import (
+    discovery_tool_schema as user_discovery_tool_schema,
+)
+from app.services.user_capability_registry import (
+    execution_tool_schema as user_execution_tool_schema,
+)
 from app.utils.api_resolver import ApiConfig, resolve_api_config
 
 EventSink = Callable[[Mapping[str, Any]], Optional[Awaitable[None]]]
@@ -849,9 +849,9 @@ class PrismToolExecutor:
     async def _start_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
         """复用用户 REST 预检后，在后台启动同一套圆桌编排器。"""
 
+        from app.ai.discussion_orchestrator import DiscussionOrchestrator
         from app.api.v1.discussion import start_discussion
         from app.api.v1.ws_discussion import take_pending
-        from app.ai.discussion_orchestrator import DiscussionOrchestrator
 
         response = start_discussion(
             project_id=int(call.arguments["project_id"]),
@@ -2315,7 +2315,7 @@ def _operations_tool_schema() -> Dict[str, Any]:
     return {
         "type": "function",
         "name": "admin_execute_operation",
-        "description": "查询生产状态或执行宿主机白名单运维动作；有副作用的动作会先等待用户批准",
+        "description": "查询生产状态或执行宿主机白名单运维动作(仅超级管理员可用)；有副作用的动作会先等待用户批准",
         "parameters": {
             "type": "object",
             "oneOf": [
