@@ -26,13 +26,15 @@ class TestCaseGeneratorAgent(BaseAgent):
     category = "review"
 
     def __init__(self) -> None:
+        from app.core.config import settings
+
         super().__init__(
             system_prompt=(
                 "你是代码测试用例生成器。根据给定源码摘要与语言,生成可直接执行的自包含断言测试脚本。"
                 "只输出 JSON,不要输出其他内容。"
             ),
             temperature=0.2,
-            max_tokens=16_000,
+            max_tokens=min(65_536, int(settings.deepseek_max_output_tokens)),
         )
 
     def generate(
@@ -54,7 +56,8 @@ class TestCaseGeneratorAgent(BaseAgent):
             "源码摘要(JSON):\n"
             f"{json.dumps(source_summary, ensure_ascii=False, default=str)[:12000]}\n\n"
             "要求:\n"
-            "1. 生成 2-5 个自包含断言测试文件,覆盖核心逻辑、边界与关键入口。\n"
+            "1. 生成 2-4 个自包含断言测试文件,覆盖核心逻辑、边界与关键入口;\n"
+            "   每个文件控制在 10-50 行,精简断言,避免超长输出。\n"
             "2. 每个文件必须可直接执行(不是库文件):\n"
             "   - python: 文件顶层或 __main__ 里调用断言,失败用 raise AssertionError;退出码非 0 表示失败。\n"
             "   - node: 用 node:assert 或 console.assert,非 0 退出表示失败。\n"

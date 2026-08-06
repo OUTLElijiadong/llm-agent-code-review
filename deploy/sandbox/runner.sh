@@ -230,7 +230,33 @@ run_test() {
   # agent 用例质量不稳定,失败只记录结果,不改变常规测试的通过结论。
   run_agent_tests || true
 
+prepare_deps() {
+  # 离线补全项目依赖(尽力而为):仅用镜像内置缓存或项目 vendor,不联网。
+  # 补全结果不影响主流程;缺失依赖由后端部署核验 agent 记录并在报告中提示。
+  case "$language" in
+    python)
+      if [ -f requirements.txt ]; then
+        python -m pip install -q --no-index -r requirements.txt 2>/dev/null || \
+          printf '%s\n' 'PRISM_DEPS python requirements partial (offline)' >&2
+      fi
+      ;;
+    node)
+      if [ -d node_modules ]; then :;
+      elif [ -f package.json ]; then
+        npm ci --offline --ignore-scripts 2>/dev/null || \
+          printf '%s\n' 'PRISM_DEPS node offline install partial' >&2
+      fi
+      ;;
+    go|java|php) : ;;
+  esac
+  return 0
+}
+
 run_deploy() {
+  # 后端部署核验 agent 生成的补全启动脚本优先(受控注入,固定由本 runner 调用)
+  if [ -f ./_prism_launch.sh ]; then
+    exec sh ./_prism_launch.sh
+  fi
   export HOST=127.0.0.1
   export PORT="$preview_port"
   export SERVER_PORT="$preview_port"

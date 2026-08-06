@@ -241,13 +241,17 @@ class TestReviewReporterAgent(BaseAgent):
                 ctx,
                 max_tokens=1024,
             )
-            if orch.success and isinstance(orch.data, str) and orch.data.strip():
-                orch_data = json.loads(orch.data)
-                if isinstance(orch_data, dict) and isinstance(orch_data.get("extra_roles"), list):
-                    extra_roles = [
-                        str(r).strip() for r in orch_data["extra_roles"]
-                        if isinstance(r, str) and r.strip() in _EXTRA_ROLE_PROMPTS
-                    ][:3]
+            orch_data = orch.data if isinstance(orch.data, dict) else None
+            if orch.success and orch_data is None and isinstance(orch.data, str) and orch.data.strip():
+                try:
+                    orch_data = json.loads(orch.data)
+                except (ValueError, TypeError):
+                    orch_data = None
+            if isinstance(orch_data, dict) and isinstance(orch_data.get("extra_roles"), list):
+                extra_roles = [
+                    str(r).strip() for r in orch_data["extra_roles"]
+                    if isinstance(r, str) and r.strip() in _EXTRA_ROLE_PROMPTS
+                ][:3]
         except (ValueError, TypeError):
             extra_roles = []
         for role_name in extra_roles:
