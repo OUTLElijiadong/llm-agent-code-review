@@ -5,7 +5,7 @@
 # a local Unix socket; it does not create or log a second credential.
 
 upstream prism_sandbox_executor {
-    server unix:/run/prism-sandbox/agent.sock;
+    server unix:/var/lib/prism-sandbox/agent.sock;
 }
 
 server {

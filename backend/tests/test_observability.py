@@ -1,6 +1,8 @@
 """可观测性与健康端点回归测试。"""
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
@@ -99,7 +101,24 @@ def test_readyz_returns_503_when_database_is_unavailable(monkeypatch) -> None:
     monkeypatch.setattr(main, "database_is_ready", lambda: False)
     response = main.readyz()
     assert response.status_code == 503
-    assert b'"status":"not_ready"' in response.body
+    assert response.headers["Cache-Control"] == "no-store"
+    assert json.loads(response.body) == {
+        "status": "not_ready",
+        "release": main.settings.app_release,
+    }
+
+
+def test_readyz_returns_only_release_and_ready_status(monkeypatch) -> None:
+    """数据库可用时公网契约不得暴露连接或内部详情。"""
+    from app import main
+
+    monkeypatch.setattr(main, "database_is_ready", lambda: True)
+    monkeypatch.setattr(main.settings, "app_release", "b" * 40)
+    response = main.readyz()
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert json.loads(response.body) == {"status": "ready", "release": "b" * 40}
 
 
 def test_metrics_endpoint_uses_prometheus_content_type() -> None:

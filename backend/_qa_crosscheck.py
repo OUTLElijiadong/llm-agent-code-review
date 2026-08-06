@@ -1,4 +1,5 @@
 """QA: 全站 API 聚合 ↔ 数据库直查 交叉核对(临时脚本)"""
+import os
 import httpx
 from sqlalchemy import func
 
@@ -17,8 +18,11 @@ CLIENT = httpx.Client(trust_env=False)
 
 def login():
     """登录管理员账号并返回访问令牌。"""
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    if not password:
+        raise RuntimeError("运行 QA 前必须设置 ADMIN_PASSWORD")
     r = CLIENT.post(f"{BASE}/api/auth/login",
-                    json={"username": "admin", "password": "admin123"}, timeout=30)
+                    json={"username": "admin", "password": password}, timeout=30)
     return r.json()["data"]["access_token"]
 
 

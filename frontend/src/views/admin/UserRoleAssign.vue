@@ -63,7 +63,8 @@
         </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="onAssign(row)">分配角色</el-button>
+            <span v-if="row.username === 'admin'" class="text-muted">固定角色</span>
+            <el-button v-else link type="primary" size="small" @click="onAssign(row)">分配角色</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -91,7 +92,7 @@
           <el-checkbox-group v-model="selectedRoleIds">
             <div class="role-checkbox-list">
               <el-checkbox
-                v-for="r in allRoles"
+                v-for="r in assignableRoles"
                 :key="r.id"
                 :value="r.id"
               >
@@ -114,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 
 import { getUsers } from '@/api/user'
 import {
@@ -153,6 +154,7 @@ const keyword = ref('')
 const filterRoleCode = ref('')
 
 const allRoles = ref<Role[]>([])
+const assignableRoles = computed(() => allRoles.value.filter((role) => role.code !== 'super_admin'))
 
 const assignDialogVisible = ref(false)
 const selectedUser = ref<UserRow | null>(null)
@@ -160,6 +162,7 @@ const selectedRoleIds = ref<number[]>([])
 
 /** 角色名称到 tag 类型的映射(内置管理角色高亮) */
 const ROLE_TAG_TYPE_MAP: Record<string, string> = {
+  超级管理员: 'danger',
   管理员: 'danger',
   审查员: 'warning',
 }

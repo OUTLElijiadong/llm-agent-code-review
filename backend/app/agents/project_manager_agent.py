@@ -8,6 +8,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
+from app.models.project import Project
 from app.schemas.project import ProjectIn
 from app.services import project_service
 
@@ -86,12 +87,26 @@ class ProjectManagerAgent(BaseAgent):
             self._ops.db, user=self._user, keyword=keyword,
             language=language, status=status, page=page, page_size=page_size,
         )
-        items = [
-            {"id": i["id"], "project_name": i["project_name"],
-             "language": i.get("language"), "status": i["status"],
-             "file_count": i["file_count"]}
-            for i in result["items"]
-        ]
+        is_admin = bool(self._user and self._user.role in {"admin", "super_admin"})
+        items = []
+        for i in result["items"]:
+            if is_admin:
+                own = i["id"] in {
+                    row[0]
+                    for row in self._ops.db.query(Project.id)
+                    .filter(Project.user_id == self._user.id, Project.status != "deleted")
+                    .all()
+                }
+                can_write = own
+            else:
+                can_write = bool(i.get("can_update", False) or i.get("can_delete", False))
+            items.append({
+                "id": i["id"], "project_name": i["project_name"],
+                "language": i.get("language"), "status": i["status"],
+                "file_count": i["file_count"],
+                "can_update": can_write,
+                "can_delete": can_write,
+            })
         return AgentResult(success=True, data={
             "total": result["total"], "items": items,
         })
@@ -107,10 +122,40 @@ class ProjectManagerAgent(BaseAgent):
         except Exception as e:
             return AgentResult(success=False, error=str(e))
 
+    def _assert_writable_own_project(self, project_id: int) -> Optional[str]:
+        """管理员在对话中只能写自己拥有的项目，用户项目只读。
+
+        系统级 RBAC 允许 admin 全量写用于后台监管；但普通对话 Agent 的写操作
+        收敛为「仅自有项目」，避免把用户项目当成管理员的项目操作。非 admin
+        用户仍按 project_service 的 owner/member 权限判断。
+
+        Args:
+            project_id: 目标项目ID。
+
+        Returns:
+            Optional[str]: 权限不足时的错误消息，否则返回 None。
+        """
+        if self._ops is None or self._user is None:
+            return "DB 或用户上下文未注入"
+        if self._user.role not in {"admin", "super_admin"}:
+            return None
+        project = self._ops.db.get(Project, project_id)
+        if project is None or project.status == "deleted":
+            return f"项目 #{project_id} 不存在"
+        if project.user_id != self._user.id:
+            return (
+                f"项目 #{project_id}「{project.project_name}」不是管理员自有项目，"
+                "管理员对话中仅可修改自己拥有的项目；其他用户的项目只读。"
+            )
+        return None
+
     def delete_project(self, project_id: int,
                        ctx: Optional[AgentContext] = None) -> AgentResult:
         if not self._ops:
             return AgentResult(success=False, error="DB 未注入")
+        denied = self._assert_writable_own_project(project_id)
+        if denied:
+            return AgentResult(success=False, error=denied)
         try:
             project_service.delete_project(
                 self._ops.db, user=self._user, project_id=project_id)

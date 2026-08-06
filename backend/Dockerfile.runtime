@@ -1,0 +1,13 @@
+ARG RUNTIME_BASE=prism-backend:local
+FROM ${RUNTIME_BASE}
+
+# Reuse the reviewed dependency/runtime layers while replacing the complete
+# application tree for a release built from the same immutable source bundle.
+USER root
+RUN find /app -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+COPY --chown=10001:991 . /app
+RUN install -d -o 10001 -g 991 -m 0750 /app/logs
+USER 10001:991
+
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-date-header"]

@@ -73,6 +73,7 @@ ADMIN_PAGE_ROUTES: tuple[str, ...] = (
     "/admin/skills",
     "/admin/embedding",
     "/admin/llm",
+    "/admin/mcp-workers",
     "/admin/report-templates",
 )
 
@@ -360,7 +361,7 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "POST",
         "/api/admin/governance/knowledge/sources",
         WRITE,
-        "agent:configure",
+        "server_ops:execute",
     ),
     _cap(
         "knowledge.sources.crawl",
@@ -369,7 +370,7 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "POST",
         "/api/admin/governance/knowledge/crawl",
         CRITICAL,
-        "agent:configure",
+        "server_ops:execute",
     ),
     # 任务调度
     _cap("jobs.list", "/admin/jobs", "查询 Agent 调度任务", "GET", "/api/admin/jobs", permission="agent:view"),
@@ -425,7 +426,7 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         WRITE,
         "agent:configure",
     ),
-    _cap(
+ _cap(
         "observability.security.unread",
         "/admin/observability",
         "查询当前管理员未读安全告警",
@@ -433,7 +434,8 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "/api/admin/observability/alerts/unread",
         permission="security:view",
     ),
-    _cap(
+
+_cap(
         "observability.security.read",
         "/admin/observability",
         "标记安全告警已读",
@@ -441,7 +443,8 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "/api/admin/observability/alerts/{alert_id}/read",
         permission="security:view",
     ),
-    _cap(
+
+_cap(
         "observability.security.run_monitor",
         "/admin/observability",
         "手动触发一轮安全巡检",
@@ -450,7 +453,8 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         WRITE,
         "server_ops:view",
     ),
-    _cap(
+
+_cap(
         "observability.security.status",
         "/admin/observability",
         "查询安全态势聚合",
@@ -803,7 +807,7 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "查询脱敏的 RAG 嵌入配置",
         "GET",
         "/api/knowledge/embedding-config",
-        permission="agent:view",
+        permission="server_ops:view",
     ),
     _cap(
         "embedding.config.update",
@@ -812,7 +816,7 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "PUT",
         "/api/knowledge/embedding-config",
         CRITICAL,
-        "agent:configure",
+        "server_ops:execute",
     ),
     _cap(
         "llm.config.get",
@@ -820,7 +824,7 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "查询脱敏的全局 LLM 配置",
         "GET",
         "/api/admin/llm/config",
-        permission="agent:view",
+        permission="server_ops:view",
     ),
     _cap(
         "llm.config.update",
@@ -829,9 +833,103 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "PUT",
         "/api/admin/llm/config",
         CRITICAL,
-        "agent:configure",
+        "server_ops:execute",
     ),
-    _cap("llm.config.test", "/admin/llm", "测试全局 LLM 连接", "POST", "/api/admin/llm/test", WRITE, "agent:configure"),
+    _cap(
+        "llm.config.test",
+        "/admin/llm",
+        "测试全局 LLM 连接",
+        "POST",
+        "/api/admin/llm/test",
+        WRITE,
+        "server_ops:execute",
+    ),
+    # MCP 与受控沙箱节点。所有能力均由 API 的 require_super_admin 再次强制校验；
+    # 注册表仅向管理 Agent 暴露稳定能力码和 OpenAPI 参数契约。
+    _cap(
+        "mcp.servers.list", "/admin/mcp-workers", "查询 MCP Server", "GET", "/api/admin/mcp/servers",
+        permission="server_ops:view",
+    ),
+    _cap(
+        "mcp.servers.seed_recommended", "/admin/mcp-workers", "登记推荐 MCP Server", "POST",
+        "/api/admin/mcp/servers/recommended", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.servers.create", "/admin/mcp-workers", "创建 MCP Server", "POST", "/api/admin/mcp/servers",
+        CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.servers.update", "/admin/mcp-workers", "更新 MCP Server", "PUT",
+        "/api/admin/mcp/servers/{server_id}", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.servers.delete", "/admin/mcp-workers", "删除 MCP Server", "DELETE",
+        "/api/admin/mcp/servers/{server_id}", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.servers.health", "/admin/mcp-workers", "检查 MCP Server 健康状态", "POST",
+        "/api/admin/mcp/servers/{server_id}/health", WRITE, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.servers.sync_tools", "/admin/mcp-workers", "同步 MCP 工具清单", "POST",
+        "/api/admin/mcp/servers/{server_id}/sync", WRITE, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.tools.list", "/admin/mcp-workers", "查询 MCP 工具", "GET", "/api/admin/mcp/tools",
+        permission="server_ops:view",
+    ),
+    _cap(
+        "mcp.tools.update", "/admin/mcp-workers", "更新 MCP 工具风险与启用状态", "PUT",
+        "/api/admin/mcp/tools/{tool_id}", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.bindings.list", "/admin/mcp-workers", "查询 Agent MCP 绑定", "GET", "/api/admin/mcp/bindings",
+        permission="server_ops:view",
+    ),
+    _cap(
+        "mcp.bindings.upsert", "/admin/mcp-workers", "配置 Agent MCP 工具绑定", "PUT",
+        "/api/admin/mcp/bindings", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.bindings.delete", "/admin/mcp-workers", "删除 Agent MCP 工具绑定", "DELETE",
+        "/api/admin/mcp/bindings/{binding_id}", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.aliases.list", "/admin/mcp-workers", "查询能力近义词别名", "GET", "/api/admin/mcp/aliases",
+        permission="server_ops:view",
+    ),
+    _cap(
+        "mcp.aliases.create", "/admin/mcp-workers", "创建能力近义词别名", "POST", "/api/admin/mcp/aliases",
+        WRITE, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.aliases.update", "/admin/mcp-workers", "更新能力近义词别名", "PUT",
+        "/api/admin/mcp/aliases/{alias_id}", WRITE, "server_ops:execute",
+    ),
+    _cap(
+        "mcp.aliases.delete", "/admin/mcp-workers", "删除能力近义词别名", "DELETE",
+        "/api/admin/mcp/aliases/{alias_id}", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "sandbox.workers.list", "/admin/mcp-workers", "查询沙箱 Worker", "GET", "/api/sandboxes/workers",
+        permission="server_ops:view",
+    ),
+    _cap(
+        "sandbox.workers.create", "/admin/mcp-workers", "创建远程或受控沙箱 Worker", "POST",
+        "/api/sandboxes/workers", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "sandbox.workers.update", "/admin/mcp-workers", "更新沙箱 Worker", "PUT",
+        "/api/sandboxes/workers/{worker_id}", CRITICAL, "server_ops:execute",
+    ),
+    _cap(
+        "sandbox.workers.health", "/admin/mcp-workers", "检查沙箱 Worker 健康状态", "POST",
+        "/api/sandboxes/workers/{worker_id}/health", WRITE, "server_ops:execute",
+    ),
+    _cap(
+        "sandbox.workers.seed_production", "/admin/mcp-workers", "登记生产受控沙箱 Worker", "POST",
+        "/api/sandboxes/workers/seed-production", CRITICAL, "server_ops:execute",
+    ),
     # 管理侧栏中的报告模板页
     _cap(
         "report_templates.list",

@@ -379,7 +379,7 @@ run_whitebox() {
     python)
       python -m compileall -q . || return 1
       if find . -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
-        if python -c 'import pytest' >/dev/null 2>&1; then python -m pytest -q --disable-warnings --maxfail=50 || return 1  # noqa: E501
+        if python -c 'import pytest' >/dev/null 2>&1; then python -m pytest -q --disable-warnings --maxfail=50 || return 1
         else python -m unittest discover -v || return 1; fi
       fi
       ;;
@@ -454,13 +454,13 @@ php_doc_root() {
 start_app() {
   case "$LANG_" in
     python)
-      if [ -f app.py ] && python -c 'import flask' >/dev/null 2>&1; then python -m flask --app app run --host 127.0.0.1 --port "$PORT" &  # noqa: E501
+      if [ -f app.py ] && python -c 'import flask' >/dev/null 2>&1; then python -m flask --app app run --host 127.0.0.1 --port "$PORT" &
       elif [ -f main.py ]; then python main.py &
       elif [ -f app.py ]; then python app.py &
       else return 1; fi
       ;;
     node)   [ -f package.json ] || return 1; npm start --if-present & ;;
-    java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" & ;;  # noqa: E501
+    java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" & ;;
     go)     go run . & ;;
     php)    ROOT=$(php_doc_root); php -S "127.0.0.1:$PORT" -t "$ROOT" & ;;
   esac
@@ -482,7 +482,7 @@ run_blackbox() {
   i=0; READY=0
   while [ $i -lt 30 ]; do
     S=$(http_probe "/")
-    case "$S" in 1*|2*|3*|4*|5*) READY=1; break;; esac  # 任何合法HTTP状态=服务已就绪(5xx多为应用缺DB等自身错误,属运行态证据)  # noqa: E501
+    case "$S" in 1*|2*|3*|4*|5*) READY=1; break;; esac  # 任何合法HTTP状态=服务已就绪(5xx多为应用缺DB等自身错误,属运行态证据)
     kill -0 "$APP_PID" 2>/dev/null || break
     i=$((i+1)); sleep 1
   done
@@ -522,7 +522,7 @@ case "$MODE" in
     run_whitebox; WHITEBOX_OK=$?
     run_blackbox; BB=$?
     emit_facts
-    [ $WHITEBOX_OK -eq 0 ] && [ $BB -eq 0 ] && { echo "PRISM_VERIFY combined ok"; exit 0; } || { echo "PRISM_VERIFY combined fail"; exit 1; }  # noqa: E501
+    [ $WHITEBOX_OK -eq 0 ] && [ $BB -eq 0 ] && { echo "PRISM_VERIFY combined ok"; exit 0; } || { echo "PRISM_VERIFY combined fail"; exit 1; }
     ;;
   *) echo "unknown mode"; exit 64 ;;
 esac
@@ -571,8 +571,8 @@ def _run_deploy_auto_tests(
                     result = {"status": "failed", "result": {"exit_code": 124, "logs": {"text": "自动测试轮询超时"}}}
                     break
                 time.sleep(1)
-                status_response = _call_worker(worker, "POST", "/status", {"request_id": request_id, "after_sequence": last_seq})  # noqa: E501
-                result = status_response.get("result") if isinstance(status_response.get("result"), dict) else status_response  # noqa: E501
+                status_response = _call_worker(worker, "POST", "/status", {"request_id": request_id, "after_sequence": last_seq})
+                result = status_response.get("result") if isinstance(status_response.get("result"), dict) else status_response
                 last_seq = int(result.get("last_sequence") or last_seq)
             conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
             exit_code = int(conclusion.get("exit_code") or 0) if isinstance(conclusion, dict) else 0
@@ -594,7 +594,7 @@ def _run_deploy_auto_tests(
             _append_event(
                 db, environment,
                 "complete" if passed else "progress", f"auto_{mode}",
-                f"部署后自动白盒测试{'通过' if passed else '未通过'}" if mode == "whitebox" else f"部署后自动黑盒测试{'通过' if passed else '未通过'}",  # noqa: E501
+                f"部署后自动白盒测试{'通过' if passed else '未通过'}" if mode == "whitebox" else f"部署后自动黑盒测试{'通过' if passed else '未通过'}",
                 {"mode": mode, "passed": passed, "exit_code": exit_code},
             )
             _persist_browser_artifact(
@@ -1526,7 +1526,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         # deploy 前自动白盒:测试容器跑完即回收、不占槽,避免常驻 deploy 把单槽 worker 占成 429。
         pre_whitebox: dict[str, Any] | None = None
         if worker and environment.purpose == "deploy" and environment.agent_code == "sandbox_deployer":
-            pre_whitebox = _run_deploy_auto_tests(db, environment, worker, source_archive_base64, modes=("whitebox",))[0]  # noqa: E501
+            pre_whitebox = _run_deploy_auto_tests(db, environment, worker, source_archive_base64, modes=("whitebox",))[0]
         if worker:
             execute_response = _call_worker(worker, "POST", "/execute", {
                 "request_id": environment.public_id,
@@ -1607,7 +1607,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             environment.preview_path = f"/api/sandboxes/{environment.public_id}/preview/"
         auto_smoke: dict[str, Any] | None = None
         auto_test_chain: list[dict[str, Any]] = []
-        if environment.purpose == "deploy" and environment.status == "ready" and environment.agent_code == "sandbox_deployer":  # noqa: E501
+        if environment.purpose == "deploy" and environment.status == "ready" and environment.agent_code == "sandbox_deployer":
             # 预览冒烟 = 黑盒(从环境外部对运行中的服务发真实 HTTP,单槽下无法另起黑盒容器)。
             auto_smoke = _run_auto_smoke_test(db, environment)
             _append_event(
@@ -1615,7 +1615,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 environment,
                 "complete" if auto_smoke.get("passed") else "progress",
                 "auto_smoke",
-                "部署后自动 Agent 冒烟测试完成" if auto_smoke.get("passed") else "部署后自动 Agent 冒烟测试未通过或不可用",  # noqa: E501
+                "部署后自动 Agent 冒烟测试完成" if auto_smoke.get("passed") else "部署后自动 Agent 冒烟测试未通过或不可用",
                 auto_smoke,
             )
             _emit(

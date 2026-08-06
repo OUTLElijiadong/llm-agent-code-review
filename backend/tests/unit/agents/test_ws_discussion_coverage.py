@@ -6,6 +6,7 @@ import json
 import time
 from types import SimpleNamespace
 from typing import Any, Iterator
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import WebSocketDisconnect
@@ -93,6 +94,8 @@ class FakeDiscussionBus:
         self.user_inputs: list[tuple[str, str]] = []
         self.unsubscribed: list[tuple[str, asyncio.Queue[str]]] = []
         self._control_callbacks: dict[str, Any] = {}
+        self.discussion_tasks: dict[str, asyncio.Task] = {}
+        self.cancelled_sessions: list[str] = []
 
     def get_session(self, session_id: str) -> Any:
         """返回为测试配置的既有会话。"""
@@ -131,6 +134,25 @@ class FakeDiscussionBus:
     def unsubscribe(self, session_id: str, queue: asyncio.Queue[str]) -> None:
         """记录连接断开后的订阅释放。"""
         self.unsubscribed.append((session_id, queue))
+
+    def start_discussion_task(self, session_id: str, awaitable: Any) -> asyncio.Task:
+        """按真实总线契约登记测试后台任务。"""
+        task = asyncio.create_task(awaitable)
+        self.discussion_tasks[session_id] = task
+        return task
+
+    def request_stop(self, session_id: str) -> None:
+        """记录会话停止请求。"""
+        self.cancelled_sessions.append(session_id)
+
+    def cancel_discussion_task(self, session_id: str) -> bool:
+        """取消测试后台任务并记录会话。"""
+        self.cancelled_sessions.append(session_id)
+        task = self.discussion_tasks.get(session_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        return True
 
 
 def _install_bus(monkeypatch: pytest.MonkeyPatch, bus: FakeDiscussionBus) -> None:
@@ -200,7 +222,7 @@ def test_load_active_user_and_ws_user_close_database_sessions(
     assert disabled_db.closed is True
 
     ws_db = FakeDb(active)
-    monkeypatch.setattr(module, "decode_token", lambda token: {"sub": "3"})
+    monkeypatch.setattr(module, "authenticate_access_token", lambda token, db: active)
     monkeypatch.setattr(module, "SessionLocal", lambda: ws_db)
     assert module._load_ws_user("jwt") is active
     assert ws_db.expunged == [active]
@@ -208,7 +230,9 @@ def test_load_active_user_and_ws_user_close_database_sessions(
 
     inactive_ws_db = FakeDb(_user(5, status=0))
     monkeypatch.setattr(module, "SessionLocal", lambda: inactive_ws_db)
-    assert module._load_ws_user("jwt") is None
+    monkeypatch.setattr(module, "authenticate_access_token", MagicMock(side_effect=ValueError("inactive")))
+    with pytest.raises(ValueError, match="inactive"):
+        module._load_ws_user("jwt")
     assert inactive_ws_db.expunged == []
     assert inactive_ws_db.closed is True
 
@@ -237,7 +261,9 @@ def test_register_pending_purges_only_stale_unowned_sessions(
             """active 返回会话，其余返回不存在。"""
             return SimpleNamespace(owner_user_id=3) if session_id == "active" else None
 
-    _install_bus(monkeypatch, PurgeBus())
+    # 该同步用例只使用 get_session，不应为未使用的 asyncio.Queue
+    # 依赖 pytest-asyncio 在全局安装事件循环。
+    _install_bus(monkeypatch, object.__new__(PurgeBus))
     monkeypatch.setattr(module.time, "time", lambda: now)
 
     module.register_pending("fresh", user_id="8", code="print(1)")
@@ -391,6 +417,54 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
 
 
 @pytest.mark.asyncio
+async def test_pending_discussion_is_cancelled_when_owner_session_is_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """创建圆桌的登录版本失效后，应取消后台编排而不是继续写入结果。"""
+    import app.ai.discussion_orchestrator as orchestrator_module
+    from app.agents.discussion_bus import DiscussionBus
+
+    session_id = "expired-owner-session"
+    bus = DiscussionBus()
+    bus.create_session(session_id, task_id=0, file_name="expired.py", owner_user_id=21)
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
+    monkeypatch.setattr(module, "_SESSION_CHECK_INTERVAL", 0.001)
+    session_checks = iter((True, False))
+    monkeypatch.setattr(
+        module,
+        "_is_session_version_active",
+        lambda *_args: next(session_checks, False),
+    )
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class FakeOrchestrator:
+        async def start_discussion(self, **_kwargs: Any) -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(orchestrator_module, "DiscussionOrchestrator", FakeOrchestrator)
+    pending = module.PendingDiscussion(
+        session_id,
+        user_id=21,
+        session_token_version=4,
+    )
+
+    task = module.launch_pending_discussion(pending)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+    await asyncio.gather(task, return_exceptions=True)
+    await asyncio.sleep(0)
+
+    assert bus.get_session(session_id).status == "concluded"
+    assert bus.get_discussion_task(session_id) is None
+
+
+@pytest.mark.asyncio
 async def test_ws_existing_session_allows_admin_and_sends_server_heartbeat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -405,7 +479,7 @@ async def test_ws_existing_session_allows_admin_and_sends_server_heartbeat(
     async def controlled_sleep(delay: float) -> None:
         """让心跳首次立即执行，后续等待直到 endpoint 取消任务。"""
         nonlocal heartbeat_calls
-        if delay == 60:
+        if delay == module._SESSION_CHECK_INTERVAL:
             heartbeat_calls += 1
             if heartbeat_calls == 1:
                 return

@@ -1,17 +1,63 @@
 """固定 Agent 工具参数契约的 Schema、严格校验与兼容别名测试。"""
+
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from app.agents.tool_contracts import (
     FixedToolArgumentError,
+    ImportRemoteProjectArguments,
     fixed_tool_accepts_ctx,
     get_fixed_tool_names,
     get_fixed_tool_schema,
     validate_fixed_tool_arguments,
 )
+
+EXPECTED_FIXED_TOOL_NAMES = [
+    "list_agents",
+    "list_projects",
+    "create_project",
+    "delete_project",
+    "start_review",
+    "list_review_tasks",
+    "list_review_issues",
+    "list_code_files",
+    "dashboard_summary",
+    "list_rules",
+    "list_reports",
+    "detect_language",
+    "analyze_project",
+    "review_code",
+    "generate_ai_prompt_for_issue",
+    "generate_ai_prompt_for_task",
+    "generate_ai_prompt_for_project",
+    "audit_security_for_file",
+    "audit_security_for_task",
+    "audit_security_for_project",
+    "run_project_tests",
+    "deploy_project_sandbox",
+    "close_sandbox",
+    "extend_sandbox",
+    "trigger_evolution",
+    "list_agent_skills",
+    "search_published_agents",
+    "invoke_published_agent",
+    "admin_list_users",
+    "admin_list_roles",
+    "admin_governance_overview",
+    "admin_list_agents",
+    "admin_list_approvals",
+    "admin_list_agent_release_approvals",
+    "admin_system_status",
+    "admin_set_user_role",
+    "admin_delete_user",
+    "admin_delete_users",
+    "admin_toggle_agent",
+    "admin_decide_agent_release",
+]
 
 
 @pytest.mark.parametrize(
@@ -46,6 +92,26 @@ from app.agents.tool_contracts import (
         ("audit_security_for_file", {"file_id": 1}, {"file_id": 1}),
         ("audit_security_for_task", {"task_id": 1}, {"task_id": 1}),
         ("audit_security_for_project", {"project_id": 1}, {"project_id": 1}),
+        (
+            "run_project_tests",
+            {"project_id": 1, "language": "python"},
+            {"project_id": 1, "language": "python"},
+        ),
+        (
+            "deploy_project_sandbox",
+            {"project_id": 1, "language": "node"},
+            {"project_id": 1, "language": "node"},
+        ),
+        (
+            "close_sandbox",
+            {"public_id": "sbx_0123456789abcdef01234567"},
+            {"public_id": "sbx_0123456789abcdef01234567"},
+        ),
+        (
+            "extend_sandbox",
+            {"public_id": "sbx_0123456789abcdef01234567", "hours": 24},
+            {"public_id": "sbx_0123456789abcdef01234567", "hours": 24},
+        ),
         ("trigger_evolution", {}, {}),
         ("list_agent_skills", {}, {}),
         ("search_published_agents", {"query": "安全审查"}, {"query": "安全审查"}),
@@ -76,8 +142,9 @@ def test_fixed_tool_registry_has_stable_unique_names() -> None:
     """固定工具注册表应成为唯一名称来源且不含重复项。"""
     names = get_fixed_tool_names()
 
-    assert len(names) == 36
+    assert len(names) == 40
     assert len(names) == len(set(names))
+    assert names == EXPECTED_FIXED_TOOL_NAMES
     assert names[0] == "list_agents"
     assert names[-1] == "admin_decide_agent_release"
 
@@ -133,3 +200,42 @@ def test_runtime_context_injection_metadata_matches_real_handlers() -> None:
     assert fixed_tool_accepts_ctx("review_code") is False
     assert fixed_tool_accepts_ctx("list_agents") is False
     assert fixed_tool_accepts_ctx("list_agent_skills") is False
+
+
+def test_source_archive_agent_contracts_expose_audit_mode_and_static_full_default() -> None:
+    """远程导入必须可显式选择隔离审计，项目安全审计默认不得退化为抽样。"""
+    import_schema = ImportRemoteProjectArguments.model_json_schema()
+    assert import_schema["properties"]["audit_mode"]["type"] == "boolean"
+    assert import_schema["properties"]["audit_mode"]["default"] is False
+    assert ImportRemoteProjectArguments.model_validate(
+        {
+            "url": "https://example.test/source.zip",
+            "project_name": "audit-source",
+            "audit_mode": True,
+        }
+    ).model_dump(exclude_unset=True)["audit_mode"] is True
+    with pytest.raises(PydanticValidationError):
+        ImportRemoteProjectArguments.model_validate(
+            {
+                "url": "https://example.test/source.zip",
+                "project_name": "audit-source",
+                "audit_mode": "true",
+            }
+        )
+
+    audit_schema = get_fixed_tool_schema("audit_security_for_project")
+    assert audit_schema["properties"]["scan_mode"]["default"] == "static_full"
+    assert set(audit_schema["properties"]["scan_mode"]["enum"]) == {
+        "full",
+        "static_full",
+        "triage",
+    }
+    assert validate_fixed_tool_arguments(
+        "audit_security_for_project",
+        {"project_id": 7, "scan_mode": "static_full"},
+    ) == {"project_id": 7, "scan_mode": "static_full"}
+    with pytest.raises(FixedToolArgumentError, match="scan_mode"):
+        validate_fixed_tool_arguments(
+            "audit_security_for_project",
+            {"project_id": 7, "scan_mode": "sample"},
+        )

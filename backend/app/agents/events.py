@@ -27,7 +27,6 @@ class AgentEventType(str, Enum):
     AI_CALL_THRESHOLD_REACHED = "ai_call_threshold_reached"          # AI 调用量达阈值
     EVOLUTION_PROPOSAL_PROMOTED = "evolution_proposal_promoted"      # 进化提案被批准生效
     SKILL_TRIGGER = "skill_trigger"                                  # Skill 触发通用事件
-    ADMIN_ALERT = "admin_alert"                                      # 最高管理员安全监控弹窗
 
 
 def new_trace_id() -> str:

@@ -1,65 +1,60 @@
-"""
-压缩包自动解压工具模块
+"""统一的源码归档识别与安全解包。
 
-支持 zip / tar / tar.gz / tgz / tar.bz2 / tar.xz 格式的安全解压。
-严格防护:
-1. zip slip 路径穿越攻击(拒绝 `..` 与绝对路径)
-2. 解压文件数量上限(默认 100)
-3. 解压总大小上限(500MB)
-4. 压缩包成员大小上限(100MB；普通文件直传仍保持 10MB)
-5. 隐藏文件/敏感目录过滤(.git/、.svn/、__pycache__/ 等)
+归档格式由 libarchive 自动识别。上传大小不设置业务上限；仍保留文件数量、
+路径、文件类型和解压倍率约束，防止路径穿越、链接写出和压缩炸弹。
 """
-import io
+from __future__ import annotations
+
 import os
 import re
-import tarfile
-import zipfile
+import unicodedata
 from dataclasses import dataclass
 from typing import List, Optional
 
-from app.core.exceptions import ValidationError
-# ============ 解压限制配置 ============
-MAX_EXTRACTED_FILES = 10_000     # 源码仓库允许的解压后文件数量上限
-MAX_TOTAL_SIZE = 500 * 1024 * 1024  # 与项目总大小上限一致(500MB)
-MAX_SINGLE_FILE_SIZE = 100 * 1024 * 1024  # 100MB 压缩包成员上限
+import libarchive
+from libarchive.exception import ArchiveError
 
-# 支持的压缩包扩展名(按优先级匹配,带复合扩展名优先)
+from app.core.exceptions import ValidationError
+
+MAX_EXTRACTED_FILES = 10_000
+MAX_COMPRESSION_RATIO = 1_000
+MIN_RATIO_GUARD_BYTES = 256 * 1024 * 1024
+
+# libarchive 常见源码归档格式。复合后缀必须排在单后缀之前。
 ARCHIVE_EXTENSIONS = (
-    ".zip",
-    ".tar.gz", ".tgz",
-    ".tar.bz2", ".tbz2",
-    ".tar.xz", ".txz",
-    ".tar",
+    ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tar.lz", ".tar.lzma",
+    ".tar.lzip", ".tgz", ".tbz2", ".txz", ".tzst", ".tlz",
+    ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".zst",
+    ".lz", ".lzma", ".lzip", ".z", ".cpio", ".cab", ".ar", ".xar",
+    ".lha", ".lzh", ".iso",
 )
 
-# 敏感文件名正则:防止解压出可执行脚本等危险文件(仅警告,不拒绝)
+_RAW_COMPRESSED_EXTENSIONS = (
+    ".gz", ".bz2", ".xz", ".zst", ".lz", ".lzma", ".lzip", ".z",
+)
+
 _SENSITIVE_FILE_RE = re.compile(
     r"(^|/)(\.env|\.ssh|\.aws|\.gitconfig|id_rsa|id_dsa|credentials)(/|$)",
     re.IGNORECASE,
 )
-
-# 归档导入要保持源码树完整，不能复用普通单文件上传对 dist/build/target
-# 的过滤规则；这些名称在真实项目中经常是业务源码目录。这里只过滤明确的
-# 版本库、解释器缓存和编辑器元数据。
 _ARCHIVE_METADATA_DIRS = re.compile(
     r"(^|/)(\.git|\.svn|\.hg|__pycache__|\.idea|\.vscode)(/|$)",
     re.IGNORECASE,
 )
 
 
+@dataclass(frozen=True)
+class ArchiveMember:
+    """经过路径和文件类型校验的归档成员。"""
+
+    path: str
+    content: bytes
+
+
 @dataclass
 class ExtractedFile:
-    """解压后的单个文件描述
+    """供 CodeFile 入库使用的归档成员。"""
 
-    Attributes:
-        name: 文件名(含扩展名,已去除路径)
-        path: 逻辑相对路径(已校验安全,如 "src/main.py")
-        content: 文件文本内容(UTF-8);若为二进制则填充空字符串
-        raw_bytes: 原始字节(仅二进制文件填充,文本文件为 None)
-        language: 推断的编程语言标识
-        size: 文件字节数
-        is_binary: 是否二进制文件
-    """
     name: str
     path: str
     content: str = ""
@@ -70,217 +65,193 @@ class ExtractedFile:
 
 
 def is_archive(filename: str) -> bool:
-    """判断文件名是否为支持的压缩包格式
+    """根据文件名判断是否属于支持的源码归档格式。"""
+    lower = (filename or "").strip().lower()
+    return bool(lower) and lower.endswith(ARCHIVE_EXTENSIONS)
 
-    Args:
-        filename: 文件名(含扩展名)
 
-    Returns:
-        bool: True 表示是支持的压缩包格式
-    """
-    if not filename:
-        return False
-    lower = filename.lower()
-    return any(lower.endswith(ext) for ext in ARCHIVE_EXTENSIONS)
+def read_archive_members(
+    raw: bytes,
+    filename: str,
+    *,
+    filter_sensitive: bool = True,
+    strict_paths: bool = False,
+) -> tuple[list[ArchiveMember], dict]:
+    """用 libarchive 读取归档并返回安全成员及解包摘要。"""
+    if not raw:
+        raise ValidationError("压缩包内容为空", code=40001)
+    if not is_archive(filename):
+        raise ValidationError(f"不支持的压缩包格式: {filename}", code=41500)
+
+    raw_stream = _is_raw_compressed(filename)
+    format_name = "raw" if raw_stream else "all"
+    results: list[ArchiveMember] = []
+    seen: set[str] = set()
+    regular_count = 0
+    expanded_size = 0
+    max_member_size = 0
+    ratio_guard = max(MIN_RATIO_GUARD_BYTES, len(raw) * MAX_COMPRESSION_RATIO)
+
+    try:
+        with libarchive.memory_reader(raw, format_name=format_name) as archive:
+            for entry in archive:
+                if entry.isdir:
+                    continue
+                if (
+                    not (entry.isfile or entry.isreg)
+                    or entry.issym
+                    or entry.islnk
+                    or entry.linkpath
+                ):
+                    raise ValidationError("压缩包包含链接或特殊文件", code=40001)
+
+                regular_count += 1
+                _check_file_count(regular_count)
+                original_path = str(entry.pathname or "")
+                if raw_stream and original_path in {"", "data"}:
+                    original_path = _raw_member_name(filename)
+                safe_path = _validate_path(
+                    original_path,
+                    filter_sensitive=filter_sensitive,
+                    strict=strict_paths,
+                )
+                if safe_path is None:
+                    # libarchive 会在读取下一条记录时跳过当前成员数据。
+                    continue
+
+                collision_key = unicodedata.normalize("NFC", safe_path).casefold()
+                if collision_key in seen:
+                    raise ValidationError("压缩包包含重复或大小写冲突路径", code=40001)
+                seen.add(collision_key)
+
+                chunks: list[bytes] = []
+                member_size = 0
+                for block in entry.get_blocks():
+                    member_size += len(block)
+                    expanded_size += len(block)
+                    if expanded_size > ratio_guard:
+                        raise ValidationError(
+                            f"压缩包解压倍率超过安全上限 {MAX_COMPRESSION_RATIO}x",
+                            code=40001,
+                        )
+                    chunks.append(block)
+                declared_size = entry.size
+                if declared_size is not None and declared_size >= 0 and member_size != declared_size:
+                    raise ValidationError(
+                        f"压缩包成员大小与声明不一致: {safe_path}",
+                        code=40001,
+                    )
+                content = b"".join(chunks)
+                max_member_size = max(max_member_size, member_size)
+                results.append(ArchiveMember(path=safe_path, content=content))
+    except ValidationError:
+        raise
+    except (ArchiveError, OSError, ValueError) as exc:
+        detail = str(exc).lower()
+        if "passphrase" in detail or "encrypted" in detail or "encryption" in detail:
+            message = "不支持加密压缩包"
+        else:
+            message = f"压缩包已损坏或当前运行库不支持该格式: {filename}"
+        raise ValidationError(message, code=40001) from exc
+
+    if not results:
+        raise ValidationError("压缩包内没有可用的文件(可能全部被安全过滤)", code=40001)
+    return results, {
+        "file_count": len(results),
+        "expanded_size": expanded_size,
+        "max_member_size": max_member_size,
+        "max_compression_ratio": round(expanded_size / max(1, len(raw)), 4),
+    }
 
 
 def extract_archive(raw: bytes, filename: str) -> List[ExtractedFile]:
-    """解压压缩包字节流,返回安全的文件列表
+    """解包并转换为可直接写入 CodeFile 的文件对象。"""
+    members, _ = read_archive_members(raw, filename)
+    return [_build_extracted_file(member.path, member.content) for member in members]
 
-    Args:
-        raw: 压缩包原始字节
-        filename: 压缩包文件名(用于判断格式)
 
-    Returns:
-        List[ExtractedFile]: 解压后的文件列表
-
-    Raises:
-        ValidationError: 解压失败、文件数量超限、大小超限、路径不安全
-    """
-    if not raw:
-        raise ValidationError("压缩包内容为空", code=40001)
-
+def _is_raw_compressed(filename: str) -> bool:
     lower = filename.lower()
-    if lower.endswith(".zip"):
-        files = _extract_zip(raw)
-    elif lower.endswith((".tar.gz", ".tgz")):
-        files = _extract_tar(raw, mode="r:gz")
-    elif lower.endswith((".tar.bz2", ".tbz2")):
-        files = _extract_tar(raw, mode="r:bz2")
-    elif lower.endswith((".tar.xz", ".txz")):
-        files = _extract_tar(raw, mode="r:xz")
-    elif lower.endswith(".tar"):
-        files = _extract_tar(raw, mode="r:")
-    else:
-        raise ValidationError(f"不支持的压缩包格式: {filename}", code=41500)
-
-    if not files:
-        raise ValidationError("压缩包内没有可用的文件(可能全部被安全过滤)", code=40001)
-    return files
+    if lower.endswith((
+        ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tar.lz",
+        ".tar.lzma", ".tar.lzip",
+    )):
+        return False
+    return lower.endswith(_RAW_COMPRESSED_EXTENSIONS)
 
 
-# ============ 内部实现 ============
-
-def _extract_zip(raw: bytes) -> List[ExtractedFile]:
-    """解压 zip 格式
-
-    Args:
-        raw: zip 字节流
-
-    Returns:
-        List[ExtractedFile]: 解压后的文件列表
-
-    Raises:
-        ValidationError: zip 损坏/路径不安全/超限
-    """
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(raw))
-    except zipfile.BadZipFile as e:
-        raise ValidationError(f"zip 文件已损坏: {e}", code=40001)
-
-    infos = [i for i in zf.infolist() if not i.is_dir()]
-    _check_file_count(len(infos))
-
-    total_size = 0
-    results: List[ExtractedFile] = []
-    for info in infos:
-        name = info.filename or ""
-        safe_path = _validate_path(name)
-        if safe_path is None:
-            continue  # 被安全过滤跳过
-
-        size = info.file_size
-        _check_single_size(size, safe_path)
-        total_size += size
-        _check_total_size(total_size)
-
-        with zf.open(info) as f:
-            data = f.read()
-        ext_file = _build_extracted_file(safe_path, data)
-        results.append(ext_file)
-    return results
+def _raw_member_name(filename: str) -> str:
+    base = os.path.basename(filename.replace("\\", "/"))
+    lower = base.lower()
+    for suffix in _RAW_COMPRESSED_EXTENSIONS:
+        if lower.endswith(suffix):
+            candidate = base[: -len(suffix)]
+            return candidate or "data"
+    return base or "data"
 
 
-def _extract_tar(raw: bytes, mode: str) -> List[ExtractedFile]:
-    """解压 tar / tar.gz / tar.bz2 / tar.xz 格式
-
-    Args:
-        raw: tar 字节流
-        mode: tarfile 打开模式(r:/r:gz/r:bz2/r:xz)
-
-    Returns:
-        List[ExtractedFile]: 解压后的文件列表
-
-    Raises:
-        ValidationError: tar 损坏/路径不安全/超限
-    """
-    try:
-        tf = tarfile.open(fileobj=io.BytesIO(raw), mode=mode)
-    except tarfile.TarError as e:
-        raise ValidationError(f"tar 文件已损坏: {e}", code=40001)
-
-    members = [m for m in tf.getmembers() if m.isfile()]
-    _check_file_count(len(members))
-
-    total_size = 0
-    results: List[ExtractedFile] = []
-    for m in members:
-        safe_path = _validate_path(m.name)
-        if safe_path is None:
-            continue
-        size = m.size
-        _check_single_size(size, safe_path)
-        total_size += size
-        _check_total_size(total_size)
-
-        f = tf.extractfile(m)
-        if f is None:
-            continue
-        data = f.read()
-        ext_file = _build_extracted_file(safe_path, data)
-        results.append(ext_file)
-    return results
-
-
-def _validate_path(name: str) -> Optional[str]:
-    """校验解压路径安全性,返回标准化相对路径
-
-    Args:
-        name: 压缩包内的原始路径
-
-    Returns:
-        Optional[str]: 安全的相对路径;若被安全过滤则返回 None
-
-    Raises:
-        ValidationError: 路径包含 `..` 或绝对路径(zip slip 攻击)
-    """
-    if not name:
-        return None
-    # 统一为 POSIX 风格
-    normalized = name.replace("\\", "/").lstrip("/")
-    if not normalized:
-        return None
-    # zip slip 防护:拒绝 `..` 路径段
-    parts = normalized.split("/")
-    if any(part == ".." for part in parts):
-        raise ValidationError(
-            f"压缩包包含不安全路径(可能是 zip slip 攻击): {name}", code=40001
-        )
-    # 拒绝绝对路径(Windows 盘符)
-    if re.match(r"^[a-zA-Z]:", normalized):
+def _validate_path(
+    name: str,
+    *,
+    filter_sensitive: bool = True,
+    strict: bool = False,
+) -> Optional[str]:
+    """校验成员路径，拒绝绝对路径、设备路径和路径穿越。"""
+    if not name or "\x00" in name or any(ord(char) < 32 or ord(char) == 127 for char in name):
+        raise ValidationError("压缩包包含非法路径", code=40001)
+    if strict and "\\" in name:
+        raise ValidationError("压缩包包含非法或绝对路径", code=40001)
+    normalized = unicodedata.normalize("NFC", name.replace("\\", "/"))
+    if normalized.startswith("/") or re.match(r"^[a-zA-Z]:", normalized):
         raise ValidationError(
             f"压缩包包含绝对路径(可能是 zip slip 攻击): {name}", code=40001
         )
-    # 过滤敏感目录
-    if _ARCHIVE_METADATA_DIRS.search(normalized):
-        return None
-    # 过滤隐藏文件(.gitignore/.env 等敏感配置)
-    if _SENSITIVE_FILE_RE.search(normalized):
+    parts = normalized.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValidationError(
+            f"压缩包包含不安全路径(可能是 zip slip 攻击): {name}", code=40001
+        )
+    if len(normalized.encode("utf-8")) > 2_048:
+        raise ValidationError("压缩包成员路径超过 2048 字节", code=40001)
+    if any(len(part.encode("utf-8")) > 255 for part in parts):
+        raise ValidationError("压缩包成员路径段超过 255 字节", code=40001)
+    if re.fullmatch(r"[A-Za-z]:", parts[0]) or any(":" in part for part in parts):
+        raise ValidationError("压缩包包含盘符或设备路径", code=40001)
+    if filter_sensitive and (
+        _ARCHIVE_METADATA_DIRS.search(normalized) or _SENSITIVE_FILE_RE.search(normalized)
+    ):
         return None
     return normalized
 
 
 def _build_extracted_file(safe_path: str, data: bytes) -> ExtractedFile:
-    """根据解压字节构建 ExtractedFile 对象
-
-    Args:
-        safe_path: 已校验的安全相对路径
-        data: 文件原始字节
-
-    Returns:
-        ExtractedFile: 填充后的文件描述对象
-    """
     from app.ai.language_detector import detect_language
     from app.utils.encoding_utils import to_utf8
 
     name = os.path.basename(safe_path)
     language = detect_language(name)
-    is_bin = _is_binary_data(data)
-    if is_bin:
-        # 二进制文件:content 存 base64(向后兼容),raw_bytes 存原始字节
-        content = to_utf8(data)
+    is_binary = _is_binary_data(data)
+    if is_binary:
         return ExtractedFile(
             name=name,
             path=safe_path,
-            content=content,
+            content=to_utf8(data),
             raw_bytes=data,
             language=language,
             size=len(data),
             is_binary=True,
         )
-    # 文本文件:content 存 UTF-8 文本
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         import chardet
+
         guess = chardet.detect(data)
-        enc = guess.get("encoding") or "utf-8"
-        text = data.decode(enc, errors="replace")
+        text = data.decode(guess.get("encoding") or "utf-8", errors="replace")
     return ExtractedFile(
         name=name,
         path=safe_path,
         content=text,
-        raw_bytes=None,
         language=language,
         size=len(data),
         is_binary=False,
@@ -288,63 +259,12 @@ def _build_extracted_file(safe_path: str, data: bytes) -> ExtractedFile:
 
 
 def _is_binary_data(data: bytes) -> bool:
-    """判断字节流是否为二进制(含 null 字节则视为二进制)
-
-    Args:
-        data: 待判断字节
-
-    Returns:
-        bool: True 表示二进制
-    """
-    if not data:
-        return False
-    return b"\x00" in data[:8192]
+    return bool(data) and b"\x00" in data[:8192]
 
 
 def _check_file_count(count: int) -> None:
-    """校验解压后文件数量是否超限
-
-    Args:
-        count: 压缩包内的文件数量
-
-    Raises:
-        ValidationError: 超过 MAX_EXTRACTED_FILES 上限
-    """
     if count > MAX_EXTRACTED_FILES:
         raise ValidationError(
             f"压缩包内文件数量 {count} 超过上限 {MAX_EXTRACTED_FILES}",
-            code=40001,
-        )
-
-
-def _check_single_size(size: int, path: str) -> None:
-    """校验单个文件大小是否超限
-
-    Args:
-        size: 文件字节数
-        path: 文件路径(用于错误提示)
-
-    Raises:
-        ValidationError: 超过 MAX_SINGLE_FILE_SIZE 上限
-    """
-    if size > MAX_SINGLE_FILE_SIZE:
-        raise ValidationError(
-            f"压缩包内文件 {path} 大小 {size} 字节超过单文件上限 {MAX_SINGLE_FILE_SIZE} 字节",
-            code=40001,
-        )
-
-
-def _check_total_size(total: int) -> None:
-    """校验解压累计总大小是否超限
-
-    Args:
-        total: 累计字节数
-
-    Raises:
-        ValidationError: 超过 MAX_TOTAL_SIZE 上限
-    """
-    if total > MAX_TOTAL_SIZE:
-        raise ValidationError(
-            f"压缩包解压后总大小 {total} 字节超过上限 {MAX_TOTAL_SIZE} 字节",
             code=40001,
         )

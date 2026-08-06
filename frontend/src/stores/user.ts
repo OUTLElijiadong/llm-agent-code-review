@@ -185,15 +185,20 @@ export const useUserStore = defineStore('user', () => {
     dataScope.value = null
   }
 
+  /** 清空会话本地状态(登录失效/单设备被顶下线时调用) */
+  function clearSession(): void {
+    token.value = ''
+    profile.value = null
+    clearRbacState()
+    clearToken()
+  }
+
   /**
    * 退出登录,清除本地状态与 RBAC 权限
    * @returns void
    */
   function logout(): void {
-    token.value = ''
-    profile.value = null
-    clearRbacState()
-    clearToken()
+    clearSession()
   }
 
   /**
@@ -239,6 +244,7 @@ export const useUserStore = defineStore('user', () => {
     hasRole,
     isAdmin,
     isSuperAdmin,
+    clearSession,
     logout,
   }
 })

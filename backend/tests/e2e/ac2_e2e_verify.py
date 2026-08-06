@@ -1,7 +1,7 @@
 """AC2 端到端验证脚本
 
 通过 HTTP API 完整执行一次代码审计流程,验证 agent_label 是否正确落库:
-1. 登录(admin/admin123)获取 JWT
+1. 使用显式提供的 admin 口令获取 JWT
 2. 创建项目(AC2-E2E-Test, language=python)
 3. 在线创建代码文件(vulnerable_ac2_e2e.py, 含 4 个已知漏洞)
 4. 启动审查任务(review_type=security)
@@ -13,12 +13,13 @@
     # 在 backend 容器内执行(推荐,容器内有 httpx 与项目源码)
     docker exec cr_backend python3 /app/tests/e2e/ac2_e2e_verify.py \
         --base-url http://127.0.0.1:8000 \
-        --username admin --password admin123
+        --username admin --password "$ADMIN_PASSWORD"
 
     # 或在宿主机执行(需安装 httpx)
     python3 ac2_e2e_verify.py --base-url http://127.0.0.1:8000
 """
 import argparse
+import os
 import sys
 import time
 
@@ -475,13 +476,19 @@ def main() -> int:
         help="后端 API 基地址(默认 http://127.0.0.1:8000)",
     )
     parser.add_argument("--username", default="admin", help="登录用户名")
-    parser.add_argument("--password", default="admin123", help="登录密码")
+    parser.add_argument(
+        "--password",
+        default=os.environ.get("ADMIN_PASSWORD", ""),
+        help="登录密码(也可由 ADMIN_PASSWORD 提供)",
+    )
     parser.add_argument(
         "--project-name",
         default=f"AC2-E2E-{int(time.time())}",
         help="项目名(默认带时间戳避免重复)",
     )
     args = parser.parse_args()
+    if not args.password:
+        parser.error("必须通过 --password 或 ADMIN_PASSWORD 提供管理员口令")
 
     print("=" * 72)
     print("AC2 端到端验证 — 验证 ai_call_log.agent_label 是否正确落库")

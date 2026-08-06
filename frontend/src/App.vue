@@ -1,15 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PrismLoading from '@/components/common/PrismLoading.vue'
-import { setupSecurityAlerts } from '@/composables/useSecurityAlerts'
 
 const router = useRouter()
 const routeLoading = ref(false)
 let showTimer: number | undefined
 let hideTimer: number | undefined
-/** 安全告警弹窗句柄(仅登录态管理员生效,composable 内部判断) */
-let securityAlertsDispose: (() => void) | null = null
 
 /**
  * 启动路由级加载提示，短跳转延迟展示以避免页面闪烁
@@ -46,19 +43,12 @@ const removeErrorGuard = router.onError(() => {
   stopRouteLoading()
 })
 
-onMounted(() => {
-  securityAlertsDispose = setupSecurityAlerts().dispose
-})
-
 onBeforeUnmount(() => {
   window.clearTimeout(showTimer)
   window.clearTimeout(hideTimer)
   removeBeforeGuard()
   removeAfterGuard()
   removeErrorGuard()
-  // 关闭安全告警 SSE 订阅,避免页面卸载后仍持续弹窗
-  securityAlertsDispose?.()
-  securityAlertsDispose = null
 })
 </script>
 

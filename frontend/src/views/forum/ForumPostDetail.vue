@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { useUserStore } from '@/stores/user'
 import { formatDate } from '@/utils/format'
+import { renderMarkdown } from '@/utils/markdown'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import {
@@ -24,7 +25,7 @@ const loading = ref(false)
 const replyContent = ref('')
 const replying = ref(false)
 
-const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const isAdmin = computed(() => userStore.isAdmin())
 const myId = computed(() => userStore.profile?.id)
 const isAuthor = computed(() => post.value?.user_id === myId.value)
 
@@ -104,7 +105,7 @@ onMounted(load)
         <span>·</span>
         <span>{{ post.view_count }} 浏览</span>
       </div>
-      <div class="post-body">{{ post.content }}</div>
+      <div class="post-body md-body" v-html="renderMarkdown(post.content)"></div>
     </el-card>
 
     <el-card v-if="post" shadow="never" class="reply-card">
@@ -116,7 +117,7 @@ onMounted(load)
           <el-button v-if="r.user_id === myId || isAdmin" link type="danger" size="small"
             class="reply-del" @click="removeReply(r.id)">删除</el-button>
         </div>
-        <div class="reply-body">{{ r.content }}</div>
+        <div class="reply-body md-body" v-html="renderMarkdown(r.content)"></div>
       </div>
       <el-empty v-if="post.replies.length === 0" description="还没有回复" :image-size="80" />
 
@@ -141,6 +142,37 @@ onMounted(load)
   white-space: pre-wrap; line-height: 1.8; font-size: 15px;
   border-top: 1px solid var(--el-border-color-lighter); padding-top: 16px;
 }
+/* Markdown 渲染:帖子/回复经 renderMarkdown 输出 HTML,补齐元素间距与排版 */
+.md-body { white-space: normal; }
+.md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3),
+.md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) {
+  margin: 14px 0 8px; line-height: 1.4; font-weight: 700;
+}
+.md-body :deep(h2) { font-size: 17px; }
+.md-body :deep(h3) { font-size: 15px; }
+.md-body :deep(p) { margin: 8px 0; }
+.md-body :deep(ul), .md-body :deep(ol) { margin: 8px 0; padding-left: 22px; }
+.md-body :deep(li) { margin: 3px 0; }
+.md-body :deep(code) {
+  background: var(--el-fill-color-light); border-radius: 4px;
+  padding: 1px 5px; font-size: 13px; font-family: ui-monospace, monospace;
+}
+.md-body :deep(pre) {
+  background: var(--el-fill-color-light); border-radius: 6px;
+  padding: 10px 12px; overflow-x: auto; margin: 8px 0;
+}
+.md-body :deep(pre code) { background: none; padding: 0; }
+.md-body :deep(blockquote) {
+  margin: 8px 0; padding: 4px 12px; color: var(--el-text-color-secondary);
+  border-left: 3px solid var(--el-border-color);
+}
+.md-body :deep(a) { color: var(--el-color-primary); text-decoration: none; }
+.md-body :deep(a:hover) { text-decoration: underline; }
+.md-body :deep(hr) { border: none; border-top: 1px solid var(--el-border-color-lighter); margin: 14px 0; }
+.md-body :deep(table) { border-collapse: collapse; margin: 8px 0; }
+.md-body :deep(th), .md-body :deep(td) {
+  border: 1px solid var(--el-border-color-lighter); padding: 5px 10px; font-size: 14px;
+}
 .reply-card { margin-top: 16px; }
 .block-title { margin: 0 0 12px; font-size: 15px; }
 .reply-item { padding: 12px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
@@ -149,6 +181,7 @@ onMounted(load)
 .reply-time { color: var(--el-text-color-secondary); font-size: 12px; }
 .reply-del { margin-left: auto; }
 .reply-body { white-space: pre-wrap; line-height: 1.7; margin-top: 6px; }
+.reply-body.md-body { white-space: normal; }
 .reply-editor { margin-top: 16px; }
 .editor-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 </style>

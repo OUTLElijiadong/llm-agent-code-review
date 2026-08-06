@@ -37,4 +37,10 @@ deploy/certbot/
 /*.docx
 
 frontend/coverage/
-frontend/node_modules
+
+# 质量门禁与本地发布运行态
+backend/.coverage*
+backend/coverage*.json
+deploy/.releases/
+deploy/.state/
+deploy/ops.env

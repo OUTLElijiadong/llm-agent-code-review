@@ -216,11 +216,28 @@ class SecretMatch:
     evidence_redacted: str
 
 
+_MAX_CAPTURED_SECRET_CHARS = 512
+
+
 def _redact_value(text: str, head: int = 4, tail: int = 4) -> str:
     """保留前 head + 后 tail 字符,中间打码"""
     if len(text) <= head + tail:
         return "*" * len(text)
-    return f"{text[:head]}{'*' * max(4, len(text) - head - tail)}{text[-tail:]}"
+    return f"{text[:head]}****{text[-tail:]}"
+
+
+def _bounded_match_value(content: str, match: re.Match[str]) -> str:
+    """只复制有界凭据片段，避免恶意超长 token 扩大内存占用。"""
+    try:
+        start, end = match.span(1)
+    except IndexError:
+        start, end = match.span(0)
+    if start < 0 or end < 0:
+        start, end = match.span(0)
+    if end - start <= _MAX_CAPTURED_SECRET_CHARS:
+        return content[start:end]
+    edge = _MAX_CAPTURED_SECRET_CHARS // 2
+    return f"{content[start:start + edge]}...[truncated]...{content[end - edge:end]}"
 
 
 def scan_secrets(content: str, max_per_pattern: int = 20) -> List[SecretMatch]:
@@ -237,20 +254,16 @@ def scan_secrets(content: str, max_per_pattern: int = 20) -> List[SecretMatch]:
         return []
 
     matches: List[SecretMatch] = []
-    lines = content.splitlines()
     for pattern in _PATTERNS:
         hits = 0
-        for line_no, line_text in enumerate(lines, start=1):
+        seen_lines: set[int] = set()
+        for match in pattern.regex.finditer(content):
             if hits >= max_per_pattern:
                 break
-            m = pattern.regex.search(line_text)
-            if not m:
+            line_no = content.count("\n", 0, match.start()) + 1
+            if line_no in seen_lines:
                 continue
-            # group(1) 可能是被引号包裹的实际值;若无分组则用整体匹配
-            try:
-                raw = m.group(1)
-            except IndexError:
-                raw = m.group(0)
+            raw = _bounded_match_value(content, match)
             if not raw or len(raw) < pattern.min_length:
                 continue
             matches.append(
@@ -264,6 +277,7 @@ def scan_secrets(content: str, max_per_pattern: int = 20) -> List[SecretMatch]:
                     evidence_redacted=_redact_value(raw),
                 ),
             )
+            seen_lines.add(line_no)
             hits += 1
     return matches
 

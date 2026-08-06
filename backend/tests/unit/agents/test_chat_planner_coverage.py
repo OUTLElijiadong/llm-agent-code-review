@@ -70,6 +70,14 @@ class FakePlanningAgent:
         return self.result
 
 
+def _privileged_planning_agent() -> SimpleNamespace:
+    """构造拥有 Agent 配置权限的最小规划器 Agent。"""
+
+    return SimpleNamespace(
+        _orchestrator=SimpleNamespace(_can_configure_agents=lambda: True),
+    )
+
+
 class TimeoutFuture:
     """模拟 future.result 规划超时。"""
 
@@ -102,7 +110,7 @@ def test_collect_tools_filters_non_invocable_and_builds_prompt(monkeypatch: pyte
     """工具收集应过滤不可调用 Skill，并把参数、意图和消息写入 prompt。"""
     FakeSkillRegistry.skills = [FakeSkill("demo.run"), FakeSkill("demo.hidden", invocable=False)]
     monkeypatch.setattr(SkillRegistry, "instance", FakeSkillRegistry.instance)
-    planner = ChatPlanner(SimpleNamespace())
+    planner = ChatPlanner(_privileged_planning_agent())
 
     tools = planner._collect_tools()
     prompt = planner._build_plan_prompt(
@@ -126,10 +134,27 @@ def test_collect_tools_degrades_to_fixed_tools_when_registry_fails(monkeypatch: 
     """SkillRegistry 故障时仍应返回 Orchestrator 固定工具。"""
     monkeypatch.setattr(SkillRegistry, "instance", FailingSkillRegistry.instance)
 
-    tools = ChatPlanner(SimpleNamespace())._collect_tools()
+    tools = ChatPlanner(_privileged_planning_agent())._collect_tools()
 
     assert len(tools) == len(ChatPlanner._FIXED_TOOLS)
     assert all(item["type"] == "fixed" for item in tools)
+
+
+def test_collect_tools_hides_global_skills_and_evolution_without_permission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """普通用户规划器不应看到可写全局治理状态的工具。"""
+
+    FakeSkillRegistry.skills = [FakeSkill("demo.self_improve"), FakeSkill("demo.proactive")]
+    monkeypatch.setattr(SkillRegistry, "instance", FakeSkillRegistry.instance)
+
+    tools = ChatPlanner(SimpleNamespace())._collect_tools()
+    names = {tool["name"] for tool in tools}
+
+    assert "trigger_evolution" not in names
+    assert "demo.self_improve" not in names
+    assert "demo.proactive" not in names
+    assert "list_projects" in names
 
 
 def test_call_llm_for_plan_restores_agent_settings_on_success() -> None:
@@ -206,7 +231,7 @@ def test_validate_plan_rejects_unknown_tool_and_accepts_long_chain() -> None:
 
 def test_fixed_tool_schema_and_validation_share_contract_source() -> None:
     """Planner 应展示真实 required/extra Schema，并规范化固定工具兼容别名。"""
-    planner = ChatPlanner(SimpleNamespace())
+    planner = ChatPlanner(_privileged_planning_agent())
     tools = planner._collect_tools()
     start_review = next(item for item in tools if item["name"] == "start_review")
     plan = [ToolCall("list_projects", {"project_query": "legacy"})]
@@ -225,7 +250,7 @@ def test_fixed_tool_schema_and_validation_share_contract_source() -> None:
 
 def test_start_review_replaces_planner_file_reference_with_server_resolution() -> None:
     """Planner 动态文件引用应交由 Orchestrator 解析项目 active 文件。"""
-    planner = ChatPlanner(SimpleNamespace())
+    planner = ChatPlanner(_privileged_planning_agent())
     tools = planner._collect_tools()
     plan = [
         ToolCall(

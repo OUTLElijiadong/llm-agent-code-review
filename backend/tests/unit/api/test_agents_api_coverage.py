@@ -63,7 +63,7 @@ class TimeoutThenCancel:
         self.calls += 1
         if hasattr(awaitable, "close"):
             awaitable.close()
-        assert timeout == 25.0
+        assert timeout == module._SSE_SESSION_CHECK_INTERVAL
         if self.calls == 1:
             raise asyncio.TimeoutError
         raise asyncio.CancelledError
@@ -254,30 +254,27 @@ def test_admin_agent_routes_request_unscoped_data(monkeypatch: pytest.MonkeyPatc
 def test_resolve_sse_user_accepts_bearer_and_query_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     """SSE 鉴权应优先 Bearer token，并在无 Bearer 时接受查询参数 token。"""
     user = SimpleNamespace(id=7, status=1)
-    db = SimpleNamespace(get=MagicMock(return_value=user))
-    decoder = MagicMock(return_value={"sub": "7"})
-    monkeypatch.setattr(module, "decode_token", decoder)
+    db = object()
+    authenticate = MagicMock(return_value=user)
+    monkeypatch.setattr(module, "authenticate_access_token", authenticate)
 
     assert module._resolve_sse_user("Bearer header-token", "query-token", db) is user
-    decoder.assert_called_once_with("header-token")
-    db.get.assert_called_once_with(module.User, 7)
+    authenticate.assert_called_once_with("header-token", db)
 
-    decoder.reset_mock()
-    db.get.reset_mock()
+    authenticate.reset_mock()
     assert module._resolve_sse_user("Basic ignored", "query-token", db) is user
-    decoder.assert_called_once_with("query-token")
-    db.get.assert_called_once_with(module.User, 7)
+    authenticate.assert_called_once_with("query-token", db)
 
 
 def test_resolve_sse_user_rejects_missing_or_invalid_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     """SSE 鉴权应把缺失 token 与解码失败分别映射为稳定 AuthError。"""
-    db = SimpleNamespace(get=MagicMock())
+    db = object()
 
     with pytest.raises(AuthError) as missing:
         module._resolve_sse_user(None, None, db)
     assert missing.value.code == 40100
 
-    monkeypatch.setattr(module, "decode_token", MagicMock(side_effect=ValueError("bad token")))
+    monkeypatch.setattr(module, "authenticate_access_token", MagicMock(side_effect=AuthError("bad", code=40101)))
     with pytest.raises(AuthError) as invalid:
         module._resolve_sse_user("Bearer broken", None, db)
     assert invalid.value.code == 40101
@@ -289,8 +286,12 @@ def test_resolve_sse_user_rejects_missing_or_disabled_accounts(
     resolved_user: Any,
 ) -> None:
     """SSE 鉴权应拒绝不存在或已禁用账号；参数 resolved_user 模拟数据库结果。"""
-    monkeypatch.setattr(module, "decode_token", MagicMock(return_value={"sub": "7"}))
-    db = SimpleNamespace(get=MagicMock(return_value=resolved_user))
+    db = object()
+    monkeypatch.setattr(
+        module,
+        "authenticate_access_token",
+        MagicMock(side_effect=ForbiddenError("账号不存在或已禁用", code=40301)),
+    )
 
     with pytest.raises(ForbiddenError) as exc:
         module._resolve_sse_user("Bearer valid", None, db)
@@ -305,6 +306,7 @@ async def test_sse_filters_other_users_but_delivers_system_and_owner_events(
     """普通用户 SSE 应过滤他人事件，并保留系统级与本人事件。"""
     bus = FakeEventBus([_event("other", 8), _event("system", None), _event("owner", 7)])
     monkeypatch.setattr(module, "_resolve_sse_user", MagicMock(return_value=SimpleNamespace(id=7, role="member")))
+    monkeypatch.setattr(module, "_is_sse_session_active", MagicMock(return_value=True))
     monkeypatch.setattr(module.AgentEventBus, "instance", MagicMock(return_value=bus))
 
     response = await module.stream_agent_events(replay=9, authorization="Bearer x", token=None, db=object())
@@ -339,6 +341,7 @@ async def test_sse_emits_heartbeat_and_stops_on_cancellation(monkeypatch: pytest
     waiter = TimeoutThenCancel()
     bus = FakeEventBus([])
     monkeypatch.setattr(module, "_resolve_sse_user", MagicMock(return_value=SimpleNamespace(id=7, role="member")))
+    monkeypatch.setattr(module, "_is_sse_session_active", MagicMock(return_value=True))
     monkeypatch.setattr(module.AgentEventBus, "instance", MagicMock(return_value=bus))
     monkeypatch.setattr(module.asyncio, "wait_for", waiter)
 

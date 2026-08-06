@@ -22,6 +22,8 @@ declare module 'vue-router' {
     roles?: string[]
     /** 需要的权限点列表(满足任一即可,admin 自动放行) */
     permissions?: string[]
+    /** 是否仅允许唯一超级管理员 admin,此限制不可被普通管理员绕过 */
+    superAdmin?: boolean
   }
 }
 
@@ -41,7 +43,7 @@ export function setupGuards(router: Router): void {
           }
           return { path: getRoleHomePath(user.profile?.role), replace: true }
         } catch {
-          user.logout()
+          user.clearSession()
         }
       }
       return true
@@ -55,7 +57,7 @@ export function setupGuards(router: Router): void {
       try {
         await user.fetchProfile()
       } catch {
-        user.logout()
+        user.clearSession()
         return { path: '/login', query: { redirect: to.fullPath } }
       }
     }
@@ -64,7 +66,12 @@ export function setupGuards(router: Router): void {
       return { path: getRoleHomePath(user.profile?.role), replace: true }
     }
 
-    // admin 角色绕过后续所有 RBAC 检查
+    // 唯一超级管理员限制必须先于 admin 的通用 RBAC 放行。
+    if (to.meta.superAdmin && !user.isSuperAdmin()) {
+      return { path: '/403' }
+    }
+
+    // admin 角色绕过后续普通 RBAC 检查
     const isAdmin = user.isAdmin()
 
     // 历史单角色字段检查(向后兼容)

@@ -16,6 +16,7 @@ v2.0 新增:
 """
 import asyncio
 import json
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, Query
@@ -27,12 +28,11 @@ from app.agents import AgentContext
 from app.agents.clarify_store import ClarifyStore
 from app.agents.event_bus import AgentEventBus
 from app.agents.orchestrator import get_request_orchestrator
-from app.core.database import get_db
-from app.core.dependencies import get_current_user, require_admin
+from app.core.database import SessionLocal, get_db
+from app.core.dependencies import authenticate_access_token, get_current_user, require_admin
 from app.core.exceptions import AuthError, ForbiddenError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
-from app.core.security import decode_token
 from app.models.user import User
 from app.schemas.agent import (
     AgentOverviewOut,
@@ -49,16 +49,9 @@ from app.schemas.agent import (
 )
 from app.schemas.common import Resp
 from app.services import agent_service, skill_service
-from app.services.declarative_agent_runtime import PublishedAgentCatalog
 
 router = APIRouter()
-
-
-def _custom_runtime_metadata(db: Session) -> list[dict]:
-    """真实请求合并数据库目录；轻量测试桩没有 query 时返回空目录。"""
-    if not hasattr(db, "query"):
-        return []
-    return PublishedAgentCatalog.runtime_metadata(db)
+_SSE_SESSION_CHECK_INTERVAL = 2.0
 
 
 @router.get("", response_model=Resp[list[AgentProfileOut]],
@@ -82,7 +75,7 @@ def get_usage(
     user: User = Depends(get_current_user),
 ):
     """每个代理的调用统计 (普通用户仅自己,管理员看全部)"""
-    user_id = None if user.role == "admin" else user.id
+    user_id = None if user.role in {"admin", "super_admin"} else user.id
     rows = agent_service.get_usage(db, user_id)
     return Resp(data=[AgentUsageOut(**r) for r in rows])
 
@@ -94,7 +87,7 @@ def get_overview(
     user: User = Depends(get_current_user),
 ):
     """Agent 中心首屏一次性返回:画像 + 映射 + 统计"""
-    user_id = None if user.role == "admin" else user.id
+    user_id = None if user.role in {"admin", "super_admin"} else user.id
     data = agent_service.get_overview(db, user_id)
     return Resp(data=AgentOverviewOut(**data))
 
@@ -112,9 +105,8 @@ def list_runtime_agents(
 
     数据源是 AgentRegistry.instance(),确保 UI 显示数量与后端实际运行 Agent 一致。
     """
-    user_id = None if user.role == "admin" else user.id
+    user_id = None if user.role in {"admin", "super_admin"} else user.id
     rows = agent_service.get_runtime_agents(db, user_id)
-    rows.extend(_custom_runtime_metadata(db))
     return Resp(data=[AgentRuntimeOut(**r) for r in rows])
 
 
@@ -125,15 +117,7 @@ def get_runtime_summary(
     db: Session = Depends(get_db),
 ):
     """返回内置注册中心与已发布自定义 Agent 的合并汇总。"""
-    summary = agent_service.get_runtime_summary()
-    custom = _custom_runtime_metadata(db)
-    buckets = {item["category"]: item["count"] for item in summary["by_category"]}
-    if custom:
-        buckets["custom_review"] = buckets.get("custom_review", 0) + len(custom)
-    return Resp(data=AgentRuntimeSummaryOut(
-        total=summary["total"] + len(custom),
-        by_category=[{"category": key, "count": value} for key, value in sorted(buckets.items())],
-    ))
+    return Resp(data=AgentRuntimeSummaryOut(**agent_service.get_runtime_summary(db)))
 
 
 @router.get("/situation", response_model=Resp[AgentSituationOut],
@@ -144,7 +128,7 @@ def get_situation(
     user: User = Depends(get_current_user),
 ):
     """v2.0: 态势感知面板数据(在岗/今日调用/N 分钟波形/热点)"""
-    user_id = None if user.role == "admin" else user.id
+    user_id = None if user.role in {"admin", "super_admin"} else user.id
     data = agent_service.get_situation(db, user_id, minutes)
     return Resp(data=AgentSituationOut(**data))
 
@@ -152,7 +136,7 @@ def get_situation(
 # =================== v2.0 M2: Agent 调用反馈 SSE ===================
 
 
-def _resolve_sse_user(authorization: Optional[str], token: Optional[str], db: Session) -> User:
+def _resolve_sse_token(authorization: Optional[str], token: Optional[str]) -> str:
     """SSE 专用鉴权: 从 Authorization 头或 token 查询参数解析用户。
 
     EventSource/部分流式场景无法自定义请求头,故同时支持 ?token= 查询参数。
@@ -165,14 +149,24 @@ def _resolve_sse_user(authorization: Optional[str], token: Optional[str], db: Se
         raw = token
     if not raw:
         raise AuthError("缺少token", code=40100)
-    try:
-        payload = decode_token(raw)
-    except Exception:
-        raise AuthError("token非法或已过期", code=40101)
-    u = db.get(User, int(payload["sub"]))
-    if not u or u.status != 1:
-        raise ForbiddenError("账号不存在或已禁用", code=40301)
-    return u
+    return raw
+
+
+def _resolve_sse_user(authorization: Optional[str], token: Optional[str], db: Session) -> User:
+    """解析 SSE 凭据并执行与 HTTP 请求完全相同的会话版本校验。"""
+
+    return authenticate_access_token(_resolve_sse_token(authorization, token), db)
+
+
+def _is_sse_session_active(raw_token: str) -> bool:
+    """使用独立短会话检查长连接是否仍为当前设备会话。"""
+
+    with SessionLocal() as session_db:
+        try:
+            authenticate_access_token(raw_token, session_db)
+            return True
+        except Exception:
+            return False
 
 
 @router.get("/events")
@@ -192,8 +186,9 @@ async def stream_agent_events(
         replay: 订阅初期回放最近 N 条历史事件,默认 20
         token: 可选,SSE 鉴权令牌(等价于 Authorization: Bearer)
     """
+    raw_token = _resolve_sse_token(authorization, token)
     current_user = _resolve_sse_user(authorization, token, db)
-    is_admin = current_user.role == "admin"
+    is_admin = current_user.role in {"admin", "super_admin"}
     current_user_id = current_user.id
 
     def _should_deliver(ev) -> bool:
@@ -216,17 +211,27 @@ async def stream_agent_events(
 
     async def event_source():
         bus = AgentEventBus.instance()
+        last_session_check = time.monotonic()
         yield ":connected\n\n"
         try:
             sub = bus.subscribe(replay=replay)
             while True:
                 try:
-                    ev = await asyncio.wait_for(sub.__anext__(), timeout=25.0)
+                    ev = await asyncio.wait_for(sub.__anext__(), timeout=_SSE_SESSION_CHECK_INTERVAL)
+                    now = time.monotonic()
+                    if now - last_session_check >= _SSE_SESSION_CHECK_INTERVAL:
+                        last_session_check = now
+                        if not _is_sse_session_active(raw_token):
+                            yield "event: auth_expired\ndata: {\"code\":40102}\n\n"
+                            return
                     if not _should_deliver(ev):
                         continue
                     data = json.dumps(ev.to_dict(), ensure_ascii=False)
                     yield f"event: agent\ndata: {data}\n\n"
                 except asyncio.TimeoutError:
+                    if not _is_sse_session_active(raw_token):
+                        yield "event: auth_expired\ndata: {\"code\":40102}\n\n"
+                        return
                     yield ":heartbeat\n\n"
         except asyncio.CancelledError:
             return
@@ -264,7 +269,7 @@ def submit_clarification(
     if pending is None:
         return Resp(code=41001, message="追问已过期或不存在,请重新提问", data={})
     owner_user_id = pending.get("user_id")
-    if owner_user_id is not None and owner_user_id != user.id and user.role != "admin":
+    if owner_user_id is not None and owner_user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无权回填此追问", code=40300)
     intent_name = pending["intent"]
     answers = payload.answers or {}

@@ -117,6 +117,198 @@ def test_frontend_admin_governance_api_paths_match_backend_routes():
     assert not missing
 
 
+def test_external_knowledge_source_api_requires_unique_super_admin(monkeypatch):
+    """普通管理员可读来源，但不能保存或抓取；唯一 admin 超管可执行。"""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    session = Session()
+    ordinary = User(
+        username="manager",
+        password="x",
+        email="manager@example.com",
+        nickname="普通管理员",
+        role="admin",
+        status=1,
+        token_version=0,
+    )
+    super_user = User(
+        username="admin",
+        password="x",
+        email="admin@example.com",
+        nickname="超级管理员",
+        role="super_admin",
+        status=1,
+        token_version=0,
+    )
+    super_role = Role(name="超级管理员", code="super_admin", status="active", is_builtin=1)
+    session.add_all([ordinary, super_user, super_role])
+    session.flush()
+    session.add(UserRole(user_id=super_user.id, role_id=super_role.id))
+    session.commit()
+
+    def override_db():
+        yield session
+
+    app.dependency_overrides[get_db] = override_db
+    payload = {
+        "agent_code": "manager",
+        "source_type": "inline",
+        "source_uri": "安全知识",
+        "whitelist": 1,
+        "enabled": 1,
+        "config_json": {"content": "只有超管可修改来源"},
+    }
+    try:
+        client = TestClient(app)
+        ordinary_token = create_access_token(ordinary.id, ordinary.role, ordinary.token_version)
+        super_token = create_access_token(super_user.id, super_user.role, super_user.token_version)
+
+        readable = client.get(
+            "/api/admin/governance/knowledge/sources",
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        denied_upsert = client.post(
+            "/api/admin/governance/knowledge/sources",
+            json=payload,
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        denied_crawl = client.post(
+            "/api/admin/governance/knowledge/crawl",
+            params={"agent_code": "manager"},
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        allowed = client.post(
+            "/api/admin/governance/knowledge/sources",
+            json=payload,
+            headers={"Authorization": f"Bearer {super_token}"},
+        )
+
+        ordinary_jobs = client.get(
+            "/api/admin/jobs",
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        super_jobs = client.get(
+            "/api/admin/jobs",
+            headers={"Authorization": f"Bearer {super_token}"},
+        )
+        crawl_job = next(item for item in super_jobs.json()["data"] if item["job_type"] == "crawl")
+        crawl_row = session.get(AgentJob, crawl_job["id"])
+        runs_before = session.query(AgentJobRun).filter(AgentJobRun.job_id == crawl_job["id"]).count()
+        denied_job_update = client.put(
+            f"/api/admin/jobs/{crawl_job['id']}",
+            json={"status": "disabled"},
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        denied_job_run = client.post(
+            f"/api/admin/jobs/{crawl_job['id']}/run",
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        session.refresh(crawl_row)
+        status_after_denied_update = crawl_row.status
+        runs_after_denied_run = session.query(AgentJobRun).filter(AgentJobRun.job_id == crawl_job["id"]).count()
+        monkeypatch.setattr(
+            "app.services.scheduler_service._execute_job",
+            lambda _db, _job: {"doc_count": 1},
+        )
+        allowed_job_update = client.put(
+            f"/api/admin/jobs/{crawl_job['id']}",
+            json={"status": "disabled"},
+            headers={"Authorization": f"Bearer {super_token}"},
+        )
+        allowed_job_run = client.post(
+            f"/api/admin/jobs/{crawl_job['id']}/run",
+            headers={"Authorization": f"Bearer {super_token}"},
+        )
+        ordinary_job_runs = client.get(
+            "/api/admin/jobs/runs",
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        super_job_runs = client.get(
+            "/api/admin/jobs/runs",
+            headers={"Authorization": f"Bearer {super_token}"},
+        )
+
+        sensitive_approval = ApprovalItem(
+            title="服务器操作审批",
+            action="operations.restart_service",
+            resource="production",
+            risk_level="critical",
+            status="pending",
+            decision="escalate",
+        )
+        program_approval = ApprovalItem(
+            title="程序内容审批",
+            action="project.update",
+            resource="project:1",
+            risk_level="high",
+            status="pending",
+            decision="escalate",
+        )
+        session.add_all([sensitive_approval, program_approval])
+        session.commit()
+        ordinary_approvals = client.get(
+            "/api/admin/approvals",
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        super_approvals = client.get(
+            "/api/admin/approvals",
+            headers={"Authorization": f"Bearer {super_token}"},
+        )
+        denied_sensitive_approval = client.post(
+            f"/api/admin/approvals/{sensitive_approval.id}/approve",
+            json={"note": "越权尝试"},
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        denied_sensitive_rejection = client.post(
+            f"/api/admin/approvals/{sensitive_approval.id}/reject",
+            json={"note": "越权尝试"},
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+
+        assert readable.status_code == 200
+        assert denied_upsert.status_code == 403
+        assert denied_upsert.json()["code"] == 40322
+        assert denied_crawl.status_code == 403
+        assert denied_crawl.json()["code"] == 40322
+        assert allowed.status_code == 200
+        assert allowed.json()["data"]["source_type"] == "inline"
+        assert ordinary_jobs.status_code == 200
+        assert super_jobs.status_code == 200
+        assert {item["job_type"] for item in ordinary_jobs.json()["data"]}.isdisjoint({"crawl", "ops_health_check"})
+        assert {"crawl", "ops_health_check"}.issubset({item["job_type"] for item in super_jobs.json()["data"]})
+        assert denied_job_update.status_code == 403
+        assert denied_job_update.json()["code"] == 40322
+        assert denied_job_run.status_code == 403
+        assert denied_job_run.json()["code"] == 40322
+        assert status_after_denied_update == "enabled"
+        assert runs_after_denied_run == runs_before
+        assert allowed_job_update.status_code == 200
+        assert allowed_job_run.status_code == 200
+        assert allowed_job_run.json()["data"]["job_id"] == crawl_job["id"]
+        assert all(item["job_id"] != crawl_job["id"] for item in ordinary_job_runs.json()["data"])
+        assert any(item["job_id"] == crawl_job["id"] for item in super_job_runs.json()["data"])
+        assert ordinary_approvals.status_code == 200
+        assert super_approvals.status_code == 200
+        assert sensitive_approval.id not in {item["id"] for item in ordinary_approvals.json()["data"]}
+        assert program_approval.id in {item["id"] for item in ordinary_approvals.json()["data"]}
+        assert sensitive_approval.id in {item["id"] for item in super_approvals.json()["data"]}
+        assert denied_sensitive_approval.status_code == 403
+        assert denied_sensitive_approval.json()["code"] == 40322
+        assert denied_sensitive_rejection.status_code == 403
+        assert denied_sensitive_rejection.json()["code"] == 40322
+        session.refresh(sensitive_approval)
+        assert sensitive_approval.status == "pending"
+        assert sensitive_approval.decided_by is None
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        session.close()
+        engine.dispose()
+
 
 def test_admin_governance_api_business_loop(admin_api_client):
     """验证管理端治理 API 已真实接入端点并形成业务闭环。"""

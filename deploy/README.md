@@ -17,7 +17,8 @@
 
 - Backend 生产镜像采用 builder/runtime 双阶段构建，Docker CLI 体积由 `964 MB` 降至 `494 MB`，最终镜像不含编译器和开发头文件。
 - 全新隔离 MySQL 已完成 Alembic `001 → 009`，最终为 52 张表（51 ORM + `alembic_version`）。
-- Backend 容器 `/healthz`、`/readyz`、`/metrics` 返回 200，生产 `/docs`、`/redoc`、`/openapi.json` 返回 404。
+- Backend 容器 `/healthz`、`/readyz`、`/metrics` 返回 200；公网只放行 `/healthz`
+  与最小 `/readyz` 契约（仅 `status`/`release`），`/metrics`、`/docs`、`/redoc`、`/openapi.json` 返回 404。
 - ClamAV/YARA 已覆盖干净、EICAR、YARA WebShell、引擎不可达降级和生产 fail-closed；ClamAV 未发布宿主端口。
 - Nginx 已通过 `nginx -t`、HTTP 308、HTTPS 首页和公网敏感运维路径拒绝验证。
 - 真实隔离 MySQL 备份已通过 gzip、SHA-256、元数据、恢复和临时库清理验证。
@@ -106,7 +107,7 @@ cd deploy
 ./deploy.sh frontend --revision "$release_sha"
 ```
 
-可用目标为 `all`、`backend`、`frontend`。Backend/all 流程会再次执行强制发布前备份，并由目标 Backend 镜像执行 `alembic upgrade head`。数据库结构迁移使用一次性容器共享 MySQL 网络命名空间，仅通过 `root@localhost` 完成 DDL；长期运行的 Backend 仍使用普通应用数据库账号，且不会开启 `log_bin_trust_function_creators` 这类全局放宽开关。构建、迁移、容器健康、`/healthz`、`/readyz` 或 HTTPS 冒烟失败时，发布立即停止并在条件允许时切回上一应用镜像。
+可用目标为 `all`、`backend`、`frontend`。Backend/all 流程会再次执行强制发布前备份，并由目标 Backend 镜像执行 `alembic upgrade head`。数据库结构迁移使用一次性容器共享 MySQL 网络命名空间，并通过 `127.0.0.1` TCP 连接 `root@%` 完成 DDL；root 凭据只进入该一次性容器，长期运行的 Backend 仍使用普通应用数据库账号，且不会开启 `log_bin_trust_function_creators` 这类全局放宽开关。构建、迁移、容器健康、`/healthz`、`/readyz` 或 HTTPS 冒烟失败时，发布立即停止并在条件允许时切回上一应用镜像。
 
 发布状态保存在 `deploy/.releases/`：
 

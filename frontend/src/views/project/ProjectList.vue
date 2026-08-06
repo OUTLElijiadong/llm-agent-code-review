@@ -128,8 +128,8 @@
             </td>
             <td class="col-act" @click.stop>
               <el-button link type="primary" @click="handleView(row)">详情</el-button>
-              <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
-              <el-button link type="danger" @click="handleDelete(row.id)">删除</el-button>
+              <el-button v-if="row.can_update" link type="primary" @click="handleEdit(row)">编辑</el-button>
+              <el-button v-if="row.can_delete" link type="danger" @click="handleDelete(row.id)">删除</el-button>
             </td>
           </tr>
           <tr v-if="!loading && projects.length === 0">
@@ -174,6 +174,28 @@
         <footer class="card-foot">
           <div class="foot-meta">
             <span class="font-mono">{{ formatDate(row.last_review_at) || '暂未审查' }}</span>
+          </div>
+          <div v-if="row.can_update || row.can_delete" class="card-actions" @click.stop>
+            <el-tooltip v-if="row.can_update" content="编辑项目" placement="top">
+              <el-button
+                class="card-action"
+                link
+                type="primary"
+                :icon="EditIcon"
+                aria-label="编辑项目"
+                @click="handleEdit(row)"
+              />
+            </el-tooltip>
+            <el-tooltip v-if="row.can_delete" content="删除项目" placement="top">
+              <el-button
+                class="card-action"
+                link
+                type="danger"
+                :icon="DeleteIcon"
+                aria-label="删除项目"
+                @click="handleDelete(row.id)"
+              />
+            </el-tooltip>
           </div>
           <div class="mini-gauge sm">
             <svg viewBox="0 0 36 36" class="gauge-svg">
@@ -231,9 +253,12 @@
         <el-form-item label="描述">
           <el-input v-model="remoteForm.description" type="textarea" :rows="2" maxlength="500" />
         </el-form-item>
+        <el-form-item label="导入模式">
+          <el-checkbox v-model="remoteForm.audit_mode">隔离整包审计</el-checkbox>
+        </el-form-item>
       </el-form>
       <el-alert
-        title="仅接受公开 HTTPS 归档，服务器会先校验地址、大小和压缩包路径，再执行恶意软件扫描。"
+        title="仅接受公开 HTTPS 归档，服务器会先校验地址和压缩包路径，再执行恶意软件扫描。"
         type="info"
         :closable="false"
         show-icon
@@ -249,7 +274,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Connection, Plus, Search } from '@element-plus/icons-vue'
+import { Connection, Delete as DeleteIcon, Edit as EditIcon, Plus, Search } from '@element-plus/icons-vue'
 
 import dayjs from 'dayjs'
 import { getProjects, deleteProject, createProject, updateProject, importRemoteProject } from '@/api/project'
@@ -280,7 +305,7 @@ const formMode = ref<'create' | 'edit'>('create')
 const editingProject = ref<ProjectOut | null>(null)
 const remoteVisible = ref(false)
 const remoteLoading = ref(false)
-const remoteForm = ref({ url: '', project_name: '', description: '' })
+const remoteForm = ref({ url: '', project_name: '', description: '', audit_mode: false })
 
 const activeCount = computed(() => projects.value.filter((p) => p.status === 'active').length)
 const archivedCount = computed(() => projects.value.filter((p) => p.status === 'archived').length)
@@ -408,10 +433,11 @@ async function submitRemoteImport(): Promise<void> {
       url: remoteForm.value.url.trim(),
       project_name: remoteForm.value.project_name.trim(),
       description: remoteForm.value.description.trim() || undefined,
+      audit_mode: remoteForm.value.audit_mode,
     })
     ElMessage.success(`远程源码导入完成，共 ${result.file_count} 个文件`)
     remoteVisible.value = false
-    remoteForm.value = { url: '', project_name: '', description: '' }
+    remoteForm.value = { url: '', project_name: '', description: '', audit_mode: false }
     await fetchProjects()
     router.push(`/projects/${result.id}`)
   } catch {
@@ -783,8 +809,27 @@ onMounted(() => {
 }
 
 .foot-meta {
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
   color: var(--gray-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin: 0 6px;
+}
+
+.card-action {
+  width: 30px;
+  height: 30px;
+  padding: 0;
 }
 
 .card-empty { grid-column: 1 / -1; }

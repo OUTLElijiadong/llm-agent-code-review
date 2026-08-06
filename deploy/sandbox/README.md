@@ -67,9 +67,12 @@ deploy/sandbox/install.sh --apply --deploy-dir /opt/code-review/deploy
 
 预检会验证 `docker`、`python3`、`runsc`、`systemd-analyze`、普通文件/权限/归属、
 service 模板的 root 所有权与只读安全模式、五个 Dockerfile 的摘要门禁、配置一致性、
-五个本地镜像和 systemd 单元。只有预检全绿才会创建
+五个本地镜像、固定摘要的官方 Playwright MCP 镜像、两个只读浏览器执行脚本和
+systemd 单元。只有预检全绿才会创建
 `prism-sandbox` 账户、安装单元并启动服务；启动后必须通过
-`/run/prism-sandbox/agent.sock` 的 Bearer `/health` 且返回 `ready=true`。令牌不会
+`/var/lib/prism-sandbox/agent.sock` 的 Bearer `/health`，且基础 worker 与
+`browser_blackbox` 都返回 `ready=true`。浏览器只加入内部网络，通过只允许沙箱已授权
+HTTPS origin 与固定公网 IPv4 的代理出站；浏览器容器没有直接外网和外部 DNS。令牌不会
 被脚本打印。安装脚本默认 dry-run，未加 `--apply` 不会创建或启动任何资源。
 
 `prism-sandbox` 属于 Docker 组，而 Docker 组在主机上等价于 root。因此建议把
@@ -100,7 +103,7 @@ systemctl reload nginx
    安全组的 TCP 443 来源应限制为 Backend 的固定公网出口；当前 Backend 若确实
    直接以 `81.70.251.90` 出网，可用 `81.70.251.90/32`，但必须先核对 NAT 后的实际
    出口地址。不要默认放行 `0.0.0.0/0`，证书签发临时端口用完后立即关闭。
-3. 确认本机 `/run/prism-sandbox/agent.sock` 的组权限为 `0660`，并重启 Nginx
+3. 确认本机 `/var/lib/prism-sandbox/agent.sock` 的组权限为 `0660`，并重启 Nginx
    使新增的组成员生效。
 4. 在平台的超级管理员界面注册 Worker，或由超级管理员调用
    `POST /api/v1/sandboxes/workers`：`worker_type=managed`、`transport=https`、

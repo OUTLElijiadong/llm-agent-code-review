@@ -27,6 +27,7 @@ import {
   Key,
   Stamp,
   UserFilled,
+  Monitor,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import {
@@ -40,6 +41,7 @@ interface MenuItem {
   title: string
   icon: typeof HomeFilled
   admin?: boolean
+  superAdmin?: boolean
   roles?: UserRole[]
 }
 
@@ -65,6 +67,7 @@ const menuItems: MenuItem[] = [
   { path: '/issues',    title: '问题追踪',   icon: Warning,          roles: ['user', 'reviewer'] },
   { path: '/reports',   title: '审查报告',   icon: DataBoard,        roles: ['user', 'reviewer'] },
   { path: '/agents',    title: 'Agent 中心', icon: Cpu,              roles: ['admin', 'user', 'reviewer'] },
+  { path: '/sandboxes', title: '代码沙箱',   icon: Monitor,          roles: ['admin', 'user', 'reviewer'] },
   { path: '/agent-studio', title: 'Agent 工坊', icon: EditPen,       roles: ['admin', 'reviewer'] },
   { path: '/security',  title: '安全中心',   icon: Aim,              roles: ['admin', 'user', 'reviewer'] },
   { path: '/rules',     title: '审查规则',   icon: List,             roles: ['user', 'reviewer'] },
@@ -84,8 +87,9 @@ const adminItems: MenuItem[] = [
   { path: '/admin/ai-logs',        title: 'Agent 调用日志', icon: ChatDotRound,  admin: true },
   { path: '/admin/audit',          title: '系统操作审计',    icon: Lock,          admin: true },
   { path: '/admin/evolution',      title: 'Agent 自进化',    icon: MagicStick,    admin: true },
-  { path: '/admin/llm',            title: '大模型配置',      icon: Operation,     admin: true },
-  { path: '/admin/embedding',      title: 'RAG 嵌入配置',   icon: Connection,    admin: true },
+  { path: '/admin/llm',            title: '大模型配置',      icon: Operation,     admin: true, superAdmin: true },
+  { path: '/admin/embedding',      title: 'RAG 嵌入配置',   icon: Connection,    admin: true, superAdmin: true },
+  { path: '/admin/mcp-workers',    title: 'MCP 与沙箱节点', icon: Monitor,       admin: true, superAdmin: true },
 ]
 
 const isAdmin = computed(() => userStore.isAdmin())
@@ -99,6 +103,10 @@ const visibleMenuItems = computed(() => {
     canRoleSeeNavigationItem(currentRole.value, item.roles)
   ))
 })
+
+const visibleAdminItems = computed(() => (
+  adminItems.filter((item) => !item.superAdmin || userStore.isSuperAdmin())
+))
 
 /**
  * 判断菜单项是否匹配当前路由
@@ -148,7 +156,7 @@ function go(item: MenuItem): void {
       <div v-if="isAdmin" class="nav-group">
         <div class="nav-group-label font-mono">管理</div>
         <button
-          v-for="item in adminItems"
+          v-for="item in visibleAdminItems"
           :key="item.path"
           class="nav-item"
           :class="{ 'is-active': isActive(item.path) }"
@@ -161,7 +169,7 @@ function go(item: MenuItem): void {
     </nav>
 
     <div class="sidebar-foot">
-      <div class="version font-mono">v1.0 · PRISM</div>
+      <div class="version font-mono">v3.4 · PRISM</div>
     </div>
   </aside>
 </template>

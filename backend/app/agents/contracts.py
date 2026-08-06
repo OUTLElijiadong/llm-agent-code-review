@@ -190,6 +190,8 @@ _CONTRACTS = (
             "project_analyzer",
             "code_reviewer",
             "security_sentinel",
+            "test_verifier",
+            "sandbox_deployer",
             "review_orchestrator",
             "project_manager",
             "code_file_manager",
@@ -393,13 +395,7 @@ _CONTRACTS = (
 
 
 def _service_contract(
-    code: str,
-    name: str,
-    mission: str,
-    skill: SkillSpec,
-    accepts: Iterable[str],
-    delegates: Iterable[str],
-    extra_skills: Iterable[SkillSpec] = (),
+    code: str, name: str, mission: str, skill: SkillSpec, accepts: Iterable[str], delegates: Iterable[str]
 ) -> AgentContract:
     return _contract(
         code,
@@ -409,7 +405,7 @@ def _service_contract(
         (mission, "通过现有确定性 service 执行并记录审计"),
         ("只调用已绑定的服务能力", "基于事实快照给出受限分析", "返回结构化结果和日志引用"),
         ("不得把分析当作已执行结果", "不得越过工具网关和确认边界"),
-        (skill, *extra_skills),
+        (skill,),
         accepts,
         delegates,
         COMMON_OUTPUT,
@@ -419,10 +415,8 @@ def _service_contract(
 _SERVICE_CONTRACTS = (
     _service_contract(
         "operations",
-        "最高管理员管理 Agent",
-        "巡检并通过宿主机结构化执行器管理 systemd、容器、文件、软件包、防火墙、账户、SSH 公钥、数据库、证书和备份；"
-        "持续监控每一次登录与疑似网络攻击，被动溯源攻击来源与手法，监控对生产数据的威胁，"
-        "治理备份与清理旧备份释放空间，并给出服务器优化建议与解决建议",
+        "全服管理 Agent",
+        "巡检并通过宿主机结构化执行器管理 systemd、容器、文件、软件包、防火墙、账户、SSH 公钥、数据库、证书和备份",
         _skill(
             "operations.maintain_platform",
             "全服受控运维",
@@ -431,15 +425,6 @@ _SERVICE_CONTRACTS = (
         ),
         ("manager", "monitor", "alert", "incident_responder", "scheduler", "system"),
         ("monitor", "alert", "incident_responder", "test_verifier", "data_integrity", "manager"),
-        extra_skills=(
-            _skill(
-                "operations.security_monitor",
-                "安全监控与主动告警",
-                "监控 SSH 登录/失败爆破/蜜罐触碰/代理滥用/TLS 探测，按规则生成安全告警并推送右上角弹窗；"
-                "对高危来源 IP 做被动溯源（归属地/ASN/ISP）；检查备份新鲜度、校验与体积并给出清理建议",
-                "定时巡检或管理员查询安全态势时使用；只读自动执行，处置类写操作必须走审批",
-            ),
-        ),
     ),
     _service_contract(
         "approval",
@@ -509,11 +494,40 @@ _SERVICE_CONTRACTS = (
     ),
     _service_contract(
         "test_verifier",
-        "测试验证服务 Agent",
-        "执行可复核回归测试并归档原始证据",
-        _skill("verification.run_suite", "回归验证", "按变更范围运行测试并保留原始输出", "候选变更完成后使用"),
-        ("model_evaluator", "evolution", "incident_responder", "manager", "operations"),
-        ("quality_evaluator",),
+        "测试验证 Agent",
+        "把项目快照调度到隔离 worker，执行动态白盒、黑盒或组合测试并归档原始证据",
+        _skill(
+            "verification.run_suite",
+            "沙箱回归验证",
+            "选择已登记 worker 运行固定语言测试计划并保留环境指纹和原始输出",
+            "源码静态审查后需要动态证据时使用",
+        ),
+        (
+            "orchestrator",
+            "review_orchestrator",
+            "security_sentinel",
+            "sandbox_deployer",
+            "model_evaluator",
+            "evolution",
+            "incident_responder",
+            "manager",
+            "operations",
+            "user",
+        ),
+        ("quality_evaluator", "sandbox_deployer"),
+    ),
+    _service_contract(
+        "sandbox_deployer",
+        "沙箱部署 Agent",
+        "把有权项目部署到隔离 worker，执行健康检查并管理续期、预览和关闭生命周期",
+        _skill(
+            "sandbox.manage_deployment",
+            "持续沙箱部署",
+            "选择健康 worker，创建可追溯预览并按到期时间回收",
+            "用户需要运行或临时部署完整项目时使用",
+        ),
+        ("orchestrator", "test_verifier", "manager", "user", "system"),
+        ("test_verifier",),
     ),
     _service_contract(
         "quality_evaluator",

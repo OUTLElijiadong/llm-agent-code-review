@@ -11,7 +11,7 @@
             type="danger"
             plain
             :icon="Lock"
-            @click="securityScanVisible = true"
+            @click="openSecurityScan"
           >
             🛡 安全审计
           </el-button>
@@ -48,6 +48,8 @@
       source="project"
       :ref-id="projectId"
       :ref-name="project?.project_name || ''"
+      :initial-result="persistedAuditResult"
+      @completed="fetchDetail"
     />
 
     <template v-if="project">
@@ -81,17 +83,65 @@
               <h3>代码文件</h3>
               <div class="section-actions">
                 <el-button
+                  v-if="project.file_count > 0"
                   size="small"
                   plain
                   :icon="Download"
                   :loading="downloadingSource"
                   @click="handleDownloadSource"
                 >下载源码</el-button>
-                <el-button size="small" @click="handleUploadFile">上传文件</el-button>
-                <el-button type="primary" size="small" @click="handleUploadFolder">上传文件夹</el-button>
+                <el-button
+                  v-if="project.source_mode !== 'audit_archive'"
+                  size="small"
+                  @click="handleUploadFile"
+                >上传文件</el-button>
+                <el-button
+                  v-if="project.source_mode !== 'audit_archive'"
+                  type="primary"
+                  size="small"
+                  @click="handleUploadFolder"
+                >上传文件夹</el-button>
+                <el-button
+                  v-if="project.file_count === 0 && project.source_mode !== 'audit_archive'"
+                  type="warning"
+                  plain
+                  size="small"
+                  :icon="Lock"
+                  :loading="uploadingAudit"
+                  @click="auditArchiveInputRef?.click()"
+                >上传审计包</el-button>
               </div>
             </div>
+            <div v-if="project.source_archive" class="source-archive-band">
+              <el-alert
+                :title="archiveStatusTitle(project.source_archive.malware_status)"
+                :type="project.source_archive.malware_status === 'clean' ? 'success' : 'warning'"
+                :closable="false"
+                show-icon
+              />
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="归档">{{ project.source_archive.original_filename }}</el-descriptions-item>
+                <el-descriptions-item label="文件">{{ project.source_archive.file_count }}</el-descriptions-item>
+                <el-descriptions-item label="压缩 / 解压">
+                  {{ formatBytes(project.source_archive.compressed_size) }} /
+                  {{ formatBytes(project.source_archive.expanded_size) }}
+                </el-descriptions-item>
+                <el-descriptions-item label="最大压缩比">
+                  {{ project.source_archive.max_compression_ratio.toFixed(1) }}x
+                </el-descriptions-item>
+                <el-descriptions-item label="威胁命中">
+                  {{ project.source_archive.threat_count }}
+                </el-descriptions-item>
+                <el-descriptions-item label="审计状态">
+                  {{ archiveAuditLabel(project.source_archive.audit_status) }}
+                </el-descriptions-item>
+                <el-descriptions-item label="SHA-256" :span="2">
+                  <span class="font-mono archive-sha">{{ project.source_archive.archive_sha256 }}</span>
+                </el-descriptions-item>
+              </el-descriptions>
+            </div>
             <CodeFileList
+              v-else
               :project-id="projectId"
               :key="fileListKey"
               @uploaded="onFileUploaded"
@@ -237,6 +287,13 @@
       style="display: none"
       @change="onFolderSelected"
     />
+    <input
+      ref="auditArchiveInputRef"
+      type="file"
+      :accept="archiveAcceptTypes"
+      style="display: none"
+      @change="onAuditArchiveSelected"
+    />
 
     <!-- 添加成员对话框 -->
     <el-dialog
@@ -279,7 +336,12 @@ import { goBack } from '@/utils/navigation'
 
 import { Download, Lock, MagicStick, Plus } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
-import { getProjectDetail, downloadProjectSource } from '@/api/project'
+import {
+  getAuditSourceArchiveResult,
+  getProjectDetail,
+  downloadProjectSource,
+  uploadAuditSourceArchive,
+} from '@/api/project'
 import { upload, uploadFolder } from '@/api/codeFile'
 import {
   listProjectMembers,
@@ -288,6 +350,7 @@ import {
   removeProjectMember,
 } from '@/api/projectMember'
 import type { ProjectDetailOut } from '@/types/project'
+import type { SecurityScanOut } from '@/types/security'
 import type {
   ProjectMemberOut,
   ProjectRole,
@@ -308,11 +371,52 @@ const project = ref<ProjectDetailOut | null>(null)
 const fileListKey = ref(0)
 const aiPromptVisible = ref(false)
 const securityScanVisible = ref(false)
+const persistedAuditResult = ref<SecurityScanOut | null>(null)
 const fileInputRef = ref<HTMLInputElement>()
 const folderInputRef = ref<HTMLInputElement>()
+const auditArchiveInputRef = ref<HTMLInputElement>()
 const uploading = ref(false)
+const uploadingAudit = ref(false)
 const downloadingSource = ref(false)
-const acceptFileTypes = '.py,.js,.ts,.jsx,.tsx,.vue,.java,.go,.c,.cpp,.h,.hpp,.css,.html,.json,.yaml,.yml,.xml,.zip,.tar,.gz,.tgz,.bz2,.xz'
+const archiveExtensions = [
+  '.zip', '.7z', '.rar', '.tar', '.gz', '.tgz', '.bz2', '.tbz2', '.xz', '.txz',
+  '.zst', '.tzst', '.lz', '.lzma', '.lzip', '.z', '.cpio', '.cab', '.ar', '.xar',
+  '.lha', '.lzh', '.iso',
+]
+const archiveAcceptTypes = archiveExtensions.join(',')
+const acceptFileTypes = [
+  '.py', '.js', '.ts', '.jsx', '.tsx', '.vue', '.java', '.go', '.c', '.cpp', '.h',
+  '.hpp', '.css', '.html', '.json', '.yaml', '.yml', '.xml', ...archiveExtensions,
+].join(',')
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`
+  return `${(value / 1024 / 1024).toFixed(1)} MiB`
+}
+
+function archiveStatusTitle(status: string): string {
+  const labels: Record<string, string> = {
+    clean: '整包规则扫描未命中恶意特征',
+    infected: '已命中恶意特征，源码包保持隔离',
+    degraded: '扫描引擎降级，源码包保持隔离',
+    error: '扫描引擎异常，源码包保持隔离',
+  }
+  return labels[status] || '源码包保持隔离'
+}
+
+function archiveAuditLabel(status: string): string {
+  const labels: Record<string, string> = {
+    not_started: '未开始',
+    queued: '排队中',
+    running: '审计中',
+    succeeded: '已完成',
+    failed: '失败',
+    blocked: '已阻断',
+    cancelled: '已取消',
+  }
+  return labels[status] || status
+}
 
 // ── Tab 切换 ──
 const activeTab = ref<'info' | 'files' | 'tasks' | 'members'>('info')
@@ -367,6 +471,19 @@ async function fetchDetail(): Promise<void> {
   }
 }
 
+async function openSecurityScan(): Promise<void> {
+  persistedAuditResult.value = null
+  if (project.value?.source_archive?.audit_status === 'succeeded') {
+    try {
+      const stored = await getAuditSourceArchiveResult(projectId)
+      persistedAuditResult.value = stored?.result ?? null
+    } catch {
+      /* 权限或网络错误已由 http 拦截器提示；仍允许用户打开重新扫描。 */
+    }
+  }
+  securityScanVisible.value = true
+}
+
 async function handleDownloadSource(): Promise<void> {
   if (downloadingSource.value) return
   downloadingSource.value = true
@@ -402,7 +519,7 @@ function getExtDetail(filename: string): string {
 }
 
 /** v2: 压缩包扩展名集合,后端将自动解压并批量创建文件 */
-const ARCHIVE_EXTS = new Set(['.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz'])
+const ARCHIVE_EXTS = new Set(archiveExtensions)
 
 /**
  * 判断文件是否为压缩包
@@ -421,7 +538,7 @@ const VALID_EXTS_DETAIL = new Set([
   '.html', '.htm', '.json', '.yaml', '.yml', '.toml', '.xml',
   '.sql', '.sh', '.bash', '.md', '.txt', '.cfg', '.ini',
   // v2: 压缩包扩展名,后端自动解压
-  '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz',
+  ...archiveExtensions,
 ])
 
 async function onFileSelected(e: Event): Promise<void> {
@@ -443,9 +560,11 @@ async function onFileSelected(e: Event): Promise<void> {
       const formData = new FormData()
       formData.append('file', files[0])
       formData.append('project_id', String(projectId))
-      await upload(formData)
-      // v2: 压缩包上传后后端自动解压,提示用户解压结果
-      if (isArchiveFile(files[0].name)) {
+      const uploaded = await upload(formData)
+      if (uploaded.quarantined) {
+        ElMessage.warning(`检测到恶意内容,源码包已隔离(仅限沙箱内审计/测试/部署)`)
+      } else if (isArchiveFile(files[0].name)) {
+        // v2: 压缩包上传后后端自动解压,提示用户解压结果
         ElMessage.success(`压缩包 ${files[0].name} 已上传并自动解压,请刷新文件列表查看`)
       } else {
         ElMessage.success('文件上传成功')
@@ -525,6 +644,33 @@ async function onFolderSelected(e: Event): Promise<void> {
   } finally {
     input.value = ''
     uploading.value = false
+  }
+}
+
+async function onAuditArchiveSelected(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || uploadingAudit.value) return
+  if (!isArchiveFile(file.name)) {
+    ElMessage.warning('请选择受支持的源码归档')
+    input.value = ''
+    return
+  }
+  uploadingAudit.value = true
+  ElMessage.info('正在执行整包结构校验与全成员 YARA 扫描')
+  try {
+    const result = await uploadAuditSourceArchive(projectId, file)
+    if (result.malware_status === 'clean') {
+      ElMessage.success(`审计包已接收，覆盖 ${result.file_count} 个文件`)
+    } else {
+      ElMessage.warning(`审计包已隔离，命中 ${result.threat_count} 个威胁`)
+    }
+    await fetchDetail()
+  } catch {
+    /* http 拦截器已提示错误 */
+  } finally {
+    input.value = ''
+    uploadingAudit.value = false
   }
 }
 
@@ -671,7 +817,31 @@ onMounted(() => {
 
 .section-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.source-archive-band {
+  display: grid;
+  gap: 12px;
+}
+
+.archive-sha {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .project-detail {
+    padding: 16px;
+  }
+
+  .section-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
 }
 
 .text-muted {

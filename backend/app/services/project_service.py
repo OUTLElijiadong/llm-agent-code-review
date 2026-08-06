@@ -13,6 +13,8 @@ from app.core.exceptions import ConflictError
 from app.core.pagination import Pagination
 from app.models.code_file import CodeFile
 from app.models.project import Project
+from app.models.project_member import ProjectMember
+from app.models.project_source_archive import ProjectSourceArchive
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
@@ -61,7 +63,9 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
     # 批量聚合,避免 N+1: 一次查全部文件数 + 一次查全部最近成功审查
     proj_ids = [r.id for r in rows]
     file_counts: dict[int, int] = {}
+    source_archives: dict[int, ProjectSourceArchive] = {}
     last_tasks: dict[int, ReviewTask] = {}
+    member_roles: dict[int, str] = {}
     if proj_ids:
         file_counts = dict(
             db.query(CodeFile.project_id, func.count(CodeFile.id))
@@ -69,6 +73,13 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             .group_by(CodeFile.project_id)
             .all()
         )
+        source_archives = {
+            row.project_id: row
+            for row in db.query(ProjectSourceArchive).filter(
+                ProjectSourceArchive.project_id.in_(proj_ids),
+                ProjectSourceArchive.storage_status == "active",
+            ).all()
+        }
         succ_tasks = (
             db.query(ReviewTask)
             .filter(ReviewTask.project_id.in_(proj_ids), ReviewTask.status == "success")
@@ -79,15 +90,34 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             # 已按时间倒序,首次出现即该项目最近一次成功审查
             if t.project_id not in last_tasks:
                 last_tasks[t.project_id] = t
+        member_roles = dict(
+            db.query(ProjectMember.project_id, ProjectMember.role_in_project)
+            .filter(
+                ProjectMember.project_id.in_(proj_ids),
+                ProjectMember.user_id == user.id,
+            )
+            .all()
+        )
 
     items = []
     for row in rows:
         last_task = last_tasks.get(row.id)
+        source_archive = source_archives.get(row.id)
+        can_write = (
+            user.role in {"admin", "super_admin"}
+            or row.user_id == user.id
+            or member_roles.get(row.id) == "owner"
+        )
         # v2.0 B2: 用最近一次成功审查的真实评分,前端不再 hash 派生
         items.append({
             "id": row.id, "project_name": row.project_name,
             "description": row.description, "language": row.language,
-            "status": row.status, "file_count": file_counts.get(row.id, 0),
+            "status": row.status,
+            "file_count": file_counts.get(row.id, 0) or (source_archive.file_count if source_archive else 0),
+            "source_mode": "audit_archive" if source_archive else "files",
+            "source_malware_status": source_archive.malware_status if source_archive else None,
+            "can_update": can_write,
+            "can_delete": can_write,
             "last_review_at": last_task.create_time if last_task else None,
             "score": last_task.score if last_task else None,
             "create_time": row.create_time,
@@ -150,11 +180,17 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
     Raises:
         NotFoundError: 项目不存在或无访问权限
     """
-    require_project_access(db, project_id, user, need_write=False)
+    project_role = require_project_access(db, project_id, user, need_write=False)
     project = db.get(Project, project_id)
 
     file_count = db.query(CodeFile.id).filter(
         CodeFile.project_id == project_id, CodeFile.status == "active").count()
+    source_archive = db.query(ProjectSourceArchive).filter(
+        ProjectSourceArchive.project_id == project_id,
+        ProjectSourceArchive.storage_status == "active",
+    ).first()
+    if file_count == 0 and source_archive is not None:
+        file_count = source_archive.file_count
     recent_tasks = db.query(ReviewTask).filter(
         ReviewTask.project_id == project_id,
         ReviewTask.status != "deleted",
@@ -167,6 +203,26 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         "language": project.language,
         "status": project.status,
         "file_count": file_count,
+        "source_mode": "audit_archive" if source_archive else "files",
+        "source_archive": (
+            {
+                "original_filename": source_archive.original_filename,
+                "archive_sha256": source_archive.archive_sha256,
+                "compressed_size": source_archive.compressed_size,
+                "expanded_size": source_archive.expanded_size,
+                "file_count": source_archive.file_count,
+                "max_member_size": source_archive.max_member_size,
+                "max_compression_ratio": source_archive.max_compression_ratio,
+                "storage_status": source_archive.storage_status,
+                "malware_status": source_archive.malware_status,
+                "audit_status": source_archive.audit_status,
+                "quarantined": True,
+                "threat_count": source_archive.threat_count,
+            }
+            if source_archive else None
+        ),
+        "can_update": project_role in {"admin", "owner"},
+        "can_delete": project_role in {"admin", "owner"},
         "create_time": project.create_time,
         "update_time": project.update_time,
         "recent_tasks": [

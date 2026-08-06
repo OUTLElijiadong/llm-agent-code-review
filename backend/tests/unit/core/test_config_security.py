@@ -10,7 +10,11 @@ def test_deepseek_context_budget_defaults_to_one_million_tokens():
     configured = Settings(_env_file=None)
 
     assert configured.deepseek_context_window_tokens == 1_000_000
-    assert configured.deepseek_max_output_tokens == 32_768
+    assert configured.deepseek_max_output_tokens == 65_536
+    assert configured.security_semantic_max_output_tokens == 65_536
+    assert configured.security_semantic_bounded_total_chars == 32_000
+    assert configured.security_semantic_bounded_per_file_chars == 8_000
+    assert configured.security_semantic_bounded_max_files == 12
     assert configured.deepseek_compaction_threshold_tokens == 850_000
     assert configured.deepseek_compaction_keep_recent_tokens == 200_000
 
@@ -28,6 +32,16 @@ def test_deepseek_context_budget_defaults_to_one_million_tokens():
             "deepseek_compaction_threshold_tokens": 100_000,
             "deepseek_compaction_keep_recent_tokens": 100_001,
         },
+        # semantic_max_output 超过 max_output_tokens(将后者压小,触发耦合校验)
+        {"deepseek_max_output_tokens": 16_000, "security_semantic_max_output_tokens": 32_000},
+        # per_file 不能超过 total(32000)
+        {"security_semantic_bounded_per_file_chars": 32_001},
+        # total 不能超过保守闭合上限(见 config 校验注释)
+        {"security_semantic_bounded_total_chars": 32_001},
+        # total 不能超过 per_file * max_files 乘积
+        {"security_semantic_bounded_max_files": 3},
+        # split_depth 不足以闭合 bounded_total=32000 的最坏分割
+        {"security_semantic_max_split_depth": 9},
     ],
 )
 def test_rejects_invalid_deepseek_context_budgets(overrides):
@@ -56,6 +70,7 @@ def test_production_accepts_independent_api_key_encryption_key():
         deepseek_api_key="sk-production-key",
         api_key_encryption_keys=["production-api-key-secret-123456789012345"],
         ops_executor_token="production-ops-token-12345678901234567890",
+        malware_scan_fail_closed=True,
     )
 
     assert configured.api_key_encryption_keys == ["production-api-key-secret-123456789012345"]
@@ -100,6 +115,7 @@ def test_production_accepts_independent_beta_pepper():
         beta_registration_enabled=True,
         beta_code_pepper="production-beta-pepper-123456789012345",
         ops_executor_token="production-ops-token-12345678901234567890",
+        malware_scan_fail_closed=True,
     )
 
     assert configured.beta_registration_enabled is True

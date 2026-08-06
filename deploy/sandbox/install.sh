@@ -131,6 +131,18 @@ def regular_root_service_template(path: Path) -> None:
         reject("service 模板必须由 root 拥有且权限只能为 0444 或 0644")
 
 
+def regular_root_runtime_file(path: Path, label: str) -> None:
+    try:
+        current = path.lstat()
+    except OSError:
+        reject(f"{label} 不存在")
+    mode = stat.S_IMODE(current.st_mode)
+    if stat.S_ISLNK(current.st_mode) or not stat.S_ISREG(current.st_mode):
+        reject(f"{label} 必须是普通文件")
+    if current.st_uid != 0 or mode & 0o022:
+        reject(f"{label} 必须由 root 拥有且不可被组或其他用户写入")
+
+
 def load_env(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     try:
@@ -161,6 +173,15 @@ regular_root_secret(main_path)
 regular_root_service_template(template_path)
 sandbox = load_env(sandbox_path)
 main = load_env(main_path)
+
+browser_script = deploy_path / "sandbox" / "browser_blackbox.js"
+browser_proxy_script = deploy_path / "sandbox" / "browser_target_proxy.py"
+regular_root_runtime_file(browser_script, "Playwright 固定脚本")
+regular_root_runtime_file(browser_proxy_script, "Playwright 固定代理脚本")
+try:
+    compile(browser_proxy_script.read_bytes(), str(browser_proxy_script), "exec")
+except (OSError, SyntaxError, ValueError):
+    reject("Playwright 固定代理脚本无法通过 Python 编译检查")
 
 for language in ("python", "node", "java", "go", "php"):
     dockerfile_path = deploy_path / "sandbox" / f"Dockerfile.{language}"
@@ -209,7 +230,7 @@ if main.get("SANDBOX_ALLOW_RUNC", "").lower() != "false":
     reject("主 deploy/.env 的 SANDBOX_ALLOW_RUNC 必须为 false")
 if main.get("SANDBOX_ENABLED", "").lower() != "true":
     reject("主 deploy/.env 的 SANDBOX_ENABLED 必须为 true")
-if sandbox.get("SANDBOX_EXECUTOR_SOCKET") != "/run/prism-sandbox/agent.sock":
+if sandbox.get("SANDBOX_EXECUTOR_SOCKET") != "/var/lib/prism-sandbox/agent.sock":
     reject("sandbox/.env 的 SANDBOX_EXECUTOR_SOCKET 必须使用生产 UDS")
 if main.get("SANDBOX_EXECUTOR_SOCKET") != sandbox.get("SANDBOX_EXECUTOR_SOCKET"):
     reject("主 deploy/.env 与 sandbox/.env 的 UDS 路径不一致")
@@ -271,6 +292,38 @@ required_languages = {"python", "node", "java", "go", "php"}
 if set(profiles) != required_languages:
     reject("profiles.json 必须完整包含五种受支持语言")
 digest_pattern = re.compile(r"^sha256:[0-9a-f]{64}$")
+playwright_image = sandbox.get("PLAYWRIGHT_IMAGE", "")
+playwright_digest = sandbox.get("PLAYWRIGHT_IMAGE_DIGEST", "")
+if not digest_pattern.fullmatch(playwright_digest):
+    reject("PLAYWRIGHT_IMAGE_DIGEST 必须是 sha256 摘要")
+if not playwright_image.endswith(f"@{playwright_digest}"):
+    reject("PLAYWRIGHT_IMAGE 必须以同一不可变摘要固定")
+try:
+    playwright_timeout = int(sandbox["PLAYWRIGHT_TIMEOUT_SECONDS"])
+except (KeyError, ValueError):
+    reject("PLAYWRIGHT_TIMEOUT_SECONDS 必须是整数")
+if not 30 <= playwright_timeout <= 180:
+    reject("PLAYWRIGHT_TIMEOUT_SECONDS 必须在 30 到 180 秒之间")
+inspect = subprocess.run(
+    ["docker", "image", "inspect", "--format", "{{json .}}", playwright_image],
+    capture_output=True,
+    text=True,
+    check=False,
+)
+if inspect.returncode != 0:
+    reject("Playwright 固定镜像不可用")
+try:
+    document = json.loads(inspect.stdout)
+    playwright_local_id = str(document["Id"])
+    playwright_repo_digests = [str(item) for item in (document.get("RepoDigests") or [])]
+except (json.JSONDecodeError, KeyError, TypeError):
+    reject("Playwright 镜像 inspect 结果无效")
+if not digest_pattern.fullmatch(playwright_local_id):
+    reject("Playwright 本地镜像 ID 无效")
+if playwright_local_id != playwright_digest and not any(
+    item.endswith(f"@{playwright_digest}") for item in playwright_repo_digests
+):
+    reject("Playwright 本地镜像摘要与配置不一致")
 for language in sorted(required_languages):
     profile = profiles[language]
     if not isinstance(profile, dict):
@@ -355,6 +408,10 @@ fi
   exit 1
 }
 
+# StateDirectory 是 Backend 容器挂载源，socket 直接落在这里。systemd 先以
+# 0770 创建目录；执行器启动后收紧为 0750，仍保留 GID 992 的只读访问。
+install -d -m 0770 -o prism-sandbox -g prism-sandbox /var/lib/prism-sandbox
+
 install -d -m 0755 "$unit_dir"
 installed_unit="$unit_dir/$service_name"
 if [[ -e "$installed_unit" || -L "$installed_unit" ]]; then
@@ -385,7 +442,7 @@ fi
 health_ready=0
 for _attempt in {1..30}; do
   if curl --silent --fail --max-time 5 --config "$health_config" \
-    --unix-socket /run/prism-sandbox/agent.sock http://localhost/health >"$health_response" 2>/dev/null; then
+    --unix-socket /var/lib/prism-sandbox/agent.sock http://localhost/health >"$health_response" 2>/dev/null; then
     if python3 - "$health_response" <<'PY'
 import json
 import sys
@@ -393,7 +450,12 @@ import sys
 try:
     with open(sys.argv[1], encoding="utf-8") as source:
         payload = json.load(source)
-    ready = bool(payload.get("ok")) and bool(payload.get("result", {}).get("ready"))
+    result = payload.get("result", {})
+    ready = (
+        bool(payload.get("ok"))
+        and bool(result.get("ready"))
+        and bool(result.get("browser_blackbox", {}).get("ready"))
+    )
 except (OSError, TypeError, ValueError):
     ready = False
 raise SystemExit(0 if ready else 1)
@@ -407,10 +469,10 @@ PY
 done
 if [[ "$health_ready" != "1" ]]; then
   if ! rollback_unit; then
-    fail '沙箱执行器 UDS Bearer health 未达到 ready，且回滚失败'
+    fail '沙箱执行器 UDS Bearer health 或 browser_blackbox 未达到 ready，且回滚失败'
   fi
-  fail '沙箱执行器 UDS Bearer health 未达到 ready，已回滚旧单元'
+  fail '沙箱执行器 UDS Bearer health 或 browser_blackbox 未达到 ready，已回滚旧单元'
 fi
 
 unset sandbox_token
-printf '安装完成：%s 已启动且 UDS health ready\n' "$service_name"
+printf '安装完成：%s 已启动，UDS 与 browser_blackbox health 均 ready\n' "$service_name"

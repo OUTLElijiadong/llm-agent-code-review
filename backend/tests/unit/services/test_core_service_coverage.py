@@ -292,7 +292,8 @@ def test_login_covers_invalid_disabled_and_success_paths(db, monkeypatch):
     assert token == "jwt-token"
     assert logged_in.id == active.id
     assert active.last_login is not None
-    assert token_calls == [(active.id, "user", 3)]
+    assert token_calls == [(active.id, "user", 4)]
+    assert active.token_version == 4
 
 
 def test_change_password_validates_old_password_and_revokes_tokens(db, monkeypatch):
@@ -366,8 +367,10 @@ def test_user_management_mutations_cover_success_and_missing_users(db, monkeypat
 
     result = user_service.reset_password(db, user.id)
     db.refresh(user)
-    assert result == {"default_password": "123456"}
-    assert user.password == "hashed:123456"
+    temporary_password = result["temporary_password"]
+    assert len(temporary_password) == 24
+    assert temporary_password != "123456"
+    assert user.password == f"hashed:{temporary_password}"
     assert user.token_version == 1
 
     user_service.toggle_status(db, user.id, 0)

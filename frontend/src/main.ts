@@ -12,5 +12,8 @@ import { registerElementPlus } from './plugins/elementPlus'
 const app = createApp(App)
 app.use(createPinia())
 app.use(router)
+window.addEventListener('prism:auth-expired', () => {
+  if (router.currentRoute.value.path !== '/login') void router.replace('/login')
+})
 registerElementPlus(app, { locale: zhCn })
 app.mount('#app')

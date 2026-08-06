@@ -216,6 +216,17 @@ def start_agent_governance_scheduler() -> None:
     for job in jobs:
         if _register_job_to_scheduler(scheduler, job):
             registered += 1
+    from app.services.sandbox_service import expire_due_environments
+
+    scheduler.add_job(
+        expire_due_environments,
+        "interval",
+        id="sandbox-expiry-reaper",
+        minutes=5,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     _scheduler = scheduler
     logger.info("[agent-governance-scheduler] started with {} jobs", registered)

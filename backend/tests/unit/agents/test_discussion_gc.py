@@ -1,5 +1,8 @@
 """讨论会话过期清理测试 — 防止 DiscussionBus/_pending/_session_owners 无限增长"""
+import asyncio
 import time
+
+import pytest
 
 import app.agents.discussion_bus as bus_mod
 from app.agents.discussion_bus import DiscussionBus
@@ -53,6 +56,34 @@ class TestBusPurge:
         bus.set_controller("disc_gc4", lambda action, payload: None)
         bus.close_session("disc_gc4")
         assert "disc_gc4" not in bus._control_callbacks
+
+    @pytest.mark.asyncio
+    async def test_discussion_task_is_unique_and_cancellable(self):
+        bus = _fresh_bus()
+        bus.create_session("disc_task", task_id=1, file_name="a.py")
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def run_forever():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        first = bus.start_discussion_task("disc_task", run_forever())
+        await started.wait()
+        second = bus.start_discussion_task("disc_task", run_forever())
+
+        assert second is first
+        assert bus.get_discussion_task("disc_task") is first
+        assert bus.cancel_discussion_task("disc_task") is True
+        await asyncio.gather(first, return_exceptions=True)
+        await asyncio.sleep(0)
+        assert cancelled.is_set()
+        assert bus.get_discussion_task("disc_task") is None
+        assert bus.get_session("disc_task").status == "concluded"
 
 
 class TestWsRegistryPurge:

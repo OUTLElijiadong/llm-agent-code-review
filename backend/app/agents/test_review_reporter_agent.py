@@ -155,7 +155,7 @@ class TestReviewReporterAgent(BaseAgent):
         except Exception:
             pass
         for line in full_log.splitlines():
-            if any(k in line for k in ("blackbox loopback status", "PRISM_VERIFY", "prism poc", "Development Server", "did not become ready")):
+            if any(k in line for k in ("blackbox loopback status", "PRISM_VERIFY", "prism poc", "Development Server", "did not become ready")):  # noqa: E501
                 blackbox_signals.append(line.strip())
         evidence = json.dumps(
             {
@@ -178,7 +178,7 @@ class TestReviewReporterAgent(BaseAgent):
         # 2) 黑盒角色
         bb = self._role_call(
             _BLACKBOX_PROMPT,
-            "请审查黑盒/冒烟测试证据并输出 ## 黑盒结果 小节:\n" + evidence + self._knowledge_refs(db, owner_id, "blackbox"),
+            "请审查黑盒/冒烟测试证据并输出 ## 黑盒结果 小节:\n" + evidence + self._knowledge_refs(db, owner_id, "blackbox"),  # noqa: E501
             ctx,
         )
         roles["blackbox"] = {"ok": bb.success, "text": (bb.data or "")[:16000] if bb.success else f"未执行: {bb.error}"}
@@ -208,7 +208,7 @@ class TestReviewReporterAgent(BaseAgent):
         # 截断兜底:8192 仍截断时降级为精简重试(只求核心三段),保证总能产出报告
         if (not rp.success or not (isinstance(rp.data, str) and rp.data.strip())) and rp.finish_reason == "length":
             rp = self._role_call(
-                _REPORT_PROMPT + "\n(上次输出超长被截断。本次只输出 ## 总体结论 / ## 问题清单 / ## 下一步建议 三段,问题清单最多列15条。)",
+                _REPORT_PROMPT + "\n(上次输出超长被截断。本次只输出 ## 总体结论 / ## 问题清单 / ## 下一步建议 三段,问题清单最多列15条。)",  # noqa: E501
                 "白盒结论:\n" + str(roles["whitebox"]["text"])[:2000]
                 + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])[:2000]
                 + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:2000],

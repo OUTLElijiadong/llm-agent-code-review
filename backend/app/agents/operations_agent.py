@@ -15,7 +15,7 @@ from app.utils.api_resolver import resolve_api_config
 
 class OperationsAgent(BaseAgent):
     name = "operations"
-    description = "最高管理员管理 Agent：全域巡检、安全监控与攻击溯源、备份治理、受批准变更、验证和回滚"
+    description = "生产宿主机全域巡检、受批准变更、验证和回滚"
     icon = "operations"
     color = "#2A9D8F"
     category = "operations"
@@ -33,19 +33,12 @@ class OperationsAgent(BaseAgent):
         "systemd 服务管理",
         "宿主机文件与软件包",
         "防火墙、账户与 SSH 公钥",
-        "登录与攻击监控",
-        "攻击被动溯源",
-        "备份治理与清理",
-        "服务器优化建议",
     )
 
     def __init__(self):
         super().__init__(
             system_prompt=(
-                "你是 Prism 的最高管理员管理 Agent。只分析真实工具结果，宿主机变更只能调用结构化运维工具；"
-                "持续监控每一次登录与疑似网络攻击，对攻击来源做被动溯源并识别攻击手法；"
-                "监控生产数据库备份的新鲜度、校验与体积，给出清理和优化建议；"
-                "发现安全事件（被渗透、生产库破坏、数据泄漏、服务器异常）必须主动汇报并提供解决建议；"
+                "你是 Prism 的全服管理 Agent。只分析真实工具结果，宿主机变更只能调用结构化运维工具；"
                 "输出中文，按异常、影响、建议动作、验证方式四项说明。不得声称未执行的动作已完成。"
             ),
             temperature=0.1,

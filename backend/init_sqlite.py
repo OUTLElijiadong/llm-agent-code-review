@@ -48,15 +48,17 @@ def main():
         if not admin_user:
             print("Creating admin user...")
             from app.core.security import hash_password
-            admin_pwd = os.environ.get("ADMIN_PASSWORD", "admin123")
-            if admin_pwd == "admin123":
-                print("⚠️  正在使用默认管理员口令 admin123,生产环境请设置 ADMIN_PASSWORD "
-                      "环境变量,或首次登录后立即修改密码!")
+            admin_pwd = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
+            if not 12 <= len(admin_pwd) <= 32 or len(admin_pwd.encode("utf-8")) > 72:
+                raise RuntimeError(
+                    "首次初始化必须设置 12-32 个字符且不超过 72 字节的 INITIAL_ADMIN_PASSWORD"
+                )
             admin_user = User(
                 username="admin",
                 password=hash_password(admin_pwd),
                 email="admin@local",
                 nickname="管理员",
+                # 历史 SQLite 辅助脚本不创建完整 RBAC 合同，不得伪造超管。
                 role="admin",
                 status=1
             )

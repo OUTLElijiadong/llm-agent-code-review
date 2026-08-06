@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import require_admin
+from app.core.dependencies import require_super_admin
 from app.models.user import User
 from app.schemas.api_config import ApiConfigTestIn, ApiConfigTestOut
 from app.schemas.common import Resp
@@ -19,15 +19,15 @@ router = APIRouter()
 
 
 @router.get("/config", response_model=Resp[LlmConfigOut])
-def get_config(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    """查看当前全局 LLM 配置(Key 脱敏)"""
+def get_config(db: Session = Depends(get_db), admin: User = Depends(require_super_admin)):
+    """由唯一超级管理员查看当前全局 LLM 配置(Key 脱敏)。"""
     return Resp(data=LlmConfigOut(**system_config_service.get_llm_config_public(db)))
 
 
 @router.put("/config", response_model=Resp[LlmConfigOut])
 def update_config(payload: LlmConfigIn, db: Session = Depends(get_db),
-                  admin: User = Depends(require_admin)):
-    """更新全局 LLM 配置"""
+                  admin: User = Depends(require_super_admin)):
+    """由唯一超级管理员更新全局 LLM 配置。"""
     data = system_config_service.update_llm_config(
         db, provider=payload.provider, base_url=payload.base_url,
         model=payload.model, api_key=payload.api_key, active=payload.active)
@@ -36,8 +36,8 @@ def update_config(payload: LlmConfigIn, db: Session = Depends(get_db),
 
 @router.post("/test", response_model=Resp[ApiConfigTestOut])
 def test_config(payload: LlmTestIn, db: Session = Depends(get_db),
-                admin: User = Depends(require_admin)):
-    """测试连通性;留空字段则用已保存配置"""
+                admin: User = Depends(require_super_admin)):
+    """由唯一超级管理员测试连通性;留空字段则用已保存配置。"""
     stored = system_config_service.get_llm_config(db) or {}
     base_url = (payload.base_url or stored.get("base_url") or "").strip()
     model = (payload.model or stored.get("model") or "").strip()

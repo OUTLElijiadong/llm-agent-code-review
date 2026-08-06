@@ -39,7 +39,6 @@ from app.core.dependencies import get_current_user
 from app.core.exceptions import NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
-from app.services.rbac_service import check_permission
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
@@ -47,6 +46,7 @@ from app.schemas.common import PageOut, Resp
 from app.schemas.report import ReportDetailOut, ReportListItem
 from app.schemas.report_template import ReportTemplateIn, ReportTemplateOut, ReportTemplateUpdate
 from app.services import report_service, report_template_service
+from app.services.rbac_service import check_permission
 from app.services.report_exporter import (
     export_to_html,
     export_to_json,
@@ -98,7 +98,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     if not task or task.status != "success":
         raise NotFoundError(f"审查任务 #{task_id} 不存在或未完成", code=40400)
     # 权限校验:管理员或任务发起者可访问
-    if task.user_id != user.id and user.role != "admin":
+    if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise NotFoundError("报告不存在", code=40400)
 
     issues: List[ReviewIssue] = (

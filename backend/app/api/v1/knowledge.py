@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, require_admin
+from app.core.dependencies import get_current_user, require_super_admin
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
 from app.schemas.knowledge import (
@@ -81,15 +81,15 @@ def stats(db: Session = Depends(get_db), user: User = Depends(get_current_user))
 
 
 @router.get("/embedding-config", response_model=Resp[EmbeddingConfigOut])
-def get_embedding_config(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    """查看 embedding 配置(管理员;不回显明文 Key)"""
+def get_embedding_config(db: Session = Depends(get_db), admin: User = Depends(require_super_admin)):
+    """由唯一超级管理员查看 embedding 配置(不回显明文 Key)。"""
     return Resp(data=EmbeddingConfigOut(**system_config_service.get_embedding_config_public(db)))
 
 
 @router.put("/embedding-config", response_model=Resp[EmbeddingConfigOut])
 def update_embedding_config(payload: EmbeddingConfigIn, db: Session = Depends(get_db),
-                            admin: User = Depends(require_admin)):
-    """更新 embedding 配置(管理员)"""
+                            admin: User = Depends(require_super_admin)):
+    """由唯一超级管理员更新 embedding 配置。"""
     data = system_config_service.update_embedding_config(
         db, base_url=payload.base_url, api_key=payload.api_key,
         model=payload.model, enabled=payload.enabled)

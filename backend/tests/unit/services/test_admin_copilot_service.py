@@ -1,6 +1,7 @@
 """管理员副驾驶确认协议和真实写入闭环测试。"""
 import pytest
 
+from app.agents.admin_copilot_agent import AdminCopilotAgent
 from app.agents.base import AgentResult
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEventType
@@ -29,6 +30,52 @@ def _message(db, admin, text, **extra):
         session_id="admin-session-001",
         **extra,
     )
+
+
+@pytest.mark.parametrize("failure_kind", ["invalid_json", "output_truncated"])
+def test_manager_structured_failure_retries_with_distinct_compact_prompt(
+    db,
+    admin_user,
+    monkeypatch,
+    failure_kind,
+):
+    agent = AdminCopilotAgent()
+    prompts = []
+
+    def fake_call_json(prompt, *_args, **_kwargs):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return AgentResult(
+                success=False,
+                error="结构化输出不完整",
+                failure_kind=failure_kind,
+            )
+        return AgentResult(
+            success=True,
+            data={"mode": "answer", "answer": "已恢复", "agent_code": "", "task": ""},
+        )
+
+    monkeypatch.setattr(agent, "call_json", fake_call_json)
+    monkeypatch.setattr(agent, "_log_call", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "app.agents.admin_copilot_agent.resolve_api_config",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = agent.plan(
+        db,
+        admin_user,
+        message="总结当前状态",
+        history=[{"role": "user", "content": "历史上下文" * 500}],
+        snapshot={"users": 18},
+        agents=[{"code": "code_reviewer"}],
+        trace_id="trace-compact-retry",
+    )
+
+    assert result.success is True
+    assert len(prompts) == 2
+    assert prompts[0] != prompts[1]
+    assert len(prompts[1]) < len(prompts[0])
 
 
 def test_unconfirmed_write_only_returns_preview_and_writes_nothing(db, copilot_data):

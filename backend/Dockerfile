@@ -29,11 +29,12 @@ FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
-# curl 仅用于容器健康检查；运行阶段不安装编译器或开发头文件。
+# curl 用于容器健康检查；libarchive 为多格式源码归档提供统一解析能力。
 RUN (sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null \
      || sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list 2>/dev/null || true) \
-    && apt-get update && apt-get install -y --no-install-recommends curl \
+    && apt-get update && apt-get install -y --no-install-recommends curl libarchive13t64 \
     && groupadd --system --gid 991 prism-ops \
+    && groupadd --system --gid 992 prism-sandbox \
     && useradd --system --uid 10001 --gid prism-ops --home-dir /app --shell /usr/sbin/nologin prism \
     && rm -rf /var/lib/apt/lists/*
 

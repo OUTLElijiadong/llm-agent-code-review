@@ -4,7 +4,7 @@
     <header class="ov-head">
       <div>
         <h2 class="ov-title font-display">总览大屏</h2>
-        <p class="ov-sub">服务器 · 安全态势 · 登录来源 · Agent 活跃 实时一览</p>
+        <p class="ov-sub">{{ canViewServer ? '服务器 · 安全态势 · 登录来源 · Agent 活跃 实时一览' : '安全态势 · 登录来源 · Agent 活跃 实时一览' }}</p>
       </div>
       <div class="posture-badge" :class="`lv-${posture?.level || 'ok'}`">
         <span class="pulse-dot"></span>
@@ -13,9 +13,9 @@
     </header>
 
     <!-- 服务器状态 + 安全态势 -->
-    <div class="row-2">
+    <div class="row-2" :class="{ 'single-column': !canViewServer }">
       <!-- 服务器状态 -->
-      <section class="card">
+      <section v-if="canViewServer" class="card">
         <header class="card-head">
           <h3><el-icon><Monitor /></el-icon>服务器状态</h3>
           <span class="uptime font-mono" v-if="system?.uptime_seconds">运行 {{ formatUptime(system.uptime_seconds) }}</span>
@@ -141,10 +141,13 @@ import {
 } from '@/api/adminOverview'
 import { subscribeAgentEvents } from '@/utils/agentEventStream'
 import type { AgentEvent } from '@/types/agentEvent'
+import { useUserStore } from '@/stores/user'
 
 echarts.use([GeoComponent, TooltipComponent, VisualMapComponent, ScatterChart, EffectScatterChart, CanvasRenderer])
 
 const system = ref<SystemStatus | null>(null)
+const userStore = useUserStore()
+const canViewServer = computed(() => userStore.isSuperAdmin())
 const posture = ref<SecurityPosture | null>(null)
 const geoPoints = ref<GeoPoint[]>([])
 const geoLoadFailed = ref(false)
@@ -245,7 +248,8 @@ async function loadAll(): Promise<void> {
   refreshing = true
   try {
     const [sys, sec, geo, ag] = await Promise.allSettled([
-      getSystemStatus(), getSecurityPosture(), getLoginGeo(), getAgentsActivity(),
+      canViewServer.value ? getSystemStatus() : Promise.resolve(null),
+      getSecurityPosture(), getLoginGeo(), getAgentsActivity(),
     ])
     if (sys.status === 'fulfilled') system.value = sys.value
     if (sec.status === 'fulfilled') posture.value = sec.value
@@ -315,6 +319,7 @@ onBeforeUnmount(() => {
 @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: .4; transform: scale(.8);} }
 
 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.row-2.single-column { grid-template-columns: 1fr; }
 @media (max-width: 1100px) { .row-2 { grid-template-columns: 1fr; } }
 
 .card {

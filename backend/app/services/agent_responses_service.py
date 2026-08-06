@@ -77,6 +77,7 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
 )
 from app.services.mcp_tool_provider import McpToolProvider
+from app.services.page_guide_service import admin_guide_block, user_guide_block
 from app.services.user_capability_registry import (
     CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
 )
@@ -637,9 +638,20 @@ class PrismToolExecutor:
                 parse_error=call.parse_error,
             )
         if self._mcp.has_tool(call.name):
-            if not approved:
-                return self._approval(call, danger=False, impact="将向已配置的 MCP Server 发送本次工具参数")
-            self._mark_approval(call, approve=True)
+            requires_approval = getattr(
+                self._mcp,
+                "requires_approval",
+                lambda _tool_name: True,
+            )(call.name)
+            if requires_approval and not approved:
+                impact = (
+                    "将使用当前登录用户权限执行项目内 MCP 能力"
+                    if getattr(self._mcp, "is_managed", False)
+                    else "将向已配置的 MCP Server 发送本次工具参数"
+                )
+                return self._approval(call, danger=False, impact=impact)
+            if approved:
+                self._mark_approval(call, approve=True)
             return await self._execute_once(
                 call,
                 lambda: self._mcp.call(call.name, call.arguments),
@@ -1957,19 +1969,41 @@ def _upstream_error(raw: str, status: int) -> str:
 
 
 def _instructions(surface: str) -> str:
-    identity = "Prism 管理员 Agent" if surface == "admin" else "Prism 代码审查 Agent"
-    capability_instruction = (
-        "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
-        "再调用 admin_execute_capability；不得猜测能力编码或参数。"
-        if surface == "admin"
-        else
-        "普通用户页面任务必须先调用 user_describe_capabilities 查询对应页面能力和精确参数，"
-        "再调用 user_execute_capability；不得猜测能力编码或参数。"
-        "报告、二进制单文件和项目源码下载必须分别使用 download_report、"
-        "download_code_file 和 download_project_source 固定工具。"
-        "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
-        "和 control_roundtable_discussion 固定工具。"
-    )
+    if surface == "admin":
+        identity = "Prism 管理员 Agent「小菱」"
+        capability_instruction = (
+            "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
+            "再调用 admin_execute_capability；不得猜测能力编码或参数。"
+        )
+        role_behavior = (
+            "批量处理与批量分析是你的核心能力：处理“所有/批量/全部/这些”类请求时，"
+            "先用列表类能力查清完整候选(注意翻页,page_size 取大值并核对总数),"
+            "再用 ask_user 展示统计口径与候选数量供确认,然后逐条或分页执行；"
+            "完成后汇报成功/失败/跳过条数与原因。批量分析类请求(如统计、趋势、分布)"
+            "要聚合多来源只读能力的数据后给出结论表格。"
+            "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
+        )
+        guide_block = admin_guide_block()
+    else:
+        identity = "Prism 代码审查 Agent「棱镜小助·小菱」"
+        capability_instruction = (
+            "普通用户页面任务必须先调用 user_describe_capabilities 查询对应页面能力和精确参数，"
+            "再调用 user_execute_capability；不得猜测能力编码或参数。"
+            "报告、二进制单文件和项目源码下载必须分别使用 download_report、"
+            "download_code_file 和 download_project_source 固定工具。"
+            "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
+            "和 control_roundtable_discussion 固定工具。"
+            "沙箱测试和部署是页面发现协议的例外：白盒、黑盒和组合测试直接使用 "
+            "run_project_tests，持续部署、关闭和续期分别使用 deploy_project_sandbox、"
+            "close_sandbox 和 extend_sandbox，不要先通过 user_describe_capabilities 搜索这四项固定工具。"
+        )
+        role_behavior = (
+            "你服务的对象主要是不会看文档的普通用户和审查员：回答要像带路人，"
+            "先给结论,再给傻瓜式下一步,并把对应页面入口用站内链接标出来；"
+            "审查员发起审查、处理问题、导出报告时,优先直接用工具替他完成,再引导到结果页面核对。"
+            "审查结论必须引用本次工具返回的真实数据，不得凭印象作答。"
+        )
+        guide_block = user_guide_block()
     return (
         f"你是 {identity}。所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
         "根据每次工具返回结果自主判断下一步，可以连续调用多个工具。"
@@ -1979,9 +2013,10 @@ def _instructions(surface: str) -> str:
         "涉及用户批量操作时必须先查询真实用户。用户说序号、第几条或范围而未明确是用户 ID 时，"
         "不得猜测；必须用 ask_user 区分列表序号与用户 ID，得到精确 user_ids 后再调用批量工具。"
         f"{capability_instruction}"
-        "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
+        f"{role_behavior}"
         "写操作由系统暂停并展示审批；用户点击批准后系统会把原调用结果自动交还给你，不要要求用户重复发送指令。"
-        "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。"
+        "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。\n\n"
+        f"{guide_block}"
     )
 
 

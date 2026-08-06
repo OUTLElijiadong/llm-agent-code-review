@@ -46,12 +46,13 @@ const crumbs = computed(() => {
 
 const roleLabel = computed(() => {
   const role = userStore.profile?.role
+  if (role === 'super_admin') return '超级管理员'
   if (role === 'admin') return '管理员'
   if (role === 'reviewer') return '审查员'
   return '普通用户'
 })
 
-const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const isAdmin = computed(() => userStore.isAdmin())
 const currentRole = computed(() => normalizeRole(userStore.profile?.role))
 
 const searchItems = computed<SearchItem[]>(() => {
@@ -155,7 +156,7 @@ async function handleLogout(): Promise<void> {
       cancelButtonText: '取消',
       type: 'warning',
     })
-    userStore.logout()
+    await userStore.logout()
     // 用 replace 避免历史残留,防止后退键回到内页触发异常/数据泄露
     router.replace('/login')
   } catch {

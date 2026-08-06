@@ -30,14 +30,7 @@ def _get_reader():
             _reader = maxminddb.open_database(_DB_PATH)
         else:
             _load_failed = True
-    except Exception as exc:  # pragma: no cover
-        # 记录失败原因(常见为宿主机 bind 挂载文件权限 640 + 容器非 root → Permission denied)，
-        # 否则登录来源地图静默返回空难以排查。
-        try:
-            from loguru import logger
-            logger.warning(f"[geoip] GeoLite2 定位库加载失败,登录来源地图将为空: path={_DB_PATH} err={exc}")
-        except Exception:
-            pass
+    except Exception:  # pragma: no cover
         _load_failed = True
     return _reader
 

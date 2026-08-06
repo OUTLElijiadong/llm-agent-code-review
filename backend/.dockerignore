@@ -10,3 +10,4 @@ tests
 coverage*.json
 code_review.db
 .ruff_cache
+seed_rules.py

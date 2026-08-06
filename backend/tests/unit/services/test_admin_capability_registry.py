@@ -108,6 +108,27 @@ FRONTEND_API_CAPABILITY = {
     "llmConfig:getLlmConfig": "llm.config.get",
     "llmConfig:updateLlmConfig": "llm.config.update",
     "llmConfig:testLlmConfig": "llm.config.test",
+    "mcpGovernance:listMcpServers": "mcp.servers.list",
+    "mcpGovernance:seedRecommendedMcpServers": "mcp.servers.seed_recommended",
+    "mcpGovernance:createMcpServer": "mcp.servers.create",
+    "mcpGovernance:updateMcpServer": "mcp.servers.update",
+    "mcpGovernance:deleteMcpServer": "mcp.servers.delete",
+    "mcpGovernance:checkMcpServer": "mcp.servers.health",
+    "mcpGovernance:syncMcpTools": "mcp.servers.sync_tools",
+    "mcpGovernance:listMcpTools": "mcp.tools.list",
+    "mcpGovernance:updateMcpTool": "mcp.tools.update",
+    "mcpGovernance:listMcpBindings": "mcp.bindings.list",
+    "mcpGovernance:upsertMcpBinding": "mcp.bindings.upsert",
+    "mcpGovernance:deleteMcpBinding": "mcp.bindings.delete",
+    "mcpGovernance:listCapabilityAliases": "mcp.aliases.list",
+    "mcpGovernance:createCapabilityAlias": "mcp.aliases.create",
+    "mcpGovernance:updateCapabilityAlias": "mcp.aliases.update",
+    "mcpGovernance:deleteCapabilityAlias": "mcp.aliases.delete",
+    "mcpGovernance:listSandboxWorkers": "sandbox.workers.list",
+    "mcpGovernance:createSandboxWorker": "sandbox.workers.create",
+    "mcpGovernance:updateSandboxWorker": "sandbox.workers.update",
+    "mcpGovernance:checkSandboxWorker": "sandbox.workers.health",
+    "mcpGovernance:seedProductionFallbackWorker": "sandbox.workers.seed_production",
     "report:listTemplates": "report_templates.list",
     "report:createTemplate": "report_templates.create",
     "report:updateTemplate": "report_templates.update",
@@ -156,7 +177,7 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
-    assert len(ADMIN_CAPABILITIES) == 101
+    assert len(ADMIN_CAPABILITIES) == 118
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
@@ -171,6 +192,12 @@ def test_every_api_function_imported_by_admin_views_maps_to_a_capability() -> No
     assert imported == set(FRONTEND_API_CAPABILITY)
     for api_function, capability in FRONTEND_API_CAPABILITY.items():
         assert capability in CAPABILITY_BY_CODE, api_function
+
+
+def test_external_knowledge_source_mutations_require_server_operations_permission() -> None:
+    assert CAPABILITY_BY_CODE["knowledge.sources.list"].permission == "agent:view"
+    assert CAPABILITY_BY_CODE["knowledge.sources.upsert"].permission == "server_ops:execute"
+    assert CAPABILITY_BY_CODE["knowledge.sources.crawl"].permission == "server_ops:execute"
 
 
 def test_discovery_returns_exact_page_contracts() -> None:

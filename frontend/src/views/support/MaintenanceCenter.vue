@@ -10,7 +10,7 @@ import {
 } from '@/api/maintenance'
 
 const userStore = useUserStore()
-const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const isAdmin = computed(() => userStore.isAdmin())
 
 const CATEGORY: Record<string, string> = {
   bug: '功能报错', account: '账号异常', feature: '功能建议',

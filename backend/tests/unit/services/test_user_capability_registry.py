@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 
 from app.agents.discussion_bus import DiscussionBus
-from app.main import app
 from app.core.permission_codes import ALL_PERMISSION_CODES
+from app.main import app
 from app.models.agent_governance import ApprovalItem
 from app.models.agent_response_run import AgentToolExecution
 from app.models.user import User
@@ -57,7 +57,7 @@ def _executor(db, user: User, run_id: str = "run_user_capability") -> PrismToolE
 def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
     openapi = app.openapi()
 
-    assert len(USER_CAPABILITIES) == 107
+    assert len(USER_CAPABILITIES) == 113
     assert len(CAPABILITY_BY_CODE) == len(USER_CAPABILITIES)
     for spec in USER_CAPABILITIES:
         assert not spec.path.startswith(("/api/admin", "/api/auth", "/api/rbac", "/api/users"))
@@ -75,6 +75,24 @@ def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
         assert contract.schema["additionalProperties"] is False
         if spec.method == "GET":
             assert spec.risk == READ
+
+    security_codes = {spec.code for spec in USER_CAPABILITIES if spec.page == "/security"}
+    assert security_codes == {
+        "security.checklist",
+        "security.dashboard",
+        "security.findings",
+        "security.scan_file",
+        "security.scan_task",
+        "security.scan_project",
+        "security.scan_all_projects",
+    }
+
+    sandbox_codes = {spec.code for spec in USER_CAPABILITIES if spec.page == "/sandboxes"}
+    assert sandbox_codes == {"sandboxes.list", "sandboxes.get"}
+    # 沙箱创建/停止/续期属于副作用操作,只能走专用固定工具,不开放通用执行器
+    assert not any(
+        spec.page == "/sandboxes" and spec.method != "GET" for spec in USER_CAPABILITIES
+    )
 
 
 def test_registry_excludes_binary_stream_multipart_admin_and_secret_routes() -> None:
@@ -349,6 +367,48 @@ async def test_roundtable_tools_read_and_control_only_owned_session_after_approv
     )
     assert denied.status == "error"
     assert "无权访问" in denied.error
+    DiscussionBus._instance = None
+
+
+@pytest.mark.asyncio
+async def test_unique_super_admin_can_read_and_control_other_users_roundtable(
+    db,
+    super_admin_user,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    owner = _user(db)
+    DiscussionBus._instance = None
+    bus = DiscussionBus.instance()
+    bus.create_session(
+        session_id="disc_super_admin_control",
+        task_id=0,
+        file_name="main.py",
+        owner_user_id=owner.id,
+    )
+    controls: list[str] = []
+    bus.set_controller("disc_super_admin_control", lambda action, _payload: controls.append(action))
+    executor = PrismToolExecutor(
+        db,
+        super_admin_user,
+        surface="admin",
+        run_id="run-super-roundtable",
+        mcp_provider=EmptyMcp(),
+    )
+
+    status = await executor.execute(
+        ToolCall("call-super-read", "get_roundtable_discussion", {"session_id": "disc_super_admin_control"}, "{}")
+    )
+    control = ToolCall(
+        "call-super-stop",
+        "control_roundtable_discussion",
+        {"session_id": "disc_super_admin_control", "action": "stop"},
+        "{}",
+    )
+    assert status.status == "success"
+    assert (await executor.execute(control)).status == "approval_required"
+    assert (await executor.execute(control, approved=True)).status == "success"
+    assert controls == ["stop"]
     DiscussionBus._instance = None
 
 

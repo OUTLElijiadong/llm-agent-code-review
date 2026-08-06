@@ -5,6 +5,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin_agent_releases,
+    admin_copilot,
     admin_overview,
     agent_catalog,
     agent_governance,
@@ -27,6 +28,7 @@ from app.api.v1 import (
     knowledge,
     llm_config,
     maintenance,
+    mcp_governance,
     project_members,
     projects,
     rbac,
@@ -66,7 +68,9 @@ api_router.include_router(forum.router, prefix="/forum", tags=["开发者论坛"
 api_router.include_router(user_profile.router, prefix="/me", tags=["用户画像"])
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["个人知识库"])
 api_router.include_router(llm_config.router, prefix="/admin/llm", tags=["大模型配置"])
+api_router.include_router(mcp_governance.router, prefix="/admin/mcp", tags=["MCP 治理"])
 api_router.include_router(agent_governance.router, prefix="/admin", tags=["Agent治理"])
+api_router.include_router(admin_copilot.router, prefix="/admin/copilot", tags=["管理员副驾驶"])
 api_router.include_router(admin_overview.router, prefix="/admin", tags=["管理员总览"])
 api_router.include_router(agent_studio.router, prefix="/agent-studio", tags=["Agent 工坊"])
 api_router.include_router(agent_responses.router, prefix="/agent-responses", tags=["Responses Agent"])

@@ -20,6 +20,7 @@ from app.agents.report_agent import ReportAgent
 from app.agents.review_agent import CodeReviewerAgent
 from app.agents.review_orchestrator_agent import ReviewOrchestratorAgent
 from app.agents.rule_agent import RuleManagerAgent
+from app.agents.sandbox_agents import SandboxDeployerAgent, TestVerifierAgent
 from app.agents.security_sentinel_agent import SecuritySentinelAgent
 from app.agents.tool_contracts import (
     FixedToolArgumentError,
@@ -27,11 +28,11 @@ from app.agents.tool_contracts import (
     is_fixed_tool,
     validate_fixed_tool_arguments,
 )
+from app.core.permission_codes import PermissionCode
 from app.models.user import User
 from app.schemas.project import ProjectUpdateIn
 from app.services import project_service, project_source_service
 from app.services.rbac_service import check_permission
-from app.core.permission_codes import PermissionCode
 from app.utils.api_resolver import ApiConfig, resolve_api_config
 
 
@@ -96,6 +97,8 @@ class Orchestrator(BaseAgent):
         self.reporter = ReportAgent()
         self.ai_prompt = AiPromptAgent()
         self.security_sentinel = SecuritySentinelAgent()
+        self.test_verifier = TestVerifierAgent()
+        self.sandbox_deployer = SandboxDeployerAgent()
         self.evolution_agent = EvolutionAgent()
         self.operations_agent = OperationsAgent()
 
@@ -110,7 +113,8 @@ class Orchestrator(BaseAgent):
             self.lang_agent, self.project_agent, self.code_reviewer,
             self.project_mgr, self.review_orch, self.file_mgr,
             self.dashboard_agent, self.rule_mgr, self.reporter,
-            self.ai_prompt, self.security_sentinel, self.evolution_agent,
+            self.ai_prompt, self.security_sentinel, self.test_verifier,
+            self.sandbox_deployer, self.evolution_agent,
             self.operations_agent, self.chat_agent,
         ]:
             self._registry.register(a)
@@ -163,7 +167,8 @@ class Orchestrator(BaseAgent):
         for a in [
             self.project_mgr, self.review_orch, self.file_mgr,
             self.dashboard_agent, self.rule_mgr, self.reporter,
-            self.ai_prompt, self.security_sentinel, self.evolution_agent,
+            self.ai_prompt, self.security_sentinel, self.test_verifier,
+            self.sandbox_deployer, self.evolution_agent,
         ]:
             a.inject(db, user=user)
         self._db = db
@@ -225,6 +230,19 @@ class Orchestrator(BaseAgent):
         """通过当前请求用户更新项目元数据。"""
         if self._db is None or self._user is None:
             return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if self._user.role in {"admin", "super_admin"}:
+            from app.models.project import Project as _Project
+            target = self._db.get(_Project, project_id)
+            if target is None or target.status == "deleted":
+                return AgentResult(success=False, error=f"项目 #{project_id} 不存在")
+            if target.user_id != self._user.id:
+                return AgentResult(
+                    success=False,
+                    error=(
+                        f"项目 #{project_id}「{target.project_name}」不是管理员自有项目，"
+                        "管理员对话中仅可修改自己拥有的项目；其他用户的项目只读。"
+                    ),
+                )
         try:
             project = project_service.update_project(
                 self._db, self._user, project_id,
@@ -238,6 +256,7 @@ class Orchestrator(BaseAgent):
 
     def import_remote_project(self, url: str, project_name: str, description: str = "",
                               language: Optional[str] = None,
+                              audit_mode: bool = False,
                               ctx: Optional[AgentContext] = None) -> AgentResult:
         """通过当前用户导入公开远程源码归档。"""
         if self._db is None or self._user is None:
@@ -247,7 +266,7 @@ class Orchestrator(BaseAgent):
         try:
             data = project_source_service.import_remote_project(
                 self._db, self._user, url=url, project_name=project_name,
-                description=description, language=language,
+                description=description, language=language, audit_mode=audit_mode,
             )
             return AgentResult(success=True, data=data)
         except Exception as exc:
@@ -260,13 +279,29 @@ class Orchestrator(BaseAgent):
             return AgentResult(success=False, error="DB 或用户上下文未注入")
         if not check_permission(self._db, self._user.id, PermissionCode.PROJECT_VIEW):
             return AgentResult(success=False, error="当前用户没有 project:view 权限")
+        if not check_permission(self._db, self._user.id, PermissionCode.FILE_DOWNLOAD):
+            return AgentResult(success=False, error="当前用户没有 file:download 权限")
         try:
-            project_service.get_project(self._db, self._user, project_id)
-            return AgentResult(success=True, data={
+            project = project_service.get_project(self._db, self._user, project_id)
+            archive = project_source_service.get_source_archive_metadata(
+                self._db, self._user, project_id,
+            )
+            data = {
                 "project_id": project_id,
+                "project_name": project["project_name"],
                 "download_path": f"/api/projects/{project_id}/source-archive",
                 "download_url": f"/api/projects/{project_id}/source-archive",
-            })
+                "authentication": "current_user",
+                "source_mode": "audit_archive" if archive else "files",
+            }
+            if archive:
+                data.update({
+                    "archive_sha256": archive["archive_sha256"],
+                    "malware_status": archive["malware_status"],
+                    "audit_status": archive["audit_status"],
+                    "file_count": archive["file_count"],
+                })
+            return AgentResult(success=True, data=data)
         except Exception as exc:
             return AgentResult(success=False, error=str(exc))
 
@@ -374,26 +409,58 @@ class Orchestrator(BaseAgent):
                                 ctx: Optional[AgentContext] = None) -> AgentResult:
         if disabled := self._disabled_result("security_sentinel"):
             return disabled
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if not check_permission(self._db, self._user.id, PermissionCode.SECURITY_SCAN):
+            return AgentResult(success=False, error="当前用户没有 security:scan 权限")
         return self.security_sentinel.scan_file(file_id, scan_depth, ctx)
 
     def audit_security_for_task(self, task_id: int,
                                 ctx: Optional[AgentContext] = None) -> AgentResult:
         if disabled := self._disabled_result("security_sentinel"):
             return disabled
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if not check_permission(self._db, self._user.id, PermissionCode.SECURITY_SCAN):
+            return AgentResult(success=False, error="当前用户没有 security:scan 权限")
         return self.security_sentinel.scan_task(task_id, ctx)
 
     def audit_security_for_project(self, project_id: int, top_n: int = 50,
                                    trace_dataflow: bool = True,
                                    ctx: Optional[AgentContext] = None,
-                                   scan_mode: str = "full") -> AgentResult:
+                                   scan_mode: str = "static_full") -> AgentResult:
         if disabled := self._disabled_result("security_sentinel"):
             return disabled
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if not check_permission(self._db, self._user.id, PermissionCode.SECURITY_SCAN):
+            return AgentResult(success=False, error="当前用户没有 security:scan 权限")
         if scan_mode == "full":
             # 保持旧版注入式测试/扩展 Agent 的四参数兼容；SecuritySentinel
             # 默认 full，因此不需要额外传递新参数。
             return self.security_sentinel.scan_project(project_id, top_n, trace_dataflow, ctx)
         return self.security_sentinel.scan_project(
             project_id, top_n, trace_dataflow, ctx, scan_mode)
+
+    def run_project_tests(self, *args, **kwargs) -> AgentResult:
+        if disabled := self._disabled_result("test_verifier"):
+            return disabled
+        return self.test_verifier.run_project_tests(*args, **kwargs)
+
+    def deploy_project_sandbox(self, *args, **kwargs) -> AgentResult:
+        if disabled := self._disabled_result("sandbox_deployer"):
+            return disabled
+        return self.sandbox_deployer.deploy_project_sandbox(*args, **kwargs)
+
+    def close_sandbox(self, *args, **kwargs) -> AgentResult:
+        if disabled := self._disabled_result("sandbox_deployer"):
+            return disabled
+        return self.sandbox_deployer.close_sandbox(*args, **kwargs)
+
+    def extend_sandbox(self, *args, **kwargs) -> AgentResult:
+        if disabled := self._disabled_result("sandbox_deployer"):
+            return disabled
+        return self.sandbox_deployer.extend_sandbox(*args, **kwargs)
 
     # ── 管理员 AI 代管后台工具(仅管理员;写操作强制审批)──
 
@@ -595,6 +662,9 @@ class Orchestrator(BaseAgent):
                     skill.agent_name, tool_name, arguments, ctx
                 )
 
+        if tool_name == "trigger_evolution" and not self._can_configure_agents():
+            return AgentResult(success=False, error="当前用户缺少 Agent 配置权限")
+
         # 2. 固定工具只允许调用 tool_contracts 注册表中的显式白名单。
         if not is_fixed_tool(tool_name):
             return AgentResult(
@@ -664,6 +734,8 @@ class Orchestrator(BaseAgent):
                 success=False,
                 error="DB 未注入,无法调用 Skill(请使用 get_request_orchestrator)",
             )
+        if trigger_type not in {"scheduled", "event", "proactive"} and not self._can_configure_agents():
+            return AgentResult(success=False, error="当前用户缺少 Agent 配置权限")
         from app.services import skill_service
 
         # trigger_source 默认值
@@ -687,6 +759,13 @@ class Orchestrator(BaseAgent):
             error=result["error"],
             duration_ms=result["duration_ms"],
         )
+
+    def _can_configure_agents(self) -> bool:
+        """判断请求用户是否拥有全局 Agent 配置权限。"""
+
+        if self._db is None or self._user is None:
+            return False
+        return check_permission(self._db, self._user.id, PermissionCode.AGENT_CONFIGURE)
 
     def list_agent_skills(self, agent_name: Optional[str] = None) -> List[Dict[str, Any]]:
         """列出 Agent 挂载的所有 Skill 元数据
