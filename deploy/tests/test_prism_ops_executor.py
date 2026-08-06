@@ -171,3 +171,66 @@ def test_backup_audit_reports_retention_and_other_entries(tmp_path: Path, monkey
     assert audit["older_than_14_days"] == 0
     assert audit["other_entries_count"] == 2
     assert audit["other_bytes"] == 2048 + 512
+
+
+def test_parse_db_general_log_classifies_threats() -> None:
+    rows = [
+        {"user_host": "root[root] @ localhost []", "argument": "DROP TABLE users", "event_time": "2026-08-05 10:00:00"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "DELETE FROM project WHERE id=1234", "event_time": "2026-08-05 10:01:00"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "UPDATE agent_alert SET detail_json='x' WHERE id=1", "event_time": "2026-08-05 10:01:30"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "SELECT * FROM user INTO OUTFILE '/tmp/dump.sql'", "event_time": "2026-08-05 10:02:00"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "select password from users limit 1", "event_time": "2026-08-05 10:03:00"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "Access denied for user 'app'", "event_time": "2026-08-05 10:04:00"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "INSERT INTO tool_call_log (error) VALUES (NULL)", "event_time": "2026-08-05 10:04:30"},
+        {"user_host": "app[app] @ 10.0.0.1 []", "argument": "SELECT * FROM project LIMIT 10", "event_time": "2026-08-05 10:05:00"},
+    ]
+    parsed = executor.parse_db_general_log(rows)
+    # DROP + DELETE → destructive；业务单行 UPDATE 不计入（避免误伤应用 ORM）
+    assert parsed["destructive_total"] == 2
+    # INTO OUTFILE → dump_exfil
+    assert parsed["dump_exfil_total"] == 1
+    # Access denied → error；含 error 列名的 INSERT、普通 SELECT 不计入
+    assert parsed["error_total"] == 1
+    assert parsed["destructive_by_user"][0]["value"].startswith("root[root]")
+    # 样本 SQL 已脱敏：字符串/长数字字面量被替换
+    dumped = parsed["samples"]["dump_exfil"][0]["sql"]
+    assert "/tmp/dump.sql" not in dumped
+    deleted = parsed["samples"]["destructive"][1]["sql"]
+    assert "1234" not in deleted
+
+
+def test_parse_db_general_log_empty_and_non_dict() -> None:
+    parsed = executor.parse_db_general_log([{}, {"argument": ""}, "not-a-dict", {"argument": "SELECT 1"}])
+    assert parsed["destructive_total"] == 0
+    assert parsed["dump_exfil_total"] == 0
+    assert parsed["error_total"] == 0
+    assert parsed["samples"]["destructive"] == []
+
+
+def test_redact_db_sql_masks_literals() -> None:
+    masked = executor._redact_db_sql("DELETE FROM t WHERE name='secret' AND id=98765")
+    assert "secret" not in masked
+    assert "98765" not in masked
+    assert "DELETE FROM t WHERE name=" in masked
+
+
+def test_parse_db_error_log_detects_restart_and_recovery() -> None:
+    lines = [
+        "2026-08-05T11:58:16Z [Note] InnoDB: Starting crash recovery",
+        "2026-08-05T11:58:20Z [Note] InnoDB: Database was not shutdown normally!",
+        "2026-08-05T11:58:42Z [Note] /usr/sbin/mysqld: ready for connections. port: 3306",
+        "2026-08-05T12:00:00Z [Note] some ordinary log line",
+    ]
+    parsed = executor.parse_db_error_log(lines)
+    assert parsed["restart_count"] == 1
+    assert parsed["recovery_detected"] is True
+    assert parsed["recovery_lines"]
+
+
+def test_parse_db_error_log_clean() -> None:
+    parsed = executor.parse_db_error_log([
+        "2026-08-05T12:00:00Z [Note] ordinary line",
+        "another line",
+    ])
+    assert parsed["restart_count"] == 0
+    assert parsed["recovery_detected"] is False

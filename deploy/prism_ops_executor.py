@@ -79,6 +79,8 @@ ACTION_PARAM_KEYS = {
     "flytrap_attack_events": {"since_hours", "limit"},
     "nginx_attack_events": {"since_hours", "limit"},
     "backup_audit": set(),
+    "db_threat_signals": {"since_hours", "limit"},
+    "db_health": set(),
     "ip_attribution": {"ip"},
 }
 
@@ -202,6 +204,10 @@ def execute(action: str, params: dict[str, Any], request_id: str = "") -> dict[s
         return _nginx_attack_events(params)
     if action == "backup_audit":
         return _backup_audit()
+    if action == "db_threat_signals":
+        return _db_threat_signals(params)
+    if action == "db_health":
+        return _db_health()
     if action == "ip_attribution":
         return _ip_attribution(params)
     raise ValueError("动作不在白名单")
@@ -580,6 +586,183 @@ def _backup_audit() -> dict[str, Any]:
         "oldest": rows[-1] if rows else None,
         "recent": rows[:100],
     }
+
+
+# ── 生产数据库内部威胁信号（mysql.general_log 只读采样） ──
+# 归一化 SQL 文本后按类别正则归类；仅返回聚合统计与截断样本，绝不回传参数/数据。
+DB_SQL_MAX_LEN = 160
+# 真正的破坏性结构/批量删除/权限变更；不含业务单行 UPDATE/INSERT（避免监控误伤应用 ORM）。
+_DB_DESTRUCTIVE_RE = re.compile(
+    r"\b(drop\s+table|drop\s+database|truncate\s+table|delete\s+from|"
+    r"alter\s+table|rename\s+table|grant\b|revoke\b|"
+    r"create\s+user|drop\s+user|set\s+password)\b"
+)
+_DB_DUMP_RE = re.compile(r"\b(select\s+.+\s+into\s+(out|dump)file|load_file\s*\()\b")
+# MySQL 报错文本（access denied / error NNNN），不匹配含 error 列名的普通 INSERT。
+_DB_ERROR_RE = re.compile(r"\b(access\s+denied|error\s+\d{3,5}|you have an error)\b")
+_DB_SQL_REDACT_RE = re.compile(r"('[^']*'|\"[^\"]*\"|\b\d{4,}\b)")
+
+
+def _normalize_db_sql(text: str) -> str:
+    """折叠空白并截断超长 SQL 文本。"""
+    collapsed = re.sub(r"\s+", " ", str(text or "")).strip()
+    return collapsed[:DB_SQL_MAX_LEN]
+
+
+def _redact_db_sql(text: str) -> str:
+    """脱敏 SQL 文本：字符串/长数字字面量替换为占位符，避免回传真实数据。"""
+    return _DB_SQL_REDACT_RE.sub("?", text)
+
+
+def parse_db_general_log(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """把 mysql.general_log 采样行归类为威胁信号聚合。
+
+    纯函数便于单测。输入行为 dict（含 user_host / argument / event_time）。
+    """
+    categories: dict[str, list[dict[str, Any]]] = {
+        "destructive": [],
+        "dump_exfil": [],
+        "error": [],
+    }
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = _normalize_db_sql(row.get("argument"))
+        if not raw:
+            continue
+        lowered = raw.lower()
+        sample = {
+            "user_host": str(row.get("user_host") or "")[:128],
+            "sql": _redact_db_sql(raw),
+            "event_time": str(row.get("event_time") or ""),
+        }
+        if _DB_DUMP_RE.search(lowered):
+            categories["dump_exfil"].append(sample)
+        elif _DB_DESTRUCTIVE_RE.search(lowered):
+            categories["destructive"].append(sample)
+        elif _DB_ERROR_RE.search(lowered):
+            categories["error"].append(sample)
+
+    def _agg(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for item in items:
+            value = str(item.get(key) or "")
+            counts[value] = counts.get(value, 0) + 1
+        return [
+            {"value": value, "count": count}
+            for value, count in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+        ][:20]
+
+    return {
+        "destructive_total": len(categories["destructive"]),
+        "dump_exfil_total": len(categories["dump_exfil"]),
+        "error_total": len(categories["error"]),
+        "destructive_by_user": _agg(categories["destructive"], "user_host"),
+        "dump_exfil_by_user": _agg(categories["dump_exfil"], "user_host"),
+        "error_by_user": _agg(categories["error"], "user_host"),
+        "samples": {
+            "destructive": categories["destructive"][-20:],
+            "dump_exfil": categories["dump_exfil"][-20:],
+            "error": categories["error"][-20:],
+        },
+    }
+
+
+def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
+    """只读采样 mysql.general_log 并归类数据库内部威胁信号。
+
+    要求运维已开启 general_log 且 log_output 含 TABLE；未开启时返回
+    ok=False（不抛异常），不影响整体安全巡检。
+    """
+    since_hours = _since_hours_arg(params)
+    limit = _event_limit_arg(params, default=4000)
+    root_password = _read_env("MYSQL_ROOT_PASSWORD")
+    database = _read_env("MYSQL_DATABASE")
+    sql = (
+        "SELECT user_host, argument, event_time FROM mysql.general_log "
+        f"WHERE event_time >= DATE_SUB(NOW(), INTERVAL {since_hours} HOUR) "
+        f"AND command_type IN ('Query','Execute') ORDER BY event_time DESC LIMIT {limit}"
+    )
+    result = run([
+        "docker", "exec", "cr_mysql", "sh", "-c",
+        f"MYSQL_PWD='{root_password}' mysql --protocol=TCP -h 127.0.0.1 -uroot "
+        f"--batch --skip-column-names --raw -e \"{sql}\"",
+    ], timeout=90, allow_failure=True)
+    if result["exit_code"] != 0:
+        return {
+            "ok": False,
+            "since_hours": since_hours,
+            "reason": "general_log 未开启或不可读（须运维开启 general_log 且 log_output 含 TABLE）",
+            "stderr": result["stderr"][:400],
+        }
+    rows: list[dict[str, Any]] = []
+    for line in result["stdout"].splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        rows.append({
+            "user_host": parts[0],
+            # 保留列中的制表符合并回 argument
+            "argument": "\t".join(parts[1:-1]) if len(parts) > 3 else parts[1],
+            "event_time": parts[-1],
+        })
+    parsed = parse_db_general_log(rows)
+    parsed.update({
+        "ok": True,
+        "since_hours": since_hours,
+        "sampled_rows": len(rows),
+        "database": database,
+        "stdout_capped": len(result["stdout"]) >= 100_000,
+    })
+    return parsed
+
+
+_DB_RESTART_RE = re.compile(r"/usr/sbin/mysqld: ready for connections", re.IGNORECASE)
+_DB_RECOVERY_RE = re.compile(
+    r"(InnoDB: (Starting crash recovery|Doing recovery|Database was not shutdown normally)|"
+    r"Starting crash recovery|crash recovery|forcing InnoDB Recovery)", re.IGNORECASE,
+)
+
+
+def parse_db_error_log(lines: list[str]) -> dict[str, Any]:
+    """解析 mysqld 容器日志，识别重启与崩溃恢复迹象（纯函数便于单测）。"""
+    restarts: list[str] = []
+    recovery: list[str] = []
+    for line in lines:
+        text = str(line or "")
+        if _DB_RESTART_RE.search(text):
+            restarts.append(text.strip()[:200])
+        if _DB_RECOVERY_RE.search(text):
+            recovery.append(text.strip()[:200])
+    return {
+        "restart_count": len(restarts),
+        "recovery_detected": bool(recovery),
+        "restart_lines": restarts[-10:],
+        "recovery_lines": recovery[-10:],
+    }
+
+
+def _db_health() -> dict[str, Any]:
+    """采集 MySQL 可用性健康：容器重启计数、内存、近期崩溃恢复日志。
+
+    用于提前发现 OOM 误杀 / 崩溃恢复这类直接威胁生产数据可用性的事件。
+    """
+    restart_count = run([
+        "docker", "inspect", "cr_mysql", "--format", "{{.RestartCount}}",
+    ], timeout=30, allow_failure=True)
+    mem = run([
+        "docker", "stats", "cr_mysql", "--no-stream", "--format", "{{.MemUsage}}",
+    ], timeout=30, allow_failure=True)
+    logs = run([
+        "docker", "logs", "cr_mysql", "--since", "24h",
+    ], timeout=60, allow_failure=True)
+    combined = (logs.get("stdout") or "") + "\n" + (logs.get("stderr") or "")
+    parsed = parse_db_error_log(combined.splitlines())
+    parsed.update({
+        "container_restart_count": restart_count.get("stdout", "").strip(),
+        "mem_usage": mem.get("stdout", "").strip(),
+    })
+    return parsed
 
 
 def _threat_intel_base() -> str:

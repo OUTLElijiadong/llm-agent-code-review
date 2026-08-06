@@ -556,6 +556,7 @@ class SecurityStatusOut(BaseModel):
     ssh: dict = Field(default_factory=dict)
     attacks: dict = Field(default_factory=dict)
     backup: dict = Field(default_factory=dict)
+    db_threat: dict = Field(default_factory=dict)
     open_alerts: list[dict] = Field(default_factory=list)
     errors: list[dict] = Field(default_factory=list)
 

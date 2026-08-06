@@ -26,12 +26,13 @@ _DEFAULT_JOBS = (
     ("daily_agent_evolution", "evolution", "evolution", "daily@04:00"),
     ("ops_health_check", "ops_health_check", "operations", "interval@5m"),
     ("security_monitor", "security_monitor", "operations", "interval@5m"),
+    ("db_backup", "db_backup", "operations", "daily@02:30"),
 )
 
 # These tasks either reach externally configured sources or inspect the host.
 # Unattended scheduler execution remains allowed, but interactive access is
 # reserved for the unique super administrator.
-SUPER_ADMIN_JOB_TYPES = frozenset({"crawl", "ops_health_check", "security_monitor"})
+SUPER_ADMIN_JOB_TYPES = frozenset({"crawl", "ops_health_check", "security_monitor", "db_backup"})
 
 # v3.0 AgentSkill: per-Agent 进化任务(每日 03:00 跑 self_improve action=evolve)
 # 14 个 Agent 各一条,与原 daily_agent_evolution 共存(后者保持兼容)
@@ -288,6 +289,8 @@ def _execute_job(db: Session, job: AgentJob) -> dict:
         return _execute_ops_health_check(db, job)
     if job.job_type == "security_monitor":
         return _execute_security_monitor(db, job)
+    if job.job_type == "db_backup":
+        return _execute_db_backup(db, job)
     # v3.0 AgentSkill: Skill 调度任务
     if job.job_type == "skill_evolution":
         return _execute_skill_evolution(db, job)
@@ -537,6 +540,71 @@ def _execute_security_monitor(db: Session, job: AgentJob) -> Dict[str, Any]:
         "errors": result.get("errors") or [],
         "job_id": job.id,
     }
+
+
+def _execute_db_backup(db: Session, job: AgentJob) -> Dict[str, Any]:
+    """执行生产数据库自动备份调度任务。
+
+    受 ``backup_schedule_enabled`` 显式开关闸门（默认关闭，须最高管理员在
+    .env 开启）。开启后调用 ``backup_database`` 运维动作做一次一致性压缩备份；
+    备份目录的过期轮换清理由 backup.sh 按 ``BACKUP_RETENTION_DAYS`` 完成。
+    失败时写入 critical 告警并 SSE 通知最高管理员，便于及时处置。
+    """
+    from app.agents.operations_agent import OperationsAgent
+    from app.services import observability_service
+
+    if not settings.backup_schedule_enabled:
+        return {"message": "db backup disabled", "success": True, "skipped": True}
+
+    agent = OperationsAgent()
+    result = agent.execute_action(db, None, action="backup_database", source="scheduler")
+    data = result.data if isinstance(result.data, dict) else {}
+    success = bool(result.success) and data.get("status") == "success"
+    summary: Dict[str, Any] = {
+        "success": success,
+        "execution_id": data.get("id"),
+        "status": data.get("status"),
+        "job_id": job.id,
+    }
+    if not success:
+        error_text = str(result.error or data.get("error") or "备份失败")
+        summary["error"] = error_text
+        try:
+            admin = db.query(User).filter(
+                User.username == "admin", User.role == "super_admin"
+            ).first()
+            alert = observability_service.create_alert(
+                db,
+                alert_type="ops.backup",
+                severity="critical",
+                title="生产数据库自动备份失败",
+                detail={"error": error_text[:500], "job_id": job.id},
+                category="backup",
+                source="db_backup",
+                user_id=admin.id if admin else None,
+                fingerprint="backup:auto_failed",
+            )
+            if admin is not None:
+                from app.agents.event_bus import emit_event
+                from app.agents.events import AgentEventType, new_trace_id
+                emit_event(
+                    AgentEventType.ADMIN_ALERT,
+                    agent="operations",
+                    trace_id=new_trace_id(),
+                    parent="manager",
+                    message="生产数据库自动备份失败",
+                    payload={
+                        "alert_id": alert.id,
+                        "severity": "critical",
+                        "category": "backup",
+                        "title": "生产数据库自动备份失败",
+                        "suggestion": "检查 MySQL 内存/磁盘空间与备份目录可写性，必要时手动执行 backup_database",
+                    },
+                    user_id=admin.id,
+                )
+        except Exception:  # noqa: BLE001 - 告警失败不应遮蔽原始备份错误
+            pass
+    return summary
 
 
 def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
