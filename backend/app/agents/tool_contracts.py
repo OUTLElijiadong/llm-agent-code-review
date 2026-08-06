@@ -315,6 +315,21 @@ class SearchPublishedAgentsArguments(FixedToolArguments):
     limit: int = Field(default=8, ge=1, le=20, description="最多返回的候选数量")
 
 
+class RecallKnowledgeArguments(FixedToolArguments):
+    """检索 RAG 知识笔记本参数。"""
+
+    query: str = Field(min_length=1, max_length=2000, description="要检索的问题或关键词")
+    top_k: int = Field(default=5, ge=1, le=20, description="最多返回的知识切片数")
+
+
+class SaveKnowledgeNoteArguments(FixedToolArguments):
+    """把学习感悟/经验写入 RAG 知识笔记本参数。"""
+
+    title: str = Field(min_length=1, max_length=240, description="知识笔记标题")
+    content: str = Field(min_length=1, max_length=50_000, description="知识笔记正文(小菱的理解、操作要点或经验总结)")
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0, description="本条知识的置信度,默认 0.8")
+
+
 class InvokePublishedAgentArguments(FixedToolArguments):
     """调用一个已经精确确定的已发布自定义 Agent。"""
 
@@ -419,6 +434,19 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
     ),
     FixedToolContract("close_sandbox", "调用沙箱部署 Agent 关闭环境", SandboxIdArguments, True),
     FixedToolContract("extend_sandbox", "调用沙箱部署 Agent 续期环境", ExtendSandboxArguments, True),
+    FixedToolContract(
+        "recall_knowledge",
+        "检索小菱的 RAG 知识笔记本(教学手册、操作指南与过往感悟),返回最相关知识切片;"
+        "回答不确定或需参考既有经验时先调用本工具",
+        RecallKnowledgeArguments,
+        True,
+    ),
+    FixedToolContract(
+        "save_knowledge_note",
+        "把小菱新学到的可靠经验、操作要点或理解感悟写入知识笔记本,供以后同类问题检索复用;写操作会先等待用户批准",
+        SaveKnowledgeNoteArguments,
+        True,
+    ),
     FixedToolContract("trigger_evolution", "触发指定 Agent 的自进化", TriggerEvolutionArguments, True),
     FixedToolContract("list_agent_skills", "列出指定或全部 Agent Skill 元数据", ListAgentSkillsArguments, False),
     FixedToolContract(

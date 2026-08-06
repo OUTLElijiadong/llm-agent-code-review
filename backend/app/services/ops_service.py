@@ -188,6 +188,44 @@ ACTION_PARAM_SCHEMAS = {
     "ip_attribution": _object_schema({"ip": {"type": "string", "maxLength": 64}}, {"ip"}),  # noqa: E501
 }
 
+# 每个运维动作给模型看的一句话说明(含常见意图示例),帮助小菱把用户意图
+# 正确映射到白名单动作。只读动作用于实时获取服务器信息,写动作会等待审批。
+ACTION_DESCRIPTIONS = {
+    "status": "查看服务器整体实时状态(CPU/内存/磁盘/负载/运行时长)",
+    "certificate_status": "查看 HTTPS 证书有效期与状态",
+    "backup_database": "对生产数据库执行一次完整备份",
+    "verify_backup": "校验指定备份文件是否完整可恢复(参数 file=备份文件名)",
+    "restart_service": "重启平台服务(service 可选 backend/frontend/mysql/redis/clamav)",
+    "nginx_reload": "平滑重载 Nginx 配置,不断开现有连接",
+    "renew_certificate": "重新签发并部署 HTTPS 证书",
+    "database_maintenance": "执行数据库维护(优化表/清理)",
+    "update_config": "更新平台运行配置项(key=配置键,value=配置值)",
+    "rollback_application": "回滚应用发布(target=all/backend/frontend)",
+    "restore_database": "从指定备份文件恢复数据库(file=备份文件名)",
+    "cleanup": "清理过期构建产物、临时文件与旧备份",
+    "host_inventory": "获取宿主机资产清单(CPU/内存/磁盘/网络/系统信息),用于实时了解服务器配置",
+    "list_directory": "列出服务器指定目录内容(path=绝对路径,可选 limit)",
+    "read_text_file": "读取服务器指定文本文件内容(path=绝对路径,可选 max_bytes)",
+    "journal_query": "查询 systemd 服务日志(unit=服务名,可选 since/lines),用于实时查看运行日志",
+    "systemd_unit_action": "对 systemd 单元执行 start/stop/restart/reload/enable/disable(unit=单元名)",
+    "docker_container_action": "对 Docker 容器执行 start/stop/restart/pause/unpause(container=容器名)",
+    "write_text_file": "写入或覆盖服务器文本文件(path=绝对路径,content=内容,可选 mode/expected_sha256)",
+    "package_action": "安装/升级/移除系统软件包(operation=install/upgrade/remove,packages=包名列表)",
+    "firewall_action": (
+        "开放或关闭防火墙端口/服务(operation=add/remove,target_type=port/service,"
+        "value=端口号或服务名,可选 zone)。用户说开放某端口时使用 add+port+端口号,关闭时用 remove"
+    ),
+    "account_action": "管理系统账号(operation=create_system/lock/unlock/delete,username=用户名)",
+    "ssh_authorized_key_action": "添加或移除用户 SSH 授权公钥(operation=add/remove,username,public_key)",
+    "ssh_login_events": "查询 SSH 登录事件(since_hours/limit/focus=all/accepted/failed)",
+    "flytrap_attack_events": "查询蜜罐攻击事件",
+    "nginx_attack_events": "查询 Nginx 攻击事件",
+    "backup_audit": "查询备份审计记录",
+    "db_threat_signals": "查询数据库内部威胁信号",
+    "db_health": "查询数据库健康状态",
+    "ip_attribution": "查询 IP 归属地信息(ip=IP 地址)",
+}
+
 
 def execute(
     db: Session,

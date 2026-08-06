@@ -41,6 +41,8 @@ EXPECTED_FIXED_TOOL_NAMES = [
     "deploy_project_sandbox",
     "close_sandbox",
     "extend_sandbox",
+    "recall_knowledge",
+    "save_knowledge_note",
     "trigger_evolution",
     "list_agent_skills",
     "search_published_agents",
@@ -142,7 +144,7 @@ def test_fixed_tool_registry_has_stable_unique_names() -> None:
     """固定工具注册表应成为唯一名称来源且不含重复项。"""
     names = get_fixed_tool_names()
 
-    assert len(names) == 40
+    assert len(names) == 42
     assert len(names) == len(set(names))
     assert names == EXPECTED_FIXED_TOOL_NAMES
     assert names[0] == "list_agents"

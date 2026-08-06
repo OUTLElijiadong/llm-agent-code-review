@@ -42,6 +42,7 @@ from app.services import (
     admin_agent_tools,
     admin_capability_service,
     agent_governance_service,
+    agent_knowledge_service,
     code_file_service,
     ops_service,
     policy_engine,
@@ -175,6 +176,7 @@ _WRITE_TOOLS = {
     "admin_toggle_agent",
     "admin_decide_agent_release",
     "admin_execute_operation",
+    "save_knowledge_note",
 }
 _DANGER_TOOLS = {
     "delete_project",
@@ -831,6 +833,9 @@ class PrismToolExecutor:
                 ),
             )
 
+        if call.name == "recall_knowledge":
+            return await self._execute_once(call, lambda: self._recall_knowledge(call))
+
         if call.name == "admin_list_agent_release_approvals":
             return await self._execute_once(
                 call,
@@ -863,6 +868,8 @@ class PrismToolExecutor:
 
         if call.name in {"admin_set_user_role", "admin_delete_user", "admin_toggle_agent"}:
             return await self._execute_once(call, lambda: self._execute_admin_write(call))
+        if call.name == "save_knowledge_note":
+            return await self._execute_once(call, lambda: self._save_knowledge_note(call))
         return await self._execute_once(
             call,
             lambda: self._agent_result(
@@ -930,6 +937,45 @@ class PrismToolExecutor:
                 "authentication": "current_user",
             }
         )
+
+    def _knowledge_agent_code(self) -> str:
+        return "manager" if self._surface == "admin" else "chat_assistant"
+
+    def _recall_knowledge(self, call: ToolCall) -> ToolExecutionResult:
+        """检索小菱的 RAG 知识笔记本(用户私有知识 + 当前 Agent 知识)。"""
+
+        query = str(call.arguments["query"])
+        top_k = int(call.arguments.get("top_k") or 5)
+        hits = agent_knowledge_service.unified_retrieve(
+            self._db,
+            user_id=int(self._user.id),
+            agent_code=self._knowledge_agent_code(),
+            query=query,
+            top_k=top_k,
+        )
+        if not hits:
+            return ToolExecutionResult.failure("知识笔记本中没有检索到相关内容")
+        return ToolExecutionResult.success({"count": len(hits), "hits": hits})
+
+    def _save_knowledge_note(self, call: ToolCall) -> ToolExecutionResult:
+        """把小菱的学习感悟/操作要点写入知识笔记本(写操作已先经审批)。"""
+
+        row = agent_knowledge_service.add_document(
+            self._db,
+            agent_code=self._knowledge_agent_code(),
+            title=str(call.arguments["title"]),
+            content=str(call.arguments["content"]),
+            source_type="manual",
+            source_ref=f"response_run:{self._run_id}",
+            risk_level="medium",
+            confidence=float(call.arguments.get("confidence") or 0.8),
+        )
+        return ToolExecutionResult.success({
+            "doc_id": row.id,
+            "title": row.title,
+            "status": row.status,
+            "message": "已写入知识笔记本" if row.status == "active" else "已提交知识笔记本,等待审批激活",
+        })
 
     async def _start_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
         """复用用户 REST 预检后，在后台启动同一套圆桌编排器。"""
@@ -2052,6 +2098,13 @@ def _instructions(surface: str) -> str:
             "完成后汇报成功/失败/跳过条数与原因。批量分析类请求(如统计、趋势、分布)"
             "要聚合多来源只读能力的数据后给出结论表格。"
             "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
+            "服务器运维(仅超级管理员可用)：实时获取服务器信息(状态/磁盘/进程/日志/证书)时，"
+            "直接用 admin_execute_operation 的只读动作现查"
+            "(status/host_inventory/journal_query/read_text_file/certificate_status)，不得编造；"
+            "用户要求开放/关闭端口或服务时，用 admin_execute_operation 的 firewall_action"
+            "(开放端口=operation add + target_type port + value 端口号，关闭用 remove)；"
+            "重启服务用 restart_service，装/卸软件包用 package_action，"
+            "改防火墙/服务/账号等写操作都会自动等待用户批准，批准后系统会把结果交还给你。"
         )
         guide_block = admin_guide_block()
     else:
@@ -2083,6 +2136,9 @@ def _instructions(surface: str) -> str:
         "涉及用户批量操作时必须先查询真实用户。用户说序号、第几条或范围而未明确是用户 ID 时，"
         "不得猜测；必须用 ask_user 区分列表序号与用户 ID，得到精确 user_ids 后再调用批量工具。"
         f"{capability_instruction}"
+        "知识笔记本是你的 RAG 教学库：回答前若问题可能参考既有教学手册、操作指南或你沉淀过的经验，"
+        "先调用 recall_knowledge 检索最相关知识切片再作答；你新学到可靠经验、操作要点或形成新的理解感悟时，"
+        "主动调用 save_knowledge_note 写入笔记本(写操作会先等待用户批准)，以后同类问题就能直接复用。"
         f"{role_behavior}"
         "写操作由系统暂停并展示审批；用户点击批准后系统会把原调用结果自动交还给你，不要要求用户重复发送指令。"
         "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。\n\n"
@@ -2426,6 +2482,7 @@ def _operations_tool_schema() -> Dict[str, Any]:
             "oneOf": [
                 {
                     "type": "object",
+                    "description": ops_service.ACTION_DESCRIPTIONS.get(action, ""),
                     "properties": {
                         "action": {"type": "string", "const": action},
                         "params": ops_service.ACTION_PARAM_SCHEMAS[action],

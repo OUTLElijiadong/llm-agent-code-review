@@ -12,6 +12,8 @@ import {
   type AdminCopilotMessage,
 } from '@/api/adminCopilot'
 import { getAgentResponseSession, type AgentResponseSession } from '@/api/agentResponses'
+import { createProject, updateProject, deleteProject } from '@/api/project'
+import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
@@ -81,6 +83,9 @@ const visible = ref(false)
 const loading = ref(false)
 const showTyping = ref(false)
 const inputText = ref('')
+const uploading = ref(false)
+const uploadStatus = ref('')
+const dragActive = ref(false)
 const unreadAlerts = ref(0)
 const messageArea = ref<HTMLElement | null>(null)
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('admin')
@@ -390,6 +395,123 @@ function followNavigation(directive: AgentNavigateDirective): void {
  * 拦截助手回复中的站内 markdown 链接点击:
  * 命中路由表则由 AgentNavLink 同源守卫决定是否渲染,点击后 SPA 内跳转。
  */
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
+const CODE_EXTS = new Set(['py', 'js', 'jsx', 'ts', 'tsx', 'vue', 'html', 'css', 'java', 'go', 'php', 'rb', 'c', 'h', 'cpp', 'cc', 'cs', 'rs'])
+const LANGUAGE_BY_EXT: Record<string, string> = {
+  py: 'Python', js: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript',
+  vue: 'JavaScript', html: 'JavaScript', css: 'JavaScript', java: 'Java', go: 'Go',
+  php: 'PHP', rb: 'Ruby', c: 'C', h: 'C', cpp: 'C++', cc: 'C++', cs: 'C#', rs: 'Rust',
+}
+
+function inferProjectLanguage(files: File[]): string {
+  for (const file of files) {
+    const language = LANGUAGE_BY_EXT[file.name.split('.').pop()?.toLowerCase() ?? '']
+    if (language) return language
+  }
+  return 'Python'
+}
+
+function onDragOver(event: DragEvent): void {
+  if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onDragLeave(event: DragEvent): void {
+  if (!event.currentTarget || !(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) {
+    dragActive.value = false
+  }
+}
+
+async function onDrop(event: DragEvent): Promise<void> {
+  dragActive.value = false
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  if (!files.length || uploading.value) return
+  uploading.value = true
+  uploadStatus.value = `准备上传 ${files.length} 个文件…`
+  try {
+    const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    if (images.length && !codeFiles.length) {
+      uploadStatus.value = ''
+      ElMessage.info('图片会作为项目附件上传；若要让小菱帮你创建代码项目，请再拖入至少一个代码文件')
+      return
+    }
+    const targets = files.slice(0, 20)
+    const skipped = files.length - targets.length
+    if (skipped > 0) ElMessage.warning(`单次最多上传 20 个文件,已跳过后面的 ${skipped} 个`)
+    await uploadFilesAsProject(targets, images.length)
+  } catch (err) {
+    uploadStatus.value = ''
+    ElMessage.error(`上传失败: ${err instanceof Error ? err.message : '请重试'}`)
+  } finally {
+    uploading.value = false
+  }
+}
+
+/** 把拖拽的文件建成一个新项目并导入,然后让管理端小菱接手引导下一步。 */
+async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
+  uploadStatus.value = `正在验证 ${files.length} 个文件…`
+  const readableFiles: File[] = []
+  const preflightFailures: string[] = []
+  for (const file of files) {
+    try {
+      if (file.size <= 0) throw new Error('文件为空')
+      await file.slice(0, 1).arrayBuffer()
+      readableFiles.push(file)
+    } catch (err) {
+      preflightFailures.push(`${file.name}: ${err instanceof Error ? err.message : '文件不可读取'}`)
+    }
+  }
+  if (!readableFiles.length) {
+    uploadStatus.value = ''
+    throw new Error(`没有可上传的文件${preflightFailures.length ? ` (${preflightFailures[0]})` : ''}`)
+  }
+  const base = readableFiles.find((file) => !IMAGE_EXTS.has(file.name.split('.').pop()?.toLowerCase() ?? ''))?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
+  const suffix = `${new Date().toISOString().slice(5, 10).replace('-', '')}-${crypto.randomUUID().slice(0, 6)}`
+  const projectName = `${base}-${suffix}`
+  const language = inferProjectLanguage(readableFiles)
+  uploadStatus.value = `正在创建项目「${projectName}」…`
+  const created = await createProject({ project_name: projectName, description: `管理端小菱拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
+  const projectId = created.id
+  let okCount = 0
+  const failures: string[] = [...preflightFailures]
+  for (let i = 0; i < readableFiles.length; i++) {
+    const file = readableFiles[i]
+    uploadStatus.value = `正在上传 ${i + 1}/${readableFiles.length}: ${file.name}`
+    try {
+      const fd = new FormData()
+      fd.append('project_id', String(projectId))
+      fd.append('file', file)
+      fd.append('file_path', file.name)
+      await uploadCodeFile(fd)
+      okCount += 1
+    } catch (err) {
+      failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
+    }
+  }
+  uploadStatus.value = ''
+  if (!okCount) {
+    try { await deleteProject(projectId) } catch { /* 仍优先把真实上传失败反馈给用户 */ }
+    throw new Error(`所有文件上传失败,未保留项目${failures.length ? ` (${failures[0]})` : ''}`)
+  }
+  const uploadedLanguage = inferProjectLanguage(readableFiles.filter((f) => !IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? '')))
+  if (uploadedLanguage !== language) {
+    try { await updateProject(projectId, { language: uploadedLanguage }) } catch { /* 不影响已上传文件 */ }
+  }
+  const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
+  const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
+  messages.value.push(assistantEntry({ type: 'text', content: summary }))
+  await scrollToBottom()
+  if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
+  else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
+  await runResponse({
+    action: 'start',
+    surface: 'admin',
+    session_id: sessionId.value,
+    messages: [...conversationHistory(), { role: 'user', content: `我刚通过拖拽上传了 ${okCount} 个文件,已建好项目「${projectName}」(id=${projectId},语言 ${language})。请告诉我下一步可以做什么。` }],
+  })
+}
+
 function onMessageClick(event: MouseEvent): void {
   const anchor = (event.target as HTMLElement | null)?.closest?.('a')
   if (!anchor) return
@@ -748,14 +870,20 @@ onBeforeUnmount(() => {
       v-else
       ref="panelRef"
       class="copilot-panel"
-      :class="{ 'is-dragging': dragging }"
+      :class="{ 'is-dragging': dragging, 'drag-over': dragActive }"
       :style="panelStyle"
       role="dialog"
       aria-label="管理副驾驶对话"
       @pointermove="moveDrag"
       @pointerup="endDrag"
       @pointercancel="endDrag"
+      @dragover.prevent="onDragOver"
+      @dragleave.prevent="onDragLeave"
+      @drop.prevent="onDrop"
     >
+      <div v-if="dragActive" class="drop-mask">
+        <div class="drop-mask-text">松开鼠标,把文件交给小菱建项目</div>
+      </div>
       <header class="copilot-header">
         <button class="panel-drag-handle" type="button" aria-label="移动管理副驾驶窗口" title="拖拽移动窗口" @pointerdown="beginDrag">
           ⠿
@@ -934,14 +1062,18 @@ onBeforeUnmount(() => {
       </div>
 
       <footer class="copilot-input-area">
+        <div v-if="uploadStatus" class="upload-status">
+          <span class="upload-status-spinner" />
+          <span class="upload-status-text">{{ uploadStatus }}</span>
+        </div>
         <div class="composer">
           <textarea
             v-model="inputText"
             rows="1"
             maxlength="2000"
-            :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入管理指令'"
+            :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入管理指令;也可直接拖入代码文件帮你建项目'"
             aria-label="输入管理指令"
-            :disabled="loading || sessionRestoring || sessionBusy"
+            :disabled="loading || uploading || sessionRestoring || sessionBusy"
             @keydown="handleSubmitKey"
           ></textarea>
           <button type="button" class="send-button" :disabled="!canSend" aria-label="发送" title="发送" @click="sendMessage()">
@@ -1241,6 +1373,66 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .typing-bubble i:nth-child(3) { animation-delay: 240ms; }
 @keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
 
+.copilot-panel.drag-over::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 19;
+  border-radius: inherit;
+  background: rgba(91, 88, 232, 0.06);
+  pointer-events: none;
+}
+.drop-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(91, 88, 232, 0.08);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+  border-radius: inherit;
+}
+.drop-mask-text {
+  padding: 14px 22px;
+  border-radius: 12px;
+  background: #f5f6ff;
+  border: 1.5px dashed #8f8cf0;
+  color: #5b58e8;
+  font-size: 14px;
+  font-weight: 600;
+}
+.upload-status {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 2px;
+  border-radius: 8px;
+  background: #f5f6ff;
+  border: 1px solid #d4d2f8;
+  font-size: 12.5px;
+  color: #5b58e8;
+}
+.upload-status-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #d4d2f8;
+  border-top-color: #5b58e8;
+  border-radius: 50%;
+  animation: upload-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes upload-spin {
+  to { transform: rotate(360deg); }
+}
+.upload-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: #fff; border-radius: 0 0 18px 18px; }
 .composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
 .composer textarea { min-height: 38px; max-height: 84px; resize: none; padding: 9px 10px; border: 1px solid #d8dade; border-radius: 7px; color: var(--agent-text); outline: none; line-height: 18px; }

@@ -55,6 +55,17 @@ function statusLabel(status: ResponseToolCallStatus): string {
   return STATUS_LABELS[status]
 }
 
+/** 只要还有未展开的调用就显示「展开全部」,否则显示「收起全部」。 */
+const anyCollapsed = computed(() => visibleCalls.value.some((call) => !expandedKeys.has(call.key)))
+
+function toggleAll(): void {
+  if (anyCollapsed.value) {
+    for (const call of visibleCalls.value) expandedKeys.add(call.key)
+  } else {
+    expandedKeys.clear()
+  }
+}
+
 function argumentsText(call: ResponseToolCall): string {
   return formatResponseValue(call.argumentsText)
 }
@@ -62,7 +73,18 @@ function argumentsText(call: ResponseToolCall): string {
 
 <template>
   <section v-if="visibleCalls.length" class="response-tool-timeline" aria-label="Agent 工具调用过程">
-    <header>Agent 调用链 · {{ visibleCalls.length }} 个工具</header>
+    <header>
+      <span>Agent 调用链 · {{ visibleCalls.length }} 个工具</span>
+      <button
+        v-if="visibleCalls.length > 1"
+        class="response-tool-collapse-all"
+        type="button"
+        :aria-label="anyCollapsed ? '展开全部调用' : '收起全部调用'"
+        @click="toggleAll"
+      >
+        {{ anyCollapsed ? '展开全部' : '收起全部' }}
+      </button>
+    </header>
     <ol>
       <li v-for="call in visibleCalls" :key="call.key" class="response-tool-call" :class="`is-${call.status}`">
         <div
@@ -112,7 +134,26 @@ function argumentsText(call: ResponseToolCall): string {
   font-size: 12px;
   margin-top: 8px;
 }
-.response-tool-timeline > header { padding: 8px 10px; border-bottom: 1px solid #edf0f2; font-weight: 650; }
+.response-tool-timeline > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf0f2;
+  font-weight: 650;
+}
+.response-tool-collapse-all {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: #3978d6;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.response-tool-collapse-all:hover { background: #f0f5ff; }
 .response-tool-timeline ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .response-tool-call { min-width: 0; padding: 9px 10px; border-left: 3px solid #3978d6; }
 .response-tool-call + .response-tool-call { border-top: 1px solid #edf0f2; }
