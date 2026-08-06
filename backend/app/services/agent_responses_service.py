@@ -953,6 +953,9 @@ class PrismToolExecutor:
             query=query,
             top_k=top_k,
         )
+        # 运维教程仅唯一超级管理员可检索;普通管理员/普通用户即使命中也过滤掉
+        if not (self._surface == "admin" and self._is_super_admin):
+            hits = [hit for hit in hits if "运维教程" not in str(hit.get("title") or "")]
         if not hits:
             return ToolExecutionResult.failure("知识笔记本中没有检索到相关内容")
         return ToolExecutionResult.success({"count": len(hits), "hits": hits})
@@ -1811,7 +1814,7 @@ class AgentResponsesService:
         tools = await executor.tool_schemas()
         result = await runtime.start(
             messages,
-            instructions=_instructions(self._surface),
+            instructions=_instructions(self._surface, self._user, self._is_super_admin),
             tools=tools,
             run_id=run_id,
         )
@@ -2084,7 +2087,7 @@ def _upstream_error(raw: str, status: int) -> str:
     return f"Responses 上游 HTTP {status}"
 
 
-def _instructions(surface: str) -> str:
+def _instructions(surface: str, user: Optional[User] = None, is_super_admin: bool = False) -> str:
     if surface == "admin":
         identity = "Prism 管理员 Agent「小菱」"
         capability_instruction = (
@@ -2127,8 +2130,30 @@ def _instructions(surface: str) -> str:
             "审查结论必须引用本次工具返回的真实数据，不得凭印象作答。"
         )
         guide_block = user_guide_block()
+    username = str(getattr(user, "username", "") or "未知用户")
+    role = str(getattr(user, "role", "") or "unknown")
+    role_label = {
+        "super_admin": "超级管理员(唯一 admin,可执行服务器运维)",
+        "admin": "管理员(可管理平台内容,不可执行服务器运维)",
+        "user": "普通用户",
+    }.get(role, role)
+    identity_line = (
+        f"你当前服务的登录用户是「{username}」(角色:{role_label})。"
+        "所有操作均以该身份执行,不得假设或冒充其他身份;"
+        "执行服务器运维、删除、改角色、批量删除、写知识等敏感操作前,"
+        "先向用户复述当前身份并请用户确认。"
+    )
+    if surface == "admin" and not is_super_admin:
+        identity_line += (
+            "注意:你不是唯一超级管理员,没有服务器运维权限(admin_execute_operation/admin_system_status/"
+            "外部 MCP/知识源写入/受限调度任务均不可用),也无法检索「运维教程」知识;"
+            "用户请求这类操作时直接说明'仅超级管理员 admin 可执行',不要调用工具。"
+        )
     return (
-        f"你是 {identity}。所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
+        f"你是 {identity}。{identity_line}"
+        "系统按当前用户权限过滤了工具列表:没有提供给你的工具一律不可用,"
+        "用户请求超出权限时直接说明原因并拒绝,不要尝试调用也不会报'工具权限不足'错误。"
+        "所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
         "根据每次工具返回结果自主判断下一步，可以连续调用多个工具。"
         "缺少真正阻断任务的信息时调用 ask_user，问题、候选项及其说明必须由你根据当前任务动态生成，不使用预设问题。"
         "涉及名称近义表达或自定义 Agent 能力时先调用 search_published_agents；候选不唯一时用 ask_user "
