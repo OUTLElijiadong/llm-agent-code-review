@@ -148,7 +148,13 @@ function persistSnapshot(): void {
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
   // 旧会话若在流式/运行中,保持其快照忙碌标记;服务端运行不受影响,可稍后切回接管。
   const wasBusy = isAgentResponseSessionOccupied(sessionRun.value?.status)
-  persistSnapshot()
+  // 面板重建后内存是初始空状态,不能用它覆盖已有快照;
+  // 仅当当前会话有真实内容(非欢迎语)或运行状态时才持久化。
+  const hasRealContent = messages.value.some((entry) => {
+    const content = entry.payload.content ?? ''
+    return content.trim().length > 0 && content.trim() !== WELCOME_TEXT.trim()
+  })
+  if (hasRealContent || sessionRun.value?.status) persistSnapshot()
   if (wasBusy) switcherRef.value?.setBusy(sessionId.value, true)
   activeResponse?.abort()
   activeResponse = null

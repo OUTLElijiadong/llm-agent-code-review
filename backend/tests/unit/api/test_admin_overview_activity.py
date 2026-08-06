@@ -10,7 +10,6 @@ from app.models.ai_call_log import AiCallLog
 
 
 def test_agent_activity_today_calls_merge_tool_and_ai_logs(db) -> None:
-    now = datetime.now(timezone.utc)
     db.add(AgentProfile(code="chat_assistant", name="小菱", is_enabled=1))
     db.add(AgentProfile(code="manager", name="管理副驾驶", is_enabled=1))
     # 工具网关调用 1 次

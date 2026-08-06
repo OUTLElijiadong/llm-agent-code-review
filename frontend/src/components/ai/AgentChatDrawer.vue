@@ -181,7 +181,13 @@ function persistSnapshot(): void {
 
 /** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
-  persistSnapshot()
+  // 面板重建后内存是初始空状态,不能用它覆盖已有快照;
+  // 仅当当前会话有真实内容(非欢迎语)或运行状态时才持久化。
+  const hasRealContent = messages.value.some((message) => {
+    const content = message.content ?? ''
+    return content.trim().length > 0 && content.trim() !== WELCOME_TEXT.trim()
+  })
+  if (hasRealContent || sessionRun.value?.status) persistSnapshot()
   activeResponse?.abort()
   activeResponse = null
   sessionPollStopped = true

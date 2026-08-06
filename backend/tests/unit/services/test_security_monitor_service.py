@@ -439,8 +439,8 @@ def _db_payload(*, ok=True, destructive=0, dump=0, error=0, reason=None):
         "destructive_by_user": [{"value": "root[root] @ localhost []", "count": destructive}] if destructive else [],
         "error_by_user": [{"value": "app[app] @ 10.0.0.1 []", "count": error}] if error else [],
         "samples": {
-            "destructive": [{"user_host": "root[root] @ localhost []", "sql": "DROP TABLE ?", "event_time": "2026-08-05 10:00:00"}] * min(destructive, 1),
-            "dump_exfil": [{"user_host": "app[app] @ 10.0.0.1 []", "sql": "SELECT ? INTO OUTFILE ?", "event_time": "2026-08-05 10:02:00"}] * min(dump, 1),
+            "destructive": [{"user_host": "root[root] @ localhost []", "sql": "DROP TABLE ?", "event_time": "2026-08-05 10:00:00"}] * min(destructive, 1),  # noqa: E501
+            "dump_exfil": [{"user_host": "app[app] @ 10.0.0.1 []", "sql": "SELECT ? INTO OUTFILE ?", "event_time": "2026-08-05 10:02:00"}] * min(dump, 1),  # noqa: E501
             "error": [],
         },
     }
