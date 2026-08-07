@@ -2020,7 +2020,18 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             else None
         )
         if worker_logs and str(worker_logs.get("text") or ""):
-            agent_tests_result = _extract_agent_tests_result(str(worker_logs["text"]))
+            log_text_for_facts = str(worker_logs["text"])
+            recon_facts = _extract_prism_facts(log_text_for_facts)
+            if recon_facts:
+                evidence["recon_facts"] = recon_facts
+                _persist_browser_artifact(
+                    db, environment,
+                    artifact_type="recon_facts",
+                    file_name=f"recon-facts-{environment.public_id}.json",
+                    mime_type="application/json",
+                    content=json.dumps(recon_facts, ensure_ascii=False).encode("utf-8"),
+                )
+            agent_tests_result = _extract_agent_tests_result(log_text_for_facts)
             if agent_tests_result is not None:
                 evidence["agent_tests"] = agent_tests_result
                 generated = int(agent_tests_result.get("generated") or 0)
