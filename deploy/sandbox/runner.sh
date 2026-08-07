@@ -422,10 +422,10 @@ entry_names = {"main.py", "app.py", "manage.py", "wsgi.py", "asgi.py", "index.js
                "server.js", "app.js", "main.go", "go.mod", "pom.xml", "index.php", "index.html"}
 test_re = re.compile(r"(^test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)")
 route_re = re.compile(
-    r"(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|"
-    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|"
-    r"path\s*\(\s*['"]([^'"]+)['"]", re.I)
-secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['"]([^'"]{6,})['"]", re.I)
+    r"(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
+    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
+    r"path\s*\(\s*['\"]([^'\"]+)['\"]", re.I)
+secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"]([^'\"]{6,})['\"]", re.I)
 param_names = {"file", "path", "filename", "download", "url", "callback", "id", "userid",
                "orderid", "template", "export", "redirect", "next", "upload"}
 endpoints, secrets, params, tests = [], [], set(), 0
@@ -455,7 +455,7 @@ for root, dirs, files in os.walk("."):
             if len(secrets) < 20:
                 secrets.append({"file": p.lstrip("./"), "kind": m.group(1)})
         for name in param_names:
-            if re.search(r"[?&\"'\s]" + name + r"['"=:\s]", src, re.I):
+            if re.search(r"[?&\"'\s]" + name + r"['\"=:\\s]", src, re.I):
                 params.add(name)
 facts["test_files"] = {"found": tests, "framework": framework}
 facts["endpoints"] = endpoints
@@ -466,11 +466,12 @@ print(json.dumps(facts, ensure_ascii=False))
 print("PRISM_FACTS_END")
 PYF
   elif command -v php >/dev/null 2>&1; then
-    php -r '
+    cat > /tmp/_facts_runner.php <<'PHPF'
+<?php
 $facts = array("entrypoints"=>array(), "test_files"=>array("found"=>0,"framework"=>""), "endpoints"=>array(), "param_hints"=>array(), "hardcoded_secrets"=>array());
 $entry_names = array("main.py","app.py","manage.py","wsgi.py","asgi.py","index.js","server.js","app.js","main.go","go.mod","pom.xml","index.php","index.html");
-$route_re = "/(?:route|get|post|put|delete|patch)\s*\(\s*[\x27"]([^\x27"]+)[\x27"]|@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*[\x27"]([^\x27"]+)[\x27"]|path\s*\(\s*[\x27"]([^\x27"]+)[\x27"]/i";
-$secret_re = "/(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*[\x27"]([^\x27"]{6,})[\x27"]/i";
+$route_re = "/(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|path\s*\(\s*['\"]([^'\"]+)['\"]/i";
+$secret_re = "/(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"]([^'\"]{6,})['\"]/i";
 $param_names = array("file","path","filename","download","url","callback","id","userid","orderid","template","export","redirect","next","upload");
 $tests = 0; $framework = ""; $endpoints = array(); $secrets = array(); $params = array();
 $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("."));
@@ -493,7 +494,7 @@ foreach ($it as $f) {
     foreach ($sm[1] as $k) { if (count($secrets) < 20) $secrets[] = array("file"=>$rel, "kind"=>$k); }
   }
   foreach ($param_names as $pn) {
-    if (preg_match("/[?&\x27"\s]" . preg_quote($pn, "/") . "[\x27"=:\s]/i", $src)) $params[$pn] = 1;
+    if (preg_match("/[?&'\"\\s]" . preg_quote($pn, "/") . "['\"=:\\s]/i", $src)) $params[$pn] = 1;
   }
 }
 $facts["test_files"] = array("found"=>$tests, "framework"=>$framework);
@@ -501,7 +502,8 @@ $facts["endpoints"] = $endpoints;
 $facts["hardcoded_secrets"] = $secrets;
 $facts["param_hints"] = array_keys($params);
 echo "PRISM_FACTS_BEGIN\n" . json_encode($facts) . "\nPRISM_FACTS_END\n";
-' 2>/dev/null || true
+PHPF
+    php /tmp/_facts_runner.php 2>/dev/null || true
   fi
 }
 

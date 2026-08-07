@@ -331,10 +331,10 @@ entry_names = {"main.py", "app.py", "manage.py", "wsgi.py", "asgi.py", "index.js
                "server.js", "app.js", "main.go", "go.mod", "pom.xml", "index.php"}
 test_re = re.compile(r"(^test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)")
 route_re = re.compile(
-    r"(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|"
-    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|"
-    r"path\s*\(\s*['"]([^'"]+)['"]", re.I)
-secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['"]([^'"]{6,})['"]", re.I)
+    r"(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
+    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
+    r"path\s*\(\s*['\"]([^'\"]+)['\"]", re.I)
+secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"]([^'\"]{6,})['\"]", re.I)
 param_names = {"file", "path", "filename", "download", "url", "callback", "id", "userid",
                "orderid", "template", "export", "redirect", "next", "upload"}
 endpoints, secrets, params, tests = [], [], set(), 0
@@ -364,7 +364,7 @@ for root, dirs, files in os.walk("."):
             if len(secrets) < 20:
                 secrets.append({"file": p.lstrip("./"), "kind": m.group(1)})
         for name in param_names:
-            if re.search(r"[?&\"'\s]" + name + r"['"=:\s]", src, re.I):
+            if re.search(r"[?&\"'\s]" + name + r"['\"=:\\s]", src, re.I):
                 params.add(name)
 facts["test_files"] = {"found": tests, "framework": framework}
 facts["endpoints"] = endpoints
@@ -376,12 +376,12 @@ print("facts: entries=%d endpoints=%d secrets=%d tests=%d" % (
     len(facts["entrypoints"]), len(endpoints), len(secrets), tests))
 PYEOF_INNER
   elif command -v php >/dev/null 2>&1; then
-    # PHP 沙箱无 python:用 php 做等价 Recon 事实采集
-    php -r '
+    cat > /tmp/_facts.php <<'PHPF'
+<?php
 $facts = array("entrypoints"=>array(), "test_files"=>array("found"=>0,"framework"=>""), "endpoints"=>array(), "param_hints"=>array(), "hardcoded_secrets"=>array());
 $entry_names = array("main.py","app.py","manage.py","wsgi.py","asgi.py","index.js","server.js","app.js","main.go","go.mod","pom.xml","index.php","index.html");
-$route_re = "/(?:route|get|post|put|delete|patch)\s*\(\s*[\x27"]([^\x27"]+)[\x27"]|@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*[\x27"]([^\x27"]+)[\x27"]|path\s*\(\s*[\x27"]([^\x27"]+)[\x27"]/i";
-$secret_re = "/(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*[\x27"]([^\x27"]{6,})[\x27"]/i";
+$route_re = "/(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|path\s*\(\s*['\"]([^'\"]+)['\"]/i";
+$secret_re = "/(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"]([^'\"]{6,})['\"]/i";
 $param_names = array("file","path","filename","download","url","callback","id","userid","orderid","template","export","redirect","next","upload");
 $tests = 0; $framework = ""; $endpoints = array(); $secrets = array(); $params = array();
 $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("."));
@@ -404,16 +404,16 @@ foreach ($it as $f) {
     foreach ($sm[1] as $k) { if (count($secrets) < 20) $secrets[] = array("file"=>$rel, "kind"=>$k); }
   }
   foreach ($param_names as $pn) {
-    if (preg_match("/[?&\x27"\s]" . preg_quote($pn, "/") . "[\x27"=:\s]/i", $src)) $params[$pn] = 1;
+    if (preg_match("/[?&'\"\\s]" . preg_quote($pn, "/") . "['\"=:\\s]/i", $src)) $params[$pn] = 1;
   }
 }
 $facts["test_files"] = array("found"=>$tests, "framework"=>$framework);
 $facts["endpoints"] = $endpoints;
 $facts["hardcoded_secrets"] = $secrets;
 $facts["param_hints"] = array_keys($params);
-@file_put_contents("/tmp/prism_facts.json", json_encode($facts));
-echo "facts: entries=".count($facts["entrypoints"])." endpoints=".count($endpoints)." secrets=".count($secrets)." tests=".$tests."\n";
-' 2>/dev/null || true
+echo "PRISM_FACTS_BEGIN\n" . json_encode($facts) . "\nPRISM_FACTS_END\n";
+PHPF
+    php /tmp/_facts.php 2>/dev/null || true
   fi
 }
 
@@ -528,8 +528,8 @@ try:
 except Exception as e:
   print(getattr(e,'code',0) or 0)" "$url_path" 2>/dev/null || echo 0
   else
-    # PHP 沙箱没有 python:用 php 内置 HTTP 流探测(allow_url_fopen 默认开启)
-    php -r '$u="http://127.0.0.1:'$PORT'".$argv[1]; $c=@file_get_contents($u); $code=0; if(isset($http_response_header[0]) && preg_match("#\s(\d{3})\s#", $http_response_header[0], $mm)){ $code=(int)$mm[1]; } echo $code;' "$url_path" 2>/dev/null || echo 0
+    # 无 python(PHP 沙箱):用 bash /dev/tcp 探测,与 run_blackbox 探活一致
+    bash -c 'port="$1"; path="$2"; exec 3<>"/dev/tcp/127.0.0.1/$port"; printf "GET %s HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n" "$path" >&3; IFS= read -r line <&3; case "$line" in HTTP/*\ [1-5][0-9][0-9]\ *) code="${line#HTTP/* }"; printf "%s" "${code%% *}" ;; *) printf "0" ;; esac' prism-probe "$PORT" "$url_path" 2>/dev/null || echo 0
   fi
 }
 
@@ -552,7 +552,12 @@ try:
 except urllib.error.HTTPError as e:
   print(len(e.read()))" 2>/dev/null || echo 0)  # 5xx 响应体也计入(服务已起来)
   else
-    BYTES=$(php -r 'echo strlen((string)@file_get_contents("http://127.0.0.1:'$PORT'/"));' 2>/dev/null || echo 0)
+    cat > /tmp/_bytes.php <<'PHPB'
+<?php
+echo strlen((string)@file_get_contents("http://127.0.0.1:PORT/"));
+PHPB
+    sed -i "s/PORT/$PORT/" /tmp/_bytes.php
+    BYTES=$(php /tmp/_bytes.php 2>/dev/null || echo 0)
   fi
   # 常见路径探活
   for p in / /index /health /api /login; do
