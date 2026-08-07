@@ -400,10 +400,10 @@ run_blackbox() {
   else
     printf '%s\n' 'no _prism_poc.sh present, skip poc execution'
   fi
+  # agent 动态黑盒:应用仍在运行,执行 agent 生成的回环测试脚本(必须放在 kill 之前)
+  run_agent_blackbox
   kill "$app_pid" >/dev/null 2>&1 || true
   wait "$app_pid" 2>/dev/null || true
-  # agent 动态黑盒:应用仍运行,执行 agent 生成的回环测试脚本
-  run_agent_blackbox
   trap - EXIT INT TERM
   # 5xx(应用自身错误,如缺DB)不算服务失败;1xx/4xx 也算服务已就绪。
   # 只有完全没起监听才在上面 return 1。
