@@ -26,13 +26,14 @@ class SyntaxRepairAgent(BaseAgent):
     category = "deploy"
 
     def __init__(self) -> None:
+        from app.core.config import settings
         super().__init__(
             system_prompt=(
                 "你是 PHP 语法修复专家。给定文件内容与 php -l 报告的语法错误,输出修复后"
                 "的完整文件内容。只输出 JSON,不要输出其他内容。"
             ),
             temperature=0.1,
-            max_tokens=12_000,
+            max_tokens=min(65_536, int(settings.deepseek_max_output_tokens)),
         )
 
     @staticmethod
@@ -78,38 +79,37 @@ class SyntaxRepairAgent(BaseAgent):
             f = str(err.get("file") or "").strip()
             if f:
                 by_file.setdefault(f, []).append(err)
-        # 只修复本轮文件列表中的(后端已按优先级选择)
-        payload_files: dict[str, str] = {}
-        payload_errors: list[dict[str, Any]] = []
-        for path, content in files.items():
-            clipped = self._clip(content, by_file.get(path, [{}])[0].get("line") if by_file.get(path) else None)
-            payload_files[path] = clipped
-            payload_errors.extend(by_file.get(path, []))
-        user_message = (
-            f"语言: {language}\n"
-            f"php -l 语法错误(文件+行号+消息):\n{json.dumps(payload_errors, ensure_ascii=False)[:8000]}\n\n"
-            "文件内容(错误行附近已窗口化):\n"
-            f"{json.dumps(payload_files, ensure_ascii=False)[:60000]}\n\n"
-            "要求:\n"
-            "1. 对每个文件输出修复后的完整 PHP 文件内容(保留原文件业务逻辑,只修语法)。\n"
-            "2. 兼容 PHP 8:如 'continue' 用于 switch/循环上下文、可选参数位置、大括号配对、\n"
-            "   token 错误等,按 PHP 8 语法修正。\n"
-            "3. 不要改动文件业务语义,不要新增删除功能,不要引入外部依赖。\n"
-            "4. 若某文件无法确定修复,输出该文件的原始内容并注明(仍保持 JSON 结构)。\n"
-            "5. 输出 JSON 格式: {\"files\": {\"<path>\": \"<修复后完整内容>\"}}\n"
-        )
-        agent_result = self.call_json(user_message, ctx=ctx)
-        if not getattr(agent_result, "success", False):
-            return {"error": str(getattr(agent_result, "error", "修复生成失败"))[:300]}
-        data = agent_result.data if isinstance(agent_result.data, dict) else {}
-        repaired = data.get("files") if isinstance(data.get("files"), dict) else {}
+        # 每个文件单独一次 LLM 调用,避免多文件输出超长被截断
         cleaned: dict[str, str] = {}
-        for path in files:
-            content = repaired.get(path)
-            if isinstance(content, str) and content.strip():
-                cleaned[path] = content
+        last_error = ""
+        for path, content in files.items():
+            file_errors = by_file.get(path, [])
+            clipped = self._clip(content, file_errors[0].get("line") if file_errors else None)
+            user_message = (
+                f"语言: {language}\n"
+                f"目标文件: {path}\n"
+                f"php -l 语法错误(行号+消息):\n{json.dumps(file_errors, ensure_ascii=False)[:4000]}\n\n"
+                "文件内容(错误行附近已窗口化,省略标记处保持原样输出为修复后完整文件):\n"
+                f"{clipped}\n\n"
+                "要求:\n"
+                "1. 输出该文件修复后的完整 PHP 内容(保留业务逻辑,只修语法)。\n"
+                "2. 兼容 PHP 8:如 'continue' 用于 switch/循环上下文、可选参数位置、大括号配对、\n"
+                "   token 错误等,按 PHP 8 语法修正。\n"
+                "3. 不要改动业务语义,不要新增/删除功能,不要引入外部依赖。\n"
+                "4. 输出 JSON 格式: {\"content\": \"<修复后完整内容>\"}\n"
+            )
+            agent_result = self.call_json(user_message, ctx=ctx)
+            if not getattr(agent_result, "success", False):
+                last_error = str(getattr(agent_result, "error", "修复生成失败"))[:300]
+                continue
+            data = agent_result.data if isinstance(agent_result.data, dict) else {}
+            new_content = data.get("content") if isinstance(data, dict) else None
+            if isinstance(new_content, str) and new_content.strip():
+                cleaned[path] = new_content
+            else:
+                last_error = f"{path}: 未返回有效内容"
         if not cleaned:
-            return {"error": "未生成有效修复文件"}
+            return {"error": last_error or "未生成有效修复文件"}
         return {"files": cleaned}
 
 

@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     sandbox_allow_runc: bool = False
     sandbox_remote_targets_enabled: bool = True
     sandbox_max_repair_rounds: int = 2
-    sandbox_repair_max_files: int = 8
+    sandbox_repair_max_files: int = 4
     sandbox_remote_timeout: int = 30
 
     # 宿主机运维白名单执行器；仅 Unix Socket，不开放 TCP。
