@@ -131,6 +131,8 @@ run_agent_tests() {
   for f in ./_agent_tests/*; do
     [ -f "$f" ] || continue
     case "$f" in *.py|*.js|*.mjs|*.php|*.go|*.java) ;; *) continue ;; esac
+    # 黑盒脚本只在应用就绪后由 run_agent_blackbox 执行,白盒阶段跳过,避免时序失败
+    case "$(basename "$f")" in blackbox.*) continue ;; esac
     total=$((total + 1))
     if run_agent_test_file "$f" >/tmp/agent-test-out 2>&1; then
       ok=$((ok + 1)); status="pass"
@@ -230,6 +232,7 @@ run_test() {
       fi
       ;;
   esac
+  collect_facts
   printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true}'
   return 0
 }
@@ -385,6 +388,7 @@ run_blackbox() {
     return 1
   fi
   printf 'blackbox loopback status=%s\n' "$http_status"
+  collect_facts
   # ── v3.4 真实 PoC 验证 ──
   # 服务已在固定 loopback 端口就绪。若源码携带审计平台生成的 _prism_poc.sh,
   # 在隔离环境内执行它(发起 PoC 请求拿真实响应),输出 PRISM_POC_RESULT 供后端
@@ -406,6 +410,100 @@ run_blackbox() {
 
   # agent 动态黑盒:应用就绪后执行 agent 生成的回环测试脚本
   run_agent_blackbox
+
+collect_facts() {
+  # 输出 PRISM_FACTS_BEGIN/END 供后端回收 recon_facts(入口/端点/密钥/参数提示)
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PYF' 2>/dev/null || true
+import json, os, re
+facts = {"entrypoints": [], "test_files": {"found": 0, "framework": ""},
+         "endpoints": [], "param_hints": [], "hardcoded_secrets": []}
+entry_names = {"main.py", "app.py", "manage.py", "wsgi.py", "asgi.py", "index.js",
+               "server.js", "app.js", "main.go", "go.mod", "pom.xml", "index.php", "index.html"}
+test_re = re.compile(r"(^test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)")
+route_re = re.compile(
+    r"(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|"
+    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|"
+    r"path\s*\(\s*['"]([^'"]+)['"]", re.I)
+secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['"]([^'"]{6,})['"]", re.I)
+param_names = {"file", "path", "filename", "download", "url", "callback", "id", "userid",
+               "orderid", "template", "export", "redirect", "next", "upload"}
+endpoints, secrets, params, tests = [], [], set(), 0
+framework = ""
+for root, dirs, files in os.walk("."):
+    dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", "venv", ".venv", "vendor"}]
+    for fn in files:
+        p = os.path.join(root, fn)
+        if fn in entry_names:
+            facts["entrypoints"].append(p.lstrip("./"))
+        if test_re.search(fn):
+            tests += 1
+            if fn.endswith(".py"): framework = framework or "pytest"
+            if fn.endswith(".js"): framework = framework or "jest"
+        if not fn.endswith((".py", ".js", ".ts", ".go", ".java", ".php")):
+            continue
+        try:
+            with open(p, "r", errors="ignore") as fh:
+                src = fh.read(200000)
+        except OSError:
+            continue
+        for m in route_re.finditer(src):
+            ep = m.group(1) or m.group(2) or m.group(3)
+            if ep and ep.startswith("/") and len(endpoints) < 60:
+                endpoints.append({"path": ep, "file": p.lstrip("./")})
+        for m in secret_re.finditer(src):
+            if len(secrets) < 20:
+                secrets.append({"file": p.lstrip("./"), "kind": m.group(1)})
+        for name in param_names:
+            if re.search(r"[?&\"'\s]" + name + r"['"=:\s]", src, re.I):
+                params.add(name)
+facts["test_files"] = {"found": tests, "framework": framework}
+facts["endpoints"] = endpoints
+facts["hardcoded_secrets"] = secrets
+facts["param_hints"] = sorted(params)
+print("PRISM_FACTS_BEGIN")
+print(json.dumps(facts, ensure_ascii=False))
+print("PRISM_FACTS_END")
+PYF
+  elif command -v php >/dev/null 2>&1; then
+    php -r '
+$facts = array("entrypoints"=>array(), "test_files"=>array("found"=>0,"framework"=>""), "endpoints"=>array(), "param_hints"=>array(), "hardcoded_secrets"=>array());
+$entry_names = array("main.py","app.py","manage.py","wsgi.py","asgi.py","index.js","server.js","app.js","main.go","go.mod","pom.xml","index.php","index.html");
+$route_re = "/(?:route|get|post|put|delete|patch)\s*\(\s*[\x27"]([^\x27"]+)[\x27"]|@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*[\x27"]([^\x27"]+)[\x27"]|path\s*\(\s*[\x27"]([^\x27"]+)[\x27"]/i";
+$secret_re = "/(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*[\x27"]([^\x27"]{6,})[\x27"]/i";
+$param_names = array("file","path","filename","download","url","callback","id","userid","orderid","template","export","redirect","next","upload");
+$tests = 0; $framework = ""; $endpoints = array(); $secrets = array(); $params = array();
+$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("."));
+foreach ($it as $f) {
+  if ($f->isDir()) continue;
+  $name = $f->getFilename(); $rel = substr($f->getPathname(), 2);
+  if (in_array($name, $entry_names)) $facts["entrypoints"][] = $rel;
+  if (preg_match("/^(test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)/", $name)) { $tests++; if (substr($name,-3)===".py") $framework = $framework ?: "pytest"; if (substr($name,-3)===".js") $framework = $framework ?: "jest"; }
+  $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+  if (!in_array($ext, array("py","js","ts","go","java","php"))) continue;
+  $src = @file_get_contents($f->getPathname());
+  if ($src === false) continue;
+  $src = substr($src, 0, 200000);
+  if (preg_match_all($route_re, $src, $mm)) {
+    foreach (array_merge($mm[1], $mm[2], $mm[3]) as $ep) {
+      if ($ep && $ep[0] === "/" && count($endpoints) < 60) $endpoints[] = array("path"=>$ep, "file"=>$rel);
+    }
+  }
+  if (preg_match_all($secret_re, $src, $sm)) {
+    foreach ($sm[1] as $k) { if (count($secrets) < 20) $secrets[] = array("file"=>$rel, "kind"=>$k); }
+  }
+  foreach ($param_names as $pn) {
+    if (preg_match("/[?&\x27"\s]" . preg_quote($pn, "/") . "[\x27"=:\s]/i", $src)) $params[$pn] = 1;
+  }
+}
+$facts["test_files"] = array("found"=>$tests, "framework"=>$framework);
+$facts["endpoints"] = $endpoints;
+$facts["hardcoded_secrets"] = $secrets;
+$facts["param_hints"] = array_keys($params);
+echo "PRISM_FACTS_BEGIN\n" . json_encode($facts) . "\nPRISM_FACTS_END\n";
+' 2>/dev/null || true
+  fi
+}
 
 if [ "$action" = test ]; then
   case "$test_mode" in
