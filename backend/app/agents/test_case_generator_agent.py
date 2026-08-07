@@ -115,12 +115,21 @@ class TestCaseGeneratorAgent(BaseAgent):
             "4. 只生成测试代码,不生成 shell 命令;不读取环境密钥;不做网络外联(黑盒只访问本机回环端口)。\n"
             "5. 输出 JSON 格式: {\"files\": [{\"path\": \"test_ai_1.<项目语言扩展名>\", \"content\": \"...\"}]}\n"
         )
-        try:
-            agent_result = self.call_json(user_message, ctx=ctx)
-        except Exception as exc:  # noqa: BLE001 - 生成失败由调用方降级
-            return {"error": str(exc)[:300]}
-        if not getattr(agent_result, "success", False):
-            return {"error": str(getattr(agent_result, "error", "生成失败"))[:300]}
+        # LLM 偶发返回空/限流:重试最多 3 次,提升动态用例生成成功率
+        import time as _time
+        agent_result = None
+        last_error = "生成失败"
+        for _attempt in range(3):
+            try:
+                agent_result = self.call_json(user_message, ctx=ctx)
+                if getattr(agent_result, "success", False):
+                    break
+                last_error = str(getattr(agent_result, "error", "生成失败"))[:300]
+            except Exception as exc:  # noqa: BLE001 - 重试后仍失败由调用方降级
+                last_error = str(exc)[:300]
+            _time.sleep(2.0)
+        if agent_result is None or not getattr(agent_result, "success", False):
+            return {"error": last_error}
         data = getattr(agent_result, "data", None)
         files = data.get("files") if isinstance(data, dict) else None
         if not isinstance(files, list):
