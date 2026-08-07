@@ -42,7 +42,9 @@ REQUIRED_RUNTIME = os.environ.get("SANDBOX_RUNTIME", "runsc").strip()
 ALLOW_RUNC_LOCAL = os.environ.get("SANDBOX_ALLOW_RUNC_LOCAL_DEVELOPMENT", "false").lower() == "true"
 PROFILE_FILE = Path(os.environ.get("SANDBOX_PROFILE_FILE", str(DEPLOY_DIR / "sandbox" / "profiles.json")))
 STATE_DIR = Path(os.environ.get("SANDBOX_STATE_DIR", "/var/lib/prism-sandbox/state"))
-JOB_DIR = Path(os.environ.get("SANDBOX_JOB_DIR", "/var/lib/prism-sandbox/jobs"))
+# 高危源码只落在内存 tmpfs(/run/prism-sandbox-jobs),避免明文 PHP 落盘被
+# 宿主机安全监控(腾讯云主机安全等)扫描告警;容器内 gVisor(runsc) 隔离运行。
+JOB_DIR = Path(os.environ.get("SANDBOX_JOB_DIR", "/run/prism-sandbox-jobs"))
 AUDIT_LOG = Path(os.environ.get("SANDBOX_AUDIT_LOG", "/var/log/prism-sandbox/events.jsonl"))
 BROWSER_IMAGE = os.environ.get("PLAYWRIGHT_IMAGE", "").strip()
 BROWSER_IMAGE_DIGEST = os.environ.get("PLAYWRIGHT_IMAGE_DIGEST", "").strip()
