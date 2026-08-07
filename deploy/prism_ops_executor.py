@@ -460,8 +460,8 @@ def _firewall_action(params: dict[str, Any]) -> dict[str, Any]:
 
     firewall = shutil.which("firewall-cmd")
     if firewall:
-        state = run([firewall, "--state"], timeout=30)
-        if state.get("ok") and "running" in (state.get("stdout") or ""):
+        state = run([firewall, "--state"], timeout=30, allow_failure=True)
+        if state.get("exit_code") == 0 and "running" in (state.get("stdout") or ""):
             option = f"--{operation}-{target_type}={value}"
             change = run([firewall, "--permanent", f"--zone={zone}", option], timeout=120)
             reload_result = run([firewall, "--reload"], timeout=120)
@@ -487,7 +487,7 @@ def _firewall_action(params: dict[str, Any]) -> dict[str, Any]:
     for save_path in ("/etc/sysconfig/iptables", "/etc/iptables/rules.v4"):
         if os.path.exists(save_path) and os.access(save_path, os.W_OK):
             persist = run(["iptables-save"], timeout=60)
-            if persist.get("ok"):
+            if persist.get("exit_code") == 0:
                 with open(save_path, "w", encoding="utf-8") as fh:
                     fh.write(persist.get("stdout", ""))
             break
