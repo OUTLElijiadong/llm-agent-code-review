@@ -889,6 +889,23 @@ def _raise_if_stopped(request_id: str) -> None:
             raise ConflictError("沙箱请求已关闭")
 
 
+def _resolve_testdb_ip() -> str:
+    """解析独立测试库容器在 sandbox_test_net 上的 IP;失败时回退到容器名。"""
+    if not SANDBOX_TEST_DB_HOST or not SANDBOX_TEST_DB_NETWORK:
+        return SANDBOX_TEST_DB_HOST
+    try:
+        out = _run_command([
+            "docker", "inspect", SANDBOX_TEST_DB_HOST,
+            "--format", "{{{{.NetworkSettings.Networks.{net}.IPAddress}}}}".format(net=SANDBOX_TEST_DB_NETWORK),
+        ], timeout=20)
+        ip = (out.get("stdout") or "").strip()
+        if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", ip):
+            return ip
+    except Exception:
+        pass
+    return SANDBOX_TEST_DB_HOST
+
+
 def _build_docker_create_args(
     *, request_id: str, purpose: str, test_mode: str, db_type: str, profile: Profile, runtime: str, image: ResolvedImage, source_dir: Path,
 ) -> list[str]:
@@ -975,7 +992,11 @@ def _build_docker_create_args(
         "HTTPS_PROXY=",
     ]
     if db_type == "mysql":
+        # runsc(gVisor) 不支持 Docker 内嵌 DNS(127.0.0.11),用 --add-host 静态映射
+        # 测试库主机名到 sandbox_test_net 上的容器 IP,保证沙箱内可解析。
+        testdb_ip = _resolve_testdb_ip()
         args.extend([
+            "--add-host", f"{SANDBOX_TEST_DB_HOST}:{testdb_ip}",
             "--env", f"PRISM_DB_TYPE=mysql",
             "--env", f"PRISM_DB_HOST={SANDBOX_TEST_DB_HOST}",
             "--env", f"PRISM_DB_PORT={SANDBOX_TEST_DB_PORT}",
