@@ -1841,6 +1841,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             if environment.started_at is None:
                 environment.started_at = _utcnow()
                 db.commit()
+            sandbox_db_type = str((_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none")
             execute_response = _call_worker(worker, "POST", "/execute", {
                 "request_id": environment.public_id,
                 "purpose": environment.purpose,
@@ -1850,6 +1851,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 "source_sha256": effective_sha,
                 "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
                 "image_digest": environment.image_digest or "",
+                "db_type": sandbox_db_type,
             })
             result = (
                 execute_response.get("result")
