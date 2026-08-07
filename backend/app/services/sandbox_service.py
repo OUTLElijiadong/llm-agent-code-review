@@ -322,7 +322,8 @@ cd /workspace 2>/dev/null || true
 
 # ── v3.5 多Agent测试: Recon 事实采集(零LLM,结构化facts供沙箱外Agent推理) ──
 collect_facts() {
-python3 - <<'PYEOF' 2>/dev/null || true
+  if command -v python3 >/dev/null 2>&1; then
+python3 - <<'PYEOF_INNER' 2>/dev/null || true
 import json, os, re
 facts = {"entrypoints": [], "test_files": {"found": 0, "framework": ""},
          "endpoints": [], "param_hints": [], "hardcoded_secrets": []}
@@ -330,10 +331,10 @@ entry_names = {"main.py", "app.py", "manage.py", "wsgi.py", "asgi.py", "index.js
                "server.js", "app.js", "main.go", "go.mod", "pom.xml", "index.php"}
 test_re = re.compile(r"(^test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)")
 route_re = re.compile(
-    r"(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
-    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|"
-    r"path\s*\(\s*['\"]([^'\"]+)['\"]", re.I)
-secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"]([^'\"]{6,})['\"]", re.I)
+    r"(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|"
+    r"@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|"
+    r"path\s*\(\s*['"]([^'"]+)['"]", re.I)
+secret_re = re.compile(r"(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['"]([^'"]{6,})['"]", re.I)
 param_names = {"file", "path", "filename", "download", "url", "callback", "id", "userid",
                "orderid", "template", "export", "redirect", "next", "upload"}
 endpoints, secrets, params, tests = [], [], set(), 0
@@ -363,7 +364,7 @@ for root, dirs, files in os.walk("."):
             if len(secrets) < 20:
                 secrets.append({"file": p.lstrip("./"), "kind": m.group(1)})
         for name in param_names:
-            if re.search(r"[?&\"'\s]" + name + r"[\"'=:\s]", src, re.I):
+            if re.search(r"[?&\"'\s]" + name + r"['"=:\s]", src, re.I):
                 params.add(name)
 facts["test_files"] = {"found": tests, "framework": framework}
 facts["endpoints"] = endpoints
@@ -373,7 +374,47 @@ with open("/tmp/prism_facts.json", "w") as out:
     json.dump(facts, out, ensure_ascii=False)
 print("facts: entries=%d endpoints=%d secrets=%d tests=%d" % (
     len(facts["entrypoints"]), len(endpoints), len(secrets), tests))
-PYEOF
+PYEOF_INNER
+  elif command -v php >/dev/null 2>&1; then
+    # PHP 沙箱无 python:用 php 做等价 Recon 事实采集
+    php -r '
+$facts = array("entrypoints"=>array(), "test_files"=>array("found"=>0,"framework"=>""), "endpoints"=>array(), "param_hints"=>array(), "hardcoded_secrets"=>array());
+$entry_names = array("main.py","app.py","manage.py","wsgi.py","asgi.py","index.js","server.js","app.js","main.go","go.mod","pom.xml","index.php","index.html");
+$route_re = "/(?:route|get|post|put|delete|patch)\s*\(\s*[\x27"]([^\x27"]+)[\x27"]|@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*[\x27"]([^\x27"]+)[\x27"]|path\s*\(\s*[\x27"]([^\x27"]+)[\x27"]/i";
+$secret_re = "/(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*[\x27"]([^\x27"]{6,})[\x27"]/i";
+$param_names = array("file","path","filename","download","url","callback","id","userid","orderid","template","export","redirect","next","upload");
+$tests = 0; $framework = ""; $endpoints = array(); $secrets = array(); $params = array();
+$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("."));
+foreach ($it as $f) {
+  if ($f->isDir()) continue;
+  $name = $f->getFilename(); $rel = substr($f->getPathname(), 2);
+  if (in_array($name, $entry_names)) $facts["entrypoints"][] = $rel;
+  if (preg_match("/^(test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)/", $name)) { $tests++; if (substr($name,-3)===".py") $framework = $framework ?: "pytest"; if (substr($name,-3)===".js") $framework = $framework ?: "jest"; }
+  $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+  if (!in_array($ext, array("py","js","ts","go","java","php"))) continue;
+  $src = @file_get_contents($f->getPathname());
+  if ($src === false) continue;
+  $src = substr($src, 0, 200000);
+  if (preg_match_all($route_re, $src, $mm)) {
+    foreach (array_merge($mm[1], $mm[2], $mm[3]) as $ep) {
+      if ($ep && $ep[0] === "/" && count($endpoints) < 60) $endpoints[] = array("path"=>$ep, "file"=>$rel);
+    }
+  }
+  if (preg_match_all($secret_re, $src, $sm)) {
+    foreach ($sm[1] as $k) { if (count($secrets) < 20) $secrets[] = array("file"=>$rel, "kind"=>$k); }
+  }
+  foreach ($param_names as $pn) {
+    if (preg_match("/[?&\x27"\s]" . preg_quote($pn, "/") . "[\x27"=:\s]/i", $src)) $params[$pn] = 1;
+  }
+}
+$facts["test_files"] = array("found"=>$tests, "framework"=>$framework);
+$facts["endpoints"] = $endpoints;
+$facts["hardcoded_secrets"] = $secrets;
+$facts["param_hints"] = array_keys($params);
+@file_put_contents("/tmp/prism_facts.json", json_encode($facts));
+echo "facts: entries=".count($facts["entrypoints"])." endpoints=".count($endpoints)." secrets=".count($secrets)." tests=".$tests."\n";
+' 2>/dev/null || true
+  fi
 }
 
 emit_facts() {  # 把 facts 打到日志,后端经 docker logs 回收
@@ -480,11 +521,16 @@ start_app() {
 
 http_probe() {
   url_path="$1"
-  python -c "import urllib.request,sys
+  if command -v python >/dev/null 2>&1; then
+    python -c "import urllib.request,sys
 try:
   r=urllib.request.urlopen('http://127.0.0.1:$PORT'+sys.argv[1],timeout=3); print(r.status)
 except Exception as e:
   print(getattr(e,'code',0) or 0)" "$url_path" 2>/dev/null || echo 0
+  else
+    # PHP 沙箱没有 python:用 php 内置 HTTP 流探测(allow_url_fopen 默认开启)
+    php -r '$u="http://127.0.0.1:'$PORT'".$argv[1]; $c=@file_get_contents($u); $code=0; if(isset($http_response_header[0]) && preg_match("#\s(\d{3})\s#", $http_response_header[0], $mm)){ $code=(int)$mm[1]; } echo $code;' "$url_path" 2>/dev/null || echo 0
+  fi
 }
 
 run_blackbox() {
@@ -499,11 +545,15 @@ run_blackbox() {
   done
   if [ "$READY" != "1" ]; then kill "$APP_PID" 2>/dev/null; echo "blackbox: 应用未在回环端口就绪"; return 1; fi
   # 首页内容断言:首页非空则判通过
-  BYTES=$(python -c "import urllib.request,urllib.error
+  if command -v python >/dev/null 2>&1; then
+    BYTES=$(python -c "import urllib.request,urllib.error
 try:
   print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))
 except urllib.error.HTTPError as e:
   print(len(e.read()))" 2>/dev/null || echo 0)  # 5xx 响应体也计入(服务已起来)
+  else
+    BYTES=$(php -r 'echo strlen((string)@file_get_contents("http://127.0.0.1:'$PORT'/"));' 2>/dev/null || echo 0)
+  fi
   # 常见路径探活
   for p in / /index /health /api /login; do
     printf 'blackbox probe %s -> %s\n' "$p" "$(http_probe "$p")"
