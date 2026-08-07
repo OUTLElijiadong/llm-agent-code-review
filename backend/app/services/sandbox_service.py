@@ -698,12 +698,13 @@ def _generate_agent_test_cases(
             db.commit()
             return None
         summary = _source_summary_for_agent_tests(source_archive_base64, language)
+        db_type = str((_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none")
         ctx = AgentContext(
             user_id=environment.owner_id,
             project_id=environment.project_id,
             extra={"trace_id": environment.public_id},
         )
-        result = agent.generate(language=language, test_mode=test_mode, source_summary=summary, ctx=ctx)
+        result = agent.generate(language=language, test_mode=test_mode, source_summary=summary, db_type=db_type, ctx=ctx)
         files = result.get("files") if isinstance(result, dict) else None
         if not files:
             _append_event(db, environment, "progress", "agent_tests",
@@ -748,10 +749,12 @@ def _generate_deployment_patch(
             project_id=environment.project_id,
             extra={"trace_id": environment.public_id},
         )
+        db_type = str((_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none")
         result = agent.plan(
             language=language,
             test_mode=str(getattr(environment, "test_mode", "") or "combined"),
             source_summary=summary,
+            db_type=db_type,
             ctx=ctx,
         )
         launch_script = str(result.get("launch_script") or "").strip() if isinstance(result, dict) else ""

@@ -40,10 +40,22 @@ class DeploymentCoordinatorAgent(BaseAgent):
         language: str,
         test_mode: str,
         source_summary: dict[str, Any],
+        db_type: str = "none",
         ctx: Optional[AgentContext] = None,
     ) -> dict[str, Any]:
+        db_instruction = ""
+        if db_type == "mysql":
+            db_instruction = (
+                "\n数据库: 沙箱已连接独立测试库 MySQL(只读环境变量连接,禁止硬编码凭据):\n"
+                "  PRISM_DB_HOST / PRISM_DB_PORT / PRISM_DB_USER / PRISM_DB_PASSWORD / PRISM_DB_NAME\n"
+                "  php: \\$pdo=new PDO('mysql:host='.getenv('PRISM_DB_HOST').';port='.getenv('PRISM_DB_PORT').\n"
+                "    ';dbname='.getenv('PRISM_DB_NAME'), getenv('PRISM_DB_USER'), getenv('PRISM_DB_PASSWORD'));\n"
+                "  若应用需要数据库配置,请在启动脚本中把 DB 主机/用户/密码指向上述环境变量,使应用能在沙箱内连库运行。\n"
+            )
+        elif db_type == "sqlite":
+            db_instruction = "\n数据库: 沙箱内置 sqlite(路径 /workspace/.prism-db/app.db,可自行创建)。\n"
         user_message = (
-            f"语言: {language}\n测试模式: {test_mode}\n源码摘要(JSON):\n"
+            f"语言: {language}\n测试模式: {test_mode}\n数据库: {db_type}\n源码摘要(JSON):\n"
             f"{json.dumps(source_summary, ensure_ascii=False, default=str)[:12000]}\n\n"
             "要求:\n"
             "1. 判断是否有可启动入口(main/app/index/server 等);若没有,生成一个最小可启动补全脚本。\n"
@@ -51,6 +63,7 @@ class DeploymentCoordinatorAgent(BaseAgent):
             "3. 若依赖可能缺失,在 notes 中说明(离线沙箱只能用镜像内置或 vendor 依赖)。\n"
             "4. 输出 JSON: {\'launch_script\':\'...\',\'notes\':\'...\'};\n"
             "   入口已存在且完整时 launch_script 为空字符串。\n"
+            + db_instruction
         )
         try:
             agent_result = self.call_json(user_message, ctx=ctx)

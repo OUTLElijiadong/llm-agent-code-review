@@ -148,7 +148,8 @@ run_agent_tests() {
 
 run_agent_blackbox() {
   # 黑盒:应用就绪后执行 agent 生成的 blackbox 脚本(仅本机回环),失败不阻断就绪结论。
-  for f in ./_agent_tests/blackbox.py ./_agent_tests/blackbox.js ./_agent_tests/blackbox.sh; do
+  # 探测脚本语言与项目语言一致:python→blackbox.py,node→blackbox.js,php→blackbox.php,go→blackbox.go,java→blackbox.java。
+  for f in ./_agent_tests/blackbox.py ./_agent_tests/blackbox.js ./_agent_tests/blackbox.php ./_agent_tests/blackbox.go ./_agent_tests/blackbox.java ./_agent_tests/blackbox.sh; do
     if [ -f "$f" ]; then
       printf '%s\n' "executing agent blackbox: $f"
       if run_agent_test_file "$f" >/tmp/agent-bb-out 2>&1; then
