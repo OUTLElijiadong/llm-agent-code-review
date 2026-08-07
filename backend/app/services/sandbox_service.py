@@ -683,12 +683,27 @@ def _run_deploy_auto_tests(
 
 
 def _extract_prism_facts(log_text: str) -> dict[str, Any] | None:
-    """从容器日志提取 PRISM_FACTS_BEGIN/END 包裹的 Recon 结构化事实。"""
-    m = re.search(r"PRISM_FACTS_BEGIN\s*(\{.*?\})\s*PRISM_FACTS_END", log_text, re.S)
-    if not m:
+    """从容器日志提取 PRISM_FACTS_BEGIN/END 包裹的 Recon 结构化事实。
+
+    docker log 会给每行加时间戳前缀(2026-...Z ),因此按行解析:
+    BEGIN 行之后的 JSON 行(去时间戳)到 END 行为止。
+    """
+    lines = (log_text or "").splitlines()
+    begin = next((i for i, line in enumerate(lines) if "PRISM_FACTS_BEGIN" in line), None)
+    if begin is None:
+        return None
+    end = next((i for i, line in enumerate(lines) if "PRISM_FACTS_END" in line and i > begin), None)
+    if end is None:
+        return None
+    payload_lines: list[str] = []
+    for line in lines[begin + 1:end]:
+        cleaned = re.sub(r"^\S+Z\s*", "", line)  # 去掉 docker 时间戳前缀
+        if cleaned.strip():
+            payload_lines.append(cleaned)
+    if not payload_lines:
         return None
     try:
-        return json.loads(m.group(1))
+        return json.loads("".join(payload_lines))
     except (ValueError, TypeError):
         return None
 
