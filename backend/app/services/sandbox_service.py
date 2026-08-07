@@ -411,7 +411,7 @@ $facts["test_files"] = array("found"=>$tests, "framework"=>$framework);
 $facts["endpoints"] = $endpoints;
 $facts["hardcoded_secrets"] = $secrets;
 $facts["param_hints"] = array_keys($params);
-echo "PRISM_FACTS_BEGIN\n" . json_encode($facts) . "\nPRISM_FACTS_END\n";
+echo "PRISM_FACTS_BEGIN\n" . json_encode($facts, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR) . "\nPRISM_FACTS_END\n";
 PHPF
     php /tmp/_facts.php 2>/dev/null || true
   fi

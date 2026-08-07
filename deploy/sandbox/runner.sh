@@ -402,14 +402,13 @@ run_blackbox() {
   fi
   kill "$app_pid" >/dev/null 2>&1 || true
   wait "$app_pid" 2>/dev/null || true
+  # agent 动态黑盒:应用仍运行,执行 agent 生成的回环测试脚本
+  run_agent_blackbox
   trap - EXIT INT TERM
   # 5xx(应用自身错误,如缺DB)不算服务失败;1xx/4xx 也算服务已就绪。
   # 只有完全没起监听才在上面 return 1。
   return 0
 }
-
-  # agent 动态黑盒:应用就绪后执行 agent 生成的回环测试脚本
-  run_agent_blackbox
 
 collect_facts() {
   # 输出 PRISM_FACTS_BEGIN/END 供后端回收 recon_facts(入口/端点/密钥/参数提示)
@@ -501,7 +500,7 @@ $facts["test_files"] = array("found"=>$tests, "framework"=>$framework);
 $facts["endpoints"] = $endpoints;
 $facts["hardcoded_secrets"] = $secrets;
 $facts["param_hints"] = array_keys($params);
-echo "PRISM_FACTS_BEGIN\n" . json_encode($facts) . "\nPRISM_FACTS_END\n";
+echo "PRISM_FACTS_BEGIN\n" . json_encode($facts, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR) . "\nPRISM_FACTS_END\n";
 PHPF
     php /tmp/_facts_runner.php 2>/dev/null || true
   fi
