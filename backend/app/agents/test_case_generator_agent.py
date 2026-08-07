@@ -43,6 +43,7 @@ class TestCaseGeneratorAgent(BaseAgent):
         language: str,
         test_mode: str,
         source_summary: dict[str, Any],
+        db_type: str = "none",
         ctx: Optional[AgentContext] = None,
     ) -> dict[str, Any]:
         """生成测试用例文件列表。
@@ -50,9 +51,22 @@ class TestCaseGeneratorAgent(BaseAgent):
         Returns:
             dict: {"files": [{"path": "test_ai_xxx", "content": "..."}]} 或 {"error": "..."}
         """
+        db_instruction = ""
+        if db_type == "sqlite":
+            db_instruction = (
+                "\n数据库: sqlite(独立沙箱内置,无需外部服务)。测试用例可自建 SQLite 库:\n"
+                "  python: import sqlite3; c=sqlite3.connect('/workspace/.prism-db/app.db');\n"
+                "    c.execute('CREATE TABLE IF NOT EXISTS users(\n"
+                "      id INTEGER PRIMARY KEY, username TEXT, password TEXT)'); c.commit()\n"
+                "  php: \\$pdo=new PDO('sqlite:/workspace/.prism-db/app.db');\n"
+                "    \\$pdo->exec('CREATE TABLE IF NOT EXISTS users(\n"
+                "      id INTEGER PRIMARY KEY, username TEXT, password TEXT)');\n"
+                "  SQL 注入探测必须针对真实 SQL 语法(如 OR '1'='1 绕过登录、UNION SELECT),验证是否可利用。\n"
+            )
         user_message = (
             f"语言: {language}\n"
             f"测试模式: {test_mode}\n"
+            f"数据库: {db_type or 'none'}{db_instruction}\n"
             "源码摘要(JSON):\n"
             f"{json.dumps(source_summary, ensure_ascii=False, default=str)[:12000]}\n\n"
             "要求:\n"

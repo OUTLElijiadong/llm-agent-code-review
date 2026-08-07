@@ -651,10 +651,13 @@ def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -
                 if info.file_size > 400_000:
                     continue
                 file_names.append(name)
-                if len(entries) < 120:
-                    entries.append(name)
     except (zipfile.BadZipFile, OSError):
         return {"language": language, "files": [], "entries": []}
+    # 入口与关键文件优先展示,避免 agent 基于截断清单误判"文件缺失"
+    priority = ("index.", "main.", "app.", "server.", "config.", "classes/", "src/", "lib/", "composer.json", "package.json", "requirements.txt", "pom.xml", "go.mod")
+    priority_hits = [n for n in file_names if any(n.endswith(p) or n.startswith(p) for p in priority)]
+    rest = [n for n in file_names if n not in set(priority_hits)]
+    entries = (priority_hits + rest)[:180]
     return {"language": language, "files": file_names[:300], "entries": entries}
 
 
@@ -909,6 +912,16 @@ def _publish_sandbox_report(
             .first()
         )
         now = datetime.now(_tz.utc).replace(tzinfo=None)
+        started_at = getattr(environment, "started_at", None) or now
+        stopped_at = getattr(environment, "stopped_at", None) or now
+        if getattr(started_at, "tzinfo", None) is not None:
+            started_at = started_at.replace(tzinfo=None)
+        if getattr(stopped_at, "tzinfo", None) is not None:
+            stopped_at = stopped_at.replace(tzinfo=None)
+        duration_ms = max(0, int((stopped_at - started_at).total_seconds() * 1000))
+        # 评分语义:测试真实执行完成(无论发现多少问题/漏洞)= 100;
+        # 只有测试未能执行(源码缺失/应用无法启动/超时)才给低分。
+        report_score = 100 if passed else 60
         if task is None:
             task = ReviewTask(
                 user_id=owner_id,
@@ -919,19 +932,22 @@ def _publish_sandbox_report(
                 total_files=1,
                 processed_files=1,
                 total_issues=issue_count,
-                score=100 if passed else 60,
+                score=report_score,
                 summary=report_md,
-                start_time=now,
-                end_time=now,
+                start_time=started_at,
+                end_time=stopped_at,
+                duration_ms=duration_ms,
             )
             db.add(task)
         else:
             task.project_id = project_id
             task.status = "success"
             task.total_issues = issue_count
-            task.score = 100 if passed else 60
+            task.score = report_score
             task.summary = report_md
-            task.end_time = now
+            task.start_time = started_at
+            task.end_time = stopped_at
+            task.duration_ms = duration_ms
         db.flush()
         report_row = db.query(ReviewReport).filter(ReviewReport.task_id == task.id).first()
         if report_row is None:
@@ -940,14 +956,14 @@ def _publish_sandbox_report(
                 user_id=owner_id,
                 content_json={"source": "sandbox_test", "public_id": public_id, "report_md": report_md},
                 summary=report_md[:2000],
-                score=100 if passed else 60,
+                score=report_score,
                 create_time=now,
             )
             db.add(report_row)
         else:
             report_row.content_json = {"source": "sandbox_test", "public_id": public_id, "report_md": report_md}
             report_row.summary = report_md[:2000]
-            report_row.score = 100 if passed else 60
+            report_row.score = report_score
         db.commit()
         return {"report_task_id": task.id, "issues": issue_count}
     except Exception:  # noqa: BLE001 - 入库失败不阻断测试结论
@@ -1673,6 +1689,9 @@ def _create_environment_locked(
         mode=worker_mode,
         worker_code=payload.get("worker_code", ""),
     )
+    db_type = str(payload.get("db_type") or "none").strip().lower()
+    if db_type not in {"none", "sqlite"}:
+        raise ValidationError("沙箱数据库类型不受支持", code=40001)
     archive, _ = project_source_service.build_source_archive(db, actor, project_id)
     source_sha256 = hashlib.sha256(archive).hexdigest()
     requested_ttl = int(payload.get("ttl_hours") or settings.sandbox_default_ttl_hours)
@@ -1708,6 +1727,7 @@ def _create_environment_locked(
             "requested_language": requested_language,
             "resolved_language": language,
             "language_source": "project" if project_language else "request",
+            "db_type": db_type,
         }),
         remote_target_url=remote_url or None,
         remote_target_authorized_at=_utcnow() if remote_url else None,

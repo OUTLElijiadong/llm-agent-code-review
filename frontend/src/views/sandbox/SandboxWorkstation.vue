@@ -60,6 +60,7 @@ const form = reactive({
   purpose: 'test' as SandboxPurpose,
   language: 'python' as SandboxLanguage,
   test_mode: 'whitebox' as SandboxTestMode,
+  db_type: 'none' as 'none' | 'sqlite',
   worker_code: '',
   ttl_hours: 72,
   remote_target_url: '',
@@ -77,6 +78,10 @@ const testModes: Array<{ value: Exclude<SandboxTestMode, 'deploy'>; label: strin
   { value: 'whitebox', label: '白盒', hint: '源码整体扫描与本地测试' },
   { value: 'blackbox', label: '黑盒', hint: '运行态或授权远程目标探测' },
   { value: 'combined', label: '组合', hint: '先白盒再黑盒核验' },
+]
+const dbTypes: Array<{ value: 'none' | 'sqlite'; label: string; hint: string }> = [
+  { value: 'none', label: '无', hint: '不使用数据库' },
+  { value: 'sqlite', label: 'SQLite', hint: '沙箱内置 SQLite,可做真实 SQL 注入探测' },
 ]
 
 const selected = computed(() => environments.value.find((item) => item.public_id === selectedId.value) || null)
@@ -231,6 +236,7 @@ async function submit(): Promise<void> {
       purpose: form.purpose,
       language,
       test_mode: form.purpose === 'deploy' ? 'deploy' : form.test_mode,
+      db_type: form.purpose === 'test' ? form.db_type : undefined,
       worker_code: form.worker_code || undefined,
       ttl_hours: form.ttl_hours,
       remote_target_url: form.remote_target_url.trim() || undefined,
@@ -416,6 +422,17 @@ onBeforeUnmount(() => {
             <div v-else-if="form.purpose === 'deploy'" class="field-hint">项目主语言无法映射到受控运行时，请先更新项目语言。</div>
           </el-form-item>
 
+          <el-form-item v-if="form.purpose === 'test'" label="数据库">
+            <div class="mode-options">
+              <label v-for="db in dbTypes" :key="db.value" class="mode-option">
+                <input v-model="form.db_type" type="radio" :value="db.value">
+                <span class="mode-option-body">
+                  <b>{{ db.label }}</b>
+                  <small>{{ db.hint }}</small>
+                </span>
+              </label>
+            </div>
+          </el-form-item>
           <el-form-item v-if="form.purpose === 'test'" label="测试模式">
             <div class="mode-options">
               <label v-for="mode in testModes" :key="mode.value" class="mode-option" :class="{ active: form.test_mode === mode.value }">

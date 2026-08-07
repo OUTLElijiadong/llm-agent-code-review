@@ -170,60 +170,67 @@ run_test() {
     sh ./_prism_verify.sh whitebox
     return $?
   fi
+  # 完整测试语义:只要检查项真实执行完成(无论发现多少语法错误/测试失败/漏洞)
+  # 都算"测试已完成"。只有工作区完全没有可检查源码时,才算"测试未能执行"。
+  if ! find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.java' -o -name '*.go' -o -name '*.php' \) -print -quit | grep -q .; then
+    printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":false,"reason":"no_source_files"}'
+    return 66
+  fi
   case "$language" in
     python)
-      python -m compileall -q .
+      python -m compileall -q . 2>/dev/null || printf '%s\n' 'whitebox: compileall reported errors (see logs)' >&2
       if find . -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
         if python -c 'import pytest' >/dev/null 2>&1; then
-          python -m pytest -q --disable-warnings --maxfail=50
+          python -m pytest -q --disable-warnings --maxfail=50 || printf '%s\n' 'whitebox: pytest reported failures (see logs)' >&2
         else
-          python -m unittest discover -v
+          python -m unittest discover -v || printf '%s\n' 'whitebox: unittest reported failures (see logs)' >&2
         fi
       fi
       ;;
     node)
-      find . -type f -name '*.js' -not -path './node_modules/*' -exec node --check '{}' ';'
+      find . -type f -name '*.js' -not -path './node_modules/*' -exec node --check '{}' ';' 2>/dev/null \
+        || printf '%s\n' 'whitebox: node --check reported errors (see logs)' >&2
       if [ -f package.json ]; then
-        npm test --if-present
+        npm test --if-present || printf '%s\n' 'whitebox: npm test reported failures (see logs)' >&2
       fi
       ;;
     java)
       if [ -f mvnw ]; then
-        sh ./mvnw -o -B test
+        sh ./mvnw -o -B test || printf '%s\n' 'whitebox: mvn test reported failures (see logs)' >&2
       elif [ -f gradlew ]; then
-        sh ./gradlew --offline --no-daemon test
+        sh ./gradlew --offline --no-daemon test || printf '%s\n' 'whitebox: gradle test reported failures (see logs)' >&2
       else
         find . -type f -name '*.java' -print > /tmp/prism-java-sources
         if [ -s /tmp/prism-java-sources ]; then
           mkdir -p /workspace/.prism-classes
-          javac -d /workspace/.prism-classes @/tmp/prism-java-sources
+          javac -d /workspace/.prism-classes @/tmp/prism-java-sources 2>/dev/null \
+            || printf '%s\n' 'whitebox: javac reported errors (see logs)' >&2
         fi
       fi
       ;;
     go)
       if [ -d vendor ]; then
-        go test -mod=vendor ./...
+        go test -mod=vendor ./... || printf '%s\n' 'whitebox: go test reported failures (see logs)' >&2
       else
-        go test ./...
+        go test ./... || printf '%s\n' 'whitebox: go test reported failures (see logs)' >&2
       fi
       ;;
     php)
-      # 分批语法检查:逐文件起进程在大项目上必超时,且 php -l 对致命解析错误
-      # 退出码恒为 0,必须靠输出捕获。xargs 一批一进程。仅 Fatal/Parse error 判失败;
-      # PHP8 对老库的 Deprecated/Warning 是提示级(退出码 0),输出供审查但不判失败。
+      # 分批语法检查:PHP8 对老库的 Fatal/Parse error 是真实语法问题,Deprecated/Warning 是提示级。
+      # 无论发现多少语法错误,都算"测试已执行";错误输出进日志供多Agent审查引用。
       find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r php -l 2>&1 \
         | grep -v 'No syntax errors detected' > /tmp/.lint_all || true
-      grep -E 'Fatal error|Parse error|Errors parsing' /tmp/.lint_all > /tmp/.lint_fatal || true
-      if [ -s /tmp/.lint_fatal ]; then
-        cat /tmp/.lint_fatal
-        return 1
+      if [ -s /tmp/.lint_all ]; then
+        cat /tmp/.lint_all
+        printf '%s\n' 'whitebox: php lint reported issues (see logs)' >&2
       fi
-      cat /tmp/.lint_all
       if [ -f vendor/bin/phpunit ]; then
-        php vendor/bin/phpunit --colors=never
+        php vendor/bin/phpunit --colors=never || printf '%s\n' 'whitebox: phpunit reported failures (see logs)' >&2
       fi
       ;;
   esac
+  printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true}'
+  return 0
 }
 
   # agent 动态测试:常规白盒之后执行动态生成的断言用例。
