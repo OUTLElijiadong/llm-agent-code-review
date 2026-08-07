@@ -85,7 +85,7 @@ class SandboxCreateIn(BaseModel):
     purpose: Literal["test", "deploy"]
     language: Literal["python", "node", "java", "go", "php"]
     test_mode: Literal["whitebox", "blackbox", "combined", "deploy"] = "whitebox"
-    db_type: Literal["none", "sqlite"] = "none"
+    db_type: Literal["none", "sqlite", "mysql"] = "none"
     worker_code: str = Field(default="", max_length=80)
     ttl_hours: int = Field(default=72, ge=1, le=168)
     remote_target_url: Optional[HttpUrl] = None

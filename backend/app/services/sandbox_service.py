@@ -1690,7 +1690,7 @@ def _create_environment_locked(
         worker_code=payload.get("worker_code", ""),
     )
     db_type = str(payload.get("db_type") or "none").strip().lower()
-    if db_type not in {"none", "sqlite"}:
+    if db_type not in {"none", "sqlite", "mysql"}:
         raise ValidationError("沙箱数据库类型不受支持", code=40001)
     archive, _ = project_source_service.build_source_archive(db, actor, project_id)
     source_sha256 = hashlib.sha256(archive).hexdigest()

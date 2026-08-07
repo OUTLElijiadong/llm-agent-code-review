@@ -52,6 +52,18 @@ class TestCaseGeneratorAgent(BaseAgent):
             dict: {"files": [{"path": "test_ai_xxx", "content": "..."}]} 或 {"error": "..."}
         """
         db_instruction = ""
+        if db_type == "mysql":
+            db_instruction = (
+                "\n数据库: mysql(独立沙箱测试库,只读环境变量连接,禁止硬编码凭据)。用环境变量:\n"
+                "  PRISM_DB_HOST / PRISM_DB_PORT / PRISM_DB_USER / PRISM_DB_PASSWORD / PRISM_DB_NAME\n"
+                "  python: import pymysql, os; conn=pymysql.connect(host=os.environ['PRISM_DB_HOST'],\n"
+                "    port=int(os.environ.get('PRISM_DB_PORT','3306')), user=os.environ['PRISM_DB_USER'],\n"
+                "    password=os.environ['PRISM_DB_PASSWORD'], database=os.environ['PRISM_DB_NAME'],\n"
+                "    autocommit=True); cur=conn.cursor(); cur.execute('CREATE TABLE IF NOT EXISTS users(...)');\n"
+                "  php: \\$pdo=new PDO('mysql:host='.getenv('PRISM_DB_HOST').';port='.getenv('PRISM_DB_PORT').\n"
+                "    ';dbname='.getenv('PRISM_DB_NAME'), getenv('PRISM_DB_USER'), getenv('PRISM_DB_PASSWORD'));\n"
+                "  SQL 注入探测必须针对真实 MySQL 语法(如 OR '1'='1 绕过登录、UNION SELECT),验证是否可利用。\n"
+            )
         if db_type == "sqlite":
             db_instruction = (
                 "\n数据库: sqlite(独立沙箱内置,无需外部服务)。测试用例可自建 SQLite 库:\n"

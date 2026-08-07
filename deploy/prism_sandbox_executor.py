@@ -82,12 +82,20 @@ EXECUTE_KEYS = frozenset(
         "purpose",
         "language",
         "test_mode",
+        "db_type",
         "source_archive_base64",
         "source_sha256",
         "ttl_seconds",
         "image_digest",
     }
 )
+# 沙箱测试数据库:仅独立测试库(绝不指向生产库);缺失则沙箱保持无数据库。
+SANDBOX_TEST_DB_NETWORK = os.environ.get("SANDBOX_TEST_DB_NETWORK", "sandbox_test_net")
+SANDBOX_TEST_DB_HOST = os.environ.get("SANDBOX_TEST_DB_HOST", "cr_testdb")
+SANDBOX_TEST_DB_PORT = os.environ.get("SANDBOX_TEST_DB_PORT", "3306")
+SANDBOX_TEST_DB_USER = os.environ.get("SANDBOX_TEST_DB_USER", "sandbox")
+SANDBOX_TEST_DB_PASSWORD = os.environ.get("SANDBOX_TEST_DB_PASSWORD", "")
+SANDBOX_TEST_DB_NAME = os.environ.get("SANDBOX_TEST_DB_NAME", "sandbox_test")
 STATUS_KEYS = frozenset({"request_id", "after_sequence"})
 STOP_KEYS = frozenset({"request_id"})
 EXTEND_KEYS = frozenset({"request_id", "extend_seconds"})
@@ -882,7 +890,7 @@ def _raise_if_stopped(request_id: str) -> None:
 
 
 def _build_docker_create_args(
-    *, request_id: str, purpose: str, test_mode: str, profile: Profile, runtime: str, image: ResolvedImage, source_dir: Path,
+    *, request_id: str, purpose: str, test_mode: str, db_type: str, profile: Profile, runtime: str, image: ResolvedImage, source_dir: Path,
 ) -> list[str]:
     if purpose not in PURPOSES or profile.language not in LANGUAGES:
         raise ValueError("沙箱用途或语言不合法")
@@ -902,7 +910,7 @@ def _build_docker_create_args(
         "--runtime",
         runtime,
         "--network",
-        "none",
+        "none" if db_type != "mysql" else SANDBOX_TEST_DB_NETWORK,
         "--read-only",
         "--cap-drop",
         "ALL",
@@ -965,8 +973,18 @@ def _build_docker_create_args(
         "HTTP_PROXY=",
         "--env",
         "HTTPS_PROXY=",
-        image.run_ref,
     ]
+    if db_type == "mysql":
+        args.extend([
+            "--env", f"PRISM_DB_TYPE=mysql",
+            "--env", f"PRISM_DB_HOST={SANDBOX_TEST_DB_HOST}",
+            "--env", f"PRISM_DB_PORT={SANDBOX_TEST_DB_PORT}",
+            "--env", f"PRISM_DB_USER={SANDBOX_TEST_DB_USER}",
+            "--env", f"PRISM_DB_PASSWORD={SANDBOX_TEST_DB_PASSWORD}",
+            "--env", f"PRISM_DB_NAME={SANDBOX_TEST_DB_NAME}",
+        ])
+    args.append(image.run_ref)
+    return args
 
 
 def _active_job_count() -> int:
@@ -1011,6 +1029,7 @@ def _new_state(payload: dict[str, Any], profile: Profile, digest: str) -> dict[s
         "purpose": payload["purpose"],
         "language": payload["language"],
         "test_mode": payload.get("test_mode", "whitebox"),
+        "db_type": payload.get("db_type", "none"),
         "source_sha256": payload["source_sha256"],
         "status": "validating",
         "stage": "validating",
@@ -1155,6 +1174,7 @@ def submit_job(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             request_id=request_id,
             purpose=normalized["purpose"],
             test_mode=normalized["test_mode"],
+            db_type=str(normalized.get("db_type") or "none"),
             profile=profile,
             runtime=runtime,
             image=image,

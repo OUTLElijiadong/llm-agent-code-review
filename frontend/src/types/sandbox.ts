@@ -7,7 +7,7 @@ export interface SandboxCreateInput {
   purpose: SandboxPurpose
   language: SandboxLanguage
   test_mode: SandboxTestMode
-  db_type?: 'none' | 'sqlite'
+  db_type?: 'none' | 'sqlite' | 'mysql'
   worker_code?: string
   ttl_hours: number
   remote_target_url?: string

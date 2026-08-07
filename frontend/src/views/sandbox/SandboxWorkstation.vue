@@ -60,7 +60,7 @@ const form = reactive({
   purpose: 'test' as SandboxPurpose,
   language: 'python' as SandboxLanguage,
   test_mode: 'whitebox' as SandboxTestMode,
-  db_type: 'none' as 'none' | 'sqlite',
+  db_type: 'none' as 'none' | 'sqlite' | 'mysql',
   worker_code: '',
   ttl_hours: 72,
   remote_target_url: '',
@@ -79,9 +79,10 @@ const testModes: Array<{ value: Exclude<SandboxTestMode, 'deploy'>; label: strin
   { value: 'blackbox', label: '黑盒', hint: '运行态或授权远程目标探测' },
   { value: 'combined', label: '组合', hint: '先白盒再黑盒核验' },
 ]
-const dbTypes: Array<{ value: 'none' | 'sqlite'; label: string; hint: string }> = [
+const dbTypes: Array<{ value: 'none' | 'sqlite' | 'mysql'; label: string; hint: string }> = [
   { value: 'none', label: '无', hint: '不使用数据库' },
   { value: 'sqlite', label: 'SQLite', hint: '沙箱内置 SQLite,可做真实 SQL 注入探测' },
+  { value: 'mysql', label: 'MySQL', hint: '连接独立沙箱测试库,可做真实 SQL 注入探测' },
 ]
 
 const selected = computed(() => environments.value.find((item) => item.public_id === selectedId.value) || null)
