@@ -444,23 +444,54 @@ def _firewall_action(params: dict[str, Any]) -> dict[str, Any]:
     target_type = str(params.get("target_type") or "")
     if target_type not in {"port", "service"}:
         raise ValueError("target_type 必须是 port 或 service")
-    value = str(params.get("value") or "")
+    value = str(params.get("value") or "").strip().lower()
     if target_type == "port":
-        match = re.fullmatch(r"([0-9]{1,5})/(tcp|udp)", value)
+        # 兼容纯端口号(如 8080,默认 tcp)与带协议端口(如 8080/tcp、8080/udp)
+        match = re.fullmatch(r"([0-9]{1,5})(?:/(tcp|udp))?", value)
         if not match or not 1 <= int(match.group(1)) <= 65535:
-            raise ValueError("端口必须是 1-65535/tcp|udp")
+            raise ValueError("端口必须是 1-65535 或 1-65535/tcp|udp")
+        proto = match.group(2) or "tcp"
+        value = f"{match.group(1)}/{proto}"
     elif not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
         raise ValueError("firewalld service 名称不合法")
     zone = str(params.get("zone") or "public")
     if not ZONE_NAME.fullmatch(zone):
         raise ValueError("firewalld zone 名称不合法")
+
     firewall = shutil.which("firewall-cmd")
-    if not firewall:
-        raise RuntimeError("服务器未安装 firewall-cmd")
-    option = f"--{operation}-{target_type}={value}"
-    change = run([firewall, "--permanent", f"--zone={zone}", option], timeout=120)
-    reload_result = run([firewall, "--reload"], timeout=120)
-    return {"change": change, "reload": reload_result}
+    if firewall:
+        state = run([firewall, "--state"], timeout=30)
+        if state.get("ok") and "running" in (state.get("stdout") or ""):
+            option = f"--{operation}-{target_type}={value}"
+            change = run([firewall, "--permanent", f"--zone={zone}", option], timeout=120)
+            reload_result = run([firewall, "--reload"], timeout=120)
+            return {"change": change, "reload": reload_result}
+
+    # firewalld 未运行/未安装时回退到 iptables(OpenCloudOS/CentOS 常见)。
+    # 仅端口操作支持 iptables,服务名操作无法映射时给出明确提示。
+    iptables = shutil.which("iptables") or shutil.which("/usr/sbin/iptables")
+    if not iptables:
+        raise RuntimeError("服务器未安装 firewall-cmd/firewalld 且无 iptables")
+    if target_type == "service":
+        raise RuntimeError(
+            "当前防火墙为 iptables 模式,不支持按服务名开放;请使用端口操作(target_type=port)"
+        )
+    proto = value.split("/", 1)[1] if "/" in value else "tcp"
+    port = value.split("/", 1)[0]
+    if operation == "add":
+        rule = ["-I", "INPUT", "-p", proto, "--dport", port, "-j", "ACCEPT"]
+    else:
+        rule = ["-D", "INPUT", "-p", proto, "--dport", port, "-j", "ACCEPT"]
+    change = run([iptables, *rule], timeout=60)
+    persist = None
+    for save_path in ("/etc/sysconfig/iptables", "/etc/iptables/rules.v4"):
+        if os.path.exists(save_path) and os.access(save_path, os.W_OK):
+            persist = run(["iptables-save"], timeout=60)
+            if persist.get("ok"):
+                with open(save_path, "w", encoding="utf-8") as fh:
+                    fh.write(persist.get("stdout", ""))
+            break
+    return {"change": change, "persist": persist or {"ok": False, "note": "未找到可写 iptables 持久化文件,规则仅临时生效"}}
 
 
 def _account_action(params: dict[str, Any]) -> dict[str, Any]:
