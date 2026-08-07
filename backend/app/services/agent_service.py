@@ -467,7 +467,8 @@ def get_situation(db: Session, user_id: Optional[int] = None,
 
     codes = {r["code"] for r in runtime}
     hotspot_counts: dict[str, int] = defaultdict(int)
-    for model_name, _, _ in rows_today:
+    for row in rows_today:
+        model_name = row[0]
         for code in _agent_codes_from_model_name(model_name, codes):
             hotspot_counts[code] += 1
     name_by_code = {r["code"]: r["name"] for r in runtime}
