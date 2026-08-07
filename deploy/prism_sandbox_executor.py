@@ -1194,7 +1194,12 @@ def submit_job(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             state["container_id"] = container_id
             state["started_at"] = _iso()
             if normalized["purpose"] == "test":
-                _transition(state, "running_whitebox", "running_whitebox", "白盒测试容器已启动")
+                mode_label = {
+                    "whitebox": "白盒测试容器已启动",
+                    "blackbox": "黑盒测试容器已启动",
+                    "combined": "黑白盒测试容器已启动",
+                }.get(normalized["test_mode"], "测试容器已启动")
+                _transition(state, "running_whitebox", "running_whitebox", mode_label)
             else:
                 _transition(state, "starting", "starting", "持续部署容器已启动，等待回环健康检查")
         _start_monitor(request_id, profile)
