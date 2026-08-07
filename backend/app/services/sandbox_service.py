@@ -1835,6 +1835,9 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 environment.source_sha256 = effective_sha
                 db.commit()
         if worker:
+            if environment.started_at is None:
+                environment.started_at = _utcnow()
+                db.commit()
             execute_response = _call_worker(worker, "POST", "/execute", {
                 "request_id": environment.public_id,
                 "purpose": environment.purpose,
@@ -1907,7 +1910,8 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         environment.image_digest = str(result.get("image_digest") or "")[:100] or None
         if isinstance(result.get("resource_policy"), dict):
             environment.resource_policy_json = _json(result["resource_policy"])
-        environment.started_at = environment.started_at or _utcnow()
+        if environment.started_at is None:
+            environment.started_at = _utcnow()
         if environment.status in TERMINAL_STATES:
             environment.stopped_at = _utcnow()
         if environment.purpose == "deploy" and environment.status == "ready":
