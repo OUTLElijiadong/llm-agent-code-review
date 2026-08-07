@@ -898,7 +898,7 @@ def _build_docker_create_args(
     if source_dir != expected_source or source_dir.is_symlink() or not source_dir.is_dir():
         raise ValueError("源码目录不是执行器生成的内部路径")
     container = _container_name(request_id)
-    return [
+    args = [
         "docker",
         "create",
         "--name",
