@@ -28,7 +28,13 @@ def upgrade() -> None:
     if _has_table(bind, "project_source_revision"):
         return
     dialect = bind.dialect.name
-    blob_type = sa.LargeBinary if dialect == "sqlite" else sa.LargeBinary().with_variant(sa.LargeBinary, "mysql")
+    if dialect == "mysql":
+        blob_type = sa.LargeBinary().with_variant(sa.LargeBinary, "mysql")
+        # MySQL 必须用 LONGBLOB(修复后源码 zip 可达上百 MB),不能用默认 BLOB(64KB)
+        from sqlalchemy.dialects.mysql import LONGBLOB
+        blob_type = LONGBLOB()
+    else:
+        blob_type = sa.LargeBinary
     op.create_table(
         "project_source_revision",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
