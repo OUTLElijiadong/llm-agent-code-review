@@ -2012,6 +2012,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             repair_round = 0
             max_repair_rounds = int(getattr(settings, "sandbox_max_repair_rounds", 2) or 2)
             while True:
+                worker_request_id = environment.public_id if repair_round == 0 else f"{environment.public_id}-r{repair_round}"
                 last_sequence = 0
                 def persist_worker_events(state: dict[str, Any]) -> None:
                     nonlocal last_sequence
@@ -2034,7 +2035,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                     db.commit()
                 sandbox_db_type = str((_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none")
                 execute_response = _call_worker(worker, "POST", "/execute", {
-                    "request_id": environment.public_id,
+                    "request_id": worker_request_id,
                     "purpose": environment.purpose,
                     "language": environment.language,
                     "test_mode": worker_mode if worker_mode in {"whitebox", "blackbox", "combined"} else "whitebox",
@@ -2061,7 +2062,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                         raise RuntimeError("Sandbox worker 状态轮询超时")
                     time.sleep(1)
                     status_response = _call_worker(worker, "POST", "/status", {
-                        "request_id": environment.public_id,
+                        "request_id": worker_request_id,
                         "after_sequence": last_sequence,
                     })
                     result = (
