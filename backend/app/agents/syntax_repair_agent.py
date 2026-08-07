@@ -41,8 +41,8 @@ class SyntaxRepairAgent(BaseAgent):
         """保留错误行附近的代码窗口,同时控制总长度。"""
         lines = content.split("\n")
         if line is not None and 1 <= line <= len(lines):
-            start = max(0, line - 40)
-            end = min(len(lines), line + 40)
+            start = max(0, line - 20)
+            end = min(len(lines), line + 20)
             clipped = lines[start:end]
             prefix = f"# 已裁剪:原始第 1-{start} 行省略" if start > 0 else ""
             suffix = f"# 已裁剪:原始第 {end+1}-{len(lines)} 行省略" if end < len(lines) else ""
@@ -73,6 +73,9 @@ class SyntaxRepairAgent(BaseAgent):
         """
         if language != "php" or not errors or not files:
             return {"error": "当前仅支持 PHP 语法修复"}
+        # 大文件修复耗时,临时把单次模型超时提到 300s
+        old_timeout = self._timeout
+        self._timeout = max(float(old_timeout or 0), 300.0)
         # 按文件聚合错误
         by_file: dict[str, list[dict[str, Any]]] = {}
         for err in errors:
@@ -108,6 +111,7 @@ class SyntaxRepairAgent(BaseAgent):
                 cleaned[path] = new_content
             else:
                 last_error = f"{path}: 未返回有效内容"
+        self._timeout = old_timeout
         if not cleaned:
             return {"error": last_error or "未生成有效修复文件"}
         return {"files": cleaned}

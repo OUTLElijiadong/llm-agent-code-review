@@ -1934,11 +1934,14 @@ def _syntax_repair_round(
                           f"语法修复未生成: {str(result.get('error') or '空结果')[:120]}")
             db.commit()
             return None
-        # 写回 zip(仅覆盖修复文件,保留其他成员)
-        buf = io.BytesIO(raw)
-        with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as zf:
-            for path, content in repaired.items():
-                zf.writestr(path, content)
+        # 写回 zip:重建 zip 并替换同名成员(不能用 append,否则产生重复条目导致 executor 解压失败)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(raw), "r") as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for info in zin.infolist():
+                data = zin.read(info.filename)
+                if info.filename in repaired:
+                    data = repaired[info.filename].encode("utf-8")
+                zout.writestr(info, data)
         new_source = base64.b64encode(buf.getvalue()).decode("ascii")
         _append_event(
             db, environment, "progress", "syntax_repair",
