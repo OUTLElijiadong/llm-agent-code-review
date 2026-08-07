@@ -378,15 +378,18 @@ PYEOF_INNER
   elif command -v php >/dev/null 2>&1; then
     cat > /tmp/_facts.php <<'PHPF'
 <?php
+try {
 $facts = array("entrypoints"=>array(), "test_files"=>array("found"=>0,"framework"=>""), "endpoints"=>array(), "param_hints"=>array(), "hardcoded_secrets"=>array());
 $entry_names = array("main.py","app.py","manage.py","wsgi.py","asgi.py","index.js","server.js","app.js","main.go","go.mod","pom.xml","index.php","index.html");
-$route_re = "/(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['\"]([^'\"]+)['\"]|path\s*\(\s*['\"]([^'\"]+)['\"]/i";
-$secret_re = "/(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['\"]([^'\"]{6,})['\"]/i";
+$route_re = "/(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|@(?:app|bp|router)\.(?:route|get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]|path\s*\(\s*['"]([^'"]+)['"]/i";
+$secret_re = "/(api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['"]([^'"]{6,})['"]/i";
 $param_names = array("file","path","filename","download","url","callback","id","userid","orderid","template","export","redirect","next","upload");
 $tests = 0; $framework = ""; $endpoints = array(); $secrets = array(); $params = array();
+$scanned = 0;
 $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("."));
 foreach ($it as $f) {
   if ($f->isDir()) continue;
+  if ($scanned++ > 3000) break;
   $name = $f->getFilename(); $rel = substr($f->getPathname(), 2);
   if (in_array($name, $entry_names)) $facts["entrypoints"][] = $rel;
   if (preg_match("/^(test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)/", $name)) { $tests++; if (substr($name,-3)===".py") $framework = $framework ?: "pytest"; if (substr($name,-3)===".js") $framework = $framework ?: "jest"; }
@@ -404,7 +407,7 @@ foreach ($it as $f) {
     foreach ($sm[1] as $k) { if (count($secrets) < 20) $secrets[] = array("file"=>$rel, "kind"=>$k); }
   }
   foreach ($param_names as $pn) {
-    if (preg_match("/[?&'\"\\s]" . preg_quote($pn, "/") . "['\"=:\\s]/i", $src)) $params[$pn] = 1;
+    if (preg_match("/[?&'"\s]" . preg_quote($pn, "/") . "['"=:\s]/i", $src)) $params[$pn] = 1;
   }
 }
 $facts["test_files"] = array("found"=>$tests, "framework"=>$framework);
@@ -412,6 +415,7 @@ $facts["endpoints"] = $endpoints;
 $facts["hardcoded_secrets"] = $secrets;
 $facts["param_hints"] = array_keys($params);
 echo "PRISM_FACTS_BEGIN\n" . json_encode($facts, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR) . "\nPRISM_FACTS_END\n";
+} catch (Throwable $e) { echo "PRISM_FACTS_BEGIN\n{\"error\":\"" . addslashes($e->getMessage()) . "\"}\nPRISM_FACTS_END\n"; }
 PHPF
     php /tmp/_facts.php 2>/dev/null || true
   fi
