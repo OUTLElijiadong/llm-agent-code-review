@@ -167,6 +167,14 @@ def _artifact_documents(
     failure = "" if passed else (
         f'<failure message="{escaped_summary}">{html.escape(log_text[-4_000:] or summary)}</failure>'
     )
+    agent_test_details: bytes | None = None
+    at_result = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else None
+    details = at_result.get("details") if isinstance(at_result, dict) and isinstance(at_result.get("details"), dict) else {}
+    if details:
+        parts = []
+        for file_name, output in details.items():
+            parts.append(f"===== agent 测试用例: {file_name} =====\n{output}\n")
+        agent_test_details = "\n".join(parts).encode("utf-8", errors="replace")
     junit = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<testsuite name="PrismSandbox" tests="1" failures="{0 if passed else 1}">'
@@ -191,13 +199,16 @@ def _artifact_documents(
             },
         }],
     }, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
-    return [
+    documents = [
         ("result", "sandbox-result.json", "application/json", result_json),
         ("log", "sandbox.log", "text/plain; charset=utf-8", log_text.encode("utf-8")),
         ("junit", "sandbox-junit.xml", "application/xml", junit),
         ("sarif", "sandbox-results.sarif", "application/sarif+json", sarif),
         ("html", "sandbox-report.html", "text/html; charset=utf-8", html_report),
     ]
+    if agent_test_details is not None:
+        documents.append(("agent_test_details", f"agent-test-details-{environment.public_id}.txt", "text/plain; charset=utf-8", agent_test_details))  # noqa: E501
+    return documents
 
 
 def _persist_artifacts(
@@ -771,15 +782,29 @@ def _inject_deployment_patch(source_archive_base64: str, launch_script: str) -> 
 
 
 def _extract_agent_tests_result(log_text: str) -> dict[str, Any] | None:
-    """从容器日志提取 PRISM_AGENT_TESTS_BEGIN/END 包裹的动态测试结果。"""
+    """从容器日志提取 PRISM_AGENT_TESTS_BEGIN/END 包裹的动态测试结果,并附带失败用例输出。"""
     pattern = r"PRISM_AGENT_TESTS_BEGIN\s*(\{.*?\})\s*PRISM_AGENT_TESTS_END"
     m = re.search(pattern, log_text, re.S)
     if not m:
         return None
     try:
-        return json.loads(m.group(1))
+        result = json.loads(m.group(1))
     except (ValueError, TypeError):
         return None
+    if isinstance(result, dict) and result.get("failed"):
+        result["details"] = _extract_agent_test_failures(log_text)
+    return result
+
+
+def _extract_agent_test_failures(log_text: str) -> dict[str, str]:
+    """从容器日志提取每个失败 agent 用例的执行输出(供存档审查)。"""
+    details: dict[str, str] = {}
+    for match in re.finditer(r"agent test failed: ([^\s]+)\s*\n(.*?)(?=\nagent test failed:|PRISM_AGENT_TESTS_BEGIN|PRISM_VERIFY|PRISM_AGENT_TESTS_END|$)", log_text, re.S):  # noqa: E501
+        file_name = match.group(1).split("/")[-1]
+        output = match.group(2).strip()[-2000:]
+        if file_name and output:
+            details[file_name] = output
+    return details
 
 
 def _run_test_review_report(
@@ -832,6 +857,10 @@ def _run_test_review_report(
             "roles": {k: {"ok": bool(v.get("ok"))} for k, v in roles.items() if isinstance(v, dict)},
             "report_bytes": len(report_md.encode("utf-8")),
         }
+        published = _publish_sandbox_report(db, environment, conclusion, report_md)
+        if published:
+            summary["report_task_id"] = published.get("report_task_id")
+            summary["issues"] = published.get("issues", 0)
         _append_event(
             db, environment, "complete", "multi_agent_review",
             f"多 Agent 测试审查报告已生成(角色 {summary['roles_executed']}/4)",
@@ -844,6 +873,86 @@ def _run_test_review_report(
                       f"多 Agent 测试审查异常: {str(exc)[:120]}")
         db.commit()
         return None
+
+
+def _publish_sandbox_report(
+    db: Session,
+    environment: "SandboxEnvironment",
+    conclusion: dict[str, Any],
+    report_md: str,
+) -> dict[str, Any]:
+    """把沙箱多 Agent 审查报告正式入库"审查报告"中心(ReviewTask+ReviewReport)。
+
+    幂等:按 public_id 写入 task_name 查重,重复执行只更新不重复建。
+    失败静默,不阻断测试结论。
+    """
+    try:
+        from datetime import datetime
+        from datetime import timezone as _tz
+
+        from app.models.review_report import ReviewReport
+        from app.models.review_task import ReviewTask
+
+        owner_id = int(getattr(environment, "owner_id", 0) or 0)
+        project_id = int(getattr(environment, "project_id", 0) or 0)
+        public_id = str(getattr(environment, "public_id", "") or "")
+        passed = bool(conclusion.get("passed"))
+        task_name = f"沙箱黑白盒测试 · {public_id}"
+        # 从审查报告解析问题清单条数(## 问题清单 段内以 - 开头行)
+        issue_count = 0
+        issue_section = re.search(r"## 问题清单(.*?)(?=\n## |$)", report_md, re.S)
+        if issue_section:
+            issue_count = len(re.findall(r"^[-*] ", issue_section.group(1), re.M))
+        task = (
+            db.query(ReviewTask)
+            .filter(ReviewTask.task_name == task_name, ReviewTask.review_type == "sandbox_test")
+            .first()
+        )
+        now = datetime.now(_tz.utc).replace(tzinfo=None)
+        if task is None:
+            task = ReviewTask(
+                user_id=owner_id,
+                project_id=project_id,
+                task_name=task_name,
+                review_type="sandbox_test",
+                status="success",
+                total_files=1,
+                processed_files=1,
+                total_issues=issue_count,
+                score=100 if passed else 60,
+                summary=report_md,
+                start_time=now,
+                end_time=now,
+            )
+            db.add(task)
+        else:
+            task.project_id = project_id
+            task.status = "success"
+            task.total_issues = issue_count
+            task.score = 100 if passed else 60
+            task.summary = report_md
+            task.end_time = now
+        db.flush()
+        report_row = db.query(ReviewReport).filter(ReviewReport.task_id == task.id).first()
+        if report_row is None:
+            report_row = ReviewReport(
+                task_id=task.id,
+                user_id=owner_id,
+                content_json={"source": "sandbox_test", "public_id": public_id, "report_md": report_md},
+                summary=report_md[:2000],
+                score=100 if passed else 60,
+                create_time=now,
+            )
+            db.add(report_row)
+        else:
+            report_row.content_json = {"source": "sandbox_test", "public_id": public_id, "report_md": report_md}
+            report_row.summary = report_md[:2000]
+            report_row.score = 100 if passed else 60
+        db.commit()
+        return {"report_task_id": task.id, "issues": issue_count}
+    except Exception:  # noqa: BLE001 - 入库失败不阻断测试结论
+        db.rollback()
+        return {}
 
 
 def artifact_to_dict(row: SandboxArtifact) -> dict[str, Any]:
@@ -1870,6 +1979,8 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         }
         if agent_tests_result is not None:
             conclusion["agent_tests"] = agent_tests_result
+            if isinstance(agent_tests_result.get("details"), dict) and agent_tests_result["details"]:
+                evidence["agent_test_details"] = agent_tests_result["details"]
         if auto_test_chain:
             conclusion["auto_test_chain"] = auto_test_chain
             evidence["auto_test_chain"] = auto_test_chain
