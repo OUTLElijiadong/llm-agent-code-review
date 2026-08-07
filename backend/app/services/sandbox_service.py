@@ -42,6 +42,7 @@ from app.models.agent_capability import (
 )
 from app.models.project import Project
 from app.models.user import User
+from app.agents.syntax_repair_agent import SyntaxRepairAgent, collect_php_lint_errors
 from app.services import audit_service, project_source_service, rbac_service
 from app.services.project_member_service import get_visible_project_ids, require_project_access
 from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
@@ -1857,6 +1858,102 @@ def _create_environment_locked(
     return environment
 
 
+def _select_repair_targets(lint_errors: list[dict[str, Any]], max_files: int) -> list[dict[str, Any]]:
+    """按优先级选择本轮修复的文件:入口链 > api/inc 公共库 > 其余,同文件合并错误。"""
+    by_file: dict[str, list[dict[str, Any]]] = {}
+    for err in lint_errors:
+        f = str(err.get("file") or "").strip()
+        if f:
+            by_file.setdefault(f, []).append(err)
+    def priority(path: str) -> int:
+        p = path.lower()
+        if p == "index.php" or p.startswith("index/"):
+            return 0
+        if p.startswith("api/") or p.startswith("inc/") or p.startswith("classes/"):
+            return 1
+        return 2
+    ordered = sorted(by_file.items(), key=lambda kv: (priority(kv[0]), kv[0]))
+    out: list[dict[str, Any]] = []
+    for path, errs in ordered[:max_files]:
+        out.append({"file": path, "errors": errs})
+    return out
+
+
+def _syntax_repair_round(
+    db: Session,
+    environment: Any,
+    source_archive_base64: str,
+    lint_errors: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """对白盒 php -l 报错文件调用修复 Agent,返回写回修复后的新 zip。
+
+    失败静默(只记事件不阻断):LLM 未配置/生成失败都跳过本轮修复。
+    """
+    try:
+        from app.agents.base import AgentContext
+
+        max_files = int(getattr(settings, "sandbox_repair_max_files", 8) or 8)
+        targets = _select_repair_targets(lint_errors, max_files)
+        if not targets:
+            return None
+        raw = base64.b64decode(source_archive_base64)
+        files: dict[str, str] = {}
+        errors_payload: list[dict[str, Any]] = []
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            names = set(zf.namelist())
+            for target in targets:
+                path = target["file"]
+                if path in names:
+                    try:
+                        files[path] = zf.read(path).decode("utf-8", errors="replace")
+                    except Exception:
+                        continue
+                errors_payload.extend(target["errors"])
+        if not files:
+            return None
+        agent = SyntaxRepairAgent()
+        if not agent._api_key:
+            _append_event(db, environment, "progress", "syntax_repair",
+                          "LLM 未配置,跳过后端语法修复")
+            db.commit()
+            return None
+        ctx = AgentContext(
+            user_id=environment.owner_id,
+            project_id=environment.project_id,
+            extra={"trace_id": environment.public_id},
+        )
+        result = agent.repair(
+            language=environment.language,
+            errors=errors_payload,
+            files=files,
+            ctx=ctx,
+        )
+        repaired = result.get("files") if isinstance(result.get("files"), dict) else {}
+        if not repaired:
+            _append_event(db, environment, "progress", "syntax_repair",
+                          f"语法修复未生成: {str(result.get('error') or '空结果')[:120]}")
+            db.commit()
+            return None
+        # 写回 zip(仅覆盖修复文件,保留其他成员)
+        buf = io.BytesIO(raw)
+        with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as zf:
+            for path, content in repaired.items():
+                zf.writestr(path, content)
+        new_source = base64.b64encode(buf.getvalue()).decode("ascii")
+        _append_event(
+            db, environment, "progress", "syntax_repair",
+            f"后端语法修复 Agent 已修复 {len(repaired)} 个文件({', '.join(sorted(repaired)[:8])})",
+            {"repaired_files": sorted(repaired), "round_errors": len(lint_errors)},
+        )
+        db.commit()
+        return {"source": new_source, "files": sorted(repaired)}
+    except Exception as exc:  # noqa: BLE001 - 修复失败不阻断原测试链
+        _append_event(db, environment, "progress", "syntax_repair",
+                      f"语法修复异常: {str(exc)[:120]}")
+        db.commit()
+        return None
+
+
 def _execute_environment(environment_id: int, source_archive_base64: str) -> None:
     db = SessionLocal()
     try:
@@ -1912,69 +2009,93 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 environment.source_sha256 = effective_sha
                 db.commit()
         if worker:
-            if environment.started_at is None:
-                environment.started_at = _utcnow()
+            repair_round = 0
+            max_repair_rounds = int(getattr(settings, "sandbox_max_repair_rounds", 2) or 2)
+            while True:
+                last_sequence = 0
+                def persist_worker_events(state: dict[str, Any]) -> None:
+                    nonlocal last_sequence
+                    worker_events = state.get("events") if isinstance(state.get("events"), list) else []
+                    for item in worker_events:
+                        if not isinstance(item, dict):
+                            continue
+                        _append_event(
+                            db,
+                            environment,
+                            str(item.get("event_type") or "progress"),
+                            str(item.get("stage") or "executor"),
+                            str(item.get("message") or "worker 进度"),
+                            item.get("payload") if isinstance(item.get("payload"), dict) else {},
+                        )
+                    last_sequence = int(state.get("last_sequence") or last_sequence)
+
+                if environment.started_at is None:
+                    environment.started_at = _utcnow()
+                    db.commit()
+                sandbox_db_type = str((_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none")
+                execute_response = _call_worker(worker, "POST", "/execute", {
+                    "request_id": environment.public_id,
+                    "purpose": environment.purpose,
+                    "language": environment.language,
+                    "test_mode": worker_mode if worker_mode in {"whitebox", "blackbox", "combined"} else "whitebox",
+                    "source_archive_base64": effective_source,
+                    "source_sha256": effective_sha,
+                    "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
+                    "image_digest": environment.image_digest or "",
+                    "db_type": sandbox_db_type,
+                })
+                result = (
+                    execute_response.get("result")
+                    if isinstance(execute_response.get("result"), dict)
+                    else execute_response
+                )
+                last_sequence = 0
+                configured_policy = _loads(environment.resource_policy_json, {})
+                deadline = time.monotonic() + int(configured_policy.get("timeout_seconds") or 600) + 180
+                persist_worker_events(result)
                 db.commit()
-            sandbox_db_type = str((_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none")
-            execute_response = _call_worker(worker, "POST", "/execute", {
-                "request_id": environment.public_id,
-                "purpose": environment.purpose,
-                "language": environment.language,
-                "test_mode": worker_mode if worker_mode in {"whitebox", "blackbox", "combined"} else "whitebox",
-                "source_archive_base64": effective_source,
-                "source_sha256": effective_sha,
-                "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
-                "image_digest": environment.image_digest or "",
-                "db_type": sandbox_db_type,
-            })
-            result = (
-                execute_response.get("result")
-                if isinstance(execute_response.get("result"), dict)
-                else execute_response
-            )
+                while str(result.get("status") or "") not in {
+                    "succeeded", "failed", "blocked", "stopped", "expired", "running",
+                }:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Sandbox worker 状态轮询超时")
+                    time.sleep(1)
+                    status_response = _call_worker(worker, "POST", "/status", {
+                        "request_id": environment.public_id,
+                        "after_sequence": last_sequence,
+                    })
+                    result = (
+                        status_response.get("result")
+                        if isinstance(status_response.get("result"), dict)
+                        else status_response
+                    )
+                    persist_worker_events(result)
+                    db.commit()
+                environment = db.get(SandboxEnvironment, environment_id)
+                if environment.status in {"stopped", "expired"}:
+                    return
+                # ── 后端语法修复:白盒 php -l 报错时,LLM 修复文件后重跑(最多 max_repair_rounds 轮) ──
+                if (
+                    environment.purpose == "test"
+                    and environment.language == "php"
+                    and repair_round < max_repair_rounds
+                ):
+                    worker_concl = result.get("result") if isinstance(result.get("result"), dict) else result
+                    wlogs = worker_concl.get("logs") if isinstance(worker_concl, dict) else None
+                    log_text = str((wlogs or {}).get("text") or "")
+                    lint_errors = collect_php_lint_errors(log_text)
+                    if lint_errors:
+                        repaired = _syntax_repair_round(db, environment, effective_source, lint_errors)
+                        if repaired:
+                            effective_source = repaired["source"]
+                            effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
+                            environment.source_sha256 = effective_sha
+                            repair_round += 1
+                            db.commit()
+                            continue
+                break
         else:
             result = {"request_id": environment.public_id, "status": "succeeded", "result": {"exit_code": 0}}
-        last_sequence = 0
-        configured_policy = _loads(environment.resource_policy_json, {})
-        deadline = time.monotonic() + int(configured_policy.get("timeout_seconds") or 600) + 180
-        def persist_worker_events(state: dict[str, Any]) -> None:
-            nonlocal last_sequence
-            worker_events = state.get("events") if isinstance(state.get("events"), list) else []
-            for item in worker_events:
-                if not isinstance(item, dict):
-                    continue
-                _append_event(
-                    db,
-                    environment,
-                    str(item.get("event_type") or "progress"),
-                    str(item.get("stage") or "executor"),
-                    str(item.get("message") or "worker 进度"),
-                    item.get("payload") if isinstance(item.get("payload"), dict) else {},
-                )
-            last_sequence = int(state.get("last_sequence") or last_sequence)
-
-        persist_worker_events(result)
-        db.commit()
-        while str(result.get("status") or "") not in {
-            "succeeded", "failed", "blocked", "stopped", "expired", "running",
-        }:
-            if time.monotonic() >= deadline:
-                raise RuntimeError("Sandbox worker 状态轮询超时")
-            time.sleep(1)
-            status_response = _call_worker(worker, "POST", "/status", {
-                "request_id": environment.public_id,
-                "after_sequence": last_sequence,
-            })
-            result = (
-                status_response.get("result")
-                if isinstance(status_response.get("result"), dict)
-                else status_response
-            )
-            persist_worker_events(result)
-            db.commit()
-        environment = db.get(SandboxEnvironment, environment_id)
-        if environment.status in {"stopped", "expired"}:
-            return
         state = str(result.get("status") or "failed")
         environment.status = {
             "completed": "succeeded",
