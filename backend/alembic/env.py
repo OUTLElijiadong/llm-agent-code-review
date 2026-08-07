@@ -25,6 +25,7 @@ _MODEL_MODULES = (
     "app.models.custom_agent",
     "app.models.project",
     "app.models.project_source_archive",
+    "app.models.project_source_revision",
     "app.models.review_issue",
     "app.models.review_report",
     "app.models.review_rule",

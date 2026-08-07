@@ -52,6 +52,7 @@ export interface ProjectDetailOut {
   create_time: string
   update_time: string
   recent_tasks: { id: number; score: number; total_issues: number; status: string; create_time: string }[]
+  source_revisions: { id: number; revision_no: number; source_sha256: string; repaired_files: string[]; repair_notes?: string; create_time?: string | null }[]
 }
 
 export interface CodeFileOut {

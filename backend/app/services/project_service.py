@@ -15,6 +15,7 @@ from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_source_archive import ProjectSourceArchive
+from app.services import project_source_revision_service
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
@@ -253,6 +254,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
              "status": t.status, "create_time": t.create_time}
             for t in recent_tasks
         ],
+        "source_revisions": project_source_revision_service.list_revisions(db, user, project_id),
     }
 
 

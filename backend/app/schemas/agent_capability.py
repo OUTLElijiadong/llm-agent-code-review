@@ -87,6 +87,7 @@ class SandboxCreateIn(BaseModel):
     test_mode: Literal["whitebox", "blackbox", "combined", "deploy"] = "whitebox"
     db_type: Literal["none", "sqlite", "mysql"] = "none"
     worker_code: str = Field(default="", max_length=80)
+    source_revision_id: Optional[int] = Field(default=None, description="使用项目源码修复副本(不传则用原始源码)")
     ttl_hours: int = Field(default=72, ge=1, le=168)
     remote_target_url: Optional[HttpUrl] = None
     remote_target_authorized: bool = False
@@ -131,6 +132,7 @@ class SandboxEnvironmentOut(BaseModel):
     status: str
     runtime: str
     source_sha256: str
+    source_revision_id: Optional[int] = None
     preview_path: Optional[str] = None
     remote_target_url: Optional[str] = None
     expires_at: datetime

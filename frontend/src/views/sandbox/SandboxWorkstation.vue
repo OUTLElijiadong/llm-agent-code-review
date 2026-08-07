@@ -24,7 +24,7 @@ import {
   stopSandbox,
 } from '@/api/sandbox'
 import { listSandboxWorkers } from '@/api/mcpGovernance'
-import { getProjects } from '@/api/project'
+import { getProjectDetail, getProjects } from '@/api/project'
 import { useUserStore } from '@/stores/user'
 import type { ProjectOut } from '@/types/project'
 import type { SandboxArtifact, SandboxEnvironment, SandboxLanguage, SandboxPurpose, SandboxTestMode } from '@/types/sandbox'
@@ -43,6 +43,7 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 const POLL_INTERVAL_MS = 2500
 const userStore = useUserStore()
 const projects = ref<ProjectOut[]>([])
+const sourceRevisions = ref<Array<{ id: number; revision_no: number; source_sha256: string; repaired_files: string[]; repair_notes: string; create_time?: string | null }>>([])
 const workers = ref<SandboxWorker[]>([])
 const environments = ref<SandboxEnvironment[]>([])
 const selectedId = ref('')
@@ -62,6 +63,7 @@ const form = reactive({
   test_mode: 'whitebox' as SandboxTestMode,
   db_type: 'none' as 'none' | 'sqlite' | 'mysql',
   worker_code: '',
+  source_revision_id: null as number | null,
   ttl_hours: 72,
   remote_target_url: '',
   remote_target_authorized: false,
@@ -239,6 +241,7 @@ async function submit(): Promise<void> {
       test_mode: form.purpose === 'deploy' ? 'deploy' : form.test_mode,
       db_type: form.purpose === 'test' ? form.db_type : undefined,
       worker_code: form.worker_code || undefined,
+      source_revision_id: form.source_revision_id || undefined,
       ttl_hours: form.ttl_hours,
       remote_target_url: form.remote_target_url.trim() || undefined,
       remote_target_authorized: remoteAuthorizationRequired.value && form.remote_target_authorized,
@@ -349,9 +352,17 @@ watch(() => form.test_mode, (mode) => {
 })
 
 watch(() => form.language, () => { form.worker_code = '' })
-watch(() => form.project_id, (projectId) => {
+watch(() => form.project_id, async (projectId) => {
   syncProjectLanguage(projectId)
   form.worker_code = ''
+  form.source_revision_id = null
+  sourceRevisions.value = []
+  if (projectId) {
+    try {
+      const detail = await getProjectDetail(projectId)
+      sourceRevisions.value = detail.source_revisions || []
+    } catch { /* 副本列表失败不影响主流程 */ }
+  }
 })
 watch(() => form.remote_target_url, () => { form.remote_target_authorized = false })
 
@@ -406,6 +417,16 @@ onBeforeUnmount(() => {
             <el-select v-model="form.project_id" filterable placeholder="选择有权访问的项目" style="width: 100%">
               <el-option v-for="project in projects" :key="project.id" :label="project.project_name" :value="project.id" />
             </el-select>
+          </el-form-item>
+
+          <el-form-item v-if="sourceRevisions.length" label="源码版本">
+            <el-select v-model="form.source_revision_id" clearable placeholder="原始源码(默认)" style="width: 100%">
+              <el-option v-for="rev in sourceRevisions" :key="rev.id" :value="rev.id" :label="`修复副本 rev#${rev.revision_no} · ${rev.repaired_files.length} 个文件`">
+                <span>{{ `修复副本 rev#${rev.revision_no}` }}</span>
+                <span class="field-hint">修复 {{ rev.repaired_files.join(', ').slice(0, 40) }}</span>
+              </el-option>
+            </el-select>
+            <div class="field-hint">不选使用原始源码；选副本使用语法修复 Agent 修复后的源码。</div>
           </el-form-item>
 
           <el-form-item label="执行目标">

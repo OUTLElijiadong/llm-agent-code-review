@@ -9,6 +9,7 @@ export interface SandboxCreateInput {
   test_mode: SandboxTestMode
   db_type?: 'none' | 'sqlite' | 'mysql'
   worker_code?: string
+  source_revision_id?: number
   ttl_hours: number
   remote_target_url?: string
   remote_target_authorized: boolean

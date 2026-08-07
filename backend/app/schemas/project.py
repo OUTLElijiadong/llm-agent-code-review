@@ -89,6 +89,17 @@ class RecentTaskOut(BaseModel):
     create_time: datetime
 
 
+class SourceRevisionOut(BaseModel):
+    """项目源码修复副本摘要。"""
+    id: int
+    revision_no: int
+    source_sha256: str
+    parent_sha256: Optional[str] = None
+    repaired_files: list[str] = Field(default_factory=list)
+    repair_notes: str = ""
+    create_time: Optional[datetime] = None
+
+
 class ProjectDetailOut(BaseModel):
     """项目详情响应"""
     id: int
@@ -106,5 +117,6 @@ class ProjectDetailOut(BaseModel):
     create_time: datetime
     update_time: datetime
     recent_tasks: list[RecentTaskOut] = []
+    source_revisions: list[SourceRevisionOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

@@ -43,7 +43,12 @@ from app.models.agent_capability import (
 from app.models.project import Project
 from app.models.user import User
 from app.agents.syntax_repair_agent import SyntaxRepairAgent, collect_php_lint_errors
-from app.services import audit_service, project_source_service, rbac_service
+from app.services import (
+    audit_service,
+    project_source_revision_service,
+    project_source_service,
+    rbac_service,
+)
 from app.services.project_member_service import get_visible_project_ids, require_project_access
 from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
 from app.utils.public_http import pin_public_http_url
@@ -1770,7 +1775,15 @@ def _create_environment_locked(
     db_type = str(payload.get("db_type") or "none").strip().lower()
     if db_type not in {"none", "sqlite", "mysql"}:
         raise ValidationError("沙箱数据库类型不受支持", code=40001)
-    archive, _ = project_source_service.build_source_archive(db, actor, project_id)
+    source_revision_id = payload.get("source_revision_id")
+    source_revision_note = ""
+    if source_revision_id:
+        archive = project_source_revision_service.get_revision_archive(
+            db, actor, int(source_revision_id), project_id,
+        )
+        source_revision_note = f"(使用源码修复副本 rev#{int(source_revision_id)})"
+    else:
+        archive, _ = project_source_service.build_source_archive(db, actor, project_id)
     source_sha256 = hashlib.sha256(archive).hexdigest()
     requested_ttl = int(payload.get("ttl_hours") or settings.sandbox_default_ttl_hours)
     ttl_hours = max(1, min(requested_ttl, settings.sandbox_max_ttl_hours))
@@ -1806,6 +1819,7 @@ def _create_environment_locked(
             "resolved_language": language,
             "language_source": "project" if project_language else "request",
             "db_type": db_type,
+            "source_revision_id": int(source_revision_id) if source_revision_id else None,
         }),
         remote_target_url=remote_url or None,
         remote_target_authorized_at=_utcnow() if remote_url else None,
@@ -1943,9 +1957,24 @@ def _syntax_repair_round(
                     data = repaired[info.filename].encode("utf-8")
                 zout.writestr(info, data)
         new_source = base64.b64encode(buf.getvalue()).decode("ascii")
+        # 修复后的源码作为项目副本持久化,下次审计可选用
+        try:
+            saved = project_source_revision_service.save_revision(
+                db,
+                project_id=environment.project_id,
+                owner_id=environment.owner_id,
+                repaired_source_base64=new_source,
+                repaired_files=sorted(repaired),
+                parent_sha256=environment.source_sha256,
+                repair_notes=f"沙箱语法修复第{len(lint_errors)}处错误,修复{len(repaired)}文件",
+            )
+            saved_note = f", 已保存为项目源码副本 rev#{saved.revision_no}" if saved else ""
+        except Exception as exc:  # noqa: BLE001 - 副本保存失败不影响修复流程
+            saved_note = f", 副本保存失败: {str(exc)[:80]}"
+            db.rollback()
         _append_event(
             db, environment, "progress", "syntax_repair",
-            f"后端语法修复 Agent 已修复 {len(repaired)} 个文件({', '.join(sorted(repaired)[:8])})",
+            f"后端语法修复 Agent 已修复 {len(repaired)} 个文件({', '.join(sorted(repaired)[:8])}){saved_note}",
             {"repaired_files": sorted(repaired), "round_errors": len(lint_errors)},
         )
         db.commit()
@@ -2288,6 +2317,7 @@ def environment_to_dict(db: Session, row: SandboxEnvironment) -> dict[str, Any]:
         .order_by(SandboxArtifact.id)
         .all()
     )
+    env_config = _loads(row.agent_config_json, {})
     return {
         "public_id": row.public_id,
         "project_id": row.project_id,
@@ -2300,6 +2330,7 @@ def environment_to_dict(db: Session, row: SandboxEnvironment) -> dict[str, Any]:
         "status": row.status,
         "runtime": row.runtime,
         "source_sha256": row.source_sha256,
+        "source_revision_id": env_config.get("source_revision_id"),
         "preview_path": row.preview_path,
         "remote_target_url": row.remote_target_url,
         "expires_at": row.expires_at,
