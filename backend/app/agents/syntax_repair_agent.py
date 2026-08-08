@@ -82,10 +82,11 @@ class SyntaxRepairAgent(BaseAgent):
             f = str(err.get("file") or "").strip()
             if f:
                 by_file.setdefault(f, []).append(err)
-        # 每个文件单独一次 LLM 调用,避免多文件输出超长被截断
-        cleaned: dict[str, str] = {}
-        last_error = ""
-        for path, content in files.items():
+        # 每个文件单独一次 LLM 调用,避免多文件输出超长被截断;
+        # 文件间并发(上限 2)缩短整体修复耗时,同时避免触发模型限流。
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _repair_one(path: str, content: str) -> tuple[str, str | None]:
             file_errors = by_file.get(path, [])
             clipped = self._clip(content, file_errors[0].get("line") if file_errors else None)
             user_message = (
@@ -103,14 +104,28 @@ class SyntaxRepairAgent(BaseAgent):
             )
             agent_result = self.call_json(user_message, ctx=ctx)
             if not getattr(agent_result, "success", False):
-                last_error = str(getattr(agent_result, "error", "修复生成失败"))[:300]
-                continue
+                return path, None
             data = agent_result.data if isinstance(agent_result.data, dict) else {}
             new_content = data.get("content") if isinstance(data, dict) else None
             if isinstance(new_content, str) and new_content.strip():
-                cleaned[path] = new_content
-            else:
-                last_error = f"{path}: 未返回有效内容"
+                return path, new_content
+            return path, None
+
+        cleaned: dict[str, str] = {}
+        last_error = ""
+        with ThreadPoolExecutor(max_workers=min(2, len(files))) as pool:
+            futures = {pool.submit(_repair_one, path, content): path for path, content in files.items()}
+            for fut in futures:
+                path = futures[fut]
+                try:
+                    repaired_content = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    last_error = f"{path}: {str(exc)[:120]}"
+                    continue
+                if repaired_content:
+                    cleaned[path] = repaired_content
+                else:
+                    last_error = f"{path}: 未返回有效内容"
         self._timeout = old_timeout
         if not cleaned:
             return {"error": last_error or "未生成有效修复文件"}

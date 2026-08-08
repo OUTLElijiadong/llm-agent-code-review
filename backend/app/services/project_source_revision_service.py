@@ -119,6 +119,24 @@ def save_revision(
     return row
 
 
+def delete_revision(
+    db: Session,
+    actor: Any,
+    project_id: int,
+    revision_id: int,
+) -> None:
+    """删除项目的一个源码修复副本(原始归档不受影响)。
+
+    仅项目 owner/admin 可删除;副本被沙箱引用不影响(创建时已复制 zip)。
+    """
+    row = db.get(ProjectSourceRevision, revision_id)
+    if row is None or row.project_id != project_id:
+        raise NotFoundError("源码副本不存在", code=40400)
+    require_project_access(db, project_id, actor, need_write=True)
+    db.delete(row)
+    db.flush()
+
+
 def revision_to_dict(row: ProjectSourceRevision) -> dict[str, Any]:
     return {
         "id": row.id,

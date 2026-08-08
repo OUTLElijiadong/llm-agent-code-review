@@ -18,7 +18,7 @@ from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
 from app.schemas.project import ProjectDetailOut, ProjectIn, ProjectOut, ProjectUpdateIn, RemoteProjectImportIn
-from app.services import audit_service, project_service, project_source_service
+from app.services import audit_service, project_service, project_source_revision_service, project_source_service
 
 router = APIRouter()
 
@@ -87,6 +87,24 @@ def get_project(project_id: int, db: Session = Depends(get_db),
     """项目详情"""
     data = project_service.get_project(db, user, project_id)
     return Resp(data=ProjectDetailOut(**data))
+
+
+@router.delete("/{project_id}/source-revisions/{revision_id}",
+                dependencies=[Depends(require_permission(PermissionCode.PROJECT_VIEW))],
+                status_code=200)
+def delete_source_revision(project_id: int, revision_id: int,
+                           db: Session = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """删除项目的一个源码修复副本(原始归档不受影响)。"""
+    project_source_revision_service.delete_revision(db, user, project_id, revision_id)
+    audit_service.log(
+        db, user, "source_revision_delete",
+        target_type="project_source_revision",
+        target_id=str(revision_id),
+        detail=f"project={project_id}",
+        commit=True,
+    )
+    return Resp(data={"deleted": revision_id})
 
 
 @router.get("/{project_id}/source-archive",

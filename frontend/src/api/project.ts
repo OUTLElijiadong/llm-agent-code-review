@@ -87,6 +87,10 @@ export function getAuditSourceArchiveResult(projectId: number): Promise<{
 }
 
 /** 下载项目当前 active 文件组成的源码 ZIP。 */
+export function deleteSourceRevision(projectId: number, revisionId: number): Promise<{ deleted: number }> {
+  return del<{ deleted: number }>(`/projects/${projectId}/source-revisions/${revisionId}`)
+}
+
 export function downloadProjectSource(projectId: number): Promise<Blob> {
   return download(`/projects/${projectId}/source-archive`)
 }

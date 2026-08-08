@@ -169,6 +169,13 @@
                 <el-table-column label="生成时间" width="150">
                   <template #default="{ row }">{{ row.create_time ? formatDate(row.create_time) : '-' }}</template>
                 </el-table-column>
+                <el-table-column label="操作" width="90">
+                  <template #default="{ row }">
+                    <el-button size="small" type="danger" plain :disabled="deletingRevisionId === row.id" @click="removeRevision(row)">
+                      {{ deletingRevisionId === row.id ? '删除中' : '删除' }}
+                    </el-button>
+                  </template>
+                </el-table-column>
               </el-table>
             </div>
             <CodeFileList
@@ -370,6 +377,7 @@ import dayjs from 'dayjs'
 import {
   getAuditSourceArchiveResult,
   getProjectDetail,
+  deleteSourceRevision,
   downloadProjectSource,
   uploadAuditSourceArchive,
 } from '@/api/project'
@@ -489,6 +497,27 @@ function getStatusType(status: string): 'success' | 'warning' | 'info' | 'danger
     cancelled: 'info',
   }
   return map[status] || 'info'
+}
+
+const deletingRevisionId = ref<number | null>(null)
+
+async function removeRevision(row: { id: number; revision_no: number }): Promise<void> {
+  if (!project.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除源码修复副本 rev#${row.revision_no}？原始源码归档不受影响，删除后不可恢复。`,
+      '删除修复副本',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch { return }
+  deletingRevisionId.value = row.id
+  try {
+    await deleteSourceRevision(project.value.id, row.id)
+    ElMessage.success(`已删除修复副本 rev#${row.revision_no}`)
+    await fetchDetail()
+  } finally {
+    deletingRevisionId.value = null
+  }
 }
 
 async function fetchDetail(): Promise<void> {
