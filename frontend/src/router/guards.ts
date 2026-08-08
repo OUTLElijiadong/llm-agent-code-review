@@ -66,6 +66,15 @@ export function setupGuards(router: Router): void {
       return { path: getRoleHomePath(user.profile?.role), replace: true }
     }
 
+    // 管理员只做管理内容工作:用户端页面仅保留管理后台跳转所需的"详情查看"路径
+    // (项目/任务/代码文件/报告详情),其余用户端页面(沙箱、工作台、论坛等)一律回管理总览。
+    if (user.isAdmin() && !to.path.startsWith('/admin') && to.path !== '/') {
+      const adminViewable = /^\/(projects\/\d+|reviews\/\d+|code\/\d+\/file\/\d+|reports\/\d+)(\/|$)/.test(to.path)
+      if (!adminViewable) {
+        return { path: '/admin/overview', replace: true }
+      }
+    }
+
     // 唯一超级管理员限制必须先于 admin 的通用 RBAC 放行。
     if (to.meta.superAdmin && !user.isSuperAdmin()) {
       return { path: '/403' }
