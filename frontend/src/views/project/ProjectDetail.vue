@@ -167,7 +167,7 @@
                   <template #default="{ row }">{{ (row.repaired_files || []).length }}</template>
                 </el-table-column>
                 <el-table-column label="生成时间" width="150">
-                  <template #default="{ row }">{{ row.create_time ? formatTime(row.create_time) : '-' }}</template>
+                  <template #default="{ row }">{{ row.create_time ? formatDate(row.create_time) : '-' }}</template>
                 </el-table-column>
               </el-table>
             </div>
