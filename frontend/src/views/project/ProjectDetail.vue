@@ -147,6 +147,30 @@
                 </el-descriptions-item>
               </el-descriptions>
             </div>
+            <div v-if="project.source_revisions && project.source_revisions.length" class="source-archive-band">
+              <el-alert
+                title="源码修复副本（语法修复 Agent 产物，可在代码沙箱创建时选用）"
+                type="success"
+                :closable="false"
+                show-icon
+              />
+              <el-table :data="project.source_revisions" size="small" border>
+                <el-table-column label="修订" width="80">
+                  <template #default="{ row }">rev#{{ row.revision_no }}</template>
+                </el-table-column>
+                <el-table-column label="修复文件" min-width="220">
+                  <template #default="{ row }">
+                    <span class="font-mono">{{ (row.repaired_files || []).join(', ').slice(0, 80) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="文件数" width="70">
+                  <template #default="{ row }">{{ (row.repaired_files || []).length }}</template>
+                </el-table-column>
+                <el-table-column label="生成时间" width="150">
+                  <template #default="{ row }">{{ row.create_time ? formatTime(row.create_time) : '-' }}</template>
+                </el-table-column>
+              </el-table>
+            </div>
             <CodeFileList
               v-else
               :project-id="projectId"

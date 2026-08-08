@@ -1766,12 +1766,7 @@ def _create_environment_locked(
 
     remote_only = bool(remote_url and mode == "blackbox")
     worker_mode = "whitebox" if remote_url and mode == "combined" else mode
-    worker = None if remote_only else _select_worker(
-        db,
-        language=language,
-        mode=worker_mode,
-        worker_code=payload.get("worker_code", ""),
-    )
+    # 先做参数与源码/副本校验(worker 繁忙时不掩盖真实参数错误),最后再选 worker
     db_type = str(payload.get("db_type") or "none").strip().lower()
     if db_type not in {"none", "sqlite", "mysql"}:
         raise ValidationError("沙箱数据库类型不受支持", code=40001)
@@ -1785,6 +1780,12 @@ def _create_environment_locked(
     else:
         archive, _ = project_source_service.build_source_archive(db, actor, project_id)
     source_sha256 = hashlib.sha256(archive).hexdigest()
+    worker = None if remote_only else _select_worker(
+        db,
+        language=language,
+        mode=worker_mode,
+        worker_code=payload.get("worker_code", ""),
+    )
     requested_ttl = int(payload.get("ttl_hours") or settings.sandbox_default_ttl_hours)
     ttl_hours = max(1, min(requested_ttl, settings.sandbox_max_ttl_hours))
     public_id = f"sbx_{uuid.uuid4().hex[:24]}"
