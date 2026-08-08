@@ -8,6 +8,7 @@ import {
   Document,
   Files,
   Histogram,
+  Monitor,
   Key,
   Lock,
   MagicStick,
@@ -40,6 +41,7 @@ const userStore = useUserStore()
 
 const menuItems: AdminMenuItem[] = [
   { path: '/admin/overview', title: '总览大屏', icon: Histogram },
+  { path: '/admin/sandboxes', title: '代码沙箱', icon: Monitor },
   { path: '/admin/agents', title: 'Agent 管理', icon: Cpu },
   { path: '/admin/approvals', title: '审批中心', icon: Lock },
   { path: '/admin/agent-releases', title: 'Agent 发布审批', icon: Cpu },
