@@ -14,3 +14,16 @@ COPY backend/app/services/admin_agent_tools.py /app/app/services/admin_agent_too
 COPY backend/app/services/agent_responses_service.py /app/app/services/agent_responses_service.py
 COPY backend/app/services/deepseek_responses_runtime.py /app/app/services/deepseek_responses_runtime.py
 COPY backend/app/services/published_agent_tools.py /app/app/services/published_agent_tools.py
+COPY backend/app/services/agent_service.py /app/app/services/agent_service.py
+COPY backend/app/services/sandbox_service.py /app/app/services/sandbox_service.py
+COPY backend/app/agents/deployment_coordinator_agent.py /app/app/agents/deployment_coordinator_agent.py
+COPY backend/app/agents/test_case_generator_agent.py /app/app/agents/test_case_generator_agent.py
+COPY backend/app/agents/syntax_repair_agent.py /app/app/agents/syntax_repair_agent.py
+COPY backend/app/models/project_source_revision.py /app/app/models/project_source_revision.py
+COPY backend/app/services/project_source_revision_service.py /app/app/services/project_source_revision_service.py
+COPY backend/alembic/versions/029_add_project_source_revision.py /app/alembic/versions/029_add_project_source_revision.py
+COPY backend/app/services/project_service.py /app/app/services/project_service.py
+COPY backend/app/schemas/project.py /app/app/schemas/project.py
+COPY backend/app/schemas/agent_capability.py /app/app/schemas/agent_capability.py
+COPY backend/app/agents/sandbox_agents.py /app/app/agents/sandbox_agents.py
+COPY backend/app/api/v1/projects.py /app/app/api/v1/projects.py
