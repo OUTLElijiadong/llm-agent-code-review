@@ -218,6 +218,19 @@ class Orchestrator(BaseAgent):
             return disabled
         return self.project_mgr.list_projects(*args, **kw)
 
+    def get_project_detail(self, project_id: int,
+                           ctx: Optional[AgentContext] = None) -> AgentResult:
+        """返回项目完整详情(含源码修复副本 source_revisions,供选用副本跑沙箱)。"""
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if not check_permission(self._db, self._user.id, PermissionCode.PROJECT_VIEW):
+            return AgentResult(success=False, error="当前用户没有 project:view 权限")
+        try:
+            data = project_service.get_project(self._db, self._user, project_id)
+            return AgentResult(success=True, data=data)
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
     def delete_project(self, *args, **kw) -> AgentResult:
         if disabled := self._disabled_result("project_manager"):
             return disabled

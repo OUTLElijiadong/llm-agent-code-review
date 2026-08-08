@@ -22,6 +22,12 @@ class NoArguments(FixedToolArguments):
     """不接受模型参数的固定工具契约。"""
 
 
+class GetProjectDetailArguments(FixedToolArguments):
+    """查询项目完整详情(含源码修复副本 source_revisions)。"""
+
+    project_id: int = Field(gt=0, description="项目 ID")
+
+
 class ListProjectsArguments(FixedToolArguments):
     """项目列表工具参数。"""
 
@@ -384,6 +390,7 @@ class FixedToolArgumentError(ValueError):
 _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
     FixedToolContract("list_agents", "列出平台注册的 Agent 元数据", NoArguments, False),
     FixedToolContract("list_projects", "分页查询当前用户可见项目", ListProjectsArguments, True),
+    FixedToolContract("get_project_detail", "查询项目完整详情(含源码修复副本 source_revisions)", GetProjectDetailArguments, True),
     FixedToolContract("create_project", "创建代码审查项目", CreateProjectArguments, True),
     FixedToolContract("delete_project", "删除指定项目", DeleteProjectArguments, True),
     FixedToolContract("start_review", "为指定项目文件启动代码审查", StartReviewArguments, True),
