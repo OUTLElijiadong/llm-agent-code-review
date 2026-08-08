@@ -2044,6 +2044,9 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             repair_round = 0
             max_repair_rounds = int(getattr(settings, "sandbox_max_repair_rounds", 2) or 2)
             while True:
+                # 若在排队期间被用户关闭,直接退出,不再提交执行器
+                if environment.status == "stopped":
+                    return
                 worker_request_id = environment.public_id if repair_round == 0 else f"{environment.public_id}-r{repair_round}"
                 last_sequence = 0
                 def persist_worker_events(state: dict[str, Any]) -> None:
@@ -2404,6 +2407,18 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
     if worker:
         try:
             _call_worker(worker, "POST", "/stop", {"request_id": row.public_id})
+        except httpx.HTTPStatusError as exc:
+            # 404:executor 尚未注册该任务(刚创建还在 queued),直接在 DB 层停止,
+            # 执行线程会在提交前检查 status 后退出,无需抛错。
+            if exc.response is not None and exc.response.status_code == 404:
+                _append_event(db, row, "progress", "stop",
+                              "任务尚未提交执行器,已在本地直接关闭")
+                db.commit()
+            else:
+                row.error = f"关闭 worker 失败：{str(exc)[:1000]}"
+                _append_event(db, row, "failed", "stop", "关闭 worker 失败，保留 stopping 状态等待重试")
+                db.commit()
+                raise
         except Exception as exc:
             row.error = f"关闭 worker 失败：{str(exc)[:1000]}"
             _append_event(db, row, "failed", "stop", "关闭 worker 失败，保留 stopping 状态等待重试")

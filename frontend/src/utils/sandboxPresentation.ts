@@ -46,3 +46,19 @@ export function hasSandboxConclusion(environment: SandboxEnvironment): boolean {
 export function isRemoteAuthorizationRequired(testMode: string, remoteUrl: string): boolean {
   return Boolean(remoteUrl.trim()) && (testMode === 'blackbox' || testMode === 'combined')
 }
+
+const STAGE_LABELS: Record<string, string> = {
+  authorization: '权限校验', snapshot: '源码快照', worker: '执行器调度', executor: '执行器',
+  deploy_verify: '部署核验', agent_tests: '动态测试用例', validating: '沙箱校验', preparing: '环境准备',
+  running_whitebox: '白盒测试', starting: '启动应用', health_checking: '健康检查', running: '运行中',
+  stopping: '回收环境', succeeded: '成功', failed: '失败', blocked: '安全阻断', stopped: '已停止',
+  conclusion: '测试结论', syntax_repair: '语法修复', multi_agent_review: '多 Agent 审查',
+  auto_whitebox: '自动白盒', auto_blackbox: '自动黑盒', auto_smoke: '冒烟测试', stop: '关闭',
+  language: '语言识别', dispatch: '调度', progress: '进度', complete: '完成', lifecycle: '生命周期',
+  result: '结果', remote_blackbox: '远程黑盒', deploy: '部署',
+}
+
+/** Agent 事件阶段英文码 → 中文标签(未收录时原样返回)。 */
+export function stageLabel(stage: string): string {
+  return STAGE_LABELS[stage] || stage
+}

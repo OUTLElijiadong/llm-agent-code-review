@@ -31,6 +31,7 @@ import type { SandboxArtifact, SandboxEnvironment, SandboxLanguage, SandboxPurpo
 import type { SandboxWorker } from '@/types/mcpGovernance'
 import {
   canStopSandbox,
+  stageLabel,
   hasSandboxConclusion,
   isRemoteAuthorizationRequired,
   isSandboxActive,
@@ -88,6 +89,11 @@ const dbTypes: Array<{ value: 'none' | 'sqlite' | 'mysql'; label: string; hint: 
 ]
 
 const selected = computed(() => environments.value.find((item) => item.public_id === selectedId.value) || null)
+
+function sourceRevisionNo(revisionId: number | null | undefined): number | '-' {
+  if (!revisionId) return '-'
+  return sourceRevisions.value.find((rev) => rev.id === revisionId)?.revision_no ?? '-'
+}
 const selectedFormProject = computed(() => projects.value.find((item) => item.id === form.project_id) || null)
 const selectedProjectLanguage = computed(() => projectSandboxLanguage(selectedFormProject.value?.language))
 const selectedEvents = computed(() => sortSandboxEvents(selected.value?.events || []))
@@ -549,6 +555,7 @@ onBeforeUnmount(() => {
           <dl class="fact-grid">
             <div><dt>状态</dt><dd><el-tag size="small" :type="statusType(selected.status)">{{ statusLabel(selected.status) }}</el-tag></dd></div>
             <div><dt>源码指纹</dt><dd class="font-mono">{{ selected.source_sha256.slice(0, 16) }}</dd></div>
+            <div><dt>源码来源</dt><dd>{{ selected.source_revision_id ? `修复副本 rev#${sourceRevisionNo(selected.source_revision_id)}` : '原始源码' }}</dd></div>
             <div><dt>执行方式</dt><dd>{{ purposeLabel(selected) }}</dd></div>
             <div><dt>到期时间</dt><dd>{{ formatTime(selected.expires_at) }}</dd></div>
           </dl>
@@ -563,7 +570,7 @@ onBeforeUnmount(() => {
                 <span class="event-marker"></span>
                 <div class="event-body">
                   <div class="event-head">
-                    <b>{{ event.stage }}</b>
+                    <b>{{ stageLabel(event.stage) }}</b>
                     <time class="font-mono">{{ formatTime(event.create_time) }}</time>
                   </div>
                   <p>{{ event.message }}</p>
