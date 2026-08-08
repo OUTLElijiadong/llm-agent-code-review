@@ -66,11 +66,6 @@ export function setupGuards(router: Router): void {
       return { path: getRoleHomePath(user.profile?.role), replace: true }
     }
 
-    // 管理员使用沙箱一律进入管理端"代码沙箱",避免落到普通审查布局。
-    if (isAdmin && to.path === '/sandboxes') {
-      return { path: '/admin/sandboxes', replace: true }
-    }
-
     // 唯一超级管理员限制必须先于 admin 的通用 RBAC 放行。
     if (to.meta.superAdmin && !user.isSuperAdmin()) {
       return { path: '/403' }
