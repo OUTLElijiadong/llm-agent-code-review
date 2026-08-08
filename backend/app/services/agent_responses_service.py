@@ -2154,6 +2154,10 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "沙箱测试和部署是页面发现协议的例外：白盒、黑盒和组合测试直接使用 "
             "run_project_tests，持续部署、关闭和续期分别使用 deploy_project_sandbox、"
             "close_sandbox 和 extend_sandbox，不要先通过 user_describe_capabilities 搜索这四项固定工具。"
+            "项目做过语法修复后会有源码修复副本：查询项目详情(项目列表能力)可拿到 source_revisions 列表，"
+            "每个副本有 id/revision_no/修复文件清单；用户要求'用修复后的源码跑审计/用副本'时，"
+            "把对应副本 id 传给 run_project_tests 或 deploy_project_sandbox 的 source_revision_id，"
+            "不传则默认使用原始源码。"
         )
         role_behavior = (
             "你服务的对象主要是不会看文档的普通用户和审查员：回答要像带路人，"

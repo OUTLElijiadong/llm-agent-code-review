@@ -218,6 +218,7 @@ class RunProjectTestsArguments(FixedToolArguments):
     language: Literal["python", "node", "java", "go", "php"]
     test_mode: Literal["whitebox", "blackbox", "combined"] = "whitebox"
     worker_code: str = Field(default="", max_length=80)
+    source_revision_id: Optional[int] = Field(default=None, description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码")
     remote_target_url: str = Field(default="", max_length=500)
     remote_target_authorized: bool = Field(default=False)
 
@@ -229,6 +230,7 @@ class DeployProjectSandboxArguments(FixedToolArguments):
     language: Literal["python", "node", "java", "go", "php"]
     ttl_hours: int = Field(default=72, ge=1, le=720)
     worker_code: str = Field(default="", max_length=80)
+    source_revision_id: Optional[int] = Field(default=None, description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码")
 
 
 class SandboxIdArguments(FixedToolArguments):

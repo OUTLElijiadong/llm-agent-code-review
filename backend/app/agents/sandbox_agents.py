@@ -43,6 +43,7 @@ class TestVerifierAgent(_SandboxAgent):
         language: str,
         test_mode: str = "whitebox",
         worker_code: str = "",
+        source_revision_id: Optional[int] = None,
         remote_target_url: str = "",
         remote_target_authorized: bool = False,
         ctx: Optional[AgentContext] = None,
@@ -56,6 +57,7 @@ class TestVerifierAgent(_SandboxAgent):
                 "language": language,
                 "test_mode": test_mode,
                 "worker_code": worker_code,
+                "source_revision_id": source_revision_id,
                 "remote_target_url": remote_target_url or None,
                 "remote_target_authorized": remote_target_authorized,
                 "ttl_hours": 24,
@@ -79,6 +81,7 @@ class SandboxDeployerAgent(_SandboxAgent):
         language: str,
         ttl_hours: int = 72,
         worker_code: str = "",
+        source_revision_id: Optional[int] = None,
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
         del ctx
@@ -90,6 +93,7 @@ class SandboxDeployerAgent(_SandboxAgent):
                 "language": language,
                 "test_mode": "deploy",
                 "worker_code": worker_code,
+                "source_revision_id": source_revision_id,
                 "ttl_hours": ttl_hours,
             })
             return AgentResult(success=True, data=sandbox_service.environment_to_dict(db, row))
