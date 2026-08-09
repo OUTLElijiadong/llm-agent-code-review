@@ -12,6 +12,12 @@ export interface Resp<T = unknown> {
   detail?: unknown
 }
 
+declare global {
+  interface Window {
+    __prismAuthExpiredHandled?: boolean
+  }
+}
+
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   // 慢推理模型单次调用可达 ~90s+,聊天为多次调用串联;
@@ -29,7 +35,11 @@ http.interceptors.response.use(
   (resp: AxiosResponse<Resp | Blob>) => {
     if (resp.config.responseType === 'blob') return resp
     const { data } = resp
-    if (!(data instanceof Blob) && data?.code === 0) return resp
+    if (!(data instanceof Blob) && data?.code === 0) {
+      // 请求成功说明会话有效,重置 401 防抖标记(下次失效可再次提示)
+      window.__prismAuthExpiredHandled = false
+      return resp
+    }
     ElMessage.error(!(data instanceof Blob) ? data?.message || '请求失败' : '请求失败')
     return Promise.reject(data)
   },
@@ -39,14 +49,22 @@ http.interceptors.response.use(
     const status = err.response?.status
     const data = err.response?.data
     if (status === 401) {
-      clearToken()
-      window.dispatchEvent(new Event('prism:auth-expired'))
-      // 用 replace 避免历史残留,防止后退键回到已失效的内页
-      router.replace('/login')
+      // 并发请求可能同时 401,只处理一次:清 token、跳登录、弹一次错,
+      // 避免"缺少token"等错误消息反复弹出刷屏。
+      if (!window.__prismAuthExpiredHandled) {
+        window.__prismAuthExpiredHandled = true
+        clearToken()
+        window.dispatchEvent(new Event('prism:auth-expired'))
+        const message = data?.code === 40102
+          ? '账号已在另一台设备登录，当前设备已下线'
+          : data?.message || '登录已过期，请重新登录'
+        ElMessage.error(message)
+        // 用 replace 避免历史残留,防止后退键回到已失效的内页
+        router.replace('/login')
+      }
+      return Promise.reject(data || err)
     }
-    const message = data?.code === 40102
-      ? '账号已在另一台设备登录，当前设备已下线'
-      : data?.message || err.message || '网络错误'
+    const message = data?.message || err.message || '网络错误'
     ElMessage.error(message)
     return Promise.reject(data || err)
   },
