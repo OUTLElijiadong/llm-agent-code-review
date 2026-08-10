@@ -22,7 +22,7 @@ from app.core.rbac_dependency import require_permission
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
 from app.schemas.common import Resp
-from app.services import rbac_service
+from app.services import agent_mesh_service, rbac_service
 from app.services.agent_responses_service import (
     AgentResponsesService,
     is_paused,
@@ -76,6 +76,7 @@ class AgentResponsesRequest(BaseModel):
     call_id: str = Field(default="", max_length=160)
     answer: str = Field(default="", max_length=20_000)
     confirmation: str = Field(default="", max_length=20)
+    mesh_message_id: str = Field(default="", max_length=80)
 
     @field_validator("session_id")
     @classmethod
@@ -91,13 +92,25 @@ class AgentResponsesRequest(BaseModel):
             raise ValueError("run_id 格式非法")
         return value
 
+    @field_validator("mesh_message_id")
+    @classmethod
+    def validate_mesh_message_id(cls, value: str) -> str:
+        if value and (not value.startswith("msg_") or not value[4:].isalnum()):
+            raise ValueError("mesh_message_id 格式非法")
+        return value
+
     @model_validator(mode="after")
     def validate_action_fields(self) -> "AgentResponsesRequest":
         if self.action == "start":
-            if not self.messages or not any(item.role == "user" and item.content.strip() for item in self.messages):
-                raise ValueError("启动 Agent 时至少需要一条非空用户消息")
+            has_user_message = any(item.role == "user" and item.content.strip() for item in self.messages)
+            if not has_user_message and not self.mesh_message_id:
+                raise ValueError("启动 Agent 时必须提供用户消息或 Agent Mesh 消息")
+            if has_user_message and self.mesh_message_id:
+                raise ValueError("用户消息与 Agent Mesh 消息不能在同一次启动中混用")
         elif not self.run_id:
             raise ValueError("恢复 Agent 运行必须提供 run_id")
+        if self.action != "start" and self.mesh_message_id:
+            raise ValueError("恢复运行时不得重新指定 mesh_message_id")
         if self.action == "answer" and not self.answer.strip():
             raise ValueError("回答模型追问时 answer 不能为空")
         return self
@@ -152,6 +165,12 @@ def get_agent_response_session(
                 "run": None,
                 "messages": [],
                 "pending": None,
+                "mesh_messages": agent_mesh_service.list_session_messages(
+                    db,
+                    user,
+                    surface=surface,
+                    session_key=session_id,
+                ),
             }
         )
     try:
@@ -168,6 +187,7 @@ def get_agent_response_session(
             "run": {
                 "run_id": row.run_id,
                 "status": row.status,
+                "mesh_message_id": row.mesh_message_id or "",
                 "model": str(checkpoint.get("model") or ""),
                 "rounds": int(checkpoint.get("rounds") or 0),
                 "error": _public_text(checkpoint.get("error")),
@@ -178,6 +198,12 @@ def get_agent_response_session(
             "events": replay_events,
             "last_sequence_number": len(replay_events),
             "pending": _public_pending_event(row.run_id, row.status, checkpoint.get("pending")),
+            "mesh_messages": agent_mesh_service.list_session_messages(
+                db,
+                user,
+                surface=surface,
+                session_key=session_id,
+            ),
         }
     )
 
@@ -720,17 +746,83 @@ async def stream_agent_response(
                         continue
 
         async def execute() -> Any:
+            mesh_message_id = ""
             if payload.action == "start":
                 messages = [item.model_dump() for item in payload.messages if item.content.strip()]
-                return await service.start(messages, run_id=run_id, event_sink=sink)
-            return await service.resume(
-                run_id=run_id,
-                action=payload.action,
-                call_id=payload.call_id,
-                answer=payload.answer,
-                confirmation=payload.confirmation,
-                event_sink=sink,
-            )
+                if payload.mesh_message_id:
+                    mesh_message_id = payload.mesh_message_id
+                    _, system_input = agent_mesh_service.prepare_message_run(
+                        db,
+                        user,
+                        mesh_message_id,
+                        surface=payload.surface,
+                        session_key=payload.session_id,
+                    )
+                    messages = [system_input]
+            else:
+                active_row = (
+                    db.query(AgentResponseRun)
+                    .filter(
+                        AgentResponseRun.run_id == run_id,
+                        AgentResponseRun.user_id == user.id,
+                        AgentResponseRun.surface == payload.surface,
+                        AgentResponseRun.session_key == payload.session_id,
+                    )
+                    .first()
+                )
+                mesh_message_id = active_row.mesh_message_id if active_row is not None else ""
+
+            try:
+                if payload.action == "start":
+                    result = await service.start(messages, run_id=run_id, event_sink=sink)
+                else:
+                    result = await service.resume(
+                        run_id=run_id,
+                        action=payload.action,
+                        call_id=payload.call_id,
+                        answer=payload.answer,
+                        confirmation=payload.confirmation,
+                        event_sink=sink,
+                    )
+                if mesh_message_id:
+                    response_row = (
+                        db.query(AgentResponseRun)
+                        .filter(
+                            AgentResponseRun.run_id == run_id,
+                            AgentResponseRun.user_id == user.id,
+                        )
+                        .first()
+                    )
+                    if response_row is not None and response_row.mesh_message_id != mesh_message_id:
+                        response_row.mesh_message_id = mesh_message_id
+                        db.commit()
+                    if not is_paused(result):
+                        agent_mesh_service.finish_message_run(
+                            db,
+                            user,
+                            mesh_message_id,
+                            surface=payload.surface,
+                            session_key=payload.session_id,
+                            success=result.status == "completed",
+                            summary=result.output_text,
+                            error=result.error,
+                        )
+                return result
+            except Exception as exc:
+                if mesh_message_id:
+                    try:
+                        agent_mesh_service.finish_message_run(
+                            db,
+                            user,
+                            mesh_message_id,
+                            surface=payload.surface,
+                            session_key=payload.session_id,
+                            success=False,
+                            error=str(exc),
+                        )
+                    except agent_mesh_service.AgentMeshError:
+                        db.rollback()
+                raise
 
         def encode(event: Mapping[str, Any]) -> str:
             nonlocal sequence

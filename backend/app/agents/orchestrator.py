@@ -637,9 +637,73 @@ class Orchestrator(BaseAgent):
         )
         return self.chat_agent.execute(messages, ctx)
 
-    def list_agents(self) -> dict:
-        """列出全局注册中心中的 Agent 元数据。"""
+    def list_agents(self, ctx: Optional[AgentContext] = None) -> dict:
+        """列出 Agent 契约、已发布自定义 Agent 与同账户会话。"""
+        if self._db is not None and self._user is not None:
+            from app.services import agent_mesh_service
+
+            return agent_mesh_service.list_agents(self._db, self._user)
         return self._registry.list()
+
+    def send_message(
+        self,
+        send_to: str,
+        message_type: str,
+        subject: str,
+        payload: Dict[str, Any],
+        idempotency_key: str,
+        schema_version: str = "1.0",
+        trace_id: str = "",
+        correlation_id: str = "",
+        causation_id: str = "",
+        priority: str = "normal",
+        context: Optional[Dict[str, Any]] = None,
+        artifacts: Optional[List[Dict[str, Any]]] = None,
+        errors: Optional[List[Dict[str, Any]]] = None,
+        delivery: Optional[Dict[str, Any]] = None,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """以当前认证会话为发送方写入 Agent Mesh 账本。"""
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        extra = dict(ctx.extra or {}) if ctx is not None else {}
+        surface = str(extra.get("surface") or "")
+        session_key = str(extra.get("session_key") or "")
+        if surface not in {"user", "admin"} or not session_key:
+            return AgentResult(success=False, error="SendMessage 缺少可验证的当前会话上下文")
+        try:
+            from app.schemas.agent_mesh import AgentMeshMessageIn
+            from app.services import agent_mesh_service
+
+            message_context = dict(context or {})
+            message_context["run_id"] = str(message_context.get("run_id") or extra.get("run_id") or "")
+            message = AgentMeshMessageIn.model_validate({
+                "schema_version": schema_version,
+                "idempotency_key": idempotency_key,
+                "trace_id": trace_id or str(extra.get("trace_id") or ""),
+                "correlation_id": correlation_id,
+                "causation_id": causation_id,
+                "sent_from": "",
+                "send_to": send_to,
+                "message_type": message_type,
+                "priority": priority,
+                "subject": subject,
+                "payload": payload,
+                "context": message_context,
+                "artifacts": list(artifacts or []),
+                "errors": list(errors or []),
+                "delivery": dict(delivery or {}),
+            })
+            data = agent_mesh_service.send_message(
+                self._db,
+                self._user,
+                surface=surface,
+                session_key=session_key,
+                message=message,
+            )
+            return AgentResult(success=True, data=data)
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
 
     def get_agent(self, name: str):
         return self._registry.get(name)

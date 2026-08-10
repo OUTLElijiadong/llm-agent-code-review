@@ -15,12 +15,14 @@ class AgentResponseRun(Base, IdMixin, TimestampMixin):
         Index("uq_agent_response_run_id", "run_id", unique=True),
         Index("ix_agent_response_run_owner_session", "user_id", "surface", "session_key"),
         Index("ix_agent_response_run_status", "status"),
+        Index("ix_agent_response_run_mesh_message", "mesh_message_id"),
     )
 
     run_id = Column(String(80), nullable=False)
     user_id = Column(BigInteger, nullable=False)
     surface = Column(String(24), nullable=False)
     session_key = Column(String(128), nullable=False)
+    mesh_message_id = Column(String(80), nullable=True)
     status = Column(String(32), nullable=False, default="running")
     checkpoint_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=False)
     version = Column(Integer, nullable=False, default=1)

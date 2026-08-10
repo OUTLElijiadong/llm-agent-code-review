@@ -40,6 +40,11 @@ from app.models.agent_governance import (  # noqa: F401,E402
     PolicyRule,
     ToolCallLog,
 )
+from app.models.agent_mesh import (  # noqa: F401,E402
+    AgentMeshConversation,
+    AgentMeshMessage,
+    AgentMeshMessageEvent,
+)
 from app.models.ai_call_log import AiCallLog  # noqa: F401,E402
 from app.models.api_config import UserApiConfig  # noqa: F401,E402  -- v3.1
 from app.models.audit_log import AuditLog  # noqa: F401,E402

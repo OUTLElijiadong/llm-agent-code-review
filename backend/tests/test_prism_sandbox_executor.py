@@ -151,6 +151,7 @@ def test_docker_create_uses_non_overridable_hardening(isolated_paths: Path) -> N
         request_id=request_id,
         purpose="test",
         test_mode="combined",
+        db_type="none",
         profile=profile,
         runtime="runsc",
         image=image,

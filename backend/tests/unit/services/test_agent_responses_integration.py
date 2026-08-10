@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.dialects import mysql, sqlite
 from sqlalchemy.orm import sessionmaker
@@ -31,6 +32,23 @@ from app.services.deepseek_responses_runtime import (
     RuntimeResult,
     ToolCall,
 )
+
+
+def test_agent_response_request_accepts_only_one_start_input_source() -> None:
+    request = api_module.AgentResponsesRequest(
+        surface="user",
+        session_id="session-mesh-01",
+        mesh_message_id="msg_0123456789abcdef",
+    )
+    assert request.messages == []
+
+    with pytest.raises(PydanticValidationError):
+        api_module.AgentResponsesRequest(
+            surface="user",
+            session_id="session-mesh-01",
+            mesh_message_id="msg_0123456789abcdef",
+            messages=[{"role": "user", "content": "不应与结构化消息混用"}],
+        )
 
 
 @pytest.fixture()
@@ -503,6 +521,7 @@ def test_session_recovery_is_user_and_surface_isolated(db) -> None:
         "run": None,
         "messages": [],
         "pending": None,
+        "mesh_messages": [],
     }
 
 

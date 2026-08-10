@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -224,7 +225,10 @@ class RunProjectTestsArguments(FixedToolArguments):
     language: Literal["python", "node", "java", "go", "php"]
     test_mode: Literal["whitebox", "blackbox", "combined"] = "whitebox"
     worker_code: str = Field(default="", max_length=80)
-    source_revision_id: Optional[int] = Field(default=None, description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码")
+    source_revision_id: Optional[int] = Field(
+        default=None,
+        description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码",
+    )
     remote_target_url: str = Field(default="", max_length=500)
     remote_target_authorized: bool = Field(default=False)
 
@@ -236,7 +240,10 @@ class DeployProjectSandboxArguments(FixedToolArguments):
     language: Literal["python", "node", "java", "go", "php"]
     ttl_hours: int = Field(default=72, ge=1, le=720)
     worker_code: str = Field(default="", max_length=80)
-    source_revision_id: Optional[int] = Field(default=None, description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码")
+    source_revision_id: Optional[int] = Field(
+        default=None,
+        description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码",
+    )
 
 
 class SandboxIdArguments(FixedToolArguments):
@@ -350,6 +357,53 @@ class InvokePublishedAgentArguments(FixedToolArguments):
     experience: str = Field(default="", max_length=12_000, description="可选审查经验上下文")
 
 
+class SendMessageContextArguments(FixedToolArguments):
+    """跨 Agent/会话消息的最小业务上下文。"""
+
+    task_id: Optional[int] = Field(default=None, gt=0)
+    project_id: Optional[int] = Field(default=None, gt=0)
+    file_id: Optional[int] = Field(default=None, gt=0)
+    run_id: str = Field(default="", max_length=80)
+
+
+class SendMessageDeliveryArguments(FixedToolArguments):
+    """异步投递、重试和过期策略。"""
+
+    requires_ack: bool = True
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    expires_at: Optional[datetime] = None
+
+
+class SendMessageArguments(FixedToolArguments):
+    """小菱 Agent Mesh 标准化消息信封。"""
+
+    schema_version: Literal["1.0"] = "1.0"
+    idempotency_key: str = Field(min_length=1, max_length=160)
+    trace_id: str = Field(default="", max_length=80)
+    correlation_id: str = Field(default="", max_length=80)
+    causation_id: str = Field(default="", max_length=80)
+    send_to: str = Field(
+        min_length=1,
+        max_length=200,
+        pattern=r"^(?:agent|custom|session):[A-Za-z0-9_.:-]+$",
+    )
+    message_type: Literal[
+        "task.request",
+        "task.result",
+        "task.error",
+        "status.update",
+        "coordination",
+        "notification",
+    ]
+    priority: Literal["low", "normal", "high", "critical"] = "normal"
+    subject: str = Field(min_length=1, max_length=240)
+    payload: Dict[str, Any]
+    context: SendMessageContextArguments = Field(default_factory=SendMessageContextArguments)
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)
+    errors: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)
+    delivery: SendMessageDeliveryArguments = Field(default_factory=SendMessageDeliveryArguments)
+
+
 class AdminReleaseApprovalsArguments(FixedToolArguments):
     """管理员查询自定义 Agent 发布审批详情。"""
 
@@ -388,9 +442,25 @@ class FixedToolArgumentError(ValueError):
 
 
 _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
-    FixedToolContract("list_agents", "列出平台注册的 Agent 元数据", NoArguments, False),
+    FixedToolContract(
+        "list_agents",
+        "发现全部内置/自定义 Agent 与同一账户可寻址会话",
+        NoArguments,
+        True,
+    ),
+    FixedToolContract(
+        "send_message",
+        "向 ListAgents 返回的 Agent 或同一账户会话发送严格 JSON 消息，并返回可追踪 trace_id",
+        SendMessageArguments,
+        True,
+    ),
     FixedToolContract("list_projects", "分页查询当前用户可见项目", ListProjectsArguments, True),
-    FixedToolContract("get_project_detail", "查询项目完整详情(含源码修复副本 source_revisions)", GetProjectDetailArguments, True),
+    FixedToolContract(
+        "get_project_detail",
+        "查询项目完整详情(含源码修复副本 source_revisions)",
+        GetProjectDetailArguments,
+        True,
+    ),
     FixedToolContract("create_project", "创建代码审查项目", CreateProjectArguments, True),
     FixedToolContract("delete_project", "删除指定项目", DeleteProjectArguments, True),
     FixedToolContract("start_review", "为指定项目文件启动代码审查", StartReviewArguments, True),

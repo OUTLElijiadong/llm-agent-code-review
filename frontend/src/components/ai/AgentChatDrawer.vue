@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CircleCheck, Close, WarningFilled } from '@element-plus/icons-vue'
 
 import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { getAgentResponseSession } from '@/api/agentResponses'
+import type { AgentMeshMessage } from '@/api/agentMesh'
 import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
@@ -36,8 +37,15 @@ import {
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
+import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
+import { agentMeshToolCalls } from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
-import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
+import {
+  autoTitleAgentChatSession,
+  loadAgentChatSnapshot,
+  saveAgentChatSnapshot,
+  type AgentChatSessionMeta,
+} from '@/utils/agentChatSessions'
 import {
   applyResponseToolEvent,
   attachApprovalToToolCall,
@@ -135,6 +143,8 @@ const canRetryRun = computed(() => {
   return Boolean(status && ['failed', 'incomplete', 'max_rounds_exceeded'].includes(status) && !loading.value)
 })
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+const meshSessions = ref<AgentChatSessionMeta[]>([])
+const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
 const uploading = ref(false)
 
@@ -155,6 +165,16 @@ const canSend = computed(() => (
   && !sessionRestoring.value
   && !sessionBusy.value
 ))
+
+const meshBridge = createAgentMeshBridge({
+  surface: 'user',
+  getSessionId: () => sessionId.value,
+  getTitle: () => meshSessions.value.find((item) => item.id === sessionId.value)?.title ?? '用户端小菱对话',
+  getSessions: () => meshSessions.value,
+  getActiveRun: () => sessionRun.value,
+  isBusy: isMeshSessionBusy,
+  onMessage: handleMeshMessage,
+})
 
 function messageId(): string {
   return crypto.randomUUID()
@@ -208,7 +228,23 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
 }
 
 function syncBusy(): void {
-  switcherRef.value?.setBusy(sessionId.value, isAgentResponseSessionOccupied(sessionRun.value?.status))
+  const busy = isAgentResponseSessionOccupied(sessionRun.value?.status)
+  if (!busy) backgroundBusySessions.delete(sessionId.value)
+  switcherRef.value?.setBusy(sessionId.value, busy)
+}
+
+function handleSwitcherReady(metas: AgentChatSessionMeta[]): void {
+  meshSessions.value = metas
+  syncBusy()
+  void meshBridge.syncNow()
+}
+
+function isMeshSessionBusy(targetSessionId: string): boolean {
+  if (targetSessionId === sessionId.value) {
+    return loading.value || sessionRestoring.value || sessionBusy.value
+  }
+  if (backgroundBusySessions.has(targetSessionId)) return true
+  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId)?.runStatus)
 }
 
 function restoredMessages(
@@ -239,7 +275,10 @@ function restoredSessionMessages(
         navigations: directives.length ? directives : undefined,
       }
     })
-  const toolCalls = responseToolCallsFromEvents(session.events)
+  const toolCalls = [
+    ...agentMeshToolCalls(session.mesh_messages, `session:user:${session.session_id}`),
+    ...responseToolCallsFromEvents(session.events),
+  ]
   if (!toolCalls.length) return restored
   const timeline: ChatMessage = {
     id: messageId(),
@@ -326,6 +365,78 @@ async function restoreSession(): Promise<void> {
     persistSnapshot()
     await nextTick()
     scrollToBottom()
+    void meshBridge.syncNow()
+  }
+}
+
+async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: string): Promise<boolean> {
+  if (targetSessionId !== sessionId.value) {
+    return runBackgroundMeshMessage(message, targetSessionId)
+  }
+  const toolCalls = agentMeshToolCalls([message], `session:user:${sessionId.value}`)
+  const timeline: ChatMessage = {
+    id: messageId(),
+    role: 'assistant',
+    content: '',
+    time: dayjs().format('HH:mm'),
+    trace_id: message.trace_id,
+    toolCalls,
+  }
+  messages.value.push(timeline)
+  await nextTick()
+  scrollToBottom()
+  const succeeded = await runResponse({
+    action: 'start',
+    surface: 'user',
+    session_id: sessionId.value,
+    messages: [],
+    mesh_message_id: message.message_id,
+  })
+  if (toolCalls[0]) {
+    toolCalls[0].status = succeeded && sessionRun.value?.status === 'completed' ? 'completed' : 'running'
+  }
+  return succeeded
+}
+
+async function runBackgroundMeshMessage(
+  message: AgentMeshMessage,
+  targetSessionId: string,
+): Promise<boolean> {
+  backgroundBusySessions.add(targetSessionId)
+  switcherRef.value?.setBusy(targetSessionId, true)
+  let waiting = false
+  const handle = streamResponses({
+    action: 'start',
+    surface: 'user',
+    session_id: targetSessionId,
+    messages: [],
+    mesh_message_id: message.message_id,
+  }, {
+    onEvent(event) {
+      if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
+        waiting = true
+      }
+      if (
+        event.type === 'response.completed'
+        || event.type === 'response.incomplete'
+        || event.type === 'response.failed'
+        || event.type === 'response.cancelled'
+        || event.type === 'error'
+      ) {
+        waiting = false
+      }
+    },
+  })
+  try {
+    await handle.done
+    return true
+  } catch {
+    return false
+  } finally {
+    if (!waiting) {
+      backgroundBusySessions.delete(targetSessionId)
+      switcherRef.value?.setBusy(targetSessionId, false)
+    }
   }
 }
 
@@ -1153,6 +1264,7 @@ function handleEscape(event: KeyboardEvent): void {
 }
 
 onBeforeUnmount(() => {
+  meshBridge.stop()
   persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
@@ -1160,6 +1272,8 @@ onBeforeUnmount(() => {
   window.clearTimeout(projectSearchTimer)
   window.removeEventListener('keydown', handleEscape)
 })
+
+onMounted(() => meshBridge.start())
 </script>
 
 <template>
@@ -1222,6 +1336,7 @@ onBeforeUnmount(() => {
                   id-prefix="user"
                   :welcome-text="WELCOME_TEXT"
                   @select="handleSessionSelect"
+                  @sessions-changed="handleSwitcherReady"
                 />
               </div>
             </div>

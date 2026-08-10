@@ -12,9 +12,14 @@ const streams = vi.hoisted(() => ({
 
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn() }))
+const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
 vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get }))
+vi.mock('@/api/agentMesh', () => ({
+  heartbeatAgentMesh: meshApi.heartbeat,
+  pullAgentMeshInbox: meshApi.inbox,
+}))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
 import AgentChatDrawer from './AgentChatDrawer.vue'
@@ -53,6 +58,8 @@ async function finish(index: number): Promise<void> {
 }
 
 beforeEach(() => {
+  meshApi.heartbeat.mockReset().mockResolvedValue({})
+  meshApi.inbox.mockReset().mockResolvedValue([])
   sessionApi.get.mockReset()
   sessionApi.get.mockResolvedValue({
     surface: 'user', session_id: 'user-test', run: null, messages: [], pending: null,

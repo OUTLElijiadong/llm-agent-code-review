@@ -528,6 +528,7 @@ class PrismToolExecutor:
         surface: str,
         run_id: str,
         mcp_provider: McpToolProvider,
+        session_key: str = "",
         event_sink: Optional[EventSink] = None,
         session_validator: Optional[SessionValidator] = None,
     ) -> None:
@@ -535,6 +536,7 @@ class PrismToolExecutor:
         self._user = user
         self._surface = surface
         self._run_id = run_id
+        self._session_key = session_key
         self._is_admin = surface == "admin" and _is_admin_actor(db, user)
         self._is_super_admin = surface == "admin" and _is_super_admin_actor(db, user)
         self._mcp = mcp_provider
@@ -665,6 +667,17 @@ class PrismToolExecutor:
             return True
         return rbac_service.check_permission(self._db, self._user.id, permission_code)
 
+    def _agent_context(self) -> AgentContext:
+        return AgentContext(
+            user_id=self._user.id,
+            extra={
+                "run_id": self._run_id,
+                "trace_id": self._run_id,
+                "surface": self._surface,
+                "session_key": self._session_key,
+            },
+        )
+
     async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
         self._assert_session_active()
         if call.name.startswith(_ADMIN_TOOL_PREFIX) and not self._is_admin:
@@ -755,7 +768,7 @@ class PrismToolExecutor:
                     self._orch.invoke_tool(
                         self._skill_bindings[call.name],
                         call.arguments,
-                        AgentContext(user_id=self._user.id, extra={"run_id": self._run_id}),
+                        self._agent_context(),
                     ),
                 ),
             )
@@ -828,7 +841,7 @@ class PrismToolExecutor:
                     call,
                     getattr(self._orch, call.name)(
                         **call.arguments,
-                        ctx=AgentContext(user_id=self._user.id, extra={"run_id": self._run_id}),
+                        ctx=self._agent_context(),
                     ),
                 ),
             )
@@ -877,7 +890,7 @@ class PrismToolExecutor:
                 self._orch.invoke_tool(
                     call.name,
                     call.arguments,
-                    AgentContext(user_id=self._user.id, extra={"run_id": self._run_id}),
+                    self._agent_context(),
                 ),
             ),
         )
@@ -1222,6 +1235,8 @@ class PrismToolExecutor:
         )
 
     def _tool_agent_code(self, call: ToolCall) -> str:
+        if call.name == "send_message":
+            return str(call.arguments.get("send_to") or "orchestrator")
         if call.name == "admin_execute_operation":
             return "operations"
         if call.name == "invoke_published_agent":
@@ -1877,6 +1892,7 @@ class AgentResponsesService:
             surface=self._surface,
             run_id=run_id,
             mcp_provider=mcp,
+            session_key=self._session_key,
             event_sink=event_sink,
         )
         # 工具事件必须先于结论文本到达用户端。DeepSeek 可能在工具调用前
@@ -2191,6 +2207,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "用户请求超出权限时直接说明原因并拒绝,不要尝试调用也不会报'工具权限不足'错误。"
         "所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
         "根据每次工具返回结果自主判断下一步，可以连续调用多个工具。"
+        "需要发现子 Agent、已发布 Agent 或同一账户其他会话时调用 list_agents；"
+        "需要移交结论、同步进度或协调并行任务时调用 send_message，"
+        "只能向 list_agents 返回的精确地址发送严格结构化消息，不得用自由文本伪造消息信封。"
         "缺少真正阻断任务的信息时调用 ask_user，问题、候选项及其说明必须由你根据当前任务动态生成，不使用预设问题。"
         "涉及名称近义表达或自定义 Agent 能力时先调用 search_published_agents；候选不唯一时用 ask_user "
         "展示动态候选，确认后才能调用 invoke_published_agent。"

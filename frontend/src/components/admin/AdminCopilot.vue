@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Close,
@@ -12,6 +12,7 @@ import {
   type AdminCopilotMessage,
 } from '@/api/adminCopilot'
 import { getAgentResponseSession, type AgentResponseSession } from '@/api/agentResponses'
+import type { AgentMeshMessage } from '@/api/agentMesh'
 import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
@@ -50,8 +51,15 @@ import {
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
+import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
+import { agentMeshToolCalls } from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
-import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
+import {
+  autoTitleAgentChatSession,
+  loadAgentChatSnapshot,
+  saveAgentChatSnapshot,
+  type AgentChatSessionMeta,
+} from '@/utils/agentChatSessions'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 interface ChatEntry {
@@ -98,6 +106,8 @@ const router = useRouter()
 
 const sessionId = ref('')
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+const meshSessions = ref<AgentChatSessionMeta[]>([])
+const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
 let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
@@ -129,6 +139,16 @@ const canSend = computed(() => (
   && !sessionRestoring.value
   && !sessionBusy.value
 ))
+
+const meshBridge = createAgentMeshBridge({
+  surface: 'admin',
+  getSessionId: () => sessionId.value,
+  getTitle: () => meshSessions.value.find((item) => item.id === sessionId.value)?.title ?? '管理端小菱对话',
+  getSessions: () => meshSessions.value,
+  getActiveRun: () => sessionRun.value,
+  isBusy: isMeshSessionBusy,
+  onMessage: handleMeshMessage,
+})
 
 function welcomeEntry(): ChatEntry {
   return assistantEntry({ type: 'text', content: WELCOME_TEXT, status: 'completed' })
@@ -175,12 +195,24 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
 }
 
 /** 切换器初始化后补同步一次忙碌状态,避免初始化竞态导致标记丢失。 */
-function handleSwitcherReady(): void {
+function handleSwitcherReady(metas: AgentChatSessionMeta[]): void {
+  meshSessions.value = metas
   syncBusy()
+  void meshBridge.syncNow()
 }
 
 function syncBusy(): void {
-  switcherRef.value?.setBusy(sessionId.value, isAgentResponseSessionOccupied(sessionRun.value?.status))
+  const busy = isAgentResponseSessionOccupied(sessionRun.value?.status)
+  if (!busy) backgroundBusySessions.delete(sessionId.value)
+  switcherRef.value?.setBusy(sessionId.value, busy)
+}
+
+function isMeshSessionBusy(targetSessionId: string): boolean {
+  if (targetSessionId === sessionId.value) {
+    return loading.value || sessionRestoring.value || sessionBusy.value
+  }
+  if (backgroundBusySessions.has(targetSessionId)) return true
+  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId)?.runStatus)
 }
 
 function now(): string {
@@ -262,7 +294,10 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
         navigations: directives.length ? directives : undefined,
       }
     })
-  const toolCalls = responseToolCallsFromEvents(session.events)
+  const toolCalls = [
+    ...agentMeshToolCalls(session.mesh_messages, `session:admin:${session.session_id}`),
+    ...responseToolCallsFromEvents(session.events),
+  ]
   if (!toolCalls.length) return restored
   const timeline: ChatEntry = {
     ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
@@ -344,6 +379,73 @@ async function restoreSession(): Promise<void> {
     syncBusy()
     persistSnapshot()
     await scrollToBottom()
+    void meshBridge.syncNow()
+  }
+}
+
+async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: string): Promise<boolean> {
+  if (targetSessionId !== sessionId.value) {
+    return runBackgroundMeshMessage(message, targetSessionId)
+  }
+  const toolCalls = agentMeshToolCalls([message], `session:admin:${sessionId.value}`)
+  const timeline: ChatEntry = {
+    ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
+    toolCalls,
+  }
+  messages.value.push(timeline)
+  await scrollToBottom()
+  const succeeded = await runResponse({
+    action: 'start',
+    surface: 'admin',
+    session_id: sessionId.value,
+    messages: [],
+    mesh_message_id: message.message_id,
+  })
+  if (toolCalls[0]) {
+    toolCalls[0].status = succeeded && sessionRun.value?.status === 'completed' ? 'completed' : 'running'
+  }
+  return succeeded
+}
+
+async function runBackgroundMeshMessage(
+  message: AgentMeshMessage,
+  targetSessionId: string,
+): Promise<boolean> {
+  backgroundBusySessions.add(targetSessionId)
+  switcherRef.value?.setBusy(targetSessionId, true)
+  let waiting = false
+  const handle = streamResponses({
+    action: 'start',
+    surface: 'admin',
+    session_id: targetSessionId,
+    messages: [],
+    mesh_message_id: message.message_id,
+  }, {
+    onEvent(event) {
+      if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
+        waiting = true
+      }
+      if (
+        event.type === 'response.completed'
+        || event.type === 'response.incomplete'
+        || event.type === 'response.failed'
+        || event.type === 'response.cancelled'
+        || event.type === 'error'
+      ) {
+        waiting = false
+      }
+    },
+  })
+  try {
+    await handle.done
+    return true
+  } catch {
+    return false
+  } finally {
+    if (!waiting) {
+      backgroundBusySessions.delete(targetSessionId)
+      switcherRef.value?.setBusy(targetSessionId, false)
+    }
   }
 }
 
@@ -852,12 +954,15 @@ function handleAlertAction(prompt?: string): void {
 }
 
 onBeforeUnmount(() => {
+  meshBridge.stop()
   persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
   activeResponse?.abort()
   window.removeEventListener('keydown', handleKeydown)
 })
+
+onMounted(() => meshBridge.start())
 </script>
 
 <template>

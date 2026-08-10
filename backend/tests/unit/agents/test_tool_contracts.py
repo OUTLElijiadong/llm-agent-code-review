@@ -18,7 +18,9 @@ from app.agents.tool_contracts import (
 
 EXPECTED_FIXED_TOOL_NAMES = [
     "list_agents",
+    "send_message",
     "list_projects",
+    "get_project_detail",
     "create_project",
     "delete_project",
     "start_review",
@@ -144,7 +146,7 @@ def test_fixed_tool_registry_has_stable_unique_names() -> None:
     """固定工具注册表应成为唯一名称来源且不含重复项。"""
     names = get_fixed_tool_names()
 
-    assert len(names) == 42
+    assert len(names) == 44
     assert len(names) == len(set(names))
     assert names == EXPECTED_FIXED_TOOL_NAMES
     assert names[0] == "list_agents"
@@ -200,8 +202,22 @@ def test_runtime_context_injection_metadata_matches_real_handlers() -> None:
     assert fixed_tool_accepts_ctx("list_projects") is True
     assert fixed_tool_accepts_ctx("start_review") is True
     assert fixed_tool_accepts_ctx("review_code") is False
-    assert fixed_tool_accepts_ctx("list_agents") is False
+    assert fixed_tool_accepts_ctx("list_agents") is True
+    assert fixed_tool_accepts_ctx("send_message") is True
     assert fixed_tool_accepts_ctx("list_agent_skills") is False
+
+
+def test_send_message_contract_is_strict_and_structured() -> None:
+    payload = {
+        "send_to": "session:user:session-b1",
+        "message_type": "coordination",
+        "subject": "同步排查结论",
+        "payload": {"summary": "配置变更是根因"},
+        "idempotency_key": "handoff-run-1",
+    }
+    assert validate_fixed_tool_arguments("send_message", payload)["send_to"] == payload["send_to"]
+    with pytest.raises(FixedToolArgumentError):
+        validate_fixed_tool_arguments("send_message", {**payload, "text": "自由文本"})
 
 
 def test_source_archive_agent_contracts_expose_audit_mode_and_static_full_default() -> None:

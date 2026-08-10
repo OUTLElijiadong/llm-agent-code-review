@@ -14,6 +14,7 @@ from app.core.database import Base
 _MODEL_MODULES = (
     "app.models.admin_chat",
     "app.models.agent_response_run",
+    "app.models.agent_mesh",
     "app.models.agent_governance",
     "app.models.agent_capability",
     "app.models.ai_call_log",

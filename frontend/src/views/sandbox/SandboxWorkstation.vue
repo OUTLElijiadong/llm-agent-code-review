@@ -26,7 +26,7 @@ import {
 import { listSandboxWorkers } from '@/api/mcpGovernance'
 import { getProjectDetail, getProjects } from '@/api/project'
 import { useUserStore } from '@/stores/user'
-import type { ProjectOut } from '@/types/project'
+import type { ProjectDetailOut, ProjectOut } from '@/types/project'
 import type { SandboxArtifact, SandboxEnvironment, SandboxLanguage, SandboxPurpose, SandboxTestMode } from '@/types/sandbox'
 import type { SandboxWorker } from '@/types/mcpGovernance'
 import {
@@ -44,7 +44,7 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 const POLL_INTERVAL_MS = 2500
 const userStore = useUserStore()
 const projects = ref<ProjectOut[]>([])
-const sourceRevisions = ref<Array<{ id: number; revision_no: number; source_sha256: string; repaired_files: string[]; repair_notes: string; create_time?: string | null }>>([])
+const sourceRevisions = ref<ProjectDetailOut['source_revisions']>([])
 const workers = ref<SandboxWorker[]>([])
 const environments = ref<SandboxEnvironment[]>([])
 const selectedId = ref('')
@@ -90,10 +90,6 @@ const dbTypes: Array<{ value: 'none' | 'sqlite' | 'mysql'; label: string; hint: 
 
 const selected = computed(() => environments.value.find((item) => item.public_id === selectedId.value) || null)
 
-function sourceRevisionNo(revisionId: number | null | undefined): number | '-' {
-  if (!revisionId) return '-'
-  return sourceRevisions.value.find((rev) => rev.id === revisionId)?.revision_no ?? '-'
-}
 const selectedFormProject = computed(() => projects.value.find((item) => item.id === form.project_id) || null)
 const selectedProjectLanguage = computed(() => projectSandboxLanguage(selectedFormProject.value?.language))
 const selectedEvents = computed(() => sortSandboxEvents(selected.value?.events || []))
