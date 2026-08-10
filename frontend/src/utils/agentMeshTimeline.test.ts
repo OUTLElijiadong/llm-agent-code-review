@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ResponseToolCall } from './responsesTimeline'
-import { settleAgentMeshToolCalls } from './agentMeshTimeline'
+import {
+  findAgentMeshTimeline,
+  settleAgentMeshTimeline,
+  settleAgentMeshToolCalls,
+} from './agentMeshTimeline'
 
 const receivingCall: ResponseToolCall = {
   key: 'mesh-msg-test',
@@ -36,5 +40,16 @@ describe('Agent Mesh timeline settlement', () => {
   it('等待审批或追问时保持执行中', () => {
     expect(settleAgentMeshToolCalls([receivingCall], true, 'waiting_approval')[0].status).toBe('running')
     expect(settleAgentMeshToolCalls([receivingCall], true, 'waiting_input')[0].status).toBe('running')
+  })
+
+  it('按消息 ID 复用已恢复的时间线并在集合上收敛状态', () => {
+    const restored = { toolCalls: [receivingCall] }
+    const entries = [{ toolCalls: [] }, restored]
+
+    expect(findAgentMeshTimeline(entries, 'msg_test')).toBe(restored)
+    expect(settleAgentMeshTimeline(entries, 'msg_test', true, 'completed')).toBe(true)
+    expect(restored.toolCalls).not.toEqual([receivingCall])
+    expect(restored.toolCalls[0].status).toBe('completed')
+    expect(settleAgentMeshTimeline(entries, 'missing', true, 'completed')).toBe(false)
   })
 })

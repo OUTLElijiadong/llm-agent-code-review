@@ -52,7 +52,11 @@ import {
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
 import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
-import { agentMeshToolCalls, settleAgentMeshToolCalls } from '@/utils/agentMeshTimeline'
+import {
+  agentMeshToolCalls,
+  findAgentMeshTimeline,
+  settleAgentMeshTimeline,
+} from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import {
   autoTitleAgentChatSession,
@@ -326,6 +330,7 @@ function applySessionSnapshot(session: AgentResponseSession): void {
     run: session.run,
     messages: session.messages,
     events: session.events,
+    mesh_messages: session.mesh_messages,
     pending: session.pending,
   })
   if (signature === sessionSnapshotSignature) return
@@ -387,12 +392,12 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
   if (targetSessionId !== sessionId.value) {
     return runBackgroundMeshMessage(message, targetSessionId)
   }
-  const toolCalls = agentMeshToolCalls([message], `session:admin:${sessionId.value}`)
-  const timeline: ChatEntry = {
-    ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
-    toolCalls,
+  if (!findAgentMeshTimeline(messages.value, message.message_id)) {
+    messages.value.push({
+      ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
+      toolCalls: agentMeshToolCalls([message], `session:admin:${sessionId.value}`),
+    })
   }
-  messages.value.push(timeline)
   await scrollToBottom()
   const succeeded = await runResponse({
     action: 'start',
@@ -401,8 +406,9 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     messages: [],
     mesh_message_id: message.message_id,
   })
-  timeline.toolCalls = settleAgentMeshToolCalls(
-    timeline.toolCalls,
+  settleAgentMeshTimeline(
+    messages.value,
+    message.message_id,
     succeeded,
     sessionRun.value?.status,
     sessionRun.value?.error,

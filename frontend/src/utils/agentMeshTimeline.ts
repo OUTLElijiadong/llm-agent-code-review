@@ -1,6 +1,10 @@
 import type { AgentMeshMessage } from '@/api/agentMesh'
 import type { ResponseToolCall, ResponseToolCallStatus } from '@/utils/responsesTimeline'
 
+export interface AgentMeshTimelineEntry {
+  toolCalls?: ResponseToolCall[]
+}
+
 function statusOf(message: AgentMeshMessage): ResponseToolCallStatus {
   if (['failed', 'dead_letter', 'expired'].includes(message.status)) return 'failed'
   if (message.status === 'completed') return 'completed'
@@ -58,4 +62,24 @@ export function settleAgentMeshToolCalls(
     }
     return { ...toolCall, status: 'running' }
   })
+}
+
+export function findAgentMeshTimeline<T extends AgentMeshTimelineEntry>(
+  entries: T[],
+  messageId: string,
+): T | undefined {
+  return entries.find((entry) => entry.toolCalls?.some((toolCall) => toolCall.callId === messageId))
+}
+
+export function settleAgentMeshTimeline<T extends AgentMeshTimelineEntry>(
+  entries: T[],
+  messageId: string,
+  succeeded: boolean,
+  runStatus: string | null | undefined,
+  error?: string | null,
+): boolean {
+  const timeline = findAgentMeshTimeline(entries, messageId)
+  if (!timeline) return false
+  timeline.toolCalls = settleAgentMeshToolCalls(timeline.toolCalls, succeeded, runStatus, error)
+  return true
 }
