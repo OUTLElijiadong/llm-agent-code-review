@@ -45,7 +45,7 @@ import type {
   ResponseStreamEvent,
 } from '@/types/responses'
 import {
-  AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS,
+  agentResponseSessionPollInterval,
   isAgentResponseSessionActive,
   isAgentResponseSessionOccupied,
   isAgentResponseSessionWaiting,
@@ -250,12 +250,12 @@ function invalidateSessionPoll(): void {
 
 function scheduleSessionPoll(): void {
   clearSessionPoll()
-  if (sessionPollStopped || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  if (sessionPollStopped || !sessionId.value) return
   const generation = sessionPollGeneration
   sessionPollTimer = window.setTimeout(() => {
     sessionPollTimer = undefined
     void pollSessionSnapshot(generation)
-  }, AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS)
+  }, agentResponseSessionPollInterval(sessionRun.value?.status))
 }
 
 function pendingEntry(session: AgentResponseSession, restoredTime: string): ChatEntry | null {
@@ -323,8 +323,7 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
 function applySessionSnapshot(session: AgentResponseSession): void {
   sessionRun.value = session.run
   if (!loading.value) showTyping.value = isAgentResponseSessionActive(session.run?.status)
-  if (isAgentResponseSessionActive(session.run?.status)) scheduleSessionPoll()
-  else clearSessionPoll()
+  scheduleSessionPoll()
 
   const signature = JSON.stringify({
     run: session.run,
@@ -352,7 +351,6 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   if (
     sessionPollStopped
     || generation !== sessionPollGeneration
-    || !isAgentResponseSessionActive(sessionRun.value?.status)
   ) return
   try {
     const session = await getAgentResponseSession('admin', sessionId.value)
@@ -363,11 +361,7 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   } finally {
     syncBusy()
     persistSnapshot()
-    if (
-      !sessionPollStopped
-      && generation === sessionPollGeneration
-      && isAgentResponseSessionActive(sessionRun.value?.status)
-    ) scheduleSessionPoll()
+    if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
   }
 }
 
@@ -852,6 +846,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     loading.value = false
     showTyping.value = false
     await scrollToBottom()
+    scheduleSessionPoll()
   }
 }
 

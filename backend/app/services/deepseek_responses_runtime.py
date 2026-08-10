@@ -568,8 +568,9 @@ class DeepSeekResponsesRuntime:
                 checkpoint.error = ""
                 await self._store.save(checkpoint)
                 return self._result(checkpoint)
-            if checkpoint.status == MAX_ROUNDS_EXCEEDED:
-                checkpoint.rounds = 0
+            # retry 是一次新的模型尝试；若第 N 轮传输中断，必须先恢复完整
+            # 轮数预算，否则即便补齐工具输出也会立即再次命中旧上限。
+            checkpoint.rounds = 0
             checkpoint.status = RUNNING
             checkpoint.error = ""
             await self._store.save(checkpoint)
@@ -604,6 +605,9 @@ class DeepSeekResponsesRuntime:
     async def _drive(self, checkpoint: RunCheckpoint) -> RuntimeResult:
         events: List[Mapping[str, Any]] = []
         while True:
+            recovered = await self._recover_interrupted_completed_calls(checkpoint)
+            if recovered is not None:
+                return self._result(checkpoint, events=events + list(recovered.events))
             if checkpoint.rounds >= self._max_rounds:
                 checkpoint.status = MAX_ROUNDS_EXCEEDED
                 checkpoint.error = f"模型工具循环超过最大轮数 {self._max_rounds}"
@@ -634,6 +638,10 @@ class DeepSeekResponsesRuntime:
                 checkpoint.error = f"Responses 上下文超出安全预算，已拒绝发送: {exc}"
                 await self._store.save(checkpoint)
                 return self._result(checkpoint, events=events)
+
+            # failed/incomplete 响应中的工具调用不具备执行语义，审计原文继续
+            # 留在 checkpoint，但不能以缺失 output 的协议形态重发给上游。
+            projected_input = _without_unpaired_function_calls(projected_input)
 
             previous_compactions = int(checkpoint.context_metadata.get("compaction_count") or 0)
             if context_metadata["compacted"]:
@@ -754,6 +762,39 @@ class DeepSeekResponsesRuntime:
             checkpoint.status = COMPLETED
             await self._store.save(checkpoint)
             return self._result(checkpoint, events=events)
+
+    async def _recover_interrupted_completed_calls(
+        self,
+        checkpoint: RunCheckpoint,
+    ) -> Optional[RuntimeResult]:
+        """执行已完成模型响应中尚未持久化终态输出的工具调用。
+
+        failed/incomplete 响应没有可执行语义，绝不能借重试触发其中的调用。
+        生产工具执行器以 run_id/call_id 维护幂等账本，进程中断恢复不会重复
+        已确认的副作用。
+        """
+
+        if str(checkpoint.last_response.get("status") or "") != COMPLETED:
+            return None
+        output_items = [
+            copy.deepcopy(dict(item))
+            for item in list(checkpoint.last_response.get("output") or [])
+            if isinstance(item, Mapping)
+        ]
+        calls = [
+            call
+            for call in _extract_tool_calls(output_items)
+            if call.call_id
+            and any(
+                str(item.get("type") or "") == "function_call"
+                and str(item.get("call_id") or item.get("id") or "") == call.call_id
+                for item in checkpoint.transcript
+            )
+            and not _has_tool_evidence(checkpoint.transcript, call.call_id)
+        ]
+        if not calls:
+            return None
+        return await self._process_calls(checkpoint, calls)
 
     async def _process_calls(
         self,
@@ -1077,6 +1118,25 @@ def _has_tool_evidence(transcript: Sequence[Mapping[str, Any]], tool_call_id: st
         and str(item.get("call_id") or "") == tool_call_id
         for item in transcript
     )
+
+
+def _without_unpaired_function_calls(
+    items: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """从模型输入投影剔除没有终态输出的孤立工具调用。"""
+
+    output_call_ids = {
+        str(item.get("call_id") or "")
+        for item in items
+        if str(item.get("type") or "") == "function_call_output"
+        and str(item.get("call_id") or "")
+    }
+    return [
+        copy.deepcopy(dict(item))
+        for item in items
+        if str(item.get("type") or "") != "function_call"
+        or str(item.get("call_id") or item.get("id") or "") in output_call_ids
+    ]
 
 
 def _tool_choice_for_round(model: str, force_tool_rounds: int) -> Optional[str]:

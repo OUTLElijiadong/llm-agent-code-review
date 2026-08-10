@@ -659,6 +659,83 @@ async def test_failed_model_response_never_executes_contained_function_call() ->
 
 
 @pytest.mark.asyncio
+async def test_retry_recovers_completed_tool_call_interrupted_before_output_persisted() -> None:
+    call_response = _function_response(
+        ("call_interrupted", "save_knowledge_note", {"title": "登录数据查询方法"})
+    )
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="run_interrupted_tool",
+        model="deepseek-v4-flash",
+        transcript=[
+            {"role": "user", "content": "记录查询方法"},
+            *call_response["output"],
+        ],
+        tools=[],
+        status=FAILED,
+        rounds=12,
+        last_response=call_response,
+        error=(
+            "Responses transport 调用失败: Responses 上游 HTTP 400: "
+            "No tool output found for tool call call_interrupted."
+        ),
+    )
+    await store.create(checkpoint)
+    transport = ScriptedTransport([_message_response("知识已记录")])
+    executor = RecordingExecutor()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=executor,
+        checkpoint_store=store,
+    )
+
+    result = await runtime.retry(checkpoint.run_id)
+
+    assert result.status == "completed"
+    assert result.output_text == "知识已记录"
+    assert [call.call_id for call, _ in executor.calls] == ["call_interrupted"]
+    replay = transport.payloads[0]["input"]
+    assert [
+        item.get("type") for item in replay if item.get("call_id") == "call_interrupted"
+    ] == ["function_call", "function_call_output"]
+
+
+@pytest.mark.asyncio
+async def test_retry_does_not_recover_unpaired_call_from_failed_response() -> None:
+    failed_response = _function_response(("call_unsafe_retry", "side_effect", {"value": 1}))
+    failed_response["status"] = "failed"
+    failed_response["error"] = {"message": "上游失败"}
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="run_failed_unpaired",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "执行"}, *failed_response["output"]],
+        tools=[],
+        status=FAILED,
+        rounds=1,
+        last_response=failed_response,
+        error="上游失败",
+    )
+    await store.create(checkpoint)
+    transport = ScriptedTransport([_message_response("已安全重试")])
+    executor = RecordingExecutor()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=executor,
+        checkpoint_store=store,
+    )
+
+    result = await runtime.retry(checkpoint.run_id)
+
+    assert result.status == "completed"
+    assert executor.calls == []
+    assert not any(
+        item.get("call_id") == "call_unsafe_retry"
+        for item in transport.payloads[0]["input"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_truncated_stream_never_executes_partial_function_call() -> None:
     async def truncated_events() -> AsyncIterator[Mapping[str, Any]]:
         yield {

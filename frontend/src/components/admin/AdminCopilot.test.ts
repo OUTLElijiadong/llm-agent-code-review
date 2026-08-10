@@ -154,7 +154,7 @@ describe('AdminCopilot Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('恢复运行态后轮询到待审批即停止', async () => {
+  it('恢复运行态后轮询到待审批仍按低频间隔继续刷新', async () => {
     vi.useFakeTimers()
     sessionApi.get
       .mockResolvedValueOnce({
@@ -184,9 +184,57 @@ describe('AdminCopilot Responses stream', () => {
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('admin_delete_user')
 
-    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(2999)
     await flushPromises()
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+    expect(sessionApi.get).toHaveBeenCalledTimes(3)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('空闲时实时拉取子 Agent 交流过程并默认折叠详情', async () => {
+    vi.useFakeTimers()
+    const meshMessage = {
+      schema_version: '1.0', message_id: 'msg-admin-live', idempotency_key: 'idem-admin-live',
+      trace_id: 'trace-admin-live', correlation_id: 'corr-admin-live', causation_id: '',
+      sent_from: 'agent:error-handler', send_to: 'session:admin:admin-test',
+      message_type: 'task.result', priority: 'normal', subject: '报错根因已定位',
+      status: 'completed', payload: { root_cause: '数据库连接耗尽' }, context: {},
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '2026-08-10T12:10:00Z', create_time: '2026-08-10T12:00:00Z',
+      update_time: '2026-08-10T12:00:01Z',
+    }
+    sessionApi.get
+      .mockResolvedValueOnce({
+        surface: 'admin', session_id: 'admin-test', run: null, messages: [],
+        mesh_messages: [], pending: null,
+      })
+      .mockResolvedValue({
+        surface: 'admin', session_id: 'admin-test', run: null, messages: [],
+        mesh_messages: [meshMessage], pending: null,
+      })
+    const wrapper = mountCopilot()
+    await vi.advanceTimersByTimeAsync(0)
+    await flushPromises()
+    await openCopilot(wrapper)
+
+    expect(wrapper.find('.response-tool-timeline').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    const timeline = wrapper.find('.response-tool-timeline')
+    expect(timeline.text()).toContain('receive_message')
+    expect(timeline.text()).toContain('agent:error-handler')
+    const head = timeline.find('.response-tool-call-head')
+    expect(head.attributes('aria-expanded')).toBe('false')
+    expect(timeline.find('.response-tool-detail').exists()).toBe(false)
+
+    await head.trigger('click')
+    expect(timeline.find('.response-tool-detail').text()).toContain('报错根因已定位')
+    expect(timeline.find('.response-tool-detail').text()).toContain('数据库连接耗尽')
     wrapper.unmount()
     vi.useRealTimers()
   })

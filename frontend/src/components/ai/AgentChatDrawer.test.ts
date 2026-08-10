@@ -153,7 +153,7 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('恢复运行态后轮询到动态追问即停止', async () => {
+  it('恢复运行态后轮询到动态追问仍按低频间隔继续刷新', async () => {
     vi.useFakeTimers()
     sessionApi.get
       .mockResolvedValueOnce({
@@ -179,9 +179,56 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('你指的是哪个 Agent？')
 
-    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(2999)
     await flushPromises()
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+    expect(sessionApi.get).toHaveBeenCalledTimes(3)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('空闲时实时拉取子 Agent 交流过程并默认折叠详情', async () => {
+    vi.useFakeTimers()
+    const meshMessage = {
+      schema_version: '1.0', message_id: 'msg-user-live', idempotency_key: 'idem-user-live',
+      trace_id: 'trace-user-live', correlation_id: 'corr-user-live', causation_id: '',
+      sent_from: 'agent:data-analysis', send_to: 'session:user:user-test',
+      message_type: 'task.result', priority: 'normal', subject: '数据分析完成',
+      status: 'completed', payload: { anomaly_count: 2 }, context: {}, artifacts: [], errors: [],
+      requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '2026-08-10T12:10:00Z', create_time: '2026-08-10T12:00:00Z',
+      update_time: '2026-08-10T12:00:01Z',
+    }
+    sessionApi.get
+      .mockResolvedValueOnce({
+        surface: 'user', session_id: 'user-test', run: null, messages: [],
+        mesh_messages: [], pending: null,
+      })
+      .mockResolvedValue({
+        surface: 'user', session_id: 'user-test', run: null, messages: [],
+        mesh_messages: [meshMessage], pending: null,
+      })
+    const wrapper = mountDrawer()
+    await vi.advanceTimersByTimeAsync(0)
+    await flushPromises()
+
+    expect(wrapper.find('.response-tool-timeline').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    const timeline = wrapper.find('.response-tool-timeline')
+    expect(timeline.text()).toContain('receive_message')
+    expect(timeline.text()).toContain('agent:data-analysis')
+    const head = timeline.find('.response-tool-call-head')
+    expect(head.attributes('aria-expanded')).toBe('false')
+    expect(timeline.find('.response-tool-detail').exists()).toBe(false)
+
+    await head.trigger('click')
+    expect(timeline.find('.response-tool-detail').text()).toContain('数据分析完成')
+    expect(timeline.find('.response-tool-detail').text()).toContain('anomaly_count')
     wrapper.unmount()
     vi.useRealTimers()
   })

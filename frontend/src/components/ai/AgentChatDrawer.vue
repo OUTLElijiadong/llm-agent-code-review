@@ -31,7 +31,7 @@ import {
 } from '@/utils/clarifyProjectOptions'
 import { streamResponses } from '@/utils/responsesStream'
 import {
-  AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS,
+  agentResponseSessionPollInterval,
   isAgentResponseSessionActive,
   isAgentResponseSessionOccupied,
   isAgentResponseSessionWaiting,
@@ -361,7 +361,7 @@ async function restoreSession(): Promise<void> {
       target.inputRequest = { ...pending, answer: '', status: 'pending' }
     }
     messages.value.push(target)
-    clearSessionPoll()
+    scheduleSessionPoll()
   } catch {
     // HTTP 层已给出错误提示；保留本地会话不覆盖用户输入。
   } finally {
@@ -463,16 +463,16 @@ function invalidateSessionPoll(): void {
 
 function scheduleSessionPoll(): void {
   clearSessionPoll()
-  if (sessionPollStopped || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  if (sessionPollStopped || !sessionId.value) return
   const generation = sessionPollGeneration
   sessionPollTimer = window.setTimeout(() => {
     sessionPollTimer = undefined
     void pollSessionSnapshot(generation)
-  }, AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS)
+  }, agentResponseSessionPollInterval(sessionRun.value?.status))
 }
 
 async function pollSessionSnapshot(generation: number): Promise<void> {
-  if (sessionPollStopped || generation !== sessionPollGeneration || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  if (sessionPollStopped || generation !== sessionPollGeneration) return
   try {
     const session = await getAgentResponseSession('user', sessionId.value)
     if (sessionPollStopped || generation !== sessionPollGeneration) return
@@ -519,11 +519,7 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   } finally {
     syncBusy()
     persistSnapshot()
-    if (
-      !sessionPollStopped
-      && generation === sessionPollGeneration
-      && isAgentResponseSessionActive(sessionRun.value?.status)
-    ) scheduleSessionPoll()
+    if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
   }
 }
 
@@ -763,6 +759,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     showTyping.value = false
     await nextTick()
     scrollToBottom()
+    scheduleSessionPoll()
   }
 }
 
