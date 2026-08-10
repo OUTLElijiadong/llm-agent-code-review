@@ -114,6 +114,7 @@ token 过期返回 `401 40101`,前端需引导用户重新登录。
 | `/api/admin/audit/*` | 操作审计 (v2.0) |
 | `/api/discuss/*` | 圆桌讨论审预检 (v2.3) |
 | `/api/ws/discuss/{id}` | 圆桌讨论审 WebSocket (v2.3) |
+| `/api/agent-mesh/*` | 小菱 Agent/跨会话发现、投递与追踪 |
 
 ---
 
@@ -1431,7 +1432,7 @@ FastAPI 自动暴露:
 { "status": "ok" }
 ```
 
-当前代码未提供 `/readyz`;容器健康检查由 MySQL 容器自身 healthcheck 和后端 `/healthz` 共同承担。
+`GET /readyz` 同时检查数据库、Redis、ClamAV/YARA 等生产依赖；依赖不可用时返回 503。容器健康检查使用 `/healthz`，发布门禁同时检查 `/healthz` 与 `/readyz`。
 
 ## 22. Schema 速查(Pydantic 命名约定)
 
@@ -1452,6 +1453,7 @@ schemas/
   ├── ai_prompt.py  (AiPromptBundleOut, AiPromptIssueIn, AiPromptTaskIn, AiPromptProjectIn)
   ├── security.py   (SecurityScanOut, SecurityChecklistOut, SecurityDashboardSummaryOut)
   ├── evolution.py  (ExperienceOut, ProposalOut, EvalCaseOut, RunIn, RejectIn)
+  ├── agent_mesh.py (AgentMeshHeartbeatIn, AgentMeshMessageIn, AgentMeshAckIn)
   └── audit.py      (AuditLogOut)
 ```
 
@@ -1481,3 +1483,20 @@ curl -X POST http://localhost:8000/api/review/start \
 curl -OJ -H 'Authorization: Bearer <token>' \
   http://localhost:8000/api/reports/33/export/word
 ```
+
+## 24. 小菱 Agent Mesh `/api/agent-mesh`
+
+全部接口要求 JWT 与 `agent:chat` 权限；`surface=admin` 还会验证管理员身份。服务器从 JWT 注入 `user_id`，请求体不得指定所有者。
+
+| 方法 | 路径 | 功能 |
+| --- | --- | --- |
+| `POST` | `/conversations/heartbeat` | 注册或刷新当前 user/admin 会话 |
+| `GET` | `/agents` | 返回当前账户可发现的 runtime/service/custom/session 地址 |
+| `POST` | `/messages` | 按严格 JSON 信封写入消息账本 |
+| `GET` | `/inbox?surface=&session_id=&limit=` | 拉取当前会话收件箱并推进首次送达状态 |
+| `POST` | `/messages/{message_id}/ack?surface=&session_id=` | 回写 acknowledged/processing/completed/failed |
+| `GET` | `/traces/{trace_id}` | 恢复 trace 内消息与不可变状态事件 |
+
+消息必填核心字段包括 `schema_version=1.0`、`idempotency_key`、`send_to`、`message_type`、`subject`、`payload`；未知字段、错类型和非法地址会被拒绝。会话地址格式为 `session:user:<session_id>` 或 `session:admin:<session_id>`，内置 Agent 为 `agent:<code>`，已发布自定义 Agent 为 `custom:<code>`。
+
+投递状态机为 `queued → delivered → acknowledged|processing → completed|failed|expired|dead_letter`。相同账户与 `idempotency_key` 返回原消息，不重复写入；真正业务写操作仍由 Responses 工具网关执行原有 RBAC 与审批规则。

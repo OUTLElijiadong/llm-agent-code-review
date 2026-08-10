@@ -77,7 +77,7 @@ flowchart LR
 
 - 扩展既有 `list_agents`，调用 Mesh Service，不能仅返回 `AgentRegistry`。
 - 新增固定工具 `send_message`，参数模型直接生成 JSON Schema；执行器使用当前 request 的用户、surface、session 和 run trace。
-- `SendMessage` 本身是消息写入，需工具审批；收到消息后真正执行的业务动作仍按原工具风险级别再次裁决。
+- `SendMessage` 只写入同账户协作账本，可在关键节点自主执行，不要求人工审批；接收方后续发起的项目写入、外部 MCP、运维等真实业务动作仍按原工具风险级别和审批规则裁决。
 - 内置 Agent 地址用于可视化和受控协作；本次不虚构不存在的独立进程。真正执行仍由现有 Orchestrator/Service adapter 完成。
 
 ## 6. 自动唤醒时序

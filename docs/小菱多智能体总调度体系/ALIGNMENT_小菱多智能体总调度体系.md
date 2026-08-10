@@ -25,13 +25,13 @@
 - 后端：FastAPI、SQLAlchemy、Alembic、MySQL 8、Redis。
 - 前端：Vue 3、TypeScript、Element Plus、SSE。
 - Agent 运行：DeepSeek Responses 兼容运行时、工具循环、审批恢复、请求级 Orchestrator。
-- 生产：五个容器 `cr_backend/cr_frontend/cr_mysql/cr_redis/cr_clamav` 均健康，Alembic 为 `029 (head)`。
+- 生产：五个容器 `cr_backend/cr_frontend/cr_mysql/cr_redis/cr_clamav` 均健康，Alembic 为 `030 (head)`。
 - 风险：生产源码分支、release 指针与容器 release 标识不一致；磁盘使用率 80%。发布必须使用精确文件清单、数据库备份和可回滚镜像，不得以本地工作树覆盖生产仓库。
 
 ### 3.2 现有能力
 
-- `AgentRegistry`：17 个真实运行时 Agent。
-- `contracts.py`：32 个 Agent 职责契约，其中 15 个由确定性服务承载。
+- `AgentRegistry`：注册表包含 17 个类级定义；按 `contracts.py` 去重并以最终可寻址类型归类后，生产 `ListAgents` 返回 14 个 runtime。
+- `contracts.py`：32 个 Agent 职责契约，最终归类为 14 个 runtime 与 18 个确定性 service。
 - `MetaGPT Environment/Role/Message`：具备进程内定向消息、协作白名单和消息字段校验。
 - `AgentResponseRun`：保存同一用户、surface、session 的 Responses 检查点。
 - `AgentEventBus`：支持 Redis relay 和按用户隔离的 SSE。
@@ -52,11 +52,11 @@
 |---|---:|---|
 | 小菱入口 | 2 个 surface | `chat_assistant`（用户端）与 `manager`（管理端）共用小菱人格、会话与消息协议 |
 | 核心编排 | 1 | `orchestrator` 负责路由、依赖、结果归并 |
-| 真实运行时专业 Agent | 14 | 语言、项目、审查、安全、文件、报表、规则、进化、沙箱、测试、运维等现有实例 |
-| 确定性服务型 Agent | 15 | 审批、策略、调度、记忆、知识蒸馏、监控、反思、告警、质量/模型/报告/数据校验、成本和事件响应 |
+| 真实运行时专业 Agent | 14 | `chat_assistant`、`orchestrator`、语言、项目、审查、安全、文件、报表、规则、进化、沙箱等现有实例 |
+| 确定性服务型 Agent | 18 | `manager`、运维、审批、策略、调度、记忆、知识蒸馏、监控、反思、告警、测试验证、沙箱部署、质量/模型/报告/数据校验、成本和事件响应 |
 | 动态成员 | 运行时变化 | 已发布自定义 Agent与同账户已注册会话 |
 
-用户示例能力按真实项目复用：页面操作由用户/管理员能力网关承担；报错处理由告警与事件响应链承担；数据分析由 Dashboard 与 DataIntegrity 承担；预警预判由 Monitor、Alert、Reflection、Evolution 闭环承担；运维由 Operations 承担；信息汇总由 Orchestrator 与 Reporter 承担。
+生产实测 `ListAgents` 返回 `runtime=14/service=18/custom=2/session=5`，合计 39 个可寻址对象；其中内置 Agent 为 32 个（14 runtime + 18 service），自定义 Agent 和会话按账户动态变化。用户示例能力按真实项目复用：页面操作由用户/管理员能力网关承担；报错处理由告警与事件响应链承担；数据分析由 Dashboard 与 DataIntegrity 承担；预警预判由 Monitor、Alert、Reflection、Evolution 闭环承担；运维由 Operations 承担；信息汇总由 Orchestrator 与 Reporter 承担。
 
 ## 5. 不纳入范围
 
