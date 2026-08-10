@@ -37,3 +37,25 @@ export function agentMeshToolCalls(
     }
   })
 }
+
+export function settleAgentMeshToolCalls(
+  toolCalls: ResponseToolCall[] | undefined,
+  succeeded: boolean,
+  runStatus: string | null | undefined,
+  error?: string | null,
+): ResponseToolCall[] {
+  return (toolCalls ?? []).map((toolCall, index) => {
+    if (index > 0) return toolCall
+    if (succeeded && runStatus === 'completed') {
+      return { ...toolCall, status: 'completed', error: undefined }
+    }
+    if (runStatus === 'failed' || runStatus === 'cancelled') {
+      return {
+        ...toolCall,
+        status: 'failed',
+        error: error || (runStatus === 'cancelled' ? '响应已取消' : '响应执行失败'),
+      }
+    }
+    return { ...toolCall, status: 'running' }
+  })
+}

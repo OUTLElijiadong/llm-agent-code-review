@@ -52,7 +52,7 @@ import {
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
 import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
-import { agentMeshToolCalls } from '@/utils/agentMeshTimeline'
+import { agentMeshToolCalls, settleAgentMeshToolCalls } from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import {
   autoTitleAgentChatSession,
@@ -401,9 +401,12 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     messages: [],
     mesh_message_id: message.message_id,
   })
-  if (toolCalls[0]) {
-    toolCalls[0].status = succeeded && sessionRun.value?.status === 'completed' ? 'completed' : 'running'
-  }
+  timeline.toolCalls = settleAgentMeshToolCalls(
+    timeline.toolCalls,
+    succeeded,
+    sessionRun.value?.status,
+    sessionRun.value?.error,
+  )
   return succeeded
 }
 
