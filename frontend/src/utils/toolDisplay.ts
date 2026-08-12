@@ -84,6 +84,17 @@ const TOOL_META: Record<string, ToolMeta> = {
   // 页面能力(帮我操作)
   user_execute_capability: { label: '执行页面操作', running: '小菱正在帮你操作页面…', group: 'capability', isPageAction: true },
   admin_execute_capability: { label: '执行管理操作', running: '小菱正在执行管理操作…', group: 'capability', isPageAction: true },
+
+  // 多智能体编排(子 Agent 团队)
+  create_agent_team: { label: '创建子Agent团队', running: '小菱正在组建子Agent团队…', group: 'capability', isPageAction: true },
+  get_agent_team: { label: '查看团队进度', running: '小菱正在查看团队进度…', group: 'capability' },
+  list_agent_teams: { label: '查看团队列表', running: '小菱正在查看团队列表…', group: 'capability' },
+  retry_agent_team: { label: '重试失败任务', running: '小菱正在重试失败任务…', group: 'capability', isPageAction: true },
+  cancel_agent_team: { label: '取消团队', running: '小菱正在取消团队…', group: 'capability', isPageAction: true },
+  archive_agent_team: { label: '归档团队', running: '小菱正在归档团队…', group: 'capability' },
+  send_agent_message: { label: '给子Agent发消息', running: '小菱正在给子Agent派活…', group: 'capability' },
+  receive_agent_message: { label: '接收子Agent消息', running: '小菱正在接收子Agent反馈…', group: 'capability' },
+  dispatch_agent_task: { label: '派发子任务', running: '小菱正在派发子任务…', group: 'capability' },
 }
 
 /** 前缀兜底规则(命中第一个匹配项)。 */

@@ -57,3 +57,16 @@ describe('toolDisplay', () => {
     expect(toolRunningPhrase('deploy_project_sandbox')).toContain('沙箱')
   })
 })
+
+describe('toolDisplay 多智能体编排工具', () => {
+  it('create_agent_team 映射为中文而非下划线函数名', () => {
+    expect(toolDisplayInfo('create_agent_team').label).toBe('创建子Agent团队')
+    expect(toolDisplayInfo('create_agent_team').label).not.toContain('_')
+    expect(toolDisplayInfo('create_agent_team').running).toContain('组建子Agent团队')
+  })
+  it('get_agent_team/retry/cancel 编排工具均有中文映射', () => {
+    expect(toolDisplayInfo('get_agent_team').label).toBe('查看团队进度')
+    expect(toolDisplayInfo('retry_agent_team').label).toBe('重试失败任务')
+    expect(toolDisplayInfo('cancel_agent_team').label).toBe('取消团队')
+  })
+})
