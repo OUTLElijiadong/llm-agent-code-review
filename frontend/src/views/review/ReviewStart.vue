@@ -158,7 +158,6 @@ import { useRouter } from 'vue-router'
 import type { FormInstance } from 'element-plus'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
-import { formatFileSize } from '@/utils/format'
 import { getProjects } from '@/api/project'
 import { list as getCodeFiles } from '@/api/codeFile'
 import { startReview } from '@/api/review'
@@ -188,7 +187,9 @@ const form = reactive({
 })
 
 function formatSize(bytes: number): string {
-  return formatFileSize(bytes)
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 const isAllSelected = computed(() => files.value.length > 0 && form.file_ids.length === files.value.length)

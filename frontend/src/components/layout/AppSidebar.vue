@@ -68,7 +68,7 @@ const menuItems: MenuItem[] = [
   { path: '/reports',   title: '审查报告',   icon: DataBoard,        roles: ['user', 'reviewer'] },
   { path: '/agents',    title: 'Agent 中心', icon: Cpu,              roles: ['admin', 'user', 'reviewer'] },
   { path: '/sandboxes', title: '代码沙箱',   icon: Monitor,          roles: ['admin', 'user', 'reviewer'] },
-  { path: '/agent-studio', title: 'Agent 工坊', icon: EditPen,       roles: ['admin', 'reviewer'] },
+  { path: '/agent-studio', title: 'Agent 工坊', icon: EditPen,       roles: ['admin', 'user', 'reviewer'] },
   { path: '/security',  title: '安全中心',   icon: Aim,              roles: ['admin', 'user', 'reviewer'] },
   { path: '/rules',     title: '审查规则',   icon: List,             roles: ['user', 'reviewer'] },
   { path: '/forum',     title: '开发者论坛', icon: ChatLineSquare,   roles: ['admin', 'user', 'reviewer'] },

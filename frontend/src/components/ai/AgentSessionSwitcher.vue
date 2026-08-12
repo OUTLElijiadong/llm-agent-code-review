@@ -7,10 +7,14 @@ import {
   isPristineAgentChatSession,
   loadAgentChatSessions,
   loadAgentChatSnapshot,
+  mergeAgentChatSessions,
   removeAgentChatSession,
   renameAgentChatSession,
+  saveAgentChatSessions,
   type AgentChatSessionMeta,
+  type DiscoveredAgentChatSession,
 } from '@/utils/agentChatSessions'
+import { listAgentMeshAgents } from '@/api/agentMesh'
 import { isAgentResponseSessionOccupied } from '@/utils/agentResponseSession'
 
 interface Props {
@@ -22,6 +26,8 @@ interface Props {
   idPrefix: string
   /** 本地欢迎语不计入有效消息,用于判断空会话能否复用 */
   welcomeText?: string
+  /** 启用 Agent Mesh 服务端会话发现；user/admin 宿主显式传入。 */
+  discoverRemote?: boolean
 }
 
 const props = defineProps<Props>()
@@ -35,6 +41,9 @@ const activeId = ref('')
 const menuFor = ref('')
 const busyIds = ref<Set<string>>(new Set())
 const panelRef = ref<HTMLElement | null>(null)
+const discoveryLoading = ref(false)
+let discoveryTimer: number | undefined
+let pendingHeartbeatId = ''
 
 const currentTitle = computed(() => (
   sessions.value.find((item) => item.id === activeId.value)?.title ?? '对话'
@@ -64,6 +73,7 @@ function select(sessionId: string): void {
 
 function createSession(): void {
   const meta = createAgentChatSession(props.storageKey, props.idPrefix)
+  pendingHeartbeatId = meta.id
   sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
   notify()
   select(meta.id)
@@ -71,6 +81,7 @@ function createSession(): void {
 
 function dropSession(sessionId: string): void {
   if (inferBusy(sessions.value.find((item) => item.id === sessionId) ?? { id: sessionId, title: '', createdAt: 0 })) return
+  if (pendingHeartbeatId === sessionId) pendingHeartbeatId = ''
   const wasActive = sessionId === activeId.value
   removeAgentChatSession(props.storageKey, sessionId)
   sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
@@ -129,14 +140,20 @@ onMounted(() => {
   if (!sessions.value.length) {
     const meta = createAgentChatSession(props.storageKey, props.idPrefix)
     sessions.value = [meta]
+    pendingHeartbeatId = meta.id
   }
   activeId.value = sessions.value[0].id
   notify()
   emit('select', activeId.value)
+  if (props.discoverRemote) {
+    void refreshFromAgentMesh()
+    discoveryTimer = window.setInterval(() => void refreshFromAgentMesh(), 10_000)
+  }
   document.addEventListener('click', handleOutsideClick)
 })
 
 onBeforeUnmount(() => {
+  if (discoveryTimer !== undefined) window.clearInterval(discoveryTimer)
   document.removeEventListener('click', handleOutsideClick)
 })
 
@@ -153,7 +170,54 @@ function reload(): void {
   notify()
 }
 
-defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload })
+/**
+ * 以 Agent Mesh 服务端会话目录为事实源，合并当前 surface 的本地标题和最近顺序。
+ * 未被服务端发现的本地条目不会继续出现在切换器中，避免账户或 user/admin 数据串线。
+ */
+async function refreshFromAgentMesh(): Promise<void> {
+  if (discoveryLoading.value) return
+  discoveryLoading.value = true
+  const surface = props.storageKey === 'admin' ? 'admin' : 'user'
+  const previousActiveId = activeId.value
+  try {
+    const discovery = await listAgentMeshAgents()
+    const discovered: DiscoveredAgentChatSession[] = discovery.items
+      .filter((item) => item.kind === 'session' && item.surface === surface && item.session_id)
+      .map((item) => ({
+        id: item.session_id,
+        title: item.name,
+        surface,
+        kind: 'session' as const,
+        lastSeenAt: item.last_seen_at,
+      }))
+    let merged = mergeAgentChatSessions(
+      loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix),
+      discovered,
+      surface,
+      new Set(pendingHeartbeatId ? [pendingHeartbeatId] : []),
+    )
+    if (pendingHeartbeatId && discovered.some((item) => item.id === pendingHeartbeatId)) pendingHeartbeatId = ''
+    if (!merged.length) {
+      // 服务端还未收到当前窗口的首次 heartbeat，建立一个干净的当前端会话。
+      const current = createAgentChatSession(props.storageKey, props.idPrefix)
+      pendingHeartbeatId = current.id
+      merged = [current]
+    }
+    saveAgentChatSessions(props.storageKey, merged)
+    sessions.value = merged
+    if (!merged.some((item) => item.id === activeId.value)) {
+      activeId.value = merged[0].id
+      if (activeId.value !== previousActiveId) emit('select', activeId.value)
+    }
+    notify()
+  } catch {
+    // 发现接口短暂不可用时保留本地列表，下一次打开或轮询继续收敛。
+  } finally {
+    discoveryLoading.value = false
+  }
+}
+
+defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh })
 </script>
 
 <template>
@@ -276,7 +340,7 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload }
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  z-index: var(--z-index-popover, 1060);
+  z-index: 20;
   width: 220px;
   max-height: 260px;
   overflow-y: auto;

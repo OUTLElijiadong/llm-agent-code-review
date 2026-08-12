@@ -52,6 +52,13 @@
             <span :class="scoreClass(row.score)">{{ row.score }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="status" label="结论" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
+              {{ row.status === 'success' ? '通过' : '未通过' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="total_issues" label="问题数" width="80" sortable />
         <el-table-column prop="create_time" label="创建时间" width="170" sortable>
           <template #default="{ row }">

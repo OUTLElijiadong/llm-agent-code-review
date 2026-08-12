@@ -131,7 +131,7 @@ const routes: RouteRecordRaw[] = [
         path: 'agent-studio',
         name: 'AgentStudio',
         component: () => import('@/views/agent/AgentStudio.vue'),
-        meta: { title: 'Agent 工坊', roles: ['reviewer', 'admin'], permissions: ['agent_asset:create'] },
+        meta: { title: 'Agent 工坊', roles: ['user', 'reviewer', 'admin'], permissions: ['agent_asset:create'] },
       },
       {
         path: 'forum',

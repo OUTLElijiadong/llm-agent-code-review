@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { CircleCheck, Close, WarningFilled } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { CircleCheck, Close, Upload, WarningFilled } from '@element-plus/icons-vue'
 
 import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { getAgentResponseSession } from '@/api/agentResponses'
+import type { AgentMeshMessage } from '@/api/agentMesh'
+import { getAgentTeam, listAgentTeams, type AgentTeamDetail } from '@/api/agentTeams'
 import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
@@ -16,6 +18,10 @@ import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
+import AgentTeamTrace from '@/components/ai/AgentTeamTrace.vue'
+import AgentTeamWindow from '@/components/ai/AgentTeamWindow.vue'
+import { isPageActionTool, toolRunningPhrase } from '@/utils/toolDisplay'
+import { useAgentActivityStore } from '@/stores/agentActivity'
 import { extractNavigateDirectives } from '@/utils/agentNavigation'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
@@ -30,16 +36,26 @@ import {
 } from '@/utils/clarifyProjectOptions'
 import { streamResponses } from '@/utils/responsesStream'
 import {
-  AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS,
+  agentResponseSessionPollInterval,
   isAgentResponseSessionActive,
   isAgentResponseSessionOccupied,
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
-import { isPageActionTool, toolDisplayInfo, toolRunningPhrase } from '@/utils/toolDisplay'
-import { useAgentActivityStore } from '@/stores/agentActivity'
+import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
+import {
+  agentMeshToolCalls,
+  findAgentMeshTimeline,
+  settleAgentMeshTimeline,
+} from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
-import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
+import { buildAutoValidationPrompt } from '@/utils/autoValidation'
+import {
+  autoTitleAgentChatSession,
+  loadAgentChatSnapshot,
+  saveAgentChatSnapshot,
+  type AgentChatSessionMeta,
+} from '@/utils/agentChatSessions'
 import {
   applyResponseToolEvent,
   attachApprovalToToolCall,
@@ -112,7 +128,7 @@ const router = useRouter()
 const activityStore = useAgentActivityStore()
 
 const MASCOT_NAME = '小菱'
-const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},你的代码审查小助手!可以帮你发起审查、解读报告、查项目与漏洞。点左上角「+」可随时开新对话。`
+const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},Prism 棱镜智能代码审查平台的小助手!我可以帮你发起代码审查、解读报告、查询项目与漏洞。点击左上角「+」可以随时开新对话,多个任务我会并行帮你盯着。`
 
 /** 空状态快捷问题:点击填入输入框并直接发送。 */
 const QUICK_QUESTIONS = ['帮我发起代码审查', '查看我的项目', '有什么安全问题']
@@ -134,6 +150,11 @@ let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
 const sessionRun = ref<Awaited<ReturnType<typeof getAgentResponseSession>>['run']>(null)
 const sessionRestoring = ref(true)
+const sessionPollError = ref('')
+const sessionLastPolledAt = ref('')
+const agentTeams = ref<AgentTeamDetail[]>([])
+const agentTeamLoading = ref(false)
+const agentTeamError = ref('')
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
 
 /** 失败/未完成/超轮数的运行可手动重试（回退策略入口） */
@@ -142,8 +163,22 @@ const canRetryRun = computed(() => {
   return Boolean(status && ['failed', 'incomplete', 'max_rounds_exceeded'].includes(status) && !loading.value)
 })
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+const meshSessions = ref<AgentChatSessionMeta[]>([])
+const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
 const uploading = ref(false)
+
+/** 子 Agent 团队独立悬浮窗:当前点中查看的团队。 */
+const teamWindowVisible = ref(false)
+const teamWindowTeamId = ref<number | null>(null)
+const teamWindowTeam = computed(() => (
+  agentTeams.value.find((team) => team.team_id === teamWindowTeamId.value) ?? null
+))
+
+function openTeamWindow(team: AgentTeamDetail): void {
+  teamWindowTeamId.value = team.team_id
+  teamWindowVisible.value = true
+}
 
 /** 吉祥物与标题栏共享的agent状态:运行中/等待用户/空闲 */
 const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
@@ -162,6 +197,16 @@ const canSend = computed(() => (
   && !sessionRestoring.value
   && !sessionBusy.value
 ))
+
+const meshBridge = createAgentMeshBridge({
+  surface: 'user',
+  getSessionId: () => sessionId.value,
+  getTitle: () => meshSessions.value.find((item) => item.id === sessionId.value)?.title ?? '用户端小菱对话',
+  getSessions: () => meshSessions.value,
+  getActiveRun: () => sessionRun.value,
+  isBusy: isMeshSessionBusy,
+  onMessage: handleMeshMessage,
+})
 
 function messageId(): string {
   return crypto.randomUUID()
@@ -204,6 +249,10 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionRestoreStarted = false
   sessionId.value = nextSessionId
   sessionRun.value = null
+  agentTeams.value = []
+  agentTeamError.value = ''
+  teamWindowVisible.value = false
+  teamWindowTeamId.value = null
   loading.value = false
   showTyping.value = false
   lastActiveToolName.value = ''
@@ -216,7 +265,23 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
 }
 
 function syncBusy(): void {
-  switcherRef.value?.setBusy(sessionId.value, isAgentResponseSessionOccupied(sessionRun.value?.status))
+  const busy = isAgentResponseSessionOccupied(sessionRun.value?.status)
+  if (!busy) backgroundBusySessions.delete(sessionId.value)
+  switcherRef.value?.setBusy(sessionId.value, busy)
+}
+
+function handleSwitcherReady(metas: AgentChatSessionMeta[]): void {
+  meshSessions.value = metas
+  syncBusy()
+  void meshBridge.syncNow()
+}
+
+function isMeshSessionBusy(targetSessionId: string): boolean {
+  if (targetSessionId === sessionId.value) {
+    return loading.value || sessionRestoring.value || sessionBusy.value
+  }
+  if (backgroundBusySessions.has(targetSessionId)) return true
+  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId)?.runStatus)
 }
 
 function restoredMessages(
@@ -247,7 +312,10 @@ function restoredSessionMessages(
         navigations: directives.length ? directives : undefined,
       }
     })
-  const toolCalls = responseToolCallsFromEvents(session.events)
+  const toolCalls = [
+    ...agentMeshToolCalls(session.mesh_messages, `session:user:${session.session_id}`),
+    ...responseToolCallsFromEvents(session.events),
+  ]
   if (!toolCalls.length) return restored
   const timeline: ChatMessage = {
     id: messageId(),
@@ -300,11 +368,13 @@ async function restoreSession(): Promise<void> {
       run: session.run,
       messages: session.messages,
       events: session.events,
+      mesh_messages: session.mesh_messages,
       pending: session.pending,
     })
     const pending = session.pending
     if (!pending) {
       showTyping.value = isAgentResponseSessionActive(session.run?.status)
+      await refreshAgentTeam()
       scheduleSessionPoll()
       return
     }
@@ -325,7 +395,8 @@ async function restoreSession(): Promise<void> {
       target.inputRequest = { ...pending, answer: '', status: 'pending' }
     }
     messages.value.push(target)
-    clearSessionPoll()
+    await refreshAgentTeam()
+    scheduleSessionPoll()
   } catch {
     // HTTP 层已给出错误提示；保留本地会话不覆盖用户输入。
   } finally {
@@ -334,6 +405,82 @@ async function restoreSession(): Promise<void> {
     persistSnapshot()
     await nextTick()
     scrollToBottom()
+    void meshBridge.syncNow()
+  }
+}
+
+async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: string): Promise<boolean> {
+  if (targetSessionId !== sessionId.value) {
+    return runBackgroundMeshMessage(message, targetSessionId)
+  }
+  if (!findAgentMeshTimeline(messages.value, message.message_id)) {
+    messages.value.push({
+      id: messageId(),
+      role: 'assistant',
+      content: '',
+      time: dayjs().format('HH:mm'),
+      trace_id: message.trace_id,
+      toolCalls: agentMeshToolCalls([message], `session:user:${sessionId.value}`),
+    })
+  }
+  await nextTick()
+  scrollToBottom()
+  const succeeded = await runResponse({
+    action: 'start',
+    surface: 'user',
+    session_id: sessionId.value,
+    messages: [],
+    mesh_message_id: message.message_id,
+  })
+  settleAgentMeshTimeline(
+    messages.value,
+    message.message_id,
+    succeeded,
+    sessionRun.value?.status,
+    sessionRun.value?.error,
+  )
+  return succeeded
+}
+
+async function runBackgroundMeshMessage(
+  message: AgentMeshMessage,
+  targetSessionId: string,
+): Promise<boolean> {
+  backgroundBusySessions.add(targetSessionId)
+  switcherRef.value?.setBusy(targetSessionId, true)
+  let waiting = false
+  const handle = streamResponses({
+    action: 'start',
+    surface: 'user',
+    session_id: targetSessionId,
+    messages: [],
+    mesh_message_id: message.message_id,
+  }, {
+    onEvent(event) {
+      if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
+        waiting = true
+      }
+      if (
+        event.type === 'response.completed'
+        || event.type === 'response.incomplete'
+        || event.type === 'response.failed'
+        || event.type === 'response.cancelled'
+        || event.type === 'error'
+      ) {
+        waiting = false
+      }
+    },
+  })
+  try {
+    await handle.done
+    return true
+  } catch {
+    return false
+  } finally {
+    if (!waiting) {
+      backgroundBusySessions.delete(targetSessionId)
+      switcherRef.value?.setBusy(targetSessionId, false)
+    }
   }
 }
 
@@ -349,28 +496,58 @@ function invalidateSessionPoll(): void {
   clearSessionPoll()
 }
 
+/** 团队状态由服务端账本提供,会话切换和轮询均按当前 session 对齐。 */
+async function refreshAgentTeam(generation?: number): Promise<void> {
+  if (!sessionId.value) return
+  const requestedSessionId = sessionId.value
+  const isCurrent = (): boolean => requestedSessionId === sessionId.value
+    && (generation === undefined || generation === sessionPollGeneration)
+  agentTeamLoading.value = true
+  try {
+    const listed = await listAgentTeams({ surface: 'user', session_id: requestedSessionId, limit: 20 })
+    if (!isCurrent()) return
+    if (!listed.items.length) {
+      agentTeams.value = []
+      agentTeamError.value = ''
+      return
+    }
+    const details = await Promise.all(listed.items.map((item) => getAgentTeam(item.team_id)))
+    if (!isCurrent()) return
+    agentTeams.value = details
+    agentTeamError.value = ''
+  } catch {
+    if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
+  } finally {
+    if (isCurrent()) agentTeamLoading.value = false
+  }
+}
+
 function scheduleSessionPoll(): void {
   clearSessionPoll()
-  if (sessionPollStopped || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  if (sessionPollStopped || !sessionId.value) return
   const generation = sessionPollGeneration
   sessionPollTimer = window.setTimeout(() => {
     sessionPollTimer = undefined
     void pollSessionSnapshot(generation)
-  }, AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS)
+  }, agentResponseSessionPollInterval(sessionRun.value?.status))
 }
 
 async function pollSessionSnapshot(generation: number): Promise<void> {
-  if (sessionPollStopped || generation !== sessionPollGeneration || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  if (sessionPollStopped || generation !== sessionPollGeneration) return
   try {
     const session = await getAgentResponseSession('user', sessionId.value)
     if (sessionPollStopped || generation !== sessionPollGeneration) return
+    sessionPollError.value = ''
+    sessionLastPolledAt.value = dayjs().format('HH:mm:ss')
     sessionRun.value = session.run
     if (session.run?.model) modelName.value = session.run.model
+    await refreshAgentTeam(generation)
     if (!loading.value) {
       const signature = JSON.stringify({
         run: session.run,
         messages: session.messages,
         events: session.events,
+        mesh_messages: session.mesh_messages,
         pending: session.pending,
       })
       if (signature !== sessionSnapshotSignature) {
@@ -402,15 +579,11 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
       }
     }
   } catch {
-    // SSE remains the primary channel; transient recovery errors are retried.
+    sessionPollError.value = '同步暂时中断,正在重试'
   } finally {
     syncBusy()
     persistSnapshot()
-    if (
-      !sessionPollStopped
-      && generation === sessionPollGeneration
-      && isAgentResponseSessionActive(sessionRun.value?.status)
-    ) scheduleSessionPoll()
+    if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
   }
 }
 
@@ -434,7 +607,7 @@ function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: str
 function eventErrorMessage(event: ResponseStreamEvent): string {
   if (event.type === 'error') return event.error?.message || event.message || ''
   if (event.type === 'response.incomplete') return '小菱的回答没说完,重发一次试试'
-  if (event.type === 'response.cancelled') return '小菱已停止这次任务'
+  if (event.type === 'response.cancelled') return 'Agent 任务已取消'
   if (event.type !== 'response.failed') return ''
   const error = event.response.error
   if (typeof error === 'string') return error
@@ -663,6 +836,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     showTyping.value = false
     await nextTick()
     scrollToBottom()
+    scheduleSessionPoll()
   }
 }
 
@@ -1031,6 +1205,7 @@ function scrollToBottom(): void {
 const dragActive = ref(false)
 /** 拖拽上传的实时状态,显示在输入区上方让用户知道进展 */
 const uploadStatus = ref('')
+const uploadInput = ref<HTMLInputElement>()
 
 function onDragEnter(event: DragEvent): void {
   if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
@@ -1060,9 +1235,7 @@ function inferProjectLanguage(files: File[]): string {
   return 'Python'
 }
 
-async function onDrop(event: DragEvent): Promise<void> {
-  dragActive.value = false
-  const files = Array.from(event.dataTransfer?.files ?? [])
+async function processIncomingFiles(files: File[]): Promise<void> {
   if (!files.length || uploading.value) return
   uploading.value = true
   uploadStatus.value = `准备上传 ${files.length} 个文件…`
@@ -1084,6 +1257,17 @@ async function onDrop(event: DragEvent): Promise<void> {
   } finally {
     uploading.value = false
   }
+}
+
+async function onDrop(event: DragEvent): Promise<void> {
+  dragActive.value = false
+  await processIncomingFiles(Array.from(event.dataTransfer?.files ?? []))
+}
+
+async function onFileInput(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  await processIncomingFiles(Array.from(input.files ?? []))
+  input.value = ''
 }
 
 /** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
@@ -1141,18 +1325,21 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     try { await updateProject(projectId, { language: uploadedLanguage }) } catch { /* 不影响已上传文件 */ }
   }
   const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
-  const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
+  const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。小菱正在自动启动隔离沙箱全量验证，完成后会返回白盒、黑盒与多 Agent 审查报告。`
   messages.value.push({ id: messageId(), role: 'assistant', content: summary, time: dayjs().format('HH:mm') })
   await nextTick()
   scrollToBottom()
   if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
   else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
-  // 交给 Agent 接手:把上传结果作为一条用户消息发给 Agent,让它按操作手册引导下一步
+  // 上传成功后交给固定全量验证工具，避免模型只回复“下一步做什么”而不执行。
   await runResponse({
     action: 'start',
     surface: 'user',
     session_id: sessionId.value,
-    messages: [...conversationHistory(), { role: 'user', content: `我刚通过拖拽上传了 ${okCount} 个文件,已建好项目「${projectName}」(id=${projectId},语言 ${language})。请告诉我下一步可以做什么。` }],
+    messages: [...conversationHistory(), {
+      role: 'user',
+      content: buildAutoValidationPrompt(projectId, uploadedLanguage, projectName),
+    }],
   })
 }
 
@@ -1182,6 +1369,7 @@ function handleEscape(event: KeyboardEvent): void {
 }
 
 onBeforeUnmount(() => {
+  meshBridge.stop()
   persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
@@ -1190,6 +1378,8 @@ onBeforeUnmount(() => {
   window.clearTimeout(projectSearchTimer)
   window.removeEventListener('keydown', handleEscape)
 })
+
+onMounted(() => meshBridge.start())
 </script>
 
 <template>
@@ -1236,6 +1426,8 @@ onBeforeUnmount(() => {
                   <span class="run-badge" :class="`run-${mascotStatus}`">
                     <i></i>{{ runStatusLabel }}
                   </span>
+                  <span v-if="sessionPollError" class="sync-status is-error" role="status">{{ sessionPollError }}</span>
+                  <span v-else-if="sessionLastPolledAt" class="sync-status" role="status">已同步 {{ sessionLastPolledAt }}</span>
                   <button
                     v-if="canRetryRun"
                     class="retry-run-btn"
@@ -1251,7 +1443,9 @@ onBeforeUnmount(() => {
                   :legacy-key="LEGACY_SESSION_KEY"
                   id-prefix="user"
                   :welcome-text="WELCOME_TEXT"
+                  :discover-remote="true"
                   @select="handleSessionSelect"
+                  @sessions-changed="handleSwitcherReady"
                 />
               </div>
             </div>
@@ -1353,7 +1547,7 @@ onBeforeUnmount(() => {
                     >
                       <div class="plan-step-head">
                         <span class="plan-step-idx">#{{ step.step_index + 1 }}</span>
-                        <span class="plan-tool" :title="step.tool_name">{{ toolDisplayInfo(step.tool_name).label }}</span>
+                        <code class="plan-tool">{{ step.tool_name }}</code>
                         <span
                           class="plan-step-status"
                           :class="step.success ? 'plan-ok' : 'plan-bad'"
@@ -1549,6 +1743,15 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <AgentTeamTrace
+              v-for="(team, index) in agentTeams"
+              :key="team.team_id"
+              :team="team"
+              :loading="agentTeamLoading"
+              :error="index === 0 ? agentTeamError : ''"
+              @open-detail="openTeamWindow"
+            />
+
             <div v-if="showTyping" class="msg-row assistant">
               <div class="msg-avatar">
                 <PrismMascot :size="26" :status="'running'" />
@@ -1567,6 +1770,15 @@ onBeforeUnmount(() => {
               <span class="upload-status-spinner" />
               <span class="upload-status-text">{{ uploadStatus }}</span>
             </div>
+            <input
+              ref="uploadInput"
+              class="source-upload-input"
+              type="file"
+              multiple
+              accept=".py,.js,.jsx,.ts,.tsx,.vue,.html,.css,.java,.go,.php,.rb,.c,.h,.cpp,.cc,.cs,.rs,.json,.yaml,.yml,.toml,.md,.txt,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg"
+              aria-label="选择源码文件"
+              @change="onFileInput"
+            />
             <textarea
               v-model="inputText"
               class="chat-input"
@@ -1575,18 +1787,35 @@ onBeforeUnmount(() => {
               :disabled="loading || uploading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
             />
-            <button
-              class="send-btn"
-              type="button"
-              :disabled="!canSend"
-              @click="sendMessage"
-            >
-              发送
-            </button>
+            <div class="chat-input-actions">
+              <button
+                class="upload-btn"
+                type="button"
+                :disabled="loading || uploading || sessionRestoring || sessionBusy"
+                title="选择源码文件或图片附件"
+                @click="uploadInput?.click()"
+              >
+                <el-icon aria-hidden="true"><Upload /></el-icon>
+                选择源码
+              </button>
+              <button
+                class="send-btn"
+                type="button"
+                :disabled="!canSend"
+                @click="sendMessage"
+              >
+                发送
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </Transition>
+    <AgentTeamWindow
+      v-model:visible="teamWindowVisible"
+      :team="teamWindowTeam"
+      @refreshed="void refreshAgentTeam()"
+    />
   </Teleport>
 </template>
 
@@ -1722,16 +1951,18 @@ onBeforeUnmount(() => {
   background: currentColor;
 }
 .run-idle { color: var(--gray-500); background: var(--gray-100); border-color: var(--gray-200, #e5e6eb); }
-.run-running { color: var(--color-success); background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
+.run-running { color: #2f7a3d; background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
 .run-running i { animation: run-blink 1s ease-in-out infinite; }
-.run-waiting { color: var(--sev-medium); background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
+.run-waiting { color: #b68039; background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
 .run-waiting i { animation: run-blink 1s ease-in-out infinite; }
+.sync-status { color: var(--color-text-secondary); font-size: 9.5px; white-space: nowrap; }
+.sync-status.is-error { color: #c43d36; font-weight: 600; }
 @keyframes run-blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 .chat-progress {
   flex-shrink: 0;
   padding: 6px 20px;
-  font-size: var(--fs-xs);
+  font-size: 11px;
   color: var(--color-text-secondary);
   background: linear-gradient(90deg, rgba(91, 88, 232, 0.06), rgba(61, 188, 217, 0.06));
   border-bottom: 1px solid var(--color-border-light);
@@ -1739,35 +1970,13 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.quick-questions {
-  position: absolute;
-  top: 134px;
-  right: 8px;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--sp-2);
-}
-
-.quick-question {
-  border: 1px solid var(--brand-200);
-  border-radius: 999px;
-  background: var(--brand-50);
-  color: var(--brand-700);
-  font-size: var(--fs-xs);
-  padding: 5px var(--sp-3);
-  cursor: pointer;
-  box-shadow: var(--shadow-1);
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
-
-.quick-question:hover {
-  background: var(--brand-100);
-  border-color: var(--brand-300);
-  transform: translateY(-1px);
+.chat-progress code {
+  font-family: var(--font-mono, monospace);
+  color: var(--brand-600);
+  font-size: 10.5px;
+  background: rgba(91, 88, 232, 0.1);
+  padding: 0 5px;
+  border-radius: 3px;
 }
 
 .chat-drawer.is-dragging { user-select: none; }
@@ -1799,22 +2008,13 @@ onBeforeUnmount(() => {
   font-size: 18px;
 }
 
-/* 模型名对普通用户太技术:弱化展示,hover 时再看清 */
 .model-tag {
-  font-size: var(--fs-xs);
-  padding: 2px var(--sp-2);
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--gray-400);
-  border: 1px solid var(--gray-200);
-  opacity: 0.6;
-  transition: opacity var(--transition-fast);
-}
-.model-tag:hover {
-  opacity: 1;
-  color: var(--brand-600);
-  border-color: var(--brand-200);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
   background: var(--brand-50);
+  color: var(--brand-600);
+  border: 1px solid var(--brand-200);
 }
 
 .close-btn {
@@ -1852,6 +2052,41 @@ onBeforeUnmount(() => {
   z-index: 1;
   pointer-events: none;
   opacity: 0.95;
+}
+
+.quick-questions {
+  position: absolute;
+  top: 134px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+
+.quick-question {
+  border: 1px solid var(--brand-200);
+  border-radius: 999px;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: var(--fs-xs);
+  padding: 5px var(--sp-3);
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.quick-question:hover {
+  background: var(--brand-100);
+  border-color: var(--brand-300);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quick-question { transition: none; }
+  .quick-question:hover { transform: none; }
 }
 
 .mascot-float-enter-active,
@@ -1925,12 +2160,12 @@ onBeforeUnmount(() => {
 .msg-content.markdown-body { white-space: normal; }
 .msg-content.markdown-body :deep(p)        { margin: 0; }
 .msg-content.markdown-body :deep(pre) {
-  background: var(--gray-900); color: var(--gray-100);
+  background: #1e1e2e; color: #cdd6f4;
   border-radius: 6px; padding: 12px;
-  overflow-x: auto; font-size: var(--fs-xs); line-height: 1.5; margin: 8px 0;
+  overflow-x: auto; font-size: 12px; line-height: 1.5; margin: 8px 0;
 }
 .msg-content.markdown-body :deep(code) {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: var(--fs-xs);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px;
 }
 .msg-content.markdown-body :deep(p code) {
   background: var(--gray-100); padding: 1px 5px;
@@ -2041,11 +2276,11 @@ onBeforeUnmount(() => {
   background: #fff;
   border: 1px solid var(--color-border-light, #EEF0F4);
   border-radius: 6px;
-  border-left: 3px solid var(--color-success);
+  border-left: 3px solid #2f9e44;
 
   &.plan-failed {
-    border-left-color: var(--color-danger);
-    background: rgba(220, 73, 97, 0.04);
+    border-left-color: #e5484d;
+    background: rgba(229, 72, 77, 0.04);
   }
 }
 
@@ -2053,18 +2288,19 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--fs-xs);
+  font-size: 11.5px;
 }
 
 .plan-step-idx {
   font-weight: 600;
   color: var(--gray-500, #909399);
-  font-size: var(--fs-xs);
+  font-size: 10.5px;
 }
 
 .plan-tool {
+  font-family: var(--font-mono, monospace);
   color: var(--brand-600, #5B58E8);
-  font-size: var(--fs-xs);
+  font-size: 11px;
   background: rgba(91, 88, 232, 0.08);
   padding: 1px 6px;
   border-radius: 3px;
@@ -2072,22 +2308,22 @@ onBeforeUnmount(() => {
 
 .plan-step-status {
   font-weight: 700;
-  font-size: var(--fs-xs);
+  font-size: 12px;
 
-  &.plan-ok { color: var(--color-success); }
-  &.plan-bad { color: var(--color-danger); }
+  &.plan-ok { color: #2f9e44; }
+  &.plan-bad { color: #e5484d; }
 }
 
 .plan-step-ms {
   margin-left: auto;
-  font-size: var(--fs-xs);
+  font-size: 10.5px;
   color: var(--gray-500, #909399);
   font-family: var(--font-mono, monospace);
 }
 
 .plan-reason {
   margin: 4px 0 0;
-  font-size: var(--fs-xs);
+  font-size: 11.5px;
   color: var(--gray-600, #606266);
   line-height: 1.5;
 }
@@ -2095,22 +2331,22 @@ onBeforeUnmount(() => {
 .plan-args,
 .plan-preview {
   margin-top: 4px;
-  font-size: var(--fs-xs);
+  font-size: 11px;
 
   summary {
     cursor: pointer;
     color: var(--gray-500, #909399);
-    font-size: var(--fs-xs);
+    font-size: 10.5px;
   }
 }
 
 .plan-json {
   margin: 4px 0 0;
   padding: 6px 8px;
-  background: var(--gray-50);
+  background: #f6f7f9;
   border-radius: 4px;
   font-family: var(--font-mono, monospace);
-  font-size: var(--fs-xs);
+  font-size: 10.5px;
   color: var(--gray-700, #303133);
   overflow-x: auto;
   max-height: 120px;
@@ -2119,8 +2355,8 @@ onBeforeUnmount(() => {
 
 .plan-error {
   margin: 4px 0 0;
-  font-size: var(--fs-xs);
-  color: var(--color-danger);
+  font-size: 11px;
+  color: #e5484d;
   word-break: break-all;
 }
 
@@ -2183,28 +2419,28 @@ onBeforeUnmount(() => {
   line-height: 1.4;
 }
 
-.step-complete .step-type { background: rgba(79, 184, 122, 0.12); color: var(--color-success); }
-.step-failed .step-type   { background: rgba(220, 73, 97, 0.12); color: var(--color-danger); }
-.step-clarify .step-type  { background: rgba(217, 168, 87, 0.18); color: var(--sev-medium); }
-.step-dispatch .step-type { background: rgba(91, 88, 232, 0.12); color: var(--brand-500); }
+.step-complete .step-type { background: rgba(79, 184, 122, 0.12); color: #4FB87A; }
+.step-failed .step-type   { background: rgba(220, 73, 97, 0.12); color: #DC4961; }
+.step-clarify .step-type  { background: rgba(217, 168, 87, 0.18); color: #B68039; }
+.step-dispatch .step-type { background: rgba(91, 88, 232, 0.12); color: #5B58E8; }
 
 /* === Clarify 表单 === */
 .clarify-card {
   margin-top: 10px;
-  border: 1px dashed var(--sev-medium);
-  background: var(--sev-medium-bg);
+  border: 1px dashed #D9A857;
+  background: #FFFBF0;
   border-radius: 8px;
   padding: 12px 14px;
 }
 
 .clarify-card.is-danger {
   border-style: solid;
-  border-color: var(--color-danger);
-  background: var(--color-danger-light);
+  border-color: #D54941;
+  background: #FFF6F5;
 }
 
 .clarify-card.is-danger .clarify-head {
-  color: var(--color-danger);
+  color: #B42318;
 }
 
 .clarify-head {
@@ -2212,8 +2448,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  font-size: var(--fs-sm);
-  color: var(--sev-medium);
+  font-size: 13px;
+  color: #8B6A2F;
   margin-bottom: 10px;
 }
 
@@ -2349,6 +2585,49 @@ onBeforeUnmount(() => {
 }
 
 .chat-input:focus { border-color: var(--brand-400); }
+
+.source-upload-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chat-input-actions {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.upload-btn:hover:not(:disabled) {
+  border-color: var(--brand-400);
+  color: var(--brand-600);
+}
+
+.upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .send-btn {
   align-self: flex-end;

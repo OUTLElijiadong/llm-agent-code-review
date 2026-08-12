@@ -71,6 +71,7 @@ export interface ReportListItem {
   project_name: string
   total_issues: number
   score: number
+  status: 'success' | 'failed'
   create_time: string
 }
 

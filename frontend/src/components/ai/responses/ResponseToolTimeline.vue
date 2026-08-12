@@ -10,6 +10,10 @@ const props = defineProps<{ calls: ResponseToolCall[] }>()
 
 const STATUS_LABELS: Record<ResponseToolCallStatus, string> = {
   streaming: '接收参数',
+  queued: '已排队',
+  delivered: '已送达',
+  acknowledged: '已确认',
+  processing: '处理中',
   running: '执行中',
   waiting_approval: '等待批准',
   waiting_input: '等待输入',
@@ -32,9 +36,16 @@ function statusLabel(status: ResponseToolCallStatus): string {
   return STATUS_LABELS[status]
 }
 
-/** 通俗展示名(原始函数名只进 aria-label,不再外露)。 */
+/** 条目主标题:有协作 subject 用 subject,否则把函数名翻译成通俗中文。 */
 function displayLabel(call: ResponseToolCall): string {
-  return toolDisplayInfo(call.name).label
+  return call.subject ? call.subject : toolDisplayInfo(call.name).label
+}
+
+/** aria-label 保留原始函数名,方便辅助技术/调试定位。 */
+function ariaLabel(call: ResponseToolCall): string {
+  const base = call.subject ? `${call.subject}（${call.name}）` : call.name
+  const agent = call.agentCode ? `（${call.agentCode}）` : ''
+  return `${base} ${statusLabel(call.status)}${agent}`
 }
 
 /** 运行中的 RAG 检索类工具给出「检索中」专属文案。 */
@@ -47,7 +58,7 @@ function isRagRunning(call: ResponseToolCall): boolean {
 }
 
 function hasDetail(call: ResponseToolCall): boolean {
-  return Boolean(formatResponseValue(call.argumentsText) || call.resultPreview || call.error)
+  return Boolean(formatResponseValue(call.argumentsText) || call.resultPreview || call.error || call.traceId)
 }
 
 /** 只要还有未展开的技术细节就显示「展开全部」,否则显示「收起全部」。 */
@@ -67,9 +78,9 @@ function argumentsText(call: ResponseToolCall): string {
 </script>
 
 <template>
-  <section v-if="visibleCalls.length" class="response-tool-timeline" aria-label="小菱的操作步骤">
+  <section v-if="visibleCalls.length" class="response-tool-timeline" aria-label="协作与调用记录">
     <header>
-      <span>小菱的操作步骤</span>
+      <span>协作与调用记录 · {{ visibleCalls.length }} 条</span>
       <button
         v-if="visibleCalls.length > 1"
         class="response-tool-collapse-all"
@@ -92,7 +103,7 @@ function argumentsText(call: ResponseToolCall): string {
           role="button"
           tabindex="0"
           :aria-expanded="hasDetail(call) ? expandedKeys.has(call.key) : undefined"
-          :aria-label="`${displayLabel(call)} ${statusLabel(call.status)}${call.agentCode ? `（${call.agentCode}）` : ''}`"
+          :aria-label="ariaLabel(call)"
           @click="hasDetail(call) && toggle(call)"
           @keydown.enter="hasDetail(call) && toggle(call)"
           @keydown.space.prevent="hasDetail(call) && toggle(call)"
@@ -104,7 +115,8 @@ function argumentsText(call: ResponseToolCall): string {
             <Loading v-else />
           </el-icon>
           <div class="response-tool-identity">
-            <span class="response-tool-label">{{ isRagRunning(call) ? displayRunning(call) : displayLabel(call) }}</span>
+            <span class="response-tool-label">{{ isRagRunning(call) && !call.subject ? displayRunning(call) : displayLabel(call) }}</span>
+            <small v-if="call.agentCode">{{ call.direction === 'receive' ? '来自' : '发往' }} {{ call.agentCode }}</small>
           </div>
           <span class="response-tool-status">{{ statusLabel(call.status) }}</span>
           <el-icon v-if="hasDetail(call)" class="response-tool-caret" :class="{ 'is-open': expandedKeys.has(call.key) }">
@@ -113,6 +125,7 @@ function argumentsText(call: ResponseToolCall): string {
         </div>
         <div v-if="hasDetail(call) && expandedKeys.has(call.key)" class="response-tool-detail">
           <p class="response-tool-detail-caption">技术细节 · {{ call.name }}</p>
+          <p v-if="call.traceId" class="response-tool-meta">追踪 ID: {{ call.traceId }}</p>
           <pre v-if="argumentsText(call)" class="response-tool-arguments">{{ argumentsText(call) }}</pre>
           <pre v-if="call.resultPreview" class="response-tool-result">{{ call.resultPreview }}</pre>
           <p v-if="call.error" class="response-tool-error">{{ call.error }}</p>
@@ -163,6 +176,10 @@ function argumentsText(call: ResponseToolCall): string {
 .response-tool-call.is-rejected { border-left-color: var(--color-danger); }
 .response-tool-call.is-waiting_approval,
 .response-tool-call.is-waiting_input { border-left-color: var(--color-warning); }
+.response-tool-call.is-queued { border-left-color: var(--gray-400); }
+.response-tool-call.is-delivered,
+.response-tool-call.is-acknowledged { border-left-color: var(--color-info); }
+.response-tool-call.is-processing { border-left-color: var(--color-warning); }
 /* 运行中条目:轻微呼吸脉冲 */
 .response-tool-call.is-streaming,
 .response-tool-call.is-running {
@@ -193,9 +210,11 @@ function argumentsText(call: ResponseToolCall): string {
 .response-tool-call-head:focus-visible { outline: 2px solid var(--brand-300); outline-offset: 2px; border-radius: var(--r-sm); }
 .response-tool-identity { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 7px; min-width: 0; }
 .response-tool-label { min-width: 0; overflow-wrap: anywhere; color: var(--color-text-primary); font-weight: 550; }
+.response-tool-identity small { color: var(--color-text-placeholder); font-size: 10px; overflow-wrap: anywhere; }
 .response-tool-status { color: var(--color-text-secondary); font-size: var(--fs-xs); white-space: nowrap; }
 .response-tool-state-icon { color: var(--color-info); }
 .is-streaming .response-tool-state-icon,
+.is-processing .response-tool-state-icon,
 .is-running .response-tool-state-icon { animation: response-tool-spin 1s linear infinite; }
 .is-completed .response-tool-state-icon { color: var(--color-success); }
 .is-failed .response-tool-state-icon,
@@ -212,7 +231,9 @@ function argumentsText(call: ResponseToolCall): string {
   margin: 7px 0 0 22px;
   color: var(--color-text-placeholder);
   font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
 }
+.response-tool-meta { margin: 7px 0 0 22px; color: var(--color-text-secondary); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .response-tool-arguments,
 .response-tool-result { max-height: 132px; margin: var(--sp-1) 0 0 22px; padding: 7px var(--sp-2); overflow: auto; border-radius: var(--r-sm); background: var(--gray-50); color: var(--gray-700); font: var(--fs-xs)/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .response-tool-result { background: var(--color-success-light); }
@@ -227,6 +248,7 @@ function argumentsText(call: ResponseToolCall): string {
   .response-tool-call.is-streaming,
   .response-tool-call.is-running { animation: none; }
   .is-streaming .response-tool-state-icon,
+  .is-processing .response-tool-state-icon,
   .is-running .response-tool-state-icon { animation: none; }
 }
 </style>

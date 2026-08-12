@@ -5,6 +5,7 @@ import type {
   ResponseInputRequiredEvent,
   ResponseStreamEvent,
 } from '@/types/responses'
+import type { AgentMeshMessage } from '@/api/agentMesh'
 
 export interface AgentResponseSessionMessage {
   role: 'user' | 'assistant'
@@ -18,6 +19,7 @@ export interface AgentResponseSessionRun {
   rounds: number
   error: string
   output_text?: string
+  mesh_message_id?: string
   updated_at: string
 }
 
@@ -29,6 +31,7 @@ export interface AgentResponseSession {
   events?: ResponseStreamEvent[]
   last_sequence_number?: number
   pending: ResponseApprovalRequiredEvent | ResponseInputRequiredEvent | null
+  mesh_messages?: AgentMeshMessage[]
 }
 
 /**

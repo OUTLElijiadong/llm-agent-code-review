@@ -118,7 +118,7 @@ import { ref, onMounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { Picture, Files, Document, Download } from '@element-plus/icons-vue'
-import { formatDateTime, formatFileSize } from '@/utils/format'
+import dayjs from 'dayjs'
 import { list, downloadBinary } from '@/api/codeFile'
 import type { CodeFileOut } from '@/types/project'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -156,7 +156,21 @@ const downloadingId = ref<number | null>(null)
  * @returns 格式化后的日期字符串
  */
 function formatDate(dateStr: string): string {
-  return formatDateTime(dateStr, 'YYYY-MM-DD HH:mm')
+  return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
+}
+
+/**
+ * 格式化文件大小为人类可读字符串
+ * v3:对齐 T13 规范命名(formatFileSize)
+ * @param bytes - 文件字节数
+ * @returns 可读的文件大小字符串
+ */
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes < 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
 /**

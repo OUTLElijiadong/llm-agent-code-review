@@ -7,7 +7,6 @@ const auth = vi.hoisted(() => ({
     profile: null as null | { id: number; role: string },
     fetchProfile: vi.fn(),
     logout: vi.fn(),
-    clearSession: vi.fn(),
     isAdmin: vi.fn(() => false),
     hasRole: vi.fn<(role: string) => boolean>(() => false),
     hasPermission: vi.fn<(permission: string) => boolean>(() => false),
@@ -91,7 +90,7 @@ describe('router guards', () => {
     auth.user.profile = null
     auth.user.fetchProfile.mockRejectedValueOnce(new Error('expired'))
     expect(await before(route('/login', { public: true }), route('/'))).toBe(true)
-    expect(auth.user.clearSession).toHaveBeenCalledOnce()
+    expect(auth.user.logout).toHaveBeenCalledOnce()
   })
 
   it('redirects unauthenticated users with the original full path', async () => {
@@ -120,23 +119,25 @@ describe('router guards', () => {
       path: '/login',
       query: { redirect: '/projects' },
     })
-    expect(auth.user.clearSession).toHaveBeenCalledOnce()
+    expect(auth.user.logout).toHaveBeenCalledOnce()
   })
 
-  it('enforces legacy role metadata for users while allowing admins to bypass it', async () => {
-    /** 验证普通用户受历史 role 限制，RBAC 管理员保持超级用户语义。 */
+  it('enforces legacy roles and keeps admins inside management or detail routes', async () => {
+    /** 验证管理员仅访问管理端与四类详情路由，普通用户仍受历史 role 限制。 */
     const { before } = installHarness()
     auth.user.token = 'token'
     auth.user.profile = { id: 1, role: 'admin' }
     auth.user.isAdmin.mockReturnValue(true)
 
     expect(await before(route('/admin/users', { role: 'reviewer' }), route('/'))).toBe(true)
-    expect(await before(route('/projects'), route('/'))).toBe(true)
-    expect(await before(route('/code'), route('/'))).toBe(true)
-    expect(await before(route('/rules'), route('/'))).toBe(true)
-    expect(await before(route('/knowledge'), route('/'))).toBe(true)
-    expect(await before(route('/profile/personalization'), route('/'))).toBe(true)
-    expect(await before(route('/security'), route('/'))).toBe(true)
+    expect(await before(route('/projects'), route('/'))).toEqual({
+      path: '/admin/overview',
+      replace: true,
+    })
+    expect(await before(route('/projects/1'), route('/'))).toBe(true)
+    expect(await before(route('/reviews/2'), route('/'))).toBe(true)
+    expect(await before(route('/code/3/file/4'), route('/'))).toBe(true)
+    expect(await before(route('/reports/5'), route('/'))).toBe(true)
 
     auth.user.profile = { id: 2, role: 'user' }
     auth.user.isAdmin.mockReturnValue(false)
@@ -168,7 +169,7 @@ describe('router guards', () => {
 
     expect(
       await before(
-        route('/agents', { roles: ['missing'], permissions: ['missing:permission'] }),
+        route('/admin/agents', { roles: ['missing'], permissions: ['missing:permission'] }),
         route('/'),
       ),
     ).toBe(true)

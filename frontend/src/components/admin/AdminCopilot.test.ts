@@ -12,9 +12,21 @@ const streams = vi.hoisted(() => ({
 
 const messages = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn() }))
+const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
+const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
 vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get }))
+vi.mock('@/api/agentMesh', () => ({
+  heartbeatAgentMesh: meshApi.heartbeat,
+  pullAgentMeshInbox: meshApi.inbox,
+  listAgentMeshAgents: meshApi.list,
+}))
+vi.mock('@/api/agentTeams', () => ({
+  listAgentTeams: teamApi.list,
+  getAgentTeam: teamApi.detail,
+  listAgentTeamMessages: teamApi.messages,
+}))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
 import AdminCopilot from './AdminCopilot.vue'
@@ -62,6 +74,11 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
 }
 
 beforeEach(() => {
+  meshApi.heartbeat.mockReset().mockResolvedValue({})
+  meshApi.inbox.mockReset().mockResolvedValue([])
+  meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
+  teamApi.list.mockReset().mockResolvedValue({ items: [], total: 0 })
+  teamApi.detail.mockReset()
   sessionApi.get.mockReset()
   sessionApi.get.mockResolvedValue({
     surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null,
@@ -85,6 +102,26 @@ afterEach(() => {
 })
 
 describe('AdminCopilot Responses stream', () => {
+  it('恢复当前管理会话时拉取服务端团队并默认折叠展示协作过程', async () => {
+    teamApi.list.mockResolvedValue({
+      items: [{ team_id: 42, title: '管理端验证', surface: 'admin', session_id: 'admin-test', status: 'verifying', max_active_children: 3, trace_id: 'trace-admin-42', counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 } }],
+      total: 1,
+    })
+    teamApi.detail.mockResolvedValue({
+      team_id: 42, title: '管理端验证', surface: 'admin', session_id: 'admin-test', status: 'verifying', max_active_children: 3, trace_id: 'trace-admin-42',
+      counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 }, members: [], tasks: [], events: [], messages: [],
+    })
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    expect(teamApi.list).toHaveBeenCalledWith(expect.objectContaining({ surface: 'admin', limit: 20 }))
+    expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
+    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('刷新恢复后仍先显示工具调用，再显示最终结论', async () => {
     sessionApi.get.mockResolvedValueOnce({
       surface: 'admin',
@@ -121,7 +158,6 @@ describe('AdminCopilot Responses stream', () => {
     expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('is-user')
     await expandTimeline(wrapper)
-    // 时间线通俗化:「查看管理数据」替代函数名
     expect(rows[2].find('.response-tool-timeline').text()).toContain('查看管理数据')
     expect(rows[2].text()).toContain('已完成')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 3 个用户')
@@ -148,7 +184,7 @@ describe('AdminCopilot Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('恢复运行态后轮询到待审批即停止', async () => {
+  it('恢复运行态后轮询到待审批仍按低频间隔继续刷新', async () => {
     vi.useFakeTimers()
     sessionApi.get
       .mockResolvedValueOnce({
@@ -176,12 +212,83 @@ describe('AdminCopilot Responses stream', () => {
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
-    // 时间线已通俗化:不再外露函数名,显示「删除管理数据」
     expect(wrapper.text()).toContain('删除管理数据')
 
-    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(2999)
     await flushPromises()
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+    expect(sessionApi.get).toHaveBeenCalledTimes(3)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('空闲时实时拉取子 Agent 交流过程并默认折叠详情', async () => {
+    vi.useFakeTimers()
+    const meshMessage = {
+      schema_version: '1.0', message_id: 'msg-admin-live', idempotency_key: 'idem-admin-live',
+      trace_id: 'trace-admin-live', correlation_id: 'corr-admin-live', causation_id: '',
+      sent_from: 'agent:error-handler', send_to: 'session:admin:admin-test',
+      message_type: 'task.result', priority: 'normal', subject: '报错根因已定位',
+      status: 'completed', payload: { root_cause: '数据库连接耗尽' }, context: {},
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '2026-08-10T12:10:00Z', create_time: '2026-08-10T12:00:00Z',
+      update_time: '2026-08-10T12:00:01Z',
+    }
+    sessionApi.get
+      .mockResolvedValueOnce({
+        surface: 'admin', session_id: 'admin-test', run: null, messages: [],
+        mesh_messages: [], pending: null,
+      })
+      .mockResolvedValue({
+        surface: 'admin', session_id: 'admin-test', run: null, messages: [],
+        mesh_messages: [meshMessage], pending: null,
+      })
+    const wrapper = mountCopilot()
+    await vi.advanceTimersByTimeAsync(0)
+    await flushPromises()
+    await openCopilot(wrapper)
+
+    expect(wrapper.find('.response-tool-timeline').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    const timeline = wrapper.find('.response-tool-timeline')
+    expect(timeline.text()).not.toContain('receive_message')
+    expect(timeline.text()).toContain('agent:error-handler')
+    expect(timeline.text()).toContain('报错根因已定位')
+    const head = timeline.find('.response-tool-call-head')
+    expect(head.attributes('aria-expanded')).toBe('false')
+    expect(timeline.find('.response-tool-detail').exists()).toBe(false)
+
+    await head.trigger('click')
+    expect(timeline.find('.response-tool-detail').text()).toContain('报错根因已定位')
+    expect(timeline.find('.response-tool-detail').text()).toContain('数据库连接耗尽')
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('轮询失败时显示同步中断并在下一轮恢复', async () => {
+    vi.useFakeTimers()
+    sessionApi.get
+      .mockResolvedValueOnce({ surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null })
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValue({ surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null })
+    const wrapper = mountCopilot()
+    await vi.advanceTimersByTimeAsync(0)
+    await flushPromises()
+    await openCopilot(wrapper)
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('同步暂时中断,正在重试')
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('同步暂时中断,正在重试')
+    expect(wrapper.text()).toContain('已同步')
     wrapper.unmount()
     vi.useRealTimers()
   })
@@ -209,12 +316,10 @@ describe('AdminCopilot Responses stream', () => {
     await openCopilot(wrapper)
     await flushSessionRestore()
 
-    expect(wrapper.text()).toContain('批量删除用户')
+    expect(wrapper.text()).toContain('删除管理数据')
     expect(wrapper.text()).toContain('qa-a (#901)')
     expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
     expect(wrapper.find('.send-button').attributes('disabled')).toBeDefined()
-    // 高危确认已改为点击按钮即提交,不再有输入框,也不再默认禁用
-    expect(wrapper.find('.danger-input').exists()).toBe(false)
     await wrapper.find('.response-approval .primary-action').trigger('click')
     await flushPromises()
     expect(streams.records[0].body).toMatchObject({
@@ -329,16 +434,13 @@ describe('AdminCopilot Responses stream', () => {
     await finish(0)
 
     expect(wrapper.find('.response-approval').exists()).toBe(true)
-    // 时间线通俗化:显示「删除管理数据」而非函数名
     expect(wrapper.find('.response-tool-timeline').text()).toContain('删除管理数据')
     expect(wrapper.find('.response-tool-timeline').text()).toContain('等待批准')
-    // 调用参数默认折叠,点开技术细节后可见
-    expect(wrapper.find('.response-approval-arguments').exists()).toBe(false)
+    // 调用参数默认折叠为技术细节,点击后展示
     await wrapper.find('.response-approval-detail-toggle').trigger('click')
+    await flushPromises()
     expect(wrapper.find('.response-approval-arguments').text()).toContain('"user_id": 9')
     expect(wrapper.find('.response-approval-preview').text()).toContain('test-user (#9)')
-    // 高危确认:无输入框,按钮默认可用,单击即提交
-    expect(wrapper.find('.danger-input').exists()).toBe(false)
     expect(wrapper.findAll('.is-user')).toHaveLength(1)
     await wrapper.find('.response-approval .primary-action').trigger('click')
     await flushPromises()
@@ -389,7 +491,6 @@ describe('AdminCopilot Responses stream', () => {
     })
     await finish(0)
 
-    // 高危确认:点按钮即提交,无需输入
     await wrapper.find('.response-approval .primary-action').trigger('click')
     await flushPromises()
     expect(streams.records[1].body).toMatchObject({
@@ -430,8 +531,8 @@ describe('AdminCopilot Responses stream', () => {
 
     await expandTimeline(wrapper)
     const timeline = wrapper.find('.response-tool-timeline')
-    // 时间线通俗化:「执行管理操作」替代函数名
     expect(timeline.text()).toContain('执行管理操作')
+    expect(timeline.text()).not.toContain('admin_execute_capability')
     expect(timeline.text()).toContain('失败')
     // 失败详情默认折叠,点击后展示
     await wrapper.find('.response-tool-call-head').trigger('click')

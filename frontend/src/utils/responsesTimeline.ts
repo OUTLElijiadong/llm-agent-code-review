@@ -2,6 +2,10 @@ import type { ResponseInputRequiredEvent, ResponseStreamEvent } from '@/types/re
 
 export type ResponseToolCallStatus =
   | 'streaming'
+  | 'queued'
+  | 'delivered'
+  | 'acknowledged'
+  | 'processing'
   | 'running'
   | 'waiting_approval'
   | 'waiting_input'
@@ -16,6 +20,11 @@ export interface ResponseToolCall {
   outputIndex?: number
   name: string
   agentCode?: string
+  /** Agent Mesh 的人类可读协作摘要。 */
+  subject?: string
+  direction?: 'send' | 'receive'
+  traceId?: string
+  protocolStatus?: string
   argumentsText: string
   status: ResponseToolCallStatus
   resultPreview?: string

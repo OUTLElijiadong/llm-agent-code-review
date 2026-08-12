@@ -5,6 +5,7 @@ import {
   findPristineAgentChatSession,
   isPristineAgentChatSession,
   loadAgentChatSessions,
+  mergeAgentChatSessions,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
 } from './agentChatSessions'
@@ -76,5 +77,26 @@ describe('createAgentChatSession 保持既有会话', () => {
     expect(created.id.startsWith('user-')).toBe(true)
     expect(all[0].id).toBe(created.id)
     expect(all.some((item) => item.id === 'user-old')).toBe(true)
+  })
+})
+
+describe('mergeAgentChatSessions 服务端发现优先', () => {
+  it('只保留当前 surface 已发现的会话,并使用本地标题和顺序', () => {
+    const merged = mergeAgentChatSessions(
+      [
+        { id: 'user-local', title: '本地标题', createdAt: 20 },
+        { id: 'user-stale', title: '旧账户标题', createdAt: 10 },
+      ],
+      [
+        { id: 'user-local', title: '服务端标题', surface: 'user', kind: 'session', lastSeenAt: '2026-08-12T00:00:00Z' },
+        { id: 'user-remote', title: '远程会话', surface: 'user', kind: 'session', lastSeenAt: '2026-08-12T00:01:00Z' },
+        { id: 'admin-remote', title: '管理会话', surface: 'admin', kind: 'session', lastSeenAt: '2026-08-12T00:02:00Z' },
+      ],
+      'user',
+    )
+
+    expect(merged.map((item) => item.id)).toEqual(['user-local', 'user-remote'])
+    expect(merged[0].title).toBe('本地标题')
+    expect(merged[1].title).toBe('远程会话')
   })
 })

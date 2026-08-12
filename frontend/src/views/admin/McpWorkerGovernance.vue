@@ -36,8 +36,6 @@ import {
   upsertMcpBinding,
 } from '@/api/mcpGovernance'
 import { listGovernanceAgents } from '@/api/adminGovernance'
-import { formatDateTime } from '@/utils/format'
-import { mcpHealthStatusLabel } from '@/constants/agentStatus'
 import type {
   CapabilityAlias,
   McpBinding,
@@ -113,7 +111,11 @@ function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' {
 }
 
 function formatTime(value?: string | null): string {
-  return formatDateTime(value, 'YYYY-MM-DD HH:mm')
+  if (!value) return '-'
+  const date = new Date(value.endsWith('Z') || /[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(date)
 }
 
 async function loadAll(): Promise<void> {
@@ -380,7 +382,7 @@ onMounted(loadAll)
           <el-table-column prop="url" label="端点" min-width="250" show-overflow-tooltip>
             <template #default="{ row }">{{ row.url || `managed://${row.managed_kind || row.code}` }}</template>
           </el-table-column>
-          <el-table-column label="状态" width="145"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ mcpHealthStatusLabel(row.status) }}</el-tag></template></el-table-column>
+          <el-table-column label="状态" width="145"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ row.status }}</el-tag></template></el-table-column>
           <el-table-column label="凭据/工具" width="130"><template #default="{ row }">{{ row.has_credentials ? '已配置' : row.credential_required ? '待配置' : '无需' }} / {{ row.tool_count }}</template></el-table-column>
           <el-table-column label="操作" width="270" fixed="right">
             <template #default="{ row }">
@@ -447,7 +449,7 @@ onMounted(loadAll)
           <el-table-column prop="endpoint" label="端点" min-width="260" show-overflow-tooltip />
           <el-table-column label="运行时" width="120"><template #default="{ row }"><span class="font-mono">{{ row.runtime }}</span></template></el-table-column>
           <el-table-column label="能力" min-width="220"><template #default="{ row }">{{ row.supported_languages.join(' / ') }}<br><small>{{ row.supported_modes.join(' / ') }}</small></template></el-table-column>
-          <el-table-column label="状态" width="135"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ mcpHealthStatusLabel(row.status) }}</el-tag></template></el-table-column>
+          <el-table-column label="状态" width="135"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ row.status }}</el-tag></template></el-table-column>
           <el-table-column label="最后在线" width="150"><template #default="{ row }">{{ formatTime(row.last_seen_at) }}</template></el-table-column>
           <el-table-column label="操作" width="160" fixed="right"><template #default="{ row }"><el-button link :icon="Check" :loading="acting" @click="runWorkerHealth(row)">检查</el-button><el-button link :icon="Edit" @click="openWorkerDialog(row)">编辑</el-button></template></el-table-column>
         </el-table>

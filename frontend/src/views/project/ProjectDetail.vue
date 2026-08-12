@@ -373,7 +373,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 
 import { Download, Lock, MagicStick, Plus } from '@element-plus/icons-vue'
-import { formatDateTime, formatFileSize } from '@/utils/format'
+import dayjs from 'dayjs'
 import {
   getAuditSourceArchiveResult,
   getProjectDetail,
@@ -429,7 +429,9 @@ const acceptFileTypes = [
 ].join(',')
 
 function formatBytes(value: number): string {
-  return formatFileSize(value)
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`
+  return `${(value / 1024 / 1024).toFixed(1)} MiB`
 }
 
 function archiveStatusTitle(status: string): string {
@@ -477,7 +479,7 @@ const statusLabels: Record<string, string> = {
 }
 
 function formatDate(dateStr: string): string {
-  return formatDateTime(dateStr, 'YYYY-MM-DD HH:mm')
+  return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
 }
 
 function getScoreType(score: number): 'success' | 'warning' | 'danger' {

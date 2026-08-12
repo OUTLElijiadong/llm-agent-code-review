@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Close,
@@ -12,6 +12,8 @@ import {
   type AdminCopilotMessage,
 } from '@/api/adminCopilot'
 import { getAgentResponseSession, type AgentResponseSession } from '@/api/agentResponses'
+import type { AgentMeshMessage } from '@/api/agentMesh'
+import { getAgentTeam, listAgentTeams, type AgentTeamDetail } from '@/api/agentTeams'
 import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
@@ -19,9 +21,9 @@ import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
+import AgentTeamTrace from '@/components/ai/AgentTeamTrace.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import { renderMarkdown } from '@/utils/markdown'
-import { toolRunningPhrase } from '@/utils/toolDisplay'
 import { extractNavigateDirectives } from '@/utils/agentNavigation'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { streamResponses } from '@/utils/responsesStream'
@@ -45,14 +47,25 @@ import type {
   ResponseStreamEvent,
 } from '@/types/responses'
 import {
-  AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS,
+  agentResponseSessionPollInterval,
   isAgentResponseSessionActive,
   isAgentResponseSessionOccupied,
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
+import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
+import {
+  agentMeshToolCalls,
+  findAgentMeshTimeline,
+  settleAgentMeshTimeline,
+} from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
-import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
+import {
+  autoTitleAgentChatSession,
+  loadAgentChatSnapshot,
+  saveAgentChatSnapshot,
+  type AgentChatSessionMeta,
+} from '@/utils/agentChatSessions'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 interface ChatEntry {
@@ -95,10 +108,17 @@ const expandedTables = ref<Set<string>>(new Set())
 const messages = ref<ChatEntry[]>([])
 const sessionRun = ref<AgentResponseSession['run']>(null)
 const sessionRestoring = ref(true)
+const sessionPollError = ref('')
+const sessionLastPolledAt = ref('')
+const agentTeams = ref<AgentTeamDetail[]>([])
+const agentTeamLoading = ref(false)
+const agentTeamError = ref('')
 const router = useRouter()
 
 const sessionId = ref('')
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+const meshSessions = ref<AgentChatSessionMeta[]>([])
+const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
 let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
@@ -130,6 +150,16 @@ const canSend = computed(() => (
   && !sessionRestoring.value
   && !sessionBusy.value
 ))
+
+const meshBridge = createAgentMeshBridge({
+  surface: 'admin',
+  getSessionId: () => sessionId.value,
+  getTitle: () => meshSessions.value.find((item) => item.id === sessionId.value)?.title ?? '管理端小菱对话',
+  getSessions: () => meshSessions.value,
+  getActiveRun: () => sessionRun.value,
+  isBusy: isMeshSessionBusy,
+  onMessage: handleMeshMessage,
+})
 
 function welcomeEntry(): ChatEntry {
   return assistantEntry({ type: 'text', content: WELCOME_TEXT, status: 'completed' })
@@ -166,6 +196,8 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionRestoreStarted = false
   sessionId.value = nextSessionId
   sessionRun.value = null
+  agentTeams.value = []
+  agentTeamError.value = ''
   loading.value = false
   showTyping.value = false
   lastActiveToolName.value = ''
@@ -176,12 +208,24 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
 }
 
 /** 切换器初始化后补同步一次忙碌状态,避免初始化竞态导致标记丢失。 */
-function handleSwitcherReady(): void {
+function handleSwitcherReady(metas: AgentChatSessionMeta[]): void {
+  meshSessions.value = metas
   syncBusy()
+  void meshBridge.syncNow()
 }
 
 function syncBusy(): void {
-  switcherRef.value?.setBusy(sessionId.value, isAgentResponseSessionOccupied(sessionRun.value?.status))
+  const busy = isAgentResponseSessionOccupied(sessionRun.value?.status)
+  if (!busy) backgroundBusySessions.delete(sessionId.value)
+  switcherRef.value?.setBusy(sessionId.value, busy)
+}
+
+function isMeshSessionBusy(targetSessionId: string): boolean {
+  if (targetSessionId === sessionId.value) {
+    return loading.value || sessionRestoring.value || sessionBusy.value
+  }
+  if (backgroundBusySessions.has(targetSessionId)) return true
+  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId)?.runStatus)
 }
 
 function now(): string {
@@ -213,14 +257,40 @@ function invalidateSessionPoll(): void {
   clearSessionPoll()
 }
 
+/** 团队账本是服务端事实源;会话恢复和每次轮询都重新读取当前会话的最新团队。 */
+async function refreshAgentTeam(generation?: number): Promise<void> {
+  if (!sessionId.value) return
+  const requestedSessionId = sessionId.value
+  const isCurrent = (): boolean => requestedSessionId === sessionId.value
+    && (generation === undefined || generation === sessionPollGeneration)
+  agentTeamLoading.value = true
+  try {
+    const listed = await listAgentTeams({ surface: 'admin', session_id: requestedSessionId, limit: 20 })
+    if (!isCurrent()) return
+    if (!listed.items.length) {
+      agentTeams.value = []
+      agentTeamError.value = ''
+      return
+    }
+    const details = await Promise.all(listed.items.map((item) => getAgentTeam(item.team_id)))
+    if (!isCurrent()) return
+    agentTeams.value = details
+    agentTeamError.value = ''
+  } catch {
+    if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
+  } finally {
+    if (isCurrent()) agentTeamLoading.value = false
+  }
+}
+
 function scheduleSessionPoll(): void {
   clearSessionPoll()
-  if (sessionPollStopped || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  if (sessionPollStopped || !sessionId.value) return
   const generation = sessionPollGeneration
   sessionPollTimer = window.setTimeout(() => {
     sessionPollTimer = undefined
     void pollSessionSnapshot(generation)
-  }, AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS)
+  }, agentResponseSessionPollInterval(sessionRun.value?.status))
 }
 
 function pendingEntry(session: AgentResponseSession, restoredTime: string): ChatEntry | null {
@@ -263,7 +333,10 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
         navigations: directives.length ? directives : undefined,
       }
     })
-  const toolCalls = responseToolCallsFromEvents(session.events)
+  const toolCalls = [
+    ...agentMeshToolCalls(session.mesh_messages, `session:admin:${session.session_id}`),
+    ...responseToolCallsFromEvents(session.events),
+  ]
   if (!toolCalls.length) return restored
   const timeline: ChatEntry = {
     ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
@@ -285,13 +358,13 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
 function applySessionSnapshot(session: AgentResponseSession): void {
   sessionRun.value = session.run
   if (!loading.value) showTyping.value = isAgentResponseSessionActive(session.run?.status)
-  if (isAgentResponseSessionActive(session.run?.status)) scheduleSessionPoll()
-  else clearSessionPoll()
+  scheduleSessionPoll()
 
   const signature = JSON.stringify({
     run: session.run,
     messages: session.messages,
     events: session.events,
+    mesh_messages: session.mesh_messages,
     pending: session.pending,
   })
   if (signature === sessionSnapshotSignature) return
@@ -313,22 +386,20 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   if (
     sessionPollStopped
     || generation !== sessionPollGeneration
-    || !isAgentResponseSessionActive(sessionRun.value?.status)
   ) return
   try {
     const session = await getAgentResponseSession('admin', sessionId.value)
     if (sessionPollStopped || generation !== sessionPollGeneration) return
+    sessionPollError.value = ''
+    sessionLastPolledAt.value = now()
     applySessionSnapshot(session)
+    await refreshAgentTeam(generation)
   } catch {
-    // SSE remains the primary live channel; a transient poll failure is retried.
+    sessionPollError.value = '同步暂时中断,正在重试'
   } finally {
     syncBusy()
     persistSnapshot()
-    if (
-      !sessionPollStopped
-      && generation === sessionPollGeneration
-      && isAgentResponseSessionActive(sessionRun.value?.status)
-    ) scheduleSessionPoll()
+    if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
   }
 }
 
@@ -338,6 +409,7 @@ async function restoreSession(): Promise<void> {
   try {
     const session = await getAgentResponseSession('admin', sessionId.value)
     applySessionSnapshot(session)
+    await refreshAgentTeam()
   } catch {
     // HTTP 层已给出错误提示；保留空对话仍允许用户重试。
   } finally {
@@ -345,6 +417,77 @@ async function restoreSession(): Promise<void> {
     syncBusy()
     persistSnapshot()
     await scrollToBottom()
+    void meshBridge.syncNow()
+  }
+}
+
+async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: string): Promise<boolean> {
+  if (targetSessionId !== sessionId.value) {
+    return runBackgroundMeshMessage(message, targetSessionId)
+  }
+  if (!findAgentMeshTimeline(messages.value, message.message_id)) {
+    messages.value.push({
+      ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
+      toolCalls: agentMeshToolCalls([message], `session:admin:${sessionId.value}`),
+    })
+  }
+  await scrollToBottom()
+  const succeeded = await runResponse({
+    action: 'start',
+    surface: 'admin',
+    session_id: sessionId.value,
+    messages: [],
+    mesh_message_id: message.message_id,
+  })
+  settleAgentMeshTimeline(
+    messages.value,
+    message.message_id,
+    succeeded,
+    sessionRun.value?.status,
+    sessionRun.value?.error,
+  )
+  return succeeded
+}
+
+async function runBackgroundMeshMessage(
+  message: AgentMeshMessage,
+  targetSessionId: string,
+): Promise<boolean> {
+  backgroundBusySessions.add(targetSessionId)
+  switcherRef.value?.setBusy(targetSessionId, true)
+  let waiting = false
+  const handle = streamResponses({
+    action: 'start',
+    surface: 'admin',
+    session_id: targetSessionId,
+    messages: [],
+    mesh_message_id: message.message_id,
+  }, {
+    onEvent(event) {
+      if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
+        waiting = true
+      }
+      if (
+        event.type === 'response.completed'
+        || event.type === 'response.incomplete'
+        || event.type === 'response.failed'
+        || event.type === 'response.cancelled'
+        || event.type === 'error'
+      ) {
+        waiting = false
+      }
+    },
+  })
+  try {
+    await handle.done
+    return true
+  } catch {
+    return false
+  } finally {
+    if (!waiting) {
+      backgroundBusySessions.delete(targetSessionId)
+      switcherRef.value?.setBusy(targetSessionId, false)
+    }
   }
 }
 
@@ -742,6 +885,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     loading.value = false
     showTyping.value = false
     await scrollToBottom()
+    scheduleSessionPoll()
   }
 }
 
@@ -853,12 +997,15 @@ function handleAlertAction(prompt?: string): void {
 }
 
 onBeforeUnmount(() => {
+  meshBridge.stop()
   persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
   activeResponse?.abort()
   window.removeEventListener('keydown', handleKeydown)
 })
+
+onMounted(() => meshBridge.start())
 </script>
 
 <template>
@@ -906,6 +1053,8 @@ onBeforeUnmount(() => {
             <div class="copilot-title-line">
               <strong>{{ ASSISTANT_NAME }}</strong>
               <span class="copilot-run-badge" :class="`run-${mascotStatus}`"><i></i>{{ runStatusLabel }}</span>
+              <span v-if="sessionPollError" class="copilot-sync-status is-error" role="status">{{ sessionPollError }}</span>
+              <span v-else-if="sessionLastPolledAt" class="copilot-sync-status" role="status">已同步 {{ sessionLastPolledAt }}</span>
               <button
                 v-if="canRetryRun"
                 class="retry-run-btn"
@@ -921,6 +1070,7 @@ onBeforeUnmount(() => {
               :legacy-key="LEGACY_SESSION_KEY"
               id-prefix="admin"
               :welcome-text="WELCOME_TEXT"
+              :discover-remote="true"
               @select="handleSessionSelect"
               @sessions-changed="handleSwitcherReady"
             />
@@ -932,7 +1082,7 @@ onBeforeUnmount(() => {
       </header>
 
       <div v-if="mascotStatus === 'running' && lastActiveToolName" class="copilot-progress">
-        {{ toolRunningPhrase(lastActiveToolName) }}
+        正在执行 <code>{{ lastActiveToolName }}</code>
       </div>
 
       <div ref="messageArea" class="copilot-messages" aria-live="polite" @click="onMessageClick">
@@ -1062,6 +1212,14 @@ onBeforeUnmount(() => {
             <time>{{ entry.time }}</time>
           </div>
         </article>
+
+        <AgentTeamTrace
+          v-for="(team, index) in agentTeams"
+          :key="team.team_id"
+          :team="team"
+          :loading="agentTeamLoading"
+          :error="index === 0 ? agentTeamError : ''"
+        />
 
         <div v-if="showTyping" class="typing-row">
           <div class="message-avatar">
@@ -1220,6 +1378,8 @@ input { font: inherit; }
 .copilot-run-badge.run-running i { animation: copilot-run-blink 1s ease-in-out infinite; }
 .copilot-run-badge.run-waiting { color: #b68039; background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
 .copilot-run-badge.run-waiting i { animation: copilot-run-blink 1s ease-in-out infinite; }
+.copilot-sync-status { color: var(--agent-text-secondary); font-size: 9.5px; white-space: nowrap; }
+.copilot-sync-status.is-error { color: var(--agent-danger); font-weight: 600; }
 @keyframes copilot-run-blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 .copilot-progress {

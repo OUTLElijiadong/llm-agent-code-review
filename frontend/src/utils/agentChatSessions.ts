@@ -11,6 +11,17 @@ export interface AgentChatSessionMeta {
   createdAt: number
 }
 
+/**
+ * Agent Mesh 会话发现的最小字段；故意不依赖 API 模块，避免 localStorage 工具和网络层互相耦合。
+ */
+export interface DiscoveredAgentChatSession {
+  id: string
+  title?: string
+  surface: 'user' | 'admin'
+  kind: 'session'
+  lastSeenAt?: string
+}
+
 export interface AgentChatSnapshotMessage {
   role: 'user' | 'assistant'
   content: string
@@ -71,6 +82,68 @@ export function loadAgentChatSessions(
   if (existing.length) return existing
   const migrated = migrateLegacy(storageKey, legacyKey, idPrefix)
   return migrated
+}
+
+/** 将服务端发现结果持久化为当前 surface 的本地索引。 */
+export function saveAgentChatSessions(storageKey: string, metas: AgentChatSessionMeta[]): void {
+  writeIndex(storageKey, metas)
+}
+
+/**
+ * 将服务端 Agent Mesh 会话与本地标题/顺序缓存合并。
+ *
+ * 服务端是会话集合的事实源；本地只用于已发现会话的标题和最近顺序。
+ * preserveIds 仅用于首次心跳尚未落库的当前会话，下一次刷新会按服务端集合清理。
+ */
+export function mergeAgentChatSessions(
+  local: AgentChatSessionMeta[],
+  discovered: DiscoveredAgentChatSession[],
+  surface: 'user' | 'admin',
+  preserveIds: ReadonlySet<string> = new Set(),
+): AgentChatSessionMeta[] {
+  const remote = discovered.filter((item) => (
+    item.kind === 'session'
+    && item.surface === surface
+    && typeof item.id === 'string'
+    && item.id.length > 0
+  ))
+  const remoteById = new Map(remote.map((item) => [item.id, item]))
+  const result: AgentChatSessionMeta[] = []
+  const included = new Set<string>()
+
+  const toMeta = (item: DiscoveredAgentChatSession, cached?: AgentChatSessionMeta): AgentChatSessionMeta => {
+    const parsedLastSeen = item.lastSeenAt ? Date.parse(item.lastSeenAt) : Number.NaN
+    return {
+      id: item.id,
+      // 本地标题包含用户自动命名；没有缓存时才采用服务端标题。
+      title: cached?.title?.trim() || item.title?.trim() || '默认对话',
+      createdAt: cached?.createdAt ?? (Number.isFinite(parsedLastSeen) ? parsedLastSeen : Date.now()),
+    }
+  }
+
+  // 先按本地顺序输出仍被服务端发现的会话，保留最近使用顺序。
+  for (const cached of local) {
+    const item = remoteById.get(cached.id)
+    if (!item || included.has(item.id)) continue
+    result.push(toMeta(item, cached))
+    included.add(item.id)
+  }
+
+  // 服务端新发现的会话按服务端 last_seen 顺序追加。
+  for (const item of remote) {
+    if (included.has(item.id)) continue
+    result.push(toMeta(item))
+    included.add(item.id)
+  }
+
+  // 首次发现可能早于当前会话的 heartbeat；只临时保留当前会话，避免切换器丢失当前上下文。
+  for (const cached of local) {
+    if (!preserveIds.has(cached.id) || included.has(cached.id)) continue
+    result.unshift(cached)
+    included.add(cached.id)
+  }
+
+  return result.slice(0, 30)
 }
 
 export function createAgentChatSession(

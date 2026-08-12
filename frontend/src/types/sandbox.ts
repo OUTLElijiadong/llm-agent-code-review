@@ -45,6 +45,7 @@ export interface SandboxEnvironment {
   status: string
   runtime: string
   source_sha256: string
+  source_revision_id?: number | null
   preview_path?: string | null
   remote_target_url?: string | null
   expires_at: string

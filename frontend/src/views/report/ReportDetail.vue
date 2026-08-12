@@ -403,7 +403,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ArrowLeft, ArrowDown, Document, Download, Printer, View } from '@element-plus/icons-vue'
-import { formatDateTime } from '@/utils/format'
+import dayjs from 'dayjs'
 import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -570,7 +570,8 @@ const riskLevel = computed(() => {
 })
 
 function formatDate(s?: string): string {
-  return formatDateTime(s, 'YYYY-MM-DD HH:mm')
+  if (!s) return '-'
+  return dayjs(s).format('YYYY-MM-DD HH:mm')
 }
 
 function formatDuration(ms: number): string {

@@ -13,9 +13,21 @@ const streams = vi.hoisted(() => ({
 
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn() }))
+const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
+const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
 vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get }))
+vi.mock('@/api/agentMesh', () => ({
+  heartbeatAgentMesh: meshApi.heartbeat,
+  pullAgentMeshInbox: meshApi.inbox,
+  listAgentMeshAgents: meshApi.list,
+}))
+vi.mock('@/api/agentTeams', () => ({
+  listAgentTeams: teamApi.list,
+  getAgentTeam: teamApi.detail,
+  listAgentTeamMessages: teamApi.messages,
+}))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
 import AgentChatDrawer from './AgentChatDrawer.vue'
@@ -56,6 +68,11 @@ async function finish(index: number): Promise<void> {
 beforeEach(() => {
   // 组件在 setup 顶层使用 useAgentActivityStore,测试环境需先激活 Pinia
   setActivePinia(createPinia())
+  meshApi.heartbeat.mockReset().mockResolvedValue({})
+  meshApi.inbox.mockReset().mockResolvedValue([])
+  meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
+  teamApi.list.mockReset().mockResolvedValue({ items: [], total: 0 })
+  teamApi.detail.mockReset()
   sessionApi.get.mockReset()
   sessionApi.get.mockResolvedValue({
     surface: 'user', session_id: 'user-test', run: null, messages: [], pending: null,
@@ -91,6 +108,23 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
 }
 
 describe('AgentChatDrawer Responses stream', () => {
+  it('恢复当前会话时拉取服务端团队并默认折叠展示协作过程', async () => {
+    teamApi.list.mockResolvedValue({
+      items: [{ team_id: 42, title: '发布前验证', surface: 'user', session_id: 'user-test', status: 'running', max_active_children: 3, trace_id: 'trace-42', counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 } }],
+      total: 1,
+    })
+    teamApi.detail.mockResolvedValue({
+      team_id: 42, title: '发布前验证', surface: 'user', session_id: 'user-test', status: 'running', max_active_children: 3, trace_id: 'trace-42',
+      counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 }, members: [], tasks: [], events: [], messages: [],
+    })
+    const wrapper = await mountReadyDrawer()
+
+    expect(teamApi.list).toHaveBeenCalledWith(expect.objectContaining({ surface: 'user', limit: 20 }))
+    expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
+    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('刷新恢复后仍先显示工具调用，再显示最终结论', async () => {
     sessionApi.get.mockResolvedValueOnce({
       surface: 'user',
@@ -149,7 +183,7 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('恢复运行态后轮询到动态追问即停止', async () => {
+  it('恢复运行态后轮询到动态追问仍按低频间隔继续刷新', async () => {
     vi.useFakeTimers()
     sessionApi.get
       .mockResolvedValueOnce({
@@ -175,9 +209,77 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('你指的是哪个 Agent？')
 
-    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(2999)
     await flushPromises()
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+    expect(sessionApi.get).toHaveBeenCalledTimes(3)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('空闲时实时拉取子 Agent 交流过程并默认折叠详情', async () => {
+    vi.useFakeTimers()
+    const meshMessage = {
+      schema_version: '1.0', message_id: 'msg-user-live', idempotency_key: 'idem-user-live',
+      trace_id: 'trace-user-live', correlation_id: 'corr-user-live', causation_id: '',
+      sent_from: 'agent:data-analysis', send_to: 'session:user:user-test',
+      message_type: 'task.result', priority: 'normal', subject: '数据分析完成',
+      status: 'completed', payload: { anomaly_count: 2 }, context: {}, artifacts: [], errors: [],
+      requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '2026-08-10T12:10:00Z', create_time: '2026-08-10T12:00:00Z',
+      update_time: '2026-08-10T12:00:01Z',
+    }
+    sessionApi.get
+      .mockResolvedValueOnce({
+        surface: 'user', session_id: 'user-test', run: null, messages: [],
+        mesh_messages: [], pending: null,
+      })
+      .mockResolvedValue({
+        surface: 'user', session_id: 'user-test', run: null, messages: [],
+        mesh_messages: [meshMessage], pending: null,
+      })
+    const wrapper = mountDrawer()
+    await vi.advanceTimersByTimeAsync(0)
+    await flushPromises()
+
+    expect(wrapper.find('.response-tool-timeline').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    const timeline = wrapper.find('.response-tool-timeline')
+    expect(timeline.text()).not.toContain('receive_message')
+    expect(timeline.text()).toContain('agent:data-analysis')
+    expect(timeline.text()).toContain('数据分析完成')
+    const head = timeline.find('.response-tool-call-head')
+    expect(head.attributes('aria-expanded')).toBe('false')
+    expect(timeline.find('.response-tool-detail').exists()).toBe(false)
+
+    await head.trigger('click')
+    expect(timeline.find('.response-tool-detail').text()).toContain('数据分析完成')
+    expect(timeline.find('.response-tool-detail').text()).toContain('anomaly_count')
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('轮询失败时显示同步中断并在下一轮恢复', async () => {
+    vi.useFakeTimers()
+    sessionApi.get
+      .mockResolvedValueOnce({ surface: 'user', session_id: 'user-test', run: null, messages: [], pending: null })
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValue({ surface: 'user', session_id: 'user-test', run: null, messages: [], pending: null })
+    const wrapper = await mountReadyDrawer()
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('同步暂时中断,正在重试')
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('同步暂时中断,正在重试')
+    expect(wrapper.text()).toContain('已同步')
     wrapper.unmount()
     vi.useRealTimers()
   })
@@ -500,7 +602,7 @@ describe('AgentChatDrawer Responses stream', () => {
     const timeline = wrapper.find('.response-tool-timeline')
     expect(timeline.text()).toContain('read file')
     expect(timeline.text()).not.toContain('read_file')
-    expect(timeline.text()).not.toContain('project_agent')
+    expect(timeline.text()).toContain('project_agent')
     expect(timeline.text()).toContain('失败')
     // 已完成/失败的调用默认折叠,点击后展示错误详情
     await wrapper.find('.response-tool-call-head').trigger('click')

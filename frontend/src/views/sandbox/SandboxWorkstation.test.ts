@@ -29,7 +29,7 @@ import SandboxWorkstation from './SandboxWorkstation.vue'
 const mountOptions = {
   global: {
     stubs: {
-      'el-alert': { template: '<div><slot /></div>' },
+      'el-alert': { props: ['title', 'type'], template: '<div :data-type="type">{{ title }}<slot /></div>' },
       'el-button': { template: '<button><slot /></button>' },
       'el-checkbox': { template: '<label><slot /></label>' },
       'el-empty': { template: '<div />' },
@@ -161,5 +161,57 @@ describe('SandboxWorkstation Agent output ordering', () => {
     await vm.submit()
     expect(api.createSandbox).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it('shows a finalizing result as pending report generation instead of a failed conclusion', async () => {
+    const finalizing = {
+      ...environment,
+      status: 'finalizing',
+      result: { passed: true, summary: '白盒和黑盒测试已通过' },
+    }
+    api.listSandboxes.mockResolvedValue([finalizing])
+    api.getSandbox.mockResolvedValue(finalizing)
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+
+    const conclusion = wrapper.get('[data-testid="agent-conclusion"]')
+    expect(conclusion.text()).toContain('确定性结果已生成，审查报告生成中')
+    expect(conclusion.find('[data-type]').attributes('data-type')).toBe('warning')
+    expect(wrapper.text()).toContain('自动刷新')
+    wrapper.unmount()
+  })
+
+  it('does not offer renewal while the sandbox is closing', async () => {
+    const stopping = { ...environment, status: 'stopping', result: {} }
+    api.listSandboxes.mockResolvedValue([stopping])
+    api.getSandbox.mockResolvedValue(stopping)
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('续期 24h')
+    expect(wrapper.findAll('button').some((button) => button.text() === '关闭')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps polling a finalizing sandbox after the 2.5 second interval', async () => {
+    vi.useFakeTimers()
+    const finalizing = { ...environment, status: 'finalizing', result: { passed: true } }
+    api.listSandboxes.mockResolvedValue([finalizing])
+    api.getSandbox.mockResolvedValue(finalizing)
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    try {
+      await flushPromises()
+      expect(api.listSandboxes).toHaveBeenCalledTimes(1)
+      expect(api.getSandbox).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2500)
+      await flushPromises()
+
+      expect(api.listSandboxes).toHaveBeenCalledTimes(2)
+      expect(api.getSandbox).toHaveBeenCalledWith('sbx_1')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
   })
 })

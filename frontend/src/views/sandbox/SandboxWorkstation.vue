@@ -26,27 +26,28 @@ import {
 import { listSandboxWorkers } from '@/api/mcpGovernance'
 import { getProjectDetail, getProjects } from '@/api/project'
 import { useUserStore } from '@/stores/user'
-import type { ProjectOut } from '@/types/project'
+import type { ProjectDetailOut, ProjectOut } from '@/types/project'
 import type { SandboxArtifact, SandboxEnvironment, SandboxLanguage, SandboxPurpose, SandboxTestMode } from '@/types/sandbox'
 import type { SandboxWorker } from '@/types/mcpGovernance'
 import {
+  canExtendSandbox,
   canStopSandbox,
-  stageLabel,
   hasSandboxConclusion,
   isRemoteAuthorizationRequired,
   isSandboxActive,
   projectSandboxLanguage,
+  sandboxConclusionPresentation,
+  sandboxStatusLabel,
   sortSandboxEvents,
+  stageLabel,
 } from '@/utils/sandboxPresentation'
-import { formatDateTime, formatFileSize } from '@/utils/format'
-import EmptyState from '@/components/common/EmptyState.vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
 const POLL_INTERVAL_MS = 2500
 const userStore = useUserStore()
 const projects = ref<ProjectOut[]>([])
-const sourceRevisions = ref<Array<{ id: number; revision_no: number; source_sha256: string; repaired_files: string[]; repair_notes: string; create_time?: string | null }>>([])
+const sourceRevisions = ref<ProjectDetailOut['source_revisions']>([])
 const workers = ref<SandboxWorker[]>([])
 const environments = ref<SandboxEnvironment[]>([])
 const selectedId = ref('')
@@ -92,10 +93,6 @@ const dbTypes: Array<{ value: 'none' | 'sqlite' | 'mysql'; label: string; hint: 
 
 const selected = computed(() => environments.value.find((item) => item.public_id === selectedId.value) || null)
 
-function sourceRevisionNo(revisionId: number | null | undefined): number | '-' {
-  if (!revisionId) return '-'
-  return sourceRevisions.value.find((rev) => rev.id === revisionId)?.revision_no ?? '-'
-}
 const selectedFormProject = computed(() => projects.value.find((item) => item.id === form.project_id) || null)
 const selectedProjectLanguage = computed(() => projectSandboxLanguage(selectedFormProject.value?.language))
 const selectedEvents = computed(() => sortSandboxEvents(selected.value?.events || []))
@@ -130,18 +127,10 @@ function syncProjectLanguage(projectId: number | null): void {
   if (language) form.language = language
 }
 
-function statusLabel(status: string): string {
-  return ({
-    queued: '排队中', dispatching: '调度中', running: '运行中', ready: '预览就绪',
-    stopping: '关闭中', succeeded: '已通过', failed: '失败', blocked: '已阻断',
-    stopped: '已关闭', expired: '已到期',
-  } as Record<string, string>)[status] || status
-}
-
 function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' | 'primary' {
   if (status === 'succeeded' || status === 'ready') return 'success'
   if (status === 'failed' || status === 'blocked') return 'danger'
-  if (status === 'queued' || status === 'dispatching' || status === 'running' || status === 'stopping') return 'warning'
+  if (status === 'queued' || status === 'dispatching' || status === 'running' || status === 'finalizing' || status === 'stopping') return 'warning'
   return 'info'
 }
 
@@ -151,7 +140,11 @@ function purposeLabel(item: SandboxEnvironment): string {
 }
 
 function formatTime(value?: string | null): string {
-  return formatDateTime(value, 'MM-DD HH:mm:ss')
+  if (!value) return '-'
+  const date = new Date(value.endsWith('Z') || /[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(date)
 }
 
 function formatScore(value: number): string {
@@ -159,14 +152,9 @@ function formatScore(value: number): string {
 }
 
 function formatBytes(value: number): string {
-  return formatFileSize(value)
-}
-
-function resultSummary(item: SandboxEnvironment): string {
-  const summary = item.result?.summary
-  if (typeof summary === 'string' && summary) return summary
-  if (item.error) return item.error
-  return item.status === 'ready' ? '部署已启动，可创建预览会话。' : '任务已结束，未返回摘要。'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`
 }
 
 function resultEvidence(item: SandboxEnvironment): string {
@@ -368,13 +356,6 @@ watch(() => form.project_id, async (projectId) => {
 })
 watch(() => form.remote_target_url, () => { form.remote_target_authorized = false })
 
-onMounted(async () => {
-  await loadInitial()
-  pollTimer = setInterval(() => {
-    if (environments.value.some((item) => isSandboxActive(item.status))) void refreshSelected(true)
-  }, POLL_INTERVAL_MS)
-})
-
 let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined
 function onAgentTaskComplete(): void {
   if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
@@ -528,11 +509,11 @@ onBeforeUnmount(() => {
                 <b>{{ purposeLabel(item) }} · {{ item.language }}</b>
                 <small>{{ item.public_id }} · {{ formatTime(item.expires_at) }} 到期</small>
               </span>
-              <el-tag size="small" :type="statusType(item.status)">{{ statusLabel(item.status) }}</el-tag>
+              <el-tag size="small" :type="statusType(item.status)">{{ sandboxStatusLabel(item.status) }}</el-tag>
               <el-icon><ArrowRight /></el-icon>
             </button>
           </div>
-          <EmptyState v-else compact description="暂无沙箱任务，先在左侧创建一个吧" />
+          <el-empty v-else description="暂无沙箱任务" :image-size="72" />
         </div>
 
         <div v-if="selected" class="task-detail">
@@ -543,13 +524,13 @@ onBeforeUnmount(() => {
             </div>
             <div class="detail-actions">
               <el-button v-if="selected.status === 'ready' && selected.preview_path" type="primary" :icon="Monitor" :loading="mutating" @click="openPreview">打开预览</el-button>
-              <el-button v-if="isSandboxActive(selected.status)" :icon="Clock" :loading="mutating" @click="extendCurrent">续期 24h</el-button>
+              <el-button v-if="canExtendSandbox(selected.status)" :icon="Clock" :loading="mutating" @click="extendCurrent">续期 24h</el-button>
               <el-button v-if="canStopSandbox(selected.status)" type="danger" plain :icon="CircleClose" :loading="mutating" @click="stopCurrent">关闭</el-button>
             </div>
           </div>
 
           <dl class="fact-grid">
-            <div><dt>状态</dt><dd><el-tag size="small" :type="statusType(selected.status)">{{ statusLabel(selected.status) }}</el-tag></dd></div>
+            <div><dt>状态</dt><dd><el-tag size="small" :type="statusType(selected.status)">{{ sandboxStatusLabel(selected.status) }}</el-tag></dd></div>
             <div><dt>源码指纹</dt><dd class="font-mono">{{ selected.source_sha256.slice(0, 16) }}</dd></div>
             <div><dt>源码来源</dt><dd>{{ selected.source_revision_id ? `修复副本 #${selected.source_revision_id}` : '原始源码' }}</dd></div>
             <div><dt>执行方式</dt><dd>{{ purposeLabel(selected) }}</dd></div>
@@ -579,8 +560,8 @@ onBeforeUnmount(() => {
           <section v-if="hasSandboxConclusion(selected)" class="conclusion-panel" data-testid="agent-conclusion">
             <div class="section-title"><span>执行结论</span></div>
             <el-alert
-              :type="selected.status === 'succeeded' || selected.status === 'ready' ? 'success' : 'error'"
-              :title="resultSummary(selected)"
+              :type="sandboxConclusionPresentation(selected).type"
+              :title="sandboxConclusionPresentation(selected).title"
               :closable="false"
               show-icon
             />
@@ -606,7 +587,7 @@ onBeforeUnmount(() => {
             </div>
           </section>
         </div>
-        <EmptyState v-else class="detail-empty" description="选择任务查看 Agent 调用和测试结论" />
+        <el-empty v-else class="detail-empty" description="选择任务查看 Agent 调用和测试结论" />
       </section>
     </div>
   </div>
@@ -653,7 +634,7 @@ onBeforeUnmount(() => {
 .task-row { width: 100%; min-height: 54px; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto 16px; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-bottom: var(--hairline); background: transparent; color: inherit; cursor: pointer; text-align: left; }
 .task-row:hover, .task-row.active { background: var(--surface-hover); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gray-400); }
-.status-dot.queued, .status-dot.dispatching, .status-dot.running, .status-dot.stopping { background: var(--color-warning); box-shadow: 0 0 0 4px rgba(217, 168, 87, .13); }
+.status-dot.queued, .status-dot.dispatching, .status-dot.running, .status-dot.finalizing, .status-dot.stopping { background: var(--color-warning); box-shadow: 0 0 0 4px rgba(217, 168, 87, .13); }
 .status-dot.succeeded, .status-dot.ready { background: var(--color-success); }
 .status-dot.failed, .status-dot.blocked { background: var(--color-danger); }
 .task-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -687,9 +668,9 @@ onBeforeUnmount(() => {
 .event-head time { font-size: 9px; color: var(--gray-400); }
 .event-body p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--gray-600); overflow-wrap: anywhere; }
 .conclusion-panel { margin-top: 2px; }
-.evidence-output { max-height: 300px; margin: 10px 0 0; padding: 12px; overflow: auto; border: var(--hairline); border-radius: 5px; background: var(--gray-50); color: var(--gray-700); font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.evidence-output { max-height: 300px; margin: 10px 0 0; padding: 12px; overflow: auto; border: var(--hairline); border-radius: 5px; background: #161A24; color: #D9E1F2; font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .empty-line { padding: 18px 0; color: var(--gray-500); font-size: 12px; }
-.detail-empty { display: flex; min-height: 380px; align-items: center; justify-content: center; }
+.detail-empty { min-height: 380px; }
 
 @media (max-width: 1100px) {
   .workstation-grid { grid-template-columns: 330px minmax(0, 1fr); }

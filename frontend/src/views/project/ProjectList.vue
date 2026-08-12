@@ -286,7 +286,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { Connection, Delete as DeleteIcon, Edit as EditIcon, Plus, Search } from '@element-plus/icons-vue'
 
-import { formatDateTime } from '@/utils/format'
+import dayjs from 'dayjs'
 import { getProjects, deleteProject, createProject, updateProject, importRemoteProject } from '@/api/project'
 import { uploadFolder } from '@/api/codeFile'
 import { useUserStore } from '@/stores/user'
@@ -320,14 +320,9 @@ const remoteForm = ref({ url: '', project_name: '', description: '', audit_mode:
 const activeCount = computed(() => projects.value.filter((p) => p.status === 'active').length)
 const archivedCount = computed(() => projects.value.filter((p) => p.status === 'archived').length)
 
-/**
- * 列表/卡片统一使用 YYYY-MM-DD HH:mm,空值回退空串由调用处兜底
- * @param dateStr - 日期字符串
- * @returns 格式化后的日期字符串
- */
 function formatDate(dateStr?: string): string {
   if (!dateStr) return ''
-  return formatDateTime(dateStr, 'YYYY-MM-DD HH:mm')
+  return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
 }
 
 function initials(name: string): string {
