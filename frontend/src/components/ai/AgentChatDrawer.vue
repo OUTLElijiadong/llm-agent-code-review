@@ -36,6 +36,8 @@ import {
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
+import { isPageActionTool, toolDisplayInfo, toolRunningPhrase } from '@/utils/toolDisplay'
+import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
 import {
@@ -106,9 +108,14 @@ const props = defineProps<{ visible: boolean; prefill?: string }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean]; 'consumed-prefill': [] }>()
 
 const router = useRouter()
+/** 全局「小菱工作中」活动信号:驱动彩框与虚拟鼠标。 */
+const activityStore = useAgentActivityStore()
 
 const MASCOT_NAME = '小菱'
-const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},Prism 棱镜智能代码审查平台的小助手!我可以帮你发起代码审查、解读报告、查询项目与漏洞。点击左上角「+」可以随时开新对话,多个任务我会并行帮你盯着。`
+const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},你的代码审查小助手!可以帮你发起审查、解读报告、查项目与漏洞。点左上角「+」可随时开新对话。`
+
+/** 空状态快捷问题:点击填入输入框并直接发送。 */
+const QUICK_QUESTIONS = ['帮我发起代码审查', '查看我的项目', '有什么安全问题']
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
@@ -200,6 +207,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   loading.value = false
   showTyping.value = false
   lastActiveToolName.value = ''
+  activityStore.clear()
   sessionRestoring.value = true
   messages.value = [welcomeMessage()]
   await nextTick()
@@ -425,8 +433,8 @@ function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: str
 
 function eventErrorMessage(event: ResponseStreamEvent): string {
   if (event.type === 'error') return event.error?.message || event.message || ''
-  if (event.type === 'response.incomplete') return '模型响应未完整结束，请重新发起任务'
-  if (event.type === 'response.cancelled') return 'Agent 任务已取消'
+  if (event.type === 'response.incomplete') return '小菱的回答没说完,重发一次试试'
+  if (event.type === 'response.cancelled') return '小菱已停止这次任务'
   if (event.type !== 'response.failed') return ''
   const error = event.response.error
   if (typeof error === 'string') return error
@@ -438,7 +446,7 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
 }
 
 function requestErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : 'Agent 请求失败'
+  return error instanceof Error && error.message ? error.message : '小菱这次没连上,请再试一次'
 }
 
 function setTimelineCallStatus(
@@ -549,6 +557,17 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         showTyping.value = false
         if (event.type === 'response.tool.started' && typeof event.tool_name === 'string' && event.tool_name) {
           lastActiveToolName.value = event.tool_name
+          // 页面操作类工具:点亮全屏彩框 + 虚拟鼠标,让用户感知「小菱正在替我操作」
+          if (isPageActionTool(event.tool_name)) {
+            activityStore.begin(toolRunningPhrase(event.tool_name), event.call_id)
+          }
+        } else if (
+          (event.type === 'response.tool.completed'
+            || event.type === 'response.tool.failed'
+            || event.type === 'response.tool.rejected')
+          && typeof event.call_id === 'string'
+        ) {
+          activityStore.end(event.call_id)
         }
         if (!applyExistingTimelineToolEvent(event)) {
           applyResponseToolEvent(runToolCalls, event)
@@ -594,6 +613,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       ) {
         showTyping.value = false
         lastActiveToolName.value = ''
+        // 流进入终态:兜底熄灭彩框/虚拟鼠标(单工具结束事件已按 call_id 精确清除)
+        activityStore.clear()
         if (sessionRun.value) {
           sessionRun.value = {
             ...sessionRun.value,
@@ -895,6 +916,13 @@ async function sendMessage(): Promise<void> {
   })
 }
 
+/** 空状态快捷问题:填入输入框并直接走现有发送逻辑。 */
+function askQuickQuestion(question: string): void {
+  if (loading.value || sessionRestoring.value || sessionBusy.value) return
+  inputText.value = question
+  void sendMessage()
+}
+
 async function decideApproval(
   message: ChatMessage,
   decision: ResponseApprovalDecision,
@@ -1131,6 +1159,7 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
 function close(): void {
   // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
   persistSnapshot()
+  activityStore.clear()
   emit('update:visible', false)
 }
 
@@ -1157,6 +1186,7 @@ onBeforeUnmount(() => {
   sessionPollStopped = true
   invalidateSessionPoll()
   activeResponse?.abort()
+  activityStore.clear()
   window.clearTimeout(projectSearchTimer)
   window.removeEventListener('keydown', handleEscape)
 })
@@ -1202,7 +1232,7 @@ onBeforeUnmount(() => {
               <div class="chat-title-text">
                 <div class="chat-title-line">
                   <span>{{ MASCOT_NAME }} · Agent 助手</span>
-                  <span class="model-tag font-mono">{{ modelName }}</span>
+                  <span class="model-tag font-mono" title="当前模型">{{ modelName }}</span>
                   <span class="run-badge" :class="`run-${mascotStatus}`">
                     <i></i>{{ runStatusLabel }}
                   </span>
@@ -1243,8 +1273,22 @@ onBeforeUnmount(() => {
               </div>
             </Transition>
 
+            <Transition name="mascot-float">
+              <div v-if="messages.length <= 1 && !showTyping" class="quick-questions" aria-label="快捷问题">
+                <button
+                  v-for="question in QUICK_QUESTIONS"
+                  :key="question"
+                  class="quick-question"
+                  type="button"
+                  @click="askQuickQuestion(question)"
+                >
+                  {{ question }}
+                </button>
+              </div>
+            </Transition>
+
             <div v-if="mascotStatus === 'running' && lastActiveToolName" class="chat-progress">
-              正在执行 <code>{{ lastActiveToolName }}</code>
+              {{ toolRunningPhrase(lastActiveToolName) }}
             </div>
 
             <div ref="chatBody" class="chat-body" @click="onMessageClick">
@@ -1309,7 +1353,7 @@ onBeforeUnmount(() => {
                     >
                       <div class="plan-step-head">
                         <span class="plan-step-idx">#{{ step.step_index + 1 }}</span>
-                        <code class="plan-tool">{{ step.tool_name }}</code>
+                        <span class="plan-tool" :title="step.tool_name">{{ toolDisplayInfo(step.tool_name).label }}</span>
                         <span
                           class="plan-step-status"
                           :class="step.success ? 'plan-ok' : 'plan-bad'"
@@ -1678,16 +1722,16 @@ onBeforeUnmount(() => {
   background: currentColor;
 }
 .run-idle { color: var(--gray-500); background: var(--gray-100); border-color: var(--gray-200, #e5e6eb); }
-.run-running { color: #2f7a3d; background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
+.run-running { color: var(--color-success); background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
 .run-running i { animation: run-blink 1s ease-in-out infinite; }
-.run-waiting { color: #b68039; background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
+.run-waiting { color: var(--sev-medium); background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
 .run-waiting i { animation: run-blink 1s ease-in-out infinite; }
 @keyframes run-blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 .chat-progress {
   flex-shrink: 0;
   padding: 6px 20px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--color-text-secondary);
   background: linear-gradient(90deg, rgba(91, 88, 232, 0.06), rgba(61, 188, 217, 0.06));
   border-bottom: 1px solid var(--color-border-light);
@@ -1695,13 +1739,35 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-progress code {
-  font-family: var(--font-mono, monospace);
-  color: var(--brand-600);
-  font-size: 10.5px;
-  background: rgba(91, 88, 232, 0.1);
-  padding: 0 5px;
-  border-radius: 3px;
+
+.quick-questions {
+  position: absolute;
+  top: 134px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+
+.quick-question {
+  border: 1px solid var(--brand-200);
+  border-radius: 999px;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: var(--fs-xs);
+  padding: 5px var(--sp-3);
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.quick-question:hover {
+  background: var(--brand-100);
+  border-color: var(--brand-300);
+  transform: translateY(-1px);
 }
 
 .chat-drawer.is-dragging { user-select: none; }
@@ -1733,13 +1799,22 @@ onBeforeUnmount(() => {
   font-size: 18px;
 }
 
+/* 模型名对普通用户太技术:弱化展示,hover 时再看清 */
 .model-tag {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--brand-50);
+  font-size: var(--fs-xs);
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--gray-400);
+  border: 1px solid var(--gray-200);
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+}
+.model-tag:hover {
+  opacity: 1;
   color: var(--brand-600);
-  border: 1px solid var(--brand-200);
+  border-color: var(--brand-200);
+  background: var(--brand-50);
 }
 
 .close-btn {
@@ -1850,12 +1925,12 @@ onBeforeUnmount(() => {
 .msg-content.markdown-body { white-space: normal; }
 .msg-content.markdown-body :deep(p)        { margin: 0; }
 .msg-content.markdown-body :deep(pre) {
-  background: #1e1e2e; color: #cdd6f4;
+  background: var(--gray-900); color: var(--gray-100);
   border-radius: 6px; padding: 12px;
-  overflow-x: auto; font-size: 12px; line-height: 1.5; margin: 8px 0;
+  overflow-x: auto; font-size: var(--fs-xs); line-height: 1.5; margin: 8px 0;
 }
 .msg-content.markdown-body :deep(code) {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: var(--fs-xs);
 }
 .msg-content.markdown-body :deep(p code) {
   background: var(--gray-100); padding: 1px 5px;
@@ -1966,11 +2041,11 @@ onBeforeUnmount(() => {
   background: #fff;
   border: 1px solid var(--color-border-light, #EEF0F4);
   border-radius: 6px;
-  border-left: 3px solid #2f9e44;
+  border-left: 3px solid var(--color-success);
 
   &.plan-failed {
-    border-left-color: #e5484d;
-    background: rgba(229, 72, 77, 0.04);
+    border-left-color: var(--color-danger);
+    background: rgba(220, 73, 97, 0.04);
   }
 }
 
@@ -1978,19 +2053,18 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
 }
 
 .plan-step-idx {
   font-weight: 600;
   color: var(--gray-500, #909399);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
 }
 
 .plan-tool {
-  font-family: var(--font-mono, monospace);
   color: var(--brand-600, #5B58E8);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   background: rgba(91, 88, 232, 0.08);
   padding: 1px 6px;
   border-radius: 3px;
@@ -1998,22 +2072,22 @@ onBeforeUnmount(() => {
 
 .plan-step-status {
   font-weight: 700;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 
-  &.plan-ok { color: #2f9e44; }
-  &.plan-bad { color: #e5484d; }
+  &.plan-ok { color: var(--color-success); }
+  &.plan-bad { color: var(--color-danger); }
 }
 
 .plan-step-ms {
   margin-left: auto;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--gray-500, #909399);
   font-family: var(--font-mono, monospace);
 }
 
 .plan-reason {
   margin: 4px 0 0;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--gray-600, #606266);
   line-height: 1.5;
 }
@@ -2021,22 +2095,22 @@ onBeforeUnmount(() => {
 .plan-args,
 .plan-preview {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 
   summary {
     cursor: pointer;
     color: var(--gray-500, #909399);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
   }
 }
 
 .plan-json {
   margin: 4px 0 0;
   padding: 6px 8px;
-  background: #f6f7f9;
+  background: var(--gray-50);
   border-radius: 4px;
   font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--gray-700, #303133);
   overflow-x: auto;
   max-height: 120px;
@@ -2045,8 +2119,8 @@ onBeforeUnmount(() => {
 
 .plan-error {
   margin: 4px 0 0;
-  font-size: 11px;
-  color: #e5484d;
+  font-size: var(--fs-xs);
+  color: var(--color-danger);
   word-break: break-all;
 }
 
@@ -2109,28 +2183,28 @@ onBeforeUnmount(() => {
   line-height: 1.4;
 }
 
-.step-complete .step-type { background: rgba(79, 184, 122, 0.12); color: #4FB87A; }
-.step-failed .step-type   { background: rgba(220, 73, 97, 0.12); color: #DC4961; }
-.step-clarify .step-type  { background: rgba(217, 168, 87, 0.18); color: #B68039; }
-.step-dispatch .step-type { background: rgba(91, 88, 232, 0.12); color: #5B58E8; }
+.step-complete .step-type { background: rgba(79, 184, 122, 0.12); color: var(--color-success); }
+.step-failed .step-type   { background: rgba(220, 73, 97, 0.12); color: var(--color-danger); }
+.step-clarify .step-type  { background: rgba(217, 168, 87, 0.18); color: var(--sev-medium); }
+.step-dispatch .step-type { background: rgba(91, 88, 232, 0.12); color: var(--brand-500); }
 
 /* === Clarify 表单 === */
 .clarify-card {
   margin-top: 10px;
-  border: 1px dashed #D9A857;
-  background: #FFFBF0;
+  border: 1px dashed var(--sev-medium);
+  background: var(--sev-medium-bg);
   border-radius: 8px;
   padding: 12px 14px;
 }
 
 .clarify-card.is-danger {
   border-style: solid;
-  border-color: #D54941;
-  background: #FFF6F5;
+  border-color: var(--color-danger);
+  background: var(--color-danger-light);
 }
 
 .clarify-card.is-danger .clarify-head {
-  color: #B42318;
+  color: var(--color-danger);
 }
 
 .clarify-head {
@@ -2138,8 +2212,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  font-size: 13px;
-  color: #8B6A2F;
+  font-size: var(--fs-sm);
+  color: var(--sev-medium);
   margin-bottom: 10px;
 }
 

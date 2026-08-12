@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import dayjs from 'dayjs'
+import { formatDateTime } from '@/utils/format'
 import { CopyDocument, Plus, Refresh, Remove } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -73,7 +73,7 @@ async function handleRevoke(row: BetaInviteCode): Promise<void> {
 }
 
 function formatTime(value?: string): string {
-  return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-'
+  return formatDateTime(value, 'YYYY-MM-DD HH:mm')
 }
 
 function changeFilter(): void {

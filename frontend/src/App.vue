@@ -2,6 +2,8 @@
 import { onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PrismLoading from '@/components/common/PrismLoading.vue'
+import AgentActivityBorder from '@/components/ai/AgentActivityBorder.vue'
+import VirtualCursor from '@/components/ai/VirtualCursor.vue'
 
 const router = useRouter()
 const routeLoading = ref(false)
@@ -54,6 +56,8 @@ onBeforeUnmount(() => {
 
 <template>
   <router-view />
+  <AgentActivityBorder />
+  <VirtualCursor />
   <transition name="route-loading-fade">
     <div v-if="routeLoading" class="route-loading-mask">
       <PrismLoading

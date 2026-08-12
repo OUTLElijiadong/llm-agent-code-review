@@ -63,7 +63,9 @@ provide('openAgentChat', openAgentChat)
       <AppHeader @toggle-sidebar="toggleSidebar" />
       <main class="app-layout-main">
         <router-view v-slot="{ Component, route }">
-          <component :is="Component" :key="route.fullPath" />
+          <transition name="page-fade" mode="out-in">
+            <component :is="Component" :key="route.path" />
+          </transition>
         </router-view>
       </main>
     </div>

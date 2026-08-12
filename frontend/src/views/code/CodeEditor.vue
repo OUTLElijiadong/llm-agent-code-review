@@ -51,7 +51,7 @@
               </el-descriptions-item>
               <el-descriptions-item label="版本">v{{ fileDetail.version_no }}</el-descriptions-item>
               <el-descriptions-item label="更新时间">
-                {{ formatDateTime(fileDetail.update_time) }}
+                {{ formatTimeText(fileDetail.update_time) }}
               </el-descriptions-item>
             </el-descriptions>
             <div class="binary-actions">
@@ -95,7 +95,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 
 import { Document, Download } from '@element-plus/icons-vue'
-import dayjs from 'dayjs'
+import { formatFileSize, formatDateTime } from '@/utils/format'
 import MonacoEditor from '@/components/editor/MonacoEditor.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getDetail, update, downloadBinary } from '@/api/codeFile'
@@ -164,11 +164,7 @@ const editorLang = computed(() => {
  * @returns 格式化后的字符串,如 "1.2 KB"
  */
 function formatSize(bytes: number): string {
-  if (!bytes || bytes < 0) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  return formatFileSize(bytes)
 }
 
 /**
@@ -176,8 +172,8 @@ function formatSize(bytes: number): string {
  * @param dateStr ISO 日期字符串
  * @returns YYYY-MM-DD HH:mm 格式字符串
  */
-function formatDateTime(dateStr: string): string {
-  return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
+function formatTimeText(dateStr: string): string {
+  return formatDateTime(dateStr, 'YYYY-MM-DD HH:mm')
 }
 
 /**

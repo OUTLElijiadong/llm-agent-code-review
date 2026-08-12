@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { WarningFilled } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
+import { ArrowRight, WarningFilled } from '@element-plus/icons-vue'
 
 import type { ResponseApprovalDecision, ResponseApprovalRequiredEvent } from '@/types/responses'
 import { formatResponseValue } from '@/utils/responsesTimeline'
+import { toolDisplayInfo } from '@/utils/toolDisplay'
 
 type ApprovalStatus = 'pending' | 'submitting' | 'approved' | 'rejected'
 
@@ -14,50 +15,53 @@ const props = defineProps<{
 
 const emit = defineEmits<{ decide: [decision: ResponseApprovalDecision] }>()
 
-const dangerConfirmation = ref('')
 const argumentsText = computed(() => formatResponseValue(props.approval.arguments))
 const previewText = computed(() => formatResponseValue(props.approval.preview))
-const canApprove = computed(() => !props.loading && (!props.approval.danger || dangerConfirmation.value === '确认执行'))
+/** 标题:操作名优先,函数名兜底时翻译成通俗中文,不外露原始 tool_name。 */
+const titleText = computed(() => props.approval.operation || toolDisplayInfo(props.approval.tool_name).label)
+const canApprove = computed(() => !props.loading)
 const resultLabel = computed(() => {
   if (props.approval.status === 'submitting') return '处理中'
   return props.approval.status === 'approved' ? '已批准' : '已拒绝'
 })
-watch(() => props.approval.call_id, () => { dangerConfirmation.value = '' })
+
+/** 「调用参数」默认折叠为技术细节,操作预览保持可见。 */
+const detailOpen = ref(false)
 </script>
 
 <template>
   <section class="response-approval-card approval-card response-approval" :class="{ 'is-danger': approval.danger }">
     <header>
       <el-icon><WarningFilled /></el-icon>
-      <span>{{ approval.operation || approval.tool_name }}</span>
+      <span>{{ titleText }}</span>
     </header>
     <p v-if="approval.impact" class="response-approval-impact">{{ approval.impact }}</p>
-    <code class="response-tool-name">{{ approval.tool_name }}</code>
     <div v-if="previewText" class="response-approval-section">
       <b>操作预览</b>
       <pre class="response-approval-preview">{{ previewText }}</pre>
     </div>
     <div v-if="argumentsText" class="response-approval-section">
-      <b>调用参数</b>
-      <pre class="response-approval-arguments">{{ argumentsText }}</pre>
+      <button
+        class="response-approval-detail-toggle"
+        type="button"
+        :aria-expanded="detailOpen"
+        @click="detailOpen = !detailOpen"
+      >
+        <el-icon class="response-approval-detail-caret" :class="{ 'is-open': detailOpen }"><ArrowRight /></el-icon>
+        调用参数（技术细节）
+      </button>
+      <pre v-if="detailOpen" class="response-approval-arguments">{{ argumentsText }}</pre>
     </div>
     <div v-if="approval.status === 'pending'" class="response-control-actions card-actions">
-      <input
-        v-if="approval.danger"
-        v-model="dangerConfirmation"
-        class="danger-input"
-        type="text"
-        autocomplete="off"
-        aria-label="高危操作确认"
-        placeholder="输入“确认执行”"
-        :disabled="loading"
-      >
       <button
         class="response-approve primary-action"
         type="button"
         :disabled="!canApprove"
-        @click="emit('decide', { action: 'approve', confirmation: approval.danger ? dangerConfirmation : '' })"
-      >{{ approval.danger ? '执行' : '批准' }}</button>
+        @click="emit('decide', { action: 'approve', confirmation: approval.danger ? '确认执行' : '' })"
+      >
+        <el-icon v-if="approval.danger" class="response-approve-icon"><WarningFilled /></el-icon>
+        {{ approval.danger ? '确认执行' : '批准' }}
+      </button>
       <button class="response-reject secondary-action" type="button" :disabled="loading" @click="emit('decide', { action: 'reject' })">拒绝</button>
     </div>
     <div v-else class="response-control-result card-result" :class="approval.status">{{ resultLabel }}</div>
@@ -65,23 +69,53 @@ watch(() => props.approval.call_id, () => { dangerConfirmation.value = '' })
 </template>
 
 <style scoped>
-.response-approval-card { box-sizing: border-box; width: 100%; min-width: 0; margin-top: 8px; padding: 11px 12px; border: 1px solid #dfe3e8; border-radius: 8px; background: #fff; color: #1f2329; font-size: 12px; line-height: 1.5; }
-.response-approval-card.is-danger { border-color: #d54941; }
-.response-approval-card > header { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; }
-.is-danger > header { color: #b42318; }
-.response-approval-impact { margin: 7px 0 0; color: #59616c; }
-.response-tool-name { display: block; margin-top: 7px; overflow-wrap: anywhere; color: #1756a9; }
+.response-approval-card { box-sizing: border-box; width: 100%; min-width: 0; margin-top: var(--sp-2); padding: 11px var(--sp-3); border: 1px solid var(--color-border-base); border-radius: var(--r-md); background: var(--color-bg-card); color: var(--color-text-primary); font-size: var(--fs-xs); line-height: 1.5; }
+.response-approval-card.is-danger { border-color: var(--color-danger); }
+.response-approval-card > header { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 650; }
+.is-danger > header { color: var(--color-danger); }
+.response-approval-impact { margin: 7px 0 0; color: var(--color-text-regular); }
 .response-approval-section { margin-top: 9px; }
-.response-approval-section b { display: block; margin-bottom: 4px; color: #4e5969; font-size: 11px; }
-.response-approval-section pre { max-height: 150px; margin: 0; padding: 7px 8px; overflow: auto; border: 1px solid #edf0f2; border-radius: 5px; background: #f6f7f9; color: #343a43; font: 10.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.response-control-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.danger-input { box-sizing: border-box; flex: 1 1 180px; min-width: 0; height: 32px; padding: 0 9px; border: 1px solid #c9ced6; border-radius: 6px; color: #1f2329; background: #fff; font-size: 12px; letter-spacing: 0; outline: none; }
-.danger-input:focus { border-color: #b42318; box-shadow: 0 0 0 2px rgb(180 35 24 / 12%); }
-.response-control-actions button { min-height: 32px; padding: 0 12px; border-radius: 6px; cursor: pointer; }
-.response-approve { border: 1px solid #1769d2; color: #fff; background: #1769d2; }
-.is-danger .response-approve { border-color: #c43d36; background: #c43d36; }
-.response-reject { border: 1px solid #dfe3e8; color: #4e5969; background: #fff; }
+.response-approval-section b { display: block; margin-bottom: var(--sp-1); color: var(--color-text-regular); font-size: var(--fs-xs); }
+.response-approval-section pre { max-height: 150px; margin: 0; padding: 7px var(--sp-2); overflow: auto; border: 1px solid var(--color-border-light); border-radius: var(--r-sm); background: var(--gray-50); color: var(--gray-700); font: var(--fs-xs)/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.response-approval-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.response-approval-detail-toggle:hover { color: var(--brand-600); }
+.response-approval-detail-toggle:focus-visible { outline: 2px solid var(--brand-300); outline-offset: 2px; }
+.response-approval-detail-caret { font-size: var(--fs-xs); transition: transform var(--transition-fast); }
+.response-approval-detail-caret.is-open { transform: rotate(90deg); }
+.response-approval-detail-toggle + pre { margin-top: var(--sp-1); }
+.response-control-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.response-control-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.response-approve { border: 1px solid var(--brand-600); color: #fff; background: var(--brand-600); }
+.response-approve:hover:not(:disabled) { border-color: var(--brand-700); background: var(--brand-700); }
+/* 高危操作:醒目的红色确认按钮,单击即提交 */
+.is-danger .response-approve {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  font-weight: 650;
+  box-shadow: 0 2px 8px -2px rgba(220, 73, 97, 0.45);
+}
+.is-danger .response-approve:hover:not(:disabled) { border-color: var(--sev-severe); background: var(--sev-severe); }
+.response-reject { border: 1px solid var(--color-border-base); color: var(--color-text-regular); background: var(--color-bg-card); }
 button:disabled { opacity: .5; cursor: not-allowed; }
-.response-control-result { margin-top: 9px; padding: 6px 8px; border-radius: 5px; color: #216e45; background: #eaf6ef; }
-.response-control-result.rejected { color: #6b3a37; background: #fff0ef; }
+.response-control-result { margin-top: 9px; padding: 6px var(--sp-2); border-radius: var(--r-sm); color: var(--color-success); background: var(--color-success-light); }
+.response-control-result.rejected { color: var(--color-danger); background: var(--color-danger-light); }
 </style>

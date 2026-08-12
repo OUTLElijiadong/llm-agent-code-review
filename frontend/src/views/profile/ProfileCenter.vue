@@ -81,7 +81,7 @@
 import { computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 
-import dayjs from 'dayjs'
+import { formatDateTime } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -118,7 +118,7 @@ const prefs = reactive({
 })
 
 function formatDate(time?: string): string {
-  return time ? dayjs(time).format('YYYY-MM-DD HH:mm') : '-'
+  return formatDateTime(time, 'YYYY-MM-DD HH:mm')
 }
 
 function loadPrefs(): void {

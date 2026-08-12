@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
-import { ArrowRight, CircleCheck, Loading, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowRight, CircleCheck, Loading, Search, WarningFilled } from '@element-plus/icons-vue'
 
 import type { ResponseToolCall, ResponseToolCallStatus } from '@/utils/responsesTimeline'
 import { formatResponseValue } from '@/utils/responsesTimeline'
+import { toolDisplayInfo } from '@/utils/toolDisplay'
 
 const props = defineProps<{ calls: ResponseToolCall[] }>()
 
@@ -19,7 +20,7 @@ const STATUS_LABELS: Record<ResponseToolCallStatus, string> = {
 
 const visibleCalls = computed(() => props.calls.filter((call) => call.name || call.argumentsText))
 
-/** 每条调用的展开状态;默认全部折叠,用户点击后展开,保持用户选择。 */
+/** 每条调用「技术细节」的展开状态;默认折叠,保持用户选择。 */
 const expandedKeys = reactive(new Set<string>())
 
 function toggle(call: ResponseToolCall): void {
@@ -31,8 +32,26 @@ function statusLabel(status: ResponseToolCallStatus): string {
   return STATUS_LABELS[status]
 }
 
-/** 只要还有未展开的调用就显示「展开全部」,否则显示「收起全部」。 */
-const anyCollapsed = computed(() => visibleCalls.value.some((call) => !expandedKeys.has(call.key)))
+/** 通俗展示名(原始函数名只进 aria-label,不再外露)。 */
+function displayLabel(call: ResponseToolCall): string {
+  return toolDisplayInfo(call.name).label
+}
+
+/** 运行中的 RAG 检索类工具给出「检索中」专属文案。 */
+function displayRunning(call: ResponseToolCall): string {
+  return toolDisplayInfo(call.name).running
+}
+
+function isRagRunning(call: ResponseToolCall): boolean {
+  return toolDisplayInfo(call.name).isRag && call.status === 'running'
+}
+
+function hasDetail(call: ResponseToolCall): boolean {
+  return Boolean(formatResponseValue(call.argumentsText) || call.resultPreview || call.error)
+}
+
+/** 只要还有未展开的技术细节就显示「展开全部」,否则显示「收起全部」。 */
+const anyCollapsed = computed(() => visibleCalls.value.some((call) => hasDetail(call) && !expandedKeys.has(call.key)))
 
 function toggleAll(): void {
   if (anyCollapsed.value) {
@@ -48,46 +67,52 @@ function argumentsText(call: ResponseToolCall): string {
 </script>
 
 <template>
-  <section v-if="visibleCalls.length" class="response-tool-timeline" aria-label="Agent 工具调用过程">
+  <section v-if="visibleCalls.length" class="response-tool-timeline" aria-label="小菱的操作步骤">
     <header>
-      <span>Agent 调用链 · {{ visibleCalls.length }} 个工具</span>
+      <span>小菱的操作步骤</span>
       <button
         v-if="visibleCalls.length > 1"
         class="response-tool-collapse-all"
         type="button"
-        :aria-label="anyCollapsed ? '展开全部调用' : '收起全部调用'"
+        :aria-label="anyCollapsed ? '展开全部技术细节' : '收起全部技术细节'"
         @click="toggleAll"
       >
         {{ anyCollapsed ? '展开全部' : '收起全部' }}
       </button>
     </header>
     <ol>
-      <li v-for="call in visibleCalls" :key="call.key" class="response-tool-call" :class="`is-${call.status}`">
+      <li
+        v-for="call in visibleCalls"
+        :key="call.key"
+        class="response-tool-call"
+        :class="[`is-${call.status}`, { 'is-rag': isRagRunning(call) }]"
+      >
         <div
           class="response-tool-call-head"
           role="button"
           tabindex="0"
-          :aria-expanded="expandedKeys.has(call.key)"
-          :aria-label="`${call.name} ${statusLabel(call.status)}`"
-          @click="toggle(call)"
-          @keydown.enter="toggle(call)"
-          @keydown.space.prevent="toggle(call)"
+          :aria-expanded="hasDetail(call) ? expandedKeys.has(call.key) : undefined"
+          :aria-label="`${displayLabel(call)} ${statusLabel(call.status)}${call.agentCode ? `（${call.agentCode}）` : ''}`"
+          @click="hasDetail(call) && toggle(call)"
+          @keydown.enter="hasDetail(call) && toggle(call)"
+          @keydown.space.prevent="hasDetail(call) && toggle(call)"
         >
           <el-icon class="response-tool-state-icon">
             <CircleCheck v-if="call.status === 'completed'" />
             <WarningFilled v-else-if="call.status === 'failed' || call.status === 'rejected'" />
+            <Search v-else-if="isRagRunning(call)" />
             <Loading v-else />
           </el-icon>
           <div class="response-tool-identity">
-            <code>{{ call.name }}</code>
-            <small v-if="call.agentCode">{{ call.agentCode }}</small>
+            <span class="response-tool-label">{{ isRagRunning(call) ? displayRunning(call) : displayLabel(call) }}</span>
           </div>
           <span class="response-tool-status">{{ statusLabel(call.status) }}</span>
-          <el-icon class="response-tool-caret" :class="{ 'is-open': expandedKeys.has(call.key) }">
+          <el-icon v-if="hasDetail(call)" class="response-tool-caret" :class="{ 'is-open': expandedKeys.has(call.key) }">
             <ArrowRight />
           </el-icon>
         </div>
-        <div v-if="expandedKeys.has(call.key)" class="response-tool-detail">
+        <div v-if="hasDetail(call) && expandedKeys.has(call.key)" class="response-tool-detail">
+          <p class="response-tool-detail-caption">技术细节 · {{ call.name }}</p>
           <pre v-if="argumentsText(call)" class="response-tool-arguments">{{ argumentsText(call) }}</pre>
           <pre v-if="call.resultPreview" class="response-tool-result">{{ call.resultPreview }}</pre>
           <p v-if="call.error" class="response-tool-error">{{ call.error }}</p>
@@ -103,41 +128,60 @@ function argumentsText(call: ResponseToolCall): string {
   width: 100%;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid #dfe3e8;
-  border-radius: 8px;
-  background: #fff;
-  color: #1f2329;
-  font-size: 12px;
-  margin-top: 8px;
+  border: 1px solid var(--color-border-base);
+  border-radius: var(--r-md);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-size: var(--fs-xs);
+  margin-top: var(--sp-2);
 }
 .response-tool-timeline > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid #edf0f2;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--color-border-light);
   font-weight: 650;
 }
 .response-tool-collapse-all {
   flex: none;
   border: 0;
   background: transparent;
-  color: #3978d6;
-  font-size: 12px;
+  color: var(--brand-600);
+  font-size: var(--fs-xs);
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
+  padding: 2px var(--sp-1);
+  border-radius: var(--r-sm);
 }
-.response-tool-collapse-all:hover { background: #f0f5ff; }
+.response-tool-collapse-all:hover { background: var(--brand-50); }
 .response-tool-timeline ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
-.response-tool-call { min-width: 0; padding: 9px 10px; border-left: 3px solid #3978d6; }
-.response-tool-call + .response-tool-call { border-top: 1px solid #edf0f2; }
-.response-tool-call.is-completed { border-left-color: #2b8a57; }
+.response-tool-call { min-width: 0; padding: 9px var(--sp-3); border-left: 3px solid var(--color-info); }
+.response-tool-call + .response-tool-call { border-top: 1px solid var(--color-border-light); }
+.response-tool-call.is-completed { border-left-color: var(--color-success); }
 .response-tool-call.is-failed,
-.response-tool-call.is-rejected { border-left-color: #c43d36; }
+.response-tool-call.is-rejected { border-left-color: var(--color-danger); }
 .response-tool-call.is-waiting_approval,
-.response-tool-call.is-waiting_input { border-left-color: #c16b20; }
+.response-tool-call.is-waiting_input { border-left-color: var(--color-warning); }
+/* 运行中条目:轻微呼吸脉冲 */
+.response-tool-call.is-streaming,
+.response-tool-call.is-running {
+  animation: response-tool-pulse 1.8s ease-in-out infinite;
+}
+/* RAG 检索中:品牌紫 → 折射青渐变左边条 */
+.response-tool-call.is-rag {
+  border-left: 0;
+  position: relative;
+}
+.response-tool-call.is-rag::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--brand-400), var(--accent-400));
+}
 .response-tool-call-head {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto 14px;
@@ -146,27 +190,43 @@ function argumentsText(call: ResponseToolCall): string {
   cursor: pointer;
   user-select: none;
 }
-.response-tool-call-head:focus-visible { outline: 2px solid rgba(57, 120, 214, 0.5); outline-offset: 2px; border-radius: 4px; }
+.response-tool-call-head:focus-visible { outline: 2px solid var(--brand-300); outline-offset: 2px; border-radius: var(--r-sm); }
 .response-tool-identity { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 7px; min-width: 0; }
-.response-tool-call-head code { min-width: 0; overflow-wrap: anywhere; color: #1756a9; font-size: 11px; }
-.response-tool-identity small { color: #7a838f; font-size: 9.5px; overflow-wrap: anywhere; }
-.response-tool-status { color: #707781; font-size: 10px; white-space: nowrap; }
-.response-tool-state-icon { color: #3978d6; }
+.response-tool-label { min-width: 0; overflow-wrap: anywhere; color: var(--color-text-primary); font-weight: 550; }
+.response-tool-status { color: var(--color-text-secondary); font-size: var(--fs-xs); white-space: nowrap; }
+.response-tool-state-icon { color: var(--color-info); }
 .is-streaming .response-tool-state-icon,
 .is-running .response-tool-state-icon { animation: response-tool-spin 1s linear infinite; }
-.is-completed .response-tool-state-icon { color: #2b8a57; }
+.is-completed .response-tool-state-icon { color: var(--color-success); }
 .is-failed .response-tool-state-icon,
-.is-rejected .response-tool-state-icon { color: #c43d36; }
+.is-rejected .response-tool-state-icon { color: var(--color-danger); }
+.is-rag .response-tool-state-icon { color: var(--brand-500); }
 .response-tool-caret {
-  color: #a6aeb8;
-  font-size: 11px;
-  transition: transform 0.15s ease;
+  color: var(--gray-400);
+  font-size: var(--fs-xs);
+  transition: transform var(--transition-fast);
 }
 .response-tool-caret.is-open { transform: rotate(90deg); }
 .response-tool-detail { min-width: 0; }
+.response-tool-detail-caption {
+  margin: 7px 0 0 22px;
+  color: var(--color-text-placeholder);
+  font-size: var(--fs-xs);
+}
 .response-tool-arguments,
-.response-tool-result { max-height: 132px; margin: 7px 0 0 22px; padding: 7px 8px; overflow: auto; border-radius: 5px; background: #f6f7f9; color: #3f4650; font: 10.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.response-tool-result { background: #f1f8f4; }
-.response-tool-error { margin: 7px 0 0 22px; color: #b42318; overflow-wrap: anywhere; }
+.response-tool-result { max-height: 132px; margin: var(--sp-1) 0 0 22px; padding: 7px var(--sp-2); overflow: auto; border-radius: var(--r-sm); background: var(--gray-50); color: var(--gray-700); font: var(--fs-xs)/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.response-tool-result { background: var(--color-success-light); }
+.response-tool-error { margin: 7px 0 0 22px; color: var(--color-danger); overflow-wrap: anywhere; }
 @keyframes response-tool-spin { to { transform: rotate(360deg); } }
+@keyframes response-tool-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 999px rgba(91, 88, 232, 0); }
+  50% { box-shadow: inset 0 0 0 999px rgba(91, 88, 232, 0.045); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .response-tool-call.is-streaming,
+  .response-tool-call.is-running { animation: none; }
+  .is-streaming .response-tool-state-icon,
+  .is-running .response-tool-state-icon { animation: none; }
+}
 </style>

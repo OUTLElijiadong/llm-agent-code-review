@@ -17,6 +17,7 @@ import type {
   AgentReleaseApproval,
   AgentReleaseAuthoring,
 } from '@/types/agentStudio'
+import { agentApprovalStatusLabel, agentAssetStatusLabel } from '@/constants/agentStatus'
 
 const activeTab = ref<'approvals' | 'releases'>('approvals')
 const loading = ref(false)
@@ -38,6 +39,47 @@ const beforeAuthoring = computed<AgentReleaseAuthoring | null>(() => {
 const afterAuthoring = computed<AgentReleaseAuthoring | null>(() => (
   selected.value?.authoring ?? selected.value?.diff.after ?? null
 ))
+
+/** 模型参数常用键的中文标签,JSON 键值对展示时先翻译 */
+const MODEL_CONFIG_LABELS: Record<string, string> = {
+  temperature: '采样温度',
+  max_tokens: '最大输出 Token',
+  top_p: '核采样 Top-P',
+  model: '模型',
+  provider: '提供商',
+}
+
+/**
+ * 将 model_config 对象转换为键值对列表,键尽量翻译为中文
+ * @param value - model_config 对象
+ * @returns 键值对数组
+ */
+function modelConfigEntries(value: unknown): Array<{ key: string; label: string; text: string }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  return Object.entries(value as Record<string, unknown>).map(([key, val]) => ({
+    key,
+    label: MODEL_CONFIG_LABELS[key] ?? key,
+    text: val === null || val === undefined ? '（空）' : typeof val === 'object' ? JSON.stringify(val) : String(val),
+  }))
+}
+
+const beforeModelConfig = computed(() => modelConfigEntries(beforeAuthoring.value?.model_config))
+const afterModelConfig = computed(() => modelConfigEntries(afterAuthoring.value?.model_config))
+
+/**
+ * 将测试证据对象格式化为键值对列表,避免直接裸展示 JSON
+ * @param value - test_evidence 对象
+ * @returns 键值对数组(嵌套对象压缩为一行 JSON)
+ */
+function evidenceEntries(value: unknown): Array<{ key: string; text: string }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  return Object.entries(value as Record<string, unknown>).map(([key, val]) => ({
+    key,
+    text: typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val),
+  }))
+}
+
+const testEvidenceEntries = computed(() => evidenceEntries(selected.value?.test_evidence))
 
 function isCancelled(error: unknown): boolean {
   return error === 'cancel' || error === 'close'
@@ -210,7 +252,7 @@ onMounted(load)
         <el-table-column label="Skill" width="90"><template #default="{ row }">{{ row.dependencies.length }}</template></el-table-column>
         <el-table-column label="新增调用" width="110"><template #default="{ row }">+{{ row.estimated_calls_per_chunk }}/分片</template></el-table-column>
         <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag type="warning" effect="plain">{{ row.risk.level }}</el-tag></template></el-table-column>
-        <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag :type="row.status === 'pending' ? 'warning' : row.status === 'approved' ? 'success' : 'info'" effect="plain">{{ row.status }}</el-tag></template></el-table-column>
+        <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag :type="row.status === 'pending' ? 'warning' : row.status === 'approved' ? 'success' : 'info'" effect="plain">{{ agentApprovalStatusLabel(row.status) }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="110" fixed="right"><template #default="{ row }"><el-button text type="primary" @click="openDetail(row)">查看</el-button></template></el-table-column>
       </el-table>
     </section>
@@ -219,12 +261,12 @@ onMounted(load)
       <article v-for="item in agents" :key="item.agent.id" class="release-row">
         <div class="release-agent">
           <b>{{ item.agent.name }}</b><code>{{ item.agent.code }}</code>
-          <el-tag size="small" effect="plain">{{ item.agent.status }}</el-tag>
+          <el-tag size="small" effect="plain">{{ agentAssetStatusLabel(item.agent.status) }}</el-tag>
         </div>
         <div class="release-versions">
           <button v-for="release in item.releases" :key="release.id" type="button" class="release-chip" :disabled="actionBusy" @click="rollback(item, release.id)">
             <span>#{{ release.id }} · vID {{ release.agent_version_id }}</span>
-            <small>{{ release.status }}</small>
+            <small>{{ agentApprovalStatusLabel(release.status) }}</small>
           </button>
         </div>
         <el-button v-if="item.agent.is_enabled" type="danger" plain :icon="SwitchButton" :loading="actionKey === `disable-${item.agent.id}`" :disabled="actionBusy && actionKey !== `disable-${item.agent.id}`" @click="disableAgent(item)">停用</el-button>

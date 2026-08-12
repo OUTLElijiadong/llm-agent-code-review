@@ -38,6 +38,8 @@ import {
   projectSandboxLanguage,
   sortSandboxEvents,
 } from '@/utils/sandboxPresentation'
+import { formatDateTime, formatFileSize } from '@/utils/format'
+import EmptyState from '@/components/common/EmptyState.vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
@@ -149,11 +151,7 @@ function purposeLabel(item: SandboxEnvironment): string {
 }
 
 function formatTime(value?: string | null): string {
-  if (!value) return '-'
-  const date = new Date(value.endsWith('Z') || /[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).format(date)
+  return formatDateTime(value, 'MM-DD HH:mm:ss')
 }
 
 function formatScore(value: number): string {
@@ -161,9 +159,7 @@ function formatScore(value: number): string {
 }
 
 function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`
-  return `${(value / (1024 * 1024)).toFixed(1)} MiB`
+  return formatFileSize(value)
 }
 
 function resultSummary(item: SandboxEnvironment): string {
@@ -536,7 +532,7 @@ onBeforeUnmount(() => {
               <el-icon><ArrowRight /></el-icon>
             </button>
           </div>
-          <el-empty v-else description="暂无沙箱任务" :image-size="72" />
+          <EmptyState v-else compact description="暂无沙箱任务，先在左侧创建一个吧" />
         </div>
 
         <div v-if="selected" class="task-detail">
@@ -610,7 +606,7 @@ onBeforeUnmount(() => {
             </div>
           </section>
         </div>
-        <el-empty v-else class="detail-empty" description="选择任务查看 Agent 调用和测试结论" />
+        <EmptyState v-else class="detail-empty" description="选择任务查看 Agent 调用和测试结论" />
       </section>
     </div>
   </div>
@@ -691,9 +687,9 @@ onBeforeUnmount(() => {
 .event-head time { font-size: 9px; color: var(--gray-400); }
 .event-body p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--gray-600); overflow-wrap: anywhere; }
 .conclusion-panel { margin-top: 2px; }
-.evidence-output { max-height: 300px; margin: 10px 0 0; padding: 12px; overflow: auto; border: var(--hairline); border-radius: 5px; background: #161A24; color: #D9E1F2; font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.evidence-output { max-height: 300px; margin: 10px 0 0; padding: 12px; overflow: auto; border: var(--hairline); border-radius: 5px; background: var(--gray-50); color: var(--gray-700); font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .empty-line { padding: 18px 0; color: var(--gray-500); font-size: 12px; }
-.detail-empty { min-height: 380px; }
+.detail-empty { display: flex; min-height: 380px; align-items: center; justify-content: center; }
 
 @media (max-width: 1100px) {
   .workstation-grid { grid-template-columns: 330px minmax(0, 1fr); }

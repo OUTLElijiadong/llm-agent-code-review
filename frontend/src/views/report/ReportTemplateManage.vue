@@ -199,7 +199,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, Plus, Search, View, Edit, Delete } from '@element-plus/icons-vue'
-import dayjs from 'dayjs'
+import { formatDateTime as fmtDateTime } from '@/utils/format'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import {
@@ -300,8 +300,7 @@ const filteredTemplates = computed<ReportTemplate[]>(() => {
  * @returns 格式化后的字符串 YYYY-MM-DD HH:mm
  */
 function formatDateTime(s: string): string {
-  if (!s) return '—'
-  return dayjs(s).format('YYYY-MM-DD HH:mm')
+  return fmtDateTime(s, 'YYYY-MM-DD HH:mm')
 }
 
 /**

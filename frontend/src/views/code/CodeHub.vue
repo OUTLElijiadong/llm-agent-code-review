@@ -50,8 +50,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import dayjs from 'dayjs'
 import { Search } from '@element-plus/icons-vue'
+import { formatDateTime } from '@/utils/format'
 import { getProjects } from '@/api/project'
 import type { ProjectOut } from '@/types/project'
 
@@ -67,7 +67,7 @@ const filteredProjects = computed(() => {
 })
 
 function formatDate(time?: string): string {
-  return time ? dayjs(time).format('YYYY-MM-DD HH:mm') : '-'
+  return formatDateTime(time, 'YYYY-MM-DD HH:mm')
 }
 
 function goProjectCode(proj: ProjectOut): void {

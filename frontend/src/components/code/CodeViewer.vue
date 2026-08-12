@@ -30,6 +30,7 @@
  */
 import { ref } from 'vue'
 import { Document } from '@element-plus/icons-vue'
+import { formatFileSize } from '@/utils/format'
 import MonacoEditor from '@/components/editor/MonacoEditor.vue'
 import type { CodeFileMetaOut } from '@/types/project'
 
@@ -49,19 +50,6 @@ const props = defineProps<{
 }>()
 
 const editorRef = ref<InstanceType<typeof MonacoEditor> | null>(null)
-
-/**
- * 格式化文件大小为人类可读字符串
- * @param bytes 字节数
- * @returns 格式化后的字符串
- */
-function formatFileSize(bytes: number): string {
-  if (!bytes || bytes < 0) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
-}
 
 /**
  * 滚动到指定行(仅文本文件可用)

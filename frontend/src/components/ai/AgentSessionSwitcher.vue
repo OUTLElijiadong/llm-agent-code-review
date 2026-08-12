@@ -276,7 +276,7 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload }
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  z-index: 20;
+  z-index: var(--z-index-popover, 1060);
   width: 220px;
   max-height: 260px;
   overflow-y: auto;

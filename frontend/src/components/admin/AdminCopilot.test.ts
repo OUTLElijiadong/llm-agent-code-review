@@ -121,7 +121,8 @@ describe('AdminCopilot Responses stream', () => {
     expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('is-user')
     await expandTimeline(wrapper)
-    expect(rows[2].find('.response-tool-timeline').text()).toContain('admin_list_users')
+    // 时间线通俗化:「查看管理数据」替代函数名
+    expect(rows[2].find('.response-tool-timeline').text()).toContain('查看管理数据')
     expect(rows[2].text()).toContain('已完成')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 3 个用户')
     expect(rows[3].find('.markdown-body').text()).toContain('已完成。')
@@ -175,7 +176,8 @@ describe('AdminCopilot Responses stream', () => {
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
-    expect(wrapper.text()).toContain('admin_delete_user')
+    // 时间线已通俗化:不再外露函数名,显示「删除管理数据」
+    expect(wrapper.text()).toContain('删除管理数据')
 
     await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
@@ -207,12 +209,12 @@ describe('AdminCopilot Responses stream', () => {
     await openCopilot(wrapper)
     await flushSessionRestore()
 
-    expect(wrapper.text()).toContain('admin_delete_users')
+    expect(wrapper.text()).toContain('批量删除用户')
     expect(wrapper.text()).toContain('qa-a (#901)')
     expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
     expect(wrapper.find('.send-button').attributes('disabled')).toBeDefined()
-    expect(wrapper.find<HTMLButtonElement>('.response-approval .primary-action').element.disabled).toBe(true)
-    await wrapper.find('.danger-input').setValue('确认执行')
+    // 高危确认已改为点击按钮即提交,不再有输入框,也不再默认禁用
+    expect(wrapper.find('.danger-input').exists()).toBe(false)
     await wrapper.find('.response-approval .primary-action').trigger('click')
     await flushPromises()
     expect(streams.records[0].body).toMatchObject({
@@ -327,14 +329,17 @@ describe('AdminCopilot Responses stream', () => {
     await finish(0)
 
     expect(wrapper.find('.response-approval').exists()).toBe(true)
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('admin_delete_user')
+    // 时间线通俗化:显示「删除管理数据」而非函数名
+    expect(wrapper.find('.response-tool-timeline').text()).toContain('删除管理数据')
     expect(wrapper.find('.response-tool-timeline').text()).toContain('等待批准')
+    // 调用参数默认折叠,点开技术细节后可见
+    expect(wrapper.find('.response-approval-arguments').exists()).toBe(false)
+    await wrapper.find('.response-approval-detail-toggle').trigger('click')
     expect(wrapper.find('.response-approval-arguments').text()).toContain('"user_id": 9')
     expect(wrapper.find('.response-approval-preview').text()).toContain('test-user (#9)')
-    expect(wrapper.find('.danger-input').exists()).toBe(true)
+    // 高危确认:无输入框,按钮默认可用,单击即提交
+    expect(wrapper.find('.danger-input').exists()).toBe(false)
     expect(wrapper.findAll('.is-user')).toHaveLength(1)
-    expect(wrapper.find<HTMLButtonElement>('.response-approval .primary-action').element.disabled).toBe(true)
-    await wrapper.find('.danger-input').setValue('确认执行')
     await wrapper.find('.response-approval .primary-action').trigger('click')
     await flushPromises()
 
@@ -384,7 +389,7 @@ describe('AdminCopilot Responses stream', () => {
     })
     await finish(0)
 
-    await wrapper.find('.danger-input').setValue('确认执行')
+    // 高危确认:点按钮即提交,无需输入
     await wrapper.find('.response-approval .primary-action').trigger('click')
     await flushPromises()
     expect(streams.records[1].body).toMatchObject({
@@ -425,7 +430,8 @@ describe('AdminCopilot Responses stream', () => {
 
     await expandTimeline(wrapper)
     const timeline = wrapper.find('.response-tool-timeline')
-    expect(timeline.text()).toContain('admin_execute_capability')
+    // 时间线通俗化:「执行管理操作」替代函数名
+    expect(timeline.text()).toContain('执行管理操作')
     expect(timeline.text()).toContain('失败')
     // 失败详情默认折叠,点击后展示
     await wrapper.find('.response-tool-call-head').trigger('click')

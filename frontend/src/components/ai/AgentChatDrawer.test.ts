@@ -1,4 +1,5 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const streams = vi.hoisted(() => ({
@@ -53,6 +54,8 @@ async function finish(index: number): Promise<void> {
 }
 
 beforeEach(() => {
+  // 组件在 setup 顶层使用 useAgentActivityStore,测试环境需先激活 Pinia
+  setActivePinia(createPinia())
   sessionApi.get.mockReset()
   sessionApi.get.mockResolvedValue({
     surface: 'user', session_id: 'user-test', run: null, messages: [], pending: null,
@@ -122,7 +125,7 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('user')
     await expandTimeline(wrapper)
-    expect(rows[2].find('.response-tool-timeline').text()).toContain('list_projects')
+    expect(rows[2].find('.response-tool-timeline').text()).toContain('查看项目列表')
     expect(rows[2].text()).toContain('已完成')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 2 个项目')
     expect(rows[3].find('.markdown-body').text()).toContain('已完成。')
@@ -323,7 +326,10 @@ describe('AgentChatDrawer Responses stream', () => {
 
     expect(wrapper.find('.approval-card').exists()).toBe(true)
     await expandTimeline(wrapper)
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('update_project')
+    expect(wrapper.find('.response-tool-timeline').text()).toContain('更新项目')
+    // 调用参数默认折叠为技术细节,点击后展示
+    await wrapper.find('.response-approval-detail-toggle').trigger('click')
+    await flushPromises()
     expect(wrapper.find('.response-approval-arguments').text()).toContain('"project_id": 3')
     expect(wrapper.find('.response-approval-preview').text()).toContain('更新默认分支')
     expect(wrapper.findAll('.msg-row.user')).toHaveLength(1)
@@ -492,8 +498,9 @@ describe('AgentChatDrawer Responses stream', () => {
 
     await expandTimeline(wrapper)
     const timeline = wrapper.find('.response-tool-timeline')
-    expect(timeline.text()).toContain('read_file')
-    expect(timeline.text()).toContain('project_agent')
+    expect(timeline.text()).toContain('read file')
+    expect(timeline.text()).not.toContain('read_file')
+    expect(timeline.text()).not.toContain('project_agent')
     expect(timeline.text()).toContain('失败')
     // 已完成/失败的调用默认折叠,点击后展示错误详情
     await wrapper.find('.response-tool-call-head').trigger('click')
@@ -530,8 +537,9 @@ it('恢复进行中会话时展示调用链、部分输出与运行状态', asyn
     pending: null,
   })
   const wrapper = await mountReadyDrawer()
-  // 调用链(进行中工具)可见
-  expect(wrapper.text()).toContain('admin_execute_capability')
+  // 调用链(进行中工具,通俗化展示)可见
+  expect(wrapper.text()).toContain('执行管理操作')
+  expect(wrapper.text()).not.toContain('admin_execute_capability')
   // 部分输出可见
   expect(wrapper.text()).toContain('正在处理第 1 个告警')
   // 运行状态徽标:运行中

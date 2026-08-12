@@ -87,7 +87,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 
-import dayjs from 'dayjs'
+import { formatDateTime } from '@/utils/format'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { listVersions, getVersion, restoreVersion } from '@/api/codeFile'
 import type { VersionOut, VersionDetailOut } from '@/types/project'
@@ -112,7 +112,7 @@ const versionDetail = ref<VersionDetailOut | null>(null)
  * @returns 格式化后的日期字符�?
  */
 function formatDate(dateStr: string): string {
-  return dayjs(dateStr).format('YYYY-MM-DD HH:mm:ss')
+  return formatDateTime(dateStr)
 }
 
 /**
