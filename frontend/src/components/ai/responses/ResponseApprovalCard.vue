@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ArrowRight, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowRight, Loading, WarningFilled } from '@element-plus/icons-vue'
 
 import type { ResponseApprovalDecision, ResponseApprovalRequiredEvent } from '@/types/responses'
 import { formatResponseValue } from '@/utils/responsesTimeline'
@@ -19,7 +19,9 @@ const argumentsText = computed(() => formatResponseValue(props.approval.argument
 const previewText = computed(() => formatResponseValue(props.approval.preview))
 /** 标题:操作名优先,函数名兜底时翻译成通俗中文,不外露原始 tool_name。 */
 const titleText = computed(() => props.approval.operation || toolDisplayInfo(props.approval.tool_name).label)
-const canApprove = computed(() => !props.loading)
+/** 提交中(本卡片 submitting 或整局面板 loading):批准/拒绝按钮禁用并转圈,防重复点击。 */
+const submitting = computed(() => props.approval.status === 'submitting' || props.loading)
+const canApprove = computed(() => !submitting.value)
 const resultLabel = computed(() => {
   if (props.approval.status === 'submitting') return '处理中'
   return props.approval.status === 'approved' ? '已批准' : '已拒绝'
@@ -59,10 +61,11 @@ const detailOpen = ref(false)
         :disabled="!canApprove"
         @click="emit('decide', { action: 'approve', confirmation: approval.danger ? '确认执行' : '' })"
       >
-        <el-icon v-if="approval.danger" class="response-approve-icon"><WarningFilled /></el-icon>
-        {{ approval.danger ? '确认执行' : '批准' }}
+        <el-icon v-if="submitting" class="is-spinning" aria-hidden="true"><Loading /></el-icon>
+        <el-icon v-else-if="approval.danger" class="response-approve-icon"><WarningFilled /></el-icon>
+        {{ submitting ? '处理中…' : approval.danger ? '确认执行' : '批准' }}
       </button>
-      <button class="response-reject secondary-action" type="button" :disabled="loading" @click="emit('decide', { action: 'reject' })">拒绝</button>
+      <button class="response-reject secondary-action" type="button" :disabled="submitting" @click="emit('decide', { action: 'reject' })">拒绝</button>
     </div>
     <div v-else class="response-control-result card-result" :class="approval.status">{{ resultLabel }}</div>
   </section>
@@ -118,4 +121,9 @@ const detailOpen = ref(false)
 button:disabled { opacity: .5; cursor: not-allowed; }
 .response-control-result { margin-top: 9px; padding: 6px var(--sp-2); border-radius: var(--r-sm); color: var(--color-success); background: var(--color-success-light); }
 .response-control-result.rejected { color: var(--color-danger); background: var(--color-danger-light); }
+
+/* 提交中旋转指示(复用 Element Plus 约定类名) */
+.is-spinning { animation: response-spin 1s linear infinite; }
+@keyframes response-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .is-spinning { animation: none; } }
 </style>

@@ -24,6 +24,7 @@ import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline
 import AgentTeamTrace from '@/components/ai/AgentTeamTrace.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import { renderMarkdown } from '@/utils/markdown'
+import { toolRunningPhrase } from '@/utils/toolDisplay'
 import { extractNavigateDirectives } from '@/utils/agentNavigation'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { streamResponses } from '@/utils/responsesStream'
@@ -1082,7 +1083,7 @@ onMounted(() => meshBridge.start())
       </header>
 
       <div v-if="mascotStatus === 'running' && lastActiveToolName" class="copilot-progress">
-        正在执行 <code>{{ lastActiveToolName }}</code>
+        {{ toolRunningPhrase(lastActiveToolName) }}
       </div>
 
       <div ref="messageArea" class="copilot-messages" aria-live="polite" @click="onMessageClick">

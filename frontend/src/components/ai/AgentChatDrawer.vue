@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { CircleCheck, Close, Upload, WarningFilled } from '@element-plus/icons-vue'
+import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument, Upload, WarningFilled } from '@element-plus/icons-vue'
 
 import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
@@ -98,9 +98,11 @@ interface PlanStep {
 
 interface ChatMessage {
   id?: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'error'
   content: string
   time: string
+  /** 错误卡片:失败后留在消息流里,带「重试」与「新建对话」 */
+  errorCard?: { retryable: boolean }
   runId?: string
   trace_id?: string
   steps?: StepBubble[]
@@ -139,6 +141,7 @@ const loading = ref(false)
 const showTyping = ref(false)
 const modelName = ref('deepseek-v4-flash')
 const chatBody = ref<HTMLElement>()
+const chatInputRef = ref<HTMLTextAreaElement>()
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('user')
 const LEGACY_SESSION_KEY = 'prism-user-agent-session'
 const sessionId = ref('')
@@ -167,6 +170,10 @@ const meshSessions = ref<AgentChatSessionMeta[]>([])
 const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
 const uploading = ref(false)
+/** 上传进度:completed/total 驱动进度条,phase 描述当前阶段。 */
+const uploadProgress = ref({ completed: 0, total: 0, phase: '' })
+/** 最近一次失败/取消的运行:支撑错误卡片的「重试最后一条消息」。 */
+const lastFailedRun = ref<{ kind: 'user-message' | 'approval' | 'input' }>('user-message')
 
 /** 子 Agent 团队独立悬浮窗:当前点中查看的团队。 */
 const teamWindowVisible = ref(false)
@@ -190,12 +197,43 @@ const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
 const runStatusLabel = computed(() => (
   mascotStatus.value === 'running' ? '运行中' : mascotStatus.value === 'waiting' ? '等待你操作' : '空闲'
 ))
-const canSend = computed(() => (
-  inputText.value.trim().length > 0
-  && !loading.value
+
+/** 小菱执行进度:统计当前会话中「最新一轮」工具调用的完成情况。 */
+const toolStepProgress = computed(() => {
+  const activeRunId = sessionRun.value?.run_id
+  // 运行中取当前 run 的调用;无 run(或运行已结束)时回退到会话里最后一组调用
+  const source = activeRunId
+    ? [...messages.value].reverse().find((msg) => msg.runId === activeRunId && msg.toolCalls?.length)
+    : [...messages.value].reverse().find((msg) => msg.toolCalls?.length)
+  const calls = source?.toolCalls ?? []
+  const countable = calls.filter((call) => call.status !== 'rejected')
+  const done = countable.filter((call) => ['completed', 'failed'].includes(call.status)).length
+  const current = countable.find((call) =>
+    ['streaming', 'queued', 'delivered', 'acknowledged', 'processing', 'running'].includes(call.status))
+    ?? countable.find((call) => ['waiting_approval', 'waiting_input'].includes(call.status))
+  const hasPending = countable.some((call) =>
+    !['completed', 'failed'].includes(call.status))
+  return { done, total: countable.length, current, hasPending }
+})
+/** 存在工具调用且未全部完成时才显示执行进度条。 */
+const showToolProgress = computed(() => (
+  toolStepProgress.value.total > 0 && toolStepProgress.value.hasPending
+))
+const toolProgressPercent = computed(() => {
+  const { done, total } = toolStepProgress.value
+  return total > 0 ? Math.round((done / total) * 100) : 0
+})
+/** 面板是否可发起新的运行(发送/重试共用同一套守卫)。 */
+const canStartRun = computed(() => (
+  !loading.value
   && !uploading.value
   && !sessionRestoring.value
   && !sessionBusy.value
+))
+const canSend = computed(() => inputText.value.trim().length > 0 && canStartRun.value)
+/** 小菱流式运行中:显示「停止响应」按钮,点击即中止当前流。 */
+const canStopResponse = computed(() => (
+  loading.value || isAgentResponseSessionActive(sessionRun.value?.status)
 ))
 
 const meshBridge = createAgentMeshBridge({
@@ -599,9 +637,13 @@ function formatStreamContent(value: string): string {
 
 function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
   return messages.value
-    // 欢迎语是本地开屏气泡,不参与模型上下文,避免被服务端持久化后恢复重复
-    .filter((message) => message.content.trim().length > 0 && message.content.trim() !== WELCOME_TEXT.trim())
-    .map((message) => ({ role: message.role, content: message.content }))
+    // 欢迎语是本地开屏气泡,错误卡片是本地展示层,两者都不参与模型上下文
+    .filter((message) => (
+      message.role !== 'error'
+      && message.content.trim().length > 0
+      && message.content.trim() !== WELCOME_TEXT.trim()
+    ))
+    .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }))
 }
 
 function eventErrorMessage(event: ResponseStreamEvent): string {
@@ -620,6 +662,99 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
 
 function requestErrorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : '小菱这次没连上,请再试一次'
+}
+
+/** 错误留在消息流:失败/取消不再只是 Toast,追加一张带重试/新建对话的错误卡片。 */
+function appendErrorCard(content: string, retryable: boolean): void {
+  messages.value.push({
+    id: messageId(),
+    role: 'error',
+    content,
+    time: dayjs().format('HH:mm'),
+    errorCard: { retryable },
+  })
+  void nextTick().then(scrollToBottom)
+}
+
+/** 重试:按最近一次失败的来源续跑(用户消息 / 审批 / 追问),复用发送守卫。 */
+async function retryLastAction(): Promise<void> {
+  if (!canStartRun.value) return
+  const kind = lastFailedRun.value.kind
+  if (kind === 'user-message') {
+    const lastUserMessage = [...messages.value].reverse().find((message) => message.role === 'user')
+    if (!lastUserMessage) return
+    await runResponse({
+      action: 'start',
+      surface: 'user',
+      session_id: sessionId.value,
+      messages: conversationHistory(),
+    })
+    return
+  }
+  if (kind === 'approval') {
+    const target = [...messages.value].reverse().find((message) => message.approval?.status === 'pending')
+    if (target?.approval) await decideApproval(target, { action: 'approve', confirmation: target.approval.danger ? '确认执行' : '' })
+    return
+  }
+  const target = [...messages.value].reverse().find((message) => message.inputRequest?.status === 'pending')
+  if (target) await submitInput(target)
+}
+
+/** 新建对话:交给会话切换器创建并切换(正在运行的对话会在后台继续)。 */
+function startNewChat(): void {
+  switcherRef.value?.createSession()
+}
+
+/** 停止响应:中止当前流;已生成的部分内容保留在消息流里。 */
+function stopResponse(): void {
+  if (!canStopResponse.value) return
+  // 先收尾本地运行状态:服务端会话已解除占用,停止按钮立即隐藏。
+  if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: 'cancelled' }
+  syncBusy()
+  activeResponse?.abort()
+}
+
+/** 消息复制反馈:记录最近复制成功的消息 id,图标短暂变勾。 */
+const copiedMessageId = ref('')
+let copiedResetTimer: number | undefined
+
+function fallbackCopyText(text: string): boolean {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    textarea.remove()
+  }
+}
+
+async function copyMessage(message: ChatMessage): Promise<void> {
+  const text = message.content
+  let succeeded: boolean
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      succeeded = true
+    } else {
+      succeeded = fallbackCopyText(text)
+    }
+  } catch {
+    succeeded = fallbackCopyText(text)
+  }
+  if (!succeeded) {
+    ElMessage.error('复制失败,请手动选择文本复制')
+    return
+  }
+  if (!message.id) return
+  copiedMessageId.value = message.id
+  window.clearTimeout(copiedResetTimer)
+  copiedResetTimer = window.setTimeout(() => { copiedMessageId.value = '' }, 1500)
 }
 
 function setTimelineCallStatus(
@@ -821,14 +956,20 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     await handle.done
     if (protocolError) {
       ElMessage.error(protocolError)
+      appendErrorCard(protocolError, true)
       return false
     }
     return true
   } catch (error) {
-    if (!(error instanceof Error && error.name === 'AbortError')) {
-      ElMessage.error(requestErrorMessage(error))
-      if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
+    if (error instanceof Error && error.name === 'AbortError') {
+      // 用户主动「停止响应」:部分内容保留,留一张可重试的取消卡片。
+      appendErrorCard('已停止本次回答,你可以点「重试」继续,或新建对话', true)
+      return false
     }
+    const text = requestErrorMessage(error)
+    ElMessage.error(text)
+    appendErrorCard(text, true)
+    if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
     return false
   } finally {
     if (activeResponse === handle) activeResponse = null
@@ -1075,6 +1216,7 @@ async function sendMessage(): Promise<void> {
 
   messages.value.push({ id: messageId(), role: 'user', content: text, time: dayjs().format('HH:mm') })
   inputText.value = ''
+  lastFailedRun.value = { kind: 'user-message' }
   // 新对话自动命名:首条用户消息提炼为会话标题
   if (autoTitleAgentChatSession('user', sessionId.value, text)) {
     switcherRef.value?.reload?.()
@@ -1105,6 +1247,7 @@ async function decideApproval(
   if (!approval || approval.status !== 'pending' || loading.value) return
   const { action, confirmation = '' } = decision
   approval.status = 'submitting'
+  lastFailedRun.value = { kind: 'approval' }
   setTimelineCallStatus(approval.call_id, action === 'approve' ? 'running' : 'rejected')
   const succeeded = await runResponse({
     action,
@@ -1126,6 +1269,7 @@ async function submitInput(message: ChatMessage, selectedAnswer?: string): Promi
   const answer = request?.answer.trim() ?? ''
   if (!request || request.status !== 'pending' || !answer || loading.value) return
   request.status = 'submitting'
+  lastFailedRun.value = { kind: 'input' }
   if (!request.answerSent) {
     messages.value.push({
       id: messageId(),
@@ -1158,7 +1302,35 @@ function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     sendMessage()
+    return
   }
+  // ↑:输入框为空时把最后一条自己发的消息填回来改,避免重复打字
+  if (e.key === 'ArrowUp' && !inputText.value.trim()) {
+    const lastUserMessage = [...messages.value].reverse().find((message) => message.role === 'user')
+    if (!lastUserMessage) return
+    e.preventDefault()
+    inputText.value = lastUserMessage.content
+    void nextTick(() => {
+      const input = e.target as HTMLTextAreaElement | null
+      if (input) {
+        input.focus()
+        input.setSelectionRange(input.value.length, input.value.length)
+      }
+    })
+  }
+}
+
+/** 面板级快捷键:`/` 从任意处聚焦输入框(输入中不拦截,不影响中文输入)。 */
+function handleGlobalKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && props.visible) {
+    close()
+    return
+  }
+  if (!props.visible || e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+  const target = e.target as HTMLElement | null
+  if (target?.closest('input, textarea, [contenteditable="true"]')) return
+  e.preventDefault()
+  chatInputRef.value?.focus()
 }
 
 /**
@@ -1203,9 +1375,22 @@ function scrollToBottom(): void {
 
 /* ── 拖拽上传文件建项目 ─────────────────────────────── */
 const dragActive = ref(false)
-/** 拖拽上传的实时状态,显示在输入区上方让用户知道进展 */
-const uploadStatus = ref('')
 const uploadInput = ref<HTMLInputElement>()
+
+/** 更新上传进度展示:阶段文案 + 已完成/总数驱动进度条。 */
+function setUploadProgress(phase: string, completed: number, total: number): void {
+  uploadProgress.value = { phase, completed, total }
+}
+
+function resetUploadProgress(): void {
+  uploadProgress.value = { completed: 0, total: 0, phase: '' }
+}
+
+const uploadStatusVisible = computed(() => uploading.value && Boolean(uploadProgress.value.phase))
+const uploadPercent = computed(() => {
+  const { completed, total } = uploadProgress.value
+  return total > 0 ? Math.round((completed / total) * 100) : 0
+})
 
 function onDragEnter(event: DragEvent): void {
   if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
@@ -1238,12 +1423,12 @@ function inferProjectLanguage(files: File[]): string {
 async function processIncomingFiles(files: File[]): Promise<void> {
   if (!files.length || uploading.value) return
   uploading.value = true
-  uploadStatus.value = `准备上传 ${files.length} 个文件…`
+  setUploadProgress(`准备上传…`, 0, files.length)
   try {
     const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     if (images.length && !codeFiles.length) {
-      uploadStatus.value = ''
+      resetUploadProgress()
       ElMessage.info('图片会作为项目附件上传；若要让小菱帮你创建代码项目，请再拖入至少一个代码文件')
       return
     }
@@ -1252,7 +1437,7 @@ async function processIncomingFiles(files: File[]): Promise<void> {
     if (skipped > 0) ElMessage.warning(`单次最多上传 20 个文件,已跳过后面的 ${skipped} 个`)
     await uploadFilesAsProject(targets, images.length)
   } catch (err) {
-    uploadStatus.value = ''
+    resetUploadProgress()
     ElMessage.error(`上传失败: ${err instanceof Error ? err.message : '请重试'}`)
   } finally {
     uploading.value = false
@@ -1272,7 +1457,7 @@ async function onFileInput(event: Event): Promise<void> {
 
 /** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
 async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
-  uploadStatus.value = `正在验证 ${files.length} 个文件…`
+  setUploadProgress('正在验证文件…', 0, files.length)
   // 创建项目前先逐个读取,空文件/读取失败时不调用创建接口,避免留下空项目。
   const readableFiles: File[] = []
   const preflightFailures: string[] = []
@@ -1284,16 +1469,17 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     } catch (err) {
       preflightFailures.push(`${file.name}: ${err instanceof Error ? err.message : '文件不可读取'}`)
     }
+    setUploadProgress('正在验证文件…', readableFiles.length + preflightFailures.length, files.length)
   }
   if (!readableFiles.length) {
-    uploadStatus.value = ''
+    resetUploadProgress()
     throw new Error(`没有可上传的文件${preflightFailures.length ? ` (${preflightFailures[0]})` : ''}`)
   }
   const base = readableFiles.find((file) => !IMAGE_EXTS.has(file.name.split('.').pop()?.toLowerCase() ?? ''))?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
   const suffix = `${new Date().toISOString().slice(5, 10).replace('-', '')}-${crypto.randomUUID().slice(0, 6)}`
   const projectName = `${base}-${suffix}`
   const language = inferProjectLanguage(readableFiles)
-  uploadStatus.value = `正在创建项目「${projectName}」…`
+  setUploadProgress(`正在创建项目「${projectName}」…`, 0, readableFiles.length)
   const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
   const projectId = created.id
   let okCount = 0
@@ -1301,7 +1487,7 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   const targets = readableFiles
   for (let i = 0; i < targets.length; i++) {
     const file = targets[i]
-    uploadStatus.value = `正在上传 ${i + 1}/${targets.length}: ${file.name}`
+    setUploadProgress(file.name, i, targets.length)
     try {
       const fd = new FormData()
       fd.append('project_id', String(projectId))
@@ -1312,8 +1498,9 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     } catch (err) {
       failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
     }
+    setUploadProgress(file.name, i + 1, targets.length)
   }
-  uploadStatus.value = ''
+  resetUploadProgress()
   // 若所有上传请求都失败,立即软删除刚建的空项目,不把失败项目留给用户。
   if (!okCount) {
     try { await deleteProject(projectId) } catch { /* 仍优先把真实上传失败反馈给用户 */ }
@@ -1364,10 +1551,6 @@ watch(() => props.prefill, (prefill) => {
   emit('consumed-prefill')
 }, { immediate: true })
 
-function handleEscape(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && props.visible) close()
-}
-
 onBeforeUnmount(() => {
   meshBridge.stop()
   persistSnapshot()
@@ -1376,10 +1559,14 @@ onBeforeUnmount(() => {
   activeResponse?.abort()
   activityStore.clear()
   window.clearTimeout(projectSearchTimer)
-  window.removeEventListener('keydown', handleEscape)
+  window.clearTimeout(copiedResetTimer)
+  window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
-onMounted(() => meshBridge.start())
+onMounted(() => {
+  meshBridge.start()
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
 </script>
 
 <template>
@@ -1421,8 +1608,7 @@ onMounted(() => meshBridge.start())
               </span>
               <div class="chat-title-text">
                 <div class="chat-title-line">
-                  <span>{{ MASCOT_NAME }} · Agent 助手</span>
-                  <span class="model-tag font-mono" title="当前模型">{{ modelName }}</span>
+                  <span :title="`当前模型:${modelName}`">{{ MASCOT_NAME }} · Agent 助手</span>
                   <span class="run-badge" :class="`run-${mascotStatus}`">
                     <i></i>{{ runStatusLabel }}
                   </span>
@@ -1481,8 +1667,28 @@ onMounted(() => meshBridge.start())
               </div>
             </Transition>
 
-            <div v-if="mascotStatus === 'running' && lastActiveToolName" class="chat-progress">
-              {{ toolRunningPhrase(lastActiveToolName) }}
+            <div
+              v-if="showToolProgress || (mascotStatus === 'running' && lastActiveToolName)"
+              class="chat-progress"
+              :class="{ 'is-busy': mascotStatus === 'running' }"
+              role="status"
+              aria-label="小菱执行进度"
+            >
+              <span class="chat-progress-phrase">
+                <template v-if="mascotStatus === 'running' && lastActiveToolName">
+                  {{ toolRunningPhrase(lastActiveToolName) }}
+                </template>
+                <template v-else-if="toolStepProgress.current">
+                  当前:{{ toolRunningPhrase(toolStepProgress.current.name) }}
+                </template>
+                <template v-else>小菱正在推进…</template>
+              </span>
+              <template v-if="showToolProgress">
+                <span class="chat-progress-track" aria-hidden="true">
+                  <i :style="{ width: `${toolProgressPercent}%` }"></i>
+                </span>
+                <span class="chat-progress-count">{{ toolStepProgress.done }}/{{ toolStepProgress.total }} 步</span>
+              </template>
             </div>
 
             <div ref="chatBody" class="chat-body" @click="onMessageClick">
@@ -1492,11 +1698,10 @@ onMounted(() => meshBridge.start())
                 <PrismMascot v-else :size="26" :status="'idle'" />
               </div>
               <div class="msg-bubble" :class="{ 'has-response-control': msg.toolCalls?.length || msg.approval || msg.inputRequest }">
-                <!-- 步骤气泡: 仅对 assistant + 有 steps 时展示 -->
+                <!-- 步骤气泡: 仅对 assistant + 有 steps 时展示;默认折叠降噪 -->
                 <details
                   v-if="msg.role === 'assistant' && msg.steps && msg.steps.length"
                   class="step-stream"
-                  open
                 >
                   <summary class="step-summary">
                     Agent 调度链 · 共 {{ msg.steps.length }} 步
@@ -1532,7 +1737,7 @@ onMounted(() => meshBridge.start())
                   class="plan-tree"
                 >
                   <summary class="plan-summary">
-                    <span class="plan-icon">🌳</span>
+                    <el-icon class="plan-icon" aria-hidden="true"><Connection /></el-icon>
                     双层调度调用链 · LLM 规划 {{ msg.planSteps.length }} 步
                     <span class="plan-total-ms">
                       总耗时 {{ planTotalMs(msg.planSteps) }}ms
@@ -1572,12 +1777,44 @@ onMounted(() => meshBridge.start())
                   </ol>
                 </details>
 
+                <!-- 错误卡片:失败/取消留在消息流,带重试与新建对话 -->
+                <div v-if="msg.role === 'error'" class="msg-error-card">
+                  <div class="msg-error-head">
+                    <el-icon aria-hidden="true"><CircleCloseFilled /></el-icon>
+                    <span>这次没有完成</span>
+                  </div>
+                  <p class="msg-error-text">{{ msg.content }}</p>
+                  <div class="msg-error-actions">
+                    <button
+                      v-if="msg.errorCard?.retryable"
+                      class="msg-error-btn is-retry"
+                      type="button"
+                      :disabled="!canStartRun"
+                      @click="retryLastAction()"
+                    >重试</button>
+                    <button class="msg-error-btn" type="button" @click="startNewChat()">新建对话</button>
+                  </div>
+                </div>
+
                 <div
                   v-if="msg.role === 'assistant' && msg.content"
                   class="msg-content markdown-body"
                   v-html="renderMarkdown(msg.content)"
                 />
                 <div v-else-if="msg.role === 'user'" class="msg-content">{{ msg.content }}</div>
+                <!-- 助手消息 hover 显示复制按钮 -->
+                <button
+                  v-if="msg.role === 'assistant' && msg.content"
+                  class="msg-copy-btn"
+                  :class="{ 'is-copied': copiedMessageId === msg.id }"
+                  type="button"
+                  :title="copiedMessageId === msg.id ? '已复制' : '复制这条回复'"
+                  :aria-label="copiedMessageId === msg.id ? '已复制' : '复制这条回复'"
+                  @click="copyMessage(msg)"
+                >
+                  <el-icon v-if="copiedMessageId === msg.id" aria-hidden="true"><Check /></el-icon>
+                  <el-icon v-else aria-hidden="true"><CopyDocument /></el-icon>
+                </button>
 
                 <!-- 页面引导:模型约定路由 + 指令导航按钮,鉴权由 AgentNavLink 同源守卫裁决 -->
                 <div v-if="msg.role === 'assistant' && msg.navigations?.length" class="nav-directives">
@@ -1766,10 +2003,15 @@ onMounted(() => meshBridge.start())
           </div>
 
           <div class="chat-input-area">
-            <div v-if="uploadStatus" class="upload-status">
+            <div v-if="uploadStatusVisible" class="upload-status" role="status" aria-label="上传进度">
               <span class="upload-status-spinner" />
-              <span class="upload-status-text">{{ uploadStatus }}</span>
+              <span class="upload-status-text" :title="uploadProgress.phase">{{ uploadProgress.phase }}</span>
+              <span class="upload-status-track" aria-hidden="true">
+                <i :style="{ width: `${uploadPercent}%` }"></i>
+              </span>
+              <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
             </div>
+            <p v-else class="chat-input-hint">支持直接拖入代码文件帮你建项目;Shift+Enter 换行</p>
             <input
               ref="uploadInput"
               class="source-upload-input"
@@ -1780,9 +2022,10 @@ onMounted(() => meshBridge.start())
               @change="onFileInput"
             />
             <textarea
+              ref="chatInputRef"
               v-model="inputText"
               class="chat-input"
-              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送,Shift+Enter 换行;也可直接拖入代码文件帮你建项目'"
+              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送'"
               rows="2"
               :disabled="loading || uploading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
@@ -1799,6 +2042,17 @@ onMounted(() => meshBridge.start())
                 选择源码
               </button>
               <button
+                v-if="canStopResponse"
+                class="stop-btn"
+                type="button"
+                title="停止小菱本次回答"
+                @click="stopResponse"
+              >
+                <span class="stop-btn-icon" aria-hidden="true"></span>
+                停止响应
+              </button>
+              <button
+                v-else
                 class="send-btn"
                 type="button"
                 :disabled="!canSend"
@@ -1896,8 +2150,6 @@ onMounted(() => meshBridge.start())
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
   border-radius: 50%;
   background: linear-gradient(145deg, #f2f3ff, #e4ecfb);
   box-shadow: inset 0 0 0 1px rgba(91, 88, 232, 0.16);
@@ -1961,13 +2213,51 @@ onMounted(() => meshBridge.start())
 
 .chat-progress {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 20px;
   font-size: 11px;
   color: var(--color-text-secondary);
   background: linear-gradient(90deg, rgba(91, 88, 232, 0.06), rgba(61, 188, 217, 0.06));
   border-bottom: 1px solid var(--color-border-light);
   overflow: hidden;
+}
+.chat-progress-phrase {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-progress-track {
+  flex: 1 1 72px;
+  min-width: 48px;
+  max-width: 160px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--gray-100);
+}
+.chat-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand-400), var(--accent-400));
+  transition: width 0.4s ease;
+}
+/* 运行中呼吸:整条进度带轻微明暗起伏 */
+.chat-progress.is-busy .chat-progress-track i {
+  animation: chat-progress-breathe 1.4s ease-in-out infinite;
+}
+@keyframes chat-progress-breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.22); }
+}
+.chat-progress-count {
+  flex: none;
+  color: var(--brand-600);
+  font-weight: 600;
+  font-size: 10.5px;
   white-space: nowrap;
 }
 .chat-progress code {
@@ -2008,21 +2298,12 @@ onMounted(() => meshBridge.start())
   font-size: 18px;
 }
 
-.model-tag {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--brand-50);
-  color: var(--brand-600);
-  border: 1px solid var(--brand-200);
-}
-
 .close-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -2071,7 +2352,8 @@ onMounted(() => meshBridge.start())
   background: var(--brand-50);
   color: var(--brand-700);
   font-size: var(--fs-xs);
-  padding: 5px var(--sp-3);
+  min-height: 36px;
+  padding: 8px var(--sp-4);
   cursor: pointer;
   box-shadow: var(--shadow-1);
   transition: all var(--transition-fast);
@@ -2087,6 +2369,11 @@ onMounted(() => meshBridge.start())
 @media (prefers-reduced-motion: reduce) {
   .quick-question { transition: none; }
   .quick-question:hover { transform: none; }
+  .chat-progress-track i { transition: none; }
+  .chat-progress.is-busy .chat-progress-track i { animation: none; }
+  .upload-status-track i { transition: none; }
+  .msg-copy-btn { transition: none; }
+  .stop-btn { transition: none; }
 }
 
 .mascot-float-enter-active,
@@ -2131,6 +2418,7 @@ onMounted(() => meshBridge.start())
 }
 
 .msg-bubble {
+  position: relative;
   max-width: calc(100% - 48px);
   padding: 10px 14px;
   border-radius: 12px;
@@ -2139,6 +2427,80 @@ onMounted(() => meshBridge.start())
 }
 
 .msg-bubble.has-response-control { width: calc(100% - 48px); }
+
+/* hover 复制按钮:默认淡出,气泡悬停/键盘聚焦时可见 */
+.msg-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.msg-bubble:hover .msg-copy-btn,
+.msg-copy-btn:focus-visible { opacity: 1; }
+.msg-copy-btn:hover { color: var(--brand-600); border-color: var(--brand-300); }
+.msg-copy-btn.is-copied { color: var(--color-success); border-color: var(--color-success); opacity: 1; }
+
+/* 错误卡片:红色左边条,失败/取消留在消息流里 */
+.msg-row.error .msg-avatar { background: var(--color-danger-light); box-shadow: inset 0 0 0 1px rgba(220, 73, 97, 0.25); }
+
+.msg-error-card {
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--color-danger);
+}
+
+.msg-error-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-danger);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.msg-error-text {
+  margin: 5px 0 0;
+  color: var(--color-text-regular);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-error-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.msg-error-btn {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-base);
+  border-radius: 6px;
+  background: var(--color-bg-card);
+  color: var(--color-text-regular);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.msg-error-btn:hover:not(:disabled) { border-color: var(--brand-400); color: var(--brand-600); }
+.msg-error-btn.is-retry { border-color: var(--brand-500); color: #fff; background: var(--brand-500); }
+.msg-error-btn.is-retry:hover:not(:disabled) { border-color: var(--brand-600); background: var(--brand-600); color: #fff; }
+.msg-error-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .msg-row.user .msg-bubble {
   background: var(--brand-50);
@@ -2253,7 +2615,7 @@ onMounted(() => meshBridge.start())
   flex-wrap: wrap;
 }
 
-.plan-icon { font-size: 14px; }
+.plan-icon { font-size: 14px; color: var(--brand-500); }
 
 .plan-total-ms {
   margin-left: auto;
@@ -2566,9 +2928,44 @@ onMounted(() => meshBridge.start())
 }
 
 .upload-status-text {
+  flex: none;
+  max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.upload-status-track {
+  flex: 1 1 60px;
+  min-width: 48px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--brand-100, #dcdafd);
+}
+
+.upload-status-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand-400, #6f69ee), var(--accent-400, #3dbcd9));
+  transition: width 0.3s ease;
+}
+
+.upload-status-count {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--brand-600, #5b58e8);
+  white-space: nowrap;
+}
+
+.chat-input-hint {
+  width: 100%;
+  margin: 0 0 2px;
+  color: var(--color-text-placeholder);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
 .chat-input {
@@ -2631,7 +3028,8 @@ onMounted(() => meshBridge.start())
 
 .send-btn {
   align-self: flex-end;
-  padding: 8px 20px;
+  min-height: 40px;
+  padding: 8px 24px;
   border: none;
   border-radius: 8px;
   background: var(--brand-500);
@@ -2645,6 +3043,34 @@ onMounted(() => meshBridge.start())
 
 .send-btn:hover:not(:disabled) { background: var(--brand-600); }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 停止响应:红色醒目,运行中替换发送按钮 */
+.stop-btn {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 18px;
+  border: 1px solid var(--color-danger);
+  border-radius: 8px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.stop-btn:hover { background: var(--sev-severe); border-color: var(--sev-severe); }
+
+.stop-btn-icon {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #fff;
+}
 
 .drawer-enter-active,
 .drawer-leave-active { transition: all 0.3s ease; }
@@ -2662,5 +3088,10 @@ onMounted(() => meshBridge.start())
   .chat-overlay { right: 16px; bottom: 16px; }
   .chat-fab { right: 16px; bottom: 16px; }
   .chat-drawer { width: calc(100vw - 32px); height: min(600px, calc(100dvh - 32px)); }
+  /* 触控适配:关键按钮加大到 40px,更好点 */
+  .close-btn { width: 40px; height: 40px; }
+  .send-btn,
+  .stop-btn { min-height: 40px; padding: 8px 22px; }
+  .upload-btn { min-height: 40px; }
 }
 </style>

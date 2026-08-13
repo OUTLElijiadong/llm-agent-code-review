@@ -588,7 +588,7 @@ describe('AdminCopilot Responses stream', () => {
     await finish(1)
   })
 
-  it('streams function arguments and submits a structured option immediately', async () => {
+  it('streams function arguments and submits a structured option via the submit button', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
     await flushSessionRestore()
@@ -631,7 +631,12 @@ describe('AdminCopilot Responses stream', () => {
     expect(wrapper.find('.response-tool-arguments').text()).toContain('"query": "李家栋"')
     expect(wrapper.findAll('.response-input-option')).toHaveLength(2)
     expect(wrapper.text()).toContain('其他（自定义输入）')
+    // 点选只高亮选中态,再点「提交」才发送(防误触)
     await wrapper.findAll('.response-input-option')[0].trigger('click')
+    await flushPromises()
+    expect(streams.records).toHaveLength(1)
+    expect(wrapper.findAll('.response-input-option')[0].classes()).toContain('is-selected')
+    await wrapper.find('.response-answer-submit').trigger('click')
     await flushPromises()
     expect(streams.records[1].body).toMatchObject({
       action: 'answer',

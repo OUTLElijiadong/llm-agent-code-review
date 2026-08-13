@@ -15,11 +15,12 @@ import {
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 
 /**
- * 子 Agent 团队独立悬浮窗。
+ * 子 Agent 团队独立悬浮窗(Codex 风格多 Agent 群聊视图)。
  *
  * 区别于主聊天面板(AgentChatDrawer):这是一个可拖拽的独立浮窗,
- * 默认展开地展示某个子 Agent 团队的完整工作内容——成员/任务/消息流,
- * 并提供「重试失败」「取消团队」操作入口。
+ * 把一个子 Agent 团队渲染成「群聊」——每条协作消息是一个带头像/角色
+ * 配色的气泡,成员卡片实时展示「正在做什么」,顶部是强化进度条,
+ * 任务明细默认折叠,并提供「重试失败」「取消团队」操作入口。
  */
 
 const props = defineProps<{
@@ -36,6 +37,8 @@ const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveD
   useFloatingChatPosition('agent-team-window')
 
 const actionSubmitting = ref(false)
+/** 气泡滚动容器:新消息到达时自动滚到底部。 */
+const chatBodyRef = ref<HTMLElement | null>(null)
 
 const members = computed<AgentTeamMember[]>(() => props.team?.members ?? [])
 const tasks = computed<AgentTeamTask[]>(() => props.team?.tasks ?? [])
@@ -63,6 +66,11 @@ const counts = computed(() => {
 const progressPercent = computed(() => {
   const total = counts.value.total
   return total > 0 ? Math.round((counts.value.completed / total) * 100) : 0
+})
+/** 团队仍在推进(运行/验证/排队)时进度条加流光动画。 */
+const teamActive = computed(() => {
+  const status = props.team?.status
+  return Boolean(status && ['running', 'verifying', 'queued'].includes(status))
 })
 
 /** 有失败/死信/过期任务时才允许「重试失败」。 */
@@ -93,6 +101,8 @@ const MEMBER_STATUS_LABELS: Record<string, string> = {
 const ROLE_LABELS: Record<string, string> = {
   worker: '执行', verifier: '验证', summarizer: '汇总',
 }
+/** 小菱/系统侧地址关键字:命中即视为主持人(品牌紫头像)。 */
+const MANAGER_TOKENS = ['manager', 'user', 'system', 'coordinator', 'orchestrator', '小菱', 'session:']
 
 function teamStatusLabel(status: string): string {
   return TEAM_STATUS_LABELS[status] ?? status
@@ -108,6 +118,87 @@ function roleLabel(role: string): string {
 }
 function statusClass(status: string): string {
   return `is-${status.replace(/[^a-z0-9_-]/gi, '-')}`
+}
+
+/** 归一化地址:小写并去掉 agent:/member: 等前缀,便于与 member_key/address 比对。 */
+function normalizeAddress(raw?: string | null): string {
+  return (raw ?? '').trim().toLowerCase().replace(/^(agent|member|session|user|system)[:/]+/, '')
+}
+
+function findMember(raw?: string | null): AgentTeamMember | undefined {
+  const key = normalizeAddress(raw)
+  if (!key) return undefined
+  return members.value.find((member) => {
+    const candidates = [member.member_key, member.address, member.display_name]
+    return candidates.some((candidate) => candidate && normalizeAddress(candidate) === key)
+  })
+}
+
+/** 发言者身份:优先按角色配色(worker/verifier/summarizer),否则视为小菱/系统主持人。 */
+interface Speaker {
+  key: string
+  name: string
+  /** 气泡头部角色徽标文案;小菱/系统为空(不展示徽标)。 */
+  badge: string
+  /** 头像内单字。 */
+  initial: string
+  /** 配色类别 → CSS 修饰类。 */
+  theme: 'manager' | 'worker' | 'verifier' | 'summarizer'
+}
+
+function resolveSpeaker(raw?: string | null): Speaker {
+  const key = normalizeAddress(raw) || 'system'
+  const member = findMember(raw)
+  if (member) {
+    const theme = ROLE_LABELS[member.role] ? (member.role as Speaker['theme']) : 'manager'
+    return {
+      key,
+      name: member.display_name,
+      badge: roleLabel(member.role),
+      initial: (member.display_name || roleLabel(member.role) || '员').trim().charAt(0),
+      theme,
+    }
+  }
+  const text = (raw ?? '').trim()
+  if (!text || MANAGER_TOKENS.some((token) => key.includes(token))) {
+    return { key, name: '小菱', badge: '', initial: '菱', theme: 'manager' }
+  }
+  // 未在成员列表里的其他地址:按未知成员处理,用执行色兜底
+  return { key, name: text, badge: '', initial: text.charAt(0).toUpperCase() || '员', theme: 'worker' }
+}
+
+/**
+ * 「@某人」小标签:send_to 指向具体成员时展示「指派 @xx」,广播/回到小菱时不展示。
+ * task.assign 类消息用「指派」,其余用「回复」。
+ */
+function mentionLabel(message: AgentTeamMessage): string {
+  const target = findMember(message.send_to)
+  if (!target) return ''
+  if (normalizeAddress(message.send_to) === normalizeAddress(message.sent_from)) return ''
+  const verb = /assign|dispatch|delegate/i.test(message.message_type) ? '指派' : '回复'
+  return `${verb} @${target.display_name}`
+}
+
+/** 每个成员的实时工作状态:取该成员当前 running 任务标题作为「正在做的事」。 */
+function memberActivity(member: AgentTeamMember): string {
+  const running = tasks.value.find(
+    (task) =>
+      task.status === 'running'
+      && (task.member_id === member.member_id
+        || (task.member_key && normalizeAddress(task.member_key) === normalizeAddress(member.member_key))),
+  )
+  if (running) return running.title
+  if (member.status === 'running') return '处理中'
+  if (member.status === 'completed') return '已完成'
+  if (member.status === 'failed') return '出错了'
+  return '待命'
+}
+
+/** 成员状态点:completed→绿勾,failed→红叉,running→呼吸点,其余灰点。 */
+function memberStatusIcon(status: string): string {
+  if (status === 'completed') return '✓'
+  if (status === 'failed') return '✕'
+  return ''
 }
 
 function taskMember(task: AgentTeamTask): string {
@@ -147,6 +238,18 @@ watch(
     await nextTick()
     restoreOrAnchor()
   },
+)
+
+/** 新消息/成员状态变化时,气泡区自动滚动到底部。 */
+watch(
+  () => [messages.value.length, props.team?.updated_at],
+  async () => {
+    if (!props.visible) return
+    await nextTick()
+    const el = chatBodyRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  },
+  { flush: 'post' },
 )
 
 async function retryFailed(): Promise<void> {
@@ -234,34 +337,86 @@ async function cancelTeam(): Promise<void> {
           </button>
         </header>
 
+        <!-- 强化进度条:百分比 + 完成/总数 + 渐变流光 -->
         <div class="team-window-progress" aria-label="团队进度">
-          <div class="team-window-progress-bar">
-            <i :style="{ width: `${progressPercent}%` }"></i>
+          <div class="team-window-progress-top">
+            <span class="team-window-progress-pct">{{ progressPercent }}%</span>
+            <span class="team-window-progress-frac">已完成 {{ counts.completed }}/{{ counts.total }} 项</span>
+            <span class="team-window-progress-mini">
+              <template v-if="counts.running">运行 {{ counts.running }}</template>
+              <template v-if="counts.queued"> · 排队 {{ counts.queued }}</template>
+              <template v-if="counts.failed + counts.blocked"> · 失败/阻塞 {{ counts.failed + counts.blocked }}</template>
+            </span>
           </div>
-          <div class="team-window-stats">
-            <span><b>{{ counts.completed }}</b>完成</span>
-            <span><b>{{ counts.running }}</b>运行</span>
-            <span><b>{{ counts.queued }}</b>排队</span>
-            <span><b>{{ counts.failed + counts.blocked }}</b>失败/阻塞</span>
-            <span class="team-window-total">共 {{ counts.total }} 项</span>
+          <div class="team-window-progress-bar" :class="{ 'is-active': teamActive && progressPercent < 100 }">
+            <i :style="{ width: `${progressPercent}%` }"></i>
           </div>
         </div>
 
-        <div class="team-window-body">
-          <section v-if="members.length" class="team-window-section" aria-label="团队成员">
-            <h4>成员 · {{ members.length }}</h4>
+        <div ref="chatBodyRef" class="team-window-body">
+          <!-- 成员实时工作状态条 -->
+          <section v-if="members.length" class="team-window-section" aria-label="团队成员实时状态">
             <ul class="team-window-members">
-              <li v-for="member in members" :key="member.member_id">
-                <span class="team-window-dot" :class="statusClass(member.status)" aria-hidden="true"></span>
-                <span class="team-window-member-name">{{ member.display_name }}</span>
-                <span class="team-window-role">{{ roleLabel(member.role) }}</span>
-                <span class="team-window-item-status">{{ memberStatusLabel(member.status) }}</span>
+              <li v-for="member in members" :key="member.member_id" :class="statusClass(member.status)">
+                <span
+                  class="team-member-avatar"
+                  :class="`is-${ROLE_LABELS[member.role] ? member.role : 'manager'}`"
+                  aria-hidden="true"
+                >{{ (member.display_name || '员').trim().charAt(0) }}</span>
+                <span class="team-member-main">
+                  <span class="team-member-line">
+                    <span class="team-window-member-name">{{ member.display_name }}</span>
+                    <span class="team-window-role" :class="`is-${member.role}`">{{ roleLabel(member.role) }}</span>
+                  </span>
+                  <span class="team-member-activity" :title="memberActivity(member)">{{ memberActivity(member) }}</span>
+                </span>
+                <span class="team-member-state" :class="statusClass(member.status)">
+                  <i v-if="member.status === 'running'" class="team-member-pulse" aria-hidden="true"></i>
+                  <b v-else-if="memberStatusIcon(member.status)" aria-hidden="true">{{ memberStatusIcon(member.status) }}</b>
+                  {{ memberStatusLabel(member.status) }}
+                </span>
               </li>
             </ul>
           </section>
 
-          <section v-if="tasks.length" class="team-window-section" aria-label="团队任务">
-            <h4>任务 · {{ tasks.length }}</h4>
+          <!-- 多 Agent 群聊气泡流 -->
+          <section v-if="messages.length" class="team-window-section team-window-chat" aria-label="协作消息">
+            <div
+              v-for="message in messages"
+              :key="message.message_id"
+              class="team-chat-row"
+            >
+              <span
+                class="team-chat-avatar"
+                :class="`is-${resolveSpeaker(message.sent_from).theme}`"
+                aria-hidden="true"
+              >{{ resolveSpeaker(message.sent_from).initial }}</span>
+              <div class="team-chat-main">
+                <div class="team-chat-head">
+                  <span class="team-chat-name">{{ resolveSpeaker(message.sent_from).name }}</span>
+                  <span
+                    v-if="resolveSpeaker(message.sent_from).badge"
+                    class="team-chat-badge"
+                    :class="`is-${resolveSpeaker(message.sent_from).theme}`"
+                  >{{ resolveSpeaker(message.sent_from).badge }}</span>
+                  <span v-if="mentionLabel(message)" class="team-chat-mention">{{ mentionLabel(message) }}</span>
+                  <time class="team-chat-time">{{ formatTime(message.create_time ?? message.created_at) }}</time>
+                </div>
+                <div class="team-chat-bubble" :class="`is-${resolveSpeaker(message.sent_from).theme}`">
+                  <p class="team-chat-subject">{{ message.subject || message.message_type }}</p>
+                  <p v-if="message.payload" class="team-chat-payload">{{ summarize(message.payload) }}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <p v-if="!members.length && !messages.length" class="team-window-empty">
+            团队详情正在同步…
+          </p>
+
+          <!-- 任务明细默认折叠,避免浮窗过长 -->
+          <details v-if="tasks.length" class="team-window-task-details">
+            <summary>任务明细 · {{ tasks.length }}</summary>
             <ol class="team-window-tasks">
               <li v-for="task in tasks" :key="task.task_id" :class="statusClass(task.status)">
                 <div class="team-window-task-line">
@@ -278,25 +433,7 @@ async function cancelTeam(): Promise<void> {
                 </details>
               </li>
             </ol>
-          </section>
-
-          <section v-if="messages.length" class="team-window-section" aria-label="协作消息流">
-            <h4>协作消息 · {{ messages.length }}</h4>
-            <ul class="team-window-messages">
-              <li v-for="message in messages" :key="message.message_id">
-                <div class="team-window-message-line">
-                  <span class="team-window-message-route">{{ message.sent_from }} → {{ message.send_to }}</span>
-                  <time>{{ formatTime(message.create_time ?? message.created_at) }}</time>
-                </div>
-                <p class="team-window-message-subject">{{ message.subject || message.message_type }}</p>
-                <p v-if="message.payload" class="team-window-message-payload">{{ summarize(message.payload) }}</p>
-              </li>
-            </ul>
-          </section>
-
-          <p v-if="!members.length && !tasks.length && !messages.length" class="team-window-empty">
-            团队详情正在同步…
-          </p>
+          </details>
         </div>
 
         <footer class="team-window-footer">
@@ -398,32 +535,56 @@ async function cancelTeam(): Promise<void> {
 }
 .team-window-close:hover { color: var(--color-text-primary); background: var(--gray-50); }
 
+/* ── 强化进度条 ─────────────────────────────── */
 .team-window-progress {
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) calc(var(--sp-2) + 2px);
   border-bottom: 1px solid var(--color-border-light);
 }
-.team-window-progress-bar {
-  height: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--gray-50);
-}
-.team-window-progress-bar i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--brand-400), var(--accent-400));
-  transition: width 0.3s ease;
-}
-.team-window-stats {
+.team-window-progress-top {
   display: flex;
   align-items: baseline;
-  gap: var(--sp-3);
-  margin-top: var(--sp-1);
-  color: var(--color-text-secondary);
+  gap: var(--sp-2);
+  margin-bottom: 5px;
 }
-.team-window-stats b { color: var(--color-text-primary); font-size: 13px; margin-right: 2px; }
-.team-window-total { margin-left: auto; color: var(--color-text-placeholder); }
+.team-window-progress-pct {
+  font-size: 15px;
+  font-weight: 700;
+  background: linear-gradient(90deg, var(--brand-500), var(--accent-500));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.team-window-progress-frac { color: var(--color-text-secondary); font-size: 11px; }
+.team-window-progress-mini { margin-left: auto; color: var(--color-text-placeholder); font-size: 10px; white-space: nowrap; }
+.team-window-progress-bar {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--gray-100);
+}
+.team-window-progress-bar i {
+  position: relative;
+  display: block;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand-400), var(--accent-400));
+  transition: width 0.4s ease;
+}
+/* 运行中流光:一条斜纹高光在已完成部分往复扫过 */
+.team-window-progress-bar.is-active i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.55) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: team-progress-shine 1.6s ease-in-out infinite;
+}
+@keyframes team-progress-shine {
+  0% { transform: translateX(-100%); }
+  60%, 100% { transform: translateX(100%); }
+}
 
 .team-window-body {
   min-height: 0;
@@ -434,22 +595,35 @@ async function cancelTeam(): Promise<void> {
 }
 .team-window-section { min-width: 0; padding-top: var(--sp-2); }
 .team-window-section:first-child { padding-top: 0; }
-.team-window-section h4 { margin: 0 0 5px; color: var(--color-text-secondary); font-size: 11px; font-weight: 650; }
 
-.team-window-members,
-.team-window-tasks,
-.team-window-messages { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-
+/* ── 成员实时工作状态卡 ─────────────────────── */
+.team-window-members { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .team-window-members li {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto auto;
+  display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 5px 6px;
+  max-width: 100%;
+  padding: 4px 8px 4px 4px;
   border: 1px solid var(--color-border-light);
-  border-radius: var(--r-sm);
+  border-radius: 999px;
+  background: var(--color-bg-card);
 }
+.team-window-members li.is-running { border-color: var(--brand-200); background: var(--brand-50); }
+.team-window-members li.is-failed { border-color: rgba(217, 84, 79, 0.35); }
+.team-member-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 650;
+}
+.team-member-main { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.team-member-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .team-window-member-name { min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
 .team-window-role {
   flex: none;
@@ -459,11 +633,129 @@ async function cancelTeam(): Promise<void> {
   color: var(--brand-600);
   font-size: 10px;
 }
-.team-window-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gray-400); }
-.team-window-dot.is-running { background: var(--color-info); }
-.team-window-dot.is-completed { background: var(--color-success); }
-.team-window-dot.is-failed { background: var(--color-danger); }
+.team-window-role.is-worker { background: rgba(61, 188, 217, 0.12); color: var(--accent-600); }
+.team-window-role.is-verifier { background: var(--sev-medium-bg); color: var(--sev-medium); }
+.team-window-role.is-summarizer { background: var(--color-success-light); color: var(--color-success); }
+.team-member-activity {
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--color-text-placeholder);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-window-members li.is-running .team-member-activity { color: var(--brand-600); }
+.team-member-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.team-member-state b { font-weight: 700; }
+.team-member-state.is-completed { color: var(--color-success); }
+.team-member-state.is-failed { color: var(--color-danger); }
+.team-member-state.is-running { color: var(--brand-600); }
+.team-member-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-info);
+  animation: team-member-breathe 1.2s ease-in-out infinite;
+}
+@keyframes team-member-breathe { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
 
+/* ── 群聊气泡 ──────────────────────────────── */
+.team-window-chat { display: grid; gap: 8px; }
+.team-chat-row { display: flex; align-items: flex-start; gap: 7px; min-width: 0; }
+.team-chat-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+}
+/* 角色配色:小菱=品牌紫,执行=青,验证=金,汇总=绿 */
+.team-chat-avatar.is-manager,
+.team-member-avatar.is-manager { background: linear-gradient(135deg, var(--brand-500), var(--brand-400)); }
+.team-chat-avatar.is-worker,
+.team-member-avatar.is-worker { background: linear-gradient(135deg, var(--accent-500), var(--accent-400)); }
+.team-chat-avatar.is-verifier,
+.team-member-avatar.is-verifier { background: linear-gradient(135deg, var(--sev-medium), #e8c07a); }
+.team-chat-avatar.is-summarizer,
+.team-member-avatar.is-summarizer { background: linear-gradient(135deg, var(--color-success), #7fce9b); }
+
+.team-chat-main { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: calc(100% - 33px); }
+.team-chat-head { display: flex; align-items: baseline; gap: 5px; min-width: 0; max-width: 100%; margin-bottom: 2px; }
+.team-chat-name { overflow: hidden; font-weight: 600; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.team-chat-badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  line-height: 14px;
+}
+.team-chat-badge.is-worker { background: rgba(61, 188, 217, 0.12); color: var(--accent-600); }
+.team-chat-badge.is-verifier { background: var(--sev-medium-bg); color: var(--sev-medium); }
+.team-chat-badge.is-summarizer { background: var(--color-success-light); color: var(--color-success); }
+.team-chat-mention {
+  flex: none;
+  max-width: 140px;
+  overflow: hidden;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--brand-50);
+  color: var(--brand-600);
+  font-size: 9.5px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-chat-time { flex: none; margin-left: auto; color: var(--color-text-placeholder); font-size: 9.5px; }
+
+.team-chat-bubble {
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 3px 12px 12px;
+  background: var(--gray-50);
+}
+.team-chat-bubble.is-manager { border-color: var(--brand-200); background: var(--brand-50); }
+.team-chat-bubble.is-worker { border-color: rgba(61, 188, 217, 0.3); background: rgba(61, 188, 217, 0.08); }
+.team-chat-bubble.is-verifier { border-color: rgba(216, 166, 87, 0.35); background: var(--sev-medium-bg); }
+.team-chat-bubble.is-summarizer { border-color: rgba(91, 181, 125, 0.35); background: var(--color-success-light); }
+.team-chat-subject { margin: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.team-chat-payload {
+  margin: 3px 0 0;
+  padding-top: 3px;
+  border-top: 1px dashed var(--color-border-light);
+  color: var(--color-text-secondary);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.team-window-empty { margin: var(--sp-3) 0; color: var(--color-text-placeholder); text-align: center; }
+
+/* ── 任务明细(默认折叠) ────────────────────── */
+.team-window-task-details { padding-top: var(--sp-2); }
+.team-window-task-details > summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  user-select: none;
+}
+.team-window-task-details > summary:hover { color: var(--brand-600); }
+.team-window-tasks { display: grid; gap: 4px; margin: 5px 0 0; padding: 0; list-style: none; }
 .team-window-tasks li {
   min-width: 0;
   padding: 6px 8px;
@@ -485,19 +777,6 @@ async function cancelTeam(): Promise<void> {
 .team-window-task-error code { display: block; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; }
 
 .team-window-item-status { flex: none; color: var(--color-text-secondary); font-size: 10px; white-space: nowrap; }
-
-.team-window-messages li {
-  min-width: 0;
-  padding: 5px 0;
-  border-bottom: 1px solid var(--color-border-light);
-}
-.team-window-message-line { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; }
-.team-window-message-route { min-width: 0; overflow-wrap: anywhere; color: var(--brand-600); font-weight: 550; }
-.team-window-message-line time { flex: none; color: var(--color-text-placeholder); font-size: 10px; }
-.team-window-message-subject { margin: 2px 0 0; overflow-wrap: anywhere; }
-.team-window-message-payload { margin: 2px 0 0; color: var(--color-text-secondary); overflow-wrap: anywhere; }
-
-.team-window-empty { margin: var(--sp-3) 0; color: var(--color-text-placeholder); text-align: center; }
 
 .team-window-footer {
   display: flex;
@@ -529,6 +808,8 @@ async function cancelTeam(): Promise<void> {
 
 @media (max-width: 520px) {
   .agent-team-window { right: 12px; bottom: 12px; left: 12px; width: auto; }
+  /* 触控适配:关闭按钮加大到 40px */
+  .team-window-close { width: 40px; height: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -536,5 +817,7 @@ async function cancelTeam(): Promise<void> {
   .team-window-action,
   .team-window-enter-active,
   .team-window-leave-active { transition: none; }
+  .team-window-progress-bar.is-active i::after,
+  .team-member-pulse { animation: none; }
 }
 </style>

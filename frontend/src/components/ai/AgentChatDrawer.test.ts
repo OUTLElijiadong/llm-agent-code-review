@@ -8,6 +8,8 @@ const streams = vi.hoisted(() => ({
     body: Record<string, unknown>
     onEvent: (event: unknown) => void
     resolve: () => void
+    reject: (error: unknown) => void
+    aborted: boolean
   }>,
 }))
 
@@ -47,8 +49,13 @@ function mountDrawer(prefill?: string): VueWrapper {
         'el-select': true,
         AgentAvatar: true,
         AgentNavLink: { props: ['href', 'label', 'hint', 'prominent'], template: '<button class="agent-nav-link-stub">{{ label }}</button>' },
+        Check: true,
         CircleCheck: true,
+        CircleCloseFilled: true,
         Close: true,
+        Connection: true,
+        CopyDocument: true,
+        Loading: true,
         Promotion: true,
         WarningFilled: true,
       },
@@ -62,6 +69,21 @@ function emit(index: number, event: Record<string, unknown>): void {
 
 async function finish(index: number): Promise<void> {
   streams.records[index].resolve()
+  await flushPromises()
+}
+
+/** 模拟流异常中断(网络错误等),复现 fetch 层的 AbortError 拒绝。 */
+async function failStream(index: number, error: unknown): Promise<void> {
+  streams.records[index].reject(error)
+  await flushPromises()
+  // 等待 runResponse 的 finally 收尾(loading 复位、错误卡片入流)
+  await flushPromises()
+}
+
+/** 等所有微任务与一轮宏任务跑完(setTimeout 回调、watch 后置刷新等)。 */
+async function settleAll(): Promise<void> {
+  await flushPromises()
+  await new Promise<void>((resolve) => { setTimeout(resolve, 0) })
   await flushPromises()
 }
 
@@ -83,11 +105,30 @@ beforeEach(() => {
     body: Record<string, unknown>,
     options: { onEvent: (event: unknown) => void },
   ) => {
-    const controller = new AbortController()
-    let resolve = (): void => undefined
-    const done = new Promise<void>((doneResolve) => { resolve = doneResolve })
-    streams.records.push({ body, onEvent: options.onEvent, resolve })
-    return { abort: () => controller.abort(), signal: controller.signal, done }
+    const record = {
+      body,
+      onEvent: options.onEvent,
+      resolve: (): void => undefined,
+      reject: (): void => undefined,
+      aborted: false,
+    }
+    const done = new Promise<void>((doneResolve, doneReject) => {
+      record.resolve = doneResolve
+      record.reject = doneReject
+    })
+    // 测试自行处理拒绝场景,避免未处理的 Promise 告警
+    done.catch(() => undefined)
+    streams.records.push(record)
+    return {
+      abort: () => {
+        record.aborted = true
+        const error = new Error('The operation was aborted')
+        error.name = 'AbortError'
+        record.reject(error)
+      },
+      signal: new AbortController().signal,
+      done,
+    }
   })
 })
 
@@ -284,7 +325,7 @@ describe('AgentChatDrawer Responses stream', () => {
     vi.useRealTimers()
   })
 
-  it('刷新后恢复动态追问并点击选项自动续跑', async () => {
+  it('刷新后恢复动态追问,点选候选后再点提交才续跑', async () => {
     sessionApi.get.mockResolvedValueOnce({
       surface: 'user',
       session_id: 'user-test',
@@ -312,14 +353,34 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.findAll('.response-input-option')).toHaveLength(2)
     expect(wrapper.find('.response-answer').exists()).toBe(false)
     expect(wrapper.find('.chat-input').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('.send-btn').attributes('disabled')).toBeDefined()
+    const submit = wrapper.find('.response-answer-submit')
+    expect(submit.exists()).toBe(true)
+    expect(submit.attributes('disabled')).toBeDefined()
+
+    // 点选只高亮选中态,不立即提交;可改选,再点一次取消选择
     await wrapper.findAll('.response-input-option')[0].trigger('click')
+    await flushPromises()
+    expect(streams.start).not.toHaveBeenCalled()
+    expect(wrapper.findAll('.response-input-option')[0].classes()).toContain('is-selected')
+    await wrapper.findAll('.response-input-option')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.response-input-option')[0].classes()).not.toContain('is-selected')
+    expect(wrapper.findAll('.response-input-option')[1].classes()).toContain('is-selected')
+    expect(streams.start).not.toHaveBeenCalled()
+    await wrapper.findAll('.response-input-option')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.response-input-option')[1].classes()).not.toContain('is-selected')
+    expect(wrapper.find('.response-answer-submit').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('.response-input-option')[1].trigger('click')
+    await flushPromises()
+
+    await submit.trigger('click')
     await flushPromises()
     expect(streams.records[0].body).toMatchObject({
       action: 'answer',
       run_id: 'run-user-restored',
       call_id: 'call-choice',
-      answer: 'agent-safe',
+      answer: 'agent-quality',
     })
     await finish(0)
   })
@@ -533,7 +594,7 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(1)
   })
 
-  it('renders structured candidates and submits a click without requiring typed text', async () => {
+  it('renders structured candidates and submits only after clicking the submit button', async () => {
     const wrapper = await mountReadyDrawer()
     await wrapper.find('.chat-input').setValue('审查登录项目')
     void wrapper.find('.send-btn').trigger('click')
@@ -557,7 +618,15 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.text()).toContain('你指的是下面哪个项目？')
     expect(wrapper.findAll('.response-input-option')).toHaveLength(2)
     expect(wrapper.find('.response-answer').exists()).toBe(true)
+    expect(wrapper.find('.response-answer-submit').attributes('disabled')).toBeDefined()
+
+    // 点选不再立即提交
     await wrapper.findAll('.response-input-option')[1].trigger('click')
+    await flushPromises()
+    expect(streams.records).toHaveLength(1)
+    expect(wrapper.findAll('.response-input-option')[1].classes()).toContain('is-selected')
+
+    await wrapper.find('.response-answer-submit').trigger('click')
     await flushPromises()
     expect(streams.records[1].body).toMatchObject({
       action: 'answer',
@@ -609,6 +678,138 @@ describe('AgentChatDrawer Responses stream', () => {
     await flushPromises()
     expect(wrapper.find('.response-tool-timeline').text()).toContain('文件不存在')
   })
+
+  it('运行中显示「停止响应」,点击后中止流并留下可重试的取消卡片', async () => {
+    const wrapper = await mountReadyDrawer()
+    expect(wrapper.find('.stop-btn').exists()).toBe(false)
+
+    await wrapper.find('.chat-input').setValue('帮我分析这个项目')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    emit(0, { type: 'response.created', response: { id: 'run-stop', model: 'deepseek-v4-flash' } })
+    emit(0, { type: 'response.output_text.delta', delta: '我先看一下项目结构' })
+    await flushPromises()
+
+    const stopBtn = wrapper.find('.stop-btn')
+    expect(stopBtn.exists()).toBe(true)
+    expect(wrapper.find('.send-btn').exists()).toBe(false)
+
+    await stopBtn.trigger('click')
+    await settleAll()
+
+    // 已中止当前流;已生成的部分内容保留在消息流里(首条为欢迎语)
+    expect(streams.records[0].aborted).toBe(true)
+    const bubbles = wrapper.findAll('.msg-row.assistant .markdown-body')
+    expect(bubbles[bubbles.length - 1].text()).toContain('我先看一下项目结构')
+    // 取消后错误卡片留在消息流,带重试与新建对话入口
+    const errorCard = wrapper.find('.msg-error-card')
+    expect(errorCard.exists()).toBe(true)
+    expect(errorCard.text()).toContain('已停止本次回答')
+    expect(wrapper.find('.msg-error-btn.is-retry').exists()).toBe(true)
+    // 运行结束,停止按钮自动隐藏
+    expect(wrapper.find('.stop-btn').exists()).toBe(false)
+    expect(wrapper.find('.send-btn').exists()).toBe(true)
+    expect(messages.error).not.toHaveBeenCalled()
+
+    // 点「重试」重新续跑(上下文包含部分输出,让模型知道说到哪了)
+    await wrapper.find('.msg-error-btn.is-retry').trigger('click')
+    await settleAll()
+    expect(streams.records[1].body).toMatchObject({
+      action: 'start',
+      surface: 'user',
+      messages: [
+        { role: 'user', content: '帮我分析这个项目' },
+        { role: 'assistant', content: '我先看一下项目结构' },
+      ],
+    })
+    emit(1, { type: 'response.output_text.delta', delta: '这次顺利完成了' })
+    emit(1, { type: 'response.completed', response: { id: 'run-stop-retry' } })
+    await finish(1)
+    expect(wrapper.text()).toContain('这次顺利完成了')
+    wrapper.unmount()
+  })
+
+  it('网络错误留在消息流:错误卡片 + Toast,重试可恢复', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('查一下漏洞')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    await failStream(0, new Error('网络连接中断'))
+    // 等待 canSend 等计算属性完成重算(loading 复位),重试按钮才可点
+    await settleAll()
+
+    const errorCard = wrapper.find('.msg-error-card')
+    expect(errorCard.exists()).toBe(true)
+    expect(errorCard.text()).toContain('网络连接中断')
+    expect(messages.error).toHaveBeenCalledWith('网络连接中断')
+    expect(wrapper.find('.stop-btn').exists()).toBe(false)
+
+    await wrapper.find('.msg-error-btn.is-retry').trigger('click')
+    await settleAll()
+    expect(streams.records[1].body).toMatchObject({
+      action: 'start',
+      messages: [{ role: 'user', content: '查一下漏洞' }],
+    })
+    emit(1, { type: 'response.completed', response: { id: 'run-net-retry' } })
+    await finish(1)
+    wrapper.unmount()
+  })
+
+  it('协议错误(回答没说完)同样沉淀为错误卡片,且不进入后续上下文', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('开始审查')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    emit(0, { type: 'response.incomplete', response: { id: 'run-incomplete' } })
+    await finish(0)
+
+    expect(wrapper.find('.msg-error-card').exists()).toBe(true)
+    expect(wrapper.find('.msg-error-card').text()).toContain('小菱的回答没说完')
+    expect(messages.error).toHaveBeenCalledWith('小菱的回答没说完,重发一次试试')
+
+    // 后续正常发送时,错误卡片不进模型上下文
+    await wrapper.find('.chat-input').setValue('重新审查')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    expect(streams.records[1].body).toMatchObject({
+      messages: [
+        { role: 'user', content: '开始审查' },
+        { role: 'user', content: '重新审查' },
+      ],
+    })
+    await finish(1)
+    wrapper.unmount()
+  })
+
+  it('助手消息可复制:写入剪贴板并短暂显示对勾', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard')
+    Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true })
+    try {
+      const wrapper = await mountReadyDrawer()
+      await wrapper.find('.chat-input').setValue('总结一下')
+      void wrapper.find('.send-btn').trigger('click')
+      await flushPromises()
+      emit(0, { type: 'response.output_text.delta', delta: '这里是总结内容' })
+      emit(0, { type: 'response.completed', response: { id: 'run-copy' } })
+      await finish(0)
+
+      const bubbles = wrapper.findAll('.msg-row.assistant .msg-copy-btn')
+      const copyBtn = bubbles[bubbles.length - 1]
+      expect(copyBtn.exists()).toBe(true)
+      expect(copyBtn.classes()).not.toContain('is-copied')
+      await copyBtn.trigger('click')
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith('这里是总结内容')
+      expect(wrapper.findAll('.msg-row.assistant .msg-copy-btn')[1].classes()).toContain('is-copied')
+      wrapper.unmount()
+    } finally {
+      if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard)
+    }
+  })
 })
 
 it('恢复进行中会话时展示调用链、部分输出与运行状态', async () => {
@@ -646,5 +847,48 @@ it('恢复进行中会话时展示调用链、部分输出与运行状态', asyn
   expect(wrapper.text()).toContain('正在处理第 1 个告警')
   // 运行状态徽标:运行中
   expect(wrapper.text()).toContain('运行中')
+  wrapper.unmount()
+})
+
+it('运行中展示小菱执行进度条(已完成 X/Y 步 + 当前动作),完成后收起', async () => {
+  const wrapper = await mountReadyDrawer()
+  // 空闲且没有工具调用时不显示
+  expect(wrapper.find('.chat-progress').exists()).toBe(false)
+
+  await wrapper.find('.chat-input').setValue('列出项目')
+  void wrapper.find('.send-btn').trigger('click')
+  await flushPromises()
+
+  emit(0, {
+    type: 'response.output_item.added',
+    output_index: 0,
+    item: { type: 'function_call', id: 'item-projects', call_id: 'call-projects', name: 'list_projects' },
+  })
+  emit(0, {
+    type: 'response.function_call_arguments.done',
+    output_index: 0,
+    item_id: 'item-projects',
+    arguments: '{"page":1}',
+  })
+  await flushPromises()
+
+  // 进度条:0/1 步,当前动作为「查看项目列表」
+  const progress = wrapper.find('.chat-progress')
+  expect(progress.exists()).toBe(true)
+  expect(progress.text()).toContain('0/1 步')
+  expect(progress.text()).toContain('查看项目列表')
+  expect(progress.find('.chat-progress-track').exists()).toBe(true)
+
+  emit(0, {
+    type: 'response.tool.completed',
+    call_id: 'call-projects',
+    tool_name: 'list_projects',
+    output_summary: '返回 2 个项目',
+  })
+  emit(0, { type: 'response.completed', response: { id: 'run-progress' } })
+  await finish(0)
+
+  // 全部完成后进度条收起
+  expect(wrapper.find('.chat-progress').exists()).toBe(false)
   wrapper.unmount()
 })
