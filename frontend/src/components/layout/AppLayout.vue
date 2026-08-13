@@ -54,7 +54,7 @@ provide('openAgentChat', openAgentChat)
 </script>
 
 <template>
-  <div class="app-layout">
+  <div class="app-layout" :class="{ 'agent-open': agentVisible }">
     <AppSidebar :mobile-open="sidebarVisible" @close="closeSidebar" />
     <transition name="sidebar-mask-fade">
       <div v-if="sidebarVisible" class="sidebar-mask" @click="closeSidebar"></div>
@@ -131,6 +131,21 @@ provide('openAgentChat', openAgentChat)
   opacity: 0;
 }
 
+/* 小菱悬浮窗打开时,主内容向左让出空间 */
+body.xiaoling-open .app-layout-right {
+  padding-right: calc(var(--layout-main-padding) + 424px);
+  transition: padding-right 0.28s ease;
+}
+body:not(.xiaoling-open) .app-layout-right {
+  transition: padding-right 0.24s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.xiaoling-open .app-layout-right,
+  body:not(.xiaoling-open) .app-layout-right {
+    transition: none !important;
+  }
+}
+
 @media (max-width: 768px) {
   .app-layout {
     overflow-x: hidden;
@@ -139,6 +154,10 @@ provide('openAgentChat', openAgentChat)
 
   .app-layout-main {
     padding: var(--layout-main-padding) 12px 24px;
+  }
+  /* 窄屏不给小菱让位:浮层覆盖即可 */
+  body.xiaoling-open .app-layout-right {
+    padding-right: 12px;
   }
 
   .sidebar-mask {

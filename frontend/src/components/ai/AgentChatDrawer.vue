@@ -1538,6 +1538,7 @@ function close(): void {
 }
 
 watch(() => props.visible, async (val) => {
+  document.body.classList.toggle('xiaoling-open', val)
   if (!val) return
   await nextTick()
   restoreOrAnchor()
@@ -1561,6 +1562,7 @@ onBeforeUnmount(() => {
   window.clearTimeout(projectSearchTimer)
   window.clearTimeout(copiedResetTimer)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  document.body.classList.remove('xiaoling-open')
 })
 
 onMounted(() => {

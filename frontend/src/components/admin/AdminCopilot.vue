@@ -679,6 +679,7 @@ async function openPanel(): Promise<void> {
   await nextTick()
   restoreOrAnchor()
   switcherRef.value?.ensureFreshOnOpen()
+  document.body.classList.add('xiaoling-open')
   await scrollToBottom()
 }
 
@@ -686,6 +687,7 @@ function closePanel(): void {
   // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
   persistSnapshot()
   visible.value = false
+  document.body.classList.remove('xiaoling-open')
 }
 
 function setTimelineCallStatus(
@@ -1004,6 +1006,7 @@ onBeforeUnmount(() => {
   invalidateSessionPoll()
   activeResponse?.abort()
   window.removeEventListener('keydown', handleKeydown)
+  document.body.classList.remove('xiaoling-open')
 })
 
 onMounted(() => meshBridge.start())
