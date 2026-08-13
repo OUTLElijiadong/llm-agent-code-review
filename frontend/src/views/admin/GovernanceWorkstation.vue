@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
 import {
   activateAgentKnowledgeDoc,
@@ -277,6 +278,13 @@ async function onEvaluatePolicy(): Promise<void> {
  * @returns Promise<void>
  */
 async function onSavePolicy(): Promise<void> {
+  try {
+    await ElMessageBox.confirm('确定要保存此策略规则吗？', '保存确认', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   await upsertPolicy({ ...policyEditor.value, condition_json: {} })
   ElMessage.success('策略规则已保存')
   await loadData()
@@ -287,6 +295,13 @@ async function onSavePolicy(): Promise<void> {
  * @returns Promise<void>
  */
 async function onSaveToolPermission(): Promise<void> {
+  try {
+    await ElMessageBox.confirm('确定要保存此工具权限配置吗？', '保存确认', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   await upsertToolPermission({ ...toolPermissionForm.value })
   ElMessage.success('工具权限已保存')
   await loadData()
@@ -298,6 +313,13 @@ async function onSaveToolPermission(): Promise<void> {
  * @returns Promise<void>
  */
 async function onApprove(row: ApprovalItem): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确定要通过审批「${row.title}」吗？`, '审批确认', {
+      confirmButtonText: '通过',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch { return }
   await approveItem(row.id, '管理端审批通过')
   ElMessage.success('已审批通过')
   await loadData()
@@ -309,6 +331,13 @@ async function onApprove(row: ApprovalItem): Promise<void> {
  * @returns Promise<void>
  */
 async function onReject(row: ApprovalItem): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确定要驳回审批「${row.title}」吗？`, '驳回确认', {
+      confirmButtonText: '驳回',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch { return }
   await rejectItem(row.id, '管理端驳回')
   ElMessage.success('已驳回')
   await loadData()
@@ -320,6 +349,13 @@ async function onReject(row: ApprovalItem): Promise<void> {
  * @returns Promise<void>
  */
 async function onRunJob(row: AgentJob): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确定要手动运行任务「${row.job_code}」吗？`, '运行确认', {
+      confirmButtonText: '运行',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   await runJob(row.id)
   ElMessage.success('任务已运行')
   await loadData()
@@ -331,6 +367,13 @@ async function onRunJob(row: AgentJob): Promise<void> {
  * @returns Promise<void>
  */
 async function onSaveJob(row: AgentJob): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确定要保存任务「${row.job_code}」的配置吗？`, '保存确认', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   const data = jobEdit.value[row.id]
   await updateJob(row.id, { schedule: data.schedule, status: data.status })
   ElMessage.success('任务配置已保存')
@@ -343,6 +386,13 @@ async function onSaveJob(row: AgentJob): Promise<void> {
  */
 async function onCreateMemory(): Promise<void> {
   if (!selectedAgent.value) return
+  try {
+    await ElMessageBox.confirm('确定要沉淀此记忆吗？', '记忆确认', {
+      confirmButtonText: '沉淀',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   await createAgentMemory(selectedAgent.value, { ...memoryForm.value })
   memoryForm.value = { title: '', content: '', memory_type: 'long_term', weight: 1 }
   ElMessage.success('记忆已沉淀')
@@ -355,6 +405,13 @@ async function onCreateMemory(): Promise<void> {
  */
 async function onCreateKnowledgeDoc(): Promise<void> {
   if (!selectedAgent.value) return
+  try {
+    await ElMessageBox.confirm('确定要提交此知识文档吗？', '知识确认', {
+      confirmButtonText: '提交',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   await createAgentKnowledgeDoc({
     agent_code: selectedAgent.value,
     title: knowledgeDocForm.value.title,
@@ -375,6 +432,13 @@ async function onCreateKnowledgeDoc(): Promise<void> {
  */
 async function onSaveKnowledgeSource(): Promise<void> {
   if (!selectedAgent.value || !canManageKnowledgeSources.value) return
+  try {
+    await ElMessageBox.confirm('确定要保存此知识来源吗？', '来源确认', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   await upsertAgentKnowledgeSource({
     agent_code: selectedAgent.value,
     source_type: knowledgeSourceForm.value.source_type,
@@ -393,6 +457,13 @@ async function onSaveKnowledgeSource(): Promise<void> {
  */
 async function onCrawlKnowledge(): Promise<void> {
   if (!canManageKnowledgeSources.value) return
+  try {
+    await ElMessageBox.confirm('确定要抓取该 Agent 的知识来源吗？', '抓取确认', {
+      confirmButtonText: '抓取',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   const result = await crawlAgentKnowledgeSources(selectedAgent.value)
   ElMessage.success(`抓取完成：${result.doc_count ?? 0} 个文档`)
   await loadAgentKnowledge()
@@ -404,6 +475,13 @@ async function onCrawlKnowledge(): Promise<void> {
  * @returns Promise<void>
  */
 async function onActivateKnowledge(row: AgentKnowledgeDoc): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确定要激活知识文档「${row.title}」吗？`, '激活确认', {
+      confirmButtonText: '激活',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch { return }
   await activateAgentKnowledgeDoc(row.id)
   ElMessage.success('知识已生效')
   await loadAgentKnowledge()
@@ -415,6 +493,13 @@ async function onActivateKnowledge(row: AgentKnowledgeDoc): Promise<void> {
  * @returns Promise<void>
  */
 async function onResolveAlert(row: AgentAlert): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确定要关闭告警「${row.title}」吗？`, '关闭告警', {
+      confirmButtonText: '关闭',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch { return }
   await resolveAlert(row.id, '管理端关闭告警')
   ElMessage.success('告警已关闭')
   await loadData()
@@ -425,6 +510,13 @@ async function onResolveAlert(row: AgentAlert): Promise<void> {
  * @returns Promise<void>
  */
 async function onCreateReward(): Promise<void> {
+  try {
+    await ElMessageBox.confirm('确定要记录此奖惩事件吗？', '记录确认', {
+      confirmButtonText: '记录',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   await createRewardEvent({ ...rewardForm.value })
   rewardForm.value.reason = ''
   ElMessage.success('奖惩事件已记录')
@@ -436,6 +528,13 @@ async function onCreateReward(): Promise<void> {
  * @returns Promise<void>
  */
 async function onCreateArtifactVersion(): Promise<void> {
+  try {
+    await ElMessageBox.confirm('确定要创建此版本吗？', '版本确认', {
+      confirmButtonText: '创建',
+      cancelButtonText: '取消',
+      type: 'info',
+    })
+  } catch { return }
   await createArtifactVersion({ ...artifactForm.value })
   artifactForm.value.version = ''
   artifactForm.value.content = ''
@@ -450,6 +549,13 @@ async function onCreateArtifactVersion(): Promise<void> {
  * @returns Promise<void>
  */
 async function onRollbackArtifact(row: AgentArtifactVersion): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确定要回滚版本「${row.version}」吗？此操作将恢复到该版本的快照。`, '回滚确认', {
+      confirmButtonText: '回滚',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch { return }
   await rollbackArtifactVersion(row.id)
   ElMessage.success('已回滚版本')
   await loadData()
@@ -602,7 +708,9 @@ onMounted(loadData)
       <div class="panel">
         <h3>工具权限配置</h3>
         <div class="toolbar-grid">
-          <el-input v-model="toolPermissionForm.agent_code" placeholder="Agent 编码" />
+          <el-select v-model="toolPermissionForm.agent_code" filterable placeholder="Agent 编码" style="min-width: 180px">
+            <el-option v-for="agent in agents" :key="agent.code" :label="`${agent.name} (${agent.code})`" :value="agent.code" />
+          </el-select>
           <el-input v-model="toolPermissionForm.tool_code" placeholder="工具编码" />
           <el-select v-model="toolPermissionForm.permission">
             <el-option label="允许(allow)" value="allow" />

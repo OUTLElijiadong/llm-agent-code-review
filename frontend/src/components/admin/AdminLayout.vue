@@ -34,43 +34,74 @@ interface AdminMenuItem {
   superAdmin?: boolean
 }
 
+interface AdminMenuGroup {
+  label: string
+  items: AdminMenuItem[]
+}
+
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const menuItems: AdminMenuItem[] = [
-  { path: '/admin/overview', title: '总览大屏', icon: Histogram },
-  { path: '/admin/agents', title: 'Agent 管理', icon: Cpu },
-  { path: '/admin/approvals', title: '审批中心', icon: Lock },
-  { path: '/admin/agent-releases', title: 'Agent 发布审批', icon: Cpu },
-  { path: '/admin/beta-codes', title: '内测码管理', icon: Key },
-  { path: '/admin/policies', title: '策略中心', icon: Operation },
-  { path: '/admin/tools', title: '工具权限', icon: Tools },
-  { path: '/admin/knowledge', title: '知识与记忆', icon: Files },
-  { path: '/admin/jobs', title: '任务调度', icon: Timer },
-  { path: '/admin/observability', title: '监控告警', icon: DataAnalysis },
-  { path: '/admin/rewards', title: '奖惩趋势', icon: TrendCharts },
-  { path: '/admin/rollback', title: '回滚中心', icon: Refresh },
-  { path: '/admin/users', title: '用户管理', icon: User },
-  { path: '/admin/rbac/roles', title: '角色管理', icon: Lock },
-  { path: '/admin/rbac/permissions', title: '权限点列表', icon: Key },
-  { path: '/admin/rbac/users', title: '用户角色分配', icon: User },
-  { path: '/admin/ai-logs', title: 'Agent 调用日志', icon: MagicStick },
-  { path: '/admin/report-templates', title: '报告模板', icon: Document },
-  { path: '/admin/audit', title: '系统操作审计', icon: Bell },
-  { path: '/admin/evolution', title: 'Agent 自进化', icon: MagicStick },
-  { path: '/admin/skills', title: 'Skill 管理', icon: View },
-  { path: '/admin/mcp-workers', title: 'MCP 与沙箱节点', icon: Connection, superAdmin: true },
-  { path: '/admin/llm', title: '大模型配置', icon: Setting, superAdmin: true },
-  { path: '/admin/embedding', title: 'RAG 嵌入配置', icon: Key, superAdmin: true },
+const menuGroups: AdminMenuGroup[] = [
+  {
+    label: '总览',
+    items: [
+      { path: '/admin/overview', title: '总览大屏', icon: Histogram },
+      { path: '/admin/agents', title: 'Agent 管理', icon: Cpu },
+      { path: '/admin/evolution', title: 'Agent 自进化', icon: MagicStick },
+      { path: '/admin/skills', title: 'Skill 管理', icon: View },
+      { path: '/admin/ai-logs', title: 'Agent 调用日志', icon: MagicStick },
+    ],
+  },
+  {
+    label: 'Agent 治理',
+    items: [
+      { path: '/admin/approvals', title: '审批中心', icon: Lock },
+      { path: '/admin/agent-releases', title: 'Agent 发布审批', icon: Cpu },
+      { path: '/admin/policies', title: '策略中心', icon: Operation },
+      { path: '/admin/tools', title: '工具权限', icon: Tools },
+      { path: '/admin/knowledge', title: '知识与记忆', icon: Files },
+      { path: '/admin/jobs', title: '任务调度', icon: Timer },
+      { path: '/admin/observability', title: '监控告警', icon: DataAnalysis },
+      { path: '/admin/rewards', title: '奖惩趋势', icon: TrendCharts },
+      { path: '/admin/rollback', title: '回滚中心', icon: Refresh },
+    ],
+  },
+  {
+    label: 'RBAC',
+    items: [
+      { path: '/admin/users', title: '用户管理', icon: User },
+      { path: '/admin/rbac/roles', title: '角色管理', icon: Lock },
+      { path: '/admin/rbac/permissions', title: '权限点列表', icon: Key },
+      { path: '/admin/rbac/users', title: '用户角色分配', icon: User },
+    ],
+  },
+  {
+    label: '系统配置',
+    items: [
+      { path: '/admin/beta-codes', title: '内测码管理', icon: Key },
+      { path: '/admin/report-templates', title: '报告模板', icon: Document },
+      { path: '/admin/audit', title: '系统操作审计', icon: Bell },
+      { path: '/admin/mcp-workers', title: 'MCP 与沙箱节点', icon: Connection, superAdmin: true },
+      { path: '/admin/llm', title: '大模型配置', icon: Setting, superAdmin: true },
+      { path: '/admin/embedding', title: 'RAG 嵌入配置', icon: Key, superAdmin: true },
+    ],
+  },
 ]
 
-const visibleMenuItems = computed(() => (
-  menuItems.filter((item) => !item.superAdmin || userStore.isSuperAdmin())
-))
+const visibleMenuGroups = computed(() =>
+  menuGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.superAdmin || userStore.isSuperAdmin()),
+    }))
+    .filter((group) => group.items.length > 0),
+)
 
 const activePath = computed(() => {
-  const found = visibleMenuItems.value.find(
+  const allItems = visibleMenuGroups.value.flatMap((g) => g.items)
+  const found = allItems.find(
     (item) => route.path === item.path || route.path.startsWith(item.path + '/'),
   )
   return found?.path || '/admin/overview'
@@ -115,17 +146,20 @@ async function logout(): Promise<void> {
         </div>
       </div>
       <nav class="admin-nav">
-        <button
-          v-for="item in visibleMenuItems"
-          :key="item.path"
-          type="button"
-          class="admin-nav-item"
-          :class="{ 'is-active': activePath === item.path }"
-          @click="go(item.path)"
-        >
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.title }}</span>
-        </button>
+        <template v-for="group in visibleMenuGroups" :key="group.label">
+          <div class="nav-group-label">{{ group.label }}</div>
+          <button
+            v-for="item in group.items"
+            :key="item.path"
+            type="button"
+            class="admin-nav-item"
+            :class="{ 'is-active': activePath === item.path }"
+            @click="go(item.path)"
+          >
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.title }}</span>
+          </button>
+        </template>
       </nav>
     </aside>
 
@@ -229,6 +263,16 @@ async function logout(): Promise<void> {
   background: rgba(91, 88, 232, 0.22);
 }
 
+.nav-group-label {
+  padding: 14px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+
 .admin-main {
   flex: 1;
   min-width: 0;
@@ -290,6 +334,10 @@ async function logout(): Promise<void> {
     gap: 6px;
     overflow-x: auto;
     padding: 10px;
+  }
+
+  .admin-nav .nav-group-label {
+    display: none;
   }
 
   .admin-nav-item {

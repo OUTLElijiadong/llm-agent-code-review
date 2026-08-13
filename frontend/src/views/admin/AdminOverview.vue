@@ -1,5 +1,5 @@
 <template>
-  <div class="admin-overview">
+  <div v-loading="pageLoading" class="admin-overview">
     <!-- 顶部:标题 + 安全态势等级 -->
     <header class="ov-head">
       <div>
@@ -66,7 +66,7 @@
         </div>
         <ul v-if="posture?.signals?.length" class="signals">
           <li v-for="(s, i) in posture.signals" :key="i" :class="`sev-${s.severity}`">
-            <span class="sig-icon">⚠</span>
+            <span class="sig-icon"><el-icon><WarningFilled /></el-icon></span>
             <div>
               <b>{{ s.title }}</b>
               <p>{{ s.detail }}</p>
@@ -123,7 +123,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Aim, Cpu, MapLocation, Monitor } from '@element-plus/icons-vue'
+import { Aim, Cpu, MapLocation, Monitor, WarningFilled } from '@element-plus/icons-vue'
 import * as echarts from 'echarts/core'
 import { GeoComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
 import { EffectScatterChart, ScatterChart } from 'echarts/charts'
@@ -157,6 +157,7 @@ let mapChart: echarts.EChartsType | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 let eventStream: { close: () => void } | null = null
 const eventStreamStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'closed'>('connecting')
+const pageLoading = ref(true)
 let refreshing = false
 
 const postureLabel = computed(() => {
@@ -263,6 +264,7 @@ async function loadAll(): Promise<void> {
     renderMap()
   } finally {
     refreshing = false
+    pageLoading.value = false
   }
 }
 

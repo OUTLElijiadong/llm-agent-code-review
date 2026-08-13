@@ -1642,7 +1642,7 @@ onBeforeUnmount(() => {
 }
 
 .chat-fab {
-  position: fixed; right: 24px; bottom: 24px; z-index: 3000;
+  position: fixed; right: 24px; bottom: 80px; z-index: 3000;
   width: 60px; height: 60px; border: 0; border-radius: 50%;
   background: linear-gradient(145deg, #ffffff, #eef0fb);
   display: grid; place-items: center;
