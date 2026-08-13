@@ -268,28 +268,46 @@ async function loadAgentKnowledge(): Promise<void> {
  * 执行策略试算。
  * @returns Promise<void>
  */
+const evaluatingPolicy = ref(false)
 async function onEvaluatePolicy(): Promise<void> {
-  policyResult.value = await evaluatePolicy({ ...policyForm.value, context: {} })
+  evaluatingPolicy.value = true
+  try {
+    policyResult.value = await evaluatePolicy({ ...policyForm.value, context: {} })
+  } finally {
+    evaluatingPolicy.value = false
+  }
 }
 
 /**
  * 保存策略规则。
  * @returns Promise<void>
  */
+const savingPolicy = ref(false)
 async function onSavePolicy(): Promise<void> {
-  await upsertPolicy({ ...policyEditor.value, condition_json: {} })
-  ElMessage.success('策略规则已保存')
-  await loadData()
+  savingPolicy.value = true
+  try {
+    await upsertPolicy({ ...policyEditor.value, condition_json: {} })
+    ElMessage.success('策略规则已保存')
+    await loadData()
+  } finally {
+    savingPolicy.value = false
+  }
 }
 
 /**
  * 保存工具权限。
  * @returns Promise<void>
  */
+const savingToolPermission = ref(false)
 async function onSaveToolPermission(): Promise<void> {
-  await upsertToolPermission({ ...toolPermissionForm.value })
-  ElMessage.success('工具权限已保存')
-  await loadData()
+  savingToolPermission.value = true
+  try {
+    await upsertToolPermission({ ...toolPermissionForm.value })
+    ElMessage.success('工具权限已保存')
+    await loadData()
+  } finally {
+    savingToolPermission.value = false
+  }
 }
 
 /**
@@ -542,7 +560,7 @@ onMounted(loadData)
           <label class="form-control"><span>执行主体</span><el-input v-model="policyForm.subject" placeholder="例如：Agent 团队" /></label>
           <label class="form-control"><span>业务动作</span><el-input v-model="policyForm.action" placeholder="例如：读取知识" /></label>
           <label class="form-control"><span>目标资源</span><el-input v-model="policyForm.resource" placeholder="例如：项目知识库" /></label>
-          <el-button type="primary" @click="onEvaluatePolicy">试算</el-button>
+          <el-button type="primary" :loading="evaluatingPolicy" @click="onEvaluatePolicy">试算</el-button>
         </div>
         <div v-if="policyResult" class="decision-line">
           结果：{{ statusText(policyResult.decision) }} · {{ riskText(policyResult.risk_level) }} · {{ policyResult.reason }}
@@ -572,7 +590,7 @@ onMounted(loadData)
             <el-option label="启用" :value="1" />
             <el-option label="停用" :value="0" />
           </el-select>
-          <el-button type="primary" @click="onSavePolicy">保存策略</el-button>
+          <el-button type="primary" :loading="savingPolicy" @click="onSavePolicy">保存策略</el-button>
         </div>
       </div>
       <div class="panel">
@@ -620,7 +638,7 @@ onMounted(loadData)
             <el-option label="停用" :value="0" />
           </el-select>
           <el-input v-model="toolPermissionForm.note" placeholder="备注" />
-          <el-button type="primary" @click="onSaveToolPermission">保存权限</el-button>
+          <el-button type="primary" :loading="savingToolPermission" @click="onSaveToolPermission">保存权限</el-button>
         </div>
       </div>
       <div class="panel">

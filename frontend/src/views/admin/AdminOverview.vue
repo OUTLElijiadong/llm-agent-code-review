@@ -1,5 +1,5 @@
 <template>
-  <div class="admin-overview">
+  <div class="admin-overview" v-loading="initialLoading" element-loading-text="正在加载总览数据…">
     <!-- 顶部:标题 + 安全态势等级 -->
     <header class="ov-head">
       <div>
@@ -158,6 +158,8 @@ let timer: ReturnType<typeof setInterval> | null = null
 let eventStream: { close: () => void } | null = null
 const eventStreamStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'closed'>('connecting')
 let refreshing = false
+/** 首次进入的页面级 loading(后续 5s 轮询静默刷新,不打断用户) */
+const initialLoading = ref(true)
 
 const postureLabel = computed(() => {
   const lv = posture.value?.level
@@ -263,6 +265,7 @@ async function loadAll(): Promise<void> {
     renderMap()
   } finally {
     refreshing = false
+    initialLoading.value = false
   }
 }
 

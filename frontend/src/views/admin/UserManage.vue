@@ -157,8 +157,8 @@ import { CopyDocument } from '@element-plus/icons-vue'
 import { getUsers, setUserRole, toggleUserStatus, resetPassword, deleteUser } from '@/api/user'
 import type { UserListItem } from '@/types/user'
 import { formatDateTime } from '@/utils/format'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -233,31 +233,35 @@ async function onConfirmRole() {
 
 async function onToggleStatus(row: UserListItem) {
   const newStatus = row.status ? 0 : 1
+  const ok = await confirmDanger({
+    target: `${newStatus ? '启用' : '禁用'}用户「${row.username}」`,
+    consequence: newStatus ? '启用后该账号可正常登录' : '禁用后该账号将无法登录',
+    confirmText: newStatus ? '确认启用' : '确认禁用',
+  })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(
-      `确定要${newStatus ? '启用' : '禁用'}用户「${row.username}」吗？`,
-      '确认操作',
-      { type: 'warning' },
-    )
     await toggleUserStatus(row.id, newStatus)
     ElMessage.success('操作成功')
     loadData()
   } catch {
-    /* canceled */
+    /* http 拦截器已提示 */
   }
 }
 
 async function onResetPassword(row: UserListItem) {
+  const ok = await confirmDanger({
+    target: `重置用户「${row.username}」的密码`,
+    consequence: '将强制下线其旧会话',
+    confirmText: '确认重置',
+  })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(`确定要重置用户「${row.username}」的密码并强制下线其旧会话吗？`, '确认重置密码', {
-      type: 'warning',
-    })
     const data = await resetPassword(row.id)
     resetPasswordUsername.value = row.username
     temporaryPassword.value = data.temporary_password
     passwordDialogVisible.value = true
   } catch {
-    /* canceled */
+    /* http 拦截器已提示 */
   }
 }
 
@@ -276,17 +280,18 @@ function clearTemporaryPassword() {
 }
 
 async function onDelete(row: UserListItem) {
+  const ok = await confirmDanger({
+    target: `删除用户「${row.username}」`,
+    consequence: '删除为软删除：该账号将无法登录，但其项目与历史数据会保留',
+    confirmText: '删除',
+  })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(
-      `确定要删除用户「${row.username}」吗?\n删除为软删除:该账号将无法登录,但其项目与历史数据会保留。`,
-      '确认删除用户',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
     await deleteUser(row.id)
     ElMessage.success(`用户「${row.username}」已删除`)
     loadData()
   } catch {
-    /* canceled */
+    /* http 拦截器已提示 */
   }
 }
 

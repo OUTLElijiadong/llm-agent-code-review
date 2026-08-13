@@ -8,19 +8,39 @@
     <div v-if="$slots.default" class="empty-action">
       <slot />
     </div>
+    <!-- 统一的行动指引:有 actionText 就显示一个主按钮,点击跳路由或触发自定义 -->
+    <div v-else-if="actionText" class="empty-action">
+      <button type="button" class="empty-action-btn" @click="onAction">{{ actionText }}</button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-withDefaults(defineProps<{
+import { useRouter } from 'vue-router'
+
+const props = withDefaults(defineProps<{
   description?: string
   compact?: boolean
   imageSize?: number
+  /** 行动按钮文案,如「创建项目」「返回列表」 */
+  actionText?: string
+  /** 点击后跳转的站内路由(与 actionHandler 二选一) */
+  actionTo?: string
 }>(), {
   description: '暂无数据',
   compact: false,
   imageSize: 80,
+  actionText: '',
+  actionTo: '',
 })
+
+const emit = defineEmits<{ action: [] }>()
+const router = useRouter()
+
+function onAction(): void {
+  emit('action')
+  if (props.actionTo) void router.push(props.actionTo)
+}
 </script>
 
 <style scoped lang="scss">
@@ -89,6 +109,27 @@ withDefaults(defineProps<{
 
 .empty-action {
   margin-top: 14px;
+}
+
+.empty-action-btn {
+  min-height: 34px;
+  padding: 0 var(--sp-4, 16px);
+  border: 1px solid var(--brand-300, #8E88F5);
+  border-radius: var(--r-md, 8px);
+  background: var(--brand-500, #5B58E8);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+.empty-action-btn:hover {
+  background: var(--brand-600, #4A46D4);
+  border-color: var(--brand-600, #4A46D4);
+  transform: translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .empty-action-btn { transition: none; }
+  .empty-action-btn:hover { transform: none; }
 }
 
 .compact .empty-illustration {

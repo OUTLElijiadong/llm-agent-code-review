@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { View, ChatLineRound } from '@element-plus/icons-vue'
 import { formatDate } from '@/utils/format'
 import { getPosts, type ForumPost } from '@/api/forum'
+import EmptyState from '@/components/common/EmptyState.vue'
 
 const router = useRouter()
 
@@ -85,7 +86,12 @@ onMounted(load)
             <span><el-icon><ChatLineRound /></el-icon> {{ p.reply_count }}</span>
           </div>
         </div>
-        <el-empty v-if="!loading && posts.length === 0" description="还没有帖子,来发第一帖吧" />
+        <EmptyState
+          v-if="!loading && posts.length === 0"
+          description="还没有帖子,来发第一帖吧"
+          action-text="发布新帖"
+          action-to="/forum/new"
+        />
       </div>
       <div class="pager">
         <el-pagination layout="total, prev, pager, next" :total="total" :page-size="pageSize"

@@ -288,7 +288,7 @@ onMounted(() => {
           border
           stripe
           size="small"
-          empty-text="加载中..."
+          empty-text="暂无敏感信息识别规则"
         >
           <el-table-column label="名称" min-width="180">
             <template #default="{ row }: { row: SecurityChecklistItem }">
@@ -331,7 +331,7 @@ onMounted(() => {
           border
           stripe
           size="small"
-          empty-text="加载中..."
+          empty-text="暂无静态语义规则"
         >
           <el-table-column label="代号" width="200">
             <template #default="{ row }: { row: SecurityChecklistItem }">

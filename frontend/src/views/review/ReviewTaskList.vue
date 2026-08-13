@@ -53,13 +53,16 @@
       </div>
 
       <el-table
+        ref="tableRef"
         :data="tasks"
         v-loading="loading"
         style="width: 100%"
         size="default"
         @row-click="onRowClick"
+        @selection-change="onSelectionChange"
         highlight-current-row
       >
+        <el-table-column type="selection" width="44" />
         <el-table-column prop="task_name" label="任务名称" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.task_name || `审查 #${row.id}` }}
@@ -106,6 +109,26 @@
         </el-table-column>
       </el-table>
 
+      <div v-if="selectedRows.length" class="batch-bar">
+        <span class="batch-info">已选 {{ selectedRows.length }} 项</span>
+        <el-button
+          size="small"
+          type="warning"
+          plain
+          :disabled="!selectedRunning.length"
+          :loading="batchStopping"
+          @click="handleBatchStop"
+        >批量停止{{ selectedRunning.length ? ` (${selectedRunning.length})` : '' }}</el-button>
+        <el-button
+          size="small"
+          type="danger"
+          plain
+          :loading="batchDeleting"
+          @click="handleBatchDelete"
+        >批量删除</el-button>
+        <el-button size="small" link @click="clearSelection">取消选择</el-button>
+      </div>
+
       <div class="pagination-wrapper">
         <el-pagination
           v-model:current-page="page"
@@ -121,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { formatDateTime } from '@/utils/format'
@@ -131,10 +154,11 @@ import { getProjects } from '@/api/project'
 import type { TaskOut } from '@/types/review'
 import type { ProjectOut } from '@/types/project'
 import { reviewTypeLabel } from '@/constants/reviewType'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const router = useRouter()
+const tableRef = ref()
 
 const loading = ref(false)
 const tasks = ref<TaskOut[]>([])
@@ -233,41 +257,96 @@ function onRowClick(row: TaskOut) {
 }
 
 async function handleDelete(row: TaskOut) {
+  const ok = await confirmDanger({ target: `删除任务「${row.task_name || `审查 #${row.id}`}」` })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(
-      `确定要删除任务「${row.task_name || `审查 #${row.id}`}」吗？删除后不可恢复。`,
-      '删除审查任务',
-      {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-        confirmButtonClass: 'el-button--danger',
-      }
-    )
     await deleteReviewTask(row.id)
     ElMessage.success('任务已删除')
     await loadData()
   } catch {
-    /* 用户取消或 http 拦截器已处理 */
+    /* http 拦截器已处理 */
   }
 }
 
 async function handleCancel(row: TaskOut) {
+  const ok = await confirmDanger({
+    target: `停止任务「${row.task_name || `审查 #${row.id}`}」`,
+    consequence: '已处理的部分将保留',
+    confirmText: '确定停止',
+  })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(
-      `确定要停止任务「${row.task_name || `审查 #${row.id}`}」吗？已处理的部分将保留。`,
-      '停止审查任务',
-      {
-        confirmButtonText: '确定停止',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
     await cancelReviewTask(row.id)
     ElMessage.success('任务已停止')
     await loadData()
   } catch {
-    /* 用户取消或 http 拦截器已处理 */
+    /* http 拦截器已处理 */
+  }
+}
+
+// ── 批量操作 ──
+const selectedRows = ref<TaskOut[]>([])
+const batchStopping = ref(false)
+const batchDeleting = ref(false)
+
+const selectedRunning = computed(() => selectedRows.value.filter((t) => t.status === 'running'))
+
+function onSelectionChange(rows: TaskOut[]) {
+  selectedRows.value = rows
+}
+
+function clearSelection() {
+  tableRef.value?.clearSelection()
+}
+
+async function handleBatchStop() {
+  const targets = selectedRunning.value
+  if (!targets.length) return
+  const ok = await confirmDanger({
+    target: `停止选中的 ${targets.length} 个运行中任务`,
+    consequence: '各任务已处理的部分将保留',
+    confirmText: '确定停止',
+  })
+  if (!ok) return
+  batchStopping.value = true
+  let failed = 0
+  try {
+    for (const t of targets) {
+      try {
+        await cancelReviewTask(t.id)
+      } catch {
+        failed++
+      }
+    }
+    if (failed) ElMessage.warning(`${failed} 个任务停止失败，其余已停止`)
+    else ElMessage.success(`已停止 ${targets.length} 个任务`)
+    await loadData()
+  } finally {
+    batchStopping.value = false
+  }
+}
+
+async function handleBatchDelete() {
+  const targets = selectedRows.value
+  if (!targets.length) return
+  const ok = await confirmDanger({ target: `删除选中的 ${targets.length} 个任务` })
+  if (!ok) return
+  batchDeleting.value = true
+  let failed = 0
+  try {
+    for (const t of targets) {
+      try {
+        await deleteReviewTask(t.id)
+      } catch {
+        failed++
+      }
+    }
+    if (failed) ElMessage.warning(`${failed} 个任务删除失败，其余已删除`)
+    else ElMessage.success(`已删除 ${targets.length} 个任务`)
+    clearSelection()
+    await loadData()
+  } finally {
+    batchDeleting.value = false
   }
 }
 
@@ -306,6 +385,21 @@ onUnmounted(clearPoll)
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+
+  .batch-info {
+    font-size: 13px;
+    color: var(--el-text-color-secondary);
+  }
 }
 
 .score-high { color: #67c23a; font-weight: 600; }

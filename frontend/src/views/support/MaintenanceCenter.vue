@@ -3,8 +3,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 
 import { useUserStore } from '@/stores/user'
 import { formatDate } from '@/utils/format'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 import {
   createTicket, getTickets, handleTicket, closeTicket, type Ticket,
 } from '@/api/maintenance'
@@ -88,7 +88,11 @@ async function submitHandle() {
 }
 
 async function close(t: Ticket) {
-  await ElMessageBox.confirm('确认关闭该工单?', '提示', { type: 'warning' })
+  if (!await confirmDanger({
+    target: '关闭该工单',
+    consequence: '关闭后将不再更新处理进度',
+    confirmText: '确认关闭',
+  })) return
   await closeTicket(t.id)
   ElMessage.success('已关闭')
   load()

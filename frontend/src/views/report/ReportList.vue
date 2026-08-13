@@ -65,24 +65,37 @@
             {{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="170" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click.stop="goDetail(row.task_id)">查看详情</el-button>
-            <el-button link type="primary" size="small" @click.stop="goGenerate(row.task_id)">生成报告</el-button>
-            <el-dropdown trigger="click" @command="(cmd: ReportFormat) => handleExport(row, cmd)">
-              <el-button link type="primary" size="small" :loading="exportingTaskId === row.task_id" @click.stop>
-                导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            <el-tooltip content="查看详情" placement="top">
+              <el-button link type="primary" size="small" :icon="ViewIcon" aria-label="查看详情" @click.stop="goDetail(row.task_id)" />
+            </el-tooltip>
+            <el-tooltip content="生成报告" placement="top">
+              <el-button link type="primary" size="small" :icon="MagicStick" aria-label="生成报告" @click.stop="goGenerate(row.task_id)" />
+            </el-tooltip>
+            <el-dropdown trigger="click" @command="(cmd: string) => handleRowCommand(row, cmd)">
+              <el-button
+                link
+                type="primary"
+                size="small"
+                :loading="exportingTaskId === row.task_id"
+                aria-label="更多操作"
+                @click.stop
+              >
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item :command="'json'">JSON</el-dropdown-item>
-                  <el-dropdown-item :command="'html'">HTML</el-dropdown-item>
-                  <el-dropdown-item :command="'pdf'">PDF</el-dropdown-item>
-                  <el-dropdown-item :command="'word'">Word</el-dropdown-item>
+                  <el-dropdown-item :command="'export:json'">导出 JSON</el-dropdown-item>
+                  <el-dropdown-item :command="'export:html'">导出 HTML</el-dropdown-item>
+                  <el-dropdown-item :command="'export:pdf'">导出 PDF</el-dropdown-item>
+                  <el-dropdown-item :command="'export:word'">导出 Word</el-dropdown-item>
+                  <el-dropdown-item :command="'delete'" divided>
+                    <span class="danger-item">删除报告</span>
+                  </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-            <el-button link type="danger" size="small" @click.stop="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -105,14 +118,14 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, MagicStick, View as ViewIcon } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import { getReports, deleteReport, exportReport } from '@/api/report'
 import { getProjects } from '@/api/project'
 import type { ReportListItem, ReportFormat } from '@/types/report'
 import type { ProjectOut } from '@/types/project'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const router = useRouter()
 
@@ -215,26 +228,31 @@ async function handleExport(row: ReportListItem, format: ReportFormat): Promise<
 }
 
 /**
- * 删除报告(带二次确认)
+ * 删除报告(带统一危险确认)
  * @param row - 报告行数据
  */
 async function handleDelete(row: ReportListItem) {
+  const ok = await confirmDanger({ target: `删除报告「${row.task_name || `审查 #${row.task_id}`}」` })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(
-      `确定要删除报告「${row.task_name || `审查 #${row.task_id}`}」吗？删除后不可恢复。`,
-      '删除报告',
-      {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-        confirmButtonClass: 'el-button--danger',
-      }
-    )
     await deleteReport(row.task_id)
     ElMessage.success('报告已删除')
     await loadData()
   } catch {
-    /* 用户取消或 http 拦截器已处理 */
+    /* http 拦截器已处理 */
+  }
+}
+
+/**
+ * 操作列「更多」下拉命令分发:export:* 导出,delete 删除。
+ */
+function handleRowCommand(row: ReportListItem, cmd: string): void {
+  if (cmd === 'delete') {
+    void handleDelete(row)
+    return
+  }
+  if (cmd.startsWith('export:')) {
+    void handleExport(row, cmd.slice('export:'.length) as ReportFormat)
   }
 }
 
@@ -276,4 +294,6 @@ onMounted(() => {
 .score-high { color: #67c23a; font-weight: 600; }
 .score-medium { color: #e6a23c; font-weight: 600; }
 .score-low { color: #f56c6c; font-weight: 600; }
+
+.danger-item { color: var(--el-color-danger); }
 </style>

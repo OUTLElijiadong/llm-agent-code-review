@@ -359,7 +359,7 @@ async function loadAgentSkills(agentCode: string): Promise<void> {
   try {
     agentSkills.value = await listAgentSkills(agentCode)
   } catch {
-    // 静默失败,抽屉里会显示 EmptyState
+    // 抽屉内已有 EmptyState 兜底展示;网络/权限错误由 http 拦截器提示,不再重复弹
   } finally {
     skillsLoading.value = false
   }
@@ -529,7 +529,7 @@ async function refreshAgentStats(): Promise<void> {
     situation.value = sit
     syncSituationActivityCounts()
   } catch {
-    // 静默失败
+    // SSE 事件流为主、此处为轻量轮询兜底,失败不打断用户;错误由 http 拦截器提示
   }
 }
 

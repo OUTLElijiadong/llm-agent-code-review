@@ -300,6 +300,7 @@ import {
 import { listRuntimeAgents, listSkillRecords } from '@/api/agent'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 import type {
   EvalCase,
   EvolutionProposal,
@@ -592,10 +593,13 @@ async function onEvaluate(row: EvolutionProposal): Promise<void> {
 }
 
 async function onApprove(row: EvolutionProposal): Promise<void> {
-  await ElMessageBox.confirm(
-    `确认审批生效？将写入审查规则并在下次审查自动生效。\n${row.title}`,
-    '审批生效', { type: 'warning' },
-  )
+  const ok = await confirmDanger({
+    target: '审批生效该提案',
+    consequence: '将写入审查规则并在下次审查自动生效',
+    confirmText: '确认生效',
+    extra: row.title,
+  })
+  if (!ok) return
   busyId.value = row.id
   try {
     await approveProposal(row.id)

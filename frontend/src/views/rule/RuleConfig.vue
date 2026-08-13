@@ -151,8 +151,8 @@ import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { getRules, toggleRule, createRule, updateRule, deleteRule } from '@/api/rule'
 import type { RuleOut } from '@/types/rule'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -274,13 +274,13 @@ function onEdit(row: RuleOut) {
 }
 
 async function onDelete(ruleId: number) {
+  if (!await confirmDanger({ target: '删除此规则', consequence: '删除后新审查将不再使用该规则' })) return
   try {
-    await ElMessageBox.confirm('确定要删除此规则吗？', '确认删除', { type: 'warning' })
     await deleteRule(ruleId)
     ElMessage.success('规则已删除')
     loadRules()
   } catch {
-    /* canceled */
+    /* http 拦截器已提示 */
   }
 }
 

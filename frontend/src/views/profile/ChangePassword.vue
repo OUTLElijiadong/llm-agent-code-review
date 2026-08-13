@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { Lock } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 import { changePassword } from '@/api/auth'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { goBack as safeGoBack } from '@/utils/navigation'
 
 const router = useRouter()
+const userStore = useUserStore()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+/** 个人资料未就绪时展示页面级 loading */
+const pageLoading = computed(() => !userStore.profile)
 
 const form = reactive({
   oldPassword: '',
@@ -79,9 +83,9 @@ function goBack() {
         <el-icon><ArrowLeft /></el-icon>
         返回
       </el-button>
-      <h2>修改密码</h2>
+      <h1 class="page-title">修改密码</h1>
     </div>
-    <div class="form-container">
+    <div class="form-container" v-loading="pageLoading">
       <el-form
         ref="formRef"
         :model="form"
@@ -142,7 +146,7 @@ function goBack() {
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-lg);
 
-  h2 {
+  .page-title {
     font-size: var(--font-size-xl);
     font-weight: 600;
     color: var(--color-text-primary);

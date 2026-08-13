@@ -200,8 +200,8 @@ import { ref, computed, onMounted, reactive } from 'vue'
 import { type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, Plus, Search, View, Edit, Delete } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 import {
   listTemplates,
   createTemplate,
@@ -439,22 +439,14 @@ async function handleDelete(row: ReportTemplate): Promise<void> {
     ElMessage.warning('内置模板不可删除')
     return
   }
+  const ok = await confirmDanger({ target: `删除模板「${row.name}」` })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm(
-      `确定要删除模板「${row.name}」吗？删除后不可恢复。`,
-      '删除模板',
-      {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-        confirmButtonClass: 'el-button--danger',
-      },
-    )
     await deleteTemplate(row.id)
     ElMessage.success('模板已删除')
     await loadData()
   } catch {
-    /* 用户取消或 http 拦截器已处理 */
+    /* http 拦截器已处理 */
   }
 }
 

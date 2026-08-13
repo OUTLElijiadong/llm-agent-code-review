@@ -2,8 +2,8 @@
 import { onMounted, reactive, ref } from 'vue'
 
 import { formatDate } from '@/utils/format'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 import {
   getDocs, addDoc, deleteDoc, searchKnowledge, syncKnowledge, getKbStats,
   type KnowledgeDoc, type SearchHit, type KbStats,
@@ -72,7 +72,7 @@ async function submitAdd() {
 }
 
 async function remove(d: KnowledgeDoc) {
-  await ElMessageBox.confirm(`确认从知识库删除「${d.title}」?`, '提示', { type: 'warning' })
+  if (!await confirmDanger({ target: `从知识库删除「${d.title}」`, extra: '其向量切片会一并清除' })) return
   await deleteDoc(d.id)
   ElMessage.success('已删除')
   await Promise.all([loadDocs(), loadStats()])

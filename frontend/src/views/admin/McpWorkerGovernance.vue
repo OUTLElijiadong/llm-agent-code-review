@@ -48,7 +48,7 @@ import type {
 import type { GovernanceAgent } from '@/types/adminGovernance'
 import type { SandboxLanguage, SandboxTestMode } from '@/types/sandbox'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 type TabName = 'servers' | 'tools' | 'bindings' | 'aliases' | 'workers'
 
@@ -193,7 +193,10 @@ async function saveServer(): Promise<void> {
 }
 
 async function removeServer(server: McpServer): Promise<void> {
-  await ElMessageBox.confirm(`删除 ${server.name} 会同时删除工具与 Agent 绑定，是否继续？`, '删除 MCP Server', { type: 'warning' })
+  if (!await confirmDanger({
+    target: `删除 MCP Server「${server.name}」`,
+    consequence: '会同时删除其工具与 Agent 绑定',
+  })) return
   await deleteMcpServer(server.id)
   await loadAll()
   ElMessage.success('MCP Server 已删除')

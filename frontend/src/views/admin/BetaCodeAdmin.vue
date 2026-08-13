@@ -2,7 +2,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
 import { CopyDocument, Plus, Refresh, Remove } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 import { generateBetaCodes, listBetaCodes, revokeBetaCode } from '@/api/betaCode'
 import type { BetaCodeStatus, BetaInviteCode } from '@/types/betaCode'
@@ -62,11 +63,11 @@ async function copyText(value: string, successMessage = '已复制'): Promise<vo
 }
 
 async function handleRevoke(row: BetaInviteCode): Promise<void> {
-  await ElMessageBox.confirm(`确认撤销 ${row.display_prefix}？撤销后无法恢复。`, '撤销内测码', {
-    type: 'warning',
-    confirmButtonText: '撤销',
-    cancelButtonText: '取消',
-  })
+  if (!await confirmDanger({
+    target: `撤销内测码 ${row.display_prefix}`,
+    consequence: '撤销后无法恢复',
+    confirmText: '确认撤销',
+  })) return
   await revokeBetaCode(row.id)
   ElMessage.success('内测码已撤销')
   await loadCodes()

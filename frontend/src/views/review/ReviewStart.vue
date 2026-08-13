@@ -5,16 +5,16 @@
     </div>
 
     <el-card shadow="hover" class="form-card">
-      <el-form ref="formRef" :model="form" label-width="100px" size="default">
+      <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px" size="default">
         <el-form-item label="审查名称">
           <el-input v-model="form.task_name" placeholder="可选，输入任务名称" :maxlength="100" show-word-limit />
         </el-form-item>
 
         <el-form-item label="审查范围">
           <el-radio-group v-model="form.scope" @change="onScopeChange">
-            <el-radio-button value="whole">📦 整个项目</el-radio-button>
-            <el-radio-button value="files">🗂 指定文件</el-radio-button>
-            <el-radio-button value="all">🌐 全部项目</el-radio-button>
+            <el-radio-button value="whole"><el-icon><Box /></el-icon> 整个项目</el-radio-button>
+            <el-radio-button value="files"><el-icon><FolderOpened /></el-icon> 指定文件</el-radio-button>
+            <el-radio-button value="all"><el-icon><Connection /></el-icon> 全部项目</el-radio-button>
           </el-radio-group>
           <div class="scope-hint">
             <template v-if="form.scope === 'whole'">审查所选项目的全部代码文件，无需逐个勾选。</template>
@@ -23,7 +23,7 @@
           </div>
         </el-form-item>
 
-        <el-form-item v-if="form.scope !== 'all'" label="选择项目">
+        <el-form-item v-if="form.scope !== 'all'" label="选择项目" prop="project_id">
           <el-select
             v-model="form.project_id"
             placeholder="请选择审查项目"
@@ -49,7 +49,7 @@
         </el-form-item>
 
         <!-- 指定文件：手动勾选 -->
-        <el-form-item v-if="form.scope === 'files'" label="选择文件">
+        <el-form-item v-if="form.scope === 'files'" label="选择文件" prop="file_ids">
           <div v-if="!form.project_id" class="form-hint">请先选择项目</div>
           <PrismLoading
             v-else-if="loadingFiles"
@@ -109,13 +109,13 @@
 
         <el-form-item label="审查类型">
           <el-radio-group v-model="form.review_type">
-            <el-radio value="quick">⚡ 快速审查</el-radio>
-            <el-radio value="standard">⚡ 标准审查</el-radio>
-            <el-radio value="security">🛡 安全代理（渗透/漏洞）</el-radio>
-            <el-radio value="performance">⚡ 性能代理</el-radio>
-            <el-radio value="full">⚡ 多Agent全面审查(并行)</el-radio>
+            <el-radio value="quick"><el-icon><Lightning /></el-icon> 快速审查</el-radio>
+            <el-radio value="standard"><el-icon><DocumentChecked /></el-icon> 标准审查</el-radio>
+            <el-radio value="security"><el-icon><Aim /></el-icon> 安全代理（渗透/漏洞）</el-radio>
+            <el-radio value="performance"><el-icon><Odometer /></el-icon> 性能代理</el-radio>
+            <el-radio value="full"><el-icon><Lightning /></el-icon> 多Agent全面审查(并行)</el-radio>
             <el-radio v-if="form.scope !== 'all'" value="discuss">
-              💬 多Agent圆桌讨论(实时可见每个Agent的思考)
+              <el-icon><ChatDotRound /></el-icon> 多Agent圆桌讨论(实时可见每个Agent的思考)
             </el-radio>
           </el-radio-group>
           <div v-if="form.scope === 'all'" class="scope-hint">
@@ -155,7 +155,8 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 
-import type { FormInstance } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
+import { Aim, Box, ChatDotRound, Connection, DocumentChecked, FolderOpened, Lightning, Odometer } from '@element-plus/icons-vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import { getProjects } from '@/api/project'
@@ -186,6 +187,37 @@ const form = reactive({
   review_type: 'standard',
 })
 
+/**
+ * 表单必填校验:项目与文件按审查范围动态校验(scope=all 时跳过)。
+ * 提交按钮本身有 submitDisabled 兜底,rules 用于给出字段级红字反馈。
+ */
+const formRules: FormRules = {
+  project_id: [
+    {
+      validator: (_rule, value, callback) => {
+        if (form.scope !== 'all' && (value === null || value === undefined || value === '')) {
+          callback(new Error('请选择审查项目'))
+          return
+        }
+        callback()
+      },
+      trigger: 'change',
+    },
+  ],
+  file_ids: [
+    {
+      validator: (_rule, value: number[], callback) => {
+        if (form.scope === 'files' && (!value || value.length === 0)) {
+          callback(new Error('请至少选择一个文件'))
+          return
+        }
+        callback()
+      },
+      trigger: 'change',
+    },
+  ],
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -199,8 +231,8 @@ function toggleSelectAll() {
 }
 
 const submitLabel = computed(() => {
-  if (form.scope === 'all') return '🌐 启动全部项目审查'
-  return form.review_type === 'discuss' ? '💬 启动讨论审' : '⚡ 启动审查'
+  if (form.scope === 'all') return '启动全部项目审查'
+  return form.review_type === 'discuss' ? '启动讨论审查' : '启动审查'
 })
 
 const submitDisabled = computed(() => {
@@ -235,6 +267,8 @@ function onScopeChange() {
   if (form.scope === 'all' && form.review_type === 'discuss') {
     form.review_type = 'standard'
   }
+  // 切换范围后清掉旧的字段级校验红字(如「请选择审查项目」)
+  formRef.value?.clearValidate()
 }
 
 async function submitSingleProject(): Promise<void> {
@@ -305,6 +339,11 @@ async function submitAllProjects(): Promise<void> {
 }
 
 async function onSubmit() {
+  // 先走表单校验(项目/文件必填红字提示),再保留原有场景化拦截
+  if (formRef.value) {
+    const valid = await formRef.value.validate().catch(() => false)
+    if (!valid) return
+  }
   if (form.scope !== 'all' && !form.project_id) {
     ElMessage.warning('请选择项目')
     return

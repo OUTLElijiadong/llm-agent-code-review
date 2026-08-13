@@ -293,8 +293,8 @@ import { useUserStore } from '@/stores/user'
 import type { ProjectOut } from '@/types/project'
 import ProjectForm from './ProjectForm.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -414,13 +414,8 @@ function handleView(row: ProjectOut): void {
 }
 
 async function handleDelete(id: number): Promise<void> {
+  if (!await confirmDanger({ target: '删除该项目' })) return
   try {
-    await ElMessageBox.confirm('确定删除该项目吗？删除后不可恢复', '删除项目', {
-      confirmButtonText: '确定删除',
-      cancelButtonText: '取消',
-      type: 'warning',
-      confirmButtonClass: 'el-button--danger',
-    })
     await deleteProject(id)
     ElMessage.success('项目已删除')
     if (projects.value.length === 1 && page.value > 1) {
@@ -428,7 +423,7 @@ async function handleDelete(id: number): Promise<void> {
     }
     await fetchProjects()
   } catch {
-    /* 用户取消或 http 拦截器已处理 */
+    /* http 拦截器已处理 */
   }
 }
 

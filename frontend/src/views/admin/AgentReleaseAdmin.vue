@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, Close, EditPen, Refresh, RefreshLeft, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 import {
   approveAgentRelease,
@@ -132,7 +133,11 @@ async function disableAgent(item: AdminAgentReleases): Promise<void> {
   if (actionBusy.value) return
   actionKey.value = `disable-${item.agent.id}`
   try {
-    await ElMessageBox.confirm(`确认停用 ${item.agent.name}？新任务将不再调用。`, '停用 Agent', { type: 'warning' })
+    if (!await confirmDanger({
+      target: `停用 ${item.agent.name}`,
+      consequence: '停用后新任务将不再调用该 Agent',
+      confirmText: '确认停用',
+    })) return
     await disableCustomAgent(item.agent.id)
     ElMessage.success('Agent 已停用')
     await load()
@@ -147,7 +152,11 @@ async function rollback(item: AdminAgentReleases, releaseId: number): Promise<vo
   if (actionBusy.value) return
   actionKey.value = `rollback-${releaseId}`
   try {
-    await ElMessageBox.confirm(`确认回滚到发布 #${releaseId}？`, '版本回滚', { type: 'warning' })
+    if (!await confirmDanger({
+      target: `回滚到发布 #${releaseId}`,
+      consequence: '将基于该版本创建新的回滚发布',
+      confirmText: '确认回滚',
+    })) return
     await rollbackCustomAgent(item.agent.id, releaseId)
     ElMessage.success('已创建回滚发布')
     await load()

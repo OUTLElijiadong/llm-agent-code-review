@@ -10,10 +10,10 @@
             v-if="project && (project.file_count ?? 0) > 0"
             type="danger"
             plain
-            :icon="Lock"
+            :icon="Aim"
             @click="openSecurityScan"
           >
-            🛡 安全审计
+            安全审计
           </el-button>
           <el-button
             v-if="project && (project.file_count ?? 0) > 0"
@@ -87,7 +87,7 @@
         <el-tab-pane label="代码文件" name="files">
           <div class="section">
             <div class="section-header">
-              <h3>代码文件</h3>
+              <h1 class="section-title">代码文件</h1>
               <div class="section-actions">
                 <el-button
                   v-if="project.file_count > 0"
@@ -191,7 +191,7 @@
         <el-tab-pane label="审查任务" name="tasks">
           <div class="section">
             <div class="section-header">
-              <h3>最近审查任务</h3>
+              <h1 class="section-title">最近审查任务</h1>
             </div>
             <el-table
               v-if="project.recent_tasks.length > 0"
@@ -236,7 +236,7 @@
         <el-tab-pane label="成员管理" name="members">
           <div class="section">
             <div class="section-header">
-              <h3>项目成员</h3>
+              <h1 class="section-title">项目成员</h1>
               <div class="section-actions">
                 <el-button
                   type="primary"
@@ -307,7 +307,7 @@
       </el-tabs>
     </template>
 
-    <EmptyState v-else-if="!loading" description="项目不存在" />
+    <EmptyState v-else-if="!loading" description="项目不存在或已被删除" action-text="返回项目列表" action-to="/projects" />
 
     <input
       ref="fileInputRef"
@@ -372,7 +372,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 
-import { Download, Lock, MagicStick, Plus } from '@element-plus/icons-vue'
+import { Download, Lock, MagicStick, Plus, Aim } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import {
   getAuditSourceArchiveResult,
@@ -398,8 +398,8 @@ import CodeFileList from '@/views/code/CodeFileList.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import AiPromptModal from '@/components/issue/AiPromptModal.vue'
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const route = useRoute()
 const router = useRouter()
@@ -503,13 +503,12 @@ const deletingRevisionId = ref<number | null>(null)
 
 async function removeRevision(row: { id: number; revision_no: number }): Promise<void> {
   if (!project.value) return
-  try {
-    await ElMessageBox.confirm(
-      `确定删除源码修复副本 rev#${row.revision_no}？原始源码归档不受影响，删除后不可恢复。`,
-      '删除修复副本',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
-  } catch { return }
+  const ok = await confirmDanger({
+    target: `删除源码修复副本 rev#${row.revision_no}`,
+    consequence: '原始源码归档不受影响，删除后不可恢复',
+    confirmText: '删除',
+  })
+  if (!ok) return
   deletingRevisionId.value = row.id
   try {
     await deleteSourceRevision(project.value.id, row.id)
@@ -812,15 +811,12 @@ async function handleChangeRole(userId: number, newRole: ProjectRole): Promise<v
  * @param row - 成员行数据
  */
 async function handleRemoveMember(row: ProjectMemberOut): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      `确定要将用户「${row.username}」移出项目吗？`,
-      '移除成员',
-      { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' },
-    )
-  } catch {
-    return /* 用户取消 */
-  }
+  const ok = await confirmDanger({
+    target: `将用户「${row.username}」移出项目`,
+    consequence: '移出后对方将失去本项目的访问权限',
+    confirmText: '移除',
+  })
+  if (!ok) return
   try {
     await removeProjectMember(projectId, row.user_id)
     ElMessage.success('成员已移除')
@@ -883,7 +879,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   margin-bottom: 16px;
 
-  h3 {
+  .section-title {
     margin: 0;
     font-size: 16px;
     font-weight: 600;
