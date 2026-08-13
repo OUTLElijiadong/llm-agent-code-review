@@ -7,9 +7,9 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 const mode = ref<'deepseek' | 'custom'>('deepseek')
 const cfg = ref<LlmConfig | null>(null)
 const form = reactive({ base_url: '', model: '', api_key: '' })
-const loading = ref(true)
 const saving = ref(false)
 const testing = ref(false)
+const loading = ref(false)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
 
 async function load() {
@@ -88,7 +88,7 @@ onMounted(load)
       <p class="page-sub">选择全平台使用的大模型;用户自定义 API 配置仍优先于此全局设置</p>
     </div>
 
-    <el-card shadow="never" class="form-card" v-loading="loading">
+    <el-card v-loading="loading" shadow="never" class="form-card">
       <el-alert v-if="cfg"
         :title="cfg.source === 'global'
           ? `当前:自定义模型生效(${cfg.model || '未填模型'})`

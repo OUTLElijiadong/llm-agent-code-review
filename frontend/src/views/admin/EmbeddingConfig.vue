@@ -6,8 +6,8 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 
 const form = reactive({ base_url: '', model: '', api_key: '', enabled: false })
 const apiKeySet = ref(false)
-const loading = ref(true)
 const saving = ref(false)
+const loading = ref(false)
 
 async function load() {
   loading.value = true
@@ -50,7 +50,7 @@ onMounted(load)
       <p class="page-sub">配置 OpenAI 兼容的 embedding 端点用于个人知识库的语义检索;留空或未启用时自动降级为本地哈希向量,系统仍可正常运行</p>
     </div>
 
-    <el-card shadow="never" class="form-card" v-loading="loading">
+    <el-card v-loading="loading" shadow="never" class="form-card">
       <el-alert
         :title="form.enabled ? '当前:使用远端 embedding API(语义向量)' : '当前:本地降级模式(无需 Key,语义较弱)'"
         :type="form.enabled ? 'success' : 'info'" :closable="false" style="margin-bottom: 18px" />

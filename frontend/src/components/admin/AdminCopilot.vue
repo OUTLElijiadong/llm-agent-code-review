@@ -73,6 +73,12 @@ interface ChatEntry {
   sensitiveResult?: ResponseSensitiveResultEvent
   /** 助手回复末尾解析出的"带我去"导航指令 */
   navigations?: AgentNavigateDirective[]
+  /** 上传失败的文件名列表 */
+  failedFiles?: string[]
+  /** 上传失败的原始 File 对象（用于一键重试） */
+  failedFileObjects?: File[]
+  /** 是否已重试 */
+  retryDone?: boolean
 }
 
 const ASSISTANT_NAME = '小菱 · 管理副驾驶'
@@ -131,8 +137,17 @@ const canSend = computed(() => (
   && !sessionBusy.value
 ))
 
+const QUICK_QUESTIONS = ['查看系统运行状态', '检查待审批事项', '生成平台报表']
+
 function welcomeEntry(): ChatEntry {
   return assistantEntry({ type: 'text', content: WELCOME_TEXT, status: 'completed' })
+}
+
+/** 空状态快捷问题:填入输入框并直接走现有发送逻辑。 */
+function askQuickQuestion(question: string): void {
+  if (loading.value || sessionRestoring.value || sessionBusy.value) return
+  inputText.value = question
+  void sendMessage()
 }
 
 /** 把当前会话的关键上下文写入本地快照,供切换会话与忙碌标记使用。 */
@@ -385,7 +400,7 @@ function requestErrorMessage(error: unknown): string {
 
 async function scrollToBottom(): Promise<void> {
   await nextTick()
-  if (messageArea.value) messageArea.value.scrollTop = messageArea.value.scrollHeight
+  if (messageArea.value) messageArea.value.scrollTo({ top: messageArea.value.scrollHeight, behavior: 'smooth' })
 }
 
 /**
@@ -482,6 +497,7 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   const projectId = created.id
   let okCount = 0
   const failures: string[] = [...preflightFailures]
+  const failedFileObjs: File[] = []
   for (let i = 0; i < readableFiles.length; i++) {
     const file = readableFiles[i]
     uploadStatus.value = `正在上传 ${i + 1}/${readableFiles.length}: ${file.name}`
@@ -494,12 +510,18 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
       okCount += 1
     } catch (err) {
       failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
+      failedFileObjs.push(file)
     }
   }
   uploadStatus.value = ''
   if (!okCount) {
     try { await deleteProject(projectId) } catch { /* 仍优先把真实上传失败反馈给用户 */ }
-    throw new Error(`所有文件上传失败,未保留项目${failures.length ? ` (${failures[0]})` : ''}`)
+    const allFailedMsg = assistantEntry({ type: 'text', content: `所有文件上传失败，未保留项目。${failures.length ? `失败原因：${failures.join('；')}` : ''}` })
+    allFailedMsg.failedFiles = failures
+    allFailedMsg.failedFileObjects = failedFileObjs
+    messages.value.push(allFailedMsg)
+    await scrollToBottom()
+    return
   }
   const uploadedLanguage = inferProjectLanguage(readableFiles.filter((f) => !IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? '')))
   if (uploadedLanguage !== language) {
@@ -507,7 +529,10 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   }
   const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
   const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
-  messages.value.push(assistantEntry({ type: 'text', content: summary }))
+  const summaryEntry = assistantEntry({ type: 'text', content: summary })
+  if (failures.length) summaryEntry.failedFiles = failures
+  if (failedFileObjs.length) summaryEntry.failedFileObjects = failedFileObjs
+  messages.value.push(summaryEntry)
   await scrollToBottom()
   if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
   else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
@@ -517,6 +542,57 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     session_id: sessionId.value,
     messages: [...conversationHistory(), { role: 'user', content: `我刚通过拖拽上传了 ${okCount} 个文件,已建好项目「${projectName}」(id=${projectId},语言 ${language})。请告诉我下一步可以做什么。` }],
   })
+}
+
+/** 一键重试失败文件：使用原始 File 对象重新上传到已有项目。 */
+async function retryFailedUpload(entry: ChatEntry): Promise<void> {
+  if (!entry.failedFiles?.length || entry.retryDone || loading.value || uploading.value) return
+  const fileObjects = entry.failedFileObjects
+  if (!fileObjects?.length) {
+    ElMessage.warning('原始文件不可用，请重新拖入文件')
+    return
+  }
+  entry.retryDone = true
+  uploading.value = true
+  uploadStatus.value = `正在重试 ${fileObjects.length} 个失败文件…`
+  try {
+    // 从已上传成功的消息中提取项目信息（名称+ID）
+    let projectId = 0
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const c = messages.value[i].payload.content ?? ''
+      const idMatch = c.match(/#(\d+)/)
+      if (idMatch) { projectId = Number(idMatch[1]); break }
+    }
+    if (!projectId) {
+      ElMessage.error('无法定位项目ID，请刷新后重试')
+      return
+    }
+    let okCount = 0
+    const newFailures: string[] = []
+    for (const file of fileObjects) {
+      try {
+        const fd = new FormData()
+        fd.append('project_id', String(projectId))
+        fd.append('file', file)
+        fd.append('file_path', file.name)
+        await uploadCodeFile(fd)
+        okCount += 1
+      } catch (err) {
+        newFailures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
+      }
+    }
+    if (newFailures.length) {
+      ElMessage.warning(`重试完成，仍有 ${newFailures.length} 个失败`)
+      entry.failedFiles = newFailures
+      entry.retryDone = false
+    } else {
+      ElMessage.success(`全部 ${okCount} 个文件重试成功`)
+      entry.failedFiles = []
+    }
+  } finally {
+    uploading.value = false
+    uploadStatus.value = ''
+  }
 }
 
 function onMessageClick(event: MouseEvent): void {
@@ -876,21 +952,22 @@ onBeforeUnmount(() => {
       <span v-if="unreadAlerts" class="unread-dot" aria-label="有未读异常"></span>
     </button>
 
-    <section
-      v-else
-      ref="panelRef"
-      class="copilot-panel"
-      :class="{ 'is-dragging': dragging, 'drag-over': dragActive }"
-      :style="panelStyle"
-      role="dialog"
-      aria-label="管理副驾驶对话"
-      @pointermove="moveDrag"
-      @pointerup="endDrag"
-      @pointercancel="endDrag"
-      @dragover.prevent="onDragOver"
-      @dragleave.prevent="onDragLeave"
-      @drop.prevent="onDrop"
-    >
+    <Transition name="drawer">
+      <section
+        v-if="visible"
+        ref="panelRef"
+        class="copilot-panel"
+        :class="{ 'is-dragging': dragging, 'drag-over': dragActive }"
+        :style="panelStyle"
+        role="dialog"
+        aria-label="管理副驾驶对话"
+        @pointermove="moveDrag"
+        @pointerup="endDrag"
+        @pointercancel="endDrag"
+        @dragover.prevent="onDragOver"
+        @dragleave.prevent="onDragLeave"
+        @drop.prevent="onDrop"
+      >
       <div v-if="dragActive" class="drop-mask">
         <div class="drop-mask-text">松开鼠标,把文件交给小菱建项目</div>
       </div>
@@ -936,6 +1013,26 @@ onBeforeUnmount(() => {
       </div>
 
       <div ref="messageArea" class="copilot-messages" aria-live="polite" @click="onMessageClick">
+        <Transition name="mascot-float">
+          <div v-if="messages.length <= 1 && !showTyping" class="mascot-hero" aria-hidden="true">
+            <PrismMascot :size="120" :status="mascotStatus" />
+          </div>
+        </Transition>
+
+        <Transition name="mascot-float">
+          <div v-if="messages.length <= 1 && !showTyping" class="quick-questions" aria-label="快捷问题">
+            <button
+              v-for="question in QUICK_QUESTIONS"
+              :key="question"
+              class="quick-question"
+              type="button"
+              @click="askQuickQuestion(question)"
+            >
+              {{ question }}
+            </button>
+          </div>
+        </Transition>
+
         <article
           v-for="entry in messages"
           :key="entry.id"
@@ -956,6 +1053,20 @@ onBeforeUnmount(() => {
               class="message-bubble"
             >
               {{ entry.payload.content }}
+            </div>
+            <div v-if="entry.failedFiles?.length" class="upload-failed-list">
+              <p><b>上传失败文件：</b></p>
+              <ul>
+                <li v-for="name in entry.failedFiles" :key="name">{{ name }}</li>
+              </ul>
+              <button
+                class="retry-upload-btn"
+                type="button"
+                :disabled="entry.retryDone"
+                @click="retryFailedUpload(entry)"
+              >
+                {{ entry.retryDone ? '已重试' : '一键重试失败文件' }}
+              </button>
             </div>
 
             <!-- 页面引导:模型约定路由 + 指令导航按钮,鉴权由 AgentNavLink 同源守卫裁决 -->
@@ -1092,6 +1203,7 @@ onBeforeUnmount(() => {
         </div>
       </footer>
     </section>
+    </Transition>
   </div>
 </template>
 
@@ -1305,6 +1417,31 @@ input { font: inherit; }
   white-space: pre;
 }
 
+.upload-failed-list {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(220, 73, 97, 0.35);
+  border-radius: 7px;
+  background: rgba(220, 73, 97, 0.05);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.upload-failed-list p { margin: 0 0 4px; color: #C92A4E; }
+.upload-failed-list ul { margin: 0; padding-left: 16px; color: #8a4b08; }
+.upload-failed-list li { margin: 1px 0; }
+.retry-upload-btn {
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: 1px solid #d54941;
+  border-radius: 5px;
+  background: #fff;
+  color: #d54941;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.retry-upload-btn:hover:not(:disabled) { background: rgba(213, 73, 65, 0.08); }
+.retry-upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .action-card,
 .report-card,
 .alert-card,
@@ -1453,5 +1590,52 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   .admin-copilot { right: 12px; bottom: 12px; left: 12px; }
   .copilot-trigger { margin-left: auto; }
   .copilot-panel { width: 100%; height: min(620px, calc(100dvh - 24px)); max-width: none; max-height: none; }
+}
+
+/* ── 面板过渡动画 ────────────────────────────────── */
+.drawer-enter-active,
+.drawer-leave-active { transition: opacity 0.3s ease; }
+.drawer-enter-active .copilot-panel,
+.drawer-leave-active .copilot-panel { transition: transform 0.3s ease, opacity 0.3s ease; }
+.drawer-enter-from,
+.drawer-leave-to { opacity: 0; }
+.drawer-enter-from .copilot-panel,
+.drawer-leave-to .copilot-panel { transform: translateY(8px) scale(0.98); }
+
+/* ── 吉祥物浮动动画 ──────────────────────────────── */
+.mascot-hero {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 8px;
+}
+.mascot-float-enter-active { transition: opacity 0.5s ease, transform 0.5s ease; }
+.mascot-float-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.mascot-float-enter-from { opacity: 0; transform: translateY(12px); }
+.mascot-float-leave-to { opacity: 0; transform: translateY(-8px); }
+
+/* ── 快捷问题按钮 ────────────────────────────────── */
+.quick-questions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 4px 0 12px;
+}
+.quick-question {
+  border: 1px solid rgba(0, 110, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(0, 110, 255, 0.05);
+  color: var(--agent-primary);
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 110, 255, 0.08);
+  transition: all 160ms ease;
+  white-space: nowrap;
+}
+.quick-question:hover {
+  background: rgba(0, 110, 255, 0.12);
+  border-color: rgba(0, 110, 255, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 110, 255, 0.15);
 }
 </style>
