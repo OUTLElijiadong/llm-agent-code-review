@@ -57,7 +57,8 @@ watch(() => props.teamId, (id) => {
 watch(isTerminal, (t) => { if (t) stopPolling() })
 
 onMounted(() => {
-  clockTimer = setInterval(() => { now.value = Date.now() }, 5000)
+  // 秒级节拍驱动成员计时文案;5s 粒度会以 5 为步长跳变
+  clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
   if (props.teamId) { fetchTeam(); startPolling() }
 })
 onBeforeUnmount(() => { stopPolling(); if (clockTimer) clearInterval(clockTimer) })

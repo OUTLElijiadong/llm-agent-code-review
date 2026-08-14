@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import type {
   AgentTeamEvent,
@@ -76,12 +76,22 @@ const now = ref(Date.now())
 let tickTimer: number | undefined
 const isRunning = computed(() => props.member.status === 'running')
 
-onMounted(() => {
-  if (isRunning.value) {
+function stopTick(): void {
+  if (tickTimer !== undefined) {
+    window.clearInterval(tickTimer)
+    tickTimer = undefined
+  }
+}
+
+// 成员从排队→运行中后才启动计时:挂在挂载时机上会漏掉,必须跟着状态走
+watch(isRunning, (running) => {
+  stopTick()
+  if (running) {
+    now.value = Date.now()
     tickTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
   }
-})
-onBeforeUnmount(() => { if (tickTimer !== undefined) window.clearInterval(tickTimer) })
+}, { immediate: true })
+onBeforeUnmount(stopTick)
 
 function parseTime(value?: string | null): number {
   if (!value) return Number.NaN

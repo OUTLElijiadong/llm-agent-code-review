@@ -700,6 +700,10 @@ function inferProjectLanguage(files: File[]): string {
   return 'Python'
 }
 
+function onDragEnter(event: DragEvent): void {
+  if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
+}
+
 function onDragOver(event: DragEvent): void {
   if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
@@ -1291,6 +1295,7 @@ let elapsedTimer: number | undefined
 onMounted(() => {
   meshBridge.start()
   elapsedTimer = window.setInterval(() => { nowTickMs.value = Date.now() }, 1000)
+  window.addEventListener('keydown', handleKeydown)
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
   window.addEventListener('prism:open-admin-copilot', handleExternalOpen)
@@ -1324,6 +1329,7 @@ onMounted(() => {
       @pointermove="moveDrag"
       @pointerup="endDrag"
       @pointercancel="endDrag"
+      @dragenter.prevent="onDragEnter"
       @dragover.prevent="onDragOver"
       @dragleave.prevent="onDragLeave"
       @drop.prevent="onDrop"

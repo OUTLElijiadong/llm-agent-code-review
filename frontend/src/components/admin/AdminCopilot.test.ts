@@ -727,3 +727,71 @@ describe('AdminCopilot Responses stream', () => {
     expect(streams.start).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('AdminCopilot 历史bug回归(本PR补齐项)', () => {
+  it('【修复】协议错误必须留在消息流(旧版只有几秒即逝的Toast,回来后零痕迹)', async () => {
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    await wrapper.find('textarea').setValue('查询系统状态')
+    void wrapper.find('.send-button').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.failed', response: { error: { message: '模型超时' } } })
+    await finish(0)
+
+    // Toast 之外,消息流里必须有错误卡片与操作入口
+    const card = wrapper.find('.copilot-error-card')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('这次没有完成')
+    expect(card.text()).toContain('模型超时')
+    expect(card.find('.copilot-error-btn.is-retry').exists()).toBe(true)
+    expect(card.find('.copilot-error-btn:not(.is-retry)').text()).toContain('新建对话')
+    wrapper.unmount()
+  })
+
+  it('【修复】助手消息必须有一键复制(旧版只能手动拖选悬浮窗文本)', async () => {
+    sessionApi.get.mockResolvedValueOnce({
+      surface: 'admin', session_id: 'admin-test',
+      run: { run_id: 'r', status: 'completed', model: '', rounds: 1, error: '', updated_at: '2026-08-01T12:00:00Z' },
+      messages: [{ role: 'assistant', content: '巡检结论:一切正常' }],
+      pending: null,
+    })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    // 欢迎语也有复制按钮;精确定位承载目标文本的气泡对应的按钮
+    const buttons = wrapper.findAll('.message-copy-btn')
+    expect(buttons.length).toBeGreaterThan(0)
+    const target = buttons.find((btn) => btn.element.closest('.message-row')?.textContent?.includes('巡检结论:一切正常'))
+    expect(target).toBeDefined()
+    await target!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('巡检结论:一切正常')
+    expect(messages.success).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('【修复】面板可见时按 / 必须聚焦输入框(旧版只支持 Escape)', async () => {
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    const textarea = wrapper.find('textarea').element as HTMLTextAreaElement
+    const focusSpy = vi.spyOn(textarea, 'focus')
+    // 真实浏览器里 keydown 的 target 是聚焦元素(如 body),不是 window;显式设定
+    const event = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'target', { value: document.body })
+    window.dispatchEvent(event)
+    await flushPromises()
+    expect(focusSpy).toHaveBeenCalled()
+    focusSpy.mockRestore()
+    wrapper.unmount()
+  })
+})

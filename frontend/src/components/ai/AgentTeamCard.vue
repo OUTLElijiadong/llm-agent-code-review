@@ -16,7 +16,8 @@ const emit = defineEmits<{
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
 
-onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 5000) })
+// 秒级节拍驱动成员计时文案;5s 粒度会让「工作中 X秒」以 5 为步长跳变
+onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 
 const members = computed<AgentTeamMember[]>(() => props.team?.members ?? [])
