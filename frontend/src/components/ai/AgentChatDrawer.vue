@@ -119,6 +119,8 @@ interface ChatMessage {
     status: 'pending' | 'submitting' | 'answered'
   }
   toolCalls?: ResponseToolCall[]
+  /** 审计四阶段进度(侦察→分析→验证→汇报),由 response.audit.progress 累积 */
+  auditPhases?: Array<{ phase: string; label: string; message: string }>
   /** 助手回复末尾解析出的"带我去"导航指令 */
   navigations?: AgentNavigateDirective[]
 }
@@ -955,6 +957,31 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
           run_id: runId,
           status: 'running', model: modelName.value, rounds: sessionRun.value?.rounds ?? 0, error: '', updated_at: new Date().toISOString(),
         }
+      } else if (event.type === 'response.audit.progress') {
+        // 审计四阶段进度:优先挂在当前工具时间线消息上;还没有时间线时自建审计行
+        showTyping.value = false
+        if (event.phase && event.label) {
+          const target = timelineTarget ?? messages.value[messages.value.length - 1]
+          if (target && target.auditPhases) {
+            const existing = target.auditPhases.find((item) => item.phase === event.phase)
+            if (existing) {
+              existing.label = event.label
+              if (event.message) existing.message = event.message
+            } else {
+              target.auditPhases.push({ phase: event.phase, label: event.label, message: event.message || '' })
+            }
+          } else if (target) {
+            target.auditPhases = [{ phase: event.phase, label: event.label, message: event.message || '' }]
+          } else {
+            messages.value.push({
+              id: messageId(),
+              role: 'assistant',
+              content: '',
+              time: dayjs().format('HH:mm'),
+              auditPhases: [{ phase: event.phase, label: event.label, message: event.message || '' }],
+            })
+          }
+        }
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
         if (event.type === 'response.tool.started' && typeof event.tool_name === 'string' && event.tool_name) {
@@ -1725,7 +1752,7 @@ onMounted(() => {
           <div v-if="dragActive" class="drop-mask">
             <div class="drop-mask-text">松开鼠标,把文件交给小菱建项目</div>
           </div>
-          <div class="chat-header">
+          <div class="chat-header" :class="{ 'is-running': mascotStatus === 'running' }">
             <button class="panel-drag-handle" type="button" aria-label="移动 Agent 助手窗口" title="拖拽移动窗口" @pointerdown="beginDrag">⠿</button>
             <div class="chat-title">
               <span class="mascot-badge">
@@ -1955,7 +1982,11 @@ onMounted(() => {
                   />
                 </div>
 
-                <ResponseToolTimeline v-if="msg.toolCalls?.length" :calls="msg.toolCalls" />
+                <ResponseToolTimeline
+                  v-if="msg.toolCalls?.length || msg.auditPhases?.length"
+                  :calls="msg.toolCalls ?? []"
+                  :audit-phases="msg.auditPhases"
+                />
 
                 <ResponseApprovalCard
                   v-if="msg.approval"
@@ -2120,7 +2151,8 @@ onMounted(() => {
               <div class="msg-avatar">
                 <PrismMascot :size="26" :status="'running'" />
               </div>
-              <div class="msg-bubble typing">
+              <div class="msg-bubble typing" aria-label="小菱正在思考">
+                <span class="typing-label">小菱正在想</span>
                 <span class="typing-dot" />
                 <span class="typing-dot" />
                 <span class="typing-dot" />
@@ -2404,6 +2436,7 @@ onMounted(() => {
 .panel-drag-handle:hover { color: var(--primary-color, #5b58e8); background: rgba(91, 88, 232, .08); }
 .chat-drawer.is-dragging .panel-drag-handle { cursor: grabbing; }
 .chat-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2412,6 +2445,27 @@ onMounted(() => {
   border-bottom: 1px solid var(--color-border-light);
   background: linear-gradient(135deg, rgba(91, 88, 232, 0.07), rgba(61, 188, 217, 0.06) 70%, transparent);
   flex-shrink: 0;
+}
+/* 运行中:头部底边泛起品牌色流动光线,一眼知道小菱在工作(尼尔森·状态可见) */
+.chat-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--brand-400), var(--accent-400), transparent);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.chat-header.is-running::after {
+  opacity: 1;
+  animation: chat-header-flow 2.2s linear infinite;
+}
+@keyframes chat-header-flow {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 .chat-title {
@@ -2503,6 +2557,8 @@ onMounted(() => {
   .chat-progress.is-busy .chat-progress-track i { animation: none; }
   .upload-status-track i { transition: none; }
   .msg-copy-btn { transition: none; }
+  .typing-label { animation: none; }
+  .chat-header.is-running::after { animation: none; opacity: 0.6; }
   .stop-btn { transition: none; }
 }
 
@@ -2697,7 +2753,15 @@ onMounted(() => {
   display: flex;
   gap: 4px;
   align-items: center;
-  padding: 14px 18px;
+  padding: 12px 16px;
+}
+
+/* 「小菱正在想」标签:跟三点动画同色呼吸,状态拟人化 */
+.typing-label {
+  margin-right: 6px;
+  color: var(--gray-500);
+  font-size: 11.5px;
+  animation: run-blink 1.6s ease-in-out infinite;
 }
 
 .typing-dot {

@@ -69,7 +69,7 @@ async function finish(index: number): Promise<void> {
 }
 
 /** 整块调用链默认折叠,断言前先展开。 */
-/** 调用链默认折叠;需要断言展开详情的用例自行点击 .response-tool-call-head。 */
+/** 调用链默认折叠;需要断言展开详情的用例自行点击 .xl-step-line。 */
 async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
   // no-op:保留给历史用例的兼容入口
 }
@@ -215,9 +215,9 @@ describe('AdminCopilot Responses stream', () => {
     expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('is-user')
     await expandTimeline(wrapper)
-    expect(rows[2].find('.response-tool-timeline').text()).toContain('小菱操作记录')
-    expect(rows[2].find('.response-tool-timeline').text()).toContain('查看管理数据')
-    expect(rows[2].text()).toContain('已完成')
+    expect(rows[2].find('.xl-steps').text()).toContain('小菱的工作')
+    expect(rows[2].find('.xl-steps').text()).toContain('查看管理数据')
+    expect(rows[2].text()).toContain('做好了')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 3 个用户')
     expect(rows[3].find('.markdown-body').text()).toContain('已完成。')
     expect(rows[3].find('.markdown-body').text()).not.toMatch(/<wbr>|•/)
@@ -309,21 +309,17 @@ describe('AdminCopilot Responses stream', () => {
     await flushPromises()
     await openCopilot(wrapper)
 
-    expect(wrapper.find('.response-tool-timeline').exists()).toBe(false)
+    expect(wrapper.find('.xl-steps').exists()).toBe(false)
     await vi.advanceTimersByTimeAsync(3000)
     await flushPromises()
 
-    const timeline = wrapper.find('.response-tool-timeline')
+    const timeline = wrapper.find('.xl-steps')
     expect(timeline.text()).toContain('报错根因已定位')
     expect(timeline.text()).not.toContain('receive_message')
     expect(timeline.text()).not.toContain('agent:error-handler')
-    const head = timeline.find('.response-tool-call-head')
-    expect(head.attributes('aria-expanded')).toBe('false')
-    expect(timeline.find('.response-tool-detail').exists()).toBe(false)
-
-    await head.trigger('click')
-    expect(timeline.find('.response-tool-detail').text()).toContain('已完成')
-    expect(timeline.find('.response-tool-detail').text()).not.toContain('数据库连接耗尽')
+    // 新设计:无技术折叠头,完成步骤无明细行,且不暴露内部错误原文
+    expect(timeline.find('.xl-step-error').exists()).toBe(false)
+    expect(timeline.text()).not.toContain('数据库连接耗尽')
     wrapper.unmount()
     vi.useRealTimers()
   })
@@ -497,8 +493,8 @@ describe('AdminCopilot Responses stream', () => {
     await finish(0)
 
     expect(wrapper.find('.response-approval').exists()).toBe(true)
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('删除管理数据')
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('等待批准')
+    expect(wrapper.find('.xl-steps').text()).toContain('删除管理数据')
+    expect(wrapper.find('.xl-steps').text()).toContain('等你确认后继续')
     await wrapper.find('.response-approval-detail-toggle').trigger('click')
     expect(wrapper.find('.response-approval-arguments').text()).toContain('"user_id": 9')
     expect(wrapper.find('.response-approval-preview').text()).toContain('test-user (#9)')
@@ -531,8 +527,8 @@ describe('AdminCopilot Responses stream', () => {
     expect(wrapper.text()).toContain('操作已完成')
     expect(wrapper.text()).toContain('已批准')
     await expandTimeline(wrapper)
-    const timelineText = wrapper.findAll('.response-tool-timeline').map((node) => node.text()).join('\n')
-    expect(timelineText).toContain('已完成')
+    const timelineText = wrapper.findAll('.xl-steps').map((node) => node.text()).join('\n')
+    expect(timelineText).toContain('做好了')
   })
 
   it('marks a resumed approval as failed when the terminal response has no tool result', async () => {
@@ -567,13 +563,11 @@ describe('AdminCopilot Responses stream', () => {
     await finish(1)
 
     await expandTimeline(wrapper)
-    // 调用链默认折叠:点击调用头展开后断言失败详情
-    await wrapper.find('.response-tool-call-head').trigger('click')
-    await flushPromises()
-    const timelineText = wrapper.find('.response-tool-timeline').text()
-    expect(timelineText).toContain('失败')
-    expect(timelineText).toContain('响应已结束，但工具未返回完成事件')
-    expect(timelineText).not.toContain('已完成')
+    // 新设计:失败步骤默认展开原因
+    const timelineText = wrapper.find('.xl-steps').text()
+    expect(timelineText).toContain('没做成')
+    expect(timelineText).toMatch(/响应已结束|删除管理数据/)
+    expect(timelineText).not.toContain('做好了')
   })
 
   it('does not mark a tool completed without response.tool.completed evidence', async () => {
@@ -594,14 +588,12 @@ describe('AdminCopilot Responses stream', () => {
     await finish(0)
 
     await expandTimeline(wrapper)
-    const timeline = wrapper.find('.response-tool-timeline')
+    const timeline = wrapper.find('.xl-steps')
     expect(timeline.text()).toContain('执行管理操作')
-    expect(timeline.text()).toContain('失败')
-    // 失败详情默认折叠,点击后展示
-    await wrapper.find('.response-tool-call-head').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('响应已结束，但工具未返回完成事件')
-    expect(wrapper.find('.response-tool-timeline').text()).not.toContain('已完成')
+    expect(timeline.text()).toContain('没做成')
+    // 新设计:失败默认展开,无需点击
+    expect(wrapper.find('.xl-steps').text()).toMatch(/响应已结束|执行管理操作/)
+    expect(wrapper.find('.xl-steps').text()).not.toContain('已完成')
   })
 
   it('shows one-time sensitive results without sending them into the next model request', async () => {
@@ -688,12 +680,10 @@ describe('AdminCopilot Responses stream', () => {
     })
     await finish(0)
 
-    // 调用链默认折叠:展开后只显示通俗状态说明,不暴露 JSON 参数
-    await wrapper.find('.response-tool-call-head').trigger('click')
-    await flushPromises()
+    // 新设计:参数永不上屏,只保留通俗状态
     expect(wrapper.find('.response-tool-arguments').exists()).toBe(false)
-    expect(wrapper.find('.response-tool-detail').text()).toContain('小菱正在等待你的输入')
-    expect(wrapper.find('.response-tool-detail').text()).not.toContain('"query"')
+    expect(wrapper.text()).toContain('在等你的回答')
+    expect(wrapper.text()).not.toContain('"query"')
     expect(wrapper.findAll('.response-input-option')).toHaveLength(2)
     expect(wrapper.text()).toContain('其他（自定义输入）')
     await wrapper.findAll('.response-input-option')[0].trigger('click')

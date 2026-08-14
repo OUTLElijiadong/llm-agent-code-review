@@ -934,6 +934,10 @@ class PrismToolExecutor:
             return await self._execute_once(call, lambda: self._execute_admin_write(call))
         if call.name == "save_knowledge_note":
             return await self._execute_once(call, lambda: self._save_knowledge_note(call))
+        if call.name in _SECURITY_SCAN_FIXED_TOOLS:
+            # 审计类工具:同步转发事件总线里的 fullchain 阶段事件为 SSE 进度
+            # (侦察→分析→验证→汇报),前端渲染成通俗角色阶段卡
+            return await self._execute_audit_with_progress(call)
         return await self._execute_once(
             call,
             lambda: self._agent_result(
@@ -945,6 +949,66 @@ class PrismToolExecutor:
                 ),
             ),
         )
+
+    # fullchain 审计四阶段的通俗文案(DeepAudit 式角色叙事,前端直接展示)
+    _AUDIT_PHASE_LABELS = {
+        "recon": "侦察员正在梳理攻击面",
+        "analysis": "分析师正在逐文件挖掘漏洞",
+        "verification": "验证员正在复核高危发现",
+        "report": "汇报员正在整理审计报告",
+    }
+
+    async def _execute_audit_with_progress(self, call: ToolCall) -> ToolExecutionResult:
+        """执行安全审计工具,并把事件总线里的 fullchain 阶段事件转发为 SSE 进度。
+
+        审计在 orchestrator 内同步执行(跑线程池),这里并发订阅事件总线,
+        把带 phase 的 PROGRESS 事件翻译成 response.audit.progress 推给前端,
+        让用户看到「侦察→分析→验证→汇报」的角色化阶段而非黑盒等待。
+        """
+        from app.agents import event_bus as agent_event_bus
+        from app.agents.events import AgentEventType
+
+        async def _relay_audit_progress() -> None:
+            try:
+                async for ev in agent_event_bus.AgentEventBus.instance().subscribe():
+                    if ev.type != AgentEventType.PROGRESS:
+                        continue
+                    phase = str((ev.payload or {}).get("phase") or "")
+                    if phase not in self._AUDIT_PHASE_LABELS:
+                        continue
+                    await _emit(
+                        self._event_sink,
+                        {
+                            "type": "response.audit.progress",
+                            "call_id": call.call_id,
+                            "phase": phase,
+                            "message": str(ev.message or ""),
+                            "label": self._AUDIT_PHASE_LABELS[phase],
+                        },
+                    )
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # 转发失败不影响审计本体
+                pass
+
+        relay = asyncio.create_task(_relay_audit_progress())
+        try:
+            # 审计在事件循环内同步执行(如需线程池须先解决 sqlite 会话亲和),
+            # 事件转发任务在审计让出点(await)之间仍可推送阶段进度
+            return await self._execute_once(
+                call,
+                lambda: self._agent_result(
+                    call,
+                    self._orch.invoke_tool(
+                        call.name,
+                        call.arguments,
+                        self._agent_context(),
+                    ),
+                ),
+            )
+        finally:
+            relay.cancel()
 
     async def _run_full_project_validation(self, call: ToolCall) -> ToolExecutionResult:
         """创建一次组合沙箱并在同一固定工具调用中等待其真实终态。"""

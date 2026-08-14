@@ -10,6 +10,7 @@ export type ResponseStreamEventType =
   | 'response.tool.failed'
   | 'response.tool.rejected'
   | 'response.sandbox.progress'
+  | 'response.audit.progress'
   | 'response.approval.required'
   | 'response.input.required'
   | 'response.sensitive.result'
@@ -152,6 +153,14 @@ export interface ResponseSandboxProgressEvent extends ResponseStreamEventBase {
   message?: string
 }
 
+export interface ResponseAuditProgressEvent extends ResponseStreamEventBase {
+  type: 'response.audit.progress'
+  call_id?: string
+  phase?: 'recon' | 'analysis' | 'verification' | 'report'
+  message?: string
+  label?: string
+}
+
 export interface ResponseAuthExpiredEvent extends ResponseStreamEventBase {
   type: 'auth_expired'
   code: 40102
@@ -169,6 +178,7 @@ export type ResponseStreamEvent =
   | ResponseInputRequiredEvent
   | ResponseSensitiveResultEvent
   | ResponseSandboxProgressEvent
+  | ResponseAuditProgressEvent
   | ResponseTerminalEvent
   | ResponseAuthExpiredEvent
   | ResponseErrorEvent

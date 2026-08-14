@@ -90,6 +90,8 @@ interface ChatEntry {
     status: 'pending' | 'submitting' | 'answered'
   }
   toolCalls?: ResponseToolCall[]
+  /** 审计四阶段进度(侦察→分析→验证→汇报),由 response.audit.progress 累积 */
+  auditPhases?: Array<{ phase: string; label: string; message: string }>
   sensitiveResult?: ResponseSensitiveResultEvent
   /** 助手回复末尾解析出的"带我去"导航指令 */
   navigations?: AgentNavigateDirective[]
@@ -934,6 +936,23 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
           updated_at: new Date().toISOString(),
         }
         syncBusy()
+      } else if (event.type === 'response.audit.progress') {
+        // 审计四阶段进度:挂在当前时间线条目上,渲染成角色阶段卡
+        showTyping.value = false
+        if (event.phase && event.label) {
+          const target = timelineTarget ?? messages.value[messages.value.length - 1]
+          if (target && target.auditPhases) {
+            const existing = target.auditPhases.find((item) => item.phase === event.phase)
+            if (existing) {
+              existing.label = event.label
+              if (event.message) existing.message = event.message
+            } else {
+              target.auditPhases.push({ phase: event.phase, label: event.label, message: event.message || '' })
+            }
+          } else if (target) {
+            target.auditPhases = [{ phase: event.phase, label: event.label, message: event.message || '' }]
+          }
+        }
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
         if (event.type === 'response.sandbox.progress' && typeof event.message === 'string') {
@@ -1444,7 +1463,11 @@ onMounted(() => {
               />
             </div>
 
-            <ResponseToolTimeline v-if="entry.toolCalls?.length" :calls="entry.toolCalls" />
+            <ResponseToolTimeline
+              v-if="entry.toolCalls?.length || entry.auditPhases?.length"
+              :calls="entry.toolCalls ?? []"
+              :audit-phases="entry.auditPhases"
+            />
 
             <section v-if="entry.sensitiveResult" class="sensitive-result" aria-live="assertive">
               <header>

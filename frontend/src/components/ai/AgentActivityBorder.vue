@@ -17,6 +17,7 @@ const badgeLabel = computed(() => store.current?.label || '小菱正在帮你操
 <template>
   <Transition name="agent-activity-fade">
     <div v-if="store.isActing" class="agent-activity-border" aria-hidden="true">
+      <span class="agent-activity-glow"></span>
       <span class="agent-activity-edge edge-top"></span>
       <span class="agent-activity-edge edge-right"></span>
       <span class="agent-activity-edge edge-bottom"></span>
@@ -40,6 +41,7 @@ const badgeLabel = computed(() => store.current?.label || '小菱正在帮你操
   z-index: var(--z-index-fixed);
 }
 
+/* 内层光谱条:四边流动的光带 */
 .agent-activity-edge {
   position: absolute;
   background-image: repeating-linear-gradient(
@@ -56,14 +58,30 @@ const badgeLabel = computed(() => store.current?.label || '小菱正在帮你操
   );
   background-size: 432px 100%;
   animation: agent-activity-flow 5s linear infinite;
-  opacity: 0.9;
+  opacity: 0.95;
+}
+
+/* 外层彩色柔光:让整圈边框「泛起」彩光,远看也醒目 */
+.agent-activity-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120px 60px at 0% 0%, rgba(107, 124, 255, 0.28), transparent 70%),
+    radial-gradient(120px 60px at 100% 0%, rgba(75, 155, 255, 0.26), transparent 70%),
+    radial-gradient(120px 60px at 100% 100%, rgba(226, 92, 115, 0.26), transparent 70%),
+    radial-gradient(120px 60px at 0% 100%, rgba(184, 90, 196, 0.26), transparent 70%);
+  animation: agent-activity-glow-breathe 2.4s ease-in-out infinite;
+}
+@keyframes agent-activity-glow-breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 
 .edge-top,
 .edge-bottom {
   left: 0;
   right: 0;
-  height: 3px;
+  height: 5px;
 }
 .edge-top { top: 0; }
 .edge-bottom { bottom: 0; animation-direction: reverse; }
@@ -72,7 +90,7 @@ const badgeLabel = computed(() => store.current?.label || '小菱正在帮你操
 .edge-right {
   top: 0;
   bottom: 0;
-  width: 3px;
+  width: 5px;
   background-image: repeating-linear-gradient(
     180deg,
     #6B7CFF 0 48px,
@@ -156,5 +174,6 @@ const badgeLabel = computed(() => store.current?.label || '小菱正在帮你操
     background-color: var(--brand-400);
   }
   .agent-activity-badge { animation: none; }
+  .agent-activity-glow { animation: none; opacity: 0.4; }
 }
 </style>

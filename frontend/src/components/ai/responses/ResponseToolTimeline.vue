@@ -1,130 +1,170 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
-import { ArrowRight, CircleCheck, Loading, WarningFilled } from '@element-plus/icons-vue'
+import { CircleCheck, Loading, WarningFilled } from '@element-plus/icons-vue'
 
 import { toolDisplayInfo } from '@/utils/toolDisplay'
 import type { ResponseToolCall, ResponseToolCallStatus } from '@/utils/responsesTimeline'
 
-const props = defineProps<{ calls: ResponseToolCall[] }>()
+/**
+ * 「小菱工作步骤」通俗时间线。
+ *
+ * 设计原则(尼尔森·系统状态可见 + 游戏3原则·清晰度):
+ * - 不展示代码级调用链:工具名/状态机术语全部翻译成人话动作
+ * - RAG 检索类显示专属「检索中」脉冲态,让用户知道小菱在翻知识库
+ * - 页面操作类显示「正在帮你操作」+ 彩点,呼应全屏彩框/虚拟鼠标
+ * - 进行中的步骤高亮呼吸,完成的收成对勾,失败的给原因
+ */
+const props = defineProps<{
+  calls: ResponseToolCall[]
+  /** 审计四阶段进度(DeepAudit 式角色叙事:侦察员→分析师→验证员→汇报员)。 */
+  auditPhases?: Array<{ phase: string; label: string; message: string }>
+}>()
 
-const STATUS_LABELS: Record<ResponseToolCallStatus, string> = {
-  streaming: '接收参数',
-  queued: '已排队',
-  delivered: '已送达',
-  acknowledged: '已确认',
-  processing: '处理中',
-  running: '执行中',
-  waiting_approval: '等待批准',
-  waiting_input: '等待输入',
-  completed: '已完成',
-  failed: '失败',
-  rejected: '已拒绝',
-}
-
-/** 展开详情只展示通俗文字:优先失败原因,否则给出状态说明。 */
 const STATUS_NOTES: Record<ResponseToolCallStatus, string> = {
-  streaming: '小菱正在接收执行参数…',
-  queued: '任务已排队,等待小菱处理…',
-  delivered: '任务已送达,等待小菱确认…',
-  acknowledged: '小菱已确认收到任务…',
-  processing: '小菱正在处理…',
-  running: '小菱正在执行…',
-  waiting_approval: '小菱正在等待你的批准…',
-  waiting_input: '小菱正在等待你的输入…',
-  completed: '此操作已完成',
-  failed: '操作失败',
-  rejected: '操作已被拒绝',
+  streaming: '正在准备这个操作…',
+  queued: '排队等候中…',
+  delivered: '排队等候中…',
+  acknowledged: '即将开始…',
+  processing: '正在进行…',
+  running: '正在进行…',
+  waiting_approval: '等你确认后继续',
+  waiting_input: '在等你的回答',
+  completed: '做好了',
+  failed: '没做成',
+  rejected: '已按你的要求取消',
 }
 
-/** Mesh 原始消息名在 toolDisplay 中没有映射,单独翻译。 */
-const MESH_SEND_MESSAGE = 'send_message'
-const MESH_RECEIVE_MESSAGE = 'receive_message'
-
-/** 单条调用的通俗展示文本:subject 优先,运行/处理中显示进行时短语。 */
-function displayText(call: ResponseToolCall): string {
-  const subject = call.subject?.trim()
-  if (subject) return subject
-  if (call.name === MESH_SEND_MESSAGE) return '派发任务'
-  if (call.name === MESH_RECEIVE_MESSAGE) return '收到子Agent结果'
-  const info = toolDisplayInfo(call.name)
-  if (call.status === 'running' || call.status === 'processing') return info.running
-  return info.label
-}
-
-/** 展开详情:失败原因优先,其余用通俗状态说明。 */
-function detailText(call: ResponseToolCall): string {
-  const error = call.error?.trim()
-  if (error) return error
-  return STATUS_NOTES[call.status] ?? '暂无更多说明'
-}
+const ACTIVE_STATUSES = new Set<ResponseToolCallStatus>([
+  'streaming', 'queued', 'delivered', 'acknowledged', 'processing', 'running',
+])
 
 const visibleCalls = computed(() => props.calls.filter((call) => call.name || call.argumentsText))
 
-/** 每条调用的展开状态;默认全部折叠,用户点击后展开,保持用户选择。 */
-const expandedKeys = reactive(new Set<string>())
-
-function toggle(call: ResponseToolCall): void {
-  if (expandedKeys.has(call.key)) expandedKeys.delete(call.key)
-  else expandedKeys.add(call.key)
+interface StepView {
+  key: string
+  /** 人话动作:如「检索知识库」「帮你创建项目」。 */
+  action: string
+  /** 当前一步的人话状态。 */
+  note: string
+  status: ResponseToolCallStatus
+  isRag: boolean
+  isPageAction: boolean
+  running: boolean
+  done: boolean
+  failed: boolean
+  waiting: boolean
+  error?: string
 }
 
-function statusLabel(status: ResponseToolCallStatus): string {
-  return STATUS_LABELS[status]
-}
-
-/** 只要还有未展开的调用就显示「展开全部」,否则显示「收起全部」。 */
-const anyCollapsed = computed(() => visibleCalls.value.some((call) => !expandedKeys.has(call.key)))
-
-function toggleAll(): void {
-  if (anyCollapsed.value) {
-    for (const call of visibleCalls.value) expandedKeys.add(call.key)
-  } else {
-    expandedKeys.clear()
+function stepView(call: ResponseToolCall): StepView {
+  const info = toolDisplayInfo(call.name)
+  const subject = call.subject?.trim()
+  const status = call.status
+  return {
+    key: call.key,
+    action: subject || info.label,
+    note: STATUS_NOTES[status] ?? '处理中',
+    status,
+    isRag: info.isRag,
+    isPageAction: info.isPageAction,
+    running: ACTIVE_STATUSES.has(status),
+    done: status === 'completed',
+    failed: status === 'failed' || status === 'rejected',
+    waiting: status === 'waiting_approval' || status === 'waiting_input',
+    error: call.error?.trim() || undefined,
   }
+}
+
+const steps = computed<StepView[]>(() => visibleCalls.value.map(stepView))
+const doneCount = computed(() => steps.value.filter((step) => step.done).length)
+const failedCount = computed(() => steps.value.filter((step) => step.failed).length)
+/** 是否有 RAG 检索正在/曾经发生(顶部显示检索徽标)。 */
+const ragActive = computed(() => steps.value.some((step) => step.isRag && (step.running || step.waiting)))
+const pageActionActive = computed(() => steps.value.some((step) => step.isPageAction && step.running))
+
+/** 单条展开状态;默认折叠,失败步骤自动展开让用户直接看到原因。 */
+const expandedKeys = reactive(new Set<string>())
+for (const step of steps.value) {
+  if (step.failed && step.error) expandedKeys.add(step.key)
+}
+
+function toggle(step: StepView): void {
+  if (expandedKeys.has(step.key)) expandedKeys.delete(step.key)
+  else expandedKeys.add(step.key)
+}
+
+function summaryText(): string {
+  const total = steps.value.length
+  if (!total) return ''
+  const parts: string[] = []
+  if (doneCount.value) parts.push(`${doneCount.value} 步完成`)
+  const active = total - doneCount.value - failedCount.value
+  if (active > 0) parts.push(`${active} 步进行中`)
+  if (failedCount.value) parts.push(`${failedCount.value} 步出错`)
+  return parts.join(' · ')
 }
 </script>
 
 <template>
-  <section v-if="visibleCalls.length" class="response-tool-timeline" aria-label="小菱操作记录">
-    <header>
-      <span>小菱操作记录 · {{ visibleCalls.length }} 步</span>
-      <button
-        v-if="visibleCalls.length > 1"
-        class="response-tool-collapse-all"
-        type="button"
-        :aria-label="anyCollapsed ? '展开全部调用' : '收起全部调用'"
-        @click="toggleAll"
-      >
-        {{ anyCollapsed ? '展开全部' : '收起全部' }}
-      </button>
+  <section v-if="steps.length || auditPhases?.length" class="xl-steps" aria-label="小菱工作步骤">
+    <header class="xl-steps-head">
+      <span class="xl-steps-title">小菱的工作</span>
+      <span v-if="ragActive" class="xl-steps-rag" role="status">
+        <i class="xl-rag-pulse" aria-hidden="true"></i>检索知识库中…
+      </span>
+      <span v-else-if="pageActionActive" class="xl-steps-page" role="status">
+        <i class="xl-page-pulse" aria-hidden="true"></i>正在帮你操作页面
+      </span>
+      <span class="xl-steps-summary">{{ summaryText() }}</span>
     </header>
-    <ol>
-      <li v-for="call in visibleCalls" :key="call.key" class="response-tool-call" :class="`is-${call.status}`">
-        <div
-          class="response-tool-call-head"
-          role="button"
-          tabindex="0"
-          :aria-expanded="expandedKeys.has(call.key)"
-          :aria-label="`${displayText(call)} ${statusLabel(call.status)}`"
-          @click="toggle(call)"
-          @keydown.enter="toggle(call)"
-          @keydown.space.prevent="toggle(call)"
-        >
-          <el-icon class="response-tool-state-icon">
-            <CircleCheck v-if="call.status === 'completed'" />
-            <WarningFilled v-else-if="call.status === 'failed' || call.status === 'rejected'" />
-            <Loading v-else />
-          </el-icon>
-          <div class="response-tool-identity">
-            <strong class="response-tool-action">{{ displayText(call) }}</strong>
-          </div>
-          <span class="response-tool-status">{{ statusLabel(call.status) }}</span>
-          <el-icon class="response-tool-caret" :class="{ 'is-open': expandedKeys.has(call.key) }">
-            <ArrowRight />
-          </el-icon>
+
+    <ol v-if="auditPhases?.length" class="xl-audit-phases" aria-label="审计阶段">
+      <li v-for="(item, index) in auditPhases" :key="item.phase" class="xl-audit-phase is-latest">
+        <span class="xl-audit-idx">{{ index + 1 }}</span>
+        <span class="xl-audit-label">{{ item.label }}</span>
+        <span v-if="index === (auditPhases?.length ?? 0) - 1" class="xl-audit-now">进行中</span>
+      </li>
+    </ol>
+
+    <ol v-if="steps.length" class="xl-step-list">
+      <li
+        v-for="step in steps"
+        :key="step.key"
+        class="xl-step"
+        :class="{
+          'is-done': step.done,
+          'is-failed': step.failed,
+          'is-running': step.running,
+          'is-waiting': step.waiting,
+          'is-rag': step.isRag,
+        }"
+      >
+        <div class="xl-step-node" aria-hidden="true">
+          <template v-if="step.done">
+            <el-icon class="xl-step-check"><CircleCheck /></el-icon>
+          </template>
+          <template v-else-if="step.failed">
+            <el-icon class="xl-step-warn"><WarningFilled /></el-icon>
+          </template>
+          <template v-else-if="step.isRag && step.running">
+            <i class="xl-step-rag-dot"></i>
+          </template>
+          <template v-else-if="step.running">
+            <i class="xl-step-spinner"></i>
+          </template>
+          <template v-else>
+            <i class="xl-step-dot"></i>
+          </template>
         </div>
-        <div v-if="expandedKeys.has(call.key)" class="response-tool-detail">
-          <p class="response-tool-note">{{ detailText(call) }}</p>
+
+        <div class="xl-step-body">
+          <div class="xl-step-line">
+            <span class="xl-step-action">{{ step.action }}</span>
+            <span v-if="step.isPageAction" class="xl-step-chip is-page" title="小菱正在替你操作页面">帮我操作</span>
+            <span v-else-if="step.isRag" class="xl-step-chip is-rag">知识库</span>
+            <span class="xl-step-note" :class="{ 'is-waiting': step.waiting }">{{ step.note }}</span>
+          </div>
+          <div v-if="step.error && expandedKeys.has(step.key)" class="xl-step-error">{{ step.error }}</div>
         </div>
       </li>
     </ol>
@@ -132,76 +172,186 @@ function toggleAll(): void {
 </template>
 
 <style scoped>
-.response-tool-timeline {
+.xl-steps {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
-  border: 1px solid #dfe3e8;
-  border-radius: 8px;
-  background: #fff;
-  color: #1f2329;
-  font-size: 12px;
   margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--gray-800);
+  font-size: 12px;
 }
-.response-tool-timeline > header {
+
+.xl-steps-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid #edf0f2;
-  font-weight: 650;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--gray-100);
 }
-.response-tool-collapse-all {
-  flex: none;
-  border: 0;
-  background: transparent;
-  color: #3978d6;
-  font-size: 12px;
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-.response-tool-collapse-all:hover { background: #f0f5ff; }
-.response-tool-timeline ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
-.response-tool-call { min-width: 0; padding: 9px 10px; border-left: 3px solid #3978d6; }
-.response-tool-call + .response-tool-call { border-top: 1px solid #edf0f2; }
-.response-tool-call.is-completed { border-left-color: #2b8a57; }
-.response-tool-call.is-failed,
-.response-tool-call.is-rejected { border-left-color: #c43d36; }
-.response-tool-call.is-waiting_approval,
-.response-tool-call.is-waiting_input { border-left-color: #c16b20; }
-.response-tool-call.is-queued { border-left-color: #8a93a0; }
-.response-tool-call.is-delivered,
-.response-tool-call.is-acknowledged { border-left-color: #3978d6; }
-.response-tool-call.is-processing { border-left-color: #c16b20; }
-.response-tool-call-head {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto 14px;
+.xl-steps-title { font-weight: 650; }
+.xl-steps-summary { margin-left: auto; color: var(--gray-500); font-size: 10.5px; white-space: nowrap; }
+
+.xl-steps-rag, .xl-steps-page {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  user-select: none;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
 }
-.response-tool-call-head:focus-visible { outline: 2px solid rgba(57, 120, 214, 0.5); outline-offset: 2px; border-radius: 4px; }
-.response-tool-identity { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 7px; min-width: 0; }
-.response-tool-action { min-width: 0; color: #252a31; font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
-.response-tool-status { color: #707781; font-size: 10px; white-space: nowrap; }
-.response-tool-state-icon { color: #3978d6; }
-.is-streaming .response-tool-state-icon,
-.is-processing .response-tool-state-icon,
-.is-running .response-tool-state-icon { animation: response-tool-spin 1s linear infinite; }
-.is-completed .response-tool-state-icon { color: #2b8a57; }
-.is-failed .response-tool-state-icon,
-.is-rejected .response-tool-state-icon { color: #c43d36; }
-.response-tool-caret {
-  color: #a6aeb8;
-  font-size: 11px;
-  transition: transform 0.15s ease;
+.xl-steps-rag { color: var(--accent-600); background: var(--accent-50); }
+.xl-steps-page { color: var(--brand-600); background: var(--brand-50); }
+
+.xl-rag-pulse, .xl-page-pulse {
+  width: 7px; height: 7px; border-radius: 50%;
+  animation: xl-breathe 1.1s ease-in-out infinite;
 }
-.response-tool-caret.is-open { transform: rotate(90deg); }
-.response-tool-detail { min-width: 0; }
-.response-tool-note { margin: 7px 0 0 22px; color: #59616c; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-@keyframes response-tool-spin { to { transform: rotate(360deg); } }
+.xl-rag-pulse { background: var(--accent-500); }
+.xl-page-pulse { background: var(--brand-500); }
+@keyframes xl-breathe { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.1); } }
+
+.xl-step-list { display: grid; margin: 0; padding: 6px 12px; list-style: none; }
+
+/* ── 审计四阶段角色卡(DeepAudit 式叙事) ───────────── */
+.xl-audit-phases { display: grid; gap: 3px; margin: 0; padding: 8px 12px; list-style: none; }
+.xl-audit-phase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: var(--gray-50);
+}
+.xl-audit-phase.is-latest:last-child {
+  background: linear-gradient(90deg, rgba(107, 124, 255, 0.10), rgba(75, 155, 255, 0.08));
+  animation: xl-audit-breathe 1.8s ease-in-out infinite;
+}
+@keyframes xl-audit-breathe { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+.xl-audit-idx {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--brand-100);
+  color: var(--brand-700);
+  font-size: 10px;
+  font-weight: 700;
+}
+.xl-audit-label {
+  min-width: 0;
+  color: var(--gray-700);
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.xl-audit-now {
+  margin-left: auto;
+  flex: none;
+  color: var(--brand-600);
+  font-size: 10px;
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xl-audit-phase.is-latest:last-child { animation: none; }
+}
+
+.xl-step {
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+  padding: 5px 0;
+}
+.xl-step + .xl-step { border-top: 1px dashed var(--gray-100); }
+
+.xl-step-node { display: grid; place-items: center; flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.xl-step-check { color: var(--color-success); font-size: 15px; }
+.xl-step-warn { color: var(--color-danger); font-size: 15px; }
+
+.xl-step-spinner {
+  width: 12px; height: 12px;
+  border: 2px solid var(--brand-100);
+  border-top-color: var(--brand-500);
+  border-radius: 50%;
+  animation: xl-spin 0.9s linear infinite;
+}
+@keyframes xl-spin { to { transform: rotate(360deg); } }
+
+/* RAG 检索专属:青色双点交替 */
+.xl-step-rag-dot {
+  position: relative;
+  width: 10px; height: 10px;
+}
+.xl-step-rag-dot::before, .xl-step-rag-dot::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent-500);
+  transform: translateY(-50%);
+}
+.xl-step-rag-dot::before { left: 0; animation: xl-rag-left 1s ease-in-out infinite; }
+.xl-step-rag-dot::after { right: 0; background: var(--accent-300); animation: xl-rag-right 1s ease-in-out infinite; }
+@keyframes xl-rag-left { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@keyframes xl-rag-right { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+
+.xl-step-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--gray-300);
+}
+
+.xl-step-body { flex: 1; min-width: 0; }
+.xl-step-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.xl-step-action {
+  min-width: 0;
+  color: var(--gray-800);
+  font-weight: 600;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.xl-step.is-running .xl-step-action { color: var(--brand-700); }
+.xl-step.is-failed .xl-step-action { color: var(--color-danger); }
+
+.xl-step-chip {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  line-height: 15px;
+}
+.xl-step-chip.is-page { background: var(--brand-50); color: var(--brand-600); }
+.xl-step-chip.is-rag { background: var(--accent-50); color: var(--accent-600); }
+
+.xl-step-note {
+  margin-left: auto;
+  flex: none;
+  color: var(--gray-500);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.xl-step.is-running .xl-step-note { color: var(--brand-600); animation: xl-note-breathe 1.6s ease-in-out infinite; }
+.xl-step-note.is-waiting { color: var(--sev-medium); font-weight: 600; }
+@keyframes xl-note-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+.xl-step-error {
+  margin-top: 3px;
+  color: var(--color-danger);
+  font-size: 10.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xl-step-spinner, .xl-rag-pulse, .xl-page-pulse { animation: none; }
+  .xl-step.is-running .xl-step-note { animation: none; }
+}
 </style>
