@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import EmptyState from '@/components/common/EmptyState.vue'
 import { confirmDanger } from '@/composables/useDangerConfirm'
+import { isCronValid } from '@/utils/cronValidate'
+import { useRouter } from 'vue-router'
+const router = useRouter()
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -118,6 +121,21 @@ const knowledgeSourceForm = ref({
   config_content: '',
 })
 const jobEdit = ref<Record<number, { schedule: string; status: string }>>({})
+
+/** 统计卡入口:跳到对应治理工作台。 */
+function goMetric(route: string): void {
+  void router.push(route)
+}
+
+
+/** 当前行的 cron 是否合法(空=未编辑不算错)。 */
+function scheduleInvalid(rowId: number): boolean {
+  const edit = jobEdit.value[rowId]
+  if (!edit || !edit.schedule) return false
+  return !isCronValid(edit.schedule)
+}
+
+
 const rewardForm = ref({ agent_code: 'manager', event_type: 'reward', score: 1, reason: '' })
 const artifactForm = ref({
   agent_code: 'policy',
@@ -231,7 +249,12 @@ async function loadData(): Promise<void> {
       await loadAgentKnowledge()
     } else if (props.mode === 'jobs') {
       jobs.value = await listJobs()
-      jobEdit.value = Object.fromEntries(jobs.value.map((job) => [job.id, { schedule: job.schedule, status: job.status }]))
+      // 只初始化缺失行:用户正在编辑的 schedule 不被后台刷新静默覆盖
+      for (const job of jobs.value) {
+        if (!jobEdit.value[job.id]) {
+          jobEdit.value[job.id] = { schedule: job.schedule, status: job.status }
+        }
+      }
     } else if (props.mode === 'observability') {
       observability.value = await getObservabilityOverview()
       alerts.value = await listAlerts()
@@ -376,6 +399,10 @@ async function onSaveJob(row: AgentJob): Promise<void> {
     })
   } catch { return }
   const data = jobEdit.value[row.id]
+  if (data && !isCronValid(data.schedule)) {
+    ElMessage.warning('cron 格式不正确,应为五段(分 时 日 月 周),如 0 3 * * *')
+    return
+  }
   await updateJob(row.id, { schedule: data.schedule, status: data.status })
   ElMessage.success('任务配置已保存')
   await loadData()
@@ -580,9 +607,14 @@ onMounted(loadData)
       <div class="metric-grid">
         <div class="metric"><span>Agent 总数</span><strong>{{ overview?.agents_total ?? 0 }}</strong></div>
         <div class="metric"><span>启用 Agent</span><strong>{{ overview?.agents_enabled ?? 0 }}</strong></div>
-        <div class="metric"><span>待审批</span><strong>{{ overview?.approvals_pending ?? 0 }}</strong></div>
+        <!-- 统计卡即入口:待审批/开放告警点击直达,数值>0 标警示色 -->
+        <button type="button" class="metric is-link" title="去审批中心" @click="goMetric('/admin/approvals')">
+          <span>待审批</span><strong :class="{ 'is-warn': (overview?.approvals_pending ?? 0) > 0 }">{{ overview?.approvals_pending ?? 0 }}</strong>
+        </button>
         <div class="metric"><span>工具调用</span><strong>{{ overview?.tool_calls_today ?? 0 }}</strong></div>
-        <div class="metric"><span>开放告警</span><strong>{{ overview?.alerts_open ?? 0 }}</strong></div>
+        <button type="button" class="metric is-link" title="去可观测中心" @click="goMetric('/admin/observability')">
+          <span>开放告警</span><strong :class="{ 'is-warn': (overview?.alerts_open ?? 0) > 0 }">{{ overview?.alerts_open ?? 0 }}</strong>
+        </button>
         <div class="metric"><span>知识文档</span><strong>{{ overview?.knowledge_docs_total ?? 0 }}</strong></div>
       </div>
       <div class="content-grid">
@@ -904,7 +936,7 @@ onMounted(loadData)
         <el-table-column prop="agent_code" label="Agent(智能体)" width="150" />
         <el-table-column label="计划" width="190">
           <template #default="{ row }">
-            <el-input v-if="jobEdit[row.id]" v-model="jobEdit[row.id].schedule" size="small" />
+            <el-input v-if="jobEdit[row.id]" v-model="jobEdit[row.id].schedule" size="small" placeholder="如 0 3 * * * (每天 3 点)" :class="{ 'is-cron-invalid': scheduleInvalid(row.id) }" />
           </template>
         </el-table-column>
         <el-table-column label="状态" width="130">
@@ -1179,4 +1211,22 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+
+/* cron 非法:输入框描红 */
+:deep(.el-input.is-cron-invalid .el-input__wrapper) {
+  box-shadow: 0 0 0 1px var(--color-danger) inset;
+}
+
+/* 统计卡入口态与警示数字 */
+.metric.is-link {
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.metric.is-link:hover { transform: translateY(-1px); }
+.metric.is-link:hover span { color: var(--brand-600); }
+.metric strong.is-warn { color: var(--color-danger); }
 </style>

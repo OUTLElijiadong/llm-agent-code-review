@@ -54,3 +54,18 @@ describe('三端交互升级第二批回归', () => {
     wrapper.unmount()
   })
 })
+
+describe('三端交互升级第三批回归', () => {
+  it('【cron校验】isCronValid 五段格式判定(合法/非法边界)', async () => {
+    const { isCronValid } = await import('@/utils/cronValidate')
+    expect(isCronValid('0 3 * * *')).toBe(true)
+    expect(isCronValid('*/5 * * * *')).toBe(true)
+    expect(isCronValid('30 2 1,15 * 0')).toBe(true)
+    expect(isCronValid('0 22 * * 1-5')).toBe(true)
+    expect(isCronValid('* * *')).toBe(false)
+    expect(isCronValid('* * * * * *')).toBe(false)
+    expect(isCronValid('')).toBe(false)
+    expect(isCronValid('   ')).toBe(false)
+    expect(isCronValid('0 25 * * *')).toBe(false)
+  })
+})

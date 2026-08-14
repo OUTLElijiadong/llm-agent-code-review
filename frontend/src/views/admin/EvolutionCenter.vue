@@ -24,13 +24,14 @@
     <div class="stat-grid">
       <el-card shadow="hover" class="stat-card">
         <div class="stat-label">意见采纳率</div>
-        <div class="stat-value ok">{{ pct(feedback?.overall_acceptance_rate) }}</div>
+        <div class="stat-value ok"><span v-if="statsLoading" class="stat-skeleton" aria-label="加载中"></span><template v-else>{{ pct(feedback?.overall_acceptance_rate) }}</template></div>
         <div class="stat-foot">已决样本 {{ feedback?.total_decided ?? 0 }} · 修复 {{ feedback?.total_fixed ?? 0 }}</div>
       </el-card>
       <el-card shadow="hover" class="stat-card">
         <div class="stat-label">假阳性率（噪声）</div>
         <div class="stat-value" :class="fpClass(feedback?.overall_false_positive_rate)">
-          {{ pct(feedback?.overall_false_positive_rate) }}
+          <span v-if="statsLoading" class="stat-skeleton" aria-label="加载中"></span>
+          <template v-else>{{ pct(feedback?.overall_false_positive_rate) }}</template>
         </div>
         <div class="stat-foot">忽略 {{ feedback?.total_ignored ?? 0 }} 条</div>
       </el-card>
@@ -338,6 +339,9 @@ const running = ref(false)
 const busyId = ref<number | null>(null)
 
 const feedback = ref<FeedbackSummary | null>(null)
+
+/** 首载(尚无反馈汇总)时统计卡显示骨架而非误导性 0。 */
+const statsLoading = computed(() => feedback.value === null)
 const proposals = ref<EvolutionProposal[]>([])
 const experiences = ref<ReviewExperience[]>([])
 const evalCases = ref<EvalCase[]>([])
@@ -786,4 +790,16 @@ onMounted(reloadAll)
 @media (max-width: 900px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* 首载统计骨架:呼吸条替代误导性 0 */
+.stat-skeleton {
+  display: inline-block;
+  width: 64px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--gray-100);
+  animation: stat-skeleton-breathe 1.4s ease-in-out infinite;
+}
+@keyframes stat-skeleton-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .stat-skeleton { animation: none; } }
 </style>

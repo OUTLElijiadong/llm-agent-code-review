@@ -22,7 +22,18 @@
         />
       </div>
 
-      <el-table :data="logs" v-loading="loading" style="width: 100%" @row-click="onRowClick" highlight-current-row>
+      <el-table
+        :data="logs"
+        v-loading="loading"
+        style="width: 100%"
+        size="small"
+        :row-class-name="rowClassName"
+        @row-click="onRowClick"
+        highlight-current-row
+      >
+        <template #empty>
+          <EmptyState compact description="当前过滤条件下没有调用记录,试试放宽条件" />
+        </template>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column label="项目" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
@@ -184,9 +195,15 @@
 </template>
 
 <script setup lang="ts">
+
+/** 失败调用行:左侧红色竖条锚点,扫读时一眼定位(成功行无差)。 */
+function rowClassName({ row }: { row: { status?: string } }): string {
+  return row.status === 'failed' ? 'row-failed' : ''
+}
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
+import EmptyState from '@/components/common/EmptyState.vue'
 import { getAiLogs, getAiLogDetail } from '@/api/aiLog'
 import type { AiLogOut, AiLogDetailOut } from '@/types/aiLog'
 import { formatDateTime } from '@/utils/format'
@@ -365,5 +382,13 @@ onMounted(() => {
       }
     }
   }
+}
+
+/* 失败行视觉锚点:左侧红条 + 极浅红底 */
+:deep(.el-table .row-failed td) {
+  background: rgba(220, 73, 97, 0.045) !important;
+}
+:deep(.el-table .row-failed td:first-child) {
+  box-shadow: inset 3px 0 0 var(--color-danger);
 }
 </style>

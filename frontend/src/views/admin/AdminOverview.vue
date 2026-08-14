@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="pageLoading" class="admin-overview">
+  <div class="admin-overview" :class="{ 'is-booting': pageLoading }">
     <!-- 顶部:标题 + 安全态势等级 -->
     <header class="ov-head">
       <div>
@@ -56,7 +56,7 @@
             <div class="p-label">24h 登录失败</div>
           </div>
           <div class="p-stat">
-            <div class="p-num font-display">{{ posture?.login_success_24h ?? '-' }}</div>
+            <div class="p-num font-display"><span v-if="pageLoading" class="num-skeleton" aria-label="加载中"></span><template v-else>{{ posture?.login_success_24h ?? '-' }}</template></div>
             <div class="p-label">24h 登录成功</div>
           </div>
           <div class="p-stat">
@@ -437,4 +437,18 @@ onBeforeUnmount(() => {
   &.disabled { background: var(--gray-100); color: var(--gray-400); }
 }
 .a-calls { font-size: 10.5px; color: var(--gray-400); }
+
+/* 首载数字骨架:呼吸条替代闪零;整页轻降透明而非压灰遮罩 */
+.num-skeleton {
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  border-radius: 5px;
+  background: var(--gray-100);
+  animation: num-skeleton-breathe 1.4s ease-in-out infinite;
+}
+.admin-overview.is-booting { opacity: 0.75; transition: opacity 0.3s ease; }
+.admin-overview { transition: opacity 0.3s ease; }
+@keyframes num-skeleton-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .num-skeleton { animation: none; } }
 </style>
