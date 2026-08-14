@@ -65,12 +65,22 @@
           </div>
         </div>
         <ul v-if="posture?.signals?.length" class="signals">
-          <li v-for="(s, i) in posture.signals" :key="i" :class="`sev-${s.severity}`">
+          <li
+            v-for="(s, i) in posture.signals"
+            :key="i"
+            :class="`sev-${s.severity}`"
+            role="button"
+            tabindex="0"
+            :title="`去处理:${s.title}`"
+            @click="goSignalDetail(s)"
+            @keyup.enter="goSignalDetail(s)"
+          >
             <span class="sig-icon"><el-icon><WarningFilled /></el-icon></span>
-            <div>
+            <div class="sig-main">
               <b>{{ s.title }}</b>
               <p>{{ s.detail }}</p>
             </div>
+            <span class="sig-go" aria-hidden="true">去处理 ›</span>
           </li>
         </ul>
         <div v-else class="ok-line">✓ 未发现爆破/恶意扫描迹象</div>
@@ -123,6 +133,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { Aim, Cpu, MapLocation, Monitor, WarningFilled } from '@element-plus/icons-vue'
 import * as echarts from 'echarts/core'
 import { GeoComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
@@ -144,6 +155,22 @@ import type { AgentEvent } from '@/types/agentEvent'
 import { useUserStore } from '@/stores/user'
 
 echarts.use([GeoComponent, TooltipComponent, VisualMapComponent, ScatterChart, EffectScatterChart, CanvasRenderer])
+
+const router = useRouter()
+
+/** 告警即入口:按信号语义跳到对应处置页(开放告警/审计检索)。 */
+function goSignalDetail(signal: { title?: string; detail?: string; severity?: string }): void {
+  const text = `${signal.title ?? ''}${signal.detail ?? ''}`
+  if (/登录|爆破|暴力/.test(text)) {
+    void router.push({ path: '/admin/audit', query: { keyword: '登录' } })
+    return
+  }
+  if (/文件|恶意|样本/.test(text)) {
+    void router.push('/admin/observability')
+    return
+  }
+  void router.push('/admin/observability')
+}
 
 const system = ref<SystemStatus | null>(null)
 const userStore = useUserStore()
@@ -358,6 +385,12 @@ onBeforeUnmount(() => {
 .p-num { font-size: 24px; font-weight: 700; color: var(--gray-900); &.danger { color: #DC4961; } }
 .p-label { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
 
+.signals li { cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; }
+.signals li:hover, .signals li:focus-visible { background: var(--gray-50); transform: translateX(2px); outline: none; }
+.signals li:focus-visible { box-shadow: inset 0 0 0 2px var(--brand-300); }
+.sig-main { min-width: 0; flex: 1; }
+.sig-go { flex: none; align-self: center; color: var(--brand-600); font-size: 11px; opacity: 0; transition: opacity 0.15s ease; }
+.signals li:hover .sig-go, .signals li:focus-visible .sig-go { opacity: 1; }
 .signals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 150px; overflow: auto;
   li { display: flex; gap: 9px; padding: 8px 10px; border-radius: 8px; font-size: 12px;
     &.sev-high { background: rgba(220,73,97,.07); b { color: #C92A4E; } .sig-icon { color: #DC4961; } }

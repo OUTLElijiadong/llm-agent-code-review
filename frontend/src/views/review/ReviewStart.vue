@@ -98,7 +98,13 @@
             label="正在加载代码文件"
             sublabel="正在读取项目文件列表"
           />
-          <div v-else-if="files.length === 0" class="form-hint">该项目暂无可审查的代码文件</div>
+          <EmptyState
+            v-else-if="files.length === 0"
+            compact
+            description="该项目还没有可审查的代码文件"
+            action-text="去项目上传文件"
+            :action-to="form.project_id ? `/projects/${form.project_id}` : '/projects'"
+          />
           <div v-else class="whole-summary">
             将审查该项目全部 <b>{{ files.length }}</b> 个文件
             <span v-if="files.length > MAX_FILES" class="form-hint">
@@ -154,10 +160,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
+import EmptyState from '@/components/common/EmptyState.vue'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 
 import type { FormInstance, FormRules } from 'element-plus'
 import { Aim, Box, ChatDotRound, Connection, DocumentChecked, FolderOpened, Lightning, Odometer } from '@element-plus/icons-vue'
-import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import { getProjects } from '@/api/project'
 import { list as getCodeFiles } from '@/api/codeFile'
@@ -313,11 +320,21 @@ async function submitSingleProject(): Promise<void> {
 }
 
 async function submitAllProjects(): Promise<void> {
+  // 一键批量为全部项目创建审查:高成本(LLM token)操作,先确认
+  const ok = await confirmDanger({
+    target: `为全部 ${projects.value.length} 个项目各创建一个审查任务`,
+    consequence: '将串行创建任务并消耗 AI 审查额度,预计耗时较长。',
+    confirmText: '确认批量创建',
+  })
+  if (!ok) return
   reviewingSublabel.value = `正在为 ${projects.value.length} 个项目创建审查任务…`
   reviewingVisible.value = true
   let created = 0
   let skipped = 0
+  const totalProjects = projects.value.length
+  let done = 0
   for (const p of projects.value) {
+    reviewingSublabel.value = `正在创建审查任务(${done + 1}/${totalProjects}):${p.project_name ?? p.id}`
     try {
       const data = await getCodeFiles({ project_id: p.id, page_size: 500, exclude_binary: true })
       const ids = data.items.map((f) => f.id).slice(0, MAX_FILES)
@@ -330,6 +347,7 @@ async function submitAllProjects(): Promise<void> {
       })
       created++
     } catch { skipped++ }
+    done++
   }
   reviewingVisible.value = false
   ElMessage.success(

@@ -4,7 +4,7 @@
     <header class="page-head">
       <div>
         <h1 class="page-title font-display">项目管理</h1>
-        <p class="page-sub">共 <b class="hl">{{ total }}</b> 个项目 · {{ activeCount }} 活跃 · {{ archivedCount }} 归档</p>
+        <p class="page-sub">共 <b class="hl">{{ total }}</b> 个项目<template v-if="showStatusSplit"> · {{ activeCount }} 活跃 · {{ archivedCount }} 归档</template></p>
       </div>
       <div class="page-actions">
         <div class="view-switch">
@@ -78,7 +78,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in projects" :key="row.id" @click="handleView(row)">
+          <tr v-for="row in projects" :key="row.id" @click="handleView(row)" tabindex="0" role="button" @keyup.enter="handleView(row)">
             <td>
               <div class="cell-name">
                 <span class="proj-avatar" :style="{ background: languageColor(row.language) }">
@@ -156,7 +156,7 @@
         v-for="row in projects"
         :key="row.id"
         class="proj-card"
-        @click="handleView(row)"
+        @click="handleView(row)" tabindex="0" role="button" @keyup.enter="handleView(row)"
       >
         <header class="proj-card-head">
           <span class="proj-avatar lg" :style="{ background: languageColor(row.language) }">
@@ -319,6 +319,8 @@ const remoteForm = ref({ url: '', project_name: '', description: '', audit_mode:
 
 const activeCount = computed(() => projects.value.filter((p) => p.status === 'active').length)
 const archivedCount = computed(() => projects.value.filter((p) => p.status === 'archived').length)
+/** 活跃/归档拆分仅统计当前页;多页时展示会与总数自相矛盾,此时隐藏拆分。 */
+const showStatusSplit = computed(() => total.value <= projects.value.length)
 
 function formatDate(dateStr?: string): string {
   if (!dateStr) return ''

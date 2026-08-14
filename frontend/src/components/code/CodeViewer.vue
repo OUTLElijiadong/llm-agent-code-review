@@ -72,7 +72,26 @@ function revealLine(lineNumber: number): void {
   editorRef.value?.revealLine(lineNumber)
 }
 
-defineExpose({ revealLine })
+/** 代码字号(持久化,两键缩放的范围限制)。 */
+const FONT_KEY = 'prism-code-font-size'
+const fontSize = ref(Number(localStorage.getItem(FONT_KEY)) || 13)
+
+function applyFontSize(size: number): void {
+  fontSize.value = size
+  localStorage.setItem(FONT_KEY, String(size))
+  editorRef.value?.updateOptions({ fontSize: size })
+}
+
+/** 放大/缩小代码字号(工具栏 ZoomIn/ZoomOut 接入)。 */
+function zoomIn(): void {
+  applyFontSize(Math.min(22, fontSize.value + 1))
+}
+
+function zoomOut(): void {
+  applyFontSize(Math.max(10, fontSize.value - 1))
+}
+
+defineExpose({ revealLine, zoomIn, zoomOut })
 </script>
 
 <style scoped lang="scss">

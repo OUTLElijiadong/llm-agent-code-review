@@ -174,8 +174,8 @@
           </div>
           <div class="code-tools">
             <el-button-group>
-              <el-button size="small" :icon="ZoomIn" />
-              <el-button size="small" :icon="ZoomOut" />
+              <el-button size="small" :icon="ZoomIn" aria-label="放大代码字号" title="放大字号" @click="codeViewerRef?.zoomIn()" />
+              <el-button size="small" :icon="ZoomOut" aria-label="缩小代码字号" title="缩小字号" @click="codeViewerRef?.zoomOut()" />
             </el-button-group>
           </div>
         </header>

@@ -5,9 +5,9 @@
       <div>
         <h1 class="page-title font-display">仪表盘</h1>
         <p class="page-sub">
-          {{ today }} · 你今天有
+          {{ today }} · 最近
           <b class="hl">{{ summary.recent_tasks?.length ?? 0 }}</b>
-          个审查任务待复查
+          个审查任务
         </p>
       </div>
       <div class="page-actions">

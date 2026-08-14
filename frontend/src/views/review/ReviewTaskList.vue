@@ -62,6 +62,13 @@
         @selection-change="onSelectionChange"
         highlight-current-row
       >
+        <template #empty>
+          <EmptyState
+            :description="hasFilter ? '当前筛选条件下没有审查任务,试试放宽条件' : '还没有审查任务'"
+            :action-text="hasFilter ? '' : '启动第一个审查'"
+            :action-to="hasFilter ? '' : '/reviews/start'"
+          />
+        </template>
         <el-table-column type="selection" width="44" />
         <el-table-column prop="task_name" label="任务名称" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
@@ -144,6 +151,7 @@
 </template>
 
 <script setup lang="ts">
+import EmptyState from '@/components/common/EmptyState.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -169,6 +177,9 @@ const pageSize = ref(20)
 const filterStatus = ref('')
 const filterProjectId = ref<number | null>(null)
 const dateRange = ref<[string, string] | null>(null)
+
+/** 空态文案依据:是否有筛选条件(区分「没有任务」与「筛选无结果」)。 */
+const hasFilter = computed(() => Boolean(filterStatus.value || filterProjectId.value || dateRange.value))
 
 const statusLabels: Record<string, string> = {
   pending: '待处理',

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import EmptyState from '@/components/common/EmptyState.vue'
+import { confirmDanger } from '@/composables/useDangerConfirm'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -331,13 +333,12 @@ async function onApprove(row: ApprovalItem): Promise<void> {
  * @returns Promise<void>
  */
 async function onReject(row: ApprovalItem): Promise<void> {
-  try {
-    await ElMessageBox.confirm(`确定要驳回审批「${row.title}」吗？`, '驳回确认', {
-      confirmButtonText: '驳回',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch { return }
+  const ok = await confirmDanger({
+    target: `驳回审批「${row.title}」`,
+    consequence: '驳回后该事项需要重新发起才能生效。',
+    confirmText: '确认驳回',
+  })
+  if (!ok) return
   await rejectItem(row.id, '管理端驳回')
   ElMessage.success('已驳回')
   await loadData()
@@ -493,13 +494,12 @@ async function onActivateKnowledge(row: AgentKnowledgeDoc): Promise<void> {
  * @returns Promise<void>
  */
 async function onResolveAlert(row: AgentAlert): Promise<void> {
-  try {
-    await ElMessageBox.confirm(`确定要关闭告警「${row.title}」吗？`, '关闭告警', {
-      confirmButtonText: '关闭',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch { return }
+  const ok = await confirmDanger({
+    target: `关闭告警「${row.title}」`,
+    consequence: '关闭后该告警不再出现在待处理列表。',
+    confirmText: '确认关闭',
+  })
+  if (!ok) return
   await resolveAlert(row.id, '管理端关闭告警')
   ElMessage.success('告警已关闭')
   await loadData()
@@ -549,13 +549,12 @@ async function onCreateArtifactVersion(): Promise<void> {
  * @returns Promise<void>
  */
 async function onRollbackArtifact(row: AgentArtifactVersion): Promise<void> {
-  try {
-    await ElMessageBox.confirm(`确定要回滚版本「${row.version}」吗？此操作将恢复到该版本的快照。`, '回滚确认', {
-      confirmButtonText: '回滚',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch { return }
+  const ok = await confirmDanger({
+    target: `回滚版本「${row.version}」`,
+    consequence: '此操作将恢复到该版本的快照,覆盖当前内容。',
+    confirmText: '确认回滚',
+  })
+  if (!ok) return
   await rollbackArtifactVersion(row.id)
   ElMessage.success('已回滚版本')
   await loadData()
@@ -590,6 +589,9 @@ onMounted(loadData)
         <section class="panel">
           <h3>Agent 状态</h3>
           <el-table :data="agents" height="360">
+              <template #empty>
+                <EmptyState compact description="暂无 Agent 记录" />
+              </template>
             <el-table-column prop="name" label="Agent(智能体)" min-width="140" />
             <el-table-column prop="category" label="分类" width="110" />
             <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small">{{ statusText(row.status) }}</el-tag></template></el-table-column>
@@ -599,6 +601,9 @@ onMounted(loadData)
         <section class="panel">
           <h3>待处理审批</h3>
           <el-table :data="approvals" height="360">
+              <template #empty>
+                <EmptyState compact description="无待审批事项,高风险操作会自动进入这里" />
+              </template>
             <el-table-column prop="title" label="事项" min-width="180" />
             <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="row.risk_level === 'high' ? 'danger' : 'warning'">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
             <el-table-column label="状态" width="110"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
@@ -609,6 +614,9 @@ onMounted(loadData)
 
     <section v-else-if="mode === 'agents'" class="panel">
       <el-table :data="agents" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无 Agent 记录" />
+          </template>
         <el-table-column prop="name" label="Agent(智能体)" min-width="150" />
         <el-table-column prop="code" label="内部编码" min-width="140" />
         <el-table-column prop="category" label="分类" width="120" />
@@ -627,6 +635,9 @@ onMounted(loadData)
 
     <section v-else-if="mode === 'approvals'" class="panel">
       <el-table :data="approvals" stripe>
+          <template #empty>
+            <EmptyState compact description="无待审批事项" />
+          </template>
         <el-table-column prop="title" label="审批事项" min-width="220" />
         <el-table-column prop="agent_code" label="Agent(智能体)" width="120" />
         <el-table-column prop="action" label="动作" min-width="150" />
@@ -684,6 +695,9 @@ onMounted(loadData)
       <div class="panel">
         <h3>策略规则</h3>
         <el-table :data="policies" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无策略配置" />
+          </template>
           <el-table-column prop="name" label="规则" min-width="180" />
           <el-table-column prop="subject" label="主体" width="130" />
           <el-table-column prop="action" label="动作" width="140" />
@@ -695,6 +709,9 @@ onMounted(loadData)
       <div class="panel">
         <h3>决策日志</h3>
         <el-table :data="decisions" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无策略决策记录" />
+          </template>
           <el-table-column prop="subject" label="主体" width="150" />
           <el-table-column prop="action" label="动作" min-width="160" />
           <el-table-column label="决策" width="110"><template #default="{ row }">{{ statusText(row.decision) }}</template></el-table-column>
@@ -734,6 +751,9 @@ onMounted(loadData)
       <div class="panel">
         <h3>权限列表</h3>
         <el-table :data="toolPermissions" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无工具授权" />
+          </template>
           <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
           <el-table-column prop="tool_code" label="工具" width="130" />
           <el-table-column prop="permission" label="权限" width="110" />
@@ -745,6 +765,9 @@ onMounted(loadData)
       <div class="panel">
         <h3>工具调用日志</h3>
         <el-table :data="tools" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无工具注册" />
+          </template>
           <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
           <el-table-column prop="tool_code" label="工具" width="130" />
           <el-table-column prop="action" label="动作" min-width="160" />
@@ -827,6 +850,9 @@ onMounted(loadData)
           <el-button type="primary" @click="onSaveKnowledgeSource">保存来源</el-button>
         </div>
         <el-table :data="knowledgeSources" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无知识源" />
+          </template>
           <el-table-column prop="source_type" label="类型" width="100" />
           <el-table-column prop="source_uri" label="来源" min-width="240" show-overflow-tooltip />
           <el-table-column prop="whitelist" label="白名单" width="90" />
@@ -837,6 +863,9 @@ onMounted(loadData)
         <div class="panel">
           <h3>独立记忆</h3>
           <el-table :data="agentMemory" height="360">
+              <template #empty>
+                <EmptyState compact description="该 Agent 暂无记忆" />
+              </template>
             <el-table-column prop="title" label="标题" min-width="180" />
             <el-table-column prop="memory_type" label="类型" width="110" />
             <el-table-column prop="weight" label="权重" width="90" />
@@ -845,6 +874,9 @@ onMounted(loadData)
         <div class="panel">
           <h3>知识文档</h3>
           <el-table :data="agentKnowledge" height="360">
+              <template #empty>
+                <EmptyState compact description="该 Agent 暂无知识条目" />
+              </template>
             <el-table-column prop="title" label="标题" min-width="180" />
             <el-table-column prop="source_type" label="来源" width="100" />
             <el-table-column prop="risk_level" label="风险" width="90" />
@@ -864,6 +896,9 @@ onMounted(loadData)
 
     <section v-else-if="mode === 'jobs'" class="panel">
       <el-table :data="jobs" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无调度任务,点上方「新建」创建" />
+          </template>
         <el-table-column prop="job_code" label="任务" min-width="220" />
         <el-table-column prop="job_type" label="类型" width="110" />
         <el-table-column prop="agent_code" label="Agent(智能体)" width="150" />
@@ -899,11 +934,17 @@ onMounted(loadData)
         </div>
         <h4>工具执行结果</h4>
         <el-table :data="Array.isArray(observability.tool_status) ? observability.tool_status : []" size="small">
+          <template #empty>
+            <EmptyState compact description="工具状态为空" />
+          </template>
           <el-table-column prop="status" label="结果"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           <el-table-column prop="count" label="次数" width="100" />
         </el-table>
         <h4>审批处理结果</h4>
         <el-table :data="Array.isArray(observability.approval_status) ? observability.approval_status : []" size="small">
+          <template #empty>
+            <EmptyState compact description="审批渠道状态为空" />
+          </template>
           <el-table-column prop="status" label="结果"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           <el-table-column prop="count" label="次数" width="100" />
         </el-table>
@@ -911,6 +952,9 @@ onMounted(loadData)
       <div class="panel">
         <h3>开放告警</h3>
         <el-table :data="alerts" height="360">
+              <template #empty>
+                <EmptyState compact description="无开放告警,一切正常" />
+              </template>
           <el-table-column prop="title" label="告警" min-width="180" />
           <el-table-column label="级别" width="110"><template #default="{ row }">{{ alertSeverityText(row.severity) }}</template></el-table-column>
           <el-table-column label="状态" width="100"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
@@ -940,6 +984,9 @@ onMounted(loadData)
       <div class="panel">
         <h3>奖惩事件</h3>
         <el-table :data="rewardEvents" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无激励事件" />
+          </template>
           <el-table-column prop="agent_code" label="Agent(智能体)" width="140" />
           <el-table-column label="类型" width="100"><template #default="{ row }">{{ row.event_type === 'reward' ? '奖励' : '惩罚' }}</template></el-table-column>
           <el-table-column prop="score" label="分数" width="90" />
@@ -974,6 +1021,9 @@ onMounted(loadData)
       <div class="panel">
         <h3>版本列表</h3>
         <el-table :data="artifactVersions" stripe>
+          <template #empty>
+            <EmptyState compact description="暂无版本产物" />
+          </template>
           <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
           <el-table-column prop="artifact_type" label="类型" width="110" />
           <el-table-column prop="version" label="版本" min-width="160" />
