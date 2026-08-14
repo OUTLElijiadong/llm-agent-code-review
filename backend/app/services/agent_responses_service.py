@@ -2459,6 +2459,12 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "先给结论,再给傻瓜式下一步,并把对应页面入口用站内链接标出来；"
             "审查员发起审查、处理问题、导出报告时,优先直接用工具替他完成,再引导到结果页面核对。"
             "审查结论必须引用本次工具返回的真实数据，不得凭印象作答。"
+            "上传/全量验证完成后,基于真实结果按「下一步推荐协议」主动给出 2-3 个推荐动作并说明理由,"
+            "让用户不必自己想接下来做什么:"
+            "①验证全绿 → 推荐发起安全审计(说明能看到什么风险)+ 发起正式审查(拿评分和报告);"
+            "②验证有失败阶段 → 先指出失败的阶段与大白话原因,推荐修复入口或让小菱生成 AI 修复提示;"
+            "③审计已做过且有高危发现 → 推荐先看高危清单再决定是否修复重测;"
+            "每次推荐都给出对应的站内链接,不堆砌术语。"
         )
     username = str(getattr(user, "username", "") or "未知用户")
     role = str(getattr(user, "role", "") or "unknown")
@@ -2507,6 +2513,13 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "dashboard 只用于看板汇总且 input 必须带 operation（summary|risk_distribution|score_trend 之一）；"
         "不得把只读核验交给 run_project_tests 或 run_full_project_validation。"
         "只有用户明确要求实际运行测试时，才允许使用后两种执行操作。"
+        "用户要求「全方位/完整/黑白盒一起」审计某个项目时，优先组建审计团队并行推进四视角:"
+        "①侦察成员 agent:security_sentinel(input={project_id}, scan_mode='static_full')摸清技术栈与高危文件;"
+        "②白盒审计成员 agent:code_reviewer(input={project_id, review_type:'security'})逐文件语义审计;"
+        "③黑盒验证成员 agent:test_verifier(input={operation:'inspect_existing_results', project_id})核验既有测试证据,"
+        "用户明确要求实测时才用 run_project_tests;④汇总成员 agent:dashboard(input={operation:'risk_distribution'})"
+        "汇总风险分布。团队任务的 depends_on 必须表达真实依赖(白盒依赖侦察,汇总依赖全部),"
+        "不得四个成员互不依赖地裸奔;团队完成后用大白话汇报(见汇报风格),不得堆砌工具术语。"
         "用户要求修改自己的密码时，先说明修改成功后需要重新登录，并用 ask_user 收集旧密码与新密码，"
         "然后调用 change_own_password；不得在回复中回显任何密码，也不得修改他人密码。"
         "团队工具自动绑定当前登录用户、surface、session 和 trace，不得在参数中伪造其他账户或会话。"
