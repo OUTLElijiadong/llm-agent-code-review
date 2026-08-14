@@ -22,7 +22,7 @@ from app.core.rbac_dependency import require_permission
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
 from app.schemas.common import Resp
-from app.services import rbac_service
+from app.services import agent_mesh_service, rbac_service
 from app.services.agent_responses_service import (
     AgentResponsesService,
     is_paused,
@@ -30,6 +30,7 @@ from app.services.agent_responses_service import (
     redact_agent_output_text,
     terminal_event,
 )
+from app.utils.api_resolver import resolve_api_config
 
 router = APIRouter()
 
@@ -68,7 +69,7 @@ class AgentResponseMessage(BaseModel):
 
 
 class AgentResponsesRequest(BaseModel):
-    action: Literal["start", "approve", "reject", "answer", "retry"] = "start"
+    action: Literal["start", "approve", "reject", "answer", "retry", "cancel"] = "start"
     surface: Literal["user", "admin"] = "user"
     session_id: str = Field(min_length=8, max_length=128)
     messages: List[AgentResponseMessage] = Field(default_factory=list, max_length=100)
@@ -76,6 +77,8 @@ class AgentResponsesRequest(BaseModel):
     call_id: str = Field(default="", max_length=160)
     answer: str = Field(default="", max_length=20_000)
     confirmation: str = Field(default="", max_length=20)
+    cancel_reason: str = Field(default="", max_length=500)
+    mesh_message_id: str = Field(default="", max_length=80)
 
     @field_validator("session_id")
     @classmethod
@@ -91,13 +94,27 @@ class AgentResponsesRequest(BaseModel):
             raise ValueError("run_id 格式非法")
         return value
 
+    @field_validator("mesh_message_id")
+    @classmethod
+    def validate_mesh_message_id(cls, value: str) -> str:
+        # 系统生成的协作消息既有 msg_<hex>,也有 team-<id>-task-<id>-...-result 等形态;
+        # 只校验安全字符集,交给服务层按账本认领,避免团队结果无法自动续跑。
+        if value and not all(char.isalnum() or char in "-_" for char in value):
+            raise ValueError("mesh_message_id 格式非法")
+        return value
+
     @model_validator(mode="after")
     def validate_action_fields(self) -> "AgentResponsesRequest":
         if self.action == "start":
-            if not self.messages or not any(item.role == "user" and item.content.strip() for item in self.messages):
-                raise ValueError("启动 Agent 时至少需要一条非空用户消息")
+            has_user_message = any(item.role == "user" and item.content.strip() for item in self.messages)
+            if not has_user_message and not self.mesh_message_id:
+                raise ValueError("启动 Agent 时必须提供用户消息或 Agent Mesh 消息")
+            if has_user_message and self.mesh_message_id:
+                raise ValueError("用户消息与 Agent Mesh 消息不能在同一次启动中混用")
         elif not self.run_id:
             raise ValueError("恢复 Agent 运行必须提供 run_id")
+        if self.action != "start" and self.mesh_message_id:
+            raise ValueError("恢复运行时不得重新指定 mesh_message_id")
         if self.action == "answer" and not self.answer.strip():
             raise ValueError("回答模型追问时 answer 不能为空")
         return self
@@ -152,6 +169,12 @@ def get_agent_response_session(
                 "run": None,
                 "messages": [],
                 "pending": None,
+                "mesh_messages": agent_mesh_service.list_session_messages(
+                    db,
+                    user,
+                    surface=surface,
+                    session_key=session_id,
+                ),
             }
         )
     try:
@@ -168,16 +191,24 @@ def get_agent_response_session(
             "run": {
                 "run_id": row.run_id,
                 "status": row.status,
+                "mesh_message_id": row.mesh_message_id or "",
                 "model": str(checkpoint.get("model") or ""),
                 "rounds": int(checkpoint.get("rounds") or 0),
                 "error": _public_text(checkpoint.get("error")),
                 "output_text": _public_text(checkpoint.get("output_text"), limit=4000),
+                "cancel_reason": _public_text(checkpoint.get("cancel_reason")),
                 "updated_at": row.update_time.isoformat() if row.update_time else "",
             },
             "messages": _public_transcript_messages(checkpoint.get("transcript")),
             "events": replay_events,
             "last_sequence_number": len(replay_events),
             "pending": _public_pending_event(row.run_id, row.status, checkpoint.get("pending")),
+            "mesh_messages": agent_mesh_service.list_session_messages(
+                db,
+                user,
+                surface=surface,
+                session_key=session_id,
+            ),
         }
     )
 
@@ -601,6 +632,9 @@ def _public_stream_event(
     if event_type == "response.created":
         return {"type": event_type, "response": _public_response_envelope(event.get("response"))}
     if event_type in {"response.tool.started", "response.tool.completed", "response.tool.failed"}:
+        error = event.get("error")
+        if event_type == "response.tool.failed" and not str(error or "").strip():
+            error = f"工具 {str(event.get('tool_name') or '未知工具')} 执行失败"
         return {
             "type": event_type,
             "run_id": event.get("run_id"),
@@ -612,7 +646,7 @@ def _public_stream_event(
             "cached": bool(event.get("cached")),
             "arguments": redact_agent_event_value(event.get("arguments")),
             "output_summary": redact_agent_event_value(event.get("output_summary")),
-            "error": redact_agent_event_value(event.get("error")),
+            "error": redact_agent_event_value(error),
         }
     if event_type == "response.approval.required":
         return {
@@ -699,6 +733,19 @@ async def stream_agent_response(
         queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=128)
         sequence = 0
         discard_events = False
+        # SSE 元数据只描述当前用户最终使用的模型，不改变服务层的模型选择逻辑。
+        # 与 AgentResponsesService._runtime 的分层规则保持一致：user/global 配置
+        # 优先，系统默认时才回落到 orchestrator 模型。
+        try:
+            api_config = resolve_api_config(db, user.id)
+        except (AttributeError, TypeError):
+            # 轻量测试/非真实 Session 场景不阻断首个 response.created。
+            api_config = None
+        response_model = (
+            api_config.model
+            if api_config is not None and api_config.source in {"user", "global"}
+            else settings.deepseek_orchestrator_model
+        )
 
         async def sink(event: Mapping[str, Any]) -> None:
             nonlocal discard_events
@@ -720,17 +767,85 @@ async def stream_agent_response(
                         continue
 
         async def execute() -> Any:
+            mesh_message_id = ""
             if payload.action == "start":
                 messages = [item.model_dump() for item in payload.messages if item.content.strip()]
-                return await service.start(messages, run_id=run_id, event_sink=sink)
-            return await service.resume(
-                run_id=run_id,
-                action=payload.action,
-                call_id=payload.call_id,
-                answer=payload.answer,
-                confirmation=payload.confirmation,
-                event_sink=sink,
-            )
+                if payload.mesh_message_id:
+                    mesh_message_id = payload.mesh_message_id
+                    _, system_input = agent_mesh_service.prepare_message_run(
+                        db,
+                        user,
+                        mesh_message_id,
+                        surface=payload.surface,
+                        session_key=payload.session_id,
+                    )
+                    messages = [system_input]
+            else:
+                active_row = (
+                    db.query(AgentResponseRun)
+                    .filter(
+                        AgentResponseRun.run_id == run_id,
+                        AgentResponseRun.user_id == user.id,
+                        AgentResponseRun.surface == payload.surface,
+                        AgentResponseRun.session_key == payload.session_id,
+                    )
+                    .first()
+                )
+                mesh_message_id = active_row.mesh_message_id if active_row is not None else ""
+
+            try:
+                if payload.action == "start":
+                    result = await service.start(messages, run_id=run_id, event_sink=sink)
+                elif payload.action == "cancel":
+                    result = await service.cancel(run_id=run_id, reason=payload.cancel_reason)
+                else:
+                    result = await service.resume(
+                        run_id=run_id,
+                        action=payload.action,
+                        call_id=payload.call_id,
+                        answer=payload.answer,
+                        confirmation=payload.confirmation,
+                        event_sink=sink,
+                    )
+                if mesh_message_id:
+                    response_row = (
+                        db.query(AgentResponseRun)
+                        .filter(
+                            AgentResponseRun.run_id == run_id,
+                            AgentResponseRun.user_id == user.id,
+                        )
+                        .first()
+                    )
+                    if response_row is not None and response_row.mesh_message_id != mesh_message_id:
+                        response_row.mesh_message_id = mesh_message_id
+                        db.commit()
+                    if not is_paused(result):
+                        agent_mesh_service.finish_message_run(
+                            db,
+                            user,
+                            mesh_message_id,
+                            surface=payload.surface,
+                            session_key=payload.session_id,
+                            success=result.status == "completed",
+                            summary=result.output_text,
+                            error=result.error,
+                        )
+                return result
+            except Exception as exc:
+                if mesh_message_id:
+                    try:
+                        agent_mesh_service.finish_message_run(
+                            db,
+                            user,
+                            mesh_message_id,
+                            surface=payload.surface,
+                            session_key=payload.session_id,
+                            success=False,
+                            error=str(exc),
+                        )
+                    except agent_mesh_service.AgentMeshError:
+                        db.rollback()
+                raise
 
         def encode(event: Mapping[str, Any]) -> str:
             nonlocal sequence
@@ -752,7 +867,12 @@ async def stream_agent_response(
         yield encode(
             {
                 "type": "response.created",
-                "response": {"id": run_id, "object": "response", "status": "in_progress"},
+                "response": {
+                    "id": run_id,
+                    "object": "response",
+                    "status": "in_progress",
+                    "model": response_model,
+                },
             }
         )
         task = asyncio.create_task(execute())

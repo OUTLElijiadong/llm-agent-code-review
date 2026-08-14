@@ -126,13 +126,15 @@ def test_set_and_get_api_config_updates_chat_agent(monkeypatch: pytest.MonkeyPat
         deepseek_base_url="https://default.example/v1/",
         deepseek_api_key="default-key",
         deepseek_model="default-model",
+        deepseek_orchestrator_model="default-orchestrator-model",
     )
     monkeypatch.setattr("app.core.config.settings", fake_settings)
     orch.set_api_config(None)
 
     assert orch.chat_agent._base_url == "https://default.example/v1"
     assert orch.chat_agent._api_key == "default-key"
-    assert orch.chat_agent._model == "default-model"
+    # 传 None 恢复系统默认时，小菱人格应恢复 orchestrator pro，而不是子 Agent 的 flash 默认。
+    assert orch.chat_agent._model == "default-orchestrator-model"
 
 
 def test_inject_db_requires_user_and_injects_all_operation_agents(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -236,6 +238,55 @@ def test_agent_wrapper_methods_forward_arguments_and_context(
     assert "ctx" not in orch.lang_agent.execute.call_args.kwargs
     assert "ctx" not in orch.project_agent.execute.call_args.kwargs
     assert "ctx" not in orch.code_reviewer.execute.call_args.kwargs
+
+
+def test_run_full_project_validation_forces_combined_mode_and_forwards_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """上传后的组合验证必须固定为 combined，并保留源版本追踪信息。"""
+    orch = _bare_orchestrator()
+    orch._db = object()
+    orch._user = SimpleNamespace(id=17)
+    ctx = AgentContext(user_id=17, extra={"trace_id": "trace-upload-1"})
+    verifier = MagicMock(run_project_tests=MagicMock(return_value=_result("validated")))
+    orch.test_verifier = verifier
+    monkeypatch.setattr(orchestrator_module, "check_permission", lambda *_args, **_kwargs: True)
+
+    result = orch.run_full_project_validation(
+        project_id=7,
+        language="python",
+        source_revision_id=3,
+        ctx=ctx,
+    )
+
+    assert result.success is True
+    assert result.data == "validated"
+    verifier.run_project_tests.assert_called_once_with(
+        project_id=7,
+        language="python",
+        test_mode="combined",
+        worker_code="",
+        source_revision_id=3,
+        ctx=ctx,
+    )
+
+
+def test_run_full_project_validation_denies_without_project_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """普通用户无项目查看权限时不得创建或运行沙箱。"""
+    orch = _bare_orchestrator()
+    orch._db = object()
+    orch._user = SimpleNamespace(id=17)
+    verifier = MagicMock(run_project_tests=MagicMock(return_value=_result("must-not-run")))
+    orch.test_verifier = verifier
+    monkeypatch.setattr(orchestrator_module, "check_permission", lambda *_args, **_kwargs: False)
+
+    result = orch.run_full_project_validation(project_id=7, language="python")
+
+    assert result.success is False
+    assert "project:view" in (result.error or "")
+    verifier.run_project_tests.assert_not_called()
 
 
 def test_archive_agent_wrappers_forward_static_full_and_remote_audit_mode(

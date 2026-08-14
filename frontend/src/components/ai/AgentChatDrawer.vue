@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { CircleCheck, Close, WarningFilled } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument, Upload, WarningFilled } from '@element-plus/icons-vue'
 
 import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
-import { getAgentResponseSession } from '@/api/agentResponses'
+import { cancelAgentResponseRun, getAgentResponseSession } from '@/api/agentResponses'
+import { archiveAgentMeshSession, type AgentMeshMessage } from '@/api/agentMesh'
+import { getAgentTeam, listAgentTeams, type AgentTeamDetail, type AgentTeamSummary } from '@/api/agentTeams'
 import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
@@ -16,6 +18,11 @@ import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
+import AgentTeamTrace from '@/components/ai/AgentTeamTrace.vue'
+import AgentTeamWindow from '@/components/ai/AgentTeamWindow.vue'
+import TaskCancelConfirm from '@/components/ai/TaskCancelConfirm.vue'
+import { isPageActionTool, toolRunningPhrase } from '@/utils/toolDisplay'
+import { useAgentActivityStore } from '@/stores/agentActivity'
 import { extractNavigateDirectives } from '@/utils/agentNavigation'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
@@ -30,16 +37,26 @@ import {
 } from '@/utils/clarifyProjectOptions'
 import { streamResponses } from '@/utils/responsesStream'
 import {
-  AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS,
+  agentResponseSessionPollInterval,
   isAgentResponseSessionActive,
   isAgentResponseSessionOccupied,
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
-import { isPageActionTool, toolDisplayInfo, toolRunningPhrase } from '@/utils/toolDisplay'
-import { useAgentActivityStore } from '@/stores/agentActivity'
+import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
+import {
+  agentMeshToolCalls,
+  findAgentMeshTimeline,
+  settleAgentMeshTimeline,
+} from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
-import { saveAgentChatSnapshot, autoTitleAgentChatSession } from '@/utils/agentChatSessions'
+import { buildAutoValidationPrompt } from '@/utils/autoValidation'
+import {
+  autoTitleAgentChatSession,
+  loadAgentChatSnapshot,
+  saveAgentChatSnapshot,
+  type AgentChatSessionMeta,
+} from '@/utils/agentChatSessions'
 import {
   applyResponseToolEvent,
   attachApprovalToToolCall,
@@ -82,9 +99,11 @@ interface PlanStep {
 
 interface ChatMessage {
   id?: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'error'
   content: string
   time: string
+  /** 错误卡片:失败后留在消息流里,带「重试」与「新建对话」 */
+  errorCard?: { retryable: boolean }
   runId?: string
   trace_id?: string
   steps?: StepBubble[]
@@ -112,7 +131,7 @@ const router = useRouter()
 const activityStore = useAgentActivityStore()
 
 const MASCOT_NAME = '小菱'
-const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},你的代码审查小助手!可以帮你发起审查、解读报告、查项目与漏洞。点左上角「+」可随时开新对话。`
+const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},Prism 棱镜智能代码审查平台的小助手!我可以帮你发起代码审查、解读报告、查询项目与漏洞。点击左上角「+」可以随时开新对话,多个任务我会并行帮你盯着。`
 
 /** 空状态快捷问题:点击填入输入框并直接发送。 */
 const QUICK_QUESTIONS = ['帮我发起代码审查', '查看我的项目', '有什么安全问题']
@@ -123,17 +142,27 @@ const loading = ref(false)
 const showTyping = ref(false)
 const modelName = ref('deepseek-v4-flash')
 const chatBody = ref<HTMLElement>()
+const chatInputRef = ref<HTMLTextAreaElement>()
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('user')
 const LEGACY_SESSION_KEY = 'prism-user-agent-session'
 const sessionId = ref('')
 let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
+let sessionPollFailures = 0
 let sessionPollTimer: number | undefined
 let sessionPollStopped = false
 let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
 const sessionRun = ref<Awaited<ReturnType<typeof getAgentResponseSession>>['run']>(null)
 const sessionRestoring = ref(true)
+const sessionPollError = ref('')
+const sessionLastPolledAt = ref('')
+const reconnectHint = ref(false)
+let reconnectHintTimer: number | undefined
+const cancelPromptVisible = ref(false)
+const agentTeams = ref<AgentTeamDetail[]>([])
+const agentTeamLoading = ref(false)
+const agentTeamError = ref('')
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
 
 /** 失败/未完成/超轮数的运行可手动重试（回退策略入口） */
@@ -142,8 +171,26 @@ const canRetryRun = computed(() => {
   return Boolean(status && ['failed', 'incomplete', 'max_rounds_exceeded'].includes(status) && !loading.value)
 })
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+const meshSessions = ref<AgentChatSessionMeta[]>([])
+const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
 const uploading = ref(false)
+/** 上传进度:completed/total 驱动进度条,phase 描述当前阶段。 */
+const uploadProgress = ref({ completed: 0, total: 0, phase: '' })
+/** 最近一次失败/取消的运行:支撑错误卡片的「重试最后一条消息」。 */
+const lastFailedRun = ref<{ kind: 'user-message' | 'approval' | 'input' }>({ kind: 'user-message' })
+
+/** 子 Agent 团队独立悬浮窗:当前点中查看的团队。 */
+const teamWindowVisible = ref(false)
+const teamWindowTeamId = ref<number | null>(null)
+const teamWindowTeam = computed(() => (
+  agentTeams.value.find((team) => team.team_id === teamWindowTeamId.value) ?? null
+))
+
+function openTeamWindow(team: AgentTeamDetail | AgentTeamSummary): void {
+  teamWindowTeamId.value = team.team_id
+  teamWindowVisible.value = true
+}
 
 /** 吉祥物与标题栏共享的agent状态:运行中/等待用户/空闲 */
 const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
@@ -155,13 +202,54 @@ const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
 const runStatusLabel = computed(() => (
   mascotStatus.value === 'running' ? '运行中' : mascotStatus.value === 'waiting' ? '等待你操作' : '空闲'
 ))
-const canSend = computed(() => (
-  inputText.value.trim().length > 0
-  && !loading.value
+
+/** 小菱执行进度:统计当前会话中「最新一轮」工具调用的完成情况。 */
+const toolStepProgress = computed(() => {
+  const activeRunId = sessionRun.value?.run_id
+  // 运行中取当前 run 的调用;无 run(或运行已结束)时回退到会话里最后一组调用
+  const source = activeRunId
+    ? [...messages.value].reverse().find((msg) => msg.runId === activeRunId && msg.toolCalls?.length)
+    : [...messages.value].reverse().find((msg) => msg.toolCalls?.length)
+  const calls = source?.toolCalls ?? []
+  const countable = calls.filter((call) => call.status !== 'rejected')
+  const done = countable.filter((call) => ['completed', 'failed'].includes(call.status)).length
+  const current = countable.find((call) =>
+    ['streaming', 'queued', 'delivered', 'acknowledged', 'processing', 'running'].includes(call.status))
+    ?? countable.find((call) => ['waiting_approval', 'waiting_input'].includes(call.status))
+  const hasPending = countable.some((call) =>
+    !['completed', 'failed'].includes(call.status))
+  return { done, total: countable.length, current, hasPending }
+})
+/** 存在工具调用且未全部完成时才显示执行进度条。 */
+const showToolProgress = computed(() => (
+  toolStepProgress.value.total > 0 && toolStepProgress.value.hasPending
+))
+const toolProgressPercent = computed(() => {
+  const { done, total } = toolStepProgress.value
+  return total > 0 ? Math.round((done / total) * 100) : 0
+})
+/** 面板是否可发起新的运行(发送/重试共用同一套守卫)。 */
+const canStartRun = computed(() => (
+  !loading.value
   && !uploading.value
   && !sessionRestoring.value
   && !sessionBusy.value
 ))
+const canSend = computed(() => inputText.value.trim().length > 0 && canStartRun.value)
+/** 小菱流式运行中:显示「停止响应」按钮,点击即中止当前流。 */
+const canStopResponse = computed(() => (
+  loading.value || isAgentResponseSessionActive(sessionRun.value?.status)
+))
+
+const meshBridge = createAgentMeshBridge({
+  surface: 'user',
+  getSessionId: () => sessionId.value,
+  getTitle: () => meshSessions.value.find((item) => item.id === sessionId.value)?.title ?? '用户端小菱对话',
+  getSessions: () => meshSessions.value,
+  getActiveRun: () => sessionRun.value,
+  isBusy: isMeshSessionBusy,
+  onMessage: handleMeshMessage,
+})
 
 function messageId(): string {
   return crypto.randomUUID()
@@ -180,7 +268,10 @@ function welcomeMessage(): ChatMessage {
 function persistSnapshot(): void {
   if (!sessionId.value) return
   saveAgentChatSnapshot(sessionId.value, {
-    messages: messages.value.map((message) => ({ role: message.role, content: message.content })),
+    messages: messages.value.map((message) => ({
+      role: message.role === 'error' ? 'assistant' : message.role,
+      content: message.content,
+    })),
     runStatus: sessionRun.value?.status ?? null,
     updatedAt: Date.now(),
   })
@@ -188,6 +279,15 @@ function persistSnapshot(): void {
 
 /** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
+  // 切换器重挂载等场景会重复发出当前会话的 select:避免中断正在运行的流;
+  // 但若没有活动流且未在恢复中,重新拉一次快照兜底。
+  if (nextSessionId === sessionId.value) {
+    if (!loading.value && !sessionRestoring.value && !activeResponse) {
+      sessionRestoreStarted = false
+      void restoreSession()
+    }
+    return
+  }
   // 面板重建后内存是初始空状态,不能用它覆盖已有快照;
   // 仅当当前会话有真实内容(非欢迎语)或运行状态时才持久化。
   const hasRealContent = messages.value.some((message) => {
@@ -203,7 +303,13 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionSnapshotSignature = ''
   sessionRestoreStarted = false
   sessionId.value = nextSessionId
+  sessionPollFailures = 0
+  cancelPromptVisible.value = false
   sessionRun.value = null
+  agentTeams.value = []
+  agentTeamError.value = ''
+  teamWindowVisible.value = false
+  teamWindowTeamId.value = null
   loading.value = false
   showTyping.value = false
   lastActiveToolName.value = ''
@@ -216,7 +322,24 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
 }
 
 function syncBusy(): void {
-  switcherRef.value?.setBusy(sessionId.value, isAgentResponseSessionOccupied(sessionRun.value?.status))
+  // loading 阶段 response.created 尚未到达时也保持忙碌标记,避免打开新对话误切走。
+  const busy = loading.value || isAgentResponseSessionOccupied(sessionRun.value?.status)
+  if (!busy) backgroundBusySessions.delete(sessionId.value)
+  switcherRef.value?.setBusy(sessionId.value, busy)
+}
+
+function handleSwitcherReady(metas: AgentChatSessionMeta[]): void {
+  meshSessions.value = metas
+  syncBusy()
+  void meshBridge.syncNow()
+}
+
+function isMeshSessionBusy(targetSessionId: string): boolean {
+  if (targetSessionId === sessionId.value) {
+    return loading.value || sessionRestoring.value || sessionBusy.value
+  }
+  if (backgroundBusySessions.has(targetSessionId)) return true
+  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId)?.runStatus)
 }
 
 function restoredMessages(
@@ -247,7 +370,10 @@ function restoredSessionMessages(
         navigations: directives.length ? directives : undefined,
       }
     })
-  const toolCalls = responseToolCallsFromEvents(session.events)
+  const toolCalls = [
+    ...agentMeshToolCalls(session.mesh_messages, `session:user:${session.session_id}`),
+    ...responseToolCallsFromEvents(session.events),
+  ]
   if (!toolCalls.length) return restored
   const timeline: ChatMessage = {
     id: messageId(),
@@ -267,7 +393,10 @@ function restoredSessionMessages(
   restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
   // 非终态运行:把模型已生成的部分输出(尚未作为完整消息落库)展示出来。
   const partialOutput = session.run?.output_text?.trim()
-  if (partialOutput && isAgentResponseSessionOccupied(session.run?.status)) {
+  if (
+    partialOutput
+    && (isAgentResponseSessionOccupied(session.run?.status) || session.run?.status === 'cancelled')
+  ) {
     const lastAssistant = [...restored].reverse().find(
       (message) => message.role === 'assistant' && message.content.trim(),
     )
@@ -287,7 +416,13 @@ async function restoreSession(): Promise<void> {
   if (sessionRestoreStarted) return
   sessionRestoreStarted = true
   try {
-    const session = await getAgentResponseSession('user', sessionId.value)
+    const requestedSessionId = sessionId.value
+    const session = await getAgentResponseSession('user', requestedSessionId)
+    // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。
+    if (requestedSessionId !== sessionId.value || loading.value || activeResponse) {
+      scheduleSessionPoll()
+      return
+    }
     sessionRun.value = session.run
     if (session.run?.model) modelName.value = session.run.model
     const restoredTime = session.run?.updated_at
@@ -300,11 +435,13 @@ async function restoreSession(): Promise<void> {
       run: session.run,
       messages: session.messages,
       events: session.events,
+      mesh_messages: session.mesh_messages,
       pending: session.pending,
     })
     const pending = session.pending
     if (!pending) {
       showTyping.value = isAgentResponseSessionActive(session.run?.status)
+      await refreshAgentTeam()
       scheduleSessionPoll()
       return
     }
@@ -325,7 +462,8 @@ async function restoreSession(): Promise<void> {
       target.inputRequest = { ...pending, answer: '', status: 'pending' }
     }
     messages.value.push(target)
-    clearSessionPoll()
+    await refreshAgentTeam()
+    scheduleSessionPoll()
   } catch {
     // HTTP 层已给出错误提示；保留本地会话不覆盖用户输入。
   } finally {
@@ -334,6 +472,82 @@ async function restoreSession(): Promise<void> {
     persistSnapshot()
     await nextTick()
     scrollToBottom()
+    void meshBridge.syncNow()
+  }
+}
+
+async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: string): Promise<boolean> {
+  if (targetSessionId !== sessionId.value) {
+    return runBackgroundMeshMessage(message, targetSessionId)
+  }
+  if (!findAgentMeshTimeline(messages.value, message.message_id)) {
+    messages.value.push({
+      id: messageId(),
+      role: 'assistant',
+      content: '',
+      time: dayjs().format('HH:mm'),
+      trace_id: message.trace_id,
+      toolCalls: agentMeshToolCalls([message], `session:user:${sessionId.value}`),
+    })
+  }
+  await nextTick()
+  scrollToBottom()
+  const succeeded = await runResponse({
+    action: 'start',
+    surface: 'user',
+    session_id: sessionId.value,
+    messages: [],
+    mesh_message_id: message.message_id,
+  })
+  settleAgentMeshTimeline(
+    messages.value,
+    message.message_id,
+    succeeded,
+    sessionRun.value?.status,
+    sessionRun.value?.error,
+  )
+  return succeeded
+}
+
+async function runBackgroundMeshMessage(
+  message: AgentMeshMessage,
+  targetSessionId: string,
+): Promise<boolean> {
+  backgroundBusySessions.add(targetSessionId)
+  switcherRef.value?.setBusy(targetSessionId, true)
+  let waiting = false
+  const handle = streamResponses({
+    action: 'start',
+    surface: 'user',
+    session_id: targetSessionId,
+    messages: [],
+    mesh_message_id: message.message_id,
+  }, {
+    onEvent(event) {
+      if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
+        waiting = true
+      }
+      if (
+        event.type === 'response.completed'
+        || event.type === 'response.incomplete'
+        || event.type === 'response.failed'
+        || event.type === 'response.cancelled'
+        || event.type === 'error'
+      ) {
+        waiting = false
+      }
+    },
+  })
+  try {
+    await handle.done
+    return true
+  } catch {
+    return false
+  } finally {
+    if (!waiting) {
+      backgroundBusySessions.delete(targetSessionId)
+      switcherRef.value?.setBusy(targetSessionId, false)
+    }
   }
 }
 
@@ -349,28 +563,64 @@ function invalidateSessionPoll(): void {
   clearSessionPoll()
 }
 
-function scheduleSessionPoll(): void {
+/** 团队状态由服务端账本提供,会话切换和轮询均按当前 session 对齐。 */
+async function refreshAgentTeam(generation?: number): Promise<void> {
+  if (!sessionId.value) return
+  const requestedSessionId = sessionId.value
+  const isCurrent = (): boolean => requestedSessionId === sessionId.value
+    && (generation === undefined || generation === sessionPollGeneration)
+  agentTeamLoading.value = true
+  try {
+    const listed = await listAgentTeams({ surface: 'user', session_id: requestedSessionId, limit: 20 })
+    if (!isCurrent()) return
+    if (!listed.items.length) {
+      agentTeams.value = []
+      agentTeamError.value = ''
+      return
+    }
+    const details = await Promise.all(listed.items.map((item) => getAgentTeam(item.team_id)))
+    if (!isCurrent()) return
+    agentTeams.value = details
+    agentTeamError.value = ''
+  } catch {
+    if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
+  } finally {
+    if (isCurrent()) agentTeamLoading.value = false
+  }
+}
+
+function scheduleSessionPoll(immediate = false): void {
   clearSessionPoll()
-  if (sessionPollStopped || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  if (sessionPollStopped || !sessionId.value) return
   const generation = sessionPollGeneration
+  // 网络抖动时指数退避,恢复后立即重试;活跃任务仍保持秒级反馈。
+  const base = agentResponseSessionPollInterval(sessionRun.value?.status)
+  const backoff = Math.min(sessionPollFailures, 3)
+  const delay = immediate ? 0 : base * (2 ** backoff)
   sessionPollTimer = window.setTimeout(() => {
     sessionPollTimer = undefined
     void pollSessionSnapshot(generation)
-  }, AGENT_RESPONSE_SESSION_POLL_INTERVAL_MS)
+  }, delay)
 }
 
 async function pollSessionSnapshot(generation: number): Promise<void> {
-  if (sessionPollStopped || generation !== sessionPollGeneration || !isAgentResponseSessionActive(sessionRun.value?.status)) return
+  if (sessionPollStopped || generation !== sessionPollGeneration) return
   try {
     const session = await getAgentResponseSession('user', sessionId.value)
     if (sessionPollStopped || generation !== sessionPollGeneration) return
-    sessionRun.value = session.run
-    if (session.run?.model) modelName.value = session.run.model
+    sessionPollError.value = ''
+    sessionPollFailures = 0
+    sessionLastPolledAt.value = dayjs().format('HH:mm:ss')
+    await refreshAgentTeam(generation)
+    // 活动流持有最新状态,轮询快照可能落后于 SSE,不能在 loading 期间覆盖。
     if (!loading.value) {
+      sessionRun.value = session.run
+      if (session.run?.model) modelName.value = session.run.model
       const signature = JSON.stringify({
         run: session.run,
         messages: session.messages,
         events: session.events,
+        mesh_messages: session.mesh_messages,
         pending: session.pending,
       })
       if (signature !== sessionSnapshotSignature) {
@@ -402,15 +652,12 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
       }
     }
   } catch {
-    // SSE remains the primary channel; transient recovery errors are retried.
+    sessionPollFailures += 1
+    sessionPollError.value = '同步暂时中断,正在重试'
   } finally {
     syncBusy()
     persistSnapshot()
-    if (
-      !sessionPollStopped
-      && generation === sessionPollGeneration
-      && isAgentResponseSessionActive(sessionRun.value?.status)
-    ) scheduleSessionPoll()
+    if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
   }
 }
 
@@ -426,15 +673,19 @@ function formatStreamContent(value: string): string {
 
 function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
   return messages.value
-    // 欢迎语是本地开屏气泡,不参与模型上下文,避免被服务端持久化后恢复重复
-    .filter((message) => message.content.trim().length > 0 && message.content.trim() !== WELCOME_TEXT.trim())
-    .map((message) => ({ role: message.role, content: message.content }))
+    // 欢迎语是本地开屏气泡,错误卡片是本地展示层,两者都不参与模型上下文
+    .filter((message) => (
+      message.role !== 'error'
+      && message.content.trim().length > 0
+      && message.content.trim() !== WELCOME_TEXT.trim()
+    ))
+    .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }))
 }
 
 function eventErrorMessage(event: ResponseStreamEvent): string {
   if (event.type === 'error') return event.error?.message || event.message || ''
   if (event.type === 'response.incomplete') return '小菱的回答没说完,重发一次试试'
-  if (event.type === 'response.cancelled') return '小菱已停止这次任务'
+  if (event.type === 'response.cancelled') return 'Agent 任务已取消'
   if (event.type !== 'response.failed') return ''
   const error = event.response.error
   if (typeof error === 'string') return error
@@ -447,6 +698,157 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
 
 function requestErrorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : '小菱这次没连上,请再试一次'
+}
+
+/** 错误留在消息流:失败/取消不再只是 Toast,追加一张带重试/新建对话的错误卡片。 */
+function appendErrorCard(content: string, retryable: boolean): void {
+  messages.value.push({
+    id: messageId(),
+    role: 'error',
+    content,
+    time: dayjs().format('HH:mm'),
+    errorCard: { retryable },
+  })
+  void nextTick().then(scrollToBottom)
+}
+
+/** 重试:按最近一次失败的来源续跑(用户消息 / 审批 / 追问),复用发送守卫。 */
+async function retryLastAction(): Promise<void> {
+  if (!canStartRun.value) return
+  const kind = lastFailedRun.value.kind
+  if (kind === 'user-message') {
+    const lastUserMessage = [...messages.value].reverse().find((message) => message.role === 'user')
+    if (!lastUserMessage) return
+    await runResponse({
+      action: 'start',
+      surface: 'user',
+      session_id: sessionId.value,
+      messages: conversationHistory(),
+    })
+    return
+  }
+  if (kind === 'approval') {
+    const target = [...messages.value].reverse().find((message) => message.approval?.status === 'pending')
+    if (target?.approval) await decideApproval(target, { action: 'approve', confirmation: target.approval.danger ? '确认执行' : '' })
+    return
+  }
+  const target = [...messages.value].reverse().find((message) => message.inputRequest?.status === 'pending')
+  if (target) await submitInput(target)
+}
+
+/** 新建对话:交给会话切换器创建并切换(正在运行的对话会在后台继续)。 */
+function startNewChat(): void {
+  switcherRef.value?.createSession()
+}
+
+/** 会话归档:服务端成功后才本地移除;失败保留会话并重新发现。 */
+/** 团队成员追问:关闭悬浮窗并把追问指令预填到输入框。 */
+async function handleAskMember({ name }: { name: string; address: string }): Promise<void> {
+  teamWindowVisible.value = false
+  inputText.value = `请让「${name}」继续处理，我的要求是：`
+  await nextTick()
+  const enabled = !loading.value && !uploading.value && !sessionRestoring.value && !sessionBusy.value
+  if (enabled) {
+    chatInputRef.value?.focus()
+    return
+  }
+  const stop = watch(
+    [loading, uploading, sessionRestoring, sessionBusy],
+    () => {
+      const canFocus = !loading.value && !uploading.value && !sessionRestoring.value && !sessionBusy.value
+      if (!canFocus) return
+      stop()
+      nextTick(() => chatInputRef.value?.focus())
+    },
+  )
+}
+
+async function handleSessionArchive(sessionId: string): Promise<void> {
+  try {
+    await archiveAgentMeshSession('user', sessionId)
+    switcherRef.value?.removeSession(sessionId)
+  } catch {
+    ElMessage.warning('服务端归档失败,会话保留在列表中')
+    switcherRef.value?.restoreSessionAfterArchiveFailure()
+    switcherRef.value?.refreshFromAgentMesh()
+  }
+}
+
+/**
+ * 停止响应:先弹原因确认;确认后调用服务端取消,并把回滚提示留在消息流里。
+ */
+function requestStopResponse(): void {
+  if (!canStopResponse.value) return
+  cancelPromptVisible.value = true
+}
+
+async function cancelResponse(reason = ''): Promise<void> {
+  const runId = sessionRun.value?.run_id
+  if (runId && sessionId.value) {
+    try {
+      await cancelAgentResponseRun('user', sessionId.value, runId, reason)
+    } catch {
+      // 取消请求失败时仍断开本地流,后续轮询以服务端状态为准。
+    }
+    if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: 'cancelled' }
+  }
+  syncBusy()
+  activeResponse?.abort()
+  const hint = reason.trim()
+    ? `已停止任务（原因：${reason.trim()}），未执行剩余操作；如需继续可重新发起。`
+    : '已停止任务，未执行剩余操作；如需继续可重新发起。'
+  messages.value.push({ id: messageId(), role: 'assistant', content: hint, time: dayjs().format('HH:mm') })
+  await nextTick()
+  scrollToBottom()
+  scheduleSessionPoll()
+}
+
+function handleCancelConfirm(reason: string): void {
+  cancelPromptVisible.value = false
+  void cancelResponse(reason)
+}
+
+/** 消息复制反馈:记录最近复制成功的消息 id,图标短暂变勾。 */
+const copiedMessageId = ref('')
+let copiedResetTimer: number | undefined
+
+function fallbackCopyText(text: string): boolean {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    textarea.remove()
+  }
+}
+
+async function copyMessage(message: ChatMessage): Promise<void> {
+  const text = message.content
+  let succeeded: boolean
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      succeeded = true
+    } else {
+      succeeded = fallbackCopyText(text)
+    }
+  } catch {
+    succeeded = fallbackCopyText(text)
+  }
+  if (!succeeded) {
+    ElMessage.error('复制失败,请手动选择文本复制')
+    return
+  }
+  if (!message.id) return
+  copiedMessageId.value = message.id
+  window.clearTimeout(copiedResetTimer)
+  copiedResetTimer = window.setTimeout(() => { copiedMessageId.value = '' }, 1500)
 }
 
 function setTimelineCallStatus(
@@ -627,8 +1029,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         syncBusy()
         persistSnapshot()
         protocolError ||= eventErrorMessage(event)
-        const failed = event.type !== 'response.completed'
-        const terminalError = failed ? protocolError : '响应已结束，但工具未返回完成事件'
+        const terminalError = protocolError || '响应已结束，但工具未返回完成事件'
         finishResponseToolCalls(
           runToolCalls,
           'failed',
@@ -648,14 +1049,20 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     await handle.done
     if (protocolError) {
       ElMessage.error(protocolError)
+      appendErrorCard(protocolError, true)
       return false
     }
     return true
   } catch (error) {
-    if (!(error instanceof Error && error.name === 'AbortError')) {
-      ElMessage.error(requestErrorMessage(error))
-      if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
+    if (error instanceof Error && error.name === 'AbortError') {
+      // 用户主动「停止响应」:部分内容保留,留一张可重试的取消卡片。
+      appendErrorCard('已停止本次回答,你可以点「重试」继续,或新建对话', true)
+      return false
     }
+    const text = requestErrorMessage(error)
+    ElMessage.error(text)
+    appendErrorCard(text, true)
+    if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
     return false
   } finally {
     if (activeResponse === handle) activeResponse = null
@@ -663,6 +1070,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     showTyping.value = false
     await nextTick()
     scrollToBottom()
+    scheduleSessionPoll()
   }
 }
 
@@ -901,6 +1309,7 @@ async function sendMessage(): Promise<void> {
 
   messages.value.push({ id: messageId(), role: 'user', content: text, time: dayjs().format('HH:mm') })
   inputText.value = ''
+  lastFailedRun.value = { kind: 'user-message' }
   // 新对话自动命名:首条用户消息提炼为会话标题
   if (autoTitleAgentChatSession('user', sessionId.value, text)) {
     switcherRef.value?.reload?.()
@@ -931,6 +1340,7 @@ async function decideApproval(
   if (!approval || approval.status !== 'pending' || loading.value) return
   const { action, confirmation = '' } = decision
   approval.status = 'submitting'
+  lastFailedRun.value = { kind: 'approval' }
   setTimelineCallStatus(approval.call_id, action === 'approve' ? 'running' : 'rejected')
   const succeeded = await runResponse({
     action,
@@ -952,6 +1362,7 @@ async function submitInput(message: ChatMessage, selectedAnswer?: string): Promi
   const answer = request?.answer.trim() ?? ''
   if (!request || request.status !== 'pending' || !answer || loading.value) return
   request.status = 'submitting'
+  lastFailedRun.value = { kind: 'input' }
   if (!request.answerSent) {
     messages.value.push({
       id: messageId(),
@@ -984,7 +1395,35 @@ function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     sendMessage()
+    return
   }
+  // ↑:输入框为空时把最后一条自己发的消息填回来改,避免重复打字
+  if (e.key === 'ArrowUp' && !inputText.value.trim()) {
+    const lastUserMessage = [...messages.value].reverse().find((message) => message.role === 'user')
+    if (!lastUserMessage) return
+    e.preventDefault()
+    inputText.value = lastUserMessage.content
+    void nextTick(() => {
+      const input = e.target as HTMLTextAreaElement | null
+      if (input) {
+        input.focus()
+        input.setSelectionRange(input.value.length, input.value.length)
+      }
+    })
+  }
+}
+
+/** 面板级快捷键:`/` 从任意处聚焦输入框(输入中不拦截,不影响中文输入)。 */
+function handleGlobalKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && props.visible) {
+    close()
+    return
+  }
+  if (!props.visible || e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+  const target = e.target as HTMLElement | null
+  if (target?.closest('input, textarea, [contenteditable="true"]')) return
+  e.preventDefault()
+  chatInputRef.value?.focus()
 }
 
 /**
@@ -1029,8 +1468,22 @@ function scrollToBottom(): void {
 
 /* ── 拖拽上传文件建项目 ─────────────────────────────── */
 const dragActive = ref(false)
-/** 拖拽上传的实时状态,显示在输入区上方让用户知道进展 */
-const uploadStatus = ref('')
+const uploadInput = ref<HTMLInputElement>()
+
+/** 更新上传进度展示:阶段文案 + 已完成/总数驱动进度条。 */
+function setUploadProgress(phase: string, completed: number, total: number): void {
+  uploadProgress.value = { phase, completed, total }
+}
+
+function resetUploadProgress(): void {
+  uploadProgress.value = { completed: 0, total: 0, phase: '' }
+}
+
+const uploadStatusVisible = computed(() => uploading.value && Boolean(uploadProgress.value.phase))
+const uploadPercent = computed(() => {
+  const { completed, total } = uploadProgress.value
+  return total > 0 ? Math.round((completed / total) * 100) : 0
+})
 
 function onDragEnter(event: DragEvent): void {
   if (event.dataTransfer?.types?.includes('Files')) dragActive.value = true
@@ -1060,17 +1513,15 @@ function inferProjectLanguage(files: File[]): string {
   return 'Python'
 }
 
-async function onDrop(event: DragEvent): Promise<void> {
-  dragActive.value = false
-  const files = Array.from(event.dataTransfer?.files ?? [])
+async function processIncomingFiles(files: File[]): Promise<void> {
   if (!files.length || uploading.value) return
   uploading.value = true
-  uploadStatus.value = `准备上传 ${files.length} 个文件…`
+  setUploadProgress(`准备上传…`, 0, files.length)
   try {
     const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     if (images.length && !codeFiles.length) {
-      uploadStatus.value = ''
+      resetUploadProgress()
       ElMessage.info('图片会作为项目附件上传；若要让小菱帮你创建代码项目，请再拖入至少一个代码文件')
       return
     }
@@ -1079,16 +1530,27 @@ async function onDrop(event: DragEvent): Promise<void> {
     if (skipped > 0) ElMessage.warning(`单次最多上传 20 个文件,已跳过后面的 ${skipped} 个`)
     await uploadFilesAsProject(targets, images.length)
   } catch (err) {
-    uploadStatus.value = ''
+    resetUploadProgress()
     ElMessage.error(`上传失败: ${err instanceof Error ? err.message : '请重试'}`)
   } finally {
     uploading.value = false
   }
 }
 
+async function onDrop(event: DragEvent): Promise<void> {
+  dragActive.value = false
+  await processIncomingFiles(Array.from(event.dataTransfer?.files ?? []))
+}
+
+async function onFileInput(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  await processIncomingFiles(Array.from(input.files ?? []))
+  input.value = ''
+}
+
 /** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
 async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
-  uploadStatus.value = `正在验证 ${files.length} 个文件…`
+  setUploadProgress('正在验证文件…', 0, files.length)
   // 创建项目前先逐个读取,空文件/读取失败时不调用创建接口,避免留下空项目。
   const readableFiles: File[] = []
   const preflightFailures: string[] = []
@@ -1100,16 +1562,17 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     } catch (err) {
       preflightFailures.push(`${file.name}: ${err instanceof Error ? err.message : '文件不可读取'}`)
     }
+    setUploadProgress('正在验证文件…', readableFiles.length + preflightFailures.length, files.length)
   }
   if (!readableFiles.length) {
-    uploadStatus.value = ''
+    resetUploadProgress()
     throw new Error(`没有可上传的文件${preflightFailures.length ? ` (${preflightFailures[0]})` : ''}`)
   }
   const base = readableFiles.find((file) => !IMAGE_EXTS.has(file.name.split('.').pop()?.toLowerCase() ?? ''))?.name.replace(/\.[^.]+$/, '') || '拖拽上传'
   const suffix = `${new Date().toISOString().slice(5, 10).replace('-', '')}-${crypto.randomUUID().slice(0, 6)}`
   const projectName = `${base}-${suffix}`
   const language = inferProjectLanguage(readableFiles)
-  uploadStatus.value = `正在创建项目「${projectName}」…`
+  setUploadProgress(`正在创建项目「${projectName}」…`, 0, readableFiles.length)
   const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
   const projectId = created.id
   let okCount = 0
@@ -1117,7 +1580,7 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   const targets = readableFiles
   for (let i = 0; i < targets.length; i++) {
     const file = targets[i]
-    uploadStatus.value = `正在上传 ${i + 1}/${targets.length}: ${file.name}`
+    setUploadProgress(file.name, i, targets.length)
     try {
       const fd = new FormData()
       fd.append('project_id', String(projectId))
@@ -1128,8 +1591,9 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     } catch (err) {
       failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
     }
+    setUploadProgress(file.name, i + 1, targets.length)
   }
-  uploadStatus.value = ''
+  resetUploadProgress()
   // 若所有上传请求都失败,立即软删除刚建的空项目,不把失败项目留给用户。
   if (!okCount) {
     try { await deleteProject(projectId) } catch { /* 仍优先把真实上传失败反馈给用户 */ }
@@ -1141,18 +1605,21 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     try { await updateProject(projectId, { language: uploadedLanguage }) } catch { /* 不影响已上传文件 */ }
   }
   const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
-  const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
+  const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。小菱正在自动启动隔离沙箱全量验证，完成后会返回白盒、黑盒与多 Agent 审查报告。`
   messages.value.push({ id: messageId(), role: 'assistant', content: summary, time: dayjs().format('HH:mm') })
   await nextTick()
   scrollToBottom()
   if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
   else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
-  // 交给 Agent 接手:把上传结果作为一条用户消息发给 Agent,让它按操作手册引导下一步
+  // 上传成功后交给固定全量验证工具，避免模型只回复“下一步做什么”而不执行。
   await runResponse({
     action: 'start',
     surface: 'user',
     session_id: sessionId.value,
-    messages: [...conversationHistory(), { role: 'user', content: `我刚通过拖拽上传了 ${okCount} 个文件,已建好项目「${projectName}」(id=${projectId},语言 ${language})。请告诉我下一步可以做什么。` }],
+    messages: [...conversationHistory(), {
+      role: 'user',
+      content: buildAutoValidationPrompt(projectId, uploadedLanguage, projectName),
+    }],
   })
 }
 
@@ -1177,18 +1644,53 @@ watch(() => props.prefill, (prefill) => {
   emit('consumed-prefill')
 }, { immediate: true })
 
-function handleEscape(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && props.visible) close()
+function showReconnectHint(): void {
+  reconnectHint.value = true
+  if (reconnectHintTimer !== undefined) window.clearTimeout(reconnectHintTimer)
+  reconnectHintTimer = window.setTimeout(() => { reconnectHint.value = false }, 6000)
+}
+
+/** 网络恢复后立即无感接管进度,无需用户手动刷新。 */
+function handleOnline(): void {
+  sessionPollFailures = 0
+  showReconnectHint()
+  scheduleSessionPoll(true)
+}
+
+function handleOffline(): void {
+  sessionPollError.value = '网络断开,恢复后自动继续'
+}
+
+/** 回到前台时立即同步一次,避免长任务被标签页冻结后出现陈旧进度。 */
+function handleVisibilityChange(): void {
+  if (document.visibilityState !== 'visible') return
+  if (!sessionPollStopped && sessionId.value && isAgentResponseSessionOccupied(sessionRun.value?.status)) {
+    scheduleSessionPoll(true)
+  }
 }
 
 onBeforeUnmount(() => {
+  meshBridge.stop()
   persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
   activeResponse?.abort()
   activityStore.clear()
   window.clearTimeout(projectSearchTimer)
-  window.removeEventListener('keydown', handleEscape)
+  window.clearTimeout(copiedResetTimer)
+  if (reconnectHintTimer !== undefined) window.clearTimeout(reconnectHintTimer)
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('online', handleOnline)
+  window.removeEventListener('offline', handleOffline)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
+
+onMounted(() => {
+  meshBridge.start()
+  window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
@@ -1231,11 +1733,13 @@ onBeforeUnmount(() => {
               </span>
               <div class="chat-title-text">
                 <div class="chat-title-line">
-                  <span>{{ MASCOT_NAME }} · Agent 助手</span>
-                  <span class="model-tag font-mono" title="当前模型">{{ modelName }}</span>
+                  <span :title="`当前模型:${modelName}`">{{ MASCOT_NAME }} · Agent 助手</span>
                   <span class="run-badge" :class="`run-${mascotStatus}`">
                     <i></i>{{ runStatusLabel }}
                   </span>
+                  <span v-if="sessionPollError" class="sync-status is-error" role="status">{{ sessionPollError }}</span>
+                  <span v-else-if="reconnectHint" class="sync-status is-reconnect" role="status">网络已恢复,继续执行</span>
+                  <span v-else-if="sessionLastPolledAt" class="sync-status" role="status">自动监控 · 已同步 {{ sessionLastPolledAt }}</span>
                   <button
                     v-if="canRetryRun"
                     class="retry-run-btn"
@@ -1251,7 +1755,10 @@ onBeforeUnmount(() => {
                   :legacy-key="LEGACY_SESSION_KEY"
                   id-prefix="user"
                   :welcome-text="WELCOME_TEXT"
+                  :discover-remote="true"
                   @select="handleSessionSelect"
+                  @sessions-changed="handleSwitcherReady"
+                  @archive="handleSessionArchive"
                 />
               </div>
             </div>
@@ -1287,8 +1794,28 @@ onBeforeUnmount(() => {
               </div>
             </Transition>
 
-            <div v-if="mascotStatus === 'running' && lastActiveToolName" class="chat-progress">
-              {{ toolRunningPhrase(lastActiveToolName) }}
+            <div
+              v-if="showToolProgress || (mascotStatus === 'running' && lastActiveToolName)"
+              class="chat-progress"
+              :class="{ 'is-busy': mascotStatus === 'running' }"
+              role="status"
+              aria-label="小菱执行进度"
+            >
+              <span class="chat-progress-phrase">
+                <template v-if="mascotStatus === 'running' && lastActiveToolName">
+                  {{ toolRunningPhrase(lastActiveToolName) }}
+                </template>
+                <template v-else-if="toolStepProgress.current">
+                  当前:{{ toolRunningPhrase(toolStepProgress.current.name) }}
+                </template>
+                <template v-else>小菱正在推进…</template>
+              </span>
+              <template v-if="showToolProgress">
+                <span class="chat-progress-track" aria-hidden="true">
+                  <i :style="{ width: `${toolProgressPercent}%` }"></i>
+                </span>
+                <span class="chat-progress-count">{{ toolStepProgress.done }}/{{ toolStepProgress.total }} 步</span>
+              </template>
             </div>
 
             <div ref="chatBody" class="chat-body" @click="onMessageClick">
@@ -1298,11 +1825,10 @@ onBeforeUnmount(() => {
                 <PrismMascot v-else :size="26" :status="'idle'" />
               </div>
               <div class="msg-bubble" :class="{ 'has-response-control': msg.toolCalls?.length || msg.approval || msg.inputRequest }">
-                <!-- 步骤气泡: 仅对 assistant + 有 steps 时展示 -->
+                <!-- 步骤气泡: 仅对 assistant + 有 steps 时展示;默认折叠降噪 -->
                 <details
                   v-if="msg.role === 'assistant' && msg.steps && msg.steps.length"
                   class="step-stream"
-                  open
                 >
                   <summary class="step-summary">
                     Agent 调度链 · 共 {{ msg.steps.length }} 步
@@ -1338,7 +1864,7 @@ onBeforeUnmount(() => {
                   class="plan-tree"
                 >
                   <summary class="plan-summary">
-                    <span class="plan-icon">🌳</span>
+                    <el-icon class="plan-icon" aria-hidden="true"><Connection /></el-icon>
                     双层调度调用链 · LLM 规划 {{ msg.planSteps.length }} 步
                     <span class="plan-total-ms">
                       总耗时 {{ planTotalMs(msg.planSteps) }}ms
@@ -1353,7 +1879,7 @@ onBeforeUnmount(() => {
                     >
                       <div class="plan-step-head">
                         <span class="plan-step-idx">#{{ step.step_index + 1 }}</span>
-                        <span class="plan-tool" :title="step.tool_name">{{ toolDisplayInfo(step.tool_name).label }}</span>
+                        <code class="plan-tool">{{ step.tool_name }}</code>
                         <span
                           class="plan-step-status"
                           :class="step.success ? 'plan-ok' : 'plan-bad'"
@@ -1378,12 +1904,44 @@ onBeforeUnmount(() => {
                   </ol>
                 </details>
 
+                <!-- 错误卡片:失败/取消留在消息流,带重试与新建对话 -->
+                <div v-if="msg.role === 'error'" class="msg-error-card">
+                  <div class="msg-error-head">
+                    <el-icon aria-hidden="true"><CircleCloseFilled /></el-icon>
+                    <span>这次没有完成</span>
+                  </div>
+                  <p class="msg-error-text">{{ msg.content }}</p>
+                  <div class="msg-error-actions">
+                    <button
+                      v-if="msg.errorCard?.retryable"
+                      class="msg-error-btn is-retry"
+                      type="button"
+                      :disabled="!canStartRun"
+                      @click="retryLastAction()"
+                    >重试</button>
+                    <button class="msg-error-btn" type="button" @click="startNewChat()">新建对话</button>
+                  </div>
+                </div>
+
                 <div
                   v-if="msg.role === 'assistant' && msg.content"
                   class="msg-content markdown-body"
                   v-html="renderMarkdown(msg.content)"
                 />
                 <div v-else-if="msg.role === 'user'" class="msg-content">{{ msg.content }}</div>
+                <!-- 助手消息 hover 显示复制按钮 -->
+                <button
+                  v-if="msg.role === 'assistant' && msg.content"
+                  class="msg-copy-btn"
+                  :class="{ 'is-copied': copiedMessageId === msg.id }"
+                  type="button"
+                  :title="copiedMessageId === msg.id ? '已复制' : '复制这条回复'"
+                  :aria-label="copiedMessageId === msg.id ? '已复制' : '复制这条回复'"
+                  @click="copyMessage(msg)"
+                >
+                  <el-icon v-if="copiedMessageId === msg.id" aria-hidden="true"><Check /></el-icon>
+                  <el-icon v-else aria-hidden="true"><CopyDocument /></el-icon>
+                </button>
 
                 <!-- 页面引导:模型约定路由 + 指令导航按钮,鉴权由 AgentNavLink 同源守卫裁决 -->
                 <div v-if="msg.role === 'assistant' && msg.navigations?.length" class="nav-directives">
@@ -1549,6 +2107,15 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <AgentTeamTrace
+              v-for="(team, index) in agentTeams"
+              :key="team.team_id"
+              :team="team"
+              :loading="agentTeamLoading"
+              :error="index === 0 ? agentTeamError : ''"
+              @open-detail="openTeamWindow"
+            />
+
             <div v-if="showTyping" class="msg-row assistant">
               <div class="msg-avatar">
                 <PrismMascot :size="26" :status="'running'" />
@@ -1563,30 +2130,75 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="chat-input-area">
-            <div v-if="uploadStatus" class="upload-status">
+            <div v-if="uploadStatusVisible" class="upload-status" role="status" aria-label="上传进度">
               <span class="upload-status-spinner" />
-              <span class="upload-status-text">{{ uploadStatus }}</span>
+              <span class="upload-status-text" :title="uploadProgress.phase">{{ uploadProgress.phase }}</span>
+              <span class="upload-status-track" aria-hidden="true">
+                <i :style="{ width: `${uploadPercent}%` }"></i>
+              </span>
+              <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
             </div>
+            <p v-else class="chat-input-hint">支持直接拖入代码文件帮你建项目;Shift+Enter 换行</p>
+            <input
+              ref="uploadInput"
+              class="source-upload-input"
+              type="file"
+              multiple
+              accept=".py,.js,.jsx,.ts,.tsx,.vue,.html,.css,.java,.go,.php,.rb,.c,.h,.cpp,.cc,.cs,.rs,.json,.yaml,.yml,.toml,.md,.txt,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg"
+              aria-label="选择源码文件"
+              @change="onFileInput"
+            />
             <textarea
+              ref="chatInputRef"
               v-model="inputText"
               class="chat-input"
-              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送,Shift+Enter 换行;也可直接拖入代码文件帮你建项目'"
+              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送'"
               rows="2"
               :disabled="loading || uploading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
             />
-            <button
-              class="send-btn"
-              type="button"
-              :disabled="!canSend"
-              @click="sendMessage"
-            >
-              发送
-            </button>
+            <div class="chat-input-actions">
+              <button
+                class="upload-btn"
+                type="button"
+                :disabled="loading || uploading || sessionRestoring || sessionBusy"
+                title="选择源码文件或图片附件"
+                @click="uploadInput?.click()"
+              >
+                <el-icon aria-hidden="true"><Upload /></el-icon>
+                选择源码
+              </button>
+              <button
+                v-if="canStopResponse"
+                class="stop-btn"
+                type="button"
+                title="停止小菱本次回答"
+                @click="requestStopResponse"
+              >
+                <span class="stop-btn-icon" aria-hidden="true"></span>
+                停止响应
+              </button>
+              <button
+                v-else
+                class="send-btn"
+                type="button"
+                :disabled="!canSend"
+                @click="sendMessage"
+              >
+                发送
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </Transition>
+    <AgentTeamWindow
+      v-model:visible="teamWindowVisible"
+      :team="teamWindowTeam"
+      @refreshed="void refreshAgentTeam()"
+      @ask-member="handleAskMember"
+    />
+    <TaskCancelConfirm :visible="cancelPromptVisible" @confirm="handleCancelConfirm" @dismiss="cancelPromptVisible = false" />
   </Teleport>
 </template>
 
@@ -1642,7 +2254,7 @@ onBeforeUnmount(() => {
 }
 
 .chat-fab {
-  position: fixed; right: 24px; bottom: 80px; z-index: 3000;
+  position: fixed; right: 24px; bottom: 24px; z-index: 3000;
   width: 60px; height: 60px; border: 0; border-radius: 50%;
   background: linear-gradient(145deg, #ffffff, #eef0fb);
   display: grid; place-items: center;
@@ -1667,8 +2279,6 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
   border-radius: 50%;
   background: linear-gradient(145deg, #f2f3ff, #e4ecfb);
   box-shadow: inset 0 0 0 1px rgba(91, 88, 232, 0.16);
@@ -1722,52 +2332,71 @@ onBeforeUnmount(() => {
   background: currentColor;
 }
 .run-idle { color: var(--gray-500); background: var(--gray-100); border-color: var(--gray-200, #e5e6eb); }
-.run-running { color: var(--color-success); background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
+.run-running { color: #2f7a3d; background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
 .run-running i { animation: run-blink 1s ease-in-out infinite; }
-.run-waiting { color: var(--sev-medium); background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
+.run-waiting { color: #b68039; background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
 .run-waiting i { animation: run-blink 1s ease-in-out infinite; }
+.sync-status { color: var(--color-text-secondary); font-size: 9.5px; white-space: nowrap; }
+.sync-status.is-error { color: #c43d36; font-weight: 600; }
+.sync-status.is-reconnect { color: #2e9e5b; font-weight: 600; }
 @keyframes run-blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 .chat-progress {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 20px;
-  font-size: var(--fs-xs);
+  font-size: 11px;
   color: var(--color-text-secondary);
   background: linear-gradient(90deg, rgba(91, 88, 232, 0.06), rgba(61, 188, 217, 0.06));
   border-bottom: 1px solid var(--color-border-light);
   overflow: hidden;
+}
+.chat-progress-phrase {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.quick-questions {
-  position: absolute;
-  top: 134px;
-  right: 8px;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--sp-2);
-}
-
-.quick-question {
-  border: 1px solid var(--brand-200);
+.chat-progress-track {
+  flex: 1 1 72px;
+  min-width: 48px;
+  max-width: 160px;
+  height: 6px;
+  overflow: hidden;
   border-radius: 999px;
-  background: var(--brand-50);
-  color: var(--brand-700);
-  font-size: var(--fs-xs);
-  padding: 5px var(--sp-3);
-  cursor: pointer;
-  box-shadow: var(--shadow-1);
-  transition: all var(--transition-fast);
+  background: var(--gray-100);
+}
+.chat-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand-400), var(--accent-400));
+  transition: width 0.4s ease;
+}
+/* 运行中呼吸:整条进度带轻微明暗起伏 */
+.chat-progress.is-busy .chat-progress-track i {
+  animation: chat-progress-breathe 1.4s ease-in-out infinite;
+}
+@keyframes chat-progress-breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.22); }
+}
+.chat-progress-count {
+  flex: none;
+  color: var(--brand-600);
+  font-weight: 600;
+  font-size: 10.5px;
   white-space: nowrap;
 }
-
-.quick-question:hover {
-  background: var(--brand-100);
-  border-color: var(--brand-300);
-  transform: translateY(-1px);
+.chat-progress code {
+  font-family: var(--font-mono, monospace);
+  color: var(--brand-600);
+  font-size: 10.5px;
+  background: rgba(91, 88, 232, 0.1);
+  padding: 0 5px;
+  border-radius: 3px;
 }
 
 .chat-drawer.is-dragging { user-select: none; }
@@ -1799,30 +2428,12 @@ onBeforeUnmount(() => {
   font-size: 18px;
 }
 
-/* 模型名对普通用户太技术:弱化展示,hover 时再看清 */
-.model-tag {
-  font-size: var(--fs-xs);
-  padding: 2px var(--sp-2);
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--gray-400);
-  border: 1px solid var(--gray-200);
-  opacity: 0.6;
-  transition: opacity var(--transition-fast);
-}
-.model-tag:hover {
-  opacity: 1;
-  color: var(--brand-600);
-  border-color: var(--brand-200);
-  background: var(--brand-50);
-}
-
 .close-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -1852,6 +2463,47 @@ onBeforeUnmount(() => {
   z-index: 1;
   pointer-events: none;
   opacity: 0.95;
+}
+
+.quick-questions {
+  position: absolute;
+  top: 134px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+
+.quick-question {
+  border: 1px solid var(--brand-200);
+  border-radius: 999px;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: var(--fs-xs);
+  min-height: 36px;
+  padding: 8px var(--sp-4);
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.quick-question:hover {
+  background: var(--brand-100);
+  border-color: var(--brand-300);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quick-question { transition: none; }
+  .quick-question:hover { transform: none; }
+  .chat-progress-track i { transition: none; }
+  .chat-progress.is-busy .chat-progress-track i { animation: none; }
+  .upload-status-track i { transition: none; }
+  .msg-copy-btn { transition: none; }
+  .stop-btn { transition: none; }
 }
 
 .mascot-float-enter-active,
@@ -1896,6 +2548,7 @@ onBeforeUnmount(() => {
 }
 
 .msg-bubble {
+  position: relative;
   max-width: calc(100% - 48px);
   padding: 10px 14px;
   border-radius: 12px;
@@ -1904,6 +2557,80 @@ onBeforeUnmount(() => {
 }
 
 .msg-bubble.has-response-control { width: calc(100% - 48px); }
+
+/* hover 复制按钮:默认淡出,气泡悬停/键盘聚焦时可见 */
+.msg-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.msg-bubble:hover .msg-copy-btn,
+.msg-copy-btn:focus-visible { opacity: 1; }
+.msg-copy-btn:hover { color: var(--brand-600); border-color: var(--brand-300); }
+.msg-copy-btn.is-copied { color: var(--color-success); border-color: var(--color-success); opacity: 1; }
+
+/* 错误卡片:红色左边条,失败/取消留在消息流里 */
+.msg-row.error .msg-avatar { background: var(--color-danger-light); box-shadow: inset 0 0 0 1px rgba(220, 73, 97, 0.25); }
+
+.msg-error-card {
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--color-danger);
+}
+
+.msg-error-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-danger);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.msg-error-text {
+  margin: 5px 0 0;
+  color: var(--color-text-regular);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-error-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.msg-error-btn {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-base);
+  border-radius: 6px;
+  background: var(--color-bg-card);
+  color: var(--color-text-regular);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.msg-error-btn:hover:not(:disabled) { border-color: var(--brand-400); color: var(--brand-600); }
+.msg-error-btn.is-retry { border-color: var(--brand-500); color: #fff; background: var(--brand-500); }
+.msg-error-btn.is-retry:hover:not(:disabled) { border-color: var(--brand-600); background: var(--brand-600); color: #fff; }
+.msg-error-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .msg-row.user .msg-bubble {
   background: var(--brand-50);
@@ -1925,12 +2652,12 @@ onBeforeUnmount(() => {
 .msg-content.markdown-body { white-space: normal; }
 .msg-content.markdown-body :deep(p)        { margin: 0; }
 .msg-content.markdown-body :deep(pre) {
-  background: var(--gray-900); color: var(--gray-100);
+  background: #1e1e2e; color: #cdd6f4;
   border-radius: 6px; padding: 12px;
-  overflow-x: auto; font-size: var(--fs-xs); line-height: 1.5; margin: 8px 0;
+  overflow-x: auto; font-size: 12px; line-height: 1.5; margin: 8px 0;
 }
 .msg-content.markdown-body :deep(code) {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: var(--fs-xs);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px;
 }
 .msg-content.markdown-body :deep(p code) {
   background: var(--gray-100); padding: 1px 5px;
@@ -2018,7 +2745,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
-.plan-icon { font-size: 14px; }
+.plan-icon { font-size: 14px; color: var(--brand-500); }
 
 .plan-total-ms {
   margin-left: auto;
@@ -2041,11 +2768,11 @@ onBeforeUnmount(() => {
   background: #fff;
   border: 1px solid var(--color-border-light, #EEF0F4);
   border-radius: 6px;
-  border-left: 3px solid var(--color-success);
+  border-left: 3px solid #2f9e44;
 
   &.plan-failed {
-    border-left-color: var(--color-danger);
-    background: rgba(220, 73, 97, 0.04);
+    border-left-color: #e5484d;
+    background: rgba(229, 72, 77, 0.04);
   }
 }
 
@@ -2053,18 +2780,19 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--fs-xs);
+  font-size: 11.5px;
 }
 
 .plan-step-idx {
   font-weight: 600;
   color: var(--gray-500, #909399);
-  font-size: var(--fs-xs);
+  font-size: 10.5px;
 }
 
 .plan-tool {
+  font-family: var(--font-mono, monospace);
   color: var(--brand-600, #5B58E8);
-  font-size: var(--fs-xs);
+  font-size: 11px;
   background: rgba(91, 88, 232, 0.08);
   padding: 1px 6px;
   border-radius: 3px;
@@ -2072,22 +2800,22 @@ onBeforeUnmount(() => {
 
 .plan-step-status {
   font-weight: 700;
-  font-size: var(--fs-xs);
+  font-size: 12px;
 
-  &.plan-ok { color: var(--color-success); }
-  &.plan-bad { color: var(--color-danger); }
+  &.plan-ok { color: #2f9e44; }
+  &.plan-bad { color: #e5484d; }
 }
 
 .plan-step-ms {
   margin-left: auto;
-  font-size: var(--fs-xs);
+  font-size: 10.5px;
   color: var(--gray-500, #909399);
   font-family: var(--font-mono, monospace);
 }
 
 .plan-reason {
   margin: 4px 0 0;
-  font-size: var(--fs-xs);
+  font-size: 11.5px;
   color: var(--gray-600, #606266);
   line-height: 1.5;
 }
@@ -2095,22 +2823,22 @@ onBeforeUnmount(() => {
 .plan-args,
 .plan-preview {
   margin-top: 4px;
-  font-size: var(--fs-xs);
+  font-size: 11px;
 
   summary {
     cursor: pointer;
     color: var(--gray-500, #909399);
-    font-size: var(--fs-xs);
+    font-size: 10.5px;
   }
 }
 
 .plan-json {
   margin: 4px 0 0;
   padding: 6px 8px;
-  background: var(--gray-50);
+  background: #f6f7f9;
   border-radius: 4px;
   font-family: var(--font-mono, monospace);
-  font-size: var(--fs-xs);
+  font-size: 10.5px;
   color: var(--gray-700, #303133);
   overflow-x: auto;
   max-height: 120px;
@@ -2119,8 +2847,8 @@ onBeforeUnmount(() => {
 
 .plan-error {
   margin: 4px 0 0;
-  font-size: var(--fs-xs);
-  color: var(--color-danger);
+  font-size: 11px;
+  color: #e5484d;
   word-break: break-all;
 }
 
@@ -2183,28 +2911,28 @@ onBeforeUnmount(() => {
   line-height: 1.4;
 }
 
-.step-complete .step-type { background: rgba(79, 184, 122, 0.12); color: var(--color-success); }
-.step-failed .step-type   { background: rgba(220, 73, 97, 0.12); color: var(--color-danger); }
-.step-clarify .step-type  { background: rgba(217, 168, 87, 0.18); color: var(--sev-medium); }
-.step-dispatch .step-type { background: rgba(91, 88, 232, 0.12); color: var(--brand-500); }
+.step-complete .step-type { background: rgba(79, 184, 122, 0.12); color: #4FB87A; }
+.step-failed .step-type   { background: rgba(220, 73, 97, 0.12); color: #DC4961; }
+.step-clarify .step-type  { background: rgba(217, 168, 87, 0.18); color: #B68039; }
+.step-dispatch .step-type { background: rgba(91, 88, 232, 0.12); color: #5B58E8; }
 
 /* === Clarify 表单 === */
 .clarify-card {
   margin-top: 10px;
-  border: 1px dashed var(--sev-medium);
-  background: var(--sev-medium-bg);
+  border: 1px dashed #D9A857;
+  background: #FFFBF0;
   border-radius: 8px;
   padding: 12px 14px;
 }
 
 .clarify-card.is-danger {
   border-style: solid;
-  border-color: var(--color-danger);
-  background: var(--color-danger-light);
+  border-color: #D54941;
+  background: #FFF6F5;
 }
 
 .clarify-card.is-danger .clarify-head {
-  color: var(--color-danger);
+  color: #B42318;
 }
 
 .clarify-head {
@@ -2212,8 +2940,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  font-size: var(--fs-sm);
-  color: var(--sev-medium);
+  font-size: 13px;
+  color: #8B6A2F;
   margin-bottom: 10px;
 }
 
@@ -2330,9 +3058,44 @@ onBeforeUnmount(() => {
 }
 
 .upload-status-text {
+  flex: none;
+  max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.upload-status-track {
+  flex: 1 1 60px;
+  min-width: 48px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--brand-100, #dcdafd);
+}
+
+.upload-status-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand-400, #6f69ee), var(--accent-400, #3dbcd9));
+  transition: width 0.3s ease;
+}
+
+.upload-status-count {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--brand-600, #5b58e8);
+  white-space: nowrap;
+}
+
+.chat-input-hint {
+  width: 100%;
+  margin: 0 0 2px;
+  color: var(--color-text-placeholder);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
 .chat-input {
@@ -2350,9 +3113,53 @@ onBeforeUnmount(() => {
 
 .chat-input:focus { border-color: var(--brand-400); }
 
+.source-upload-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chat-input-actions {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.upload-btn:hover:not(:disabled) {
+  border-color: var(--brand-400);
+  color: var(--brand-600);
+}
+
+.upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .send-btn {
   align-self: flex-end;
-  padding: 8px 20px;
+  min-height: 40px;
+  padding: 8px 24px;
   border: none;
   border-radius: 8px;
   background: var(--brand-500);
@@ -2366,6 +3173,34 @@ onBeforeUnmount(() => {
 
 .send-btn:hover:not(:disabled) { background: var(--brand-600); }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 停止响应:红色醒目,运行中替换发送按钮 */
+.stop-btn {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 18px;
+  border: 1px solid var(--color-danger);
+  border-radius: 8px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.stop-btn:hover { background: var(--sev-severe); border-color: var(--sev-severe); }
+
+.stop-btn-icon {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #fff;
+}
 
 .drawer-enter-active,
 .drawer-leave-active { transition: all 0.3s ease; }
@@ -2383,5 +3218,10 @@ onBeforeUnmount(() => {
   .chat-overlay { right: 16px; bottom: 16px; }
   .chat-fab { right: 16px; bottom: 16px; }
   .chat-drawer { width: calc(100vw - 32px); height: min(600px, calc(100dvh - 32px)); }
+  /* 触控适配:关键按钮加大到 40px,更好点 */
+  .close-btn { width: 40px; height: 40px; }
+  .send-btn,
+  .stop-btn { min-height: 40px; padding: 8px 22px; }
+  .upload-btn { min-height: 40px; }
 }
 </style>

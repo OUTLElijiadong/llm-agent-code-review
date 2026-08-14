@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -88,12 +88,29 @@ def invoke_published_agent(
     rules: list[dict[str, Any]] | None = None,
     line_offset: int = 0,
     experience: str = "",
+    release_id: Optional[int] = None,
+    version_id: Optional[int] = None,
+    package_checksum: str = "",
+    template_checksum: str = "",
 ) -> dict[str, Any]:
     """通过与目录 API 相同的实现调用精确发布版本。"""
     _require_invoke_permission(db, user)
-    definition = DeclarativeReviewAgentFactory.resolve_published(db, agent_code, user=user)
+    if release_id is not None or version_id is not None:
+        if release_id is None or version_id is None:
+            raise NotFoundError("已发布 Agent 快照不完整", code=40400)
+        definition = DeclarativeReviewAgentFactory.resolve_release(
+            db,
+            agent_code,
+            release_id=int(release_id),
+            version_id=int(version_id),
+            package_checksum=package_checksum,
+            template_checksum=template_checksum,
+            user=user,
+        )
+    else:
+        definition = DeclarativeReviewAgentFactory.resolve_published(db, agent_code, user=user)
     if definition is None:
-        raise NotFoundError("已发布 Agent 不存在或已停用", code=40400)
+        raise NotFoundError("已发布 Agent 不存在、已停用或快照校验失败", code=40400)
     profile = definition.to_profile()
     system_prompt, user_prompt = build_prompt(
         language=language,

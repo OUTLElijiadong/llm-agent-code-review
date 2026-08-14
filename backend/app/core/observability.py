@@ -1,7 +1,9 @@
-"""HTTP 请求上下文、Prometheus 指标与数据库就绪探测。"""
+"""HTTP 请求上下文、进程内事件指标、Prometheus 指标与数据库就绪探测。"""
 from __future__ import annotations
 
+import json
 import re
+import threading
 import time
 import uuid
 from typing import Optional
@@ -14,6 +16,79 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+
+# 进程内事件指标：供运行时与调度器累计关键业务事件。
+# Prometheus 计数保持进程级 registry；这里额外提供无 I/O 的内存汇总与重置，
+# 便于单元测试、本地观测和按标签维度审计。
+_EVENT_METRICS_LOCK = threading.Lock()
+_KNOWN_EVENT_CATEGORIES = (
+    "xiaoling_compaction",
+    "xiaoling_cancel",
+    "sandbox_heartbeat",
+    "sandbox_stuck_recovered",
+    "team_created",
+)
+_EVENT_COUNTS: dict[str, int] = {}
+_EVENT_LABEL_COUNTS: dict[tuple[str, str], int] = {}
+
+
+def _event_label_key(labels: Optional[dict]) -> str:
+    """把标签字典稳定序列化为可哈希的维度键。"""
+    if not labels:
+        return "{}"
+    return json.dumps(labels, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def observe_event(category: str, *, count: int = 1, labels: Optional[dict] = None) -> None:
+    """累计一次进程内业务事件计数。
+
+    Args:
+        category: 事件类别；推荐使用小写 snake_case。
+        count: 本次累计数量，必须是非负整数。
+        labels: 可选维度标签，用于按标签查询细分计数。
+
+    Returns:
+        None: 仅更新进程内计数。
+    """
+    if not isinstance(category, str) or not category:
+        raise ValueError("category 必须是非空字符串")
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        raise ValueError("count 必须是非负整数")
+    with _EVENT_METRICS_LOCK:
+        _EVENT_COUNTS[category] = _EVENT_COUNTS.get(category, 0) + count
+        label_key = _event_label_key(labels)
+        _EVENT_LABEL_COUNTS[(category, label_key)] = (
+            _EVENT_LABEL_COUNTS.get((category, label_key), 0) + count
+        )
+    PRISM_EVENT_TOTAL.labels(category=category).inc(count)
+
+
+def metrics_snapshot() -> dict[str, int]:
+    """返回已知业务事件的总计数快照，未知类别顺带保留。
+
+    Returns:
+        dict[str, int]: 五类内置事件计数，未观测过时为 0。
+    """
+    with _EVENT_METRICS_LOCK:
+        categories = list(_KNOWN_EVENT_CATEGORIES)
+        categories.extend(
+            category for category in _EVENT_COUNTS if category not in _KNOWN_EVENT_CATEGORIES
+        )
+        return {category: _EVENT_COUNTS.get(category, 0) for category in categories}
+
+
+def event_label_counts() -> dict[tuple[str, str], int]:
+    """返回按事件类别和序列化标签维度拆分的计数快照。"""
+    with _EVENT_METRICS_LOCK:
+        return dict(_EVENT_LABEL_COUNTS)
+
+
+def reset_metrics() -> None:
+    """清空全部进程内事件计数，供测试或运行周期重新起算。"""
+    with _EVENT_METRICS_LOCK:
+        _EVENT_COUNTS.clear()
+        _EVENT_LABEL_COUNTS.clear()
+
 
 HTTP_REQUESTS_TOTAL = Counter(
     "prism_http_requests_total",
@@ -30,6 +105,13 @@ HTTP_REQUESTS_IN_PROGRESS = Gauge(
     "prism_http_requests_in_progress",
     "Prism 当前处理中 HTTP 请求数。",
     ("method",),
+)
+
+
+PRISM_EVENT_TOTAL = Counter(
+    "prism_event_total",
+    "Prism 业务事件累计（压缩/取消/沙箱心跳/卡死回收/团队创建等）。",
+    ("category",),
 )
 
 

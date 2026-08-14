@@ -12,6 +12,7 @@ import {
   type AgentTeamMessage,
   type AgentTeamTask,
 } from '@/api/agentTeams'
+import AgentMemberWorkCard from '@/components/ai/AgentMemberWorkCard.vue'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 
 /**
@@ -31,6 +32,8 @@ const emit = defineEmits<{
   'update:visible': [value: boolean]
   /** 重试/取消成功后通知父组件刷新团队数据 */
   refreshed: []
+  /** 在聊天中追问某成员:父组件预填输入框,支持做完后修正。 */
+  'ask-member': [payload: { name: string; address: string }]
 }>()
 
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } =
@@ -94,10 +97,6 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   completed: '已完成', failed: '失败', blocked: '已阻塞',
   cancelled: '已取消', dead_letter: '死信', expired: '已过期',
 }
-const MEMBER_STATUS_LABELS: Record<string, string> = {
-  created: '已创建', queued: '排队中', running: '运行中',
-  completed: '已完成', failed: '失败', reclaimed: '已回收',
-}
 const ROLE_LABELS: Record<string, string> = {
   worker: '执行', verifier: '验证', summarizer: '汇总',
 }
@@ -109,9 +108,6 @@ function teamStatusLabel(status: string): string {
 }
 function taskStatusLabel(status: string): string {
   return TASK_STATUS_LABELS[status] ?? status
-}
-function memberStatusLabel(status: string): string {
-  return MEMBER_STATUS_LABELS[status] ?? status
 }
 function roleLabel(role: string): string {
   return ROLE_LABELS[role] ?? role
@@ -179,27 +175,7 @@ function mentionLabel(message: AgentTeamMessage): string {
   return `${verb} @${target.display_name}`
 }
 
-/** 每个成员的实时工作状态:取该成员当前 running 任务标题作为「正在做的事」。 */
-function memberActivity(member: AgentTeamMember): string {
-  const running = tasks.value.find(
-    (task) =>
-      task.status === 'running'
-      && (task.member_id === member.member_id
-        || (task.member_key && normalizeAddress(task.member_key) === normalizeAddress(member.member_key))),
-  )
-  if (running) return running.title
-  if (member.status === 'running') return '处理中'
-  if (member.status === 'completed') return '已完成'
-  if (member.status === 'failed') return '出错了'
-  return '待命'
-}
-
-/** 成员状态点:completed→绿勾,failed→红叉,running→呼吸点,其余灰点。 */
-function memberStatusIcon(status: string): string {
-  if (status === 'completed') return '✓'
-  if (status === 'failed') return '✕'
-  return ''
-}
+/** 每个成员的实时工作状态已由 AgentMemberWorkCard 渲染(状态+计时+日志)。 */
 
 function taskMember(task: AgentTeamTask): string {
   return task.member_key || members.value.find((member) => member.member_id === task.member_id)?.display_name || '未分配'
@@ -354,29 +330,18 @@ async function cancelTeam(): Promise<void> {
         </div>
 
         <div ref="chatBodyRef" class="team-window-body">
-          <!-- 成员实时工作状态条 -->
-          <section v-if="members.length" class="team-window-section" aria-label="团队成员实时状态">
-            <ul class="team-window-members">
-              <li v-for="member in members" :key="member.member_id" :class="statusClass(member.status)">
-                <span
-                  class="team-member-avatar"
-                  :class="`is-${ROLE_LABELS[member.role] ? member.role : 'manager'}`"
-                  aria-hidden="true"
-                >{{ (member.display_name || '员').trim().charAt(0) }}</span>
-                <span class="team-member-main">
-                  <span class="team-member-line">
-                    <span class="team-window-member-name">{{ member.display_name }}</span>
-                    <span class="team-window-role" :class="`is-${member.role}`">{{ roleLabel(member.role) }}</span>
-                  </span>
-                  <span class="team-member-activity" :title="memberActivity(member)">{{ memberActivity(member) }}</span>
-                </span>
-                <span class="team-member-state" :class="statusClass(member.status)">
-                  <i v-if="member.status === 'running'" class="team-member-pulse" aria-hidden="true"></i>
-                  <b v-else-if="memberStatusIcon(member.status)" aria-hidden="true">{{ memberStatusIcon(member.status) }}</b>
-                  {{ memberStatusLabel(member.status) }}
-                </span>
-              </li>
-            </ul>
+          <!-- 成员实时工作卡片(Codex 风格:头像+状态+计时+操作日志) -->
+          <section v-if="members.length" class="team-window-section team-window-members-section" aria-label="团队成员实时状态">
+            <AgentMemberWorkCard
+              v-for="member in members"
+              :key="member.member_id"
+              :member="member"
+              :tasks="tasks"
+              :events="props.team?.events ?? []"
+              :team-started-at="team.started_at"
+              show-ask
+              @ask="emit('ask-member', { name: $event.display_name, address: $event.address })"
+            />
           </section>
 
           <!-- 多 Agent 群聊气泡流 -->
@@ -461,7 +426,8 @@ async function cancelTeam(): Promise<void> {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: var(--z-index-popover);
+  /* 必须盖过聊天抽屉(3000)与 Element 弹层,否则被压在主聊天窗下面 */
+  z-index: 3200;
   display: flex;
   flex-direction: column;
   width: min(440px, calc(100vw - 24px));
@@ -596,76 +562,8 @@ async function cancelTeam(): Promise<void> {
 .team-window-section { min-width: 0; padding-top: var(--sp-2); }
 .team-window-section:first-child { padding-top: 0; }
 
-/* ── 成员实时工作状态卡 ─────────────────────── */
-.team-window-members { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.team-window-members li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 4px 8px 4px 4px;
-  border: 1px solid var(--color-border-light);
-  border-radius: 999px;
-  background: var(--color-bg-card);
-}
-.team-window-members li.is-running { border-color: var(--brand-200); background: var(--brand-50); }
-.team-window-members li.is-failed { border-color: rgba(217, 84, 79, 0.35); }
-.team-member-avatar {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 650;
-}
-.team-member-main { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
-.team-member-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.team-window-member-name { min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
-.team-window-role {
-  flex: none;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--brand-50);
-  color: var(--brand-600);
-  font-size: 10px;
-}
-.team-window-role.is-worker { background: rgba(61, 188, 217, 0.12); color: var(--accent-600); }
-.team-window-role.is-verifier { background: var(--sev-medium-bg); color: var(--sev-medium); }
-.team-window-role.is-summarizer { background: var(--color-success-light); color: var(--color-success); }
-.team-member-activity {
-  max-width: 150px;
-  overflow: hidden;
-  color: var(--color-text-placeholder);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.team-window-members li.is-running .team-member-activity { color: var(--brand-600); }
-.team-member-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex: none;
-  color: var(--color-text-secondary);
-  font-size: 10px;
-  white-space: nowrap;
-}
-.team-member-state b { font-weight: 700; }
-.team-member-state.is-completed { color: var(--color-success); }
-.team-member-state.is-failed { color: var(--color-danger); }
-.team-member-state.is-running { color: var(--brand-600); }
-.team-member-pulse {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--color-info);
-  animation: team-member-breathe 1.2s ease-in-out infinite;
-}
-@keyframes team-member-breathe { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+/* ── 成员工作卡片区:纵向卡片列表(Codex 风格) ── */
+.team-window-members-section { display: grid; gap: 8px; }
 
 /* ── 群聊气泡 ──────────────────────────────── */
 .team-window-chat { display: grid; gap: 8px; }
@@ -684,15 +582,10 @@ async function cancelTeam(): Promise<void> {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
 }
 /* 角色配色:小菱=品牌紫,执行=青,验证=金,汇总=绿 */
-.team-chat-avatar.is-manager,
-.team-member-avatar.is-manager { background: linear-gradient(135deg, var(--brand-500), var(--brand-400)); }
-.team-chat-avatar.is-worker,
-.team-member-avatar.is-worker { background: linear-gradient(135deg, var(--accent-500), var(--accent-400)); }
-.team-chat-avatar.is-verifier,
-.team-member-avatar.is-verifier { background: linear-gradient(135deg, var(--sev-medium), #e8c07a); }
-.team-chat-avatar.is-summarizer,
-.team-member-avatar.is-summarizer { background: linear-gradient(135deg, var(--color-success), #7fce9b); }
-
+.team-chat-avatar.is-manager { background: linear-gradient(135deg, var(--brand-500), var(--brand-400)); }
+.team-chat-avatar.is-worker { background: linear-gradient(135deg, var(--accent-500), var(--accent-400)); }
+.team-chat-avatar.is-verifier { background: linear-gradient(135deg, var(--sev-medium), #e8c07a); }
+.team-chat-avatar.is-summarizer { background: linear-gradient(135deg, var(--color-success), #7fce9b); }
 .team-chat-main { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: calc(100% - 33px); }
 .team-chat-head { display: flex; align-items: baseline; gap: 5px; min-width: 0; max-width: 100%; margin-bottom: 2px; }
 .team-chat-name { overflow: hidden; font-weight: 600; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -817,7 +710,6 @@ async function cancelTeam(): Promise<void> {
   .team-window-action,
   .team-window-enter-active,
   .team-window-leave-active { transition: none; }
-  .team-window-progress-bar.is-active i::after,
-  .team-member-pulse { animation: none; }
+  .team-window-progress-bar.is-active i::after { animation: none; }
 }
 </style>

@@ -9,8 +9,10 @@ from app.api.v1 import (
     admin_overview,
     agent_catalog,
     agent_governance,
+    agent_mesh,
     agent_responses,
     agent_studio,
+    agent_teams,
     agents,
     ai_chat,
     ai_logs,
@@ -74,6 +76,8 @@ api_router.include_router(admin_copilot.router, prefix="/admin/copilot", tags=["
 api_router.include_router(admin_overview.router, prefix="/admin", tags=["管理员总览"])
 api_router.include_router(agent_studio.router, prefix="/agent-studio", tags=["Agent 工坊"])
 api_router.include_router(agent_responses.router, prefix="/agent-responses", tags=["Responses Agent"])
+api_router.include_router(agent_mesh.router, prefix="/agent-mesh", tags=["小菱 Agent Mesh"])
+api_router.include_router(agent_teams.router, prefix="/agent-teams", tags=["小菱动态子 Agent 团队"])
 api_router.include_router(agent_catalog.router, prefix="/agent-catalog", tags=["Agent 目录"])
 api_router.include_router(admin_agent_releases.router, prefix="/admin/agent-releases", tags=["Agent 发布审批"])
 api_router.include_router(beta_invites.router, prefix="/admin/beta-codes", tags=["内测码管理"])

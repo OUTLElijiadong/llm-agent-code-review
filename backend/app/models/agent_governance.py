@@ -164,12 +164,16 @@ class ToolCallLog(Base, IdMixin, TimestampMixin):
 
 
 class AgentMemory(Base, IdMixin, TimestampMixin):
-    """Agent 独立记忆。"""
+    """Agent 记忆；执行策略按账户作用域在小菱与子 Agent 间共享。"""
 
     __tablename__ = "agent_memory"
     __table_args__ = (
         Index("ix_agent_memory_agent", "agent_code"),
         Index("ix_agent_memory_type", "memory_type"),
+        Index("ix_agent_memory_owner_scope", "owner_user_id", "share_scope", "status"),
+        Index("ix_agent_memory_project", "project_id", "status"),
+        Index("ix_agent_memory_fingerprint", "fingerprint"),
+        Index("uq_agent_memory_strategy_key", "strategy_key", unique=True),
     )
 
     agent_code = Column(String(80), nullable=False, comment="Agent 编码")
@@ -179,6 +183,18 @@ class AgentMemory(Base, IdMixin, TimestampMixin):
     weight = Column(Float, nullable=False, default=1.0, comment="权重")
     status = Column(String(30), nullable=False, default="active", comment="active/archived/deleted")
     source_ref = Column(String(160), comment="来源引用")
+    owner_user_id = Column(BigInteger, nullable=True, comment="账户级策略记忆所属用户")
+    project_id = Column(BigInteger, nullable=True, comment="策略来源项目")
+    share_scope = Column(String(20), nullable=True, comment="user/project/global")
+    fingerprint = Column(String(64), nullable=True, comment="脱敏后的策略指纹")
+    strategy_key = Column(String(64), nullable=True, comment="作用域内策略幂等键")
+    outcome = Column(String(20), nullable=True, comment="success/failure")
+    failure_kind = Column(String(80), nullable=True, comment="结构化失败类型")
+    success_count = Column(Integer, nullable=False, default=0, comment="独立成功证据数")
+    failure_count = Column(Integer, nullable=False, default=0, comment="独立失败证据数")
+    confidence = Column(Float, nullable=False, default=0.0, comment="策略置信度")
+    evidence_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=True, comment="脱敏证据引用")
+    last_seen_at = Column(DateTime, nullable=True, comment="最近一次真实验证时间")
 
 
 class AgentKnowledgeSource(Base, IdMixin, TimestampMixin):

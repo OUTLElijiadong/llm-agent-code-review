@@ -3,7 +3,7 @@
 沙箱语法修复后保留一份"修复后源码"作为项目副本,下次审计可选用
 原始源码或任一修复副本;原始归档始终不变。
 """
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, LargeBinary, String, Text
 from sqlalchemy.dialects.mysql import LONGBLOB
 from sqlalchemy.orm import deferred
 
@@ -30,7 +30,11 @@ class ProjectSourceRevision(Base, IdMixin, TimestampMixin):
     )
     repair_notes = Column(String(500), nullable=False, default="")
     archive_blob = deferred(
-        Column(LONGBLOB, nullable=False, comment="修复后源码 zip")
+        Column(
+            LargeBinary().with_variant(LONGBLOB(), "mysql"),
+            nullable=False,
+            comment="修复后源码 zip",
+        )
     )
     create_time = Column(DateTime, nullable=False)
     update_time = Column(DateTime, nullable=False)

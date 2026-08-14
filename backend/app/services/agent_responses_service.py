@@ -15,6 +15,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Literal, Mappi
 from urllib.parse import urlencode
 
 import httpx
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -34,6 +35,7 @@ from app.agents.tool_contracts import (
     validate_fixed_tool_arguments,
 )
 from app.core.config import settings
+from app.core.observability import observe_event
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
@@ -49,6 +51,8 @@ from app.services import (
     published_agent_tools,
     rbac_service,
     report_service,
+    sandbox_service,
+    strategy_learning_service,
     tool_gateway,
 )
 from app.services.admin_capability_registry import (
@@ -64,6 +68,7 @@ from app.services.admin_capability_registry import (
     READ as CAPABILITY_READ,
 )
 from app.services.deepseek_responses_runtime import (
+    CANCELLED,
     COMPLETED,
     FAILED,
     INCOMPLETE,
@@ -78,7 +83,6 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
 )
 from app.services.mcp_tool_provider import McpToolProvider
-from app.services.page_guide_service import admin_guide_block, user_guide_block
 from app.services.user_capability_registry import (
     CAPABILITY_BY_CODE as USER_CAPABILITY_BY_CODE,
 )
@@ -102,6 +106,8 @@ from app.utils.api_resolver import ApiConfig, resolve_api_config
 
 EventSink = Callable[[Mapping[str, Any]], Optional[Awaitable[None]]]
 SessionValidator = Callable[[], bool]
+_FULL_VALIDATION_TERMINAL_STATES = frozenset({"succeeded", "failed", "blocked", "stopped", "expired"})
+_FULL_VALIDATION_POLL_SECONDS = 2.0
 
 
 class AgentSessionExpiredError(RuntimeError):
@@ -170,6 +176,7 @@ _WRITE_TOOLS = {
     "control_roundtable_discussion",
     "start_review",
     "trigger_evolution",
+    "change_own_password",
     "admin_set_user_role",
     "admin_delete_user",
     "admin_delete_users",
@@ -370,22 +377,45 @@ class DatabaseCheckpointStore:
     async def save(self, checkpoint: RunCheckpoint) -> None:
         row = self._db.query(AgentResponseRun).filter(AgentResponseRun.run_id == checkpoint.run_id).first()
         if row is None:
-            row = AgentResponseRun(
-                run_id=checkpoint.run_id,
-                user_id=self._user_id,
-                surface=self._surface,
-                session_key=self._session_key,
-                status=checkpoint.status,
-                checkpoint_json=json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str),
-                version=1,
+            self._db.add(
+                AgentResponseRun(
+                    run_id=checkpoint.run_id,
+                    user_id=self._user_id,
+                    surface=self._surface,
+                    session_key=self._session_key,
+                    status=checkpoint.status,
+                    checkpoint_json=json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str),
+                    version=1,
+                )
             )
-            self._db.add(row)
-        else:
-            self._assert_owner(row)
-            row.status = checkpoint.status
-            row.checkpoint_json = json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str)
-            row.version = int(row.version or 0) + 1
+            self._db.commit()
+            return
+        self._assert_owner(row)
+        # 取消是不可覆盖终态:取消请求与原始驱动循环分属不同请求实例,
+        # 驱动循环可能稍后回写 waiting_approval/waiting_input。用条件 UPDATE
+        # 保证并发交错下取消仍最终获胜(先取消者先提交即赢)。
+        if row.status == CANCELLED and checkpoint.status != CANCELLED:
+            return
+        payload = json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str)
+        updated = (
+            self._db.query(AgentResponseRun)
+            .filter(
+                AgentResponseRun.run_id == checkpoint.run_id,
+                AgentResponseRun.status != CANCELLED,
+            )
+            .update(
+                {
+                    "status": checkpoint.status,
+                    "checkpoint_json": payload,
+                    "version": AgentResponseRun.version + 1,
+                },
+                synchronize_session=False,
+            )
+        )
         self._db.commit()
+        if updated == 0:
+            # 并发取消已先落库;保持 cancelled 终态,放弃本次回写。
+            return
 
     async def load(self, run_id: str) -> Optional[RunCheckpoint]:
         row = (
@@ -429,6 +459,26 @@ class DatabaseCheckpointStore:
         claimed_status: str,
         tool_call_id: Optional[str] = None,
     ) -> Optional[RunCheckpoint]:
+        claimed_at = datetime.now(timezone.utc)
+        result = self._db.execute(
+            update(AgentResponseRun)
+            .where(
+                AgentResponseRun.run_id == run_id,
+                AgentResponseRun.user_id == self._user_id,
+                AgentResponseRun.surface == self._surface,
+                AgentResponseRun.session_key == self._session_key,
+                AgentResponseRun.status == expected_status,
+            )
+            .values(
+                status=claimed_status,
+                version=AgentResponseRun.version + 1,
+                update_time=claimed_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            self._db.rollback()
+            return None
         row = (
             self._db.query(AgentResponseRun)
             .filter(
@@ -437,27 +487,25 @@ class DatabaseCheckpointStore:
                 AgentResponseRun.surface == self._surface,
                 AgentResponseRun.session_key == self._session_key,
             )
-            .with_for_update()
-            .first()
+            .populate_existing()
+            .one()
         )
-        if row is None or row.status != expected_status:
-            self._db.rollback()
-            return None
         try:
             checkpoint = RunCheckpoint.from_dict(json.loads(row.checkpoint_json))
         except (TypeError, json.JSONDecodeError) as exc:
             self._db.rollback()
             raise InvalidRunStateError(f"运行 {run_id} 的检查点损坏") from exc
-        if checkpoint.pending is None:
+        if expected_status in {WAITING_APPROVAL, WAITING_INPUT} and checkpoint.pending is None:
             self._db.rollback()
             return None
-        if tool_call_id and checkpoint.pending.call.call_id != tool_call_id:
+        if tool_call_id and (
+            checkpoint.pending is None
+            or checkpoint.pending.call.call_id != tool_call_id
+        ):
             self._db.rollback()
             return None
         checkpoint.status = claimed_status
-        row.status = claimed_status
         row.checkpoint_json = json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str)
-        row.version = int(row.version or 0) + 1
         self._db.commit()
         return checkpoint
 
@@ -528,6 +576,7 @@ class PrismToolExecutor:
         surface: str,
         run_id: str,
         mcp_provider: McpToolProvider,
+        session_key: str = "",
         event_sink: Optional[EventSink] = None,
         session_validator: Optional[SessionValidator] = None,
     ) -> None:
@@ -535,6 +584,7 @@ class PrismToolExecutor:
         self._user = user
         self._surface = surface
         self._run_id = run_id
+        self._session_key = session_key
         self._is_admin = surface == "admin" and _is_admin_actor(db, user)
         self._is_super_admin = surface == "admin" and _is_super_admin_actor(db, user)
         self._mcp = mcp_provider
@@ -665,6 +715,17 @@ class PrismToolExecutor:
             return True
         return rbac_service.check_permission(self._db, self._user.id, permission_code)
 
+    def _agent_context(self) -> AgentContext:
+        return AgentContext(
+            user_id=self._user.id,
+            extra={
+                "run_id": self._run_id,
+                "trace_id": self._run_id,
+                "surface": self._surface,
+                "session_key": self._session_key,
+            },
+        )
+
     async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
         self._assert_session_active()
         if call.name.startswith(_ADMIN_TOOL_PREFIX) and not self._is_admin:
@@ -744,6 +805,9 @@ class PrismToolExecutor:
         if call.name == "user_execute_capability":
             return await self._execute_user_capability(call, approved=approved)
 
+        if call.name == "run_full_project_validation":
+            return await self._execute_once(call, lambda: self._run_full_project_validation(call))
+
         if call.name in self._skill_bindings:
             if not approved:
                 return self._approval(call, danger=False, impact="将执行已注册的 Agent Skill")
@@ -755,7 +819,7 @@ class PrismToolExecutor:
                     self._orch.invoke_tool(
                         self._skill_bindings[call.name],
                         call.arguments,
-                        AgentContext(user_id=self._user.id, extra={"run_id": self._run_id}),
+                        self._agent_context(),
                     ),
                 ),
             )
@@ -828,7 +892,7 @@ class PrismToolExecutor:
                     call,
                     getattr(self._orch, call.name)(
                         **call.arguments,
-                        ctx=AgentContext(user_id=self._user.id, extra={"run_id": self._run_id}),
+                        ctx=self._agent_context(),
                     ),
                 ),
             )
@@ -877,10 +941,69 @@ class PrismToolExecutor:
                 self._orch.invoke_tool(
                     call.name,
                     call.arguments,
-                    AgentContext(user_id=self._user.id, extra={"run_id": self._run_id}),
+                    self._agent_context(),
                 ),
             ),
         )
+
+    async def _run_full_project_validation(self, call: ToolCall) -> ToolExecutionResult:
+        """创建一次组合沙箱并在同一固定工具调用中等待其真实终态。"""
+        created = self._agent_result(
+            call,
+            self._orch.run_full_project_validation(
+                **call.arguments,
+                ctx=self._agent_context(),
+            ),
+        )
+        if created.status != "success":
+            return created
+        if not isinstance(created.output, Mapping):
+            return ToolExecutionResult.failure("全量验证未返回结构化沙箱结果")
+        public_id = str(created.output.get("public_id") or "")
+        if not public_id:
+            return ToolExecutionResult.failure("全量验证未返回沙箱编号")
+
+        state = dict(created.output)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + int(settings.agent_full_validation_wait_seconds)
+        while str(state.get("status") or "") not in _FULL_VALIDATION_TERMINAL_STATES:
+            self._assert_session_active()
+            if loop.time() >= deadline:
+                return ToolExecutionResult.failure(
+                    f"等待全量验证沙箱 {public_id} 进入终态超时，最后状态: {state.get('status') or 'unknown'}",
+                    failure_kind="timeout",
+                )
+            await asyncio.sleep(_FULL_VALIDATION_POLL_SECONDS)
+            # MySQL 默认 REPEATABLE READ；仅 expire ORM 对象仍会停留在首次
+            # SELECT 的事务快照。占位账本已在执行前提交，这里可安全结束只读事务。
+            self._db.rollback()
+            self._db.expire_all()
+            try:
+                state = sandbox_service.get_environment(self._db, self._user, public_id)
+            except Exception as exc:  # 查询失败也必须结束本次原子工具调用
+                return ToolExecutionResult.failure(f"读取全量验证沙箱 {public_id} 失败: {exc}")
+
+            latest_events = state.get("events") if isinstance(state, dict) else None
+            latest_event = latest_events[-1] if isinstance(latest_events, list) and latest_events else {}
+            if not isinstance(latest_event, dict):
+                latest_event = {}
+            try:
+                await _emit(
+                    self._event_sink,
+                    {
+                        "type": "response.sandbox.progress",
+                        "environment_id": public_id,
+                        "status": str(state.get("status") or ""),
+                        "stage": str(latest_event.get("stage") or ""),
+                        "message": str(latest_event.get("message") or ""),
+                    },
+                )
+            except Exception:  # noqa: BLE001 - SSE 进度事件失败不阻断沙箱等待
+                pass
+
+        terminal = dict(state)
+        terminal["terminal"] = True
+        return ToolExecutionResult.success(terminal)
 
     def _download_report(self, call: ToolCall) -> ToolExecutionResult:
         """校验格式权限与报告归属后，返回固定同源下载入口。"""
@@ -993,6 +1116,8 @@ class PrismToolExecutor:
             review_type=str(call.arguments.get("review_type") or "full"),
             db=self._db,
             user=self._user,
+            origin_surface=self._surface,
+            origin_session_key=self._session_key,
         )
         data = dict(response.data or {})
         session_id = str(data.get("session_id") or "")
@@ -1174,10 +1299,13 @@ class PrismToolExecutor:
         self._mark_approval(call, approve=False, reason=reason)
 
     async def _failed_attempt(self, call: ToolCall, error: str) -> ToolExecutionResult:
-        await self._emit_tool_event("response.tool.started", call)
-        result = ToolExecutionResult.failure(error)
-        await self._emit_tool_result(call, result)
-        return result
+        return await self._execute_once(
+            call,
+            lambda: ToolExecutionResult.failure(
+                error,
+                failure_kind=strategy_learning_service.classify_failure(error),
+            ),
+        )
 
     async def _emit_tool_event(
         self,
@@ -1222,6 +1350,8 @@ class PrismToolExecutor:
         )
 
     def _tool_agent_code(self, call: ToolCall) -> str:
+        if call.name == "send_message":
+            return str(call.arguments.get("send_to") or "orchestrator")
         if call.name == "admin_execute_operation":
             return "operations"
         if call.name == "invoke_published_agent":
@@ -1300,7 +1430,11 @@ class PrismToolExecutor:
                 raw_result if isinstance(raw_result, ToolExecutionResult) else ToolExecutionResult.success(raw_result)
             )
         except Exception as exc:  # noqa: BLE001 - 错误也必须进入幂等结果账本
-            result = ToolExecutionResult.failure(str(exc))
+            error = str(exc)
+            result = ToolExecutionResult.failure(
+                error,
+                failure_kind=strategy_learning_service.classify_failure(error),
+            )
 
         row.status = "success" if result.status == "success" else "failed"
         persisted_output = _redact_event_value(result.output)
@@ -1309,12 +1443,37 @@ class PrismToolExecutor:
                 "status": result.status,
                 "output": persisted_output,
                 "error": result.error,
+                "failure_kind": result.failure_kind,
             },
             ensure_ascii=False,
             default=str,
         )
         row.error = result.error or None
         self._db.commit()
+        try:
+            nested_params = call.arguments.get("params")
+            project_id = _to_int(call.arguments.get("project_id"))
+            if project_id is None and isinstance(nested_params, Mapping):
+                project_id = _to_int(nested_params.get("project_id"))
+            strategy_learning_service.record_tool_outcome(
+                self._db,
+                owner_user_id=int(self._user.id),
+                project_id=project_id,
+                agent_code=self._tool_agent_code(call),
+                tool_name=call.name,
+                arguments=self._persisted_arguments(call),
+                outcome="success" if result.status == "success" else "failure",
+                failure_kind=result.failure_kind,
+                summary=(
+                    _summarize_tool_value(result.output)
+                    if result.status == "success"
+                    else str(result.error or "工具执行失败")
+                ),
+                evidence_ref=f"tool:{request_id}",
+            )
+            self._db.commit()
+        except Exception:  # noqa: BLE001 - 学习失败不改变已经落账的工具真实结果
+            self._db.rollback()
         await self._emit_tool_result(call, result)
         return result
 
@@ -1330,7 +1489,10 @@ class PrismToolExecutor:
             return ToolExecutionResult.failure("工具执行账本结果损坏，已阻止重复执行")
         if payload.get("status") == "success":
             return ToolExecutionResult.success(payload.get("output"))
-        return ToolExecutionResult.failure(str(payload.get("error") or row.error or "工具执行失败"))
+        return ToolExecutionResult.failure(
+            str(payload.get("error") or row.error or "工具执行失败"),
+            failure_kind=str(payload.get("failure_kind") or ""),
+        )
 
     def _approval(
         self,
@@ -1781,7 +1943,14 @@ class PrismToolExecutor:
     def _agent_result(call: ToolCall, result: Any) -> ToolExecutionResult:
         if getattr(result, "success", False):
             return ToolExecutionResult.success(getattr(result, "data", None))
-        return ToolExecutionResult.failure(str(getattr(result, "error", "") or f"工具 {call.name} 执行失败"))
+        error = str(getattr(result, "error", "") or f"工具 {call.name} 执行失败")
+        return ToolExecutionResult.failure(
+            error,
+            failure_kind=str(
+                getattr(result, "failure_kind", "")
+                or strategy_learning_service.classify_failure(error)
+            ),
+        )
 
 
 class AgentResponsesService:
@@ -1813,13 +1982,36 @@ class AgentResponsesService:
     ) -> RuntimeResult:
         executor, runtime = await self._runtime(run_id, event_sink)
         tools = await executor.tool_schemas()
+        instructions = _instructions(self._surface, self._user, self._is_super_admin)
+        try:
+            instructions += strategy_learning_service.build_strategy_context(
+                self._db,
+                owner_user_id=int(self._user.id),
+                surface=self._surface,
+                messages=messages,
+            )
+        except Exception:  # noqa: BLE001 - 记忆检索降级不能阻断小菱主链路
+            self._db.rollback()
         result = await runtime.start(
             messages,
-            instructions=_instructions(self._surface, self._user, self._is_super_admin),
+            instructions=instructions,
             tools=tools,
             run_id=run_id,
         )
         await self._emit_validated_output(event_sink, result)
+        return result
+
+    async def cancel(self, *, run_id: str, reason: str = "") -> RuntimeResult:
+        """请求取消一次运行并把检查点收敛为 cancelled。
+
+        用户可选填取消原因，随检查点持久化，用于历史回看与原因沉淀；
+        有原因时额外累计一次带维度的事件计数。
+        """
+        _, runtime = await self._runtime(run_id, None)
+        result = await runtime.cancel(run_id, reason=reason)
+        observe_event("xiaoling_cancel", labels={"surface": self._surface})
+        if reason.strip():
+            observe_event("xiaoling_cancel_reasoned", labels={"surface": self._surface})
         return result
 
     async def resume(
@@ -1877,16 +2069,29 @@ class AgentResponsesService:
             surface=self._surface,
             run_id=run_id,
             mcp_provider=mcp,
+            session_key=self._session_key,
             event_sink=event_sink,
         )
         # 工具事件必须先于结论文本到达用户端。DeepSeek 可能在工具调用前
         # 产生 output_text.delta，因此所有 surface 都先缓冲文本，完成后统一发出。
         transport_sink = _buffer_text_sink(event_sink)
-        fallback_model = config.model or settings.deepseek_model
+        # 小菱的 user/admin 两个 surface 都属于总调度者,统一使用 orchestrator 模型;
+        # 只有用户/全局自定义配置才覆盖该默认值。系统默认 config.model 是子 Agent 的
+        # deepseek-v4-flash,不能在这里覆盖成 flash,否则模型分层永远不会生效。
+        # AiCallLog 的 model_name 兜底值也复用该变量,因此模型分层调整会同步落到调用日志。
+        fallback_model = (
+            config.model
+            if config.source in {"user", "global"}
+            else settings.deepseek_orchestrator_model
+        )
         agent_label = "manager" if self._surface == "admin" else "chat_assistant"
 
         def _write_ai_call_log(response: Mapping[str, Any]) -> None:
-            """小菱每次 LLM 轮次落 AiCallLog,供 Agent 工作台按用户统计调用次数。"""
+            """小菱每次 LLM 轮次落 AiCallLog,供 Agent 工作台按用户统计调用次数。
+
+            模型名优先取上游 response.model,否则与 _runtime 的 fallback_model
+            保持同步,确保日志记录的是总调度者模型而不是子 Agent 的 flash 默认值。
+            """
             from app.models.ai_call_log import AiCallLog
 
             usage = response.get("usage") if isinstance(response.get("usage"), Mapping) else {}
@@ -1910,7 +2115,8 @@ class AgentResponsesService:
             tool_executor=executor,
             checkpoint_store=self._store,
             model=fallback_model,
-            max_rounds=20,
+            fallback_model=settings.deepseek_model if settings.deepseek_orchestrator_fallback_to_flash else None,
+            max_rounds=settings.agent_responses_max_rounds,
             stream=True,
             context_window_tokens=settings.deepseek_context_window_tokens,
             max_output_tokens=settings.deepseek_max_output_tokens,
@@ -1953,8 +2159,16 @@ async def _emit(sink: Optional[EventSink], event: Mapping[str, Any]) -> None:
 
 
 def _buffer_text_sink(sink: Optional[EventSink]) -> EventSink:
+    # 工具生命周期由本地执行器产生；上游同名事件可能没有平台错误详情，
+    # 透传会让前端先收到 error=null 的重复失败事件。
+    upstream_tool_events = frozenset(
+        {"response.tool.started", "response.tool.completed", "response.tool.failed"}
+    )
+
     async def filtered(event: Mapping[str, Any]) -> None:
         if str(event.get("type") or "") == "response.output_text.delta":
+            return
+        if str(event.get("type") or "") in upstream_tool_events:
             return
         await _emit(sink, event)
 
@@ -2125,6 +2339,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         capability_instruction = (
             "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
             "再调用 admin_execute_capability；不得猜测能力编码或参数。"
+            "收到来自 agent:monitor 的 status.update「JARVIS 运维简报」时,只依据简报 evidence 中的真实证据汇报:"
+            "先给结论与优先级排序,再建议只读核验动作和需要管理员点击批准的处置动作;"
+            "绝不未经批准自动执行写操作,也不要声称已修复或已处理。"
         )
         role_behavior = (
             "批量处理与批量分析是你的核心能力：处理“所有/批量/全部/这些”类请求时，"
@@ -2140,8 +2357,11 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "(开放端口=operation add + target_type port + value 端口号，关闭用 remove)；"
             "重启服务用 restart_service，装/卸软件包用 package_action，"
             "改防火墙/服务/账号等写操作都会自动等待用户批准，批准后系统会把结果交还给你。"
+            "用户直接发送 GitHub 公开仓库网址(https://github.com/{owner}/{repo} 或 /tree/<分支>)时："
+            "调用 import_remote_project(url=原始网址, project_name=仓库名, audit_mode=true) 导入为隔离审计项目；"
+            "导入成功后立即调用 audit_security_for_project(project_id=返回的 id, scan_mode='static_full') "
+            "执行整包安全审计，并基于工具返回的真实结果汇报；不要伪造下载或审计结果。"
         )
-        guide_block = admin_guide_block()
     else:
         identity = "Prism 代码审查 Agent「棱镜小助·小菱」"
         capability_instruction = (
@@ -2150,14 +2370,25 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "报告、二进制单文件和项目源码下载必须分别使用 download_report、"
             "download_code_file 和 download_project_source 固定工具。"
             "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
-            "和 control_roundtable_discussion 固定工具。"
-            "沙箱测试和部署是页面发现协议的例外：白盒、黑盒和组合测试直接使用 "
+            "和 control_roundtable_discussion 固定工具。start_roundtable_discussion 启动后立即结束本轮,"
+            "告知用户等待期间可以继续对话;讨论结束后系统会把结论回投本会话,收到 task.result 后直接汇报共识、"
+            "报告入口和是否满足要求;结论不满足时用 control_roundtable_discussion 的 user_input 追加纠正意见,"
+            "不得编造讨论进度或结论。"
+            "上传源码后用户要求自动完成部署和黑白盒审查时，必须立即调用 "
+            "run_full_project_validation；沙箱测试和部署是页面发现协议的例外：白盒、黑盒和组合测试直接使用 "
             "run_project_tests，持续部署、关闭和续期分别使用 deploy_project_sandbox、"
             "close_sandbox 和 extend_sandbox，不要先通过 user_describe_capabilities 搜索这四项固定工具。"
+            "run_full_project_validation 会在同一个固定工具调用内等待唯一沙箱进入 "
+            "succeeded/failed/blocked/stopped/expired 终态并返回完整结果；工具返回后直接基于终态和报告给出结论，"
+            "不得再调用 user_describe_capabilities、user_execute_capability 或重复创建沙箱。"
             "项目做过语法修复后会有源码修复副本：查询项目详情(项目列表能力)可拿到 source_revisions 列表，"
             "每个副本有 id/revision_no/修复文件清单；用户要求'用修复后的源码跑审计/用副本'时，"
             "把对应副本 id 传给 run_project_tests 或 deploy_project_sandbox 的 source_revision_id，"
             "不传则默认使用原始源码。"
+            "用户直接发送 GitHub 公开仓库网址(https://github.com/{owner}/{repo} 或 /tree/<分支>)时："
+            "调用 import_remote_project(url=原始网址, project_name=仓库名, audit_mode=true) 导入为隔离审计项目；"
+            "导入成功后立即调用 audit_security_for_project(project_id=返回的 id, scan_mode='static_full') "
+            "执行整包安全审计，并基于工具返回的真实结果汇报；不要伪造下载或审计结果。"
         )
         role_behavior = (
             "你服务的对象主要是不会看文档的普通用户和审查员：回答要像带路人，"
@@ -2165,7 +2396,6 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "审查员发起审查、处理问题、导出报告时,优先直接用工具替他完成,再引导到结果页面核对。"
             "审查结论必须引用本次工具返回的真实数据，不得凭印象作答。"
         )
-        guide_block = user_guide_block()
     username = str(getattr(user, "username", "") or "未知用户")
     role = str(getattr(user, "role", "") or "unknown")
     role_label = {
@@ -2191,19 +2421,51 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "用户请求超出权限时直接说明原因并拒绝,不要尝试调用也不会报'工具权限不足'错误。"
         "所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
         "根据每次工具返回结果自主判断下一步，可以连续调用多个工具。"
+        "需要发现子 Agent、已发布 Agent 或同一账户其他会话时调用 list_agents；"
+        "需要移交结论、同步进度或协调并行任务时调用 send_message，"
+        "只能向 list_agents 返回的精确地址发送严格结构化消息，不得用自由文本伪造消息信封。"
+        "需要同时拆解两个以上相互独立的局部任务时，使用 create_agent_team 创建真实可追踪的团队工作图，"
+        "成员只能选择 list_agents 返回的可执行 Agent；"
+        "list_agents 中 team_dispatch_state=team_governed 的受治理 Agent(test_verifier、sandbox_deployer、"
+        "operations)即使 dispatch_state=approval_required 也可作为团队成员,团队调度会接管其审批,"
+        "不要因此拒绝组队或追问用户；用 get_agent_team 查看实际状态和证据，"
+        "失败节点需要改变方案后再用 retry_agent_team，用户要求停止时调用 cancel_agent_team。"
+        "唯一超级管理员在管理小菱中创建服务器运维团队时，成员必须使用 agent:operations，"
+        "任务 input 必须是 {action,params}，且 action 必须来自 list_agents 返回的 team_input_contract.action；"
+        "不得用 monitor、security_sentinel 或 dashboard 代替服务器运维。团队只允许只读运维，"
+        "重启、配置、防火墙等写操作必须由主小菱调用 admin_execute_operation 进入审批链。"
+        "只读项目验收中，项目分析成员必须使用 operation=inspect_project，历史测试核验成员必须使用"
+        " operation=inspect_existing_results；文件清单核对成员必须使用 agent:code_file_manager 且"
+        " input 为 {operation:'list', project_id}，不得把 inspect_project 交给文件清单成员。"
+        "用户要求“扫描+验证”并行时：扫描成员必须用 agent:security_sentinel，input={project_id}；"
+        "验证成员必须用 agent:test_verifier，只读核验用 input={operation:'inspect_existing_results', project_id}，"
+        "只有用户明确授权才可用 operation:'run_project_tests'；不得用 agent:dashboard 做扫描或验证，"
+        "dashboard 只用于看板汇总且 input 必须带 operation（summary|risk_distribution|score_trend 之一）；"
+        "不得把只读核验交给 run_project_tests 或 run_full_project_validation。"
+        "只有用户明确要求实际运行测试时，才允许使用后两种执行操作。"
+        "用户要求修改自己的密码时，先说明修改成功后需要重新登录，并用 ask_user 收集旧密码与新密码，"
+        "然后调用 change_own_password；不得在回复中回显任何密码，也不得修改他人密码。"
+        "团队工具自动绑定当前登录用户、surface、session 和 trace，不得在参数中伪造其他账户或会话。"
+        "需要派发任务给子 Agent 或团队时：先核对任务目标、范围和验收口径，缺关键细节先用 ask_user 与用户对齐；"
+        "派发完成后立即结束本轮，告知用户已派发、等待期间可以继续补充需求或询问进度；"
+        "收到子 Agent 的 task.result 时严格按消息附带的【监督式复核协议】执行：不合格且未达上限就用 "
+        "send_message 回发纠正并说明已纠正，合格或达上限就直接向用户汇报全链结论。"
         "缺少真正阻断任务的信息时调用 ask_user，问题、候选项及其说明必须由你根据当前任务动态生成，不使用预设问题。"
+        "回复中的站内 markdown 链接必须使用真实路由；需要跳转时使用 PRISM_NAVIGATE 注释协议，"
+        "路由必须来自 recall_knowledge 检索到的页面指南，不得编造路由。"
         "涉及名称近义表达或自定义 Agent 能力时先调用 search_published_agents；候选不唯一时用 ask_user "
         "展示动态候选，确认后才能调用 invoke_published_agent。"
         "涉及用户批量操作时必须先查询真实用户。用户说序号、第几条或范围而未明确是用户 ID 时，"
         "不得猜测；必须用 ask_user 区分列表序号与用户 ID，得到精确 user_ids 后再调用批量工具。"
         f"{capability_instruction}"
         "知识笔记本是你的 RAG 教学库：回答前若问题可能参考既有教学手册、操作指南或你沉淀过的经验，"
-        "先调用 recall_knowledge 检索最相关知识切片再作答；你新学到可靠经验、操作要点或形成新的理解感悟时，"
-        "主动调用 save_knowledge_note 写入笔记本(写操作会先等待用户批准)，以后同类问题就能直接复用。"
+        "先调用 recall_knowledge 检索最相关知识切片再作答；只有用户明确要求保存教程或知识笔记时，"
+        "才调用 save_knowledge_note(写操作会先等待用户批准)。工具、审查和沙箱的成功/失败策略由系统"
+        "自动按当前账户固化并供所有子 Agent 复用，不得为这类执行结果重复调用 save_knowledge_note。"
         f"{role_behavior}"
         "写操作由系统暂停并展示审批；用户点击批准后系统会把原调用结果自动交还给你，不要要求用户重复发送指令。"
+        "涉及具体页面操作步骤时，先调用 recall_knowledge 检索对应页面指南。"
         "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。\n\n"
-        f"{guide_block}"
     )
 
 

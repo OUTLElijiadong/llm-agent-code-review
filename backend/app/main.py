@@ -100,16 +100,25 @@ async def lifespan(app: FastAPI):
     _reconcile_orphan_reviews()
     from app.agents.event_bus import AgentEventBus
     from app.agents.orchestrator import get_orchestrator
+    from app.services.agent_mesh_dispatcher import start_agent_mesh_dispatcher, stop_agent_mesh_dispatcher
     from app.services.agent_scheduler_runtime import start_agent_governance_scheduler, stop_agent_governance_scheduler
+    from app.services.agent_team_dispatcher import start_agent_team_dispatcher, stop_agent_team_dispatcher
+    from app.services.jarvis_patrol_service import start_jarvis_patrol, stop_jarvis_patrol
 
     get_orchestrator()
     AgentEventBus.instance().start_relay()
+    start_agent_mesh_dispatcher()
+    start_agent_team_dispatcher()
     start_agent_governance_scheduler()
+    start_jarvis_patrol()
     try:
         yield
     finally:
         AgentEventBus.instance().stop_relay()
+        stop_agent_mesh_dispatcher()
+        stop_agent_team_dispatcher()
         stop_agent_governance_scheduler()
+        stop_jarvis_patrol()
 
 
 app = FastAPI(

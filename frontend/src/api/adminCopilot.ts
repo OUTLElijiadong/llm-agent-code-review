@@ -5,6 +5,7 @@ export type AdminCopilotMessageType =
   | 'report'
   | 'alert'
   | 'table'
+  | 'error'
 
 export interface AdminCopilotMessage {
   type: AdminCopilotMessageType

@@ -28,10 +28,12 @@ from app.agents.tool_contracts import (
     is_fixed_tool,
     validate_fixed_tool_arguments,
 )
+from app.core.config import settings
+from app.core.exceptions import AuthError
 from app.core.permission_codes import PermissionCode
 from app.models.user import User
 from app.schemas.project import ProjectUpdateIn
-from app.services import project_service, project_source_service
+from app.services import auth_service, project_service, project_source_service
 from app.services.rbac_service import check_permission
 from app.utils.api_resolver import ApiConfig, resolve_api_config
 
@@ -54,7 +56,11 @@ class Orchestrator(BaseAgent):
     skills = ("Agent 路由", "依赖注入", "调度编排", "执行结果汇总")
 
     def __init__(self, register: bool = True):
-        super().__init__(temperature=0.5, max_tokens=256)
+        super().__init__(
+            temperature=0.5,
+            max_tokens=256,
+            model=settings.deepseek_orchestrator_model,
+        )
         # register=True: 启动时构造的"元数据"实例,把所有 Agent 登记进全局注册中心,
         #   供 /api/agents 等只读元数据端点消费。
         # register=False: 每个请求构造的独立实例,持有请求级 db/user,绝不写全局
@@ -103,6 +109,8 @@ class Orchestrator(BaseAgent):
         self.operations_agent = OperationsAgent()
 
         self.chat_agent = ChatAssistantAgent()
+        # 小菱人格(chat_assistant)与总调度者共用 orchestrator pro;子 Agent 保持 flash 默认。
+        self.chat_agent._model = settings.deepseek_orchestrator_model
         self.chat_agent.set_orchestrator(self)
 
         # 请求级实例(register=False)不写全局注册中心,避免并发覆盖。
@@ -146,7 +154,7 @@ class Orchestrator(BaseAgent):
             from app.core.config import settings as s
             self.chat_agent._base_url = s.deepseek_base_url.rstrip("/")
             self.chat_agent._api_key = s.deepseek_api_key
-            self.chat_agent._model = s.deepseek_model
+            self.chat_agent._model = s.deepseek_orchestrator_model
 
     def get_api_config(self) -> Optional[ApiConfig]:
         """获取当前注入的 API 配置"""
@@ -460,6 +468,56 @@ class Orchestrator(BaseAgent):
             return disabled
         return self.test_verifier.run_project_tests(*args, **kwargs)
 
+    def change_own_password(
+        self,
+        old_password: str,
+        new_password: str,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """校验旧密码后修改当前登录用户自己的密码。
+
+        auth_service.change_password 会在行锁内再次校验旧密码并递增
+        token_version；因此成功后当前登录态立即失效，需要重新登录。
+        返回摘要和错误信息均不包含任何密码内容。
+        """
+        del ctx
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        try:
+            auth_service.change_password(self._db, self._user, old_password, new_password)
+        except AuthError as exc:
+            return AgentResult(success=False, error=str(exc))
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+        return AgentResult(
+            success=True,
+            data={"success": True, "message": "密码已修改，请重新登录"},
+        )
+
+    def run_full_project_validation(
+        self,
+        project_id: int,
+        language: str,
+        worker_code: str = "",
+        source_revision_id: Optional[int] = None,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """上传完成后的确定性组合验证入口。"""
+        if disabled := self._disabled_result("test_verifier"):
+            return disabled
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if not check_permission(self._db, self._user.id, PermissionCode.PROJECT_VIEW):
+            return AgentResult(success=False, error="当前用户没有 project:view 权限")
+        return self.test_verifier.run_project_tests(
+            project_id=project_id,
+            language=language,
+            test_mode="combined",
+            worker_code=worker_code,
+            source_revision_id=source_revision_id,
+            ctx=ctx,
+        )
+
     def deploy_project_sandbox(self, *args, **kwargs) -> AgentResult:
         if disabled := self._disabled_result("sandbox_deployer"):
             return disabled
@@ -637,9 +695,189 @@ class Orchestrator(BaseAgent):
         )
         return self.chat_agent.execute(messages, ctx)
 
-    def list_agents(self) -> dict:
-        """列出全局注册中心中的 Agent 元数据。"""
+    def list_agents(self, ctx: Optional[AgentContext] = None) -> dict:
+        """列出 Agent 契约、已发布自定义 Agent 与同账户会话。"""
+        if self._db is not None and self._user is not None:
+            from app.services import agent_mesh_service
+
+            return agent_mesh_service.list_agents(self._db, self._user)
         return self._registry.list()
+
+    def send_message(
+        self,
+        send_to: str,
+        message_type: str,
+        subject: str,
+        payload: Dict[str, Any],
+        idempotency_key: str,
+        schema_version: str = "1.0",
+        trace_id: str = "",
+        correlation_id: str = "",
+        causation_id: str = "",
+        priority: str = "normal",
+        context: Optional[Dict[str, Any]] = None,
+        artifacts: Optional[List[Dict[str, Any]]] = None,
+        errors: Optional[List[Dict[str, Any]]] = None,
+        delivery: Optional[Dict[str, Any]] = None,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """以当前认证会话为发送方写入 Agent Mesh 账本。"""
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        extra = dict(ctx.extra or {}) if ctx is not None else {}
+        surface = str(extra.get("surface") or "")
+        session_key = str(extra.get("session_key") or "")
+        if surface not in {"user", "admin"} or not session_key:
+            return AgentResult(success=False, error="SendMessage 缺少可验证的当前会话上下文")
+        try:
+            from app.schemas.agent_mesh import AgentMeshMessageIn
+            from app.services import agent_mesh_service
+
+            message_context = dict(context or {})
+            message_context["run_id"] = str(message_context.get("run_id") or extra.get("run_id") or "")
+            message = AgentMeshMessageIn.model_validate({
+                "schema_version": schema_version,
+                "idempotency_key": idempotency_key,
+                "trace_id": trace_id or str(extra.get("trace_id") or ""),
+                "correlation_id": correlation_id,
+                "causation_id": causation_id,
+                "sent_from": "",
+                "send_to": send_to,
+                "message_type": message_type,
+                "priority": priority,
+                "subject": subject,
+                "payload": payload,
+                "context": message_context,
+                "artifacts": list(artifacts or []),
+                "errors": list(errors or []),
+                "delivery": dict(delivery or {}),
+            })
+            data = agent_mesh_service.send_message(
+                self._db,
+                self._user,
+                surface=surface,
+                session_key=session_key,
+                message=message,
+            )
+            return AgentResult(success=True, data=data)
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
+    def create_agent_team(
+        self,
+        title: str,
+        objective: str,
+        members: List[Dict[str, Any]],
+        tasks: List[Dict[str, Any]],
+        max_active_children: int = 3,
+        max_attempts: int = 3,
+        priority: int = 0,
+        deadline_at: Optional[Any] = None,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """以当前小菱会话创建可追踪的临时子 Agent 团队。"""
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="创建团队缺少 DB 或用户上下文")
+        extra = dict(ctx.extra or {}) if ctx is not None else {}
+        surface = str(extra.get("surface") or "")
+        session_key = str(extra.get("session_key") or "")
+        if surface not in {"user", "admin"} or not session_key:
+            return AgentResult(success=False, error="创建团队缺少可验证的当前会话上下文")
+        try:
+            from app.schemas.agent_team import AgentTeamCreateIn
+            from app.services import agent_team_service
+
+            payload = AgentTeamCreateIn.model_validate({
+                "surface": surface,
+                "session_id": session_key,
+                "title": title,
+                "objective": objective,
+                "members": members,
+                "tasks": tasks,
+                "max_active_children": max_active_children,
+                "max_attempts": max_attempts,
+                "priority": priority,
+                "deadline_at": deadline_at,
+                "trace_id": str(extra.get("trace_id") or ""),
+            })
+            return AgentResult(success=True, data=agent_team_service.create_team(self._db, self._user, payload))
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
+    def get_agent_team(
+        self,
+        team_id: int,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """读取当前账户的团队树和脱敏协作时间线。"""
+        del ctx
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="读取团队缺少 DB 或用户上下文")
+        try:
+            from app.services import agent_team_service
+
+            return AgentResult(success=True, data=agent_team_service.get_team(self._db, self._user, team_id))
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
+    def cancel_agent_team(
+        self,
+        team_id: int,
+        reason: str = "小菱取消团队",
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """取消当前账户团队；高风险子任务仍由原审批链决定。"""
+        del ctx
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="取消团队缺少 DB 或用户上下文")
+        try:
+            from app.services import agent_team_service
+
+            data = agent_team_service.cancel_team(self._db, self._user, team_id, reason=reason)
+            return AgentResult(
+                success=True,
+                data={
+                    "team_id": data.get("team_id"),
+                    "status": data.get("status"),
+                    "trace_id": data.get("trace_id"),
+                    "summary": data.get("summary") or {},
+                },
+            )
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
+    def retry_agent_team(
+        self,
+        team_id: int,
+        task_keys: Optional[List[str]] = None,
+        strategy_changes: Optional[Dict[str, str]] = None,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """改变方案后重新排队当前账户团队的失败节点。"""
+        del ctx
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="重试团队缺少 DB 或用户上下文")
+        try:
+            from app.services import agent_team_service
+
+            data = agent_team_service.retry_team(
+                self._db,
+                self._user,
+                team_id,
+                task_keys=list(task_keys or []),
+                strategy_changes=dict(strategy_changes or {}),
+            )
+            return AgentResult(
+                success=True,
+                data={
+                    "team_id": data.get("team_id"),
+                    "status": data.get("status"),
+                    "trace_id": data.get("trace_id"),
+                    "summary": data.get("summary") or {},
+                },
+            )
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
 
     def get_agent(self, name: str):
         return self._registry.get(name)

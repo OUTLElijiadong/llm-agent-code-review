@@ -5,7 +5,7 @@ const meshApi = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock('@/api/agentMesh', () => ({ listAgentMeshAgents: meshApi.list }))
 
 import AgentSessionSwitcher from './AgentSessionSwitcher.vue'
-import { saveAgentChatSnapshot } from '@/utils/agentChatSessions'
+import { loadAgentChatSessions, saveAgentChatSnapshot } from '@/utils/agentChatSessions'
 
 const WELCOME = '你好,我是小菱!'
 
@@ -60,6 +60,17 @@ describe('AgentSessionSwitcher.ensureFreshOnOpen', () => {
     expect(lastSelect(wrapper)).toBe('user-s1')
   })
 
+  it('无快照且标题非占位的旧会话打开时,不复用并新建新对话', async () => {
+    seedIndex([{ id: 'user-stale', title: '小菱生产验收发…', createdAt: 1 }])
+    const wrapper = await mountSwitcher()
+    ;(wrapper.vm as unknown as { ensureFreshOnOpen(): void }).ensureFreshOnOpen()
+    const selected = lastSelect(wrapper)
+    const metas = loadAgentChatSessions('user', 'legacy', 'user')
+    expect(selected).not.toBe('user-stale')
+    expect(selected).toBe(metas[0].id)
+    expect(metas[0].title).toBe('新对话')
+  })
+
   it('历史都已完成且当前是空的新对话时,保留当前不新建', async () => {
     seedIndex([
       { id: 'user-fresh', title: '新对话', createdAt: 2 },
@@ -83,6 +94,29 @@ describe('AgentSessionSwitcher.ensureFreshOnOpen', () => {
     const wrapper = await mountSwitcher()
     ;(wrapper.vm as unknown as { ensureFreshOnOpen(): void }).ensureFreshOnOpen()
     expect(lastSelect(wrapper)).toBe('user-fresh')
+  })
+
+  it('无快照且标题为默认对话的空会话仍可复用', async () => {
+    seedIndex([
+      { id: 'user-done', title: '完成对话', createdAt: 1 },
+      { id: 'user-default', title: '默认对话', createdAt: 2 },
+    ])
+    seedSnapshot('user-done', [{ role: 'user', content: '查询项目' }], 'completed')
+    const wrapper = await mountSwitcher()
+    ;(wrapper.vm as unknown as { ensureFreshOnOpen(): void }).ensureFreshOnOpen()
+    expect(lastSelect(wrapper)).toBe('user-default')
+  })
+
+  it('有快照且只有欢迎语的空会话仍可复用,标题不改变判断', async () => {
+    seedIndex([
+      { id: 'user-done', title: '完成对话', createdAt: 1 },
+      { id: 'user-titled-welcome', title: '已命名空会话', createdAt: 2 },
+    ])
+    seedSnapshot('user-done', [{ role: 'user', content: '查询项目' }], 'completed')
+    seedSnapshot('user-titled-welcome', [{ role: 'assistant', content: WELCOME }], 'completed')
+    const wrapper = await mountSwitcher()
+    ;(wrapper.vm as unknown as { ensureFreshOnOpen(): void }).ensureFreshOnOpen()
+    expect(lastSelect(wrapper)).toBe('user-titled-welcome')
   })
 
   it('历史都已完成且无空会话时,新建空对话', async () => {
@@ -118,9 +152,11 @@ describe('AgentSessionSwitcher Agent Mesh discovery', () => {
     await flushPromises()
     await wrapper.find('.session-current').trigger('click')
 
-    expect(wrapper.findAll('.session-item')).toHaveLength(2)
+    // 首次挂载会执行“打开即新对话”策略，新建的空会话在首次发现时被临时保留。
+    expect(wrapper.findAll('.session-item')).toHaveLength(3)
     expect(wrapper.text()).toContain('本地命名')
     expect(wrapper.text()).toContain('另一会话')
+    expect(wrapper.text()).toContain('新对话')
     expect(wrapper.text()).not.toContain('不应继续显示')
     expect(wrapper.text()).not.toContain('管理会话')
     expect(meshApi.list).toHaveBeenCalledOnce()
@@ -145,5 +181,163 @@ describe('AgentSessionSwitcher Agent Mesh discovery', () => {
     expect(wrapper.text()).toContain('管理会话')
     expect(wrapper.text()).not.toContain('用户会话')
     wrapper.unmount()
+  })
+})
+
+describe('AgentSessionSwitcher authoritative remote busy state', () => {
+  it('服务端说已完成时,陈旧本地 waiting 快照不能阻止打开新对话', async () => {
+    seedIndex([{ id: 'user-stale-busy', title: '旧任务', createdAt: 1 }])
+    seedSnapshot('user-stale-busy', [{ role: 'user', content: '旧任务内容' }], 'waiting_input')
+    meshApi.list.mockResolvedValue({
+      items: [
+        {
+          kind: 'session',
+          session_id: 'user-stale-busy',
+          surface: 'user',
+          name: '旧任务',
+          last_seen_at: '2026-08-13T00:00:00Z',
+          active_run_status: 'completed',
+        },
+      ],
+      total: 1,
+      by_kind: { session: 1 },
+    })
+    const wrapper = await mount(AgentSessionSwitcher, {
+      props: { storageKey: 'user', legacyKey: 'legacy', idPrefix: 'user', discoverRemote: true },
+    })
+    await flushPromises()
+    const selected = lastSelect(wrapper)
+    expect(selected?.startsWith('user-')).toBe(true)
+    expect(selected).not.toBe('user-stale-busy')
+  })
+
+  it('服务端说 running 时,即使本地快照缺失也优先跳回该会话', async () => {
+    seedIndex([{ id: 'user-running', title: '运行中任务', createdAt: 1 }])
+    meshApi.list.mockResolvedValue({
+      items: [
+        {
+          kind: 'session',
+          session_id: 'user-running',
+          surface: 'user',
+          name: '运行中任务',
+          last_seen_at: '2026-08-13T00:00:00Z',
+          active_run_status: 'running',
+        },
+      ],
+      total: 1,
+      by_kind: { session: 1 },
+    })
+    const wrapper = await mount(AgentSessionSwitcher, {
+      props: { storageKey: 'user', legacyKey: 'legacy', idPrefix: 'user', discoverRemote: true },
+    })
+    await flushPromises()
+    expect(lastSelect(wrapper)).toBe('user-running')
+  })
+})
+
+describe('AgentSessionSwitcher remote empty run state', () => {
+  it('服务端无运行记录时,陈旧本地 waiting 快照被当作已完成', async () => {
+    seedIndex([{ id: 'user-empty-run', title: '无运行记录旧会话', createdAt: 1 }])
+    seedSnapshot('user-empty-run', [{ role: 'user', content: '旧内容' }], 'waiting_input')
+    meshApi.list.mockResolvedValue({
+      items: [
+        {
+          kind: 'session',
+          session_id: 'user-empty-run',
+          surface: 'user',
+          name: '无运行记录旧会话',
+          last_seen_at: '2026-08-13T00:00:00Z',
+          active_run_status: '',
+        },
+      ],
+      total: 1,
+      by_kind: { session: 1 },
+    })
+    const wrapper = await mount(AgentSessionSwitcher, {
+      props: { storageKey: 'user', legacyKey: 'legacy', idPrefix: 'user', discoverRemote: true },
+    })
+    await flushPromises()
+    const selected = lastSelect(wrapper)
+    expect(selected?.startsWith('user-')).toBe(true)
+    expect(selected).not.toBe('user-empty-run')
+  })
+})
+
+describe('AgentSessionSwitcher 会话管理(搜索/置顶/删除确认)', () => {
+  it('搜索框按标题过滤会话,清空后恢复全部', async () => {
+    seedIndex([
+      { id: 'user-a', title: '项目审查', createdAt: 3 },
+      { id: 'user-b', title: '知识库问答', createdAt: 2 },
+      { id: 'user-c', title: '新对话', createdAt: 1 },
+    ])
+    const wrapper = await mountSwitcher()
+    await wrapper.find('.session-current').trigger('click')
+
+    expect(wrapper.findAll('.session-item')).toHaveLength(3)
+    await wrapper.find('.session-search').setValue('知识库')
+    expect(wrapper.findAll('.session-item')).toHaveLength(1)
+    expect(wrapper.text()).toContain('知识库问答')
+    expect(wrapper.text()).not.toContain('项目审查')
+
+    await wrapper.find('.session-search').setValue('')
+    expect(wrapper.findAll('.session-item')).toHaveLength(3)
+  })
+
+  it('置顶会话排在最前并持久化到本地索引', async () => {
+    seedIndex([
+      { id: 'user-a', title: '项目审查', createdAt: 3 },
+      { id: 'user-b', title: '知识库问答', createdAt: 2 },
+      { id: 'user-c', title: '新对话', createdAt: 1 },
+    ])
+    const wrapper = await mountSwitcher()
+    await wrapper.find('.session-current').trigger('click')
+
+    await wrapper.findAll('.session-pin')[1].trigger('click')
+    const names = wrapper.findAll('.session-item-name').map((item) => item.text())
+    expect(names[0]).toBe('知识库问答')
+
+    const stored = loadAgentChatSessions('user', 'legacy', 'user')
+    expect(stored.find((item) => item.id === 'user-b')?.pinned).toBe(true)
+  })
+
+  it('删除需要二次确认,确认后才真正移除', async () => {
+    seedIndex([
+      { id: 'user-a', title: '项目审查', createdAt: 3 },
+      { id: 'user-b', title: '知识库问答', createdAt: 2 },
+      { id: 'user-c', title: '新对话', createdAt: 1 },
+    ])
+    const wrapper = await mountSwitcher()
+    await wrapper.find('.session-current').trigger('click')
+
+    await wrapper.findAll('.session-delete')[1].trigger('click')
+    expect(wrapper.find('.session-confirm').exists()).toBe(true)
+    expect(loadAgentChatSessions('user', 'legacy', 'user')).toHaveLength(3)
+
+    await wrapper.find('.session-confirm-yes').trigger('click')
+    expect(wrapper.emitted('archive')).toEqual([['user-b']])
+    // 服务端归档成功前只进入归档中状态,不本地移除;由父组件确认成功后调用 removeSession。
+    expect(loadAgentChatSessions('user', 'legacy', 'user')).toHaveLength(3)
+    ;(wrapper.vm as unknown as { removeSession(id: string): void }).removeSession('user-b')
+    const remaining = loadAgentChatSessions('user', 'legacy', 'user')
+    expect(remaining.map((item) => item.id)).not.toContain('user-b')
+
+    // 取消路径不删除
+    await wrapper.findAll('.session-delete')[0].trigger('click')
+    await wrapper.find('.session-confirm-no').trigger('click')
+    expect(loadAgentChatSessions('user', 'legacy', 'user')).toHaveLength(2)
+  })
+
+  it('运行中的会话不显示删除入口,显示锁标记', async () => {
+    seedIndex([
+      { id: 'user-a', title: '项目审查', createdAt: 2 },
+      { id: 'user-b', title: '运行中任务', createdAt: 1 },
+    ])
+    seedSnapshot('user-b', [{ role: 'user', content: '开始审查' }], 'running')
+    const wrapper = await mountSwitcher()
+    await wrapper.find('.session-current').trigger('click')
+
+    expect(wrapper.findAll('.session-lock')).toHaveLength(1)
+    const busyItem = wrapper.findAll('.session-item').find((item) => item.text().includes('运行中任务'))
+    expect(busyItem?.find('.session-delete').exists()).toBe(false)
   })
 })

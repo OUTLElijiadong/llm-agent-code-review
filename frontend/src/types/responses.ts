@@ -8,6 +8,8 @@ export type ResponseStreamEventType =
   | 'response.tool.started'
   | 'response.tool.completed'
   | 'response.tool.failed'
+  | 'response.tool.rejected'
+  | 'response.sandbox.progress'
   | 'response.approval.required'
   | 'response.input.required'
   | 'response.sensitive.result'
@@ -44,7 +46,7 @@ export interface ResponseOutputItemAddedEvent extends ResponseStreamEventBase {
 }
 
 export interface ResponseToolLifecycleEvent extends ResponseStreamEventBase {
-  type: 'response.tool.started' | 'response.tool.completed' | 'response.tool.failed'
+  type: 'response.tool.started' | 'response.tool.completed' | 'response.tool.failed' | 'response.tool.rejected'
   call_id?: string
   item_id?: string
   tool_name?: string
@@ -142,6 +144,14 @@ export interface ResponseErrorEvent extends ResponseStreamEventBase {
   }
 }
 
+export interface ResponseSandboxProgressEvent extends ResponseStreamEventBase {
+  type: 'response.sandbox.progress'
+  environment_id?: string
+  status?: string
+  stage?: string
+  message?: string
+}
+
 export interface ResponseAuthExpiredEvent extends ResponseStreamEventBase {
   type: 'auth_expired'
   code: 40102
@@ -158,6 +168,7 @@ export type ResponseStreamEvent =
   | ResponseApprovalRequiredEvent
   | ResponseInputRequiredEvent
   | ResponseSensitiveResultEvent
+  | ResponseSandboxProgressEvent
   | ResponseTerminalEvent
   | ResponseAuthExpiredEvent
   | ResponseErrorEvent

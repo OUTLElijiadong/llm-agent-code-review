@@ -35,6 +35,7 @@ interface ToolMeta {
 const TOOL_META: Record<string, ToolMeta> = {
   // RAG / 知识库
   recall_knowledge: { label: '检索知识库', running: '小菱正在检索知识库…', group: 'knowledge', isRag: true },
+  change_own_password: { label: '修改密码', running: '小菱正在帮你修改密码…', group: 'admin', isPageAction: true },
   save_knowledge_note: { label: '记下经验', running: '小菱正在记下经验…', group: 'knowledge', isRag: true },
 
   // 项目

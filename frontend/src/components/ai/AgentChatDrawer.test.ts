@@ -124,7 +124,7 @@ beforeEach(() => {
         record.aborted = true
         const error = new Error('The operation was aborted')
         error.name = 'AbortError'
-        record.reject(error)
+        ;(record as { reject: (error: unknown) => void }).reject(error)
       },
       signal: new AbortController().signal,
       done,
@@ -292,15 +292,15 @@ describe('AgentChatDrawer Responses stream', () => {
 
     const timeline = wrapper.find('.response-tool-timeline')
     expect(timeline.text()).not.toContain('receive_message')
-    expect(timeline.text()).toContain('agent:data-analysis')
+    expect(timeline.text()).not.toContain('agent:data-analysis')
     expect(timeline.text()).toContain('数据分析完成')
     const head = timeline.find('.response-tool-call-head')
     expect(head.attributes('aria-expanded')).toBe('false')
     expect(timeline.find('.response-tool-detail').exists()).toBe(false)
 
     await head.trigger('click')
-    expect(timeline.find('.response-tool-detail').text()).toContain('数据分析完成')
-    expect(timeline.find('.response-tool-detail').text()).toContain('anomaly_count')
+    expect(timeline.find('.response-tool-detail').text()).toContain('此操作已完成')
+    expect(timeline.find('.response-tool-detail').text()).not.toContain('agent:data-analysis')
     wrapper.unmount()
     vi.useRealTimers()
   })
@@ -317,7 +317,8 @@ describe('AgentChatDrawer Responses stream', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('同步暂时中断,正在重试')
 
-    await vi.advanceTimersByTimeAsync(3000)
+    // 失败后指数退避:下一次轮询间隔翻倍为 6000ms。
+    await vi.advanceTimersByTimeAsync(6000)
     await flushPromises()
     expect(wrapper.text()).not.toContain('同步暂时中断,正在重试')
     expect(wrapper.text()).toContain('已同步')
@@ -671,7 +672,7 @@ describe('AgentChatDrawer Responses stream', () => {
     const timeline = wrapper.find('.response-tool-timeline')
     expect(timeline.text()).toContain('read file')
     expect(timeline.text()).not.toContain('read_file')
-    expect(timeline.text()).toContain('project_agent')
+    expect(timeline.text()).not.toContain('project_agent')
     expect(timeline.text()).toContain('失败')
     // 已完成/失败的调用默认折叠,点击后展示错误详情
     await wrapper.find('.response-tool-call-head').trigger('click')
@@ -697,11 +698,15 @@ describe('AgentChatDrawer Responses stream', () => {
 
     await stopBtn.trigger('click')
     await settleAll()
+    // 先弹原因确认层,确认后调用服务端取消并中止本地流。
+    expect(wrapper.find('.cancel-confirm-panel').exists()).toBe(true)
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await settleAll()
 
     // 已中止当前流;已生成的部分内容保留在消息流里(首条为欢迎语)
     expect(streams.records[0].aborted).toBe(true)
     const bubbles = wrapper.findAll('.msg-row.assistant .markdown-body')
-    expect(bubbles[bubbles.length - 1].text()).toContain('我先看一下项目结构')
+    expect(bubbles.some((bubble) => bubble.text().includes('我先看一下项目结构'))).toBe(true)
     // 取消后错误卡片留在消息流,带重试与新建对话入口
     const errorCard = wrapper.find('.msg-error-card')
     expect(errorCard.exists()).toBe(true)
@@ -721,6 +726,7 @@ describe('AgentChatDrawer Responses stream', () => {
       messages: [
         { role: 'user', content: '帮我分析这个项目' },
         { role: 'assistant', content: '我先看一下项目结构' },
+        { role: 'assistant', content: expect.stringContaining('已停止任务') },
       ],
     })
     emit(1, { type: 'response.output_text.delta', delta: '这次顺利完成了' })
@@ -728,6 +734,39 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(1)
     expect(wrapper.text()).toContain('这次顺利完成了')
     wrapper.unmount()
+  })
+
+  it('团队悬浮窗追问成员:点击后预填输入框', async () => {
+    teamApi.list.mockResolvedValue({
+      items: [{
+        team_id: 52, title: '只读核验', surface: 'user', session_id: 'user-test',
+        status: 'completed', max_active_children: 3, trace_id: 't52',
+        counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+      }],
+      total: 1,
+    })
+    teamApi.detail.mockResolvedValue({
+      team_id: 52, title: '只读核验', surface: 'user', session_id: 'user-test',
+      status: 'completed', max_active_children: 3, trace_id: 't52',
+      counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+      members: [{
+        member_id: 1, member_key: 'm1', display_name: '安全哨兵',
+        address: 'agent:security_sentinel', kind: 'runtime', role: 'worker',
+        status: 'completed', capabilities: {},
+      }],
+      tasks: [], events: [], messages: [],
+    })
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+    expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
+    await wrapper.find('.agent-team-open-detail').trigger('click')
+    await settleAll()
+    expect(wrapper.find('.agent-team-window').exists()).toBe(true)
+    expect(wrapper.find('.team-window-ask').exists()).toBe(true)
+    await wrapper.find('.team-window-ask').trigger('click')
+    await settleAll()
+    const value = (wrapper.find('textarea.chat-input').element as HTMLTextAreaElement).value
+    expect(value).toContain('请让「安全哨兵」继续处理')
   })
 
   it('网络错误留在消息流:错误卡片 + Toast,重试可恢复', async () => {

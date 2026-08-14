@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.dialects import mysql, sqlite
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from app.api.v1 import agent_responses as api_module
 from app.models.admin_chat import AdminChatMessage, OpsExecution
 from app.models.agent_governance import (
+    AgentMemory,
     AgentProfile,
     AgentToolPermission,
     ApprovalItem,
@@ -26,6 +29,8 @@ from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.services import agent_responses_service as service_module
 from app.services.agent_responses_service import DatabaseCheckpointStore, PrismToolExecutor
 from app.services.deepseek_responses_runtime import (
+    FAILED,
+    DeepSeekResponsesRuntime,
     InvalidRunStateError,
     RunCheckpoint,
     RuntimeResult,
@@ -33,11 +38,68 @@ from app.services.deepseek_responses_runtime import (
 )
 
 
+@pytest.mark.asyncio
+async def test_agent_responses_runtime_uses_configured_long_task_round_budget(
+    db,
+    monkeypatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class CapturingRuntime:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        service_module,
+        "resolve_api_config",
+        lambda *_args, **_kwargs: SimpleNamespace(model="deepseek-v4-flash", source="system"),
+    )
+    monkeypatch.setattr(service_module, "NativeResponsesTransport", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(service_module, "DeepSeekResponsesRuntime", CapturingRuntime)
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(service_module.settings, "agent_responses_max_rounds", 64)
+    service = service_module.AgentResponsesService(
+        db,
+        SimpleNamespace(id=7, username="tester", role="user"),
+        surface="user",
+        session_key="session-long-task",
+    )
+
+    await service._runtime("run-long-task", None)
+
+    assert captured["max_rounds"] == 64
+
+
+def test_agent_response_request_accepts_only_one_start_input_source() -> None:
+    request = api_module.AgentResponsesRequest(
+        surface="user",
+        session_id="session-mesh-01",
+        mesh_message_id="msg_0123456789abcdef",
+    )
+    assert request.messages == []
+
+    with pytest.raises(PydanticValidationError):
+        api_module.AgentResponsesRequest(
+            surface="user",
+            session_id="session-mesh-01",
+            mesh_message_id="msg_0123456789abcdef",
+            messages=[{"role": "user", "content": "不应与结构化消息混用"}],
+        )
+
+    team_result = api_module.AgentResponsesRequest(
+        surface="user",
+        session_id="session-mesh-01",
+        mesh_message_id="team-40-task-7-attempt-1-result",
+    )
+    assert team_result.mesh_message_id == "team-40-task-7-attempt-1-result"
+
+
 @pytest.fixture()
 def db():
     engine = create_engine("sqlite:///:memory:")
     AgentResponseRun.__table__.create(engine)
     AgentToolExecution.__table__.create(engine)
+    AgentMemory.__table__.create(engine)
     ApprovalItem.__table__.create(engine)
     AgentProfile.__table__.create(engine)
     AgentToolPermission.__table__.create(engine)
@@ -67,6 +129,81 @@ async def test_database_checkpoint_store_is_owner_and_session_isolated(db) -> No
 
     with pytest.raises(InvalidRunStateError):
         await other.save(checkpoint)
+
+
+@pytest.mark.asyncio
+async def test_database_checkpoint_store_cancelled_is_terminal_against_write_back(db) -> None:
+    drive_store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-cancel-race")
+    cancel_store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-cancel-race")
+    checkpoint = RunCheckpoint(
+        run_id="run_store_cancel_race",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "修改项目"}],
+        tools=[],
+        status="running",
+    )
+    assert await drive_store.create(checkpoint) is True
+
+    cancelled = RunCheckpoint.from_dict(checkpoint.to_dict())
+    cancelled.status = "cancelled"
+    cancelled.cancel_reason = "需求变更"
+    await cancel_store.save(cancelled)
+
+    # 原始驱动循环稍后回写等待审批,不能覆盖已取消终态。
+    drive_store._db.expire_all()
+    overwrite = RunCheckpoint.from_dict(checkpoint.to_dict())
+    overwrite.status = "waiting_approval"
+    overwrite.pending = None
+    await drive_store.save(overwrite)
+
+    row = db.query(AgentResponseRun).filter_by(run_id="run_store_cancel_race").one()
+    assert row.status == "cancelled"
+    assert json.loads(row.checkpoint_json)["cancel_reason"] == "需求变更"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_is_terminal_across_independent_sessions(tmp_path) -> None:
+    """真实跨请求模型:两个独立 Session,驱动循环持旧快照回写不能覆盖取消。"""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'cancel-terminal.db'}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+    AgentResponseRun.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    driver_db = factory()
+    cancel_db = factory()
+    try:
+        driver_store = DatabaseCheckpointStore(driver_db, user_id=7, surface="user", session_key="session-x")
+        cancel_store = DatabaseCheckpointStore(cancel_db, user_id=7, surface="user", session_key="session-x")
+        checkpoint = RunCheckpoint(
+            run_id="run_cross_request_cancel",
+            model="deepseek-v4-flash",
+            transcript=[{"role": "user", "content": "修改项目"}],
+            tools=[],
+            status="running",
+        )
+        assert await driver_store.create(checkpoint) is True
+
+        # 驱动循环先读到旧 running 快照;取消请求随后独立提交 cancelled。
+        stale = await driver_store.load(checkpoint.run_id)
+        cancelled = RunCheckpoint.from_dict(stale.to_dict())
+        cancelled.status = "cancelled"
+        cancelled.cancel_reason = "需求变更"
+        await cancel_store.save(cancelled)
+
+        # 驱动循环再回写 waiting_approval,条件 UPDATE 不能覆盖取消终态。
+        stale.status = "waiting_approval"
+        await driver_store.save(stale)
+
+        row = cancel_db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+        assert row.status == "cancelled"
+        payload = json.loads(row.checkpoint_json)
+        assert payload["status"] == "cancelled"
+        assert payload["cancel_reason"] == "需求变更"
+    finally:
+        driver_db.close()
+        cancel_db.close()
+        engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -112,6 +249,224 @@ async def test_database_checkpoint_store_preserves_payload_larger_than_mysql_tex
 
     assert loaded is not None
     assert loaded.tools[0]["description"] == large_tool_schema["description"]
+
+
+@pytest.mark.asyncio
+async def test_database_checkpoint_store_claim_is_compare_and_swap(db) -> None:
+    first_store = DatabaseCheckpointStore(db, user_id=7, surface="admin", session_key="session-claim")
+    second_store = DatabaseCheckpointStore(db, user_id=7, surface="admin", session_key="session-claim")
+    checkpoint = RunCheckpoint(
+        run_id="run_claim_once",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "只允许恢复一次"}],
+        tools=[],
+        status="failed",
+    )
+    assert await first_store.create(checkpoint) is True
+
+    claimed = await first_store.claim(
+        checkpoint.run_id,
+        expected_status="failed",
+        claimed_status="running",
+    )
+    rejected = await second_store.claim(
+        checkpoint.run_id,
+        expected_status="failed",
+        claimed_status="running",
+    )
+
+    assert claimed is not None
+    assert claimed.status == "running"
+    assert rejected is None
+    row = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+    assert row.status == "running"
+    assert json.loads(row.checkpoint_json)["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_database_checkpoint_store_claim_is_atomic_across_sessions(tmp_path) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'response-retry-claim.db'}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+    AgentResponseRun.__table__.create(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    seed = session_factory()
+    try:
+        await DatabaseCheckpointStore(
+            seed,
+            user_id=7,
+            surface="admin",
+            session_key="session-retry-claim",
+        ).save(
+            RunCheckpoint(
+                run_id="run_database_retry_claim",
+                model="deepseek-v4-flash",
+                transcript=[{"role": "user", "content": "恢复运行"}],
+                tools=[],
+                status=FAILED,
+                error="上游中断",
+            )
+        )
+    finally:
+        seed.close()
+
+    barrier = threading.Barrier(2)
+
+    def claim_once() -> Any:
+        session = session_factory()
+        try:
+            barrier.wait(timeout=2)
+            return asyncio.run(
+                DatabaseCheckpointStore(
+                    session,
+                    user_id=7,
+                    surface="admin",
+                    session_key="session-retry-claim",
+                ).claim(
+                    "run_database_retry_claim",
+                    expected_status=FAILED,
+                    claimed_status="running",
+                )
+            )
+        finally:
+            session.close()
+
+    try:
+        outcomes = await asyncio.gather(
+            asyncio.to_thread(claim_once),
+            asyncio.to_thread(claim_once),
+        )
+        assert sum(item is not None for item in outcomes) == 1
+
+        check = session_factory()
+        try:
+            row = check.query(AgentResponseRun).filter_by(run_id="run_database_retry_claim").one()
+            assert row.status == "running"
+            assert row.version == 2
+            assert json.loads(row.checkpoint_json)["status"] == "running"
+        finally:
+            check.close()
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_retry_reuses_persisted_tool_result_when_checkpoint_output_was_lost(
+    db,
+    monkeypatch,
+) -> None:
+    class FinalTransport:
+        def __init__(self) -> None:
+            self.payloads: list[Mapping[str, Any]] = []
+
+        async def create_response(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+            self.payloads.append(payload)
+            return {
+                "id": "resp_persisted_result",
+                "object": "response",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "已从持久化账本安全恢复"}],
+                    }
+                ],
+            }
+
+    class UnexpectedOrchestrator:
+        def invoke_tool(self, *_args, **_kwargs) -> Any:
+            raise AssertionError("已落库工具结果不得重复触发业务执行")
+
+    run_id = "run_persisted_tool_recovery"
+    call_id = "call_persisted_list"
+    arguments = {
+        "keyword": "",
+        "language": "",
+        "status": "active",
+        "page": 1,
+        "page_size": 20,
+    }
+    call_response = {
+        "id": "resp_interrupted_after_tool",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {
+                "type": "function_call",
+                "id": "item_persisted_list",
+                "call_id": call_id,
+                "name": "list_projects",
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            }
+        ],
+    }
+    checkpoint = RunCheckpoint(
+        run_id=run_id,
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "查询项目"}, *call_response["output"]],
+        tools=[],
+        status=FAILED,
+        rounds=1,
+        last_response=call_response,
+        error="Worker 在工具账本落库后、检查点输出落库前中断",
+    )
+    store = DatabaseCheckpointStore(
+        db,
+        user_id=7,
+        surface="admin",
+        session_key="session-persisted-tool-recovery",
+    )
+    await store.save(checkpoint)
+    db.add(
+        AgentToolExecution(
+            request_id=service_module._request_id(run_id, call_id),
+            run_id=run_id,
+            call_id=call_id,
+            user_id=7,
+            tool_name="list_projects",
+            status="success",
+            arguments_json=json.dumps(arguments, ensure_ascii=False),
+            result_json=json.dumps(
+                {"status": "success", "output": {"items": [], "total": 0}},
+                ensure_ascii=False,
+            ),
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(
+        service_module,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: UnexpectedOrchestrator(),
+    )
+    user = SimpleNamespace(id=7, role="admin", username="manager", token_version=0)
+    executor = PrismToolExecutor(
+        db,
+        user,
+        surface="admin",
+        run_id=run_id,
+        mcp_provider=EmptyMcp(),
+    )
+    transport = FinalTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=executor,
+        checkpoint_store=store,
+    )
+
+    result = await runtime.retry(run_id)
+
+    assert result.status == "completed"
+    assert result.output_text == "已从持久化账本安全恢复"
+    recovered_outputs = [
+        item
+        for item in transport.payloads[0]["input"]
+        if item.get("type") == "function_call_output" and item.get("call_id") == call_id
+    ]
+    assert len(recovered_outputs) == 1
+    assert json.loads(recovered_outputs[0]["output"])["output"] == {"items": [], "total": 0}
+    assert db.query(AgentToolExecution).filter_by(run_id=run_id, call_id=call_id).count() == 1
 
 
 def test_responses_payload_columns_compile_for_each_database_dialect() -> None:
@@ -503,6 +858,7 @@ def test_session_recovery_is_user_and_surface_isolated(db) -> None:
         "run": None,
         "messages": [],
         "pending": None,
+        "mesh_messages": [],
     }
 
 
@@ -642,6 +998,78 @@ class EmptyMcp:
 
 
 @pytest.mark.asyncio
+async def test_full_project_validation_waits_for_terminal_sandbox(db, monkeypatch) -> None:
+    class FakeOrchestrator:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_full_project_validation(self, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(
+                success=True,
+                data={"public_id": "sbx_wait", "project_id": 17, "status": "queued"},
+                error="",
+            )
+
+    orchestrator = FakeOrchestrator()
+    rollback_calls = 0
+    original_rollback = db.rollback
+    states = iter(
+        [
+            {"public_id": "sbx_wait", "project_id": 17, "status": "dispatching"},
+            {
+                "public_id": "sbx_wait",
+                "project_id": 17,
+                "status": "succeeded",
+                "result": {"passed": True, "summary": "组合验证通过"},
+                "artifacts": [{"artifact_type": "review_report", "id": 9}],
+            },
+        ]
+    )
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    def counted_rollback() -> None:
+        nonlocal rollback_calls
+        rollback_calls += 1
+        original_rollback()
+
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: orchestrator)
+    monkeypatch.setattr(service_module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(service_module.sandbox_service, "get_environment", lambda *_args: next(states))
+    monkeypatch.setattr(db, "rollback", counted_rollback)
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, role="user", token_version=0),
+        surface="user",
+        run_id="run_wait_terminal",
+        mcp_provider=EmptyMcp(),
+    )
+
+    result = await executor.execute(
+        ToolCall(
+            "call_wait_terminal",
+            "run_full_project_validation",
+            {"project_id": 17, "language": "python"},
+            '{"project_id":17,"language":"python"}',
+        )
+    )
+
+    assert result.status == "success"
+    assert result.output["public_id"] == "sbx_wait"
+    assert result.output["status"] == "succeeded"
+    assert result.output["terminal"] is True
+    assert result.output["result"]["passed"] is True
+    assert orchestrator.calls == 1
+    assert rollback_calls == 2
+    executions = db.query(AgentToolExecution).all()
+    assert [(row.tool_name, row.status) for row in executions] == [
+        ("run_full_project_validation", "success")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_write_tool_requires_click_approval_then_executes_exact_call(db, monkeypatch) -> None:
     class FakeOrchestrator:
         def __init__(self) -> None:
@@ -726,6 +1154,35 @@ async def test_uncertain_tool_execution_is_never_retried(db, monkeypatch) -> Non
     assert result.status == "error"
     assert "不会自动重试" in result.error
     assert orchestrator.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_invalid_tool_attempt_is_persisted_with_failure_kind_and_strategy(db, monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, role="user", token_version=0),
+        surface="user",
+        run_id="run_invalid_strategy",
+        mcp_provider=EmptyMcp(),
+    )
+
+    result = await executor.execute(
+        ToolCall(
+            "call_invalid_strategy",
+            "run_full_project_validation",
+            {"language": "python", "worker_code": "missing"},
+            '{"language":"python","worker_code":"missing"}',
+        )
+    )
+
+    assert result.status == "error"
+    ledger = db.query(AgentToolExecution).filter_by(call_id="call_invalid_strategy").one()
+    persisted = json.loads(ledger.result_json)
+    assert persisted["failure_kind"] == "invalid_arguments"
+    memory = db.query(AgentMemory).filter_by(memory_type="execution_strategy").one()
+    assert memory.failure_kind == "invalid_arguments"
+    assert memory.failure_count == 1
 
 
 @pytest.mark.asyncio
@@ -1575,14 +2032,22 @@ def test_admin_completion_guard_accepts_successful_reject_action() -> None:
 
 
 @pytest.mark.asyncio
-async def test_admin_transport_sink_buffers_only_text_deltas() -> None:
+async def test_admin_transport_sink_filters_text_and_upstream_tool_lifecycle() -> None:
     events: list[Mapping[str, Any]] = []
     sink = service_module._buffer_admin_text_sink(events.append)
 
     await sink({"type": "response.output_text.delta", "delta": "未验证文本"})
     await sink({"type": "response.tool.started", "call_id": "call-1"})
 
-    assert events == [{"type": "response.tool.started", "call_id": "call-1"}]
+    assert events == []
+
+
+def test_public_failed_tool_event_always_has_error() -> None:
+    event = api_module._public_stream_event(
+        {"type": "response.tool.failed", "tool_name": "create_agent_team", "error": None}
+    )
+    assert event is not None
+    assert event["error"] == "工具 create_agent_team 执行失败"
 
 
 @pytest.mark.asyncio

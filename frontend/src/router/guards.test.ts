@@ -7,6 +7,7 @@ const auth = vi.hoisted(() => ({
     profile: null as null | { id: number; role: string },
     fetchProfile: vi.fn(),
     logout: vi.fn(),
+    clearSession: vi.fn(),
     isAdmin: vi.fn(() => false),
     hasRole: vi.fn<(role: string) => boolean>(() => false),
     hasPermission: vi.fn<(permission: string) => boolean>(() => false),
@@ -90,7 +91,7 @@ describe('router guards', () => {
     auth.user.profile = null
     auth.user.fetchProfile.mockRejectedValueOnce(new Error('expired'))
     expect(await before(route('/login', { public: true }), route('/'))).toBe(true)
-    expect(auth.user.logout).toHaveBeenCalledOnce()
+    expect(auth.user.clearSession).toHaveBeenCalledOnce()
   })
 
   it('redirects unauthenticated users with the original full path', async () => {
@@ -119,7 +120,7 @@ describe('router guards', () => {
       path: '/login',
       query: { redirect: '/projects' },
     })
-    expect(auth.user.logout).toHaveBeenCalledOnce()
+    expect(auth.user.clearSession).toHaveBeenCalledOnce()
   })
 
   it('enforces legacy roles and keeps admins inside management or detail routes', async () => {

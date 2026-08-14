@@ -10,6 +10,7 @@ import type {
   AgentTeamSummary,
   AgentTeamTask,
 } from '@/api/agentTeams'
+import AgentMemberWorkCard from '@/components/ai/AgentMemberWorkCard.vue'
 
 const props = withDefaults(defineProps<{
   team: AgentTeamDetail | AgentTeamSummary | null
@@ -223,14 +224,16 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 
       <section v-if="members.length" class="agent-team-section" aria-label="团队成员">
         <h4>成员</h4>
-        <ul class="agent-team-members">
-          <li v-for="member in members" :key="member.member_id" class="agent-team-member">
-            <span class="agent-team-dot" :class="statusClass(member.status)" aria-hidden="true"></span>
-            <span class="agent-team-member-name">{{ member.display_name }}</span>
-            <code>{{ member.address }}</code>
-            <span class="agent-team-item-status">{{ label(member.status) }}</span>
-          </li>
-        </ul>
+        <div class="agent-team-member-cards">
+          <AgentMemberWorkCard
+            v-for="member in members"
+            :key="member.member_id"
+            :member="member"
+            :tasks="tasks"
+            :events="events"
+            :team-started-at="teamDetail?.started_at ?? null"
+          />
+        </div>
       </section>
 
       <section v-if="tasks.length" class="agent-team-section" aria-label="任务依赖">
@@ -365,75 +368,78 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 </template>
 
 <style scoped>
-.agent-team-trace { box-sizing: border-box; width: 100%; min-width: 0; margin-top: 8px; overflow: hidden; border: 1px solid #dfe3e8; border-radius: 8px; background: #fff; color: #1f2329; font-size: 12px; }
+.agent-team-trace { box-sizing: border-box; width: 100%; min-width: 0; margin-top: 8px; overflow: hidden; border: 1px solid var(--gray-200); border-radius: 8px; background: #fff; color: var(--gray-800); font-size: 12px; }
 .agent-team-trace-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 8px 10px; }
 .agent-team-toggle { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; padding: 0; }
-.agent-team-caret { flex: none; color: #8b949e; font-size: 18px; line-height: 14px; transition: transform .15s ease; transform: rotate(0deg); }
+.agent-team-caret { flex: none; color: var(--gray-400); font-size: 18px; line-height: 14px; transition: transform .15s ease; transform: rotate(0deg); }
 .agent-team-caret.is-open { transform: rotate(90deg); }
 .agent-team-title { min-width: 0; overflow-wrap: anywhere; font-weight: 650; }
-.agent-team-status, .agent-team-item-status { flex: none; white-space: nowrap; color: #66707a; font-size: 10px; }
-.agent-team-status { padding: 1px 6px; border: 1px solid #dfe3e8; border-radius: 999px; }
-.agent-team-status.is-running, .agent-team-status.is-verifying { color: #1769aa; border-color: #a9cae5; background: #eff7ff; }
-.agent-team-status.is-completed { color: #26734d; border-color: #b7dec7; background: #f0faf3; }
-.agent-team-status.is-failed, .agent-team-status.is-expired { color: #a73832; border-color: #efbbb5; background: #fff3f1; }
-.agent-team-refresh { flex: none; color: #7a838f; font-size: 10px; white-space: nowrap; }
-.agent-team-refresh.is-loading { color: #3978d6; }
+.agent-team-status, .agent-team-item-status { flex: none; white-space: nowrap; color: var(--gray-500); font-size: 10px; }
+.agent-team-status { padding: 1px 6px; border: 1px solid var(--gray-200); border-radius: 999px; }
+.agent-team-status.is-running, .agent-team-status.is-verifying { color: var(--brand-600); border-color: var(--brand-200); background: var(--brand-50); }
+.agent-team-status.is-completed { color: var(--color-success); border-color: var(--color-success); background: var(--color-success-light); }
+.agent-team-status.is-failed, .agent-team-status.is-expired { color: var(--color-danger); border-color: var(--color-danger); }
+.agent-team-refresh { flex: none; color: var(--gray-500); font-size: 10px; white-space: nowrap; }
+.agent-team-refresh.is-loading { color: var(--brand-500); }
 .agent-team-open-detail {
   flex: none;
-  border: 1px solid #cfd7df;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--gray-300);
   border-radius: 999px;
   background: #fff;
-  color: #3978d6;
-  font-size: 10px;
-  line-height: 1;
-  padding: 4px 8px;
+  color: var(--brand-600);
+  font-size: 11px;
+  line-height: 1.4;
   cursor: pointer;
   white-space: nowrap;
 }
-.agent-team-open-detail:hover { border-color: #79a8df; background: #f4f9ff; }
-.agent-team-error { margin: 0; padding: 0 10px 8px; color: #b42318; overflow-wrap: anywhere; }
-.agent-team-history-error { margin: 5px 0 0; color: #b42318; overflow-wrap: anywhere; }
-.agent-team-trace-body { min-width: 0; padding: 0 10px 10px; border-top: 1px solid #edf0f2; }
-.agent-team-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 8px 0; color: #737b85; text-align: center; }
+.agent-team-open-detail:hover { border-color: var(--brand-300); background: var(--brand-50); }
+.agent-team-error { margin: 0; padding: 0 10px 8px; color: var(--color-danger); overflow-wrap: anywhere; }
+.agent-team-history-error { margin: 5px 0 0; color: var(--color-danger); overflow-wrap: anywhere; }
+.agent-team-trace-body { min-width: 0; padding: 0 10px 10px; border-top: 1px solid var(--gray-100); }
+.agent-team-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 8px 0; color: var(--gray-500); text-align: center; }
 .agent-team-stats span { min-width: 0; overflow-wrap: anywhere; }
-.agent-team-stats b { display: block; color: #20252b; font-size: 14px; line-height: 17px; }
+.agent-team-stats b { display: block; color: var(--gray-900); font-size: 14px; line-height: 17px; }
 .agent-team-section { min-width: 0; padding-top: 7px; }
-.agent-team-section h4 { margin: 0 0 5px; color: #5e6873; font-size: 11px; font-weight: 650; }
+.agent-team-section h4 { margin: 0 0 5px; color: var(--gray-600); font-size: 11px; font-weight: 650; }
+.agent-team-member-cards { display: grid; gap: 8px; }
 .agent-team-members, .agent-team-tasks, .agent-team-events { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .agent-team-record-viewport { min-width: 0; max-block-size: 264px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.agent-team-member, .agent-team-task { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 5px; min-width: 0; padding: 5px 6px; border: 1px solid #edf0f2; border-radius: 5px; }
+.agent-team-member, .agent-team-task { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 5px; min-width: 0; padding: 5px 6px; border: 1px solid var(--gray-100); border-radius: 5px; }
 .agent-team-member-name, .agent-team-task strong { min-width: 0; overflow-wrap: anywhere; }
-.agent-team-member code, .agent-team-task code, .agent-team-events code { min-width: 0; overflow-wrap: anywhere; color: #1756a9; font-size: 10px; }
-.agent-team-dot { width: 7px; height: 7px; border-radius: 50%; background: #a6aeb8; }
-.agent-team-dot.is-running { background: #3978d6; }
-.agent-team-dot.is-completed { background: #2b8a57; }
-.agent-team-dot.is-failed, .agent-team-dot.is-dead_letter, .agent-team-dot.is-expired { background: #c43d36; }
+.agent-team-member code, .agent-team-task code, .agent-team-events code { min-width: 0; overflow-wrap: anywhere; color: var(--brand-600); font-size: 10px; }
+.agent-team-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gray-300); }
+.agent-team-dot.is-running { background: var(--brand-500); }
+.agent-team-dot.is-completed { background: var(--color-success); }
+.agent-team-dot.is-failed, .agent-team-dot.is-dead_letter, .agent-team-dot.is-expired { background: var(--color-danger); }
 .agent-team-task { display: block; }
 .agent-team-task-line { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; }
-.agent-team-task small { display: block; margin-top: 2px; color: #7a838f; overflow-wrap: anywhere; }
-.agent-team-dependencies { margin-top: 3px; color: #7a838f; overflow-wrap: anywhere; }
+.agent-team-task small { display: block; margin-top: 2px; color: var(--gray-500); overflow-wrap: anywhere; }
+.agent-team-dependencies { margin-top: 3px; color: var(--gray-500); overflow-wrap: anywhere; }
 .agent-team-dependencies code { margin-left: 3px; }
-.agent-team-events li { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 6px; min-width: 0; padding: 3px 0; border-bottom: 1px solid #f1f2f4; }
-.agent-team-events time { color: #8a929d; font-size: 10px; }
+.agent-team-events li { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 6px; min-width: 0; padding: 3px 0; border-bottom: 1px solid var(--gray-100); }
+.agent-team-events time { color: var(--gray-400); font-size: 10px; }
 .agent-team-events span, .agent-team-events small { min-width: 0; overflow-wrap: anywhere; }
-.agent-team-events small { grid-column: 2; color: #7a838f; font-size: 10px; }
-.agent-team-pager { display: flex; align-items: center; gap: 6px; min-height: 28px; color: #7a838f; font-size: 10px; }
+.agent-team-events small { grid-column: 2; color: var(--gray-500); font-size: 10px; }
+.agent-team-pager { display: flex; align-items: center; gap: 6px; min-height: 36px; color: var(--gray-500); font-size: 10px; }
 .agent-team-pager-actions { display: flex; gap: 4px; margin-left: auto; }
-.agent-team-page-action { min-width: 48px; min-height: 24px; border: 1px solid #cfd7df; border-radius: 4px; background: #fff; color: #1756a9; cursor: pointer; font-size: 10px; line-height: 1; }
-.agent-team-page-action:hover { border-color: #79a8df; background: #f4f9ff; }
-.agent-team-record-detail { grid-column: 2; min-width: 0; color: #69727d; }
+.agent-team-page-action { min-width: 56px; min-height: 32px; border: 1px solid var(--gray-300); border-radius: 4px; background: #fff; color: var(--brand-600); cursor: pointer; font-size: 11px; line-height: 1.2; }
+.agent-team-page-action:hover { border-color: var(--brand-300); background: var(--brand-50); }
+.agent-team-record-detail { grid-column: 2; min-width: 0; color: var(--gray-500); }
 .agent-team-record-detail summary { cursor: pointer; overflow-wrap: anywhere; font-size: 10px; }
-.agent-team-record-detail code { display: block; margin-top: 4px; color: #3c4652; white-space: pre-wrap; }
-.agent-team-evidence { margin-top: 5px; color: #69727d; }
-.agent-team-evidence summary { cursor: pointer; color: #1756a9; font-size: 10px; }
+.agent-team-record-detail code { display: block; margin-top: 4px; color: var(--gray-700); white-space: pre-wrap; }
+.agent-team-evidence { margin-top: 5px; color: var(--gray-500); }
+.agent-team-evidence summary { cursor: pointer; color: var(--brand-600); font-size: 10px; }
 .agent-team-detail-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 5px; margin-top: 4px; min-width: 0; }
-.agent-team-detail-row code { overflow-wrap: anywhere; color: #3c4652; white-space: pre-wrap; }
-.agent-team-detail-row.is-error code { color: #a73832; }
-.agent-team-message-trace { grid-column: 2; overflow-wrap: anywhere; color: #69727d; font-size: 9px; }
-.agent-team-empty { margin: 8px 0 0; color: #7a838f; }
+.agent-team-detail-row code { overflow-wrap: anywhere; color: var(--gray-700); white-space: pre-wrap; }
+.agent-team-detail-row.is-error code { color: var(--color-danger); }
+.agent-team-message-trace { grid-column: 2; overflow-wrap: anywhere; color: var(--gray-500); font-size: 9px; }
+.agent-team-empty { margin: 8px 0 0; color: var(--gray-500); }
 @media (max-width: 420px) {
   .agent-team-member { grid-template-columns: 8px minmax(0, 1fr) auto; }
   .agent-team-member code { grid-column: 2 / -1; }
   .agent-team-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 8px; }
+  .agent-team-open-detail, .agent-team-page-action { min-height: 40px; }
 }
 </style>

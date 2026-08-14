@@ -12,6 +12,8 @@ export interface AgentMeshAddress {
   session_id: string
   surface: string
   last_seen_at: string
+  active_run_id?: string
+  active_run_status?: string
   description?: string
 }
 
@@ -83,4 +85,18 @@ export function getAgentMeshTrace(traceId: string): Promise<{
     messages: AgentMeshMessage[]
     total: number
   }>(`/agent-mesh/traces/${encodeURIComponent(traceId)}`)
+}
+
+/**
+ * 归档当前账户的一个小菱会话,使其从服务端发现目录隐藏。
+ * 运行中/等待审批/等待输入的会话会被服务端拒绝。
+ */
+export function archiveAgentMeshSession(
+  surface: AgentMeshSurface,
+  sessionId: string,
+): Promise<{ session_id: string; status: string }> {
+  return post<{ session_id: string; status: string }>('/agent-mesh/conversations/archive', {
+    surface,
+    session_id: sessionId,
+  })
 }
