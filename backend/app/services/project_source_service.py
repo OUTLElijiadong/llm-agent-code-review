@@ -18,7 +18,7 @@ import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from sqlalchemy.orm import Session, undefer
@@ -52,6 +52,159 @@ CLAMAV_INSTREAM_SAFE_BYTES = 24 * 1024 * 1024
 # 远程源码下载上限:不设业务上限,但要防内存耗尽
 MAX_REMOTE_BYTES = 500 * 1024 * 1024
 AUDIT_RUNNING_STALE_AFTER = timedelta(minutes=30)
+
+GITHUB_PROJECT_HOSTS = frozenset({"github.com", "www.github.com"})
+GITHUB_OWNER_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+GITHUB_FORBIDDEN_PATH_MARKERS = (
+    "/blob/",
+    "/raw/",
+    "/releases/",
+    "/issues/",
+    "/pull/",
+    "/actions/",
+    "/commit/",
+    "/wiki/",
+    "/settings/",
+    "/releases",
+)
+GITHUB_CREDENTIAL_KEYS = frozenset({
+    "access_token",
+    "access-token",
+    "api_key",
+    "api-key",
+    "apikey",
+    "auth",
+    "authorization",
+    "client_id",
+    "client_secret",
+    "client-secret",
+    "credential",
+    "credentials",
+    "key",
+    "oauth_token",
+    "passwd",
+    "password",
+    "private_token",
+    "secret",
+    "token",
+})
+
+
+class RemoteArchiveNotFoundError(ExternalServiceError):
+    """远程源码归档返回 HTTP 404。
+
+    继承 ExternalServiceError 保持既有错误语义，同时让 GitHub 默认分支解析
+    能可靠识别 404 并继续尝试下一个候选分支。
+    """
+
+
+def _github_url_has_credentials(payload: str) -> bool:
+    """判断查询串或片段是否携带常见凭据键，避免令牌随 source_url 留痕。"""
+    if not payload:
+        return False
+    for key in parse_qs(payload, keep_blank_values=True):
+        if key.lower() in GITHUB_CREDENTIAL_KEYS:
+            return True
+    return False
+
+
+def _is_remote_archive_not_found(exc: Exception) -> bool:
+    """兼容识别远程归档 404：专用异常、异常 status_code 或既有错误文案。"""
+    if isinstance(exc, RemoteArchiveNotFoundError):
+        return True
+    return getattr(exc, "status_code", None) == 404 or "HTTP 404" in str(exc)
+
+
+def _is_github_project_page_url(url: str) -> bool:
+    """识别 github.com 页面网址，但保留其直接归档链接走原下载链路。
+
+    codeload、github.com 的 /archive/ 与 /releases/download 均为可直接下载的
+    归档地址；其余 github.com 路径交给 _normalize_github_project_url 严格校验。
+    """
+    try:
+        parsed = urlsplit((url or "").strip())
+    except ValueError:
+        return False
+    if parsed.scheme.lower() != "https":
+        return False
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in GITHUB_PROJECT_HOSTS:
+        return False
+    lowered_path = parsed.path.lower()
+    if "/archive/" in lowered_path or "/releases/download" in lowered_path:
+        return False
+    return bool(parsed.path.lstrip("/"))
+
+
+def _normalize_github_project_url(url: str) -> tuple[str, str, str | None]:
+    """校验 GitHub 公开仓库页面 URL，返回 (owner, repo, branch)。
+
+    branch 为 None 表示页面未显式指定分支，调用方按 main→master 顺序回退。
+    """
+    value = (url or "").strip()
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() != "https":
+        raise ValidationError("GitHub 仓库网址必须是 HTTPS", code=40001)
+    if not parsed.hostname or parsed.hostname.lower() not in GITHUB_PROJECT_HOSTS:
+        raise ValidationError(
+            "GitHub 仓库网址仅支持 github.com 或 www.github.com",
+            code=40001,
+        )
+    if parsed.username or parsed.password:
+        raise ValidationError("GitHub 仓库网址不能包含用户名或密码", code=40001)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValidationError("GitHub 仓库网址端口格式无效", code=40001) from exc
+    if port not in (None, 443):
+        raise ValidationError("GitHub 仓库网址只允许 HTTPS 默认端口", code=40001)
+    if _github_url_has_credentials(parsed.query):
+        raise ValidationError("GitHub 仓库网址查询串不能包含凭据", code=40001)
+    if _github_url_has_credentials(parsed.fragment):
+        raise ValidationError("GitHub 仓库网址片段不能包含凭据", code=40001)
+
+    path = parsed.path
+    lowered = path.lower()
+    if any(marker in lowered for marker in GITHUB_FORBIDDEN_PATH_MARKERS):
+        raise ValidationError(
+            "GitHub 仓库网址不是可导入的仓库页面路径",
+            code=40001,
+        )
+
+    parts = path.lstrip("/").rstrip("/").split("/")
+    if len(parts) < 2 or any(not part for part in parts):
+        raise ValidationError("GitHub 仓库网址路径格式无效", code=40001)
+    owner, repo = parts[0], parts[1]
+    if not re.fullmatch(GITHUB_OWNER_REPO_RE, owner) or not re.fullmatch(GITHUB_OWNER_REPO_RE, repo):
+        raise ValidationError(
+            "GitHub 仓库 owner/repo 只允许字母、数字、下划线、点和连字符",
+            code=40001,
+        )
+    if repo.lower().endswith(".git"):
+        raise ValidationError("GitHub 仓库网址不得以 .git 结尾", code=40001)
+    if len(parts) == 2:
+        return owner, repo, None
+    if parts[2] != "tree" or len(parts) < 4:
+        raise ValidationError(
+            "GitHub 仓库网址只支持 /owner/repo 或 /owner/repo/tree/<ref>",
+            code=40001,
+        )
+    branch = "/".join(parts[3:])
+    if not branch:
+        raise ValidationError("GitHub 仓库网址 /tree 分支不能为空", code=40001)
+    if any(seg in {"", ".", ".."} for seg in branch.split("/")):
+        raise ValidationError("GitHub 仓库网址 /tree 分支包含非法路径段", code=40001)
+    return owner, repo, branch
+
+
+def _github_archive_candidates(url: str) -> list[str]:
+    """返回 GitHub 仓库源码归档下载候选；无显式分支时 main→master。"""
+    owner, repo, branch = _normalize_github_project_url(url)
+    branches = [branch] if branch is not None else ["main", "master"]
+    return [
+        f"https://codeload.github.com/{owner}/{repo}/tar.gz/refs/heads/{item}"
+        for item in branches
+    ]
 
 
 def _strict_zip_members(
@@ -646,6 +799,13 @@ def download_remote_archive(url: str) -> tuple[bytes, str]:
 
                     current = urljoin(current, location)
                     continue
+                if response.status_code == 404:
+                    not_found = RemoteArchiveNotFoundError(
+                        f"远程源码归档不存在(HTTP {response.status_code})",
+                        code=50201,
+                    )
+                    not_found.status_code = response.status_code
+                    raise not_found
                 if response.status_code >= 400:
                     raise ExternalServiceError(
                         f"远程源码下载失败(HTTP {response.status_code})",
@@ -680,8 +840,27 @@ def import_remote_project(
     language: str | None = None,
     audit_mode: bool = False,
 ) -> dict:
-    """下载公开源码归档，按用户选择进入普通或隔离审计链路。"""
-    raw, archive_name = download_remote_archive(url)
+    """下载公开源码归档，按用户选择进入普通或隔离审计链路。
+
+    GitHub 仓库页面网址会先规范化为 codeload 归档候选；默认分支按 main→master
+    回退，仅 HTTP 404 才尝试下一个候选，非 404 错误保持原样抛出。
+    """
+    if _is_github_project_page_url(url):
+        last_error: Exception | None = None
+        for candidate in _github_archive_candidates(url):
+            try:
+                raw, archive_name = download_remote_archive(candidate)
+                break
+            except Exception as exc:
+                if _is_remote_archive_not_found(exc):
+                    last_error = exc
+                    continue
+                raise
+        else:
+            assert last_error is not None
+            raise last_error
+    else:
+        raw, archive_name = download_remote_archive(url)
     project = project_service.create_project(
         db,
         user,

@@ -662,6 +662,7 @@ class ChatAssistantAgent(BaseAgent):
         config = self.WRITE_INTENT_CONFIRMATIONS.get(intent_name)
         if not config:
             return None
+        has_confirmation = self.WRITE_CONFIRMATION_KEY in payload
         answer = str(payload.get(self.WRITE_CONFIRMATION_KEY) or "").strip()
         if answer == "取消":
             return AgentResult(
@@ -669,7 +670,7 @@ class ChatAssistantAgent(BaseAgent):
                 data="操作已取消，没有修改任何数据。",
                 model=self._model,
             )
-        accepted = answer == "确认执行" if config["danger"] else answer in {
+        accepted = has_confirmation if config["danger"] else answer in {
             "确认", "执行", "确认执行",
         }
         if accepted:
@@ -708,7 +709,7 @@ class ChatAssistantAgent(BaseAgent):
             },
         )
         content = (
-            f"该操作不可撤销：{config['impact']}请输入“确认执行”后继续。"
+            f"该操作不可撤销：{config['impact']}点击确认按钮即可继续，无需输入确认词。"
             if config["danger"]
             else f"{question['label']}\n\n影响范围：{config['impact']}"
         )

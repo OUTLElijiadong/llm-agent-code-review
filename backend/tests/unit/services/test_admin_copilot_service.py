@@ -5,7 +5,6 @@ from app.agents.admin_copilot_agent import AdminCopilotAgent
 from app.agents.base import AgentResult
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEventType
-from app.core.exceptions import ValidationError
 from app.models.agent_governance import AgentProfile, ApprovalItem, ToolCallLog
 from app.models.audit_log import AuditLog
 from app.models.user import User
@@ -89,22 +88,24 @@ def test_unconfirmed_write_only_returns_preview_and_writes_nothing(db, copilot_d
     assert target.status == 1
 
 
-def test_dangerous_write_requires_exact_confirmation_phrase(db, copilot_data):
+def test_dangerous_write_confirms_by_button_without_confirmation_text(db, copilot_data):
     admin, target, _ = copilot_data
     preview = _message(db, admin, f"删除用户 {target.id}")
 
-    with pytest.raises(ValidationError, match="确认执行"):
-        _message(
-            db,
-            admin,
-            "",
-            action_token=preview["action_token"],
-            decision="confirm",
-            confirmation_text="确认",
-        )
+    assert preview["type"] == "danger_confirm"
+    result = _message(
+        db,
+        admin,
+        "",
+        action_token=preview["action_token"],
+        decision="confirm",
+    )
 
+    assert result["status"] == "confirmed"
+    db.refresh(target)
+    assert target.status == -1
     assert db.query(ApprovalItem).count() == 0
-    assert db.query(ToolCallLog).count() == 0
+    assert db.query(ToolCallLog).filter(ToolCallLog.status == "success").count() == 1
 
 
 def test_role_change_is_idempotent_and_applies_after_chat_confirmation(db, copilot_data):
@@ -158,7 +159,6 @@ def test_delete_and_agent_toggle_apply_after_chat_confirmation(db, copilot_data)
         "",
         action_token=delete_preview["action_token"],
         decision="confirm",
-        confirmation_text="确认执行",
     )
     db.refresh(target)
     assert target.status == -1

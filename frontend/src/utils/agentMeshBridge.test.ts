@@ -69,6 +69,33 @@ describe('Agent Mesh session bridge', () => {
     expect(receive).toHaveBeenCalledTimes(2)
   })
 
+  it('优先认领当前会话消息,再处理后台会话', async () => {
+    const receive = vi.fn().mockResolvedValue(true)
+    const pullOrder: string[] = []
+    api.inbox.mockImplementation((_surface: string, sessionId: string) => {
+      pullOrder.push(sessionId)
+      return Promise.resolve([{ message_id: `msg_${sessionId}`, status: 'delivered', subject: '主动消息' }])
+    })
+    const bridge = createAgentMeshBridge({
+      surface: 'admin',
+      getSessionId: () => 'session-current-01',
+      getTitle: () => '当前会话',
+      getSessions: () => [
+        { id: 'session-background-01', title: '后台会话' },
+        { id: 'session-current-01', title: '当前会话' },
+      ],
+      isBusy: () => false,
+      onMessage: receive,
+    })
+
+    await bridge.syncNow()
+
+    expect(pullOrder[0]).toBe('session-current-01')
+    expect(receive).toHaveBeenCalledWith(
+      expect.objectContaining({ message_id: 'msg_session-current-01' }),
+      'session-current-01',
+    )
+  })
   it('同步同一入口的全部本地会话并可认领后台会话消息', async () => {
     const receive = vi.fn().mockResolvedValue(true)
     api.inbox.mockImplementation((_surface: string, sessionId: string) => Promise.resolve(

@@ -34,7 +34,9 @@ _REPORT_PROMPT = (
     "汇总为一份中文 Markdown 测试审查报告,固定七段:\n"
     "## 总体结论 / ## 白盒结果 / ## 黑盒结果 / ## 问题清单(按严重度,含位置/证据/修复建议) / "
     "## 攻击面待验证清单 / ## 下一步建议 / ## 证据附录。\n"
-    "纪律:每条发现挂证据;通过≠安全,须写明未覆盖项;复检降级的条目只能进'建议验证';"
+    "纪律:总体结论必须严格服从原始证据中的 conclusion.passed 和 agent_tests 计数；"
+    "任一已生成动态用例失败时不得写成测试通过或评分 100。每条发现挂证据;"
+    "通过≠安全,须写明未覆盖项;复检降级的条目只能进'建议验证';"
     "禁止编造文件路径/行号/URL。"
 )
 
@@ -316,4 +318,3 @@ class TestReviewReporterAgent(BaseAgent):
             data={"report_md": report_md, "roles": roles, "roles_executed": executed},
             model=rp.model, duration_ms=rp.duration_ms, tokens=rp.tokens,
         )
-

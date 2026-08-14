@@ -80,6 +80,70 @@ _STANCE_ALIASES = {
 _SILENT_DEFAULT = "本轮没有新增证据或不同观点，选择静音。"
 
 
+def _notify_origin_session(
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+    discussion_session_id: str,
+    file_name: str,
+    report_task_id: int,
+    status: str,
+    summary: str,
+) -> None:
+    """讨论结束后把结论作为协作消息回投发起讨论的小菱会话。
+
+    消息走 queued→delivered 生命周期,前端 MeshBridge 会自动拉起小菱续跑汇报,
+    与子 Agent 团队结果回投保持一致;失败不阻断报告落库。
+    """
+    if not surface or not session_key:
+        return
+    from app.models.user import User
+    from app.schemas.agent_mesh import AgentMeshMessageIn
+    from app.services import agent_mesh_service
+
+    db = SessionLocal()
+    try:
+        user = db.get(User, int(user_id))
+        if user is None or int(getattr(user, "status", 0) or 0) != 1:
+            return
+        message = AgentMeshMessageIn.model_validate({
+            "schema_version": "1.0",
+            "idempotency_key": f"discussion-result:{discussion_session_id}",
+            "trace_id": discussion_session_id,
+            "correlation_id": discussion_session_id,
+            "causation_id": "",
+            "sent_from": "agent:orchestrator",
+            "send_to": f"session:{surface}:{session_key}",
+            "message_type": "task.result",
+            "priority": "normal",
+            "subject": f"圆桌讨论结束:{file_name}"[:240],
+            "payload": {
+                "discussion_session_id": discussion_session_id,
+                "file_name": file_name,
+                "report_task_id": int(report_task_id or 0),
+                "status": status,
+                "summary": (summary or "")[:4000],
+            },
+            "context": {"run_id": discussion_session_id},
+            "artifacts": [],
+            "errors": [],
+            "delivery": {"requires_ack": True, "max_attempts": 3},
+        })
+        agent_mesh_service.send_message(
+            db,
+            user,
+            surface=surface,
+            session_key=session_key,
+            message=message,
+            trusted_source=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - 回投失败只记录,不打断讨论收尾
+        logger.warning(f"[Discussion] 结论回投小菱会话失败: {exc}")
+    finally:
+        db.close()
+
+
 @dataclass(frozen=True)
 class SpeakerDecision:
     """单个审查 Agent 在一轮中的自主决策。
@@ -188,6 +252,8 @@ class DiscussionOrchestrator:
         file_id: int,
         review_type: str = "full",
         max_rounds: int = 2,
+        origin_surface: str = "",
+        origin_session_key: str = "",
     ):
         bus = self._bus
         session = bus.get_session(session_id)
@@ -203,6 +269,8 @@ class DiscussionOrchestrator:
         self._user_inputs: list[str] = []
         self._user_id = user_id
         self._file_id = file_id
+        self._origin_surface = str(origin_surface or "")[:24]
+        self._origin_session_key = str(origin_session_key or "")[:128]
         self._trace_id = new_trace_id()
         all_turns: list[DiscussionTurn] = []
         self._all_turns = all_turns
@@ -418,6 +486,7 @@ class DiscussionOrchestrator:
             logger.error(f"[Discussion] 异常: {traceback.format_exc()}")
         finally:
             # ── 沉淀报告: 写调用日志 + 抽取问题 + 收尾 ReviewTask ──
+            stopped = False
             report_task_id = 0
             if task_id:
                 try:
@@ -449,12 +518,28 @@ class DiscussionOrchestrator:
             sess = bus.get_session(session_id)
             if sess:
                 sess.report_task_id = report_task_id
+            final_status = "cancelled" if cancelled else ("stopped" if stopped else "concluded")
             bus.publish_control(
                 session_id,
                 "cancelled" if cancelled else "done",
                 {"task_id": report_task_id},
             )
             bus.close_session(session_id)
+            # 对齐团队派发逻辑:结论回投发起会话,小菱自动续跑汇报,无需用户手动追问。
+            if self._origin_surface and self._origin_session_key:
+                await loop.run_in_executor(
+                    None,
+                    lambda: _notify_origin_session(
+                        user_id=self._user_id,
+                        surface=self._origin_surface,
+                        session_key=self._origin_session_key,
+                        discussion_session_id=session_id,
+                        file_name=file_name,
+                        report_task_id=report_task_id,
+                        status=final_status,
+                        summary=summary_text,
+                    ),
+                )
 
     # ── 发言逻辑 ──
 

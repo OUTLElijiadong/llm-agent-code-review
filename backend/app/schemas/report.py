@@ -14,6 +14,7 @@ class ReportListItem(BaseModel):
     project_name: str = ""
     total_issues: int
     score: int
+    status: str
     create_time: datetime
 
 

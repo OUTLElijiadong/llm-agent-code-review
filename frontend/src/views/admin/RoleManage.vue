@@ -146,8 +146,8 @@ import {
 import { getProjects } from '@/api/project'
 import type { Role, Permission, DataScopeType, DataScopeUpdateIn } from '@/types/rbac'
 import type { ProjectOut } from '@/types/project'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { confirmDanger } from '@/composables/useDangerConfirm'
 
 /** 权限树节点 */
 interface PermTreeNode {
@@ -332,13 +332,17 @@ async function onConfirmForm(): Promise<void> {
  * @returns void
  */
 async function onDelete(row: Role): Promise<void> {
-  if (!await confirmDanger({ target: `删除角色「${row.name}」`, consequence: '该操作不可恢复' })) return
   try {
+    await ElMessageBox.confirm(
+      `确定要删除角色「${row.name}」吗?该操作不可恢复。`,
+      '确认删除',
+      { type: 'warning' },
+    )
     await deleteRole(row.id)
     ElMessage.success('角色已删除')
     loadRoles()
   } catch {
-    /* http 拦截器已提示 */
+    /* canceled */
   }
 }
 

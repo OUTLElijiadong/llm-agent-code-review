@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import NotFoundError
 from app.models.project_source_revision import ProjectSourceRevision
 from app.services.project_member_service import require_project_access
 

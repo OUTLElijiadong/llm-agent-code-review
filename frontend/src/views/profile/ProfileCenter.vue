@@ -1,7 +1,7 @@
 <template>
-  <div class="profile-center-page" v-loading="profileLoading">
+  <div class="profile-center-page">
     <div class="page-header">
-      <h1 class="page-title">个人中心</h1>
+      <h2>个人中心</h2>
       <p class="page-sub">查看账户资料、管理密码与默认审查偏好</p>
     </div>
 
@@ -68,7 +68,7 @@
             <el-switch v-model="prefs.notify" />
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" :loading="prefsSaving" @click="savePrefs">保存偏好</el-button>
+            <el-button type="primary" @click="savePrefs">保存偏好</el-button>
             <span class="pref-tip">偏好保存在本机 localStorage，不上传服务器</span>
           </el-form-item>
         </el-form>
@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 
 import dayjs from 'dayjs'
@@ -90,10 +90,6 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const profile = computed(() => userStore.profile)
-/** 个人资料未就绪时展示页面级 loading,避免资料区空白闪烁 */
-const profileLoading = computed(() => !userStore.profile)
-/** 保存偏好的短暂反馈态(localStorage 写入本身为同步,留出用户可感知的反馈) */
-const prefsSaving = ref(false)
 
 const roleLabel = computed(() => {
   switch (profile.value?.role) {
@@ -138,11 +134,8 @@ function loadPrefs(): void {
 }
 
 function savePrefs(): void {
-  if (prefsSaving.value) return
-  prefsSaving.value = true
   localStorage.setItem(PREF_KEY, JSON.stringify({ reviewType: prefs.reviewType, notify: prefs.notify }))
   ElMessage.success('偏好已保存')
-  window.setTimeout(() => { prefsSaving.value = false }, 300)
 }
 
 function goChangePassword(): void {
@@ -174,7 +167,7 @@ onMounted(loadPrefs)
 .page-header {
   margin-bottom: var(--spacing-lg);
 
-  .page-title {
+  h2 {
     margin: 0 0 4px;
     font-size: 20px;
     font-weight: 600;

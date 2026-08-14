@@ -45,8 +45,8 @@ def test_chat_agent_clarify_for_missing_project_id():
     assert saved["intent"] == "delete_project"
 
 
-def test_delete_project_requires_exact_danger_confirmation():
-    """删除项目参数完整后仍须危险确认，且只接受“确认执行”。"""
+def test_delete_project_danger_confirmation_accepts_button_click():
+    """危险确认只需点击确认按钮即可放行；未点击或取消仍被拦截。"""
     agent = ChatAssistantAgent()
     result = agent._maybe_clarify(
         "delete_project", {"project_id": 42}, ctx=None,
@@ -54,12 +54,18 @@ def test_delete_project_requires_exact_danger_confirmation():
     assert result is not None
     question = result.data["clarify"]["questions"][0]
     assert question["type"] == "danger_confirm"
-    assert agent._maybe_clarify(
-        "delete_project", {"project_id": 42, "_write_confirmation": "确认"}, ctx=None,
-    ) is not None
-    assert agent._maybe_clarify(
-        "delete_project", {"project_id": 42, "_write_confirmation": "确认执行"}, ctx=None,
-    ) is None
+    assert "无需输入确认词" in result.data["content"]
+
+    for confirmation in (True, "确认", ""):
+        assert agent._maybe_clarify(
+            "delete_project", {"project_id": 42, "_write_confirmation": confirmation}, ctx=None,
+        ) is None
+
+    cancelled = agent._maybe_clarify(
+        "delete_project", {"project_id": 42, "_write_confirmation": "取消"}, ctx=None,
+    )
+    assert cancelled is not None
+    assert cancelled.data == "操作已取消，没有修改任何数据。"
 
 
 def test_create_project_confirmation_can_be_cancelled_without_execution():

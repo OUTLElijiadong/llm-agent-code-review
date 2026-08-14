@@ -6,6 +6,7 @@ import { User, Lock } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getRoleHomePath } from '@/utils/roleHome'
+import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -40,12 +41,12 @@ async function handleLogin(): Promise<void> {
     loading.value = true
     try {
       await userStore.login({ username: form.username, password: form.password })
-      // 登录成功直接进入首页,不再额外弹「登录成功」提示(进入首页即是反馈)
+      ElMessage.success('登录成功')
       // 登录后一律回角色首页(工作台/总览),不跟随 redirect——
       // 避免从旧链接/过期会话跳转时落到非预期页面。
       router.replace(getRoleHomePath(userStore.profile?.role))
     } catch {
-      /* http 拦截器已弹出后端人话错误(业务码/网络错误全覆盖),这里不再重复弹 */
+      /* 请求拦截器会展示后端返回的错误信息，避免重复 toast。 */
     } finally {
       loading.value = false
     }

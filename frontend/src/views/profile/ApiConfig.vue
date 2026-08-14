@@ -5,7 +5,7 @@
       <p class="page-sub">配置个人大模型 API，不配置则使用平台默认 DeepSeek API</p>
     </div>
 
-    <el-card shadow="hover" class="config-card" v-loading="pageLoading">
+    <el-card shadow="hover" class="config-card">
       <!-- 当前配置状态 -->
       <div class="current-status">
         <div class="status-left">
@@ -159,8 +159,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { type FormInstance, type FormRules } from 'element-plus'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { confirmDanger } from '@/composables/useDangerConfirm'
 import {
   getApiConfig,
   saveApiConfig,
@@ -170,7 +170,6 @@ import {
 } from '@/api/apiConfig'
 
 const formRef = ref<FormInstance>()
-const pageLoading = ref(true)
 const saving = ref(false)
 const testing = ref(false)
 const resetting = ref(false)
@@ -231,7 +230,6 @@ const modelHint = computed(() => {
 })
 
 async function loadConfig(): Promise<void> {
-  pageLoading.value = true
   try {
     const cfg = await getApiConfig()
     Object.assign(currentConfig, cfg)
@@ -242,9 +240,7 @@ async function loadConfig(): Promise<void> {
       // Key 已脱敏，不在 form 中回填
     }
   } catch {
-    /* 网络/权限错误由 http 拦截器提示;表单保持默认状态,用户可直接填写新配置 */
-  } finally {
-    pageLoading.value = false
+    /* 网络错误等，保持默认状态 */
   }
 }
 
@@ -277,7 +273,6 @@ async function handleTest(): Promise<void> {
       model: '',
       duration_ms: 0,
     }
-    /* 详细错误已由 http 拦截器弹出 */
   } finally {
     testing.value = false
   }
@@ -306,12 +301,15 @@ async function handleSave(): Promise<void> {
 }
 
 async function handleReset(): Promise<void> {
-  const ok = await confirmDanger({
-    target: '恢复系统默认 API 配置',
-    consequence: '您的自定义 Key 将被彻底删除',
-    confirmText: '确认重置',
-  })
-  if (!ok) return
+  try {
+    await ElMessageBox.confirm('确认恢复系统默认 API 配置？您的自定义 Key 将被彻底删除。', '确认重置', {
+      type: 'warning',
+      confirmButtonText: '确认重置',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
 
   resetting.value = true
   try {

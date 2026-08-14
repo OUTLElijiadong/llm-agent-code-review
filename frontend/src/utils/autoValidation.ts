@@ -10,5 +10,7 @@ export function buildAutoValidationPrompt(projectId: number, language: string, p
     `project_name=${projectName}`,
     '请立即调用 run_full_project_validation，使用 combined 模式完成隔离部署、环境核验、受控补全、完整运行、白盒与黑盒测试及多 Agent 证据审查。',
     '只修改一次性沙箱副本，不修改原项目源码；完成后返回沙箱 ID、阶段状态和报告入口。',
+    '验证完成后必须基于真实终态给出 2-3 条“下一步建议”(如查看报告/发起正式审查/修复后复测/沉淀知识笔记),'
+    + '并用站内 markdown 链接给出入口;下一步不唯一时用 ask_user 提供动态候选让用户选择。',
   ].join('\n')
 }

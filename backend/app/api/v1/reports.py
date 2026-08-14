@@ -79,7 +79,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     """获取审查任务及其全部问题(含权限校验)。
 
     校验逻辑:
-        1. 任务必须存在且状态为 success(审查完成)
+        1. 普通任务必须为 success；沙箱测试失败时仍允许查看已生成的失败报告
         2. 当前用户必须为管理员或任务发起者
 
     Args:
@@ -95,7 +95,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
         NotFoundError: 任务不存在或未完成,或用户无访问权限(code=40400)。
     """
     task = db.get(ReviewTask, task_id)
-    if not task or task.status != "success":
+    if not report_service.is_report_available(task):
         raise NotFoundError(f"审查任务 #{task_id} 不存在或未完成", code=40400)
     # 权限校验:管理员或任务发起者可访问
     if task.user_id != user.id and user.role not in {"admin", "super_admin"}:

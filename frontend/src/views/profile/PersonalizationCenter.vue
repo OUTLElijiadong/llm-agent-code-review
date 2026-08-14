@@ -4,7 +4,6 @@ import { onMounted, reactive, ref } from 'vue'
 import { formatDate } from '@/utils/format'
 import { getProfile, updateProfile, relearnProfile, type UserProfile } from '@/api/profile'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import EmptyState from '@/components/common/EmptyState.vue'
 
 const LEVELS: Record<string, string> = {
   beginner: '入门', intermediate: '进阶', advanced: '资深',
@@ -114,13 +113,7 @@ onMounted(load)
         <el-alert v-if="derived.summary" type="success" :closable="false" class="summary">
           {{ derived.summary }}
         </el-alert>
-        <EmptyState
-          v-else
-          description="暂无画像,点击「重新学习」或多用平台后生成"
-          action-text="重新学习"
-          compact
-          @action="relearn"
-        />
+        <el-empty v-else description="暂无画像,点击「重新学习」或多用平台后生成" :image-size="80" />
 
         <div v-if="Object.keys(derived.stats).length" class="stats">
           <h4>行为统计</h4>

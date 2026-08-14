@@ -394,12 +394,7 @@
       label="正在加载审查报告"
       sublabel="正在整理评分、问题和导出信息"
     />
-    <EmptyState
-      v-else-if="!loading"
-      description="报告数据加载失败或报告不存在"
-      action-text="返回任务列表"
-      action-to="/reviews"
-    />
+    <EmptyState v-else-if="!loading" description="报告数据加载失败" />
   </div>
 </template>
 

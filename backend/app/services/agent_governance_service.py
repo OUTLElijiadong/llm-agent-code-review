@@ -107,6 +107,12 @@ _MANAGER_ADMIN_CAPABILITY_SCOPE = "管理全部管理员页面并通过真实业
 _MANAGER_ADMIN_CAPABILITY_PERMISSION_NOTE = (
     "manager_admin_capability_v1 protected manager admin capability gateway"
 )
+_CHAT_ASSISTANT_USER_CAPABILITY_TOOL = "user_execute_capability"
+_CHAT_ASSISTANT_USER_CAPABILITY_CONTRACT_VERSION = "chat_assistant_user_capability_v1"
+_CHAT_ASSISTANT_USER_CAPABILITY_SCOPE = "普通用户页面已登记能力与当前用户权限范围"
+_CHAT_ASSISTANT_USER_CAPABILITY_PERMISSION_NOTE = (
+    "chat_assistant_user_capability_v1 protected user capability gateway"
+)
 
 
 def sync_profiles(db: Session) -> list[AgentProfile]:
@@ -153,6 +159,7 @@ def sync_profiles(db: Session) -> list[AgentProfile]:
     # 后写入的治理元数据覆盖运行时展示字段，避免单事务重复插入触发唯一索引。
     desired_by_code = {item["code"]: item for item in desired}
 
+    chat_assistant_synced = False
     for item in desired_by_code.values():
         profile = db.query(AgentProfile).filter(AgentProfile.code == item["code"]).first()
         if not profile:
@@ -167,7 +174,16 @@ def sync_profiles(db: Session) -> list[AgentProfile]:
         profile.color = item.get("color", "#5B58E8")
         if profile.code == "manager":
             _ensure_manager_admin_capability_contract(db, profile)
+        elif profile.code == "chat_assistant":
+            _ensure_chat_assistant_user_capability_contract(db, profile)
+            chat_assistant_synced = True
         _sync_skills(db, item["code"], item.get("skills", []))
+    # chat_assistant 在部分启动/测试上下文中不进入运行时注册表，但其持久
+    # 画像仍然约束 Responses 工具。只规范化已存在画像，避免创建影子 Agent。
+    if not chat_assistant_synced:
+        chat_assistant = db.query(AgentProfile).filter(AgentProfile.code == "chat_assistant").first()
+        if chat_assistant is not None:
+            _ensure_chat_assistant_user_capability_contract(db, chat_assistant)
     db.commit()
     return list_profiles(db)
 
@@ -234,6 +250,8 @@ def update_profile(
         profile.config_json = json.dumps(payload["config_json"], ensure_ascii=False)
     if profile.code == "manager":
         _ensure_manager_admin_capability_contract(db, profile)
+    elif profile.code == "chat_assistant":
+        _ensure_chat_assistant_user_capability_contract(db, profile)
     if commit:
         db.commit()
         db.refresh(profile)
@@ -309,6 +327,41 @@ def _ensure_manager_admin_capability_contract(db: Session, profile: AgentProfile
     OpenAPI 参数校验、风险分级和审批门禁约束。显式工具权限记录如果
     已存在则保留，以允许运维人员在更高级治理层收紧该入口。
     """
+    _ensure_protected_capability_contract(
+        db,
+        profile,
+        tool_code=_MANAGER_ADMIN_CAPABILITY_TOOL,
+        version_key="manager_admin_capability_boundary_version",
+        version_value=_MANAGER_ADMIN_CAPABILITY_CONTRACT_VERSION,
+        default_scope=_MANAGER_ADMIN_CAPABILITY_SCOPE,
+        permission_note=_MANAGER_ADMIN_CAPABILITY_PERMISSION_NOTE,
+    )
+
+
+def _ensure_chat_assistant_user_capability_contract(db: Session, profile: AgentProfile) -> None:
+    """保证普通用户小菱可进入受控页面能力网关。"""
+    _ensure_protected_capability_contract(
+        db,
+        profile,
+        tool_code=_CHAT_ASSISTANT_USER_CAPABILITY_TOOL,
+        version_key="chat_assistant_user_capability_boundary_version",
+        version_value=_CHAT_ASSISTANT_USER_CAPABILITY_CONTRACT_VERSION,
+        default_scope=_CHAT_ASSISTANT_USER_CAPABILITY_SCOPE,
+        permission_note=_CHAT_ASSISTANT_USER_CAPABILITY_PERMISSION_NOTE,
+    )
+
+
+def _ensure_protected_capability_contract(
+    db: Session,
+    profile: AgentProfile,
+    *,
+    tool_code: str,
+    version_key: str,
+    version_value: str,
+    default_scope: str,
+    permission_note: str,
+) -> None:
+    """把受控能力网关固定到 default-deny 边界，同时保留显式收紧记录。"""
     parsed = _safe_json_parse(profile.config_json)
     config = dict(parsed) if isinstance(parsed, dict) else {}
     raw_boundary = config.get("governance_boundary")
@@ -323,26 +376,26 @@ def _ensure_manager_admin_capability_contract(db: Session, profile: AgentProfile
     allowed_tools = _tool_set("allowed_tools")
     approval_tools = _tool_set("approval_tools")
     blocked_tools = _tool_set("blocked_tools")
-    allowed_tools.add(_MANAGER_ADMIN_CAPABILITY_TOOL)
-    approval_tools.discard(_MANAGER_ADMIN_CAPABILITY_TOOL)
-    blocked_tools.discard(_MANAGER_ADMIN_CAPABILITY_TOOL)
+    allowed_tools.add(tool_code)
+    approval_tools.discard(tool_code)
+    blocked_tools.discard(tool_code)
     boundary.update(
         {
-            "scope": str(boundary.get("scope") or _MANAGER_ADMIN_CAPABILITY_SCOPE),
+            "scope": str(boundary.get("scope") or default_scope),
             "allowed_tools": sorted(allowed_tools),
             "approval_tools": sorted(approval_tools),
             "blocked_tools": sorted(blocked_tools),
         }
     )
     config["governance_boundary"] = boundary
-    config["manager_admin_capability_boundary_version"] = _MANAGER_ADMIN_CAPABILITY_CONTRACT_VERSION
+    config[version_key] = version_value
     profile.config_json = json.dumps(config, ensure_ascii=False, sort_keys=True)
 
     permission = (
         db.query(AgentToolPermission)
         .filter(
-            AgentToolPermission.agent_code == "manager",
-            AgentToolPermission.tool_code == _MANAGER_ADMIN_CAPABILITY_TOOL,
+            AgentToolPermission.agent_code == profile.code,
+            AgentToolPermission.tool_code == tool_code,
         )
         .order_by(AgentToolPermission.id.asc())
         .first()
@@ -350,12 +403,12 @@ def _ensure_manager_admin_capability_contract(db: Session, profile: AgentProfile
     if permission is None:
         db.add(
             AgentToolPermission(
-                agent_code="manager",
-                tool_code=_MANAGER_ADMIN_CAPABILITY_TOOL,
+                agent_code=profile.code,
+                tool_code=tool_code,
                 permission="allow",
                 risk_level="low",
                 enabled=1,
-                note=_MANAGER_ADMIN_CAPABILITY_PERMISSION_NOTE,
+                note=permission_note,
             )
         )
 

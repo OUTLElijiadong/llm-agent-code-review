@@ -399,7 +399,7 @@ def _match_ops_intent(db: Session, admin: User, message: str, session) -> Option
         action, params = "restore_database", {"file": match.group(1)}
         operation = f"使用 {match.group(1)} 覆盖恢复生产数据库"
         impact = "当前生产数据将被备份文件覆盖，期间数据库不可用。"
-        consequence = "备份时间点之后的数据可能丢失，必须输入“确认执行”。"
+        consequence = "备份时间点之后的数据可能丢失，点击确认按钮即可继续，无需输入确认词。"
 
     if not action:
         return None
@@ -529,9 +529,6 @@ def _handle_confirmation(
         return _text("操作已取消，没有修改任何数据。", status="cancelled")
     if decision != "confirm":
         raise ValidationError("确认决定必须是 confirm 或 cancel")
-    if payload.get("danger") and confirmation_text != "确认执行":
-        raise ValidationError("危险操作必须输入“确认执行”")
-
     request_id = str(payload["request_id"])
     with _CONFIRMATION_LOCK:
         action = str(payload["action"])

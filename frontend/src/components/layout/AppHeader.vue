@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, SwitchButton, UserFilled, Search, MagicStick, Menu } from '@element-plus/icons-vue'
 
@@ -30,23 +30,18 @@ interface SearchItem {
 
 const searchVisible = ref(false)
 const searchKeyword = ref('')
-/** 当前键盘高亮的搜索结果下标(-1 表示无高亮) */
-const activeIndex = ref(-1)
 const openAgentChat = inject<() => void>('openAgentChat', () => {})
 
 const crumbs = computed(() => {
-  const items: Array<{ title: string; path?: string }> = []
+  const titles: string[] = []
   for (const match of route.matched) {
     const t = match.meta?.title as string | undefined
-    if (t && !items.some((i) => i.title === t)) {
-      // 中间层级给可点击链接(父级路由通常只有 path 无 title,如 /admin → 管理中心)
-      items.push({ title: t, path: match.path })
-    }
+    if (t && !titles.includes(t)) titles.push(t)
   }
-  if (items.length === 0 && route.meta?.title) {
-    items.push({ title: route.meta.title as string })
+  if (titles.length === 0 && route.meta?.title) {
+    titles.push(route.meta.title as string)
   }
-  return items
+  return titles
 })
 
 const roleLabel = computed(() => {
@@ -97,11 +92,6 @@ const filteredSearchItems = computed(() => {
   })
 })
 
-// 关键词或结果集变化时,高亮回到第一条,避免越界
-watch(filteredSearchItems, () => {
-  activeIndex.value = filteredSearchItems.value.length ? 0 : -1
-})
-
 /**
  * 切换移动端侧边栏显示状态
  * @returns void
@@ -117,7 +107,6 @@ function toggleSidebar(): void {
 function openSearch(): void {
   searchKeyword.value = ''
   searchVisible.value = true
-  activeIndex.value = filteredSearchItems.value.length ? 0 : -1
 }
 
 /**
@@ -142,43 +131,6 @@ function runSearchItem(item: SearchItem): void {
   if (item.path && item.path !== route.path) {
     router.push(item.path)
   }
-}
-
-/**
- * 全局搜索面板的键盘导航:↑/↓ 移动高亮,Enter 打开当前项,ESC 关闭。
- * 绑定在搜索输入框上(打开即聚焦),无需全局监听。
- * @param event - 键盘事件
- * @returns void
- */
-function handleSearchKeydown(event: KeyboardEvent): void {
-  const items = filteredSearchItems.value
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    closeSearch()
-    return
-  }
-  if (!items.length) return
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    activeIndex.value = (activeIndex.value + 1) % items.length
-    scrollActiveIntoView()
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    activeIndex.value = (activeIndex.value - 1 + items.length) % items.length
-    scrollActiveIntoView()
-  } else if (event.key === 'Enter') {
-    event.preventDefault()
-    const item = items[activeIndex.value] ?? items[0]
-    if (item) runSearchItem(item)
-  }
-}
-
-/** 让当前高亮项滚动进可视区域 */
-function scrollActiveIntoView(): void {
-  // 等待 activeIndex 应用到 DOM 后再滚动
-  requestAnimationFrame(() => {
-    document.querySelector('.command-item.is-active')?.scrollIntoView({ block: 'nearest' })
-  })
 }
 
 /**
@@ -245,13 +197,8 @@ onBeforeUnmount(() => {
       </button>
       <span class="crumb-home font-mono">PRISM</span>
       <span class="crumb-sep">/</span>
-      <template v-for="(c, i) in crumbs" :key="c.title">
-        <router-link
-          v-if="i < crumbs.length - 1 && c.path"
-          class="crumb crumb-link"
-          :to="c.path"
-        >{{ c.title }}</router-link>
-        <span v-else class="crumb" :class="{ 'is-current': i === crumbs.length - 1 }">{{ c.title }}</span>
+      <template v-for="(c, i) in crumbs" :key="c">
+        <span class="crumb" :class="{ 'is-current': i === crumbs.length - 1 }">{{ c }}</span>
         <span v-if="i < crumbs.length - 1" class="crumb-sep">/</span>
       </template>
     </div>
@@ -304,22 +251,19 @@ onBeforeUnmount(() => {
     <div class="command-panel">
       <el-input
         v-model="searchKeyword"
-        placeholder="搜索页面、功能或 Agent 助手(↑↓ 选择,Enter 打开,ESC 关闭)"
+        placeholder="搜索页面、功能或 Agent 助手"
         aria-label="全局搜索"
         clearable
         autofocus
         :prefix-icon="Search"
-        @keydown="handleSearchKeydown"
       />
       <div class="command-list">
         <button
-          v-for="(item, idx) in filteredSearchItems"
+          v-for="item in filteredSearchItems"
           :key="item.title"
           type="button"
           class="command-item"
-          :class="{ 'is-active': idx === activeIndex }"
           @click="runSearchItem(item)"
-          @mouseenter="activeIndex = idx"
         >
           <span class="command-title">{{ item.title }}</span>
           <span class="command-desc">{{ item.description }}</span>
@@ -402,16 +346,6 @@ onBeforeUnmount(() => {
   &.is-current {
     color: var(--color-text-primary);
     font-weight: 500;
-  }
-}
-
-.crumb-link {
-  text-decoration: none;
-  cursor: pointer;
-
-  &:hover {
-    color: var(--brand-600);
-    text-decoration: underline;
   }
 }
 
@@ -586,12 +520,6 @@ onBeforeUnmount(() => {
     border-color: var(--brand-200);
     background: var(--brand-50);
     transform: translateY(-1px);
-  }
-
-  &.is-active {
-    border-color: var(--brand-400, #6B7CFF);
-    background: var(--brand-50);
-    box-shadow: 0 0 0 3px rgba(91, 88, 232, 0.12);
   }
 }
 

@@ -11,5 +11,7 @@ describe('上传后的自动全量验证指令', () => {
     expect(prompt).toContain('run_full_project_validation')
     expect(prompt).toContain('combined')
     expect(prompt).toContain('不修改原项目源码')
+    expect(prompt).toContain('下一步建议')
+    expect(prompt).toContain('站内 markdown 链接')
   })
 })

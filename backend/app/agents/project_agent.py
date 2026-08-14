@@ -48,13 +48,20 @@ class ProjectAnalyzerAgent(BaseAgent):
         self.attach_skill(ProjectAnalyzerSelfImprovementSkill(self.name))
         self.attach_skill(ProjectAnalyzerProactiveSkill(self.name))
 
-    def execute(self, folder_name: str, file_names: List[str]) -> AgentResult:
+    def execute(
+        self,
+        folder_name: str,
+        file_names: List[str],
+        strategy_instruction: str = "",
+    ) -> AgentResult:
         file_list = file_names[:30]
         file_list_str = "\n".join(f"- {f}" for f in file_list)
         user_msg = (
             f"文件夹名称: {folder_name or '(未命名)'}\n"
             f"包含的文件:\n{file_list_str or '(无)'}"
         )
+        if strategy_instruction.strip():
+            user_msg += f"\n\n上一次失败后的改道策略:\n{strategy_instruction.strip()}"
         result = self.call_json(user_msg)
         if not result.success:
             return result

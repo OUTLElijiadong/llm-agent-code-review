@@ -15,6 +15,7 @@ v2.0 新增:
 - POST /agents/clarify           Clarify 回填后继续执行(M4 主动提问)
 """
 import asyncio
+import contextlib
 import json
 import time
 from typing import Optional
@@ -213,12 +214,20 @@ async def stream_agent_events(
     async def event_source():
         bus = AgentEventBus.instance()
         last_session_check = time.monotonic()
+        pending_next = None
         yield ":connected\n\n"
         try:
             sub = bus.subscribe(replay=replay)
+            pending_next = asyncio.create_task(sub.__anext__())
             while True:
                 try:
-                    ev = await asyncio.wait_for(sub.__anext__(), timeout=_SSE_SESSION_CHECK_INTERVAL)
+                    # shield 保留同一个 __anext__ 任务；心跳超时不能取消订阅，
+                    # 否则空闲连接会被误判断开，前端只能不断重连。
+                    ev = await asyncio.wait_for(
+                        asyncio.shield(pending_next),
+                        timeout=_SSE_SESSION_CHECK_INTERVAL,
+                    )
+                    pending_next = None
                     now = time.monotonic()
                     if now - last_session_check >= _SSE_SESSION_CHECK_INTERVAL:
                         last_session_check = now
@@ -226,18 +235,29 @@ async def stream_agent_events(
                             yield "event: auth_expired\ndata: {\"code\":40102}\n\n"
                             return
                     if not _should_deliver(ev):
+                        pending_next = asyncio.create_task(sub.__anext__())
                         continue
                     data = json.dumps(ev.to_dict(), ensure_ascii=False)
                     yield f"event: agent\ndata: {data}\n\n"
+                    pending_next = asyncio.create_task(sub.__anext__())
                 except asyncio.TimeoutError:
-                    if not _is_sse_session_active(raw_token):
-                        yield "event: auth_expired\ndata: {\"code\":40102}\n\n"
-                        return
+                    now = time.monotonic()
+                    if now - last_session_check >= _SSE_SESSION_CHECK_INTERVAL:
+                        last_session_check = now
+                        if not _is_sse_session_active(raw_token):
+                            yield "event: auth_expired\ndata: {\"code\":40102}\n\n"
+                            return
                     yield ":heartbeat\n\n"
+                except StopAsyncIteration:
+                    return
         except asyncio.CancelledError:
             return
-        except StopAsyncIteration:
-            return
+        finally:
+            if pending_next is not None and not pending_next.done():
+                pending_next.cancel()
+            if pending_next is not None:
+                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                    await pending_next
 
     return StreamingResponse(
         event_source(),

@@ -16,11 +16,13 @@
       </el-input>
     </div>
 
-    <EmptyState
+    <el-alert
       v-if="!filteredProjects.length && !loading"
-      description="还没有项目,先在「项目管理」创建项目并上传代码文件,这里会汇总展示"
-      action-text="创建项目"
-      action-to="/projects"
+      title="还没有项目"
+      description="先在「项目管理」创建项目并上传代码文件，这里会汇总展示。"
+      type="info"
+      :closable="false"
+      show-icon
     />
 
     <div v-loading="loading" class="project-grid">
@@ -52,7 +54,6 @@ import dayjs from 'dayjs'
 import { Search } from '@element-plus/icons-vue'
 import { getProjects } from '@/api/project'
 import type { ProjectOut } from '@/types/project'
-import EmptyState from '@/components/common/EmptyState.vue'
 
 const router = useRouter()
 const loading = ref(false)

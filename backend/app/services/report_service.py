@@ -17,6 +17,17 @@ from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 
 
+def is_report_available(task: ReviewTask | None) -> bool:
+    """报告已生成且可查看；沙箱失败报告也必须保留可读性。"""
+    return bool(
+        task
+        and (
+            task.status == "success"
+            or (task.status == "failed" and task.review_type == "sandbox_test")
+        )
+    )
+
+
 def list_reports(db: Session, user: User, project_id: int = None,
                  start_date: str = "", end_date: str = "",
                  page: int = 1, page_size: int = 20) -> dict:
@@ -34,7 +45,10 @@ def list_reports(db: Session, user: User, project_id: int = None,
     Returns:
         dict: 分页响应
     """
-    q = db.query(ReviewTask).filter(ReviewTask.status == "success")
+    q = db.query(ReviewTask).filter(
+        (ReviewTask.status == "success")
+        | ((ReviewTask.status == "failed") & (ReviewTask.review_type == "sandbox_test"))
+    )
     if user.role not in {"admin", "super_admin"}:
         q = q.filter(ReviewTask.user_id == user.id)
     if project_id:
@@ -54,7 +68,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
         items.append({
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
             "project_name": project.project_name if project else "",
-            "total_issues": row.total_issues, "score": row.score,
+            "total_issues": row.total_issues, "score": row.score, "status": row.status,
             "create_time": row.create_time.isoformat() if row.create_time else None,
         })
     return pagination.to_dict(items)
@@ -72,7 +86,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         dict: 报告完整数据
     """
     task = db.get(ReviewTask, task_id)
-    if not task or task.status != "success":
+    if not is_report_available(task):
         raise NotFoundError("报告不存在", code=40400)
     if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise NotFoundError("报告不存在", code=40400)

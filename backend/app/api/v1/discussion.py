@@ -35,6 +35,8 @@ def start_discussion(
     review_type: str = Query("full"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    origin_surface: str = "",
+    origin_session_key: str = "",
 ):
     """预检并注册讨论,返回 session_id 和基本信息。
 
@@ -86,6 +88,9 @@ def start_discussion(
         review_type=review_type,
         max_rounds=rounds,
         session_token_version=int(getattr(user, "token_version", 0) or 0),
+        # 小菱在会话内启动时记录来源会话,讨论结束后把结论回投给该会话自动汇报。
+        origin_surface=str(origin_surface or "")[:24],
+        origin_session_key=str(origin_session_key or "")[:128],
     )
 
     agent_list = [
