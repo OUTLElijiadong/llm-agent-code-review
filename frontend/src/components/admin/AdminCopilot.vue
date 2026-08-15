@@ -11,6 +11,7 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 import { isKnowledgeTool, isPageActionTool, toolRunningPhrase } from '@/utils/toolDisplay'
+import { useAgentActivityStore } from '@/stores/agentActivity'
 
 import {
   type AdminCopilotMessage,
@@ -106,6 +107,34 @@ interface ChatEntry {
   }
 }
 
+
+/**
+ * 从页面操作类工具参数中提取目标路由/动作语义,供虚拟鼠标定位真实元素。
+ */
+function pageActionTargetHint(args?: string | Record<string, unknown>): string | undefined {
+  if (!args) return undefined
+  let parsed: Record<string, unknown> | null = null
+  if (typeof args === 'string') {
+    try {
+      parsed = JSON.parse(args) as Record<string, unknown>
+    } catch {
+      return undefined
+    }
+  } else if (typeof args === 'object') {
+    parsed = args
+  }
+  if (!parsed) return undefined
+  const page = typeof parsed.page === 'string' ? parsed.page : ''
+  const params = parsed.params
+  const nestedPage = params && typeof params === 'object' && typeof (params as Record<string, unknown>).page === 'string'
+    ? (params as Record<string, unknown>).page as string
+    : ''
+  const route = page || nestedPage
+  const action = typeof parsed.action === 'string' ? parsed.action : ''
+  if (route || action) return [route, action].filter(Boolean).join(' ').trim()
+  return undefined
+}
+
 const ASSISTANT_NAME = '小菱 · 管理副驾驶'
 const MASCOT_NAME = '小菱'
 const WELCOME_TEXT = `你好,我是${MASCOT_NAME},Prism 的管理副驾驶!我可以帮你巡查系统态势、审批运维操作、生成平台报表。点击「+」可开新对话,多个任务并行处理。`
@@ -170,6 +199,8 @@ async function handleAskMember({ name }: { name: string; address: string }): Pro
   )
 }
 const router = useRouter()
+/** 管理端同样点亮全局彩框/虚拟鼠标:小菱替管理员操作页面时的实况反馈。 */
+const activityStore = useAgentActivityStore()
 
 const sessionId = ref('')
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
@@ -964,6 +995,17 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
           if (isPageActionTool(event.tool_name) || isKnowledgeTool(event.tool_name)) {
             ElMessage.info(toolRunningPhrase(event.tool_name))
           }
+          // 页面操作类:点亮彩框+虚拟鼠标,targetHint 带目标路由供真实定位
+          if (isPageActionTool(event.tool_name)) {
+            activityStore.begin(toolRunningPhrase(event.tool_name), event.call_id, pageActionTargetHint(event.arguments))
+          }
+        } else if (
+          (event.type === 'response.tool.completed'
+            || event.type === 'response.tool.failed'
+            || event.type === 'response.tool.rejected')
+          && typeof event.call_id === 'string'
+        ) {
+          activityStore.end(event.call_id)
         }
         if (!applyExistingTimelineToolEvent(event)) {
           applyResponseToolEvent(runToolCalls, event)

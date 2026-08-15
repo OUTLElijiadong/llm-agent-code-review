@@ -30,6 +30,8 @@ vi.mock('@/api/agentTeams', () => ({
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
+import { createPinia } from 'pinia'
+
 import AdminCopilot from './AdminCopilot.vue'
 
 function flushSessionRestore(): Promise<void> {
@@ -43,6 +45,7 @@ function flushSessionRestore(): Promise<void> {
 function mountCopilot(): VueWrapper {
   return mount(AdminCopilot, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         'el-icon': { template: '<span class="el-icon-stub"><slot /></span>' },
         ChatDotRound: true,
