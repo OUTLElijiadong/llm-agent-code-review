@@ -99,7 +99,7 @@ class AiPromptAgent(BaseAgent):
     """
 
     name = "ai_prompt"
-    description = "把审查问题翻译成可粘贴给 Cursor/Copilot/ChatGPT/Claude Code 的修复提示词"
+    description = "修复提示生成器:把审查发现一键翻译成可粘贴给 AI 编程工具的修复指令"
     icon = "ai_prompt"
     color = "#E25C73"
     category = "output"

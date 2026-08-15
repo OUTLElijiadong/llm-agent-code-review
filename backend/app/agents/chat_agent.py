@@ -75,7 +75,7 @@ class ChatAssistantAgent(BaseAgent):
     """
 
     name = "chat_assistant"
-    description = "PRISM 平台智能聊天助手, 可通过对话调控所有 Agent"
+    description = "小菱本尊:像聊天一样帮你发审查、查项目、读报告,还能派子Agent团队干活"
     icon = "chat_assistant"
     color = "#3DBCD9"
     category = "frontline"

@@ -135,7 +135,7 @@ class TestCaseGeneratorAgent(BaseAgent):
     """根据源码摘要生成白盒/黑盒自包含断言测试文件。"""
 
     name = "test_case_generator"
-    description = "为沙箱黑白盒测试动态生成自包含断言测试文件"
+    description = "出题官:根据项目特征动态生成黑白盒测试用例,考一考代码是否真的健壮"
     icon = "test_case_generator"
     color = "#2F7D6D"
     category = "review"

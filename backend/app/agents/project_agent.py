@@ -11,7 +11,7 @@ class ProjectAnalyzerAgent(BaseAgent):
     """
 
     name = "project_analyzer"
-    description = "根据文件夹名称和文件列表智能分析项目元数据"
+    description = "项目体检员:看一眼文件结构就能判断这是什么项目、用什么技术、风险高不高"
     icon = "project_analyzer"
     color = "#5BB89A"
     category = "analyzer"

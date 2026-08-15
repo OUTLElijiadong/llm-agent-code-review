@@ -13,7 +13,7 @@ class DashboardAgent(BaseAgent):
     """仪表盘 Agent"""
 
     name = "dashboard"
-    description = "获取平台统计数据: 汇总指标/风险分布/评分趋势/审查频次"
+    description = "数据播报员:汇总平台安全态势、风险分布和评分趋势,一句话讲清现状"
     icon = "dashboard"
     color = "#2A9D8F"
     category = "analytics"

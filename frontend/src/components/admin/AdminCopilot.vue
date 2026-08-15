@@ -1458,6 +1458,12 @@ onMounted(() => {
         <span class="progress-watch" title="小菱正在自动跟踪执行进度,无需手动刷新"> · 自动监控</span>
       </div>
 
+      <Transition name="mascot-float">
+        <div v-if="sessionRestoring" class="session-restoring-hint" role="status">
+          <span class="session-restoring-spinner" aria-hidden="true"></span>
+          <span>正在恢复这个对话<span v-if="sessionRun?.status === 'running'">，小菱还有任务在后台跑着，马上接回进度…</span><span v-else>，从服务器拉取历史消息…</span></span>
+        </div>
+      </Transition>
       <div ref="messageArea" class="copilot-messages" aria-live="polite" @click="onMessageClick">
         <div v-if="messages.length <= 1 && !showTyping" class="quick-questions" aria-label="快捷问题">
           <button
@@ -1868,6 +1874,30 @@ input { font: inherit; }
   box-shadow: 0 2px 8px rgba(0, 110, 255, 0.15);
 }
 .quick-question:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.session-restoring-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 14px 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--brand-200, #b7b3fb);
+  border-radius: 10px;
+  background: var(--brand-50, #efefef);
+  color: var(--brand-700, #3f3cc7);
+  font-size: 12px;
+}
+.session-restoring-spinner {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--brand-200, #b7b3fb);
+  border-top-color: var(--brand-500, #5b58e8);
+  border-radius: 50%;
+  animation: session-restoring-spin 0.9s linear infinite;
+}
+@keyframes session-restoring-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .session-restoring-spinner { animation: none; } }
 
 .copilot-messages { grid-area: messages; min-height: 0; overflow-y: auto; padding: 16px 14px; background: #f7f8fa; }
 .message-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 14px; }

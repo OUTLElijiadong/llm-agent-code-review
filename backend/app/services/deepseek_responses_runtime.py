@@ -1327,27 +1327,72 @@ def _build_compacted_projection(
 
 
 def _compaction_summary(items: Sequence[Mapping[str, Any]], digest: str) -> str:
-    type_counts: Dict[str, int] = {}
-    call_ids: List[str] = []
-    snippets: List[str] = []
+    """压缩摘要:保留被省略上下文的关键语义,而非只有计数。
+
+    目标是模型在压缩后仍"记得"做过什么、结论是什么:
+    - 用户消息:保留首句要点(最多12条,每条≤100字)
+    - 工具调用:按工具名聚合计数 + 最近参数摘要(≤80字/条,最多24条)
+    - 工具输出:保留 status/错误等结论性字段(≤120字)
+    - 助手结论:保留每条首句(≤100字,最多10条)
+    """
+    user_notes: List[str] = []
+    tool_calls: List[str] = []
+    tool_outcomes: List[str] = []
+    assistant_notes: List[str] = []
+
+    def _text_of(content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = []
+            for piece in content:
+                if isinstance(piece, Mapping):
+                    parts.append(str(piece.get("text") or piece.get("output") or "").strip())
+            return " ".join(p for p in parts if p)
+        return ""
+
     for item in items:
-        item_type = str(item.get("type") or item.get("role") or "unknown")
-        type_counts[item_type] = type_counts.get(item_type, 0) + 1
-        call_id = str(item.get("call_id") or "")
-        if call_id and call_id not in call_ids and len(call_ids) < 20:
-            call_ids.append(call_id)
-        if len(snippets) < 6:
-            snippet = _context_item_snippet(item)
-            if snippet:
-                snippets.append(snippet[:120])
-    counts = ",".join(f"{name}:{count}" for name, count in sorted(type_counts.items()))
-    calls = ",".join(call_ids) or "none"
-    evidence = " | ".join(snippets) or "none"
-    return (
-        "[平台上下文压缩] 完整历史仍保存在审计检查点中；本条仅是模型输入投影。"
-        f"省略 {len(items)} 项，类型={counts}，call_id={calls}，"
-        f"摘要={evidence}，sha256={digest}。"
-    )
+        item_type = str(item.get("type") or "")
+        role = str(item.get("role") or "")
+        if item_type == "function_call":
+            name = str(item.get("name") or "?")
+            args = str(item.get("arguments") or "")[:80]
+            if len(tool_calls) < 24:
+                tool_calls.append(f"{name}({args})")
+        elif item_type == "function_call_output":
+            output = str(item.get("output") or "")
+            try:
+                parsed = json.loads(output)
+                status = parsed.get("status") if isinstance(parsed, Mapping) else None
+                error = parsed.get("error") if isinstance(parsed, Mapping) else None
+                if (status or error) and len(tool_outcomes) < 12:
+                    tool_outcomes.append(f"{status or ''}{'|' + str(error)[:100] if error else ''}".strip())
+            except Exception:
+                if len(tool_outcomes) < 12 and output.strip():
+                    tool_outcomes.append(output.strip()[:120])
+        elif role == "user" or (item_type == "message" and item.get("role") == "user"):
+            text = _text_of(item.get("content"))
+            if text and len(user_notes) < 12:
+                user_notes.append(text[:100])
+        elif role == "assistant" or (item_type == "message" and item.get("role") == "assistant"):
+            text = _text_of(item.get("content"))
+            if text and len(assistant_notes) < 10:
+                assistant_notes.append(text[:100])
+
+    lines = [
+        "[平台上下文压缩] 完整历史仍保存在审计检查点中；本条是被省略上下文的关键语义摘要。",
+        f"共省略 {len(items)} 项。",
+    ]
+    if user_notes:
+        lines.append("用户要点: " + " / ".join(f"「{n}」" for n in user_notes))
+    if tool_calls:
+        lines.append("已执行工具: " + "; ".join(tool_calls))
+    if tool_outcomes:
+        lines.append("工具结论: " + " | ".join(tool_outcomes))
+    if assistant_notes:
+        lines.append("助手结论: " + " / ".join(f"「{n}」" for n in assistant_notes))
+    lines.append(f"sha256={digest}。")
+    return "\n".join(lines)
 
 
 def _context_item_snippet(item: Mapping[str, Any]) -> str:

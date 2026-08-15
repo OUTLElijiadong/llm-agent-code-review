@@ -47,7 +47,7 @@ class _SandboxAgent(BaseAgent):
 
 class TestVerifierAgent(_SandboxAgent):
     name = "test_verifier"
-    description = "调用隔离 worker 执行项目级动态白盒、黑盒或组合测试"
+    description = "黑盒测试员:把项目在隔离沙箱里真实运行,从外部发起真实攻击探测"
     icon = "test_verifier"
     color = "#16866F"
     category = "review"
@@ -89,7 +89,7 @@ class TestVerifierAgent(_SandboxAgent):
 
 class SandboxDeployerAgent(_SandboxAgent):
     name = "sandbox_deployer"
-    description = "在隔离 worker 部署项目并管理预览、续期和关闭生命周期"
+    description = "沙箱部署员:把项目部署到隔离环境持续运行,提供在线预览与生命周期管理"
     icon = "sandbox_deployer"
     color = "#C87823"
     category = "operations"

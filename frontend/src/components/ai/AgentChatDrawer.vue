@@ -1893,6 +1893,15 @@ onMounted(() => {
               </template>
             </div>
 
+            <Transition name="mascot-float">
+              <div v-if="sessionRestoring" class="session-restoring-hint" role="status" aria-live="polite">
+                <span class="session-restoring-spinner" aria-hidden="true"></span>
+                <span class="session-restoring-text">
+                  正在恢复这个对话<span v-if="sessionRun?.status === 'running'">，小菱还有任务在后台跑着，马上接回进度…</span><span v-else>，从服务器拉取历史消息…</span>
+                </span>
+              </div>
+            </Transition>
+
             <div ref="chatBody" class="chat-body" @click="onMessageClick">
             <div v-for="(msg, i) in messages" :key="msg.id ?? i" class="msg-row" :class="msg.role">
               <div class="msg-avatar">
@@ -2615,6 +2624,33 @@ onMounted(() => {
 .mascot-float-leave-active { transition: opacity 0.35s ease, transform 0.35s ease; }
 .mascot-float-enter-from,
 .mascot-float-leave-to { opacity: 0; transform: translateY(10px) scale(0.9); }
+
+.session-restoring-hint {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--brand-200);
+  border-radius: 10px;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: 12px;
+}
+.session-restoring-spinner {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--brand-200);
+  border-top-color: var(--brand-500);
+  border-radius: 50%;
+  animation: session-restoring-spin 0.9s linear infinite;
+}
+@keyframes session-restoring-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .session-restoring-spinner { animation: none; }
+}
 
 .chat-body {
   flex: 1;

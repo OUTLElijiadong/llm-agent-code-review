@@ -16,7 +16,7 @@ class ReviewOrchestratorAgent(BaseAgent):
     """审查调度 Agent — 启动审查并监控进度"""
 
     name = "review_orchestrator"
-    description = "启动代码审查任务/查询审查记录/列出审查问题"
+    description = "审查总指挥:发起正式代码审查、跟进进度、汇总问题清单"
     icon = "review_orchestrator"
     color = "#F4A261"
     category = "orchestrator"

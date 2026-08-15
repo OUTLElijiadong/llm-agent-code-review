@@ -25,7 +25,7 @@ class ProjectManagerAgent(BaseAgent):
     """
 
     name = "project_manager"
-    description = "管理项目: 创建/查询/编辑/删除项目"
+    description = "项目管理员:创建/修改/删除项目,支持直接导入 GitHub 仓库"
     icon = "project_manager"
     color = "#9F7AEA"
     category = "manager"

@@ -22,7 +22,7 @@ answer 不超过 400 个中文字符，task 不超过 200 个中文字符；缺�
 
 class AdminCopilotAgent(BaseAgent):
     name = "manager"
-    description = "管理员总调度与治理副驾驶"
+    description = "贾维斯:管理端副驾驶,自动巡逻异常、主动汇报风险、代办运维(高危须批准)"
     icon = "manager"
     color = "#006EFF"
     category = "governance"
