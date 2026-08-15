@@ -383,6 +383,12 @@ class SendMessageContextArguments(FixedToolArguments):
     project_id: Optional[int] = Field(default=None, gt=0)
     file_id: Optional[int] = Field(default=None, gt=0)
     run_id: str = Field(default="", max_length=80)
+    # 监督式调度闭环(T4)的透传字段,与 AgentMeshContextIn 保持一致;
+    # 缺了它们,监督复核协议要求模型回发的纠正消息会被 extra=forbid 拒绝。
+    supervision_objective: Optional[str] = Field(default=None, max_length=4000)
+    supervision_round: Optional[int] = Field(default=None, ge=0, le=100)
+    supervision_max_rounds: Optional[int] = Field(default=None, ge=1, le=100)
+    supervision_correlation_id: Optional[str] = Field(default=None, max_length=160)
 
 
 class SendMessageDeliveryArguments(FixedToolArguments):

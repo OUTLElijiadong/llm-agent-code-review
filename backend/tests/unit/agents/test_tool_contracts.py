@@ -335,3 +335,19 @@ def test_source_archive_agent_contracts_expose_audit_mode_and_static_full_defaul
             "audit_security_for_project",
             {"project_id": 7, "scan_mode": "sample"},
         )
+
+
+def test_send_message_context_accepts_supervision_fields():
+    """监督式复核协议要求模型回发带 supervision_* 的 context;
+    工具契约此前 extra=forbid 缺这些字段,纠正轮次会被直接拒绝。"""
+    from app.agents.tool_contracts import SendMessageContextArguments
+
+    ctx = SendMessageContextArguments.model_validate({
+        "run_id": "run-1",
+        "supervision_objective": "复核越权问题是否修复",
+        "supervision_round": 2,
+        "supervision_max_rounds": 3,
+        "supervision_correlation_id": "msg-orig-1",
+    })
+    assert ctx.supervision_round == 2
+    assert ctx.supervision_correlation_id == "msg-orig-1"

@@ -79,11 +79,26 @@ def _session_address(surface: str, session_key: str) -> str:
     return f"session:{surface}:{session_key}"
 
 
-def _assert_surface(user: User, surface: str) -> None:
+def _assert_surface(db: Session, user: User, surface: str) -> None:
     if surface not in {"user", "admin"}:
         raise AgentMeshAccessError("surface 必须是 user 或 admin")
-    if surface == "admin" and not _is_admin(user):
+    if surface == "admin" and not _is_admin_surface(db, user):
         raise AgentMeshAccessError("仅管理员账户可注册或访问 admin 会话")
+
+
+def _is_admin_surface(db: Session, user: User) -> bool:
+    """admin 会话准入与 /agent-responses/stream 口径一致:
+    旧版 role 字段之外,RBAC 绑定了 admin/super_admin 角色的账户同样放行,
+    避免 AdminCopilot 能聊天但 Mesh 心跳/收件箱/归档 403 的割裂。
+    """
+    if _is_admin(user):
+        return True
+    try:
+        from app.services import rbac_service
+
+        return rbac_service.is_admin_user(db, int(user.id))
+    except Exception:  # noqa: BLE001 - RBAC 查询失败时退回 role 字段判定
+        return False
 
 
 def _conversation(db: Session, user_id: int, surface: str, session_key: str) -> Optional[AgentMeshConversation]:
@@ -110,7 +125,7 @@ def heartbeat(
     active_run_status: str = "",
 ) -> dict[str, Any]:
     """注册或刷新当前账户的小菱会话。"""
-    _assert_surface(user, surface)
+    _assert_surface(db, user, surface)
     row = _conversation(db, int(user.id), surface, session_key)
     now = _now()
     if row is None:
@@ -205,7 +220,7 @@ def archive_conversation(
     幂等:会话不存在或已归档时返回归档结果;运行中/等待审批/等待输入的会话
     拒绝归档,避免用户在另一设备上误删正在执行的任务。
     """
-    _assert_surface(user, surface)
+    _assert_surface(db, user, surface)
     _, run_status = _authoritative_run_state(
         db,
         user_id=int(user.id),
@@ -563,7 +578,7 @@ def send_message(
     trusted_source: bool = False,
 ) -> dict[str, Any]:
     """校验并持久化标准消息；相同幂等键返回原记录。"""
-    _assert_surface(user, surface)
+    _assert_surface(db, user, surface)
     if _conversation(db, int(user.id), surface, session_key) is None:
         raise AgentMeshAccessError("发送会话尚未注册或不属于当前账户")
     derived_source = _session_address(surface, session_key)
@@ -1013,7 +1028,7 @@ def pull_inbox(
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     """拉取当前会话的待处理消息，并原子标记首次送达。"""
-    _assert_surface(user, surface)
+    _assert_surface(db, user, surface)
     if _conversation(db, int(user.id), surface, session_key) is None:
         raise AgentMeshAccessError("目标会话尚未注册或不属于当前账户")
     target = _session_address(surface, session_key)
@@ -1052,7 +1067,7 @@ def _owned_target_message(
     surface: str,
     session_key: str,
 ) -> AgentMeshMessage:
-    _assert_surface(user, surface)
+    _assert_surface(db, user, surface)
     target = _session_address(surface, session_key)
     row = (
         db.query(AgentMeshMessage)
@@ -1167,7 +1182,7 @@ def list_session_messages(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """返回当前账户会话收发的最近消息，供折叠时间线恢复。"""
-    _assert_surface(user, surface)
+    _assert_surface(db, user, surface)
     bind = db.get_bind()
     if bind is None or not inspect(bind).has_table(AgentMeshMessage.__tablename__):
         return []

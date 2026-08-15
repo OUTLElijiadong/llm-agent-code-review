@@ -565,6 +565,9 @@ async function runBackgroundMeshMessage(
   backgroundBusySessions.add(targetSessionId)
   switcherRef.value?.setBusy(targetSessionId, true)
   let waiting = false
+  // 只有 completed 才算成功:failed/incomplete/error 时后端可能把消息重新入队,
+  // 这里若返回 true 会被 mesh 桥标记 handled,同 message_id 的重投将被永久跳过。
+  let succeeded = false
   const handle = streamResponses({
     action: 'start',
     surface: 'user',
@@ -575,6 +578,9 @@ async function runBackgroundMeshMessage(
     onEvent(event) {
       if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
         waiting = true
+      }
+      if (event.type === 'response.completed') {
+        succeeded = true
       }
       if (
         event.type === 'response.completed'
@@ -589,7 +595,7 @@ async function runBackgroundMeshMessage(
   })
   try {
     await handle.done
-    return true
+    return succeeded
   } catch {
     return false
   } finally {
