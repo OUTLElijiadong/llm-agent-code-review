@@ -105,6 +105,21 @@ async def lifespan(app: FastAPI):
     from app.services.agent_team_dispatcher import start_agent_team_dispatcher, stop_agent_team_dispatcher
     from app.services.jarvis_patrol_service import start_jarvis_patrol, stop_jarvis_patrol
 
+    # 部署重启善后:把被杀死的进行中运行立刻翻成可重试的 failed 终态,
+    # 避免用户重开页面时看到永远「运行中」的假进度。
+    from app.api.v1.agent_responses import sweep_stale_active_runs
+    from app.core.database import SessionLocal as _SessionLocal
+
+    _sweep_db = _SessionLocal()
+    try:
+        _swept = sweep_stale_active_runs(_sweep_db)
+        if _swept:
+            from loguru import logger as _logger
+
+            _logger.info("[startup] 清扫 {} 个部署重启遗留的僵尸运行", _swept)
+    finally:
+        _sweep_db.close()
+
     get_orchestrator()
     AgentEventBus.instance().start_relay()
     start_agent_mesh_dispatcher()

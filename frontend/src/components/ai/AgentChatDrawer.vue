@@ -442,6 +442,22 @@ function restoredSessionMessages(
       })
     }
   }
+  // 失败/取消终态:把失败原因留在消息流(错误卡带重试),否则用户只见历史
+  // 消息而不知道上次没做完,误以为「已经完成」。
+  const failedStatus = session.run?.status
+  const failedError = (session.run?.error ?? '').trim()
+  if (
+    (failedStatus === 'failed' || failedStatus === 'incomplete' || failedStatus === 'max_rounds_exceeded')
+    && failedError
+  ) {
+    restored.push({
+      id: messageId(),
+      role: 'error',
+      content: failedError,
+      time: restoredTime,
+      errorCard: { retryable: true },
+    })
+  }
   return restored
 }
 
@@ -2590,6 +2606,7 @@ onMounted(() => {
   .upload-status-track i { transition: none; }
   .msg-copy-btn { transition: none; }
   .typing-label { animation: none; }
+  .msg-bubble { animation: none; }
   .chat-header.is-running::after { animation: none; opacity: 0.6; }
   .stop-btn { transition: none; }
 }
@@ -2642,9 +2659,18 @@ onMounted(() => {
   border-radius: 12px;
   font-size: 13.5px;
   line-height: 1.6;
+  animation: msg-bubble-in 0.24s ease-out;
+}
+
+@keyframes msg-bubble-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .msg-bubble.has-response-control { width: calc(100% - 48px); }
+
+/* 用户气泡深底:时间戳用半透明白 */
+.msg-row.user .msg-time { color: rgba(255, 255, 255, 0.75); }
 
 /* hover 复制按钮:默认淡出,气泡悬停/键盘聚焦时可见 */
 .msg-copy-btn {
@@ -2721,15 +2747,18 @@ onMounted(() => {
 .msg-error-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .msg-row.user .msg-bubble {
-  background: var(--brand-50);
-  border: 1px solid var(--brand-100);
+  background: linear-gradient(135deg, var(--brand-500), var(--brand-600));
+  border: 1px solid var(--brand-600);
   border-top-right-radius: 4px;
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(91, 88, 232, 0.22);
 }
 
 .msg-row.assistant .msg-bubble {
-  background: var(--gray-50);
-  border: 1px solid var(--color-border-light);
+  background: #fff;
+  border: 1px solid var(--gray-200);
   border-top-left-radius: 4px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
 }
 
 .msg-content {

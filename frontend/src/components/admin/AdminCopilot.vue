@@ -542,6 +542,17 @@ function applySessionSnapshot(session: AgentResponseSession): void {
   if (restored.length) messages.value = [welcomeEntry(), ...restored]
   const pending = pendingEntry(session, restoredTime)
   if (pending) messages.value.push(pending)
+  // 失败/取消终态:把失败原因留在消息流,否则用户只见历史而不知道上次没做完
+  const failedStatus = session.run?.status
+  const failedError = (session.run?.error ?? '').trim()
+  if (
+    (failedStatus === 'failed' || failedStatus === 'incomplete' || failedStatus === 'max_rounds_exceeded')
+    && failedError
+  ) {
+    messages.value.push({
+      ...assistantEntry({ type: 'error', title: '上次任务没有完成', content: failedError }),
+    })
+  }
 }
 
 async function pollSessionSnapshot(generation: number): Promise<void> {

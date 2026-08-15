@@ -213,6 +213,37 @@ def get_agent_response_session(
     )
 
 
+def sweep_stale_active_runs(db: Session, *, max_age_seconds: int = 0) -> int:
+    """批量清扫僵尸活跃运行(Worker 硬重启遗留)。
+
+    部署重启会杀死进行中的续跑,这些 run 停留在 running/approving/rejecting,
+    只有用户重新轮询该会话时才会被逐个恢复;页面关闭的用户永远等不到。
+    启动时全表清扫一次,让这些 run 立刻进入可重试的 failed 终态,
+    前端打开即看到真实错误而不是「运行中」的假进度。
+
+    Args:
+        db: 数据库会话。
+        max_age_seconds: 只清超过该秒数的行;0 表示沿用单行租约判定。
+
+    Returns:
+        int: 实际翻转状态的行数。
+    """
+    swept = 0
+    rows = (
+        db.query(AgentResponseRun)
+        .filter(AgentResponseRun.status.in_(_ACTIVE_RUN_STATUSES))
+        .order_by(AgentResponseRun.id.asc())
+        .limit(200)
+        .all()
+    )
+    for row in rows:
+        before = row.status
+        _recover_stale_active_run(db, row)
+        if row.status != before:
+            swept += 1
+    return swept
+
+
 def _recover_stale_active_run(db: Session, row: AgentResponseRun) -> None:
     """恢复 Worker 硬退出留下的过渡态；租约长于单次模型超时。"""
     updated_at = row.update_time

@@ -31,7 +31,9 @@ class ProjectAnalyzerAgent(BaseAgent):
         super().__init__(
             system_prompt=compose_system_prompt(self.name, system_prompt),
             temperature=0.3,
-            max_tokens=500,
+            # 思维链模型的 reasoning 也计入该上限;500 时 JSON 还没开始输出就
+            # finish_reason=length(实测生产事故)。2000 给推理留余量。
+            max_tokens=2000,
         )
 
     def _init_skills(self) -> None:
