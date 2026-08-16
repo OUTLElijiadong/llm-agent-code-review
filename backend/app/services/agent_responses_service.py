@@ -309,6 +309,7 @@ _OPS_READ_ONLY = ops_service.READ_ONLY_ACTIONS
 _TOOL_NAME_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _SENSITIVE_EVENT_KEY = re.compile(
     r"(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|private[_-]?key|"
+    r"one[_-]?time[_-]?(?:code|result)s?|"
     r"reasoning(?:[_-]?content)?|encrypted[_-]?content)",
     re.IGNORECASE,
 )
@@ -922,12 +923,17 @@ class PrismToolExecutor:
             return await self._execute_release_decision(call, approved=approved)
 
         if call.name in _WRITE_TOOLS and not approved:
-            return self._approval(
-                call,
-                danger=call.name in _DANGER_TOOLS,
-                impact="将使用当前登录用户权限执行该平台写操作",
-            )
-        if call.name in _WRITE_TOOLS:
+            # 唯一超级管理员:高危任务仍需确认,普通写操作免审批直接执行
+            is_danger = call.name in _DANGER_TOOLS
+            if not (self._is_super_admin and not is_danger):
+                return self._approval(
+                    call,
+                    danger=is_danger,
+                    impact="将使用当前登录用户权限执行该平台写操作",
+                )
+        if call.name in _WRITE_TOOLS and not (
+            self._is_super_admin and call.name not in _DANGER_TOOLS
+        ):
             self._mark_approval(call, approve=True)
 
         if call.name in {"admin_set_user_role", "admin_delete_user", "admin_toggle_agent"}:
@@ -1853,10 +1859,13 @@ class PrismToolExecutor:
         if policy.decision == policy_engine.DENY:
             return await self._failed_attempt(call, f"策略阻断管理能力: {policy.reason}")
 
+        is_critical = spec.risk == CAPABILITY_CRITICAL
         if spec.risk != CAPABILITY_READ and not approved:
-            return self._approval(
-                call,
-                danger=spec.risk == CAPABILITY_CRITICAL,
+            # 唯一超级管理员:critical 高危仍需点击确认,中低风险写能力免审批
+            if not (self._is_super_admin and not is_critical):
+                return self._approval(
+                    call,
+                    danger=is_critical,
                 operation=spec.description,
                 impact=f"将通过真实业务 API 在 {spec.page} 执行「{spec.description}」",
                 preview={
@@ -1908,8 +1917,12 @@ class PrismToolExecutor:
             if isinstance(raw_codes, Sequence) and not isinstance(raw_codes, (str, bytes, bytearray)):
                 values = [str(value) for value in raw_codes if isinstance(value, str) and value]
             title = "新生成的内测码"
+            # 明文码随一次性结果回到模型上下文:生成即用场景(管理员当场转交)
+            # 需要完整码直接可见;one_time_codes 键落库时被脱敏为 [REDACTED],
+            # 库里始终只有哈希,明文只存在于本次内存结果与 SSE 事件。
             safe_data = {
                 "generated_count": len(values),
+                "one_time_codes": values,
                 "items": copy.deepcopy(data.get("items")) if isinstance(data.get("items"), list) else [],
                 "one_time_result": True,
             }
