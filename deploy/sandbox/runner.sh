@@ -104,37 +104,96 @@ export COMPOSER_DISABLE_NETWORK=1
 export HOME=/workspace/.prism-home
 export TMPDIR=/workspace/.prism-tmp
 
-run_agent_test_file() {
-  # agent 动态生成的测试文件必须自包含可执行;按扩展名调用,失败非 0 退出。
+preflight_agent_test_file() {
+  # 先用语言原生工具完成解析/编译，避免后端根据自由文本猜测失败阶段。
   case "$1" in
-    *.py) python "$1" ;;
-    *.js|*.mjs) node "$1" ;;
-    *.php) php "$1" ;;
-    *.go) go run "$1" ;;
+    *.py) PYTHONPYCACHEPREFIX=/workspace/.prism-tmp/pycache python -m py_compile "$1" ;;
+    *.js|*.mjs) node --check "$1" ;;
+    *.php) php -l "$1" ;;
+    *.go) go build -o /workspace/.prism-tmp/agent-test-bin "$1" ;;
     *.java)
       cls_dir=".prism-ai-classes"
       mkdir -p "$cls_dir"
-      javac -d "$cls_dir" "$1" || return 1
+      javac -d "$cls_dir" "$1" ;;
+    *.sh) sh -n "$1" ;;
+    *) return 64 ;;
+  esac
+}
+
+run_agent_test_file() {
+  # agent 动态生成的测试文件必须自包含可执行；预检成功后这里只执行测试。
+  case "$1" in
+    *.py) PYTHONPATH=/workspace${PYTHONPATH:+:$PYTHONPATH} python "$1" ;;
+    *.js|*.mjs) node "$1" ;;
+    *.php) php "$1" ;;
+    *.go) /workspace/.prism-tmp/agent-test-bin ;;
+    *.java)
+      cls_dir=".prism-ai-classes"
       cls_name="$(basename "$1" .java)"
       java -cp "$cls_dir" "$cls_name" ;;
-    *) return 0 ;;
+    *.sh) sh "$1" ;;
+    *) return 64 ;;
   esac
+}
+
+agent_test_file_json() {
+  # 文件名在注入前已限制为 ASCII 安全字符；输出以 base64 放入 JSON，避免日志破坏协议。
+  agent_output=""
+  if [ -f "$6" ]; then
+    agent_output="$(tail -c 2000 "$6" | base64 | tr -d '\n')"
+  fi
+  printf '"%s":{"status":"%s","phase":"%s","failure_kind":"%s","exit_code":%s,"output_encoding":"base64","output_base64":"%s"}' \
+    "$(basename "$1")" "$2" "$3" "$4" "$5" "$agent_output"
+}
+
+execute_agent_test() {
+  # 输出一条文件级 JSON；调用方通过返回码决定整体测试是否通过。
+  agent_file="$1"
+  agent_output_file="$2"
+  : >"$agent_output_file"
+  if preflight_agent_test_file "$agent_file" >"$agent_output_file" 2>&1; then
+    agent_preflight_rc=0
+  else
+    agent_preflight_rc=$?
+  fi
+  if [ "$agent_preflight_rc" -eq 0 ]; then
+    if run_agent_test_file "$agent_file" >"$agent_output_file" 2>&1; then
+      agent_test_file_json "$agent_file" pass execute "" 0 "$agent_output_file"
+      return 0
+    else
+      agent_rc=$?
+    fi
+    agent_kind="execution_failure"
+    case "$agent_rc" in 126|127) agent_kind="infrastructure_error" ;; esac
+    agent_test_file_json "$agent_file" fail execute "$agent_kind" "$agent_rc" "$agent_output_file"
+    return "$agent_rc"
+  fi
+  agent_rc="$agent_preflight_rc"
+  agent_kind="compile_error"
+  case "$agent_rc" in 126|127) agent_kind="infrastructure_error" ;; esac
+  agent_test_file_json "$agent_file" fail compile "$agent_kind" "$agent_rc" "$agent_output_file"
+  return "$agent_rc"
 }
 
 run_agent_tests() {
   # 白盒:常规测试后执行 agent 动态生成的断言文件,输出结构化结果标记。
   if [ ! -d ./_agent_tests ]; then
-    printf '%s\n' 'PRISM_AGENT_TESTS_BEGIN {"generated":0,"passed":0,"failed":0,"passed_count":0,"files":{}} PRISM_AGENT_TESTS_END'
+    printf '%s\n' 'PRISM_AGENT_TESTS_BEGIN {"protocol_version":2,"generated":0,"passed":0,"failed":0,"passed_count":0,"files":{},"file_results":{}} PRISM_AGENT_TESTS_END'
     return 0
   fi
-  total=0; ok=0; failed=0; results=""
+  total=0; ok=0; failed=0; results=""; file_results=""
   for f in ./_agent_tests/*; do
     [ -f "$f" ] || continue
     case "$f" in *.py|*.js|*.mjs|*.php|*.go|*.java) ;; *) continue ;; esac
     # 黑盒脚本只在应用就绪后由 run_agent_blackbox 执行,白盒阶段跳过,避免时序失败
     case "$(basename "$f")" in blackbox.*) continue ;; esac
     total=$((total + 1))
-    if run_agent_test_file "$f" >/tmp/agent-test-out 2>&1; then
+    if agent_file_result="$(execute_agent_test "$f" /tmp/agent-test-out)"; then
+      agent_rc=0
+    else
+      agent_rc=$?
+    fi
+    if [ "$agent_rc" -eq 0 ]; then
       ok=$((ok + 1)); status="pass"
     else
       failed=$((failed + 1)); status="fail"
@@ -142,9 +201,11 @@ run_agent_tests() {
       tail -c 2000 /tmp/agent-test-out >&2 || true
     fi
     results="${results}\"$(basename "$f")\":\"$status\","
+    file_results="${file_results}${agent_file_result},"
   done
   results="${results%,}"
-  printf 'PRISM_AGENT_TESTS_BEGIN {"generated":%s,"passed":%s,"failed":%s,"passed_count":%s,"files":{%s}} PRISM_AGENT_TESTS_END\n' "$total" "$ok" "$failed" "$ok" "$results"
+  file_results="${file_results%,}"
+  printf 'PRISM_AGENT_TESTS_BEGIN {"protocol_version":2,"generated":%s,"passed":%s,"failed":%s,"passed_count":%s,"files":{%s},"file_results":{%s}} PRISM_AGENT_TESTS_END\n' "$total" "$ok" "$failed" "$ok" "$results" "$file_results"
   [ "$failed" -eq 0 ]
 }
 
@@ -154,16 +215,23 @@ run_agent_blackbox() {
   for f in ./_agent_tests/blackbox.py ./_agent_tests/blackbox.js ./_agent_tests/blackbox.php ./_agent_tests/blackbox.go ./_agent_tests/blackbox.java ./_agent_tests/blackbox.sh; do
     if [ -f "$f" ]; then
       printf '%s\n' "executing agent blackbox: $f"
-      if run_agent_test_file "$f" >/tmp/agent-bb-out 2>&1; then
-        printf 'PRISM_AGENT_TESTS_BEGIN {"generated":1,"passed":1,"failed":0,"passed_count":1,"files":{"%s":"pass"}} PRISM_AGENT_TESTS_END\n' "$(basename "$f")"
+      if agent_file_result="$(execute_agent_test "$f" /tmp/agent-bb-out)"; then
+        agent_rc=0
       else
-        printf 'PRISM_AGENT_TESTS_BEGIN {"generated":1,"passed":0,"failed":1,"passed_count":0,"files":{"%s":"fail"}} PRISM_AGENT_TESTS_END\n' "$(basename "$f")"
+        agent_rc=$?
+      fi
+      if [ "$agent_rc" -eq 0 ]; then
+        printf 'PRISM_AGENT_TESTS_BEGIN {"protocol_version":2,"generated":1,"passed":1,"failed":0,"passed_count":1,"files":{"%s":"pass"},"file_results":{%s}} PRISM_AGENT_TESTS_END\n' "$(basename "$f")" "$agent_file_result"
+      else
+        printf '%s\n' "agent test failed: $f" >&2
         tail -c 2000 /tmp/agent-bb-out >&2 || true
+        printf 'PRISM_AGENT_TESTS_BEGIN {"protocol_version":2,"generated":1,"passed":0,"failed":1,"passed_count":0,"files":{"%s":"fail"},"file_results":{%s}} PRISM_AGENT_TESTS_END\n' "$(basename "$f")" "$agent_file_result"
+        return 1
       fi
       return 0
     fi
   done
-  printf '%s\n' 'PRISM_AGENT_TESTS_BEGIN {"generated":0,"passed":0,"failed":0,"passed_count":0,"files":{}} PRISM_AGENT_TESTS_END'
+  printf '%s\n' 'PRISM_AGENT_TESTS_BEGIN {"protocol_version":2,"generated":0,"passed":0,"failed":0,"passed_count":0,"files":{},"file_results":{}} PRISM_AGENT_TESTS_END'
   return 0
 }
 
@@ -173,73 +241,116 @@ run_test() {
     sh ./_prism_verify.sh whitebox
     return $?
   fi
-  # 完整测试语义:只要检查项真实执行完成(无论发现多少语法错误/测试失败/漏洞)
-  # 都算"测试已完成"。只有工作区完全没有可检查源码时,才算"测试未能执行"。
-  if ! find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.java' -o -name '*.go' -o -name '*.php' \) -print -quit | grep -q .; then
+  # 基础测试继续收集所有失败证据，但最终必须以非零退出码反映任何真实失败。
+  if ! find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.java' -o -name '*.go' -o -name '*.php' \) \
+      -not -path './_agent_tests/*' -not -path './.prism-*/*' -print -quit | grep -q .; then
     printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":false,"reason":"no_source_files"}'
     return 66
   fi
+  test_failed=0
   case "$language" in
     python)
-      python -m compileall -q . 2>/dev/null || printf '%s\n' 'whitebox: compileall reported errors (see logs)' >&2
-      if find . -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
+      if ! python -m compileall -q -x '(^|/)_agent_tests(/|$)' . 2>/dev/null; then
+        printf '%s\n' 'whitebox: compileall reported errors (see logs)' >&2
+        test_failed=1
+      fi
+      if find . -type f \( -name 'test_*.py' -o -name '*_test.py' \) \
+          -not -path './_agent_tests/*' -print -quit | grep -q .; then
         if python -c 'import pytest' >/dev/null 2>&1; then
-          python -m pytest -q --disable-warnings --maxfail=50 || printf '%s\n' 'whitebox: pytest reported failures (see logs)' >&2
+          if ! python -m pytest -q --disable-warnings --maxfail=50 --ignore=_agent_tests; then
+            printf '%s\n' 'whitebox: pytest reported failures (see logs)' >&2
+            test_failed=1
+          fi
         else
-          python -m unittest discover -v || printf '%s\n' 'whitebox: unittest reported failures (see logs)' >&2
+          if ! python -m unittest discover -v; then
+            printf '%s\n' 'whitebox: unittest reported failures (see logs)' >&2
+            test_failed=1
+          fi
         fi
       fi
       ;;
     node)
-      find . -type f -name '*.js' -not -path './node_modules/*' -exec node --check '{}' ';' 2>/dev/null \
-        || printf '%s\n' 'whitebox: node --check reported errors (see logs)' >&2
+      if ! find . -type f -name '*.js' -not -path './node_modules/*' \
+          -not -path './_agent_tests/*' -exec node --check '{}' ';' 2>/dev/null; then
+        printf '%s\n' 'whitebox: node --check reported errors (see logs)' >&2
+        test_failed=1
+      fi
       if [ -f package.json ]; then
-        npm test --if-present || printf '%s\n' 'whitebox: npm test reported failures (see logs)' >&2
+        if ! npm test --if-present; then
+          printf '%s\n' 'whitebox: npm test reported failures (see logs)' >&2
+          test_failed=1
+        fi
       fi
       ;;
     java)
       if [ -f mvnw ]; then
-        sh ./mvnw -o -B test || printf '%s\n' 'whitebox: mvn test reported failures (see logs)' >&2
+        if ! sh ./mvnw -o -B test; then
+          printf '%s\n' 'whitebox: mvn test reported failures (see logs)' >&2
+          test_failed=1
+        fi
       elif [ -f gradlew ]; then
-        sh ./gradlew --offline --no-daemon test || printf '%s\n' 'whitebox: gradle test reported failures (see logs)' >&2
+        if ! sh ./gradlew --offline --no-daemon test; then
+          printf '%s\n' 'whitebox: gradle test reported failures (see logs)' >&2
+          test_failed=1
+        fi
       else
-        find . -type f -name '*.java' -print > /tmp/prism-java-sources
+        find . -type f -name '*.java' -not -path './_agent_tests/*' -print > /tmp/prism-java-sources
         if [ -s /tmp/prism-java-sources ]; then
           mkdir -p /workspace/.prism-classes
-          javac -d /workspace/.prism-classes @/tmp/prism-java-sources 2>/dev/null \
-            || printf '%s\n' 'whitebox: javac reported errors (see logs)' >&2
+          if ! javac -d /workspace/.prism-classes @/tmp/prism-java-sources 2>/dev/null; then
+            printf '%s\n' 'whitebox: javac reported errors (see logs)' >&2
+            test_failed=1
+          fi
         fi
       fi
       ;;
     go)
-      if [ -d vendor ]; then
-        go test -mod=vendor ./... || printf '%s\n' 'whitebox: go test reported failures (see logs)' >&2
+      if go_packages="$(go list ./... 2>/tmp/prism-go-list.err)"; then
+        go_packages="$(printf '%s\n' "$go_packages" | grep -v '/_agent_tests$' || true)"
+        if [ -n "$go_packages" ]; then
+          if [ -d vendor ]; then
+            printf '%s\n' "$go_packages" | xargs go test -mod=vendor || test_failed=1
+          else
+            printf '%s\n' "$go_packages" | xargs go test || test_failed=1
+          fi
+        fi
       else
-        go test ./... || printf '%s\n' 'whitebox: go test reported failures (see logs)' >&2
+        cat /tmp/prism-go-list.err >&2 || true
+        test_failed=1
+      fi
+      if [ "$test_failed" -ne 0 ]; then
+        printf '%s\n' 'whitebox: go test reported failures (see logs)' >&2
       fi
       ;;
     php)
       # 分批语法检查:PHP8 对老库的 Fatal/Parse error 是真实语法问题,Deprecated/Warning 是提示级。
       # 无论发现多少语法错误,都算"测试已执行";错误输出进日志供多Agent审查引用。
-      find . -type f -name '*.php' -print0 | xargs -0 -n 50 -r php -l 2>&1 \
+      find . -type f -name '*.php' -not -path './_agent_tests/*' -print0 | xargs -0 -n 50 -r php -l 2>&1 \
         | grep -v 'No syntax errors detected' > /tmp/.lint_all || true
       if [ -s /tmp/.lint_all ]; then
         cat /tmp/.lint_all
         printf '%s\n' 'whitebox: php lint reported issues (see logs)' >&2
+        test_failed=1
       fi
       if [ -f vendor/bin/phpunit ]; then
-        php vendor/bin/phpunit --colors=never || printf '%s\n' 'whitebox: phpunit reported failures (see logs)' >&2
+        if ! php vendor/bin/phpunit --colors=never; then
+          printf '%s\n' 'whitebox: phpunit reported failures (see logs)' >&2
+          test_failed=1
+        fi
       fi
       ;;
   esac
+  if ! run_agent_tests; then
+    test_failed=1
+  fi
   collect_facts
-  printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true}'
-  return 0
+  if [ "$test_failed" -eq 0 ]; then
+    printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true,"passed":true}'
+  else
+    printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true,"passed":false}'
+  fi
+  return "$test_failed"
 }
-
-  # agent 动态测试:常规白盒之后执行动态生成的断言用例。
-  # agent 用例质量不稳定,失败只记录结果,不改变常规测试的通过结论。
-  run_agent_tests || true
 
 prepare_deps() {
   # 离线补全项目依赖(尽力而为):仅用镜像内置缓存或项目 vendor,不联网。
@@ -401,13 +512,28 @@ run_blackbox() {
     printf '%s\n' 'no _prism_poc.sh present, skip poc execution'
   fi
   # agent 动态黑盒:应用仍在运行,执行 agent 生成的回环测试脚本(必须放在 kill 之前)
-  run_agent_blackbox
+  blackbox_failed=0
+  case "$http_status" in
+    5*) printf '%s\n' 'blackbox: application returned a 5xx response' >&2; blackbox_failed=1 ;;
+  esac
+  if ! run_agent_blackbox; then
+    blackbox_failed=1
+  fi
   kill "$app_pid" >/dev/null 2>&1 || true
   wait "$app_pid" 2>/dev/null || true
   trap - EXIT INT TERM
-  # 5xx(应用自身错误,如缺DB)不算服务失败;1xx/4xx 也算服务已就绪。
-  # 只有完全没起监听才在上面 return 1。
-  return 0
+  return "$blackbox_failed"
+}
+
+run_combined() {
+  combined_failed=0
+  if ! run_test; then
+    combined_failed=1
+  fi
+  if ! run_blackbox; then
+    combined_failed=1
+  fi
+  return "$combined_failed"
 }
 
 collect_facts() {
@@ -430,7 +556,7 @@ param_names = {"file", "path", "filename", "download", "url", "callback", "id", 
 endpoints, secrets, params, tests = [], [], set(), 0
 framework = ""
 for root, dirs, files in os.walk("."):
-    dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", "venv", ".venv", "vendor"}]
+    dirs[:] = [d for d in dirs if d not in {".git", "_agent_tests", "node_modules", "__pycache__", "venv", ".venv", "vendor"}]
     for fn in files:
         p = os.path.join(root, fn)
         if fn in entry_names:
@@ -479,7 +605,8 @@ $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("."));
 foreach ($it as $f) {
   if ($f->isDir()) continue;
   if ($scanned++ > 3000) break;
-  $name = $f->getFilename(); $rel = substr($f->getPathname(), 2);
+	  $name = $f->getFilename(); $rel = substr($f->getPathname(), 2);
+	  if (strpos($rel, "_agent_tests/") === 0) continue;
   if (in_array($name, $entry_names)) $facts["entrypoints"][] = $rel;
   if (preg_match("/^(test_.*\.py$|.*_test\.py$|.*\.test\.js$|.*_test\.go$|Test\.java$)/", $name)) { $tests++; if (substr($name,-3)===".py") $framework = $framework ?: "pytest"; if (substr($name,-3)===".js") $framework = $framework ?: "jest"; }
   $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
@@ -516,7 +643,7 @@ if [ "$action" = test ]; then
   case "$test_mode" in
     whitebox) run_test ;;
     blackbox) run_blackbox ;;
-    combined) run_test; run_blackbox ;;
+    combined) run_combined ;;
   esac
 else
   run_deploy

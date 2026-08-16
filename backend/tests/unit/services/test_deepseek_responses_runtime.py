@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Dict, List, Mapping, Sequence
 import pytest
 
 from app.services.deepseek_responses_runtime import (
+    COMPLETED,
     FAILED,
     MAX_ROUNDS_EXCEEDED,
     WAITING_APPROVAL,
@@ -270,16 +271,10 @@ async def test_approval_executes_exact_call_and_resumes_without_new_user_message
     }
     assert paused.events[-1]["type"] == "response.approval.required"
 
-    with pytest.raises(InvalidRunStateError, match="确认执行"):
-        await runtime.approve("run_approval", "call_delete", confirmation="确认")
-    unchanged = await runtime.get_checkpoint("run_approval")
-    assert unchanged.status == WAITING_APPROVAL
-    assert unchanged.pending is not None
-
     completed = await runtime.approve(
         "run_approval",
         "call_delete",
-        confirmation="确认执行",
+        confirmation="",
     )
 
     assert completed.status == "completed"
@@ -323,7 +318,6 @@ async def test_approval_resume_preserves_remaining_calls_from_same_response() ->
     completed = await runtime.approve(
         "run_middle_approval",
         "call_2",
-        confirmation="确认执行",
     )
 
     assert paused.status == WAITING_APPROVAL
@@ -619,6 +613,39 @@ async def test_stops_at_maximum_model_rounds() -> None:
 
 
 @pytest.mark.asyncio
+async def test_long_sandbox_polling_completes_with_bounded_extended_budget() -> None:
+    responses = [
+        _function_response(
+            (
+                f"call_poll_{index}",
+                "user_execute_capability",
+                {
+                    "capability": "sandboxes.get",
+                    "params": {"public_id": "sbx_long_task"},
+                },
+            )
+        )
+        for index in range(21)
+    ]
+    responses.append(_message_response("沙箱已完成，报告可查看"))
+    transport = ScriptedTransport(responses)
+    executor = RecordingExecutor()
+
+    result = await _runtime(transport, executor, max_rounds=64).start(
+        "等待完整沙箱验证终态",
+        run_id="run_long_sandbox_polling",
+    )
+
+    assert result.status == COMPLETED
+    assert result.rounds == 22
+    assert result.output_text == "沙箱已完成，报告可查看"
+    assert len(executor.calls) == 21
+    final_input = transport.payloads[-1]["input"]
+    assert sum(item.get("type") == "function_call" for item in final_input) == 21
+    assert sum(item.get("type") == "function_call_output" for item in final_input) == 21
+
+
+@pytest.mark.asyncio
 async def test_tool_exception_is_returned_to_model_and_loop_continues() -> None:
     class BrokenExecutor:
         async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
@@ -656,6 +683,209 @@ async def test_failed_model_response_never_executes_contained_function_call() ->
     assert executor.calls == []
     assert len(transport.payloads) == 1
     assert "上游失败" in result.error
+
+
+@pytest.mark.asyncio
+async def test_retry_recovers_completed_tool_call_interrupted_before_output_persisted() -> None:
+    call_response = _function_response(
+        ("call_interrupted", "save_knowledge_note", {"title": "登录数据查询方法"})
+    )
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="run_interrupted_tool",
+        model="deepseek-v4-flash",
+        transcript=[
+            {"role": "user", "content": "记录查询方法"},
+            *call_response["output"],
+        ],
+        tools=[],
+        status=FAILED,
+        rounds=12,
+        last_response=call_response,
+        error=(
+            "Responses transport 调用失败: Responses 上游 HTTP 400: "
+            "No tool output found for tool call call_interrupted."
+        ),
+    )
+    await store.create(checkpoint)
+    transport = ScriptedTransport([_message_response("知识已记录")])
+    executor = RecordingExecutor()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=executor,
+        checkpoint_store=store,
+    )
+
+    result = await runtime.retry(checkpoint.run_id)
+
+    assert result.status == "completed"
+    assert result.output_text == "知识已记录"
+    assert [call.call_id for call, _ in executor.calls] == ["call_interrupted"]
+    replay = transport.payloads[0]["input"]
+    assert [
+        item.get("type") for item in replay if item.get("call_id") == "call_interrupted"
+    ] == ["function_call", "function_call_output"]
+
+
+@pytest.mark.asyncio
+async def test_retry_does_not_recover_unpaired_call_from_failed_response() -> None:
+    failed_response = _function_response(("call_unsafe_retry", "side_effect", {"value": 1}))
+    failed_response["status"] = "failed"
+    failed_response["error"] = {"message": "上游失败"}
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="run_failed_unpaired",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "执行"}, *failed_response["output"]],
+        tools=[],
+        status=FAILED,
+        rounds=1,
+        last_response=failed_response,
+        error="上游失败",
+    )
+    await store.create(checkpoint)
+    transport = ScriptedTransport([_message_response("已安全重试")])
+    executor = RecordingExecutor()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=executor,
+        checkpoint_store=store,
+    )
+
+    result = await runtime.retry(checkpoint.run_id)
+
+    assert result.status == "completed"
+    assert executor.calls == []
+    assert not any(
+        item.get("call_id") == "call_unsafe_retry"
+        for item in transport.payloads[0]["input"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_shared_store_allows_only_one_concurrent_retry_owner() -> None:
+    class SlowTransport(ScriptedTransport):
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            await asyncio.sleep(0.02)
+            return await super().create_response(payload)
+
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="run_concurrent_retry",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "重试一次"}],
+        tools=[],
+        status=FAILED,
+        rounds=1,
+        error="上游中断",
+    )
+    await store.create(checkpoint)
+    transport_a = SlowTransport([_message_response("唯一恢复者完成")])
+    transport_b = SlowTransport([_message_response("不应执行")])
+    runtime_a = DeepSeekResponsesRuntime(
+        transport=transport_a,
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=store,
+    )
+    runtime_b = DeepSeekResponsesRuntime(
+        transport=transport_b,
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=store,
+    )
+
+    outcomes = await asyncio.gather(
+        runtime_a.retry(checkpoint.run_id),
+        runtime_b.retry(checkpoint.run_id),
+        return_exceptions=True,
+    )
+
+    completed = [item for item in outcomes if not isinstance(item, BaseException)]
+    rejected = [item for item in outcomes if isinstance(item, InvalidRunStateError)]
+    assert len(completed) == 1
+    assert completed[0].output_text == "唯一恢复者完成"
+    assert len(rejected) == 1
+    assert len(transport_a.payloads) + len(transport_b.payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_recovers_dangerous_interrupted_call_without_bypassing_approval() -> None:
+    class ApprovalExecutor:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call.call_id, approved))
+            if not approved:
+                return ToolExecutionResult.approval_required(
+                    operation="删除测试数据",
+                    impact="测试数据将被删除",
+                    danger=True,
+                )
+            return ToolExecutionResult.success({"deleted": True})
+
+    call_response = _function_response(("call_dangerous", "delete_test_data", {"id": 7}))
+    store = InMemoryCheckpointStore()
+    await store.create(RunCheckpoint(
+        run_id="run_interrupted_dangerous",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "删除测试数据"}, *call_response["output"]],
+        tools=[],
+        status=FAILED,
+        rounds=1,
+        last_response=call_response,
+        error="工具输出尚未持久化",
+    ))
+    executor = ApprovalExecutor()
+    runtime = DeepSeekResponsesRuntime(
+        transport=ScriptedTransport([]),
+        tool_executor=executor,
+        checkpoint_store=store,
+    )
+
+    result = await runtime.retry("run_interrupted_dangerous")
+
+    assert result.status == WAITING_APPROVAL
+    assert result.pending is not None
+    assert result.pending["tool_call_id"] == "call_dangerous"
+    assert executor.calls == [("call_dangerous", False)]
+
+
+@pytest.mark.asyncio
+async def test_retry_recovers_only_missing_calls_from_completed_multi_call_response() -> None:
+    call_response = _function_response(
+        ("call_done", "read_status", {"id": 1}),
+        ("call_missing", "read_status", {"id": 2}),
+    )
+    store = InMemoryCheckpointStore()
+    await store.create(RunCheckpoint(
+        run_id="run_partial_multi_call",
+        model="deepseek-v4-flash",
+        transcript=[
+            {"role": "user", "content": "读取两个状态"},
+            *call_response["output"],
+            {
+                "type": "function_call_output",
+                "call_id": "call_done",
+                "output": json.dumps({"status": "success", "output": {"id": 1}}),
+            },
+        ],
+        tools=[],
+        status=FAILED,
+        rounds=1,
+        last_response=call_response,
+        error="第二个调用输出尚未持久化",
+    ))
+    executor = RecordingExecutor()
+    runtime = DeepSeekResponsesRuntime(
+        transport=ScriptedTransport([_message_response("两个状态均已读取")]),
+        tool_executor=executor,
+        checkpoint_store=store,
+    )
+
+    result = await runtime.retry("run_partial_multi_call")
+
+    assert result.status == COMPLETED
+    assert [call.call_id for call, _ in executor.calls] == ["call_missing"]
 
 
 @pytest.mark.asyncio
@@ -717,8 +947,8 @@ async def test_shared_store_allows_only_one_concurrent_approval_execution() -> N
     await runtime_a.start("执行一次", run_id="run_concurrent_approval")
 
     outcomes = await asyncio.gather(
-        runtime_a.approve("run_concurrent_approval", "call_once", confirmation="确认执行"),
-        runtime_b.approve("run_concurrent_approval", "call_once", confirmation="确认执行"),
+        runtime_a.approve("run_concurrent_approval", "call_once"),
+        runtime_b.approve("run_concurrent_approval", "call_once"),
         return_exceptions=True,
     )
 
@@ -772,7 +1002,7 @@ async def test_concurrent_approve_and_reject_persists_only_winning_decision() ->
     await runtime_a.start("执行一次", run_id="run_approve_reject_race")
 
     outcomes = await asyncio.gather(
-        runtime_a.approve("run_approve_reject_race", "call_race", confirmation="确认执行"),
+        runtime_a.approve("run_approve_reject_race", "call_race"),
         runtime_b.reject("run_approve_reject_race", "call_race"),
         return_exceptions=True,
     )
@@ -781,3 +1011,195 @@ async def test_concurrent_approve_and_reject_persists_only_winning_decision() ->
     assert sum(isinstance(item, InvalidRunStateError) for item in outcomes) == 1
     approved_count = sum(1 for _, approved in executor.calls if approved)
     assert (approved_count, len(executor.rejections)) in {(1, 0), (0, 1)}
+
+
+class BlockingTransport:
+    """create_response 会阻塞直到取消信号到来，用于验证运行中取消。"""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.calls = 0
+
+    async def create_response(self, payload: Mapping[str, Any]) -> Any:
+        self.calls += 1
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_cancel_marks_running_checkpoint_cancelled_and_stops_loop() -> None:
+    transport = BlockingTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=InMemoryCheckpointStore(),
+        model="deepseek-v4-pro",
+        max_rounds=12,
+        stream=False,
+    )
+    task = asyncio.create_task(runtime.start(
+        [{"role": "user", "content": "开始"}],
+        instructions="",
+        tools=[],
+        run_id="run-cancel-1",
+    ))
+    await asyncio.wait_for(transport.started.wait(), timeout=5)
+
+    result = await runtime.cancel("run-cancel-1")
+    assert result.status == "cancelled"
+
+    checkpoint = await runtime.get_checkpoint("run-cancel-1")
+    assert checkpoint.status == "cancelled"
+    assert checkpoint.pending is None
+
+    # 取消后 drive 会在下一轮边界收敛;阻塞 transport 的 task 不会挂起测试。
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_cancel_is_idempotent_after_completion() -> None:
+    runtime = DeepSeekResponsesRuntime(
+        transport=ScriptedTransport([_message_response("完成")]),
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=InMemoryCheckpointStore(),
+        model="deepseek-v4-pro",
+        max_rounds=12,
+        stream=False,
+    )
+    result = await runtime.start([{"role": "user", "content": "开始"}], run_id="run-cancel-2")
+    assert result.status == COMPLETED
+
+    cancelled = await runtime.cancel("run-cancel-2")
+    assert cancelled.status == COMPLETED
+    checkpoint = await runtime.get_checkpoint("run-cancel-2")
+    assert checkpoint.status == COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_cancel_persists_reason_in_checkpoint_and_output() -> None:
+    transport = BlockingTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=InMemoryCheckpointStore(),
+        model="deepseek-v4-pro",
+        max_rounds=12,
+        stream=False,
+    )
+    task = asyncio.create_task(runtime.start(
+        [{"role": "user", "content": "开始"}],
+        instructions="",
+        tools=[],
+        run_id="run-cancel-reason",
+    ))
+    await asyncio.wait_for(transport.started.wait(), timeout=5)
+
+    result = await runtime.cancel("run-cancel-reason", reason="需求变更，暂停分析")
+    assert result.status == "cancelled"
+
+    checkpoint = await runtime.get_checkpoint("run-cancel-reason")
+    assert checkpoint.status == "cancelled"
+    assert checkpoint.cancel_reason == "需求变更，暂停分析"
+    assert "需求变更，暂停分析" in checkpoint.output_text
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_cancel_without_reason_keeps_default_message() -> None:
+    transport = BlockingTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=InMemoryCheckpointStore(),
+        model="deepseek-v4-pro",
+        max_rounds=12,
+        stream=False,
+    )
+    task = asyncio.create_task(runtime.start(
+        [{"role": "user", "content": "开始"}],
+        instructions="",
+        tools=[],
+        run_id="run-cancel-plain",
+    ))
+    await asyncio.wait_for(transport.started.wait(), timeout=5)
+
+    result = await runtime.cancel("run-cancel-plain")
+    assert result.status == "cancelled"
+
+    checkpoint = await runtime.get_checkpoint("run-cancel-plain")
+    assert checkpoint.cancel_reason == ""
+    assert checkpoint.output_text == "用户取消了本次运行。已停止任务，未执行剩余操作；如需继续可重新发起。"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+class GatedApprovalExecutor:
+    """先阻塞在工具执行中,释放后才返回审批请求,用于复现取消竞态。"""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls: List[tuple[ToolCall, bool]] = []
+
+    async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+        self.calls.append((call, approved))
+        self.started.set()
+        await self.release.wait()
+        return ToolExecutionResult.approval_required(
+            operation="update_project",
+            impact="修改项目描述",
+            danger=True,
+            approval_id=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancel_wins_over_approval_pause_write_back() -> None:
+    transport = ScriptedTransport(
+        [_function_response(("call_gate", "update_project", {"project_id": 1}))]
+    )
+    executor = GatedApprovalExecutor()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=executor,
+        checkpoint_store=InMemoryCheckpointStore(),
+        model="deepseek-v4-pro",
+        max_rounds=12,
+        stream=False,
+    )
+    task = asyncio.create_task(runtime.start(
+        [{"role": "user", "content": "修改项目"}],
+        instructions="",
+        tools=[],
+        run_id="run-cancel-race",
+    ))
+    await asyncio.wait_for(executor.started.wait(), timeout=5)
+
+    # 工具执行尚未返回审批时,取消请求先到;释放后驱动循环会尝试落盘 waiting_approval。
+    result = await runtime.cancel("run-cancel-race", reason="用户要求立即停止")
+    assert result.status == "cancelled"
+
+    # 放行工具执行:驱动循环会尝试把状态回写为 waiting_approval,取消必须最终获胜。
+    executor.release.set()
+    drive_result = await asyncio.wait_for(task, timeout=5)
+    assert drive_result.status == "cancelled"
+
+    checkpoint = await runtime.get_checkpoint("run-cancel-race")
+    assert checkpoint.status == "cancelled"
+    assert checkpoint.pending is None
+    assert checkpoint.cancel_reason == "用户要求立即停止"
+    assert "已停止任务" in checkpoint.output_text
+
+
+def test_checkpoint_round_trips_cancel_reason() -> None:
+    checkpoint = RunCheckpoint(run_id="run-1", model="m", transcript=[], tools=[])
+    checkpoint.cancel_reason = "用户要求停止"
+    restored = RunCheckpoint.from_dict(checkpoint.to_dict())
+    assert restored.cancel_reason == "用户要求停止"

@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="pageLoading" class="admin-overview">
+  <div class="admin-overview" :class="{ 'is-booting': pageLoading }">
     <!-- 顶部:标题 + 安全态势等级 -->
     <header class="ov-head">
       <div>
@@ -56,7 +56,7 @@
             <div class="p-label">24h 登录失败</div>
           </div>
           <div class="p-stat">
-            <div class="p-num font-display">{{ posture?.login_success_24h ?? '-' }}</div>
+            <div class="p-num font-display"><span v-if="pageLoading" class="num-skeleton" aria-label="加载中"></span><template v-else>{{ posture?.login_success_24h ?? '-' }}</template></div>
             <div class="p-label">24h 登录成功</div>
           </div>
           <div class="p-stat">
@@ -65,12 +65,22 @@
           </div>
         </div>
         <ul v-if="posture?.signals?.length" class="signals">
-          <li v-for="(s, i) in posture.signals" :key="i" :class="`sev-${s.severity}`">
+          <li
+            v-for="(s, i) in posture.signals"
+            :key="i"
+            :class="`sev-${s.severity}`"
+            role="button"
+            tabindex="0"
+            :title="`去处理:${s.title}`"
+            @click="goSignalDetail(s)"
+            @keyup.enter="goSignalDetail(s)"
+          >
             <span class="sig-icon"><el-icon><WarningFilled /></el-icon></span>
-            <div>
+            <div class="sig-main">
               <b>{{ s.title }}</b>
               <p>{{ s.detail }}</p>
             </div>
+            <span class="sig-go" aria-hidden="true">去处理 ›</span>
           </li>
         </ul>
         <div v-else class="ok-line">✓ 未发现爆破/恶意扫描迹象</div>
@@ -123,6 +133,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { Aim, Cpu, MapLocation, Monitor, WarningFilled } from '@element-plus/icons-vue'
 import * as echarts from 'echarts/core'
 import { GeoComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
@@ -144,6 +155,22 @@ import type { AgentEvent } from '@/types/agentEvent'
 import { useUserStore } from '@/stores/user'
 
 echarts.use([GeoComponent, TooltipComponent, VisualMapComponent, ScatterChart, EffectScatterChart, CanvasRenderer])
+
+const router = useRouter()
+
+/** 告警即入口:按信号语义跳到对应处置页(开放告警/审计检索)。 */
+function goSignalDetail(signal: { title?: string; detail?: string; severity?: string }): void {
+  const text = `${signal.title ?? ''}${signal.detail ?? ''}`
+  if (/登录|爆破|暴力/.test(text)) {
+    void router.push({ path: '/admin/audit', query: { keyword: '登录' } })
+    return
+  }
+  if (/文件|恶意|样本/.test(text)) {
+    void router.push('/admin/observability')
+    return
+  }
+  void router.push('/admin/observability')
+}
 
 const system = ref<SystemStatus | null>(null)
 const userStore = useUserStore()
@@ -358,6 +385,12 @@ onBeforeUnmount(() => {
 .p-num { font-size: 24px; font-weight: 700; color: var(--gray-900); &.danger { color: #DC4961; } }
 .p-label { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
 
+.signals li { cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; }
+.signals li:hover, .signals li:focus-visible { background: var(--gray-50); transform: translateX(2px); outline: none; }
+.signals li:focus-visible { box-shadow: inset 0 0 0 2px var(--brand-300); }
+.sig-main { min-width: 0; flex: 1; }
+.sig-go { flex: none; align-self: center; color: var(--brand-600); font-size: 11px; opacity: 0; transition: opacity 0.15s ease; }
+.signals li:hover .sig-go, .signals li:focus-visible .sig-go { opacity: 1; }
 .signals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 150px; overflow: auto;
   li { display: flex; gap: 9px; padding: 8px 10px; border-radius: 8px; font-size: 12px;
     &.sev-high { background: rgba(220,73,97,.07); b { color: #C92A4E; } .sig-icon { color: #DC4961; } }
@@ -404,4 +437,18 @@ onBeforeUnmount(() => {
   &.disabled { background: var(--gray-100); color: var(--gray-400); }
 }
 .a-calls { font-size: 10.5px; color: var(--gray-400); }
+
+/* 首载数字骨架:呼吸条替代闪零;整页轻降透明而非压灰遮罩 */
+.num-skeleton {
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  border-radius: 5px;
+  background: var(--gray-100);
+  animation: num-skeleton-breathe 1.4s ease-in-out infinite;
+}
+.admin-overview.is-booting { opacity: 0.75; transition: opacity 0.3s ease; }
+.admin-overview { transition: opacity 0.3s ease; }
+@keyframes num-skeleton-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .num-skeleton { animation: none; } }
 </style>

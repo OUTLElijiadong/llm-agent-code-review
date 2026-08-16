@@ -9,6 +9,8 @@ export interface AgentChatSessionMeta {
   id: string
   title: string
   createdAt: number
+  /** 置顶状态仅存本地,用于切换器排序;服务端恢复时保留缓存值。 */
+  pinned?: boolean
 }
 
 /**
@@ -20,6 +22,9 @@ export interface DiscoveredAgentChatSession {
   surface: 'user' | 'admin'
   kind: 'session'
   lastSeenAt?: string
+  /** 服务端 agent_response_run 账本给出的权威运行状态。 */
+  activeRunId?: string
+  activeRunStatus?: string
 }
 
 export interface AgentChatSnapshotMessage {
@@ -118,6 +123,7 @@ export function mergeAgentChatSessions(
       // 本地标题包含用户自动命名；没有缓存时才采用服务端标题。
       title: cached?.title?.trim() || item.title?.trim() || '默认对话',
       createdAt: cached?.createdAt ?? (Number.isFinite(parsedLastSeen) ? parsedLastSeen : Date.now()),
+      pinned: cached?.pinned === true,
     }
   }
 
@@ -172,6 +178,19 @@ export function renameAgentChatSession(
   writeIndex(storageKey, metas)
 }
 
+/** 设置会话置顶标记并写回本地索引。 */
+export function setAgentChatSessionPinned(
+  storageKey: string,
+  sessionId: string,
+  pinned: boolean,
+): void {
+  const metas = readIndex(storageKey)
+  const target = metas.find((item) => item.id === sessionId)
+  if (!target) return
+  target.pinned = pinned
+  writeIndex(storageKey, metas)
+}
+
 /**
  * 新对话自动命名:仅当会话仍是占位标题(新对话/默认对话)时,
  * 用首条用户消息提炼一个标题。返回是否已命名。
@@ -213,9 +232,16 @@ export function loadAgentChatSnapshot(sessionId: string): AgentChatSnapshot | nu
   }
 }
 
-export function isPristineAgentChatSession(sessionId: string, welcomeText: string): boolean {
+/** 会话标题是否仍为未命名的占位标题。 */
+export function isPlaceholderAgentChatTitle(title: string): boolean {
+  return title === '新对话' || title === '默认对话'
+}
+
+export function isPristineAgentChatSession(sessionId: string, welcomeText: string, title = ''): boolean {
   const snapshot = loadAgentChatSnapshot(sessionId)
-  if (!snapshot) return true
+  // 无快照时只有占位标题才是可复用的空会话。
+  // 旧调用不传 title,按占位处理以保持兼容。
+  if (!snapshot) return title === '' || isPlaceholderAgentChatTitle(title)
   if (isAgentResponseSessionOccupied(snapshot.runStatus)) return false
   return !snapshot.messages.some((message) => (
     message.content.trim().length > 0 && message.content.trim() !== welcomeText.trim()
@@ -229,7 +255,8 @@ export function findPristineAgentChatSession(
   busyIds: ReadonlySet<string> = new Set(),
 ): AgentChatSessionMeta | undefined {
   return sessions.find((session) => (
-    !busyIds.has(session.id) && isPristineAgentChatSession(session.id, welcomeText)
+    !busyIds.has(session.id)
+    && isPristineAgentChatSession(session.id, welcomeText, session.title)
   ))
 }
 

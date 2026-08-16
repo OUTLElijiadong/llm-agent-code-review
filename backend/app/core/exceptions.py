@@ -84,3 +84,10 @@ class ExternalServiceError(AppError):
 
     code = 50201
     http_status = 502
+
+
+class ServiceUnavailableError(AppError):
+    """服务因维护或容量保护暂时不可用，调用方可稍后重试。"""
+
+    code = 50301
+    http_status = 503

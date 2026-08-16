@@ -69,10 +69,7 @@ async def test_save_knowledge_note_requires_approval_and_persists(db, super_admi
         {"title": "端口开放经验", "content": "开放 8080 端口用 firewall_action add+port", "confidence": 0.9},
         "{}",
     )
-    # 未批准 -> 必须走审批
-    pending = await executor.execute(call)
-    assert pending.status == "approval_required"
-
+    # 唯一超级管理员:save_knowledge_note 非高危,免审批直接执行(2026-08 需求)
     captured: dict[str, Any] = {}
 
     def fake_add(_db, **kwargs):
@@ -80,9 +77,9 @@ async def test_save_knowledge_note_requires_approval_and_persists(db, super_admi
         return SimpleNamespace(id=1, title=str(kwargs["title"]), status="active")
 
     monkeypatch.setattr(service_module.agent_knowledge_service, "add_document", fake_add)
-    approved = await executor.execute(call, approved=True)
-    assert approved.status == "success"
-    assert approved.output["doc_id"] == 1
+    result = await executor.execute(call)
+    assert result.status == "success"
+    assert result.output["doc_id"] == 1
     assert captured["agent_code"] == "manager"
     assert captured["risk_level"] == "medium"
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -81,7 +82,7 @@ class UpdateProjectArguments(FixedToolArguments):
 class ImportRemoteProjectArguments(FixedToolArguments):
     """远程源码归档导入工具参数。"""
 
-    url: str = Field(description="公开 HTTPS 源码归档地址")
+    url: str = Field(description="公开 HTTPS 源码归档地址，或 GitHub 公开仓库页面网址（自动解析默认分支）")
     project_name: str = Field(description="新项目名称")
     description: str = Field(default="", description="项目描述")
     language: Optional[str] = Field(default=None, description="主语言")
@@ -224,9 +225,24 @@ class RunProjectTestsArguments(FixedToolArguments):
     language: Literal["python", "node", "java", "go", "php"]
     test_mode: Literal["whitebox", "blackbox", "combined"] = "whitebox"
     worker_code: str = Field(default="", max_length=80)
-    source_revision_id: Optional[int] = Field(default=None, description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码")
+    source_revision_id: Optional[int] = Field(
+        default=None,
+        description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码",
+    )
     remote_target_url: str = Field(default="", max_length=500)
     remote_target_authorized: bool = Field(default=False)
+
+
+class FullProjectValidationArguments(FixedToolArguments):
+    """上传完成后自动启动的组合沙箱全量验证参数。"""
+
+    project_id: int = Field(gt=0, description="项目 ID")
+    language: Literal["python", "node", "java", "go", "php"]
+    worker_code: str = Field(default="", max_length=80)
+    source_revision_id: Optional[int] = Field(
+        default=None,
+        description="项目源码修复副本 ID；不传则使用上传后的原始快照",
+    )
 
 
 class DeployProjectSandboxArguments(FixedToolArguments):
@@ -236,7 +252,10 @@ class DeployProjectSandboxArguments(FixedToolArguments):
     language: Literal["python", "node", "java", "go", "php"]
     ttl_hours: int = Field(default=72, ge=1, le=720)
     worker_code: str = Field(default="", max_length=80)
-    source_revision_id: Optional[int] = Field(default=None, description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码")
+    source_revision_id: Optional[int] = Field(
+        default=None,
+        description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码",
+    )
 
 
 class SandboxIdArguments(FixedToolArguments):
@@ -258,6 +277,13 @@ class ListAgentSkillsArguments(FixedToolArguments):
     """Agent Skill 元数据查询参数。"""
 
     agent_name: Optional[str] = Field(default=None, description="可选 Agent 名称；为空时返回全部")
+
+
+class ChangeOwnPasswordArguments(FixedToolArguments):
+    """修改当前登录用户自己的密码；成功后旧会话全部失效。"""
+
+    old_password: str = Field(min_length=6, max_length=32, description="当前旧密码")
+    new_password: str = Field(min_length=6, max_length=32, description="新密码")
 
 
 # ── 管理员 AI 代管后台工具(仅管理员可用;写操作强制审批)──
@@ -350,6 +376,127 @@ class InvokePublishedAgentArguments(FixedToolArguments):
     experience: str = Field(default="", max_length=12_000, description="可选审查经验上下文")
 
 
+class SendMessageContextArguments(FixedToolArguments):
+    """跨 Agent/会话消息的最小业务上下文。"""
+
+    task_id: Optional[int] = Field(default=None, gt=0)
+    project_id: Optional[int] = Field(default=None, gt=0)
+    file_id: Optional[int] = Field(default=None, gt=0)
+    run_id: str = Field(default="", max_length=80)
+    # 监督式调度闭环(T4)的透传字段,与 AgentMeshContextIn 保持一致;
+    # 缺了它们,监督复核协议要求模型回发的纠正消息会被 extra=forbid 拒绝。
+    supervision_objective: Optional[str] = Field(default=None, max_length=4000)
+    supervision_round: Optional[int] = Field(default=None, ge=0, le=100)
+    supervision_max_rounds: Optional[int] = Field(default=None, ge=1, le=100)
+    supervision_correlation_id: Optional[str] = Field(default=None, max_length=160)
+
+
+class SendMessageDeliveryArguments(FixedToolArguments):
+    """异步投递、重试和过期策略。"""
+
+    requires_ack: bool = True
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    expires_at: Optional[datetime] = None
+
+
+class SendMessageArguments(FixedToolArguments):
+    """小菱 Agent Mesh 标准化消息信封。"""
+
+    schema_version: Literal["1.0"] = "1.0"
+    idempotency_key: str = Field(min_length=1, max_length=160)
+    trace_id: str = Field(default="", max_length=80)
+    correlation_id: str = Field(default="", max_length=80)
+    causation_id: str = Field(default="", max_length=80)
+    send_to: str = Field(
+        min_length=1,
+        max_length=200,
+        pattern=r"^(?:agent|custom|session):[A-Za-z0-9_.:-]+$",
+    )
+    message_type: Literal[
+        "task.request",
+        "task.result",
+        "task.error",
+        "status.update",
+        "coordination",
+        "notification",
+    ]
+    priority: Literal["low", "normal", "high", "critical"] = "normal"
+    subject: str = Field(min_length=1, max_length=240)
+    payload: Dict[str, Any]
+    context: SendMessageContextArguments = Field(default_factory=SendMessageContextArguments)
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)
+    errors: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)
+    delivery: SendMessageDeliveryArguments = Field(default_factory=SendMessageDeliveryArguments)
+
+
+class CreateAgentTeamMemberArguments(FixedToolArguments):
+    """小菱创建团队成员的严格参数。"""
+
+    member_key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    display_name: str = Field(min_length=1, max_length=200)
+    address: str = Field(
+        min_length=1,
+        max_length=200,
+        pattern=r"^(?:agent|custom):[A-Za-z0-9_-]+$",
+        description="可执行的内置 Agent 或已发布自定义 Agent 地址",
+    )
+    role: Literal["worker", "verifier", "summarizer"] = "worker"
+    template_id: Optional[int] = Field(default=None, gt=0)
+    template_version_id: Optional[int] = Field(default=None, gt=0)
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateAgentTeamTaskArguments(FixedToolArguments):
+    """小菱创建团队任务节点的严格参数。"""
+
+    task_key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    member_key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    title: str = Field(min_length=1, max_length=240)
+    instructions: str = Field(min_length=1, max_length=12_000)
+    depends_on: List[str] = Field(default_factory=list, max_length=50)
+    input: Dict[str, Any] = Field(default_factory=dict)
+    priority: int = Field(default=0, ge=-100, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+
+
+class CreateAgentTeamArguments(FixedToolArguments):
+    """小菱按当前会话创建一组可追踪的临时子 Agent。"""
+
+    title: str = Field(min_length=1, max_length=200)
+    objective: str = Field(min_length=1, max_length=12_000)
+    members: List[CreateAgentTeamMemberArguments] = Field(min_length=1, max_length=16)
+    tasks: List[CreateAgentTeamTaskArguments] = Field(min_length=1, max_length=100)
+    max_active_children: int = Field(default=3, ge=1, le=32)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    priority: int = Field(default=0, ge=-100, le=100)
+    deadline_at: Optional[datetime] = None
+
+
+class GetAgentTeamArguments(FixedToolArguments):
+    """读取当前账户团队详情。"""
+
+    team_id: int = Field(gt=0)
+
+
+class CancelAgentTeamArguments(FixedToolArguments):
+    """取消当前账户团队。"""
+
+    team_id: int = Field(gt=0)
+    reason: str = Field(default="小菱取消团队", max_length=1000)
+
+
+class RetryAgentTeamArguments(FixedToolArguments):
+    """改变执行方案后重新排队当前账户团队的失败任务。"""
+
+    team_id: int = Field(gt=0)
+    task_keys: List[str] = Field(default_factory=list, max_length=100)
+    strategy_changes: Dict[str, str] = Field(
+        default_factory=dict,
+        max_length=100,
+        description="按 task_key 提供与原方案不同的重试方案，每条至少 8 个字符",
+    )
+
+
 class AdminReleaseApprovalsArguments(FixedToolArguments):
     """管理员查询自定义 Agent 发布审批详情。"""
 
@@ -388,9 +535,53 @@ class FixedToolArgumentError(ValueError):
 
 
 _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
-    FixedToolContract("list_agents", "列出平台注册的 Agent 元数据", NoArguments, False),
+    FixedToolContract(
+        "list_agents",
+        "发现全部内置/自定义 Agent 与同一账户可寻址会话",
+        NoArguments,
+        True,
+    ),
+    FixedToolContract(
+        "send_message",
+        "向 ListAgents 返回的 Agent 或同一账户会话发送严格 JSON 消息，并返回可追踪 trace_id",
+        SendMessageArguments,
+        True,
+    ),
+    FixedToolContract(
+        "create_agent_team",
+        "创建有依赖关系、可排队、可追踪的临时子 Agent 团队；成员只能引用 list_agents 返回的 executable Agent。"
+        "团队必须至少有一个 verifier 或 summarizer 任务；所有无下游依赖的叶任务必须被 verifier/summarizer 覆盖。"
+        "若遗漏汇总节点或叶任务覆盖关系，系统会自动补 agent:reporter 汇总节点；"
+        "needs_configuration/session_only/approval_required"
+        "等不可执行成员不会被轮询伪装成可用，需改用 executable Agent。",
+        CreateAgentTeamArguments,
+        True,
+    ),
+    FixedToolContract(
+        "get_agent_team",
+        "读取当前账户指定子 Agent 团队的成员、任务、事件和消息状态",
+        GetAgentTeamArguments,
+        True,
+    ),
+    FixedToolContract(
+        "cancel_agent_team",
+        "取消当前账户仍在运行或排队的子 Agent 团队",
+        CancelAgentTeamArguments,
+        True,
+    ),
+    FixedToolContract(
+        "retry_agent_team",
+        "为当前账户团队的失败、死信或阻断任务提供不同方案并重新排队",
+        RetryAgentTeamArguments,
+        True,
+    ),
     FixedToolContract("list_projects", "分页查询当前用户可见项目", ListProjectsArguments, True),
-    FixedToolContract("get_project_detail", "查询项目完整详情(含源码修复副本 source_revisions)", GetProjectDetailArguments, True),
+    FixedToolContract(
+        "get_project_detail",
+        "查询项目完整详情(含源码修复副本 source_revisions)",
+        GetProjectDetailArguments,
+        True,
+    ),
     FixedToolContract("create_project", "创建代码审查项目", CreateProjectArguments, True),
     FixedToolContract("delete_project", "删除指定项目", DeleteProjectArguments, True),
     FixedToolContract("start_review", "为指定项目文件启动代码审查", StartReviewArguments, True),
@@ -430,6 +621,12 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
         True,
     ),
     FixedToolContract(
+        "run_full_project_validation",
+        "上传完成后自动调用组合沙箱，完成部署核验、受控补全、完整运行、白盒/黑盒测试和多 Agent 证据报告",
+        FullProjectValidationArguments,
+        True,
+    ),
+    FixedToolContract(
         "run_project_tests",
         "调用测试验证 Agent 在隔离 worker 上执行项目级白盒、黑盒或组合测试",
         RunProjectTestsArguments,
@@ -454,6 +651,12 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
         "save_knowledge_note",
         "把小菱新学到的可靠经验、操作要点或理解感悟写入知识笔记本,供以后同类问题检索复用;写操作会先等待用户批准",
         SaveKnowledgeNoteArguments,
+        True,
+    ),
+    FixedToolContract(
+        "change_own_password",
+        "校验旧密码后修改当前登录用户自己的密码；修改成功后需要重新登录",
+        ChangeOwnPasswordArguments,
         True,
     ),
     FixedToolContract("trigger_evolution", "触发指定 Agent 的自进化", TriggerEvolutionArguments, True),

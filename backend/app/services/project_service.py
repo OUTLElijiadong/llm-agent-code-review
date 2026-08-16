@@ -15,10 +15,10 @@ from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_source_archive import ProjectSourceArchive
-from app.services import project_source_revision_service
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
+from app.services import project_source_revision_service
 from app.services.project_member_service import (
     ensure_owner_member,
     get_visible_project_ids,

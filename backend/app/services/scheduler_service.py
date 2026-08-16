@@ -27,6 +27,8 @@ _DEFAULT_JOBS = (
     ("ops_health_check", "ops_health_check", "operations", "interval@5m"),
     ("security_monitor", "security_monitor", "operations", "interval@5m"),
     ("db_backup", "db_backup", "operations", "daily@02:30"),
+    ("sandbox_heartbeat", "sandbox_heartbeat", "monitor", "interval@30s"),
+    ("archive_empty_sessions", "archive_empty_sessions", "monitor", "interval@30m"),
 )
 
 # These tasks either reach externally configured sources or inspect the host.
@@ -291,6 +293,14 @@ def _execute_job(db: Session, job: AgentJob) -> dict:
         return _execute_security_monitor(db, job)
     if job.job_type == "db_backup":
         return _execute_db_backup(db, job)
+    if job.job_type == "sandbox_heartbeat":
+        from app.services import sandbox_service
+
+        return sandbox_service.heartbeat_and_recover_sandboxes(db)
+    if job.job_type == "archive_empty_sessions":
+        from app.services import agent_mesh_service
+
+        return agent_mesh_service.archive_empty_conversations(db)
     # v3.0 AgentSkill: Skill 调度任务
     if job.job_type == "skill_evolution":
         return _execute_skill_evolution(db, job)

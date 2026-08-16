@@ -32,6 +32,8 @@ from typing import (
     Union,
 )
 
+from app.core.observability import observe_event
+
 RUNNING = "running"
 WAITING_APPROVAL = "waiting_approval"
 WAITING_INPUT = "waiting_input"
@@ -42,6 +44,7 @@ COMPLETED = "completed"
 INCOMPLETE = "incomplete"
 FAILED = "failed"
 MAX_ROUNDS_EXCEEDED = "max_rounds_exceeded"
+CANCELLED = "cancelled"
 
 # 可通过 retry / 幂等续跑恢复的终态；cancelled 与 completed 不可恢复。
 _TERMINAL_RECOVERABLE_STATUSES = frozenset({FAILED, INCOMPLETE, MAX_ROUNDS_EXCEEDED})
@@ -108,6 +111,7 @@ class ToolExecutionResult:
     status: str
     output: Any = None
     error: str = ""
+    failure_kind: str = ""
     operation: str = ""
     impact: str = ""
     danger: bool = False
@@ -119,8 +123,8 @@ class ToolExecutionResult:
         return cls(status="success", output=output)
 
     @classmethod
-    def failure(cls, error: str) -> "ToolExecutionResult":
-        return cls(status="error", error=error)
+    def failure(cls, error: str, *, failure_kind: str = "") -> "ToolExecutionResult":
+        return cls(status="error", error=error, failure_kind=failure_kind)
 
     @classmethod
     def approval_required(
@@ -199,6 +203,7 @@ class RunCheckpoint:
     last_response: Dict[str, Any] = field(default_factory=dict)
     context_metadata: Dict[str, Any] = field(default_factory=dict)
     error: str = ""
+    cancel_reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -214,6 +219,7 @@ class RunCheckpoint:
             "last_response": copy.deepcopy(self.last_response),
             "context_metadata": copy.deepcopy(self.context_metadata),
             "error": self.error,
+            "cancel_reason": self.cancel_reason,
         }
 
     @classmethod
@@ -232,6 +238,7 @@ class RunCheckpoint:
             last_response=copy.deepcopy(dict(value.get("last_response") or {})),
             context_metadata=copy.deepcopy(dict(value.get("context_metadata") or {})),
             error=str(value.get("error") or ""),
+            cancel_reason=str(value.get("cancel_reason") or ""),
         )
 
 
@@ -344,6 +351,8 @@ class InMemoryCheckpointStore:
             if value is None or value.get("status") != expected_status:
                 return None
             pending = value.get("pending") or {}
+            if expected_status in {WAITING_APPROVAL, WAITING_INPUT} and not pending:
+                return None
             call = pending.get("call") or {}
             if tool_call_id and call.get("call_id") != tool_call_id:
                 return None
@@ -363,6 +372,7 @@ class DeepSeekResponsesRuntime:
         tool_executor: ToolExecutor,
         checkpoint_store: CheckpointStore,
         model: str = "deepseek-v4-flash",
+        fallback_model: Optional[str] = None,
         max_rounds: int = 12,
         stream: bool = True,
         context_window_tokens: int = DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -384,6 +394,7 @@ class DeepSeekResponsesRuntime:
         self._tool_executor = tool_executor
         self._store = checkpoint_store
         self._model = model
+        self._fallback_model = fallback_model
         self._max_rounds = max_rounds
         self._stream = stream
         self._context_window_tokens = context_window_tokens
@@ -393,6 +404,8 @@ class DeepSeekResponsesRuntime:
         self._completion_guard = completion_guard
         self._on_round = on_round
         self._locks: Dict[str, asyncio.Lock] = {}
+        self._cancel_events: Dict[str, asyncio.Event] = {}
+        self._cancel_reasons: Dict[str, str] = {}
 
     async def start(
         self,
@@ -430,15 +443,14 @@ class DeepSeekResponsesRuntime:
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
             preview = await self._require_checkpoint(run_id)
-            if await self._recover_if_applied(preview, tool_call_id):
-                return await self._drive(preview)
-            pending_preview = self._require_pending(
+            recovered = await self._recover_if_applied(preview, tool_call_id)
+            if recovered is not None:
+                return await self._drive(recovered)
+            self._require_pending(
                 preview,
                 WAITING_APPROVAL,
                 tool_call_id,
             )
-            if pending_preview.danger and confirmation != "确认执行":
-                raise InvalidRunStateError("高风险操作必须输入完整确认词“确认执行”")
             checkpoint = await self._claim_pending(
                 run_id,
                 expected_status=WAITING_APPROVAL,
@@ -471,8 +483,9 @@ class DeepSeekResponsesRuntime:
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
             preview = await self._require_checkpoint(run_id)
-            if await self._recover_if_applied(preview, tool_call_id):
-                return await self._drive(preview)
+            recovered = await self._recover_if_applied(preview, tool_call_id)
+            if recovered is not None:
+                return await self._drive(recovered)
             checkpoint = await self._claim_pending(
                 run_id,
                 expected_status=WAITING_APPROVAL,
@@ -514,8 +527,9 @@ class DeepSeekResponsesRuntime:
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
             preview = await self._require_checkpoint(run_id)
-            if await self._recover_if_applied(preview, tool_call_id):
-                return await self._drive(preview)
+            recovered = await self._recover_if_applied(preview, tool_call_id)
+            if recovered is not None:
+                return await self._drive(recovered)
             checkpoint = await self._claim_pending(
                 run_id,
                 expected_status=WAITING_INPUT,
@@ -556,20 +570,33 @@ class DeepSeekResponsesRuntime:
 
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
-            checkpoint = await self._require_checkpoint(run_id)
-            if checkpoint.status not in _TERMINAL_RECOVERABLE_STATUSES:
+            preview = await self._require_checkpoint(run_id)
+            if preview.status not in _TERMINAL_RECOVERABLE_STATUSES:
                 raise InvalidRunStateError(
-                    f"运行 {run_id} 当前状态为 {checkpoint.status}，只有失败/未完成/超轮数运行可以重试"
+                    f"运行 {run_id} 当前状态为 {preview.status}，只有失败/未完成/超轮数运行可以重试"
+                )
+            claimed_status = RUNNING
+            if preview.pending is not None:
+                claimed_status = (
+                    WAITING_INPUT if preview.pending.kind == "input" else WAITING_APPROVAL
+                )
+            checkpoint = await self._store.claim(
+                run_id,
+                expected_status=preview.status,
+                claimed_status=claimed_status,
+            )
+            if checkpoint is None:
+                current = await self._require_checkpoint(run_id)
+                raise InvalidRunStateError(
+                    f"运行 {run_id} 当前状态为 {current.status}，重试已被其他执行者处理或不再允许"
                 )
             if checkpoint.pending is not None:
-                checkpoint.status = (
-                    WAITING_INPUT if checkpoint.pending.kind == "input" else WAITING_APPROVAL
-                )
                 checkpoint.error = ""
                 await self._store.save(checkpoint)
                 return self._result(checkpoint)
-            if checkpoint.status == MAX_ROUNDS_EXCEEDED:
-                checkpoint.rounds = 0
+            # retry 是一次新的模型尝试；若第 N 轮传输中断，必须先恢复完整
+            # 轮数预算，否则即便补齐工具输出也会立即再次命中旧上限。
+            checkpoint.rounds = 0
             checkpoint.status = RUNNING
             checkpoint.error = ""
             await self._store.save(checkpoint)
@@ -579,31 +606,85 @@ class DeepSeekResponsesRuntime:
         self,
         checkpoint: RunCheckpoint,
         tool_call_id: Optional[str],
-    ) -> bool:
+    ) -> Optional[RunCheckpoint]:
         """失败运行的回退：若该调用的决策副作用已执行（transcript 有终态证据），
         则幂等重置为运行中并继续模型循环，而不是再次抛出“不能执行该恢复动作”。
         """
 
         if checkpoint.status not in _TERMINAL_RECOVERABLE_STATUSES:
-            return False
+            return None
         if checkpoint.pending is not None or not tool_call_id:
-            return False
+            return None
         if not _has_tool_evidence(checkpoint.transcript, tool_call_id):
-            return False
+            return None
+        claimed = await self._store.claim(
+            checkpoint.run_id,
+            expected_status=checkpoint.status,
+            claimed_status=RUNNING,
+        )
+        if claimed is None:
+            current = await self._require_checkpoint(checkpoint.run_id)
+            raise InvalidRunStateError(
+                f"运行 {checkpoint.run_id} 当前状态为 {current.status}，恢复动作已被其他执行者处理"
+            )
         if checkpoint.status == MAX_ROUNDS_EXCEEDED:
-            checkpoint.rounds = 0
-        checkpoint.status = RUNNING
-        checkpoint.error = ""
-        await self._store.save(checkpoint)
-        return True
+            claimed.rounds = 0
+        claimed.error = ""
+        await self._store.save(claimed)
+        return claimed
 
     async def get_checkpoint(self, run_id: str) -> RunCheckpoint:
         """读取检查点副本，供 API 适配器展示状态。"""
         return await self._require_checkpoint(run_id)
 
+    async def cancel(self, run_id: str, reason: str = "") -> RuntimeResult:
+        """请求取消指定运行并立即收敛检查点。
+
+        不与 _drive 的 per-run 锁竞争：先置取消信号，再由运行循环在下一个
+        边界收敛；这里直接落 cancelled 是为了即使模型 transport 卡住，轮询
+        到的会话状态也能立即变为已取消。取消原因写入检查点供历史沉淀，
+        无论最终由本方法还是运行循环收敛终态都保持一致。
+        """
+        self._cancel_reasons[run_id] = (reason or "").strip()[:500]
+        self._cancel_events.setdefault(run_id, asyncio.Event()).set()
+        checkpoint = await self._require_checkpoint(run_id)
+        if checkpoint.status in {COMPLETED, CANCELLED}:
+            return self._result(checkpoint)
+        return await self._mark_cancelled(checkpoint, reason=self._cancel_reasons.get(run_id, ""))
+
+    def _cancel_requested(self, run_id: str) -> bool:
+        """当前运行是否已被请求取消；循环与轮询点统一读取该信号。"""
+        event = self._cancel_events.get(run_id)
+        return bool(event and event.is_set())
+
+    async def _mark_cancelled(self, checkpoint: RunCheckpoint, *, reason: str = "") -> RuntimeResult:
+        """把检查点收敛为用户取消终态；旧执行者不得再覆盖该结果。"""
+        checkpoint.status = CANCELLED
+        checkpoint.pending = None
+        checkpoint.error = ""
+        checkpoint.cancel_reason = reason
+        # 取消是终态,输出文本无条件收敛为取消结论(含原因与回滚提示),
+        # 避免取消前已有的部分输出掩盖取消原因。
+        suffix = "已停止任务，未执行剩余操作；如需继续可重新发起。"
+        checkpoint.output_text = (
+            f"用户取消了本次运行（原因：{reason}）。{suffix}"
+            if reason
+            else f"用户取消了本次运行。{suffix}"
+        )
+        await self._store.save(checkpoint)
+        return self._result(checkpoint)
+
     async def _drive(self, checkpoint: RunCheckpoint) -> RuntimeResult:
         events: List[Mapping[str, Any]] = []
         while True:
+            if self._cancel_requested(checkpoint.run_id):
+                return await self._mark_cancelled(
+                    checkpoint,
+                    reason=self._cancel_reasons.get(checkpoint.run_id, ""),
+                )
+            recovered = await self._recover_interrupted_completed_calls(checkpoint)
+            if recovered is not None:
+                return self._result(checkpoint, events=events + list(recovered.events))
             if checkpoint.rounds >= self._max_rounds:
                 checkpoint.status = MAX_ROUNDS_EXCEEDED
                 checkpoint.error = f"模型工具循环超过最大轮数 {self._max_rounds}"
@@ -635,9 +716,14 @@ class DeepSeekResponsesRuntime:
                 await self._store.save(checkpoint)
                 return self._result(checkpoint, events=events)
 
+            # failed/incomplete 响应中的工具调用不具备执行语义，审计原文继续
+            # 留在 checkpoint，但不能以缺失 output 的协议形态重发给上游。
+            projected_input = _without_unpaired_function_calls(projected_input)
+
             previous_compactions = int(checkpoint.context_metadata.get("compaction_count") or 0)
             if context_metadata["compacted"]:
                 context_metadata["compaction_count"] = previous_compactions + 1
+                observe_event("xiaoling_compaction")
             else:
                 context_metadata["compaction_count"] = previous_compactions
             context_metadata["completion_guard_retries"] = guard_retries
@@ -658,19 +744,42 @@ class DeepSeekResponsesRuntime:
 
             checkpoint.rounds += 1
             await self._store.save(checkpoint)
-            try:
-                transport_output = await _invoke_transport(self._transport, payload)
-                response, turn_events = await _collect_response(transport_output)
+
+            async def _run_model_round() -> tuple[Dict[str, Any], List[Mapping[str, Any]]]:
+                output = await _invoke_transport(self._transport, payload)
+                response, turn_events = await _collect_response(output)
                 if self._on_round is not None:
                     try:
                         self._on_round(response)
                     except Exception:  # noqa: BLE001 - 调用日志失败不影响主流程
                         pass
+                return response, turn_events
+
+            try:
+                response, turn_events = await _run_model_round()
             except Exception as exc:  # noqa: BLE001 - transport 错误转为可恢复检查点
-                checkpoint.status = FAILED
-                checkpoint.error = f"Responses transport 调用失败: {exc}"
-                await self._store.save(checkpoint)
-                return self._result(checkpoint, events=events)
+                # 只有模型不可用且尚未回退时,才在同一轮把 orchestrator 模型降级到
+                # flash/自定义降级模型并重试一次;工具调用或其他异常分支不触发回退。
+                if (
+                    self._fallback_model
+                    and checkpoint.model != self._fallback_model
+                    and _is_model_unavailable_error(exc)
+                ):
+                    checkpoint.model = self._fallback_model
+                    payload["model"] = checkpoint.model
+                    await self._store.save(checkpoint)
+                    try:
+                        response, turn_events = await _run_model_round()
+                    except Exception as retry_exc:  # noqa: BLE001 - 回退后仍失败按原逻辑置终态
+                        checkpoint.status = FAILED
+                        checkpoint.error = f"Responses transport 调用失败: {retry_exc}"
+                        await self._store.save(checkpoint)
+                        return self._result(checkpoint, events=events)
+                else:
+                    checkpoint.status = FAILED
+                    checkpoint.error = f"Responses transport 调用失败: {exc}"
+                    await self._store.save(checkpoint)
+                    return self._result(checkpoint, events=events)
 
             events.extend(turn_events)
             checkpoint.last_response = copy.deepcopy(dict(response))
@@ -755,6 +864,39 @@ class DeepSeekResponsesRuntime:
             await self._store.save(checkpoint)
             return self._result(checkpoint, events=events)
 
+    async def _recover_interrupted_completed_calls(
+        self,
+        checkpoint: RunCheckpoint,
+    ) -> Optional[RuntimeResult]:
+        """执行已完成模型响应中尚未持久化终态输出的工具调用。
+
+        failed/incomplete 响应没有可执行语义，绝不能借重试触发其中的调用。
+        生产工具执行器以 run_id/call_id 维护幂等账本，进程中断恢复不会重复
+        已确认的副作用。
+        """
+
+        if str(checkpoint.last_response.get("status") or "") != COMPLETED:
+            return None
+        output_items = [
+            copy.deepcopy(dict(item))
+            for item in list(checkpoint.last_response.get("output") or [])
+            if isinstance(item, Mapping)
+        ]
+        calls = [
+            call
+            for call in _extract_tool_calls(output_items)
+            if call.call_id
+            and any(
+                str(item.get("type") or "") == "function_call"
+                and str(item.get("call_id") or item.get("id") or "") == call.call_id
+                for item in checkpoint.transcript
+            )
+            and not _has_tool_evidence(checkpoint.transcript, call.call_id)
+        ]
+        if not calls:
+            return None
+        return await self._process_calls(checkpoint, calls)
+
     async def _process_calls(
         self,
         checkpoint: RunCheckpoint,
@@ -807,6 +949,13 @@ class DeepSeekResponsesRuntime:
                     danger=False,
                 )
                 await self._store.save(checkpoint)
+                # 取消必须赢过追问暂停:驱动循环刚落盘 waiting_input 时,
+                # 若取消请求已到达,立刻收敛为 cancelled,避免旧状态回写覆盖。
+                if self._cancel_requested(checkpoint.run_id):
+                    return await self._mark_cancelled(
+                        checkpoint,
+                        reason=self._cancel_reasons.get(checkpoint.run_id, ""),
+                    )
                 event = {
                     "type": "response.input.required",
                     "run_id": checkpoint.run_id,
@@ -833,6 +982,13 @@ class DeepSeekResponsesRuntime:
                     preview=copy.deepcopy(execution.preview),
                 )
                 await self._store.save(checkpoint)
+                # 取消必须赢过审批暂停:驱动循环刚落盘 waiting_approval 时,
+                # 若取消请求已到达,立刻收敛为 cancelled,避免旧状态回写覆盖。
+                if self._cancel_requested(checkpoint.run_id):
+                    return await self._mark_cancelled(
+                        checkpoint,
+                        reason=self._cancel_reasons.get(checkpoint.run_id, ""),
+                    )
                 event = {
                     "type": "response.approval.required",
                     "run_id": checkpoint.run_id,
@@ -1079,6 +1235,25 @@ def _has_tool_evidence(transcript: Sequence[Mapping[str, Any]], tool_call_id: st
     )
 
 
+def _without_unpaired_function_calls(
+    items: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """从模型输入投影剔除没有终态输出的孤立工具调用。"""
+
+    output_call_ids = {
+        str(item.get("call_id") or "")
+        for item in items
+        if str(item.get("type") or "") == "function_call_output"
+        and str(item.get("call_id") or "")
+    }
+    return [
+        copy.deepcopy(dict(item))
+        for item in items
+        if str(item.get("type") or "") != "function_call"
+        or str(item.get("call_id") or item.get("id") or "") in output_call_ids
+    ]
+
+
 def _tool_choice_for_round(model: str, force_tool_rounds: int) -> Optional[str]:
     """选择本轮工具策略；DeepSeek 思考模式不支持任何显式 tool_choice。
 
@@ -1152,27 +1327,72 @@ def _build_compacted_projection(
 
 
 def _compaction_summary(items: Sequence[Mapping[str, Any]], digest: str) -> str:
-    type_counts: Dict[str, int] = {}
-    call_ids: List[str] = []
-    snippets: List[str] = []
+    """压缩摘要:保留被省略上下文的关键语义,而非只有计数。
+
+    目标是模型在压缩后仍"记得"做过什么、结论是什么:
+    - 用户消息:保留首句要点(最多12条,每条≤100字)
+    - 工具调用:按工具名聚合计数 + 最近参数摘要(≤80字/条,最多24条)
+    - 工具输出:保留 status/错误等结论性字段(≤120字)
+    - 助手结论:保留每条首句(≤100字,最多10条)
+    """
+    user_notes: List[str] = []
+    tool_calls: List[str] = []
+    tool_outcomes: List[str] = []
+    assistant_notes: List[str] = []
+
+    def _text_of(content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = []
+            for piece in content:
+                if isinstance(piece, Mapping):
+                    parts.append(str(piece.get("text") or piece.get("output") or "").strip())
+            return " ".join(p for p in parts if p)
+        return ""
+
     for item in items:
-        item_type = str(item.get("type") or item.get("role") or "unknown")
-        type_counts[item_type] = type_counts.get(item_type, 0) + 1
-        call_id = str(item.get("call_id") or "")
-        if call_id and call_id not in call_ids and len(call_ids) < 20:
-            call_ids.append(call_id)
-        if len(snippets) < 6:
-            snippet = _context_item_snippet(item)
-            if snippet:
-                snippets.append(snippet[:120])
-    counts = ",".join(f"{name}:{count}" for name, count in sorted(type_counts.items()))
-    calls = ",".join(call_ids) or "none"
-    evidence = " | ".join(snippets) or "none"
-    return (
-        "[平台上下文压缩] 完整历史仍保存在审计检查点中；本条仅是模型输入投影。"
-        f"省略 {len(items)} 项，类型={counts}，call_id={calls}，"
-        f"摘要={evidence}，sha256={digest}。"
-    )
+        item_type = str(item.get("type") or "")
+        role = str(item.get("role") or "")
+        if item_type == "function_call":
+            name = str(item.get("name") or "?")
+            args = str(item.get("arguments") or "")[:80]
+            if len(tool_calls) < 24:
+                tool_calls.append(f"{name}({args})")
+        elif item_type == "function_call_output":
+            output = str(item.get("output") or "")
+            try:
+                parsed = json.loads(output)
+                status = parsed.get("status") if isinstance(parsed, Mapping) else None
+                error = parsed.get("error") if isinstance(parsed, Mapping) else None
+                if (status or error) and len(tool_outcomes) < 12:
+                    tool_outcomes.append(f"{status or ''}{'|' + str(error)[:100] if error else ''}".strip())
+            except Exception:
+                if len(tool_outcomes) < 12 and output.strip():
+                    tool_outcomes.append(output.strip()[:120])
+        elif role == "user" or (item_type == "message" and item.get("role") == "user"):
+            text = _text_of(item.get("content"))
+            if text and len(user_notes) < 12:
+                user_notes.append(text[:100])
+        elif role == "assistant" or (item_type == "message" and item.get("role") == "assistant"):
+            text = _text_of(item.get("content"))
+            if text and len(assistant_notes) < 10:
+                assistant_notes.append(text[:100])
+
+    lines = [
+        "[平台上下文压缩] 完整历史仍保存在审计检查点中；本条是被省略上下文的关键语义摘要。",
+        f"共省略 {len(items)} 项。",
+    ]
+    if user_notes:
+        lines.append("用户要点: " + " / ".join(f"「{n}」" for n in user_notes))
+    if tool_calls:
+        lines.append("已执行工具: " + "; ".join(tool_calls))
+    if tool_outcomes:
+        lines.append("工具结论: " + " | ".join(tool_outcomes))
+    if assistant_notes:
+        lines.append("助手结论: " + " / ".join(f"「{n}」" for n in assistant_notes))
+    lines.append(f"sha256={digest}。")
+    return "\n".join(lines)
 
 
 def _context_item_snippet(item: Mapping[str, Any]) -> str:
@@ -1270,6 +1490,29 @@ def _with_ask_user_tool(tools: Sequence[Mapping[str, Any]]) -> List[Dict[str, An
         }
     )
     return normalized
+
+
+def _is_model_unavailable_error(exc: BaseException) -> bool:
+    """保守识别“模型不可用”类错误,用于 orchestrator 模型分层回退。
+
+    只有错误文本点名模型不存在/非法,或直接点名默认编排模型时才会回退;
+    普通超时、限流、连接错误即使包含 model 字样也不触发回退。
+    """
+    text = str(exc).lower()
+    if "deepseek-v4-pro" in text:
+        return True
+    if "model" not in text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "not found",
+            "not_found",
+            "does not exist",
+            "invalid_request_error",
+            "model_not_found",
+        )
+    )
 
 
 async def _invoke_transport(transport: ResponsesTransport, payload: Mapping[str, Any]) -> TransportOutput:
@@ -1439,6 +1682,7 @@ def _normalize_execution_result(value: Any) -> ToolExecutionResult:
             status=status,
             output=output,
             error=str(value.get("error") or ""),
+            failure_kind=str(value.get("failure_kind") or ""),
             operation=str(value.get("operation") or ""),
             impact=str(value.get("impact") or ""),
             danger=bool(value.get("danger", False)),
@@ -1451,6 +1695,7 @@ def _normalize_execution_result(value: Any) -> ToolExecutionResult:
             status=status,
             output=getattr(value, "output", getattr(value, "data", None)),
             error=str(getattr(value, "error", "") or ""),
+            failure_kind=str(getattr(value, "failure_kind", "") or ""),
             operation=str(getattr(value, "operation", "") or ""),
             impact=str(getattr(value, "impact", "") or ""),
             danger=bool(getattr(value, "danger", False)),
@@ -1463,6 +1708,7 @@ def _normalize_execution_result(value: Any) -> ToolExecutionResult:
             status="success" if succeeded else "error",
             output=getattr(value, "data", None),
             error=str(getattr(value, "error", "") or ""),
+            failure_kind=str(getattr(value, "failure_kind", "") or ""),
         )
     return ToolExecutionResult.success(value)
 
@@ -1479,6 +1725,8 @@ def _tool_output_item(call: ToolCall, execution: ToolExecutionResult) -> Dict[st
             "status": "error",
             "error": execution.error or f"工具返回状态 {execution.status}",
         }
+        if execution.failure_kind:
+            payload["failure_kind"] = execution.failure_kind
         if execution.output is not None:
             payload["output"] = execution.output
     return _function_call_output(call.call_id, payload)

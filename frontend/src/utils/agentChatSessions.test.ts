@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   createAgentChatSession,
   findPristineAgentChatSession,
+  isPlaceholderAgentChatTitle,
   isPristineAgentChatSession,
   loadAgentChatSessions,
   mergeAgentChatSessions,
@@ -24,14 +25,38 @@ beforeEach(() => {
   window.localStorage.clear()
 })
 
+describe('isPlaceholderAgentChatTitle', () => {
+  it('「新对话」和「默认对话」是占位标题', () => {
+    expect(isPlaceholderAgentChatTitle('新对话')).toBe(true)
+    expect(isPlaceholderAgentChatTitle('默认对话')).toBe(true)
+  })
+
+  it('带业务语义的标题不是占位标题', () => {
+    expect(isPlaceholderAgentChatTitle('小菱生产验收发…')).toBe(false)
+  })
+})
+
 describe('isPristineAgentChatSession', () => {
-  it('无快照视为空的新对话', () => {
+  it('未传入标题且无快照时仍视为空的新对话,兼容旧调用', () => {
     expect(isPristineAgentChatSession('user-empty', WELCOME)).toBe(true)
   })
 
   it('仅有欢迎语视为空的新对话', () => {
     seedSnapshot('user-welcome', [{ role: 'assistant', content: WELCOME }], 'completed')
     expect(isPristineAgentChatSession('user-welcome', WELCOME)).toBe(true)
+  })
+
+  it('无快照且标题为新对话时仍视为空的新对话', () => {
+    expect(isPristineAgentChatSession('user-empty-fresh', WELCOME, '新对话')).toBe(true)
+  })
+
+  it('无快照且标题非占位时不是空的新对话', () => {
+    expect(isPristineAgentChatSession('user-empty-titled', WELCOME, '小菱生产验收发…')).toBe(false)
+  })
+
+  it('有快照时仍按消息内容判断,不受标题影响', () => {
+    seedSnapshot('user-titled-welcome', [{ role: 'assistant', content: WELCOME }], 'completed')
+    expect(isPristineAgentChatSession('user-titled-welcome', WELCOME, '小菱生产验收发…')).toBe(true)
   })
 
   it('有真实输入输出则不是空对话', () => {
@@ -60,6 +85,23 @@ describe('findPristineAgentChatSession', () => {
       new Set(['user-b']),
     )
     expect(found?.id).toBe('user-a')
+  })
+
+  it('跳过无快照且标题非占位的会话,复用占位空会话', () => {
+    seedSessions([
+      { id: 'user-stale', title: '小菱生产验收发…', createdAt: 1 },
+      { id: 'user-fresh', title: '新对话', createdAt: 2 },
+    ])
+    const found = findPristineAgentChatSession(
+      loadAgentChatSessions('user', 'legacy', 'user'),
+      WELCOME,
+    )
+    expect(found?.id).toBe('user-fresh')
+  })
+
+  it('仅有标题非占位且无快照的会话时返回 undefined', () => {
+    seedSessions([{ id: 'user-stale', title: '小菱生产验收发…', createdAt: 1 }])
+    expect(findPristineAgentChatSession(loadAgentChatSessions('user', 'legacy', 'user'), WELCOME)).toBeUndefined()
   })
 
   it('无空会话时返回 undefined', () => {

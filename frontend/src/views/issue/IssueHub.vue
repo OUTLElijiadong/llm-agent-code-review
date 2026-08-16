@@ -132,8 +132,8 @@ import type { IssueListItemOut } from '@/types/review'
 import type { ProjectOut } from '@/types/project'
 import { severityClass, severityDisplayLabel } from '@/constants/severity'
 import { dimLabel } from '@/constants/dim'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const router = useRouter()
 
@@ -245,13 +245,16 @@ async function onSetStatus(row: IssueListItemOut, status: string): Promise<void>
 
 async function onBatchMarkFixed(): Promise<void> {
   if (!selected.value.length) return
-  // 统一危险确认,避免误点一次批量改几十条状态
-  const ok = await confirmDanger({
-    target: `将选中的 ${selected.value.length} 条问题标记为已修复`,
-    consequence: '标记后需逐条核实才能改回',
-    confirmText: '确定标记',
-  })
-  if (!ok) return
+  try {
+    // 二次确认,避免误点一次批量改几十条状态
+    await ElMessageBox.confirm(
+      `确定将选中的 ${selected.value.length} 条问题标记为已修复吗?`,
+      '批量标记已修复',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return // 用户取消
+  }
   try {
     await batchUpdateStatus({
       ids: selected.value.map((r) => r.id),

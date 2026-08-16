@@ -43,7 +43,6 @@ async function refreshCaptcha(): Promise<void> {
       question: '加载失败,请重试',
       beta_registration_enabled: false,
     }
-    /* http 拦截器已弹出人话错误,题面同步显示「加载失败,请重试」 */
   } finally {
     captchaLoading.value = false
   }
@@ -136,7 +135,7 @@ async function handleRegister(): Promise<void> {
       ElMessage.success('注册成功，请登录')
       router.replace('/login')
     } catch {
-      /* http 拦截器已弹出后端人话错误,这里不再重复弹 */
+      /* 请求拦截器会展示后端返回的错误信息，避免重复 toast。 */
       // 验证码一次性失效,失败后刷新一题
       refreshCaptcha()
     } finally {

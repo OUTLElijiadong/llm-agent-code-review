@@ -28,10 +28,26 @@ class _SandboxAgent(BaseAgent):
             raise RuntimeError("沙箱 Agent 未注入请求级 DB 和用户")
         return self._db, self._user
 
+    @staticmethod
+    def _agent_team_context(ctx: Optional[AgentContext]) -> Optional[dict[str, object]]:
+        raw = (ctx.extra or {}).get("agent_team") if ctx else None
+        if not isinstance(raw, dict) or not raw.get("team_id") or not raw.get("task_id"):
+            return None
+        context: dict[str, object] = {
+            "team_id": raw.get("team_id"),
+            "task_id": raw.get("task_id"),
+            "lease_token": raw.get("lease_token"),
+            "attempt": raw.get("attempt"),
+        }
+        strategy = (ctx.extra or {}).get("execution_strategy") if ctx else None
+        if isinstance(strategy, dict):
+            context["execution_strategy"] = strategy
+        return context
+
 
 class TestVerifierAgent(_SandboxAgent):
     name = "test_verifier"
-    description = "调用隔离 worker 执行项目级动态白盒、黑盒或组合测试"
+    description = "黑盒测试员:把项目在隔离沙箱里真实运行,从外部发起真实攻击探测"
     icon = "test_verifier"
     color = "#16866F"
     category = "review"
@@ -48,20 +64,24 @@ class TestVerifierAgent(_SandboxAgent):
         remote_target_authorized: bool = False,
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
-        del ctx
         try:
             db, user = self._context()
-            row = sandbox_service.create_environment(db, user, {
-                "project_id": project_id,
-                "purpose": "test",
-                "language": language,
-                "test_mode": test_mode,
-                "worker_code": worker_code,
-                "source_revision_id": source_revision_id,
-                "remote_target_url": remote_target_url or None,
-                "remote_target_authorized": remote_target_authorized,
-                "ttl_hours": 24,
-            })
+            row = sandbox_service.create_environment(
+                db,
+                user,
+                {
+                    "project_id": project_id,
+                    "purpose": "test",
+                    "language": language,
+                    "test_mode": test_mode,
+                    "worker_code": worker_code,
+                    "source_revision_id": source_revision_id,
+                    "remote_target_url": remote_target_url or None,
+                    "remote_target_authorized": remote_target_authorized,
+                    "ttl_hours": 24,
+                    "agent_team": self._agent_team_context(ctx),
+                },
+            )
             return AgentResult(success=True, data=sandbox_service.environment_to_dict(db, row))
         except Exception as exc:
             return AgentResult(success=False, error=str(exc))
@@ -69,7 +89,7 @@ class TestVerifierAgent(_SandboxAgent):
 
 class SandboxDeployerAgent(_SandboxAgent):
     name = "sandbox_deployer"
-    description = "在隔离 worker 部署项目并管理预览、续期和关闭生命周期"
+    description = "沙箱部署员:把项目部署到隔离环境持续运行,提供在线预览与生命周期管理"
     icon = "sandbox_deployer"
     color = "#C87823"
     category = "operations"
@@ -84,18 +104,22 @@ class SandboxDeployerAgent(_SandboxAgent):
         source_revision_id: Optional[int] = None,
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
-        del ctx
         try:
             db, user = self._context()
-            row = sandbox_service.create_environment(db, user, {
-                "project_id": project_id,
-                "purpose": "deploy",
-                "language": language,
-                "test_mode": "deploy",
-                "worker_code": worker_code,
-                "source_revision_id": source_revision_id,
-                "ttl_hours": ttl_hours,
-            })
+            row = sandbox_service.create_environment(
+                db,
+                user,
+                {
+                    "project_id": project_id,
+                    "purpose": "deploy",
+                    "language": language,
+                    "test_mode": "deploy",
+                    "worker_code": worker_code,
+                    "source_revision_id": source_revision_id,
+                    "ttl_hours": ttl_hours,
+                    "agent_team": self._agent_team_context(ctx),
+                },
+            )
             return AgentResult(success=True, data=sandbox_service.environment_to_dict(db, row))
         except Exception as exc:
             return AgentResult(success=False, error=str(exc))

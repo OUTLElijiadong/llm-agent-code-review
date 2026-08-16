@@ -13,7 +13,7 @@ class CodeFileManagerAgent(BaseAgent):
     """代码文件管理 Agent"""
 
     name = "code_file_manager"
-    description = "查询项目代码文件列表和详情"
+    description = "代码管家:帮你查项目里有哪些文件、按名字找代码、看任意文件内容"
     icon = "code_file_manager"
     color = "#E76F51"
     category = "manager"

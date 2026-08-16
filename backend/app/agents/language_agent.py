@@ -9,7 +9,7 @@ class LanguageDetectorAgent(BaseAgent):
     """
 
     name = "language_detector"
-    description = "根据项目名称和描述智能识别编程语言"
+    description = "语言侦察兵:自动识别项目用的编程语言,决定用哪套工具链测试"
     icon = "language_detector"
     color = "#4B9BFF"
     category = "analyzer"

@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.ai.static_analyzer import Finding, scan, scan_file
+from app.ai.security_static_rules import apply_static_rules
 from app.models.code_file import CodeFile
 
 # 漏洞样本目录
@@ -286,3 +287,35 @@ class TestFindingFields:
         assert len(pickle_findings) >= 1
         cwe_url = "https://cwe.mitre.org/data/definitions/502.html"
         assert cwe_url in pickle_findings[0].references
+
+
+class TestParamRoutingRules:
+    """参数路由规则(用户输入直连危险操作,源自渗透工作流参数路由表)回归。"""
+
+    def test_orderby_raw_concat_hits(self):
+        hits = apply_static_rules('db.execute("SELECT * FROM t ORDER BY " + sortField)', "a.py")
+        assert any(m.rule_code == "orderby_raw_concat" for m in hits)
+
+    def test_user_url_fetch_hits(self):
+        hits = apply_static_rules("resp = requests.get(url)", "a.py")
+        assert any(m.rule_code == "user_url_fetch" for m in hits)
+
+    def test_path_param_file_read_hits(self):
+        hits = apply_static_rules("data = open(file_path).read()", "a.py")
+        assert any(m.rule_code == "path_param_file_read" for m in hits)
+
+    def test_sensitive_to_log_hits(self):
+        hits = apply_static_rules('logger.info(f"login token={token}")', "a.py")
+        assert any(m.rule_code == "sensitive_to_log" for m in hits)
+
+    def test_role_from_request_hits(self):
+        hits = apply_static_rules('role = request.json["role"]', "a.py")
+        assert any(m.rule_code == "role_from_request" for m in hits)
+
+    def test_password_plaintext_compare_hits(self):
+        hits = apply_static_rules("if password == userInput: login()", "a.py")
+        assert any(m.rule_code == "password_plaintext_compare" for m in hits)
+
+    def test_clean_code_no_false_positive(self):
+        clean = "import os\n\n\ndef compute(value: int) -> int:\n    return value * 2\n"
+        assert apply_static_rules(clean, "clean.py") == []

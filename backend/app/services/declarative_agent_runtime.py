@@ -178,6 +178,55 @@ class DeclarativeReviewAgentFactory:
         return cls._resolve_snapshot(db, snapshot, user=user)
 
     @classmethod
+    def resolve_release(
+        cls,
+        db: Session,
+        agent_code: str,
+        *,
+        release_id: int,
+        version_id: int,
+        package_checksum: str = "",
+        template_checksum: str = "",
+        user: Optional[User] = None,
+    ) -> Optional[DeclarativeReviewAgentDefinition]:
+        """按团队创建时的不可变发布快照解析，不跟随当前发布指针。"""
+
+        asset = (
+            db.query(CustomAgent)
+            .filter(
+                CustomAgent.code == agent_code,
+                CustomAgent.is_enabled == 1,
+                CustomAgent.status == "published",
+            )
+            .first()
+        )
+        release = db.get(CustomAgentRelease, int(release_id))
+        version = db.get(CustomAgentVersion, int(version_id))
+        if (
+            asset is None
+            or release is None
+            or version is None
+            or int(release.agent_id) != int(asset.id)
+            or int(release.agent_version_id) != int(version.id)
+            or int(version.agent_id) != int(asset.id)
+            or release.status != "published"
+            or release.disabled_at is not None
+            or version.status != "published"
+        ):
+            return None
+        if package_checksum and release.package_checksum != package_checksum:
+            return None
+        if template_checksum and version.checksum != template_checksum:
+            return None
+        snapshot = ReviewTaskAgentRelease(
+            task_id=0,
+            release_id=release.id,
+            agent_version_id=version.id,
+            package_manifest_json=release.package_manifest_json,
+        )
+        return cls._resolve_snapshot(db, snapshot, user=user)
+
+    @classmethod
     def _resolve_snapshot(
         cls,
         db: Session,

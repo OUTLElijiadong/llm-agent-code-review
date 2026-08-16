@@ -15,7 +15,7 @@ from app.utils.api_resolver import resolve_api_config
 
 class OperationsAgent(BaseAgent):
     name = "operations"
-    description = "生产宿主机全域巡检、受批准变更、验证和回滚"
+    description = "运维特工:服务器巡检、防火墙/服务/软件变更(全部需管理员批准)、事后回滚"
     icon = "operations"
     color = "#2A9D8F"
     category = "operations"

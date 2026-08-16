@@ -145,7 +145,12 @@ onBeforeUnmount(() => {
   if (editor) editor.dispose()
 })
 
-defineExpose({ revealLine })
+/** 透传 monaco editor.updateOptions(代码字号缩放等)。 */
+function updateOptions(options: Record<string, unknown>): void {
+  editor?.updateOptions(options as never)
+}
+
+defineExpose({ revealLine, updateOptions })
 </script>
 
 <style scoped lang="scss">

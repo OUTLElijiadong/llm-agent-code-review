@@ -11,6 +11,7 @@ import {
   removeAgentChatSession,
   renameAgentChatSession,
   saveAgentChatSessions,
+  setAgentChatSessionPinned,
   type AgentChatSessionMeta,
   type DiscoveredAgentChatSession,
 } from '@/utils/agentChatSessions'
@@ -34,20 +35,37 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   select: [sessionId: string]
   'sessions-changed': [metas: AgentChatSessionMeta[]]
+  /** 请求父组件把会话归档到服务端,再配合本地移除。 */
+  archive: [sessionId: string]
 }>()
 
 const sessions = ref<AgentChatSessionMeta[]>([])
 const activeId = ref('')
 const menuFor = ref('')
+const searchQuery = ref('')
+const confirmingDeleteId = ref('')
+const archivingId = ref('')
 const busyIds = ref<Set<string>>(new Set())
 const panelRef = ref<HTMLElement | null>(null)
 const discoveryLoading = ref(false)
+/** 服务端权威运行状态(仅 session 项);数据库为忙碌状态的唯一事实源。 */
+const remoteRunState = ref<Map<string, string>>(new Map())
+const discoveryLoadedOnce = ref(false)
 let discoveryTimer: number | undefined
 let pendingHeartbeatId = ''
 
 const currentTitle = computed(() => (
   sessions.value.find((item) => item.id === activeId.value)?.title ?? '对话'
 ))
+
+/** 搜索过滤 + 置顶优先;底层的 sessions 顺序仍由服务端合并结果决定。 */
+const displaySessions = computed<AgentChatSessionMeta[]>(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  const base = query
+    ? sessions.value.filter((item) => item.title.toLowerCase().includes(query))
+    : [...sessions.value]
+  return base.slice().sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)))
+})
 
 /** 由父组件在恢复/轮询/流事件后同步各会话占用状态。 */
 function setBusy(sessionId: string, busy: boolean): void {
@@ -93,7 +111,47 @@ function dropSession(sessionId: string): void {
   if (wasActive) select(sessions.value[0].id)
 }
 
-function ensureFreshOnOpen(): void {
+function togglePin(sessionId: string): void {
+  const target = sessions.value.find((item) => item.id === sessionId)
+  if (!target) return
+  setAgentChatSessionPinned(props.storageKey, sessionId, target.pinned !== true)
+  sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+  notify()
+}
+
+function requestDelete(sessionId: string): void {
+  const target = sessions.value.find((item) => item.id === sessionId)
+  if (!target || inferBusy(target)) return
+  confirmingDeleteId.value = sessionId
+}
+
+function cancelDelete(): void {
+  confirmingDeleteId.value = ''
+}
+
+function confirmDelete(sessionId: string): void {
+  confirmingDeleteId.value = ''
+  archivingId.value = sessionId
+  // 通知父组件执行服务端归档;成功后父组件调用 removeSession 完成本地移除。
+  emit('archive', sessionId)
+}
+
+/** 服务端归档成功后由父组件调用,完成本地移除与切换。 */
+function removeSession(sessionId: string): void {
+  archivingId.value = ''
+  dropSession(sessionId)
+}
+
+/** 服务端归档失败时由父组件调用,清空归档中状态并保留会话。 */
+function restoreSessionAfterArchiveFailure(): void {
+  archivingId.value = ''
+}
+
+async function ensureFreshOnOpen(): Promise<void> {
+  // 首次打开前先拉一次服务端权威状态,避免用陈旧本地快照把已完成会话当忙碌。
+  if (props.discoverRemote && !discoveryLoadedOnce.value) {
+    await refreshFromAgentMesh()
+  }
   const welcomeText = props.welcomeText ?? ''
   const current = sessions.value.find((item) => item.id === activeId.value)
   // 1) 任一历史会话未完成(运行中/等待审批/等待输入) → 优先跳回该会话,
@@ -104,7 +162,7 @@ function ensureFreshOnOpen(): void {
     return
   }
   // 2) 当前就是空的新对话(无输入输出) → 保留它,不重复创建空白条目。
-  if (current && isPristineAgentChatSession(current.id, welcomeText)) return
+  if (current && isPristineAgentChatSession(current.id, welcomeText, current.title)) return
   // 3) 历史对话均已完成后:复用既有空对话。
   const reusable = findPristineAgentChatSession(sessions.value, welcomeText, busyIds.value)
   if (reusable) {
@@ -121,6 +179,7 @@ function toggleMenu(): void {
 
 function closeMenu(): void {
   menuFor.value = ''
+  confirmingDeleteId.value = ''
 }
 
 function handleOutsideClick(event: MouseEvent): void {
@@ -128,9 +187,13 @@ function handleOutsideClick(event: MouseEvent): void {
   if (panelRef.value && !panelRef.value.contains(event.target as Node)) closeMenu()
 }
 
-/** 根据服务端状态与本地快照推断会话是否忙碌。 */
+/** 根据服务端权威状态与本地快照推断会话是否忙碌。 */
 function inferBusy(meta: AgentChatSessionMeta): boolean {
   if (busyIds.value.has(meta.id)) return true
+  // 服务端 agent_response_run 是权威事实源:后台已完成时,即使本地快照陈旧为
+  // running/waiting,也不能再把会话当忙碌从而阻止“打开即新对话”。
+  const remote = remoteRunState.value.get(meta.id)
+  if (remote !== undefined) return isAgentResponseSessionOccupied(remote)
   const snapshot = loadAgentChatSnapshot(meta.id)
   return isAgentResponseSessionOccupied(snapshot?.runStatus)
 }
@@ -145,6 +208,9 @@ onMounted(() => {
   activeId.value = sessions.value[0].id
   notify()
   emit('select', activeId.value)
+  // 首次挂载也要执行一次“打开即新对话”策略，避免父组件 visible watcher 在
+  // 子组件尚未就绪时错过 ensureFreshOnOpen，导致页面加载后第一次点开仍复用旧会话。
+  void ensureFreshOnOpen()
   if (props.discoverRemote) {
     void refreshFromAgentMesh()
     discoveryTimer = window.setInterval(() => void refreshFromAgentMesh(), 10_000)
@@ -189,12 +255,20 @@ async function refreshFromAgentMesh(): Promise<void> {
         surface,
         kind: 'session' as const,
         lastSeenAt: item.last_seen_at,
+        activeRunId: item.active_run_id,
+        activeRunStatus: item.active_run_status,
       }))
+    const localBeforeMerge = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+    // 服务端发现前,当前会话也必须保留,否则首次心跳尚未落库时会被误删并切走,
+    // 正在运行/等待审批的会话尤其不能因为一次空发现而丢失上下文。
+    const preserveIds = new Set<string>()
+    if (pendingHeartbeatId) preserveIds.add(pendingHeartbeatId)
+    if (activeId.value) preserveIds.add(activeId.value)
     let merged = mergeAgentChatSessions(
-      loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix),
+      localBeforeMerge,
       discovered,
       surface,
-      new Set(pendingHeartbeatId ? [pendingHeartbeatId] : []),
+      preserveIds,
     )
     if (pendingHeartbeatId && discovered.some((item) => item.id === pendingHeartbeatId)) pendingHeartbeatId = ''
     if (!merged.length) {
@@ -205,9 +279,27 @@ async function refreshFromAgentMesh(): Promise<void> {
     }
     saveAgentChatSessions(props.storageKey, merged)
     sessions.value = merged
+    const nextRunState = new Map<string, string>()
+    for (const item of discovered) {
+      // 服务端已发现该会话却没有运行记录时，权威状态等价于“已完成/不忙”，
+      // 必须覆盖陈旧本地快照，否则无 run 行的历史会话仍会被误判为忙碌。
+      const status = typeof item.activeRunStatus === 'string' && item.activeRunStatus.length > 0
+        ? item.activeRunStatus
+        : 'completed'
+      nextRunState.set(item.id, status)
+    }
+    remoteRunState.value = nextRunState
+    discoveryLoadedOnce.value = true
     if (!merged.some((item) => item.id === activeId.value)) {
-      activeId.value = merged[0].id
-      if (activeId.value !== previousActiveId) emit('select', activeId.value)
+      const busy = busyIds.value.has(activeId.value)
+      if (busy) {
+        // 当前会话正在运行/等待:不自动切走,保留其上下文直到服务端权威状态收敛。
+        const activeMeta = sessions.value.find((item) => item.id === activeId.value)
+        if (activeMeta && !merged.some((item) => item.id === activeMeta.id)) merged.unshift(activeMeta)
+      } else {
+        activeId.value = merged[0].id
+        if (activeId.value !== previousActiveId) emit('select', activeId.value)
+      }
     }
     notify()
   } catch {
@@ -217,7 +309,7 @@ async function refreshFromAgentMesh(): Promise<void> {
   }
 }
 
-defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh })
+defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, removeSession, restoreSessionAfterArchiveFailure })
 </script>
 
 <template>
@@ -248,27 +340,76 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
     <Transition name="session-pop">
       <div v-if="menuFor" class="session-menu" role="menu">
         <div class="session-menu-title">我的对话</div>
-        <button
-          v-for="item in sessions"
+        <input
+          v-model="searchQuery"
+          class="session-search"
+          type="search"
+          placeholder="搜索对话"
+          aria-label="搜索对话"
+        />
+        <div v-if="!displaySessions.length" class="session-empty">没有匹配的对话</div>
+        <div
+          v-for="item in displaySessions"
           :key="item.id"
-          class="session-item"
-          :class="{ 'is-active': item.id === activeId }"
-          type="button"
-          role="menuitem"
-          @click.stop="select(item.id)"
+          class="session-entry"
         >
-          <span v-if="inferBusy(item)" class="session-busy-dot" title="正在后台运行" aria-label="正在后台运行"></span>
-          <span class="session-item-name">{{ item.title }}</span>
-          <span
-            v-if="sessions.length > 1"
-            class="session-delete"
-            role="button"
-            tabindex="-1"
-            :aria-label="`删除对话 ${item.title}`"
-            :title="`删除对话 ${item.title}`"
-            @click.stop="dropSession(item.id)"
-          >×</span>
-        </button>
+          <button
+            class="session-item"
+            :class="{ 'is-active': item.id === activeId }"
+            type="button"
+            role="menuitem"
+            @click.stop="select(item.id)"
+          >
+            <span
+              v-if="inferBusy(item)"
+              class="session-busy-dot"
+              title="正在后台运行，暂不可删除"
+              aria-label="正在后台运行"
+            />
+            <span class="session-item-name">{{ item.title }}</span>
+            <span
+              class="session-pin"
+              :class="{ 'is-pinned': item.pinned === true }"
+              role="button"
+              tabindex="-1"
+              :aria-label="item.pinned ? `取消置顶 ${item.title}` : `置顶 ${item.title}`"
+              :title="item.pinned ? '取消置顶' : '置顶'"
+              @click.stop="togglePin(item.id)"
+            >{{ item.pinned ? '📍' : '📌' }}</span>
+            <span
+              v-if="sessions.length > 1 && !inferBusy(item) && archivingId !== item.id"
+              class="session-delete"
+              role="button"
+              tabindex="-1"
+              :aria-label="`删除对话 ${item.title}`"
+              :title="`删除对话 ${item.title}`"
+              @click.stop="requestDelete(item.id)"
+            >×</span>
+            <span
+              v-else-if="sessions.length > 1 && archivingId === item.id"
+              class="session-archiving"
+              title="正在归档"
+              aria-label="正在归档"
+            >…</span>
+            <span
+              v-else-if="sessions.length > 1"
+              class="session-lock"
+              title="运行中，不可删除"
+              aria-label="运行中，不可删除"
+            >🔒</span>
+          </button>
+          <div
+            v-if="confirmingDeleteId === item.id"
+            class="session-confirm"
+            role="alertdialog"
+            aria-label="确认删除对话"
+            @click.stop
+          >
+            <span class="session-confirm-text">确认归档该对话？归档后将从会话列表移除。</span>
+            <button class="session-confirm-yes" type="button" @click.stop="confirmDelete(item.id)">删除</button>
+            <button class="session-confirm-no" type="button" @click.stop="cancelDelete()">取消</button>
+          </div>
+        </div>
       </div>
     </Transition>
   </div>
@@ -414,6 +555,107 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
 .session-delete:hover {
   background: rgba(220, 73, 97, 0.12);
   color: #dc4961;
+}
+
+.session-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--color-border-light, #e5e6eb);
+  border-radius: 7px;
+  background: var(--gray-50, #f7f8fa);
+  color: var(--color-text-primary, #1f2329);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.session-search:focus {
+  border-color: var(--brand-400, #7a77ee);
+  background: #fff;
+}
+
+.session-empty {
+  padding: 14px 8px;
+  color: var(--color-text-placeholder, #a8abb2);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.session-pin {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.35;
+}
+
+.session-pin:hover {
+  background: rgba(122, 119, 238, 0.12);
+  opacity: 1;
+}
+
+.session-pin.is-pinned {
+  opacity: 1;
+}
+
+.session-lock {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.65;
+}
+
+.session-archiving {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--brand-500, #5b58e8);
+  font-size: 12px;
+  animation: session-busy-pulse 0.9s ease-in-out infinite;
+}
+
+.session-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: rgba(220, 73, 97, 0.08);
+}
+
+.session-confirm-text {
+  flex: 1;
+  font-size: 11.5px;
+  color: #a33c4e;
+}
+
+.session-confirm-yes,
+.session-confirm-no {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.session-confirm-yes {
+  border: 1px solid #dc4961;
+  background: #dc4961;
+  color: #fff;
+}
+
+.session-confirm-no {
+  border: 1px solid var(--color-border-light, #d8dade);
+  background: #fff;
+  color: var(--color-text-secondary, #5b616b);
 }
 
 @keyframes session-busy-pulse {

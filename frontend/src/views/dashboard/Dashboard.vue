@@ -5,9 +5,9 @@
       <div>
         <h1 class="page-title font-display">仪表盘</h1>
         <p class="page-sub">
-          {{ today }} · 你今天有
+          {{ today }} · 最近
           <b class="hl">{{ summary.recent_tasks?.length ?? 0 }}</b>
-          个审查任务待复查
+          个审查任务
         </p>
       </div>
       <div class="page-actions">
@@ -244,7 +244,7 @@ const statCards = computed(() => {
     {
       label: '累计审查任务', value: summary.value.review_count, unit: '次', icon: 'DocumentChecked',
       iconStyle: { background: 'var(--brand-50)', color: 'var(--brand-600)' },
-      delta: hasReview ? '已上线' : '— 暂无数据', deltaDir: hasReview ? 'up' : 'flat',
+      delta: hasReview ? '持续积累中' : '— 暂无数据', deltaDir: 'flat',
       feature: false,
     },
     {
@@ -271,13 +271,13 @@ const statCards = computed(() => {
     {
       label: '活跃项目', value: summary.value.project_count, unit: '个', icon: 'FolderOpened',
       iconStyle: { background: 'rgba(75,155,255,.10)', color: 'var(--dim-naming)' },
-      delta: hasProject ? '已建项目' : '— 暂无', deltaDir: 'flat',
+      delta: hasProject ? '持续更新中' : '— 暂无', deltaDir: 'flat',
       feature: false,
     },
     {
       label: '代码文件', value: summary.value.file_count, unit: '份', icon: 'Document',
       iconStyle: { background: 'rgba(61,188,217,.12)', color: 'var(--accent-600)' },
-      delta: hasFile ? '已上传' : '— 暂无', deltaDir: 'flat',
+      delta: hasFile ? '持续更新中' : '— 暂无', deltaDir: 'flat',
       feature: false,
     },
   ]

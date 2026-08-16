@@ -204,3 +204,26 @@ def revoke_code(db: Session, invite_id: int) -> BetaInviteCode:
     db.commit()
     db.refresh(invite)
     return invite
+
+
+def delete_code(db: Session, invite_id: int) -> BetaInviteCode:
+    """物理删除一个内测码记录(超级管理员专用)。
+
+    与 revoke 不同:任意状态(active/used/revoked/expired)都可删除,
+    用于清理无用记录。删除前返回行快照供审计留痕;码本身已不可用
+    的安全语义由调用方审计保证。
+    """
+
+    invite = db.query(BetaInviteCode).filter(BetaInviteCode.id == invite_id).with_for_update().first()
+    if not invite:
+        raise NotFoundError("内测码不存在", code=40420)
+    snapshot = BetaInviteCode(
+        id=invite.id,
+        code_hash=invite.code_hash,
+        label=invite.label,
+        status=invite.status,
+    )
+    snapshot.display_prefix = invite.display_prefix
+    db.delete(invite)
+    db.commit()
+    return snapshot

@@ -438,6 +438,127 @@ class StaticMatch:
     evidence_line: str
 
 
+
+# ── 用户输入直连危险操作(参数→漏洞路由,源自渗透工作流参数路由表) ──
+_PARAM_ROUTING_RULES: Tuple[StaticRule, ...] = (
+    StaticRule(
+        code="orderby_raw_concat",
+        name="排序参数直连 SQL(ORDER BY 注入)",
+        cwe="CWE-89",
+        owasp="A03:2021-Injection",
+        severity="高",
+        description=(
+            "orderBy/sort/sortDir 等排序参数未经白名单校验直接拼进 SQL。"
+            "排序位置不能用普通占位符,是最常见的注入遗漏点。"
+        ),
+        fix_suggestion="排序字段映射为白名单字典(前端传别名,后端查表取真实列名),方向只允许 ASC/DESC。",
+        pattern=re.compile(
+            r"""(?ix)
+            (?:order\s+by|ORDER\s+BY)\s*["'f]?\s*(?:\{|%s|\+|\.|\bf"|\bformat)
+            |["']\s*(?:ORDER\s+BY|order\s+by)\s*["']\s*(?:\+|%|\{|\.format|f")
+            |(?:orderBy|order_by|sortField|sortBy|sort_field)\b[^
+]{0,40}(?:f["']|%s|\+\s*\w|\.format)
+            """,
+        ),
+        file_extensions=(".py", ".java", ".js", ".ts", ".jsx", ".tsx", ".go", ".rb", ".php"),
+    ),
+    StaticRule(
+        code="user_url_fetch",
+        name="用户可控 URL 发起请求(SSRF)",
+        cwe="CWE-918",
+        owasp="A10:2021-Server-Side Request Forgery (SSRF)",
+        severity="高",
+        description=(
+            "url/callback/webhook/imageUrl 等参数直接进入 HTTP 请求。"
+            "攻击者可传入内网地址(如云元数据 169.254.169.254)读取凭证或打内网服务。"
+        ),
+        fix_suggestion="URL 先解析校验:协议只允许 http/https、禁止内网/环回/链路本地网段、解析后再次校验 IP,并禁用重定向跟随。",
+        pattern=re.compile(
+            r"""(?ix)
+            (?:requests\.(?:get|post|head)|httpx\.(?:get|post)|urlopen|fetch\s*\(|axios\.(?:get|post)|restTemplate\.\w+|HttpClient)
+            \s*\(\s*(?:url|callback|webhook_?url|image_?url|avatar_?url|target_?url|dest(?:ination)?_?url)\b
+            |["'](https?://[^"']*)?["']\s*\.\s*(?:url|callback|webhook)\b
+            """,
+        ),
+        file_extensions=(".py", ".java", ".js", ".ts", ".jsx", ".tsx", ".go", ".rb", ".php"),
+    ),
+    StaticRule(
+        code="path_param_file_read",
+        name="路径参数直连文件读写(目录穿越)",
+        cwe="CWE-22",
+        owasp="A01:2021-Broken Access Control",
+        severity="高",
+        description=(
+            "file/filePath/filename/path/download 等参数未经规范化校验直接进入文件操作,"
+            "攻击者可用 ../../ 读取任意文件(配置、密钥、源码)。"
+        ),
+        fix_suggestion="用 realpath 归一化后校验仍位于允许的基础目录内;文件名只允许白名单字符,拒绝包含 ../ 与绝对路径。",
+        pattern=re.compile(
+            r"""(?ix)
+            (?:open\s*\(|os\.path\.join|Path\s*\(|File\s*\(|readFile|readfile|file_get_contents|send_file|sendFile)
+            [^
+]{0,60}\b(?:file(?:_?path|_?name)?|path|download|filepath|filename|template_?path|report_?path)\b\s*(?:\)|,|\}|%s)
+            """,
+        ),
+        file_extensions=(".py", ".java", ".js", ".ts", ".jsx", ".tsx", ".go", ".rb", ".php"),
+    ),
+    StaticRule(
+        code="sensitive_to_log",
+        name="敏感参数写入日志(凭证泄露)",
+        cwe="CWE-532",
+        owasp="A09:2021-Security Logging and Monitoring Failures",
+        severity="中",
+        description="token/password/secret 等敏感字段被完整打印进日志,日志一旦被读取即泄露凭证。",
+        fix_suggestion="日志输出前对敏感字段脱敏(只留前 4 位或哈希),或干脆不打敏感参数。",
+        pattern=re.compile(
+            r"""(?ix)
+            (?:log(?:ger|ging)?\.(?:info|debug|warn|error)|console\.(?:log|info|debug)|print(?:f|ln)?\s*\()
+            [^
+]{0,80}\b(?:password|passwd|pwd|token|secret|api_?key|access_?key|authorization)\b
+            """,
+        ),
+        file_extensions=(".py", ".java", ".js", ".ts", ".jsx", ".tsx", ".go", ".rb", ".php"),
+    ),
+    StaticRule(
+        code="role_from_request",
+        name="角色/权限取自请求参数(提权风险)",
+        cwe="CWE-269",
+        owasp="A01:2021-Broken Access Control",
+        severity="高",
+        description=(
+            "role/permission/isAdmin 等权限字段来自请求并直接生效。"
+            "攻击者改一个参数就能把自己提为管理员,是垂直越权的最常见根源。"
+        ),
+        fix_suggestion="角色与权限只能从服务端会话/JWT 解出,请求体中的权限字段必须忽略;变更角色走独立的管理员接口。",
+        pattern=re.compile(
+            r"""(?ix)
+            (?:request\.(?:json|args|form|GET|POST|body)|body|params|data)\[["'](?:role|roles|is_?admin|is_?super|permission[s]?|user_?type|admin_?flag)["']\]
+            |(?:role|is_?admin|permission)\s*(?:=|:)\s*(?:request|req|params|body|input|data)\.
+            """,
+        ),
+        file_extensions=(".py", ".java", ".js", ".ts", ".jsx", ".tsx", ".go", ".rb", ".php"),
+    ),
+    StaticRule(
+        code="password_plaintext_compare",
+        name="明文密码比较",
+        cwe="CWE-256",
+        owasp="A07:2021-Identification and Authentication Failures",
+        severity="严重",
+        description="密码以明文形式参与比较或存储,库一旦拖走全部凭证立即泄露。",
+        fix_suggestion="注册时用 bcrypt/argon2 加盐哈希存储;登录用常数时间比较(checkpw/verify),全程不让明文密码落库或落日志。",
+        pattern=re.compile(
+            r"""(?ix)
+            (?:password|passwd|pwd)\s*(?:==|===|!=|\.equals\()\s*\w+
+            |(?:if|if\s*\()\s*(?:password|passwd|pwd)\s*==
+            |(?:where|WHERE)[^
+]{0,40}(?:password|passwd|pwd)\s*=\s*['"]|\$\{
+            """,
+        ),
+        file_extensions=(".py", ".java", ".js", ".ts", ".jsx", ".tsx", ".go", ".rb", ".php"),
+    ),
+)
+
+
 def _file_extension(file_name: str) -> str:
     if "." not in file_name:
         return ""
@@ -508,6 +629,22 @@ def apply_static_rules(content: str, file_name: str) -> List[StaticMatch]:
         if not rule.pattern.search(content):
             matches.append(_make_match(rule, 0, "(整文件级 · 未发现该响应头声明)"))
 
+    # ===== 参数路由规则(用户输入直连危险操作): 直接搜命中 =====
+    for rule in _PARAM_ROUTING_RULES:
+        if ext and ext not in rule.file_extensions:
+            continue
+        hits = 0
+        seen_lines: set[int] = set()
+        for match in rule.pattern.finditer(content):
+            if hits >= 10:
+                break
+            line_no = content.count("\n", 0, match.start()) + 1
+            if line_no in seen_lines:
+                continue
+            matches.append(_make_match(rule, line_no, _evidence_at(content, match.start())))
+            seen_lines.add(line_no)
+            hits += 1
+
     return matches
 
 
@@ -540,7 +677,7 @@ def _make_match(rule: StaticRule, line_no: int, line_text: str) -> StaticMatch:
 def list_static_rules() -> List[dict]:
     """列出所有静态规则(供检查清单接口使用)"""
     out: List[dict] = []
-    for rule in _WEAK_CRYPTO_RULES + _COOKIE_RULES + _HTTP_HEADER_RULES:
+    for rule in _WEAK_CRYPTO_RULES + _COOKIE_RULES + _HTTP_HEADER_RULES + _PARAM_ROUTING_RULES:
         out.append({
             "code": rule.code,
             "name": rule.name,

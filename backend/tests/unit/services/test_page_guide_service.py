@@ -26,8 +26,8 @@ def test_guide_blocks_cover_all_registered_pages() -> None:
         assert label and purpose, route
 
 
-def test_instructions_include_guide_protocol_and_page_routes() -> None:
-    """两侧系统提示词都必须携带页面引导协议与本侧页面清单。"""
+def test_instructions_include_guide_protocol_and_recall() -> None:
+    """主指令保留导航协议，页面清单改为 recall_knowledge 检索，不再固定注入。"""
     user = _instructions("user")
     admin = _instructions("admin")
 
@@ -35,14 +35,12 @@ def test_instructions_include_guide_protocol_and_page_routes() -> None:
         assert "PRISM_NAVIGATE" in text
         assert "站内 markdown 链接" in text
         assert "不得编造" in text
+        assert "recall_knowledge" in text
 
-    # 用户侧提示词包含用户页,不包含管理页
-    for route in USER_PAGE_ROUTES:
-        assert route in user, route
+    # 页面清单不再逐条塞进固定指令，避免每轮 token 膨胀
+    assert "/dashboard" not in user
     assert "/admin/users" not in user
-    # 管理侧提示词包含管理页,不包含普通用户页
-    for route in ADMIN_PAGE_ROUTES:
-        assert route in admin, route
+    assert "/admin/overview" not in admin
     assert "/agent-studio" not in admin
 
     # 身份与角色化行为约定

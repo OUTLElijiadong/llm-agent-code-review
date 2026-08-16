@@ -55,7 +55,12 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
           active_run_status: session.active_run_status ?? (isCurrent ? activeRun?.status : '') ?? '',
         })
       }
-      for (const session of sessions) {
+      // 优先认领当前会话的收件箱,避免历史会话的主动简报占满串行处理队列,
+      // 导致用户正在看的对话迟迟收不到 JARVIS 简报/团队结论等消息。
+      const orderedSessions = [...sessions].sort(
+        (left, right) => Number(right.id === currentSessionId) - Number(left.id === currentSessionId),
+      )
+      for (const session of orderedSessions) {
         if (options.isBusy(session.id)) continue
         const inbox = await pullAgentMeshInbox(options.surface, session.id, 20)
         const message = inbox.find((item) => (

@@ -10,17 +10,18 @@ const streams = vi.hoisted(() => ({
   }>,
 }))
 
-const messages = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }))
-const sessionApi = vi.hoisted(() => ({ get: vi.fn() }))
+const messages = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() }))
+const sessionApi = vi.hoisted(() => ({ get: vi.fn(), cancel: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
-vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get }))
+vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get, cancelAgentResponseRun: sessionApi.cancel }))
 vi.mock('@/api/agentMesh', () => ({
   heartbeatAgentMesh: meshApi.heartbeat,
   pullAgentMeshInbox: meshApi.inbox,
   listAgentMeshAgents: meshApi.list,
+  archiveAgentMeshSession: vi.fn().mockResolvedValue({ session_id: '', status: 'archived' }),
 }))
 vi.mock('@/api/agentTeams', () => ({
   listAgentTeams: teamApi.list,
@@ -28,6 +29,8 @@ vi.mock('@/api/agentTeams', () => ({
   listAgentTeamMessages: teamApi.messages,
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
+
+import { createPinia } from 'pinia'
 
 import AdminCopilot from './AdminCopilot.vue'
 
@@ -42,6 +45,7 @@ function flushSessionRestore(): Promise<void> {
 function mountCopilot(): VueWrapper {
   return mount(AdminCopilot, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         'el-icon': { template: '<span class="el-icon-stub"><slot /></span>' },
         ChatDotRound: true,
@@ -68,7 +72,7 @@ async function finish(index: number): Promise<void> {
 }
 
 /** 整块调用链默认折叠,断言前先展开。 */
-/** 调用链默认折叠;需要断言展开详情的用例自行点击 .response-tool-call-head。 */
+/** 调用链默认折叠;需要断言展开详情的用例自行点击 .xl-step-line。 */
 async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
   // no-op:保留给历史用例的兼容入口
 }
@@ -80,6 +84,7 @@ beforeEach(() => {
   teamApi.list.mockReset().mockResolvedValue({ items: [], total: 0 })
   teamApi.detail.mockReset()
   sessionApi.get.mockReset()
+  sessionApi.cancel.mockReset().mockResolvedValue(undefined)
   sessionApi.get.mockResolvedValue({
     surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null,
   })
@@ -117,8 +122,63 @@ describe('AdminCopilot Responses stream', () => {
     await flushSessionRestore()
 
     expect(teamApi.list).toHaveBeenCalledWith(expect.objectContaining({ surface: 'admin', limit: 20 }))
-    expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
-    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(false)
+    expect(wrapper.find('.team-card').exists()).toBe(true)
+    // 空成员时不再显示「已创建 0 个子Agent」,退化为「创建中」语义
+    expect(wrapper.find('.team-card').text()).toContain('子Agent创建中')
+    expect(wrapper.find('.team-side-panel').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('成员追问按钮关闭面板并预填管理输入框', async () => {
+    teamApi.list.mockResolvedValue({
+      items: [{
+        team_id: 88, title: '管理端成员追问', surface: 'admin', session_id: 'admin-test',
+        status: 'running', max_active_children: 3, trace_id: 'trace-admin-88',
+        counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 },
+      }],
+      total: 1,
+    })
+    teamApi.detail.mockResolvedValue({
+      team_id: 88, title: '管理端成员追问', surface: 'admin', session_id: 'admin-test',
+      status: 'running', max_active_children: 3, trace_id: 'trace-admin-88',
+      objective: '继续处理告警', started_at: '2026-08-13T10:00:00Z',
+      counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 },
+      members: [
+        { member_id: 1, member_key: 'm1', display_name: '安全审计员', address: 'agent:security_auditor', kind: 'runtime', role: 'worker', status: 'running', started_at: '2026-08-13T10:00:00Z' },
+      ],
+      tasks: [
+        { task_id: 1, task_key: 't1', member_id: 1, member_key: 'm1', title: '复核告警', status: 'running', depends_on: [], priority: 1, attempt_count: 0, max_attempts: 3 },
+      ],
+      events: [
+        { event_id: 1, team_id: 88, task_id: 1, member_id: 1, event_type: 'task.claimed', from_status: 'queued', to_status: 'running', created_at: '2026-08-13T10:00:00Z' },
+      ],
+      messages: [],
+    })
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    const card = wrapper.find('.team-card')
+    expect(card.exists()).toBe(true)
+    await card.trigger('click')
+    await flushPromises()
+    expect(document.querySelector('.team-side-panel')).not.toBeNull()
+
+    const memberTab = Array.from(document.querySelectorAll('.tab-btn'))
+      .find((tab) => tab.textContent?.includes('成员'))
+    expect(memberTab).toBeDefined()
+    ;(memberTab as HTMLElement).click()
+    await flushPromises()
+
+    const askButton = document.querySelector('.member-work-ask') as HTMLButtonElement | null
+    expect(askButton).not.toBeNull()
+    askButton!.click()
+    await flushPromises()
+
+    expect(document.querySelector('.team-side-panel')).toBeNull()
+    const input = wrapper.find('textarea').element as HTMLTextAreaElement
+    expect(input.value).toContain('安全审计员')
     wrapper.unmount()
   })
 
@@ -158,8 +218,9 @@ describe('AdminCopilot Responses stream', () => {
     expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('is-user')
     await expandTimeline(wrapper)
-    expect(rows[2].find('.response-tool-timeline').text()).toContain('查看管理数据')
-    expect(rows[2].text()).toContain('已完成')
+    expect(rows[2].find('.xl-steps').text()).toContain('小菱的工作')
+    expect(rows[2].find('.xl-steps').text()).toContain('查看管理数据')
+    expect(rows[2].text()).toContain('做好了')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 3 个用户')
     expect(rows[3].find('.markdown-body').text()).toContain('已完成。')
     expect(rows[3].find('.markdown-body').text()).not.toMatch(/<wbr>|•/)
@@ -212,7 +273,7 @@ describe('AdminCopilot Responses stream', () => {
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
     expect(sessionApi.get).toHaveBeenCalledTimes(2)
-    expect(wrapper.text()).toContain('删除管理数据')
+    expect(wrapper.text()).toContain('删除用户')
 
     await vi.advanceTimersByTimeAsync(2999)
     await flushPromises()
@@ -251,21 +312,17 @@ describe('AdminCopilot Responses stream', () => {
     await flushPromises()
     await openCopilot(wrapper)
 
-    expect(wrapper.find('.response-tool-timeline').exists()).toBe(false)
+    expect(wrapper.find('.xl-steps').exists()).toBe(false)
     await vi.advanceTimersByTimeAsync(3000)
     await flushPromises()
 
-    const timeline = wrapper.find('.response-tool-timeline')
-    expect(timeline.text()).not.toContain('receive_message')
-    expect(timeline.text()).toContain('agent:error-handler')
+    const timeline = wrapper.find('.xl-steps')
     expect(timeline.text()).toContain('报错根因已定位')
-    const head = timeline.find('.response-tool-call-head')
-    expect(head.attributes('aria-expanded')).toBe('false')
-    expect(timeline.find('.response-tool-detail').exists()).toBe(false)
-
-    await head.trigger('click')
-    expect(timeline.find('.response-tool-detail').text()).toContain('报错根因已定位')
-    expect(timeline.find('.response-tool-detail').text()).toContain('数据库连接耗尽')
+    expect(timeline.text()).not.toContain('receive_message')
+    expect(timeline.text()).not.toContain('agent:error-handler')
+    // 新设计:无技术折叠头,完成步骤无明细行,且不暴露内部错误原文
+    expect(timeline.find('.xl-step-error').exists()).toBe(false)
+    expect(timeline.text()).not.toContain('数据库连接耗尽')
     wrapper.unmount()
     vi.useRealTimers()
   })
@@ -285,7 +342,8 @@ describe('AdminCopilot Responses stream', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('同步暂时中断,正在重试')
 
-    await vi.advanceTimersByTimeAsync(3000)
+    // 失败后指数退避:下一次轮询间隔翻倍为 6000ms。
+    await vi.advanceTimersByTimeAsync(6000)
     await flushPromises()
     expect(wrapper.text()).not.toContain('同步暂时中断,正在重试')
     expect(wrapper.text()).toContain('已同步')
@@ -316,10 +374,14 @@ describe('AdminCopilot Responses stream', () => {
     await openCopilot(wrapper)
     await flushSessionRestore()
 
-    expect(wrapper.text()).toContain('删除管理数据')
+    expect(wrapper.text()).toContain('批量删除用户')
     expect(wrapper.text()).toContain('qa-a (#901)')
     expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('.send-button').attributes('disabled')).toBeDefined()
+    // 等待审批时按“取消任务”设计显示停止按钮，发送按钮被替换。
+    expect(wrapper.find('.stop-button').exists()).toBe(true)
+    expect(wrapper.find('.send-button').exists()).toBe(false)
+    expect(wrapper.find<HTMLButtonElement>('.response-approval .primary-action').element.disabled).toBe(false)
+    expect(wrapper.find('.danger-input').exists()).toBe(false)
     await wrapper.find('.response-approval .primary-action').trigger('click')
     await flushPromises()
     expect(streams.records[0].body).toMatchObject({
@@ -434,14 +496,14 @@ describe('AdminCopilot Responses stream', () => {
     await finish(0)
 
     expect(wrapper.find('.response-approval').exists()).toBe(true)
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('删除管理数据')
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('等待批准')
-    // 调用参数默认折叠为技术细节,点击后展示
+    expect(wrapper.find('.xl-steps').text()).toContain('删除管理数据')
+    expect(wrapper.find('.xl-steps').text()).toContain('等你确认后继续')
     await wrapper.find('.response-approval-detail-toggle').trigger('click')
-    await flushPromises()
     expect(wrapper.find('.response-approval-arguments').text()).toContain('"user_id": 9')
     expect(wrapper.find('.response-approval-preview').text()).toContain('test-user (#9)')
+    expect(wrapper.find('.danger-input').exists()).toBe(false)
     expect(wrapper.findAll('.is-user')).toHaveLength(1)
+    expect(wrapper.find<HTMLButtonElement>('.response-approval .primary-action').element.disabled).toBe(false)
     await wrapper.find('.response-approval .primary-action').trigger('click')
     await flushPromises()
 
@@ -450,6 +512,7 @@ describe('AdminCopilot Responses stream', () => {
       surface: 'admin',
       run_id: 'run-admin-approval',
       call_id: 'call-delete',
+      confirmation: '确认执行',
     })
     const approveMessages = streams.records[1].body.messages as Array<{ role: string; content: string }>
     expect(approveMessages[approveMessages.length - 1]).toEqual({ role: 'user', content: '删除测试用户' })
@@ -467,8 +530,8 @@ describe('AdminCopilot Responses stream', () => {
     expect(wrapper.text()).toContain('操作已完成')
     expect(wrapper.text()).toContain('已批准')
     await expandTimeline(wrapper)
-    const timelineText = wrapper.findAll('.response-tool-timeline').map((node) => node.text()).join('\n')
-    expect(timelineText).toContain('已完成')
+    const timelineText = wrapper.findAll('.xl-steps').map((node) => node.text()).join('\n')
+    expect(timelineText).toContain('做好了')
   })
 
   it('marks a resumed approval as failed when the terminal response has no tool result', async () => {
@@ -503,13 +566,11 @@ describe('AdminCopilot Responses stream', () => {
     await finish(1)
 
     await expandTimeline(wrapper)
-    // 调用链默认折叠:点击调用头展开后断言失败详情
-    await wrapper.find('.response-tool-call-head').trigger('click')
-    await flushPromises()
-    const timelineText = wrapper.find('.response-tool-timeline').text()
-    expect(timelineText).toContain('失败')
-    expect(timelineText).toContain('响应已结束，但工具未返回完成事件')
-    expect(timelineText).not.toContain('已完成')
+    // 新设计:失败步骤默认展开原因
+    const timelineText = wrapper.find('.xl-steps').text()
+    expect(timelineText).toContain('没做成')
+    expect(timelineText).toMatch(/响应已结束|删除管理数据/)
+    expect(timelineText).not.toContain('做好了')
   })
 
   it('does not mark a tool completed without response.tool.completed evidence', async () => {
@@ -530,15 +591,12 @@ describe('AdminCopilot Responses stream', () => {
     await finish(0)
 
     await expandTimeline(wrapper)
-    const timeline = wrapper.find('.response-tool-timeline')
+    const timeline = wrapper.find('.xl-steps')
     expect(timeline.text()).toContain('执行管理操作')
-    expect(timeline.text()).not.toContain('admin_execute_capability')
-    expect(timeline.text()).toContain('失败')
-    // 失败详情默认折叠,点击后展示
-    await wrapper.find('.response-tool-call-head').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('响应已结束，但工具未返回完成事件')
-    expect(wrapper.find('.response-tool-timeline').text()).not.toContain('已完成')
+    expect(timeline.text()).toContain('没做成')
+    // 新设计:失败默认展开,无需点击
+    expect(wrapper.find('.xl-steps').text()).toMatch(/响应已结束|执行管理操作/)
+    expect(wrapper.find('.xl-steps').text()).not.toContain('已完成')
   })
 
   it('shows one-time sensitive results without sending them into the next model request', async () => {
@@ -588,7 +646,7 @@ describe('AdminCopilot Responses stream', () => {
     await finish(1)
   })
 
-  it('streams function arguments and submits a structured option via the submit button', async () => {
+  it('streams function arguments and submits a structured option immediately', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
     await flushSessionRestore()
@@ -625,17 +683,14 @@ describe('AdminCopilot Responses stream', () => {
     })
     await finish(0)
 
-    // 调用链默认折叠:展开后断言调用参数
-    await wrapper.find('.response-tool-call-head').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('.response-tool-arguments').text()).toContain('"query": "李家栋"')
+    // 新设计:参数永不上屏,只保留通俗状态
+    expect(wrapper.find('.response-tool-arguments').exists()).toBe(false)
+    expect(wrapper.text()).toContain('在等你的回答')
+    expect(wrapper.text()).not.toContain('"query"')
     expect(wrapper.findAll('.response-input-option')).toHaveLength(2)
     expect(wrapper.text()).toContain('其他（自定义输入）')
-    // 点选只高亮选中态,再点「提交」才发送(防误触)
     await wrapper.findAll('.response-input-option')[0].trigger('click')
     await flushPromises()
-    expect(streams.records).toHaveLength(1)
-    expect(wrapper.findAll('.response-input-option')[0].classes()).toContain('is-selected')
     await wrapper.find('.response-answer-submit').trigger('click')
     await flushPromises()
     expect(streams.records[1].body).toMatchObject({
@@ -663,5 +718,73 @@ describe('AdminCopilot Responses stream', () => {
     void textarea.trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(streams.start).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AdminCopilot 历史bug回归(本PR补齐项)', () => {
+  it('【修复】协议错误必须留在消息流(旧版只有几秒即逝的Toast,回来后零痕迹)', async () => {
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    await wrapper.find('textarea').setValue('查询系统状态')
+    void wrapper.find('.send-button').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.failed', response: { error: { message: '模型超时' } } })
+    await finish(0)
+
+    // Toast 之外,消息流里必须有错误卡片与操作入口
+    const card = wrapper.find('.copilot-error-card')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('这次没有完成')
+    expect(card.text()).toContain('模型超时')
+    expect(card.find('.copilot-error-btn.is-retry').exists()).toBe(true)
+    expect(card.find('.copilot-error-btn:not(.is-retry)').text()).toContain('新建对话')
+    wrapper.unmount()
+  })
+
+  it('【修复】助手消息必须有一键复制(旧版只能手动拖选悬浮窗文本)', async () => {
+    sessionApi.get.mockResolvedValueOnce({
+      surface: 'admin', session_id: 'admin-test',
+      run: { run_id: 'r', status: 'completed', model: '', rounds: 1, error: '', updated_at: '2026-08-01T12:00:00Z' },
+      messages: [{ role: 'assistant', content: '巡检结论:一切正常' }],
+      pending: null,
+    })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    // 欢迎语也有复制按钮;精确定位承载目标文本的气泡对应的按钮
+    const buttons = wrapper.findAll('.message-copy-btn')
+    expect(buttons.length).toBeGreaterThan(0)
+    const target = buttons.find((btn) => btn.element.closest('.message-row')?.textContent?.includes('巡检结论:一切正常'))
+    expect(target).toBeDefined()
+    await target!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('巡检结论:一切正常')
+    expect(messages.success).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('【修复】面板可见时按 / 必须聚焦输入框(旧版只支持 Escape)', async () => {
+    const wrapper = mountCopilot()
+    await flushPromises()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    const textarea = wrapper.find('textarea').element as HTMLTextAreaElement
+    const focusSpy = vi.spyOn(textarea, 'focus')
+    // 真实浏览器里 keydown 的 target 是聚焦元素(如 body),不是 window;显式设定
+    const event = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'target', { value: document.body })
+    window.dispatchEvent(event)
+    await flushPromises()
+    expect(focusSpy).toHaveBeenCalled()
+    focusSpy.mockRestore()
+    wrapper.unmount()
   })
 })

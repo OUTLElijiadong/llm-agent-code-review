@@ -42,8 +42,7 @@ import {
   stageLabel,
 } from '@/utils/sandboxPresentation'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { confirmDanger } from '@/composables/useDangerConfirm'
-import EmptyState from '@/components/common/EmptyState.vue'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
 const POLL_INTERVAL_MS = 2500
 const userStore = useUserStore()
@@ -247,12 +246,11 @@ async function submit(): Promise<void> {
 
 async function stopCurrent(): Promise<void> {
   if (!selected.value) return
-  const ok = await confirmDanger({
-    target: '关闭该沙箱',
-    consequence: '运行环境会立即回收',
-    confirmText: '关闭',
-  })
-  if (!ok) return
+  try {
+    await ElMessageBox.confirm('关闭后运行环境会立即回收，是否继续？', '关闭沙箱', {
+      type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
+    })
+  } catch { return }
   mutating.value = true
   try {
     const updated = await stopSandbox(selected.value.public_id)
@@ -515,7 +513,7 @@ onBeforeUnmount(() => {
               <el-icon><ArrowRight /></el-icon>
             </button>
           </div>
-          <EmptyState v-else description="暂无沙箱任务,创建一个开始体验" compact />
+          <el-empty v-else description="暂无沙箱任务" :image-size="72" />
         </div>
 
         <div v-if="selected" class="task-detail">
@@ -589,7 +587,7 @@ onBeforeUnmount(() => {
             </div>
           </section>
         </div>
-        <EmptyState v-else class="detail-empty" description="选择任务查看 Agent 调用和测试结论" />
+        <el-empty v-else class="detail-empty" description="选择任务查看 Agent 调用和测试结论" />
       </section>
     </div>
   </div>

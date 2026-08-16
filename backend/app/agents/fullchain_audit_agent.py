@@ -439,15 +439,64 @@ class FullChainAuditOrchestrator:
             s = f.get("severity", "中")
             if s in sev:
                 sev[s] += 1
+        # ── 大白话报告(结论先行→风险速览→人话解释→下一步) ──
+        total = sum(sev.values())
+        verified = int(verification.get("verified", 0) or 0)
+        if total == 0:
+            verdict = "这轮审计没发现问题"
+            verdict_detail = "代码看起来是干净的,但建议部署前再做一次黑盒测试实际跑一跑确认。"
+        elif sev["严重"] or sev["高"]:
+            verdict = f"发现 {sev['严重'] + sev['高']} 个需要尽快处理的高危问题"
+            verdict_detail = (
+                f"其中严重 {sev['严重']} 个、高 {sev['高']} 个"
+                + (f",有 {verified} 个已经实际验证过、能稳定复现" if verified else "")
+                + "。建议优先处理下面「需要尽快处理」里的问题。"
+            )
+        else:
+            verdict = f"发现 {total} 个中低风险问题,暂不致命"
+            verdict_detail = "不影响马上上线,但建议排进近期修复计划。"
+
+        # 风险速览表:严重度/数量/一句话含义
+        severity_table = [
+            {"level": "严重", "count": sev["严重"], "meaning": "攻击者可以直接拿权限、拖数据或搞瘫系统"},
+            {"level": "高", "count": sev["高"], "meaning": "很可能被利用,需要尽快修"},
+            {"level": "中", "count": sev["中"], "meaning": "有一定风险,建议排期修"},
+            {"level": "低", "count": sev["低"], "meaning": "小瑕疵,顺手修掉即可"},
+        ]
+        # top 发现的大白话行(带文件/行号定位)
+        plain_findings = []
+        for f in (findings or [])[:10]:
+            plain_findings.append({
+                "title": str(f.get("title") or f.get("type") or "问题"),
+                "severity": f.get("severity", "中"),
+                "where": f"文件 {f.get('file_path', '?')}" + (f" 第 {f.get('line')} 行" if f.get("line") else ""),
+                "what_it_means": str(f.get("description") or f.get("evidence") or "")[:200],
+                "confidence": f.get("confidence"),
+            })
+        next_steps = []
+        if sev["严重"] or sev["高"]:
+            next_steps.append("先处理上表「严重/高」的问题,修完再跑一次审计确认")
+        if verified:
+            next_steps.append(f"已验证能复现的 {verified} 个问题优先级最高,可直接按报告定位到代码行")
+        next_steps.append("需要的话可以让小菱直接生成修复提示(AI 修复建议)")
+        next_steps.append("修复后用「全量验证」实际部署跑一遍黑白盒测试")
         summary = (
-            f"全链路审计完成「{project.project_name}」: "
-            f"侦察 {len(recon.surface.file_profiles)} 文件/污点 sink "
-            f"{len(recon.surface.hot_sinks)} 处; "
-            f"分析检出 严重{sev['严重']}/高{sev['高']}/中{sev['中']}/低{sev['低']}; "
-            f"验证可复现 {verification.get('verified', 0)}/{verification.get('targets', 0)} 条高危。"
+            f"审计完成「{project.project_name}」:{verdict}。"
+            f"共检查 {len(recon.surface.file_profiles)} 个文件、{len(recon.surface.hot_sinks)} 处"
+            f"外部输入直接触达敏感操作的位置;深度分析 {total} 个问题待你处理。"
         )
         return {
             "summary": summary,
+            # 大白话层:前端直接渲染,不出现「污点sink/对抗复检」等术语
+            "plain_report": {
+                "verdict": verdict,
+                "verdict_detail": verdict_detail,
+                "severity_table": severity_table,
+                "findings": plain_findings,
+                "next_steps": next_steps,
+                "checked_files": len(recon.surface.file_profiles),
+                "risky_entry_points": len(recon.surface.hot_sinks),
+            },
             "severity_counts": sev,
             "recon": {
                 "framework_hints": recon.framework_hints,

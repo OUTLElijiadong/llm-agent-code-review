@@ -5,9 +5,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { formatDate } from '@/utils/format'
 import { renderMarkdown } from '@/utils/markdown'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { confirmDanger } from '@/composables/useDangerConfirm'
-import EmptyState from '@/components/common/EmptyState.vue'
 import {
   getPost, createReply, deletePost, deleteReply, pinPost, type ForumPostDetail,
 } from '@/api/forum'
@@ -56,13 +55,13 @@ async function submitReply() {
 }
 
 async function removeReply(id: number) {
-  if (!await confirmDanger({ target: '删除该回复' })) return
+  await ElMessageBox.confirm('确认删除该回复?', '提示', { type: 'warning' })
   await deleteReply(id)
   await load()
 }
 
 async function removePost() {
-  if (!await confirmDanger({ target: '删除该帖子', extra: '帖子下的所有回复会一并删除' })) return
+  await ElMessageBox.confirm('确认删除该帖子?', '提示', { type: 'warning' })
   await deletePost(postId)
   ElMessage.success('已删除')
   router.push('/forum')
@@ -120,7 +119,7 @@ onMounted(load)
         </div>
         <div class="reply-body md-body" v-html="renderMarkdown(r.content)"></div>
       </div>
-      <EmptyState v-if="post.replies.length === 0" description="还没有回复,来抢沙发" compact />
+      <el-empty v-if="post.replies.length === 0" description="还没有回复" :image-size="80" />
 
       <div class="reply-editor">
         <el-input v-model="replyContent" type="textarea" :rows="3" placeholder="写下你的回复…" />

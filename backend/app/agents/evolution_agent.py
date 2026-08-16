@@ -149,7 +149,7 @@ class EvolutionAgent(BaseAgent):
     """自进化代理"""
 
     name = "evolution"
-    description = "自进化代理:从审查反馈蒸馏规则进化提案,经闸门+审批后生效"
+    description = "进化引擎:从每次审查反馈里学习,自动沉淀新规则,越用越聪明"
     icon = "evolution"
     color = "#E76F51"
     category = "meta"

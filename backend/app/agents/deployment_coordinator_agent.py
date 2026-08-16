@@ -19,7 +19,7 @@ class DeploymentCoordinatorAgent(BaseAgent):
     """判断并补全沙箱完整部署:生成启动补丁与依赖说明。"""
 
     name = "deployment_coordinator"
-    description = "沙箱完整部署核验:入口检测、依赖补全、稳定运行补丁"
+    description = "部署监理:在隔离沙箱里把项目真实跑起来,自动装依赖、修启动报错"
     icon = "deployment_coordinator"
     color = "#B26A00"
     category = "deploy"

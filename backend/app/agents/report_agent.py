@@ -13,7 +13,7 @@ class ReportAgent(BaseAgent):
     """报告 Agent"""
 
     name = "reporter"
-    description = "查询审查报告列表和详情"
+    description = "报告管理员:查历史审查报告、对比多次审查的分数变化"
     icon = "reporter"
     color = "#D9A857"
     category = "output"

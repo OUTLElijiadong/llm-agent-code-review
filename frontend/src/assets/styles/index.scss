@@ -477,3 +477,40 @@ select {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ============================================================
+ * 全局空态/加载态统一(三端交互升级)
+ * el-table 的 empty-text 自动获得品牌化视觉,无需逐页替换
+ * ============================================================ */
+.el-table .el-table__empty-block {
+  padding: 12px 0;
+}
+
+.el-table .el-table__empty-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gray-500);
+  font-size: 12.5px;
+  line-height: 1.5;
+
+  /* 空态前置一枚小棱镜点:静态装饰,弱化「报错感」 */
+  &::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 2px;
+    background: conic-gradient(from 210deg,
+      #6B7CFF, #4B9BFF, #2BBFB9,
+      #4FB87A, #D4A53A, #E08648,
+      #E25C73, #B85AC4, #6B7CFF);
+    opacity: 0.55;
+  }
+}
+
+/* 表格 loading 遮罩轻量化:不整屏压灰,保留内容可读 */
+.el-table .el-table__empty-block ~ .el-loading-mask,
+.el-table .el-loading-mask {
+  backdrop-filter: saturate(0.85);
+}

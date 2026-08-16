@@ -1,4 +1,4 @@
-import { get, post } from './http'
+import { del, get, post } from './http'
 import type {
   BetaCodePage,
   BetaCodeQuery,
@@ -17,4 +17,9 @@ export function listBetaCodes(params: BetaCodeQuery): Promise<BetaCodePage> {
 
 export function revokeBetaCode(id: number): Promise<BetaInviteCode> {
   return post<BetaInviteCode>(`/admin/beta-codes/${id}/revoke`)
+}
+
+
+export function deleteBetaCode(id: number): Promise<{ id: number; status: string }> {
+  return del(`/admin/beta-codes/${id}`)
 }

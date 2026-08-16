@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   HomeFilled,
@@ -59,41 +59,6 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-const sidebarRef = ref<HTMLElement | null>(null)
-/** 打开 drawer 前获得焦点的元素,关闭后归还焦点 */
-let previousActiveElement: HTMLElement | null = null
-
-function handleDrawerKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    emit('close')
-  }
-}
-
-// 移动端 drawer 打开时:记录当前焦点、把焦点移入侧栏、监听 ESC 关闭;
-// 关闭时:归还焦点、移除监听。(桌面端 mobileOpen 恒 false,不受影响)
-watch(
-  () => props.mobileOpen,
-  async (open) => {
-    if (open) {
-      previousActiveElement = document.activeElement as HTMLElement | null
-      await nextTick()
-      const firstItem = sidebarRef.value?.querySelector<HTMLElement>('.nav-item')
-      firstItem?.focus()
-      window.addEventListener('keydown', handleDrawerKeydown)
-    } else {
-      window.removeEventListener('keydown', handleDrawerKeydown)
-      previousActiveElement?.focus?.()
-      previousActiveElement = null
-    }
-  },
-)
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleDrawerKeydown)
-  mediaQuery?.removeEventListener('change', syncNarrow)
-})
-
 const menuItems: MenuItem[] = [
   { path: '/dashboard', title: '工作台',     icon: HomeFilled,       roles: ['admin', 'user', 'reviewer'] },
   { path: '/projects',  title: '项目管理',   icon: FolderOpened,     roles: ['user'] },
@@ -129,17 +94,6 @@ const adminItems: MenuItem[] = [
 
 const isAdmin = computed(() => userStore.isAdmin())
 const currentRole = computed(() => normalizeRole(userStore.profile?.role))
-/** 窄屏(移动端 drawer 形态)判定,用于收起时对读屏隐藏侧栏 */
-const isNarrowMobile = ref(false)
-let mediaQuery: MediaQueryList | null = null
-if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-  mediaQuery = window.matchMedia('(max-width: 768px)')
-  isNarrowMobile.value = mediaQuery.matches
-}
-function syncNarrow(): void {
-  isNarrowMobile.value = mediaQuery?.matches ?? false
-}
-mediaQuery?.addEventListener('change', syncNarrow)
 
 const visibleMenuItems = computed(() => {
   // 管理员只做管理内容工作:不显示用户端功能菜单(工作台/代码沙箱/论坛等),
@@ -178,12 +132,7 @@ function go(item: MenuItem): void {
 </script>
 
 <template>
-  <aside
-    ref="sidebarRef"
-    class="app-sidebar"
-    :class="{ 'is-mobile-open': props.mobileOpen }"
-    :aria-hidden="isNarrowMobile && !props.mobileOpen ? true : undefined"
-  >
+  <aside class="app-sidebar" :class="{ 'is-mobile-open': props.mobileOpen }">
     <div class="sidebar-logo">
       <span class="prism-mark sm"></span>
       <div class="logo-meta">

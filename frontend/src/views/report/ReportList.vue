@@ -2,6 +2,7 @@
   <div class="report-list-page">
     <div class="page-header">
       <h2>审查报告列表</h2>
+      <p class="page-sub">审查任务完成后自动生成报告,可导出 Word/PDF</p>
     </div>
 
     <el-card shadow="hover">
@@ -41,6 +42,13 @@
         @row-click="onRowClick"
         highlight-current-row
       >
+        <template #empty>
+          <EmptyState
+            :description="hasFilter ? '该项目还没有审查报告' : '暂无审查报告'"
+            :action-text="hasFilter ? '' : '去启动审查'"
+            :action-to="hasFilter ? '' : '/reviews/start'"
+          />
+        </template>
         <el-table-column prop="task_name" label="任务名称" min-width="160">
           <template #default="{ row }">
             {{ row.task_name || `审查 #${row.task_id}` }}
@@ -115,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ArrowDown, MagicStick, View as ViewIcon } from '@element-plus/icons-vue'
@@ -123,6 +131,7 @@ import { formatDateTime } from '@/utils/format'
 import { getReports, deleteReport, exportReport } from '@/api/report'
 import { getProjects } from '@/api/project'
 import type { ReportListItem, ReportFormat } from '@/types/report'
+import EmptyState from '@/components/common/EmptyState.vue'
 import type { ProjectOut } from '@/types/project'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { confirmDanger } from '@/composables/useDangerConfirm'
@@ -136,6 +145,9 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const filterProjectId = ref<number | null>(null)
+
+/** 空态文案依据:是否筛选了项目。 */
+const hasFilter = computed(() => Boolean(filterProjectId.value))
 const dateRange = ref<[string, string] | null>(null)
 /** 当前正在导出的任务 ID(用于导出按钮 loading 态),null 表示无操作 */
 const exportingTaskId = ref<number | null>(null)

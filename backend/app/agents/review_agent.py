@@ -25,7 +25,7 @@ class CodeReviewerAgent(BaseAgent):
     """
 
     name = "code_reviewer"
-    description = "对代码片段执行智能审查,检测 Bug、安全、性能等问题"
+    description = "白盒审计员:逐行读代码,找出注入、越权、密钥泄露、性能坑,并给出修复建议"
     icon = "code_reviewer"
     color = "#E27C4A"
     category = "reviewer"

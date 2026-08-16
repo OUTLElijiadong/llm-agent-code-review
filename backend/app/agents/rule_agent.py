@@ -13,7 +13,7 @@ class RuleManagerAgent(BaseAgent):
     """审查规则 Agent"""
 
     name = "rule_manager"
-    description = "管理审查规则: 列出/创建/启用/禁用"
+    description = "规则管理员:增删改查审查规则,决定平台按什么标准挑毛病"
     icon = "rule_manager"
     color = "#264653"
     category = "manager"

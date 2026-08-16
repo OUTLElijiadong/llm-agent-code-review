@@ -59,10 +59,21 @@ class Settings(BaseSettings):
 
     deepseek_api_key: str = "sk-xxxxx"
     deepseek_base_url: str = "https://api.deepseek.com"
+    # 子 Agent 统一使用的默认模型;总调度者(Orchestrator)与小菱对话单独使用 pro。
     deepseek_model: str = "deepseek-v4-flash"
+    # 总调度者与小菱(user/admin 两个 surface)使用的高能力模型。
+    deepseek_orchestrator_model: str = "deepseek-v4-pro"
+    # pro 模型返回“模型不可用”时,允许在同一轮自动回退到 flash;关闭则直接失败。
+    deepseek_orchestrator_fallback_to_flash: bool = True
     deepseek_timeout: int = 60
     deepseek_max_retries: int = 2
     deepseek_chunk_threshold: int = 32000
+    # 完整沙箱需要跨越排队、部署、测试和报告阶段；工具轮数过低会在沙箱
+    # 已成功时提前把 Responses 会话标记为 max_rounds_exceeded。
+    agent_responses_max_rounds: int = Field(default=128, ge=20, le=128)
+    # 上传后的固定全量验证在一个工具调用内等待唯一沙箱终态，避免模型提前
+    # 结束或反复轮询。上限覆盖最长语言 profile 与报告后处理。
+    agent_full_validation_wait_seconds: int = Field(default=600, ge=60, le=900)
     # DeepSeek V4 上下文窗口与内部 Agent 投影预算。完整 transcript 仍持久化供审计。
     deepseek_context_window_tokens: int = 1_000_000
     deepseek_max_output_tokens: int = 65_536
@@ -97,6 +108,24 @@ class Settings(BaseSettings):
     embedding_timeout: int = 30
 
     agent_governance_scheduler_enabled: bool = True
+    agent_mesh_dispatcher_enabled: bool = True
+    agent_mesh_dispatch_interval_seconds: int = 2
+    agent_mesh_dispatch_lease_seconds: int = 300
+    # Agent Mesh 监管者每轮调度允许的最大轮数;1-5 之间,防止监管链无限循环。
+    agent_mesh_supervision_max_rounds: int = Field(default=3, ge=1, le=5)
+    # 空 Mesh 会话归档阈值:活跃但无消息、无 Responses 运行且超过此时长的会话将被归档。
+    agent_mesh_empty_session_archive_hours: int = Field(default=24, ge=1, le=720)
+    # 管理小菱 JARVIS 全自动运维巡逻:发现异常后主动向在线管理会话投递简报。
+    agent_jarvis_patrol_enabled: bool = True
+    agent_jarvis_patrol_interval_seconds: int = Field(default=300, ge=60, le=86400)
+    agent_jarvis_online_window_minutes: int = Field(default=10, ge=1, le=1440)
+    # 动态子 Agent 团队的持久化队列和租约边界；小菱不计入子 Agent 槽位。
+    agent_team_enabled: bool = True
+    agent_team_max_active_children: int = Field(default=3, ge=1, le=32)
+    agent_team_max_queue_length: int = Field(default=100, ge=1, le=10000)
+    agent_team_task_lease_seconds: int = Field(default=300, ge=1, le=3600)
+    agent_team_dispatch_interval_seconds: int = Field(default=2, ge=1, le=60)
+    agent_team_default_max_attempts: int = Field(default=3, ge=1, le=10)
     agent_knowledge_fetch_timeout: int = 15
     agent_knowledge_fetch_max_bytes: int = 1024 * 1024
     agent_knowledge_allow_private_urls: bool = False
@@ -128,6 +157,7 @@ class Settings(BaseSettings):
     # 不可信代码只通过独立沙箱执行器运行，后端不挂载 Docker Socket。
     sandbox_enabled: bool = False
     sandbox_executor_socket: str = "/var/lib/prism-sandbox/agent.sock"
+    sandbox_maintenance_file: str = "/var/lib/prism-sandbox/maintenance.lock"
     sandbox_executor_token: str = ""
     sandbox_default_ttl_hours: int = 72
     sandbox_max_ttl_hours: int = 168
@@ -138,6 +168,13 @@ class Settings(BaseSettings):
     sandbox_remote_targets_enabled: bool = True
     sandbox_max_repair_rounds: int = 2
     sandbox_repair_max_files: int = 3
+    # 测试用例 LLM 生成总预算：超时后跳过动态白盒用例，只保留静态/黑盒链路。
+    sandbox_agent_test_generation_seconds: int = Field(default=300, ge=60, le=600)
+    # 进程内 TTL 缓存：相同源码/语言/测试模式的 agent 测试用例在窗口内直接复用。
+    sandbox_agent_test_cache_seconds: int = Field(default=3600, ge=60, le=86400)
+    # 长任务心跳与卡死回收。
+    sandbox_heartbeat_seconds: int = Field(default=30, ge=10, le=300)
+    sandbox_stuck_after_seconds: int = Field(default=900, ge=120, le=3600)
     sandbox_remote_timeout: int = 30
 
     # 宿主机运维白名单执行器；仅 Unix Socket，不开放 TCP。
@@ -307,4 +344,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

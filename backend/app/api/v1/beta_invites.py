@@ -95,3 +95,36 @@ def revoke_beta_code(
         ip=_client_ip(request),
     )
     return Resp(data=_to_out(row))
+
+
+@router.delete("/{invite_id}", response_model=Resp[dict])
+def delete_beta_code(
+    invite_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """物理删除一个内测码记录(任意状态;仅超级管理员)。"""
+
+    if admin.role != "super_admin":
+        from app.core.exceptions import ForbiddenError
+
+        raise ForbiddenError("仅超级管理员可删除内测码记录", code=40331)
+    snapshot = beta_invite_service.delete_code(db, invite_id)
+    audit_service.log(
+        db,
+        admin,
+        "beta_invite",
+        target_type="beta_invite_code",
+        target_id=snapshot.id,
+        detail=f"删除内测码 {snapshot.display_prefix}(原状态 {snapshot.status})",
+        ip=_client_ip(request),
+    )
+    return Resp(
+        data={
+            "id": snapshot.id,
+            "display_prefix": snapshot.display_prefix,
+            "status": "deleted",
+            "label": snapshot.label or "",
+        }
+    )

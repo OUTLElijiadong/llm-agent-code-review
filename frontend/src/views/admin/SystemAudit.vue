@@ -93,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { formatDateTime } from '@/utils/format'
 import { listAuditLogs } from '@/api/audit'
@@ -183,7 +183,6 @@ function goTrace(row: AuditLogOut): void {
   if (target) router.push(target)
 }
 
-watch(dateRange, reload)
 
 onMounted(loadLogs)
 </script>

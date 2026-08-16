@@ -11,7 +11,7 @@ class ProjectAnalyzerAgent(BaseAgent):
     """
 
     name = "project_analyzer"
-    description = "根据文件夹名称和文件列表智能分析项目元数据"
+    description = "项目体检员:看一眼文件结构就能判断这是什么项目、用什么技术、风险高不高"
     icon = "project_analyzer"
     color = "#5BB89A"
     category = "analyzer"
@@ -31,7 +31,9 @@ class ProjectAnalyzerAgent(BaseAgent):
         super().__init__(
             system_prompt=compose_system_prompt(self.name, system_prompt),
             temperature=0.3,
-            max_tokens=500,
+            # 思维链模型的 reasoning 也计入该上限;500 时 JSON 还没开始输出就
+            # finish_reason=length(实测生产事故)。2000 给推理留余量。
+            max_tokens=2000,
         )
 
     def _init_skills(self) -> None:
@@ -48,13 +50,20 @@ class ProjectAnalyzerAgent(BaseAgent):
         self.attach_skill(ProjectAnalyzerSelfImprovementSkill(self.name))
         self.attach_skill(ProjectAnalyzerProactiveSkill(self.name))
 
-    def execute(self, folder_name: str, file_names: List[str]) -> AgentResult:
+    def execute(
+        self,
+        folder_name: str,
+        file_names: List[str],
+        strategy_instruction: str = "",
+    ) -> AgentResult:
         file_list = file_names[:30]
         file_list_str = "\n".join(f"- {f}" for f in file_list)
         user_msg = (
             f"文件夹名称: {folder_name or '(未命名)'}\n"
             f"包含的文件:\n{file_list_str or '(无)'}"
         )
+        if strategy_instruction.strip():
+            user_msg += f"\n\n上一次失败后的改道策略:\n{strategy_instruction.strip()}"
         result = self.call_json(user_msg)
         if not result.success:
             return result

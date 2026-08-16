@@ -164,7 +164,7 @@ class SecuritySentinelAgent(BaseAgent):
     """安全哨兵 Agent"""
 
     name = "security_sentinel"
-    description = "网络安全深度审查: OWASP Top10 / CWE / 敏感信息 / 项目级威胁建模"
+    description = "安全哨兵:全方位安全审计(OWASP Top10/硬编码密钥/威胁建模),并派出侦察员摸底"
     icon = "security_sentinel"
     color = "#D93B3B"
     category = "security"

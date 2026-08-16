@@ -75,7 +75,7 @@ class ChatAssistantAgent(BaseAgent):
     """
 
     name = "chat_assistant"
-    description = "PRISM 平台智能聊天助手, 可通过对话调控所有 Agent"
+    description = "小菱本尊:像聊天一样帮你发审查、查项目、读报告,还能派子Agent团队干活"
     icon = "chat_assistant"
     color = "#3DBCD9"
     category = "frontline"
@@ -662,6 +662,7 @@ class ChatAssistantAgent(BaseAgent):
         config = self.WRITE_INTENT_CONFIRMATIONS.get(intent_name)
         if not config:
             return None
+        has_confirmation = self.WRITE_CONFIRMATION_KEY in payload
         answer = str(payload.get(self.WRITE_CONFIRMATION_KEY) or "").strip()
         if answer == "取消":
             return AgentResult(
@@ -669,7 +670,7 @@ class ChatAssistantAgent(BaseAgent):
                 data="操作已取消，没有修改任何数据。",
                 model=self._model,
             )
-        accepted = answer == "确认执行" if config["danger"] else answer in {
+        accepted = has_confirmation if config["danger"] else answer in {
             "确认", "执行", "确认执行",
         }
         if accepted:
@@ -708,7 +709,7 @@ class ChatAssistantAgent(BaseAgent):
             },
         )
         content = (
-            f"该操作不可撤销：{config['impact']}请输入“确认执行”后继续。"
+            f"该操作不可撤销：{config['impact']}点击确认按钮即可继续，无需输入确认词。"
             if config["danger"]
             else f"{question['label']}\n\n影响范围：{config['impact']}"
         )

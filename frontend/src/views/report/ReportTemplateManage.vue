@@ -53,8 +53,10 @@
         :data="filteredTemplates"
         v-loading="loading"
         style="width: 100%"
-        empty-text="暂无模板数据"
       >
+        <template #empty>
+          <EmptyState description="还没有自定义模板" action-text="新建模板" @action="openCreateDialog()" />
+        </template>
         <el-table-column prop="name" label="模板名称" min-width="180">
           <template #default="{ row }">
             <div class="cell-name">
@@ -196,6 +198,7 @@
 </template>
 
 <script setup lang="ts">
+import EmptyState from '@/components/common/EmptyState.vue'
 import { ref, computed, onMounted, reactive } from 'vue'
 import { type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, Plus, Search, View, Edit, Delete } from '@element-plus/icons-vue'

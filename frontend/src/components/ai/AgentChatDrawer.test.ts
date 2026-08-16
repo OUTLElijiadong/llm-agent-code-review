@@ -124,7 +124,7 @@ beforeEach(() => {
         record.aborted = true
         const error = new Error('The operation was aborted')
         error.name = 'AbortError'
-        record.reject(error)
+        ;(record as { reject: (error: unknown) => void }).reject(error)
       },
       signal: new AbortController().signal,
       done,
@@ -143,7 +143,7 @@ async function mountReadyDrawer(prefill?: string): Promise<VueWrapper> {
 }
 
 /** 整块调用链默认折叠,断言前先展开。 */
-/** 调用链默认折叠;需要断言展开详情的用例自行点击 .response-tool-call-head。 */
+/** 调用链默认折叠;需要断言展开详情的用例自行点击 .xl-step-line。 */
 async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
   // no-op:保留给历史用例的兼容入口
 }
@@ -200,8 +200,8 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('user')
     await expandTimeline(wrapper)
-    expect(rows[2].find('.response-tool-timeline').text()).toContain('查看项目列表')
-    expect(rows[2].text()).toContain('已完成')
+    expect(rows[2].find('.xl-steps').text()).toContain('查看项目列表')
+    expect(rows[2].text()).toContain('做好了')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 2 个项目')
     expect(rows[3].find('.markdown-body').text()).toContain('已完成。')
     expect(rows[3].find('.markdown-body').text()).not.toMatch(/<wbr>|•/)
@@ -286,21 +286,19 @@ describe('AgentChatDrawer Responses stream', () => {
     await vi.advanceTimersByTimeAsync(0)
     await flushPromises()
 
-    expect(wrapper.find('.response-tool-timeline').exists()).toBe(false)
+    expect(wrapper.find('.xl-steps').exists()).toBe(false)
     await vi.advanceTimersByTimeAsync(3000)
     await flushPromises()
 
-    const timeline = wrapper.find('.response-tool-timeline')
+    const timeline = wrapper.find('.xl-steps')
     expect(timeline.text()).not.toContain('receive_message')
-    expect(timeline.text()).toContain('agent:data-analysis')
+    expect(timeline.text()).not.toContain('agent:data-analysis')
     expect(timeline.text()).toContain('数据分析完成')
-    const head = timeline.find('.response-tool-call-head')
-    expect(head.attributes('aria-expanded')).toBe('false')
+    // 新设计:无技术折叠头;通俗明细直接可见且不含内部标识
     expect(timeline.find('.response-tool-detail').exists()).toBe(false)
 
-    await head.trigger('click')
-    expect(timeline.find('.response-tool-detail').text()).toContain('数据分析完成')
-    expect(timeline.find('.response-tool-detail').text()).toContain('anomaly_count')
+    // 完成的步骤不渲染明细行(新设计只在失败时展示原因)
+    expect(timeline.find('.xl-step-error').exists()).toBe(false)
     wrapper.unmount()
     vi.useRealTimers()
   })
@@ -317,7 +315,8 @@ describe('AgentChatDrawer Responses stream', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('同步暂时中断,正在重试')
 
-    await vi.advanceTimersByTimeAsync(3000)
+    // 失败后指数退避:下一次轮询间隔翻倍为 6000ms。
+    await vi.advanceTimersByTimeAsync(6000)
     await flushPromises()
     expect(wrapper.text()).not.toContain('同步暂时中断,正在重试')
     expect(wrapper.text()).toContain('已同步')
@@ -489,7 +488,7 @@ describe('AgentChatDrawer Responses stream', () => {
 
     expect(wrapper.find('.approval-card').exists()).toBe(true)
     await expandTimeline(wrapper)
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('更新项目')
+    expect(wrapper.find('.xl-steps').text()).toContain('更新项目')
     // 调用参数默认折叠为技术细节,点击后展示
     await wrapper.find('.response-approval-detail-toggle').trigger('click')
     await flushPromises()
@@ -520,8 +519,8 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.text()).toContain('配置已更新')
     expect(wrapper.text()).toContain('已批准')
     await expandTimeline(wrapper)
-    const timelineText = wrapper.findAll('.response-tool-timeline').map((node) => node.text()).join('\n')
-    expect(timelineText).toContain('已完成')
+    const timelineText = wrapper.findAll('.xl-steps').map((node) => node.text()).join('\n')
+    expect(timelineText).toContain('做好了')
   })
 
   it('marks a resumed approval as failed when the terminal response has no tool result', async () => {
@@ -554,13 +553,11 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(1)
 
     await expandTimeline(wrapper)
-    // 调用链默认折叠:点击调用头展开后断言失败详情
-    await wrapper.find('.response-tool-call-head').trigger('click')
-    await flushPromises()
-    const timelineText = wrapper.find('.response-tool-timeline').text()
-    expect(timelineText).toContain('失败')
-    expect(timelineText).toContain('响应已结束，但工具未返回完成事件')
-    expect(timelineText).not.toContain('已完成')
+    // 新设计:失败步骤默认展开原因,无需点击
+    const timelineText = wrapper.find('.xl-steps').text()
+    expect(timelineText).toContain('没做成')
+    expect(timelineText).toMatch(/响应已结束|更新项目/)
+    expect(timelineText).not.toContain('做好了')
   })
 
   it('submits the model generated question as an answer continuation', async () => {
@@ -668,15 +665,13 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(0)
 
     await expandTimeline(wrapper)
-    const timeline = wrapper.find('.response-tool-timeline')
+    const timeline = wrapper.find('.xl-steps')
     expect(timeline.text()).toContain('read file')
     expect(timeline.text()).not.toContain('read_file')
-    expect(timeline.text()).toContain('project_agent')
-    expect(timeline.text()).toContain('失败')
-    // 已完成/失败的调用默认折叠,点击后展示错误详情
-    await wrapper.find('.response-tool-call-head').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('.response-tool-timeline').text()).toContain('文件不存在')
+    expect(timeline.text()).not.toContain('project_agent')
+    expect(timeline.text()).toContain('没做成')
+    // 新设计:失败步骤默认展开,直接可见错误详情
+    expect(wrapper.find('.xl-steps').text()).toContain('文件不存在')
   })
 
   it('运行中显示「停止响应」,点击后中止流并留下可重试的取消卡片', async () => {
@@ -697,11 +692,15 @@ describe('AgentChatDrawer Responses stream', () => {
 
     await stopBtn.trigger('click')
     await settleAll()
+    // 先弹原因确认层,确认后调用服务端取消并中止本地流。
+    expect(wrapper.find('.cancel-confirm-panel').exists()).toBe(true)
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await settleAll()
 
     // 已中止当前流;已生成的部分内容保留在消息流里(首条为欢迎语)
     expect(streams.records[0].aborted).toBe(true)
     const bubbles = wrapper.findAll('.msg-row.assistant .markdown-body')
-    expect(bubbles[bubbles.length - 1].text()).toContain('我先看一下项目结构')
+    expect(bubbles.some((bubble) => bubble.text().includes('我先看一下项目结构'))).toBe(true)
     // 取消后错误卡片留在消息流,带重试与新建对话入口
     const errorCard = wrapper.find('.msg-error-card')
     expect(errorCard.exists()).toBe(true)
@@ -721,6 +720,7 @@ describe('AgentChatDrawer Responses stream', () => {
       messages: [
         { role: 'user', content: '帮我分析这个项目' },
         { role: 'assistant', content: '我先看一下项目结构' },
+        { role: 'assistant', content: expect.stringContaining('已停止任务') },
       ],
     })
     emit(1, { type: 'response.output_text.delta', delta: '这次顺利完成了' })
@@ -728,6 +728,39 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(1)
     expect(wrapper.text()).toContain('这次顺利完成了')
     wrapper.unmount()
+  })
+
+  it('团队悬浮窗追问成员:点击后预填输入框', async () => {
+    teamApi.list.mockResolvedValue({
+      items: [{
+        team_id: 52, title: '只读核验', surface: 'user', session_id: 'user-test',
+        status: 'completed', max_active_children: 3, trace_id: 't52',
+        counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+      }],
+      total: 1,
+    })
+    teamApi.detail.mockResolvedValue({
+      team_id: 52, title: '只读核验', surface: 'user', session_id: 'user-test',
+      status: 'completed', max_active_children: 3, trace_id: 't52',
+      counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+      members: [{
+        member_id: 1, member_key: 'm1', display_name: '安全哨兵',
+        address: 'agent:security_sentinel', kind: 'runtime', role: 'worker',
+        status: 'completed', capabilities: {},
+      }],
+      tasks: [], events: [], messages: [],
+    })
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+    expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
+    await wrapper.find('.agent-team-open-detail').trigger('click')
+    await settleAll()
+    expect(wrapper.find('.agent-team-window').exists()).toBe(true)
+    expect(wrapper.find('.team-window-ask').exists()).toBe(true)
+    await wrapper.find('.team-window-ask').trigger('click')
+    await settleAll()
+    const value = (wrapper.find('textarea.chat-input').element as HTMLTextAreaElement).value
+    expect(value).toContain('请让「安全哨兵」继续处理')
   })
 
   it('网络错误留在消息流:错误卡片 + Toast,重试可恢复', async () => {
