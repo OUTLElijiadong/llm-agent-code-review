@@ -2161,7 +2161,12 @@ async def test_one_time_admin_secret_only_uses_ephemeral_sse_event(
 
     serialized_result = json.dumps(completed.output, ensure_ascii=False)
     ledger = db.query(AgentToolExecution).filter_by(call_id=call.call_id).one()
-    assert secret not in serialized_result
+    # beta_codes.generate 的明文码随一次性结果返回(生成即用,管理员当场转交),
+    # 仅哈希落库;users.reset_password 的临时密码仍只走瞬时 SSE。
+    if capability == "beta_codes.generate":
+        assert secret in serialized_result
+    else:
+        assert secret not in serialized_result
     assert safe_marker in serialized_result
     assert secret not in ledger.result_json
     assert secret not in ledger.arguments_json

@@ -802,6 +802,12 @@ async function handleAskMember({ name }: { name: string; address: string }): Pro
   teamWindowVisible.value = false
   inputText.value = `请让「${name}」继续处理，我的要求是：`
   await nextTick()
+  // 追问模板全选:打字即替换模板前缀,避免「模板+输入」拼接
+  const askInput = chatInputRef.value
+  if (askInput) {
+    askInput.focus()
+    askInput.setSelectionRange(0, askInput.value.length)
+  }
   const enabled = !loading.value && !uploading.value && !sessionRestoring.value && !sessionBusy.value
   if (enabled) {
     chatInputRef.value?.focus()
@@ -1723,6 +1729,14 @@ watch(() => props.prefill, (prefill) => {
   if (!prefill) return
   inputText.value = prefill
   emit('consumed-prefill')
+  // 预填文本整体选中:用户直接打字即整体替换,不会与预填拼接污染首条消息
+  void nextTick(() => {
+    const input = chatInputRef.value
+    if (input) {
+      input.focus()
+      input.setSelectionRange(0, input.value.length)
+    }
+  })
 }, { immediate: true })
 
 function showReconnectHint(): void {
