@@ -223,6 +223,7 @@ def delete_code(db: Session, invite_id: int) -> BetaInviteCode:
         label=invite.label,
         status=invite.status,
     )
+    snapshot.display_prefix = invite.display_prefix
     db.delete(invite)
     db.commit()
     return snapshot
