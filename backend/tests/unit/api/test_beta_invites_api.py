@@ -32,7 +32,7 @@ def beta_client(monkeypatch):
     Base.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     db = session_factory()
-    admin_user = User(username="admin", password="x", role="admin", status=1)
+    admin_user = User(username="admin", password="x", role="super_admin", status=1)
     role = Role(name="普通成员", code="user", status="active", sort=100, is_builtin=1)
     db.add_all([admin_user, role])
     db.commit()
@@ -160,3 +160,17 @@ def test_captcha_exposes_only_beta_switch(beta_client):
     data = response.json()["data"]
     assert data["beta_registration_enabled"] is True
     assert set(data) == {"captcha_id", "question", "beta_registration_enabled"}
+
+
+def test_super_admin_can_delete_beta_code_in_any_state(beta_client):
+    """超级管理员物理删除内测码(含 revoked 状态);行消失且响应标记 deleted。"""
+    client, db = beta_client
+    client.post("/api/admin/beta-codes", json={"count": 1, "expiry_days": 7, "label": "del-test"})
+    listed = client.get("/api/admin/beta-codes").json()["data"]
+    invite_id = listed["items"][0]["id"]
+    client.post(f"/api/admin/beta-codes/{invite_id}/revoke")
+
+    resp = client.delete(f"/api/admin/beta-codes/{invite_id}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["status"] == "deleted"
+    assert db.get(BetaInviteCode, invite_id) is None

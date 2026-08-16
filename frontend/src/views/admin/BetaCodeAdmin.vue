@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
-import { CopyDocument, Plus, Refresh, Remove } from '@element-plus/icons-vue'
+import { CopyDocument, Delete, Plus, Refresh, Remove } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { generateBetaCodes, listBetaCodes, revokeBetaCode } from '@/api/betaCode'
+import { deleteBetaCode, generateBetaCodes, listBetaCodes, revokeBetaCode } from '@/api/betaCode'
 import type { BetaCodeStatus, BetaInviteCode } from '@/types/betaCode'
 
 const loading = ref(false)
@@ -69,6 +69,21 @@ async function handleRevoke(row: BetaInviteCode): Promise<void> {
   })
   await revokeBetaCode(row.id)
   ElMessage.success('内测码已撤销')
+  await loadCodes()
+}
+
+async function handleDelete(row: BetaInviteCode): Promise<void> {
+  await ElMessageBox.confirm(
+    `确认删除内测码记录 ${row.display_prefix}？该操作从数据库物理移除记录，不可恢复。`,
+    '删除内测码',
+    {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    },
+  )
+  await deleteBetaCode(row.id)
+  ElMessage.success('内测码记录已删除')
   await loadCodes()
 }
 
@@ -165,7 +180,12 @@ onMounted(loadCodes)
               :icon="Remove"
               @click="handleRevoke(row)"
             >撤销</el-button>
-            <span v-else class="muted">-</span>
+            <el-button
+              text
+              type="danger"
+              :icon="Delete"
+              @click="handleDelete(row)"
+            >删除</el-button>
           </template>
         </el-table-column>
       </el-table>

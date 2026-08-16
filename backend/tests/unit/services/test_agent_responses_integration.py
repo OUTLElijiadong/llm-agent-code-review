@@ -1290,6 +1290,7 @@ async def test_admin_capability_tools_are_admin_only_and_discover_exact_contract
         "beta_codes.list",
         "beta_codes.generate",
         "beta_codes.revoke",
+        "beta_codes.delete",
     }
 
     monkeypatch.setattr(service_module.rbac_service, "is_admin_user", lambda *_args, **_kwargs: False)

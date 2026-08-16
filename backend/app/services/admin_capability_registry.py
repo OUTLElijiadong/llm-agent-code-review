@@ -248,6 +248,15 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         CRITICAL,
         "user:update",
     ),
+    _cap(
+        "beta_codes.delete",
+        "/admin/beta-codes",
+        "删除内测码记录",
+        "DELETE",
+        "/api/admin/beta-codes/{invite_id}",
+        CRITICAL,
+        "user:update",
+    ),
     # 策略
     _cap("policies.list", "/admin/policies", "查询治理策略", "GET", "/api/admin/policies", permission="agent:view"),
     _cap(
