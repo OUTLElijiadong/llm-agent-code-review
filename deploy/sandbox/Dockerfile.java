@@ -18,7 +18,7 @@ RUN set -eu; \
     mkdir -p /opt/jadx; \
     curl -fsSL --retry 3 "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-${JADX_VERSION}.zip" -o /tmp/jadx.zip; \
     echo "$JADX_SHA256  /tmp/jadx.zip" | sha256sum -c -; \
-    cd /opt/jadx; jar xf /tmp/jadx.zip; test -x /opt/jadx/bin/jadx; \
+    cd /opt/jadx; jar xf /tmp/jadx.zip; chmod 0555 /opt/jadx/bin/jadx; test -x /opt/jadx/bin/jadx; \
     rm -f /tmp/jadx.zip; chmod -R go-w /opt/jadx
 COPY --chmod=0555 runner.sh /opt/prism/runner.sh
 # 构建期自检:烤入的 runner 哈希必须等于注入值,并写入镜像 label 供执行器校验
