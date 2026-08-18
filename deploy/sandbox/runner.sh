@@ -249,47 +249,49 @@ run_decompilation() {
     printf '%s\n' 'PRISM_DECOMPILATION_JSON {"status":"skipped","tool":"none","candidate_count":0,"exit_code":0}'
     return 0
   fi
-  if [ ! -x /opt/jadx/bin/jadx ]; then
-    printf '%s\n' 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"unknown","candidate_count":0,"exit_code":127,"reason":"tool_unavailable","log_ref":"worker.log"}'
-    return 1
-  fi
-  decomp_root="./.prism-decompiled"
-  rm -rf "$decomp_root"
-  mkdir -p "$decomp_root"
   : > /tmp/prism-decomp-input-manifest
   while IFS= read -r artifact; do
     [ -n "$artifact" ] || continue
     sha256sum "$artifact" >> /tmp/prism-decomp-input-manifest
   done < /tmp/prism-decomp-candidates
   input_sha="$(sha256sum /tmp/prism-decomp-input-manifest | cut -d' ' -f1)"
-  candidate_count=0
+  input_artifact_sha256s="$(awk 'BEGIN { printf "[" } { if (NR > 1) printf ","; printf "\"%s\"", $1 } END { printf "]" }' /tmp/prism-decomp-input-manifest)"
+  candidate_count="$(wc -l < /tmp/prism-decomp-input-manifest | tr -d ' ')"
+  if [ ! -x /opt/jadx/bin/jadx ]; then
+    printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"unknown","candidate_count":%s,"input_sha256":"%s","input_artifact_sha256s":%s,"exit_code":127,"reason":"tool_unavailable","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$candidate_count" "$input_sha" "$input_artifact_sha256s"
+    return 1
+  fi
+  decomp_root="./.prism-decompiled"
+  rm -rf "$decomp_root"
+  mkdir -p "$decomp_root"
+  processed_count=0
   while IFS= read -r artifact; do
     [ -n "$artifact" ] || continue
-    candidate_count=$((candidate_count + 1))
-    output_dir="$decomp_root/$candidate_count"
+    processed_count=$((processed_count + 1))
+    output_dir="$decomp_root/$processed_count"
     mkdir -p "$output_dir"
     if timeout 180 /opt/jadx/bin/jadx \
       --output-dir "$output_dir" \
       --no-debug-info \
       --no-inline-anonymous \
       --show-bad-code \
-      "$artifact" >"/tmp/prism-jadx-$candidate_count.out" 2>&1; then
+      "$artifact" >"/tmp/prism-jadx-$processed_count.out" 2>&1; then
       :
     else
       rc=$?
-      printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","exit_code":%s,"reason":"exit_nonzero","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$rc"
-      cat "/tmp/prism-jadx-$candidate_count.out" >&2 || true
+      printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","input_artifact_sha256s":%s,"exit_code":%s,"reason":"exit_nonzero","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$input_artifact_sha256s" "$rc"
+      cat "/tmp/prism-jadx-$processed_count.out" >&2 || true
       return 1
     fi
   done < /tmp/prism-decomp-candidates
   source_count="$(find "$decomp_root" -type f \( -name '*.java' -o -name '*.kt' \) -print | wc -l | tr -d ' ')"
   output_bytes="$(find "$decomp_root" -type f \( -name '*.java' -o -name '*.kt' \) -printf '%s\n' | awk '{sum += $1} END {print sum + 0}')"
   if [ "$source_count" -gt "$max_decomp_files" ] || [ "$output_bytes" -gt "$max_decomp_bytes" ]; then
-    printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","output_file_count":%s,"output_size_bytes":%s,"exit_code":65,"reason":"output_limit","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$source_count" "$output_bytes"
+    printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","input_artifact_sha256s":%s,"output_file_count":%s,"output_size_bytes":%s,"exit_code":65,"reason":"output_limit","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$input_artifact_sha256s" "$source_count" "$output_bytes"
     return 1
   fi
   if [ "$source_count" -le 0 ]; then
-    printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","output_file_count":0,"output_size_bytes":0,"exit_code":65,"reason":"empty_output","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha"
+    printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","input_artifact_sha256s":%s,"output_file_count":0,"output_size_bytes":0,"exit_code":65,"reason":"empty_output","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$input_artifact_sha256s"
     return 1
   fi
   find "$decomp_root" -type f \( -name '*.java' -o -name '*.kt' \) -print \
@@ -297,7 +299,7 @@ run_decompilation() {
     > /tmp/prism-decomp-manifest
   output_sha="$(sha256sum /tmp/prism-decomp-manifest | cut -d' ' -f1)"
   cp /tmp/prism-decomp-manifest ./decompilation-manifest
-  printf 'PRISM_DECOMPILATION_JSON {"status":"succeeded","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","output_file_count":%s,"output_size_bytes":%s,"output_sha256":"%s","exit_code":0,"log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$source_count" "$output_bytes" "$output_sha"
+  printf 'PRISM_DECOMPILATION_JSON {"status":"succeeded","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","input_artifact_sha256s":%s,"output_file_count":%s,"output_size_bytes":%s,"output_sha256":"%s","exit_code":0,"log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$input_artifact_sha256s" "$source_count" "$output_bytes" "$output_sha"
   return 0
 }
 

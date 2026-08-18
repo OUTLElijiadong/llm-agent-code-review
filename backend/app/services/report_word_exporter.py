@@ -229,6 +229,51 @@ def _build_summary_table(doc: Any, statistics: Dict[str, Any]) -> None:
         row.cells[1].width = Pt(80)
 
 
+def _build_decompilation_evidence(doc: Any, evidence: Dict[str, Any]) -> None:
+    """将结构化反编译证据写入 Word 报告。"""
+    decompilation = evidence.get("decompilation") if isinstance(evidence, dict) else None
+    if not isinstance(decompilation, dict):
+        return
+
+    artifact_refs = decompilation.get("artifact_refs")
+    if isinstance(artifact_refs, list):
+        artifacts = ", ".join(str(item) for item in artifact_refs)
+    else:
+        artifacts = str(artifact_refs or "-")
+    raw_input_hashes = decompilation.get("input_artifact_sha256s")
+    if isinstance(raw_input_hashes, list):
+        input_artifact_sha256s = ", ".join(str(item) for item in raw_input_hashes)
+    else:
+        input_artifact_sha256s = str(raw_input_hashes or "-")
+    rows = [
+        ("状态", decompilation.get("status") or "-"),
+        ("工具", f"{decompilation.get('tool') or '-'} {decompilation.get('tool_version') or ''}".strip()),
+        ("输入清单 SHA-256", decompilation.get("input_sha256") or "-"),
+        ("原始制品 SHA-256", input_artifact_sha256s),
+        ("输出 SHA-256", decompilation.get("output_sha256") or "-"),
+        ("输出文件数", decompilation.get("output_file_count", 0)),
+        ("输出字节数", decompilation.get("output_size_bytes", 0)),
+        ("退出码", decompilation.get("exit_code", "-")),
+        ("日志", decompilation.get("log_ref") or "-"),
+        ("制品", artifacts),
+    ]
+    doc.add_heading("反编译证据", level=1)
+    table = doc.add_table(rows=len(rows) + 1, cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = "Table Grid"
+    for row_idx, (label, value) in enumerate([("字段", "值"), *rows]):
+        label_para = table.rows[row_idx].cells[0].paragraphs[0]
+        value_para = table.rows[row_idx].cells[1].paragraphs[0]
+        _add_run(label_para, str(label), bold=(row_idx == 0), size=10)
+        _add_run(
+            value_para,
+            str(value),
+            bold=(row_idx == 0),
+            font_name=_CODE_FONT if row_idx > 0 else _CHINESE_FONT,
+            size=9 if row_idx > 0 else 10,
+        )
+
+
 def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity: str) -> None:
     """构建单个 issue 的段落(标题 + 基本信息 + 描述 + 修复建议 + 修复代码)。
 
@@ -373,10 +418,13 @@ def export_to_word(
         summary_para = doc.add_paragraph()
         _add_run(summary_para, str(summary_text), size=11)
 
-    # 3. 统计摘要表
+    # 3. 反编译证据
+    _build_decompilation_evidence(doc, context.get("evidence", {}))
+
+    # 4. 统计摘要表
     _build_summary_table(doc, statistics)
 
-    # 4. 问题详情(按严重度分组)
+    # 5. 问题详情(按严重度分组)
     _build_issues_section(doc, sorted_issues)
 
     # 导出字节流

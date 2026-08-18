@@ -300,12 +300,14 @@ def run_jadx_cli(
         suffix = f"：{detail}" if detail else ""
         raise DecompilationError(f"JADX 反编译失败，退出码 {completed.returncode}{suffix}")
     manifest = manifest_decompiled_sources(output_dir)
+    input_sha256 = hashlib.sha256(input_path.read_bytes()).hexdigest()
     return {
         "status": DecompilationStatus.SUCCEEDED.value,
         "input_kind": inspect_decompilation_input(input_path.name, input_path.read_bytes()).kind.value,
         "tool": "jadx",
         "tool_version": tool_version,
-        "input_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
+        "input_sha256": input_sha256,
+        "input_artifact_sha256s": [input_sha256],
         "output_sha256": manifest["output_sha256"],
         "output_file_count": manifest["output_file_count"],
         "output_size_bytes": manifest["output_size_bytes"],

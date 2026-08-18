@@ -9,6 +9,7 @@ def test_decompilation_marker_requires_exactly_one_valid_record() -> None:
         'PRISM_DECOMPILATION_JSON {"status":"succeeded","tool":"jadx",'
         '"tool_version":"1.5.6","candidate_count":1,"output_file_count":2,'
         '"input_sha256":"' + "c" * 64 + '","output_sha256":"' + "a" * 64 + '",'
+        '"input_artifact_sha256s":["' + "d" * 64 + '"],'
         '"output_size_bytes":123,"exit_code":0,"log_ref":"worker.log",'
         '"artifact_refs":["decompilation-manifest"]}'
     )
@@ -18,6 +19,7 @@ def test_decompilation_marker_requires_exactly_one_valid_record() -> None:
     assert result["output_file_count"] == 2
     assert len(result["output_sha256"]) == 64
     assert result["input_sha256"] == "c" * 64
+    assert result["input_artifact_sha256s"] == ["d" * 64]
     assert result["exit_code"] == 0
     assert result["artifact_refs"] == ["decompilation-manifest"]
 
@@ -39,6 +41,7 @@ def test_fact_gate_report_includes_decompilation_evidence() -> None:
                     "tool": "jadx",
                     "tool_version": "1.5.6",
                     "input_sha256": "c" * 64,
+                    "input_artifact_sha256s": ["d" * 64],
                     "output_sha256": "b" * 64,
                     "exit_code": 0,
                     "log_ref": "worker.log",
@@ -51,10 +54,24 @@ def test_fact_gate_report_includes_decompilation_evidence() -> None:
     assert "`succeeded`" in report
     assert "`1.5.6`" in report
     assert "b" * 64 in report
-    assert "输入 SHA-256" in report
+    assert "输入清单 SHA-256" in report
+    assert "原始制品 SHA-256" in report
+    assert "d" * 64 in report
     assert "worker.log" in report
 
 
 def test_decompilation_marker_rejects_invalid_numeric_fields() -> None:
     log = 'PRISM_DECOMPILATION_JSON {"status":"succeeded","candidate_count":"bad"}'
     assert sandbox_service._extract_decompilation_result(log) is None
+
+
+def test_succeeded_marker_requires_one_raw_hash_per_candidate() -> None:
+    base = (
+        'PRISM_DECOMPILATION_JSON {"status":"succeeded","tool":"jadx",'
+        '"candidate_count":1,"input_sha256":"' + "c" * 64 + '",'
+        '"output_sha256":"' + "a" * 64 + '","exit_code":0'
+    )
+    assert sandbox_service._extract_decompilation_result(base + "}") is None
+    assert sandbox_service._extract_decompilation_result(
+        base + ',"input_artifact_sha256s":["not-a-hash"]}'
+    ) is None

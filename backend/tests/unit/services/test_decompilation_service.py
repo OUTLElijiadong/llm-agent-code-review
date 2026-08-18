@@ -177,6 +177,7 @@ def test_run_jadx_cli_returns_structured_evidence(tmp_path: Path, monkeypatch: p
     assert evidence["exit_code"] == 0
     assert evidence["output_file_count"] == 1
     assert len(evidence["input_sha256"]) == 64
+    assert evidence["input_artifact_sha256s"] == [evidence["input_sha256"]]
     assert len(evidence["output_sha256"]) == 64
 
 

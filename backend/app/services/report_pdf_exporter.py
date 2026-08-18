@@ -103,6 +103,11 @@ def _build_styles(font_name: str) -> Dict[str, ParagraphStyle]:
             fontName=font_name, fontSize=10, leading=16,
             textColor=colors.HexColor("#374151"),
         ),
+        "table_header": ParagraphStyle(
+            "ReportTableHeader", parent=base["Normal"],
+            fontName=font_name, fontSize=10, leading=16,
+            textColor=colors.whitesmoke,
+        ),
         "code": ParagraphStyle(
             "ReportCode", parent=base["Code"],
             fontName="Courier", fontSize=9, leading=13,
@@ -248,6 +253,65 @@ def _build_summary_table(
         ("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#FED7AA")),
     ]))
     return table
+
+
+def _build_decompilation_evidence_elements(
+    evidence: Dict[str, Any],
+    styles: Dict[str, ParagraphStyle],
+    font_name: str,
+) -> List[Any]:
+    """构建可核对的反编译证据章节。"""
+    decompilation = evidence.get("decompilation") if isinstance(evidence, dict) else None
+    if not isinstance(decompilation, dict):
+        return []
+
+    artifact_refs = decompilation.get("artifact_refs")
+    if isinstance(artifact_refs, list):
+        artifacts = ", ".join(str(item) for item in artifact_refs)
+    else:
+        artifacts = str(artifact_refs or "-")
+    raw_input_hashes = decompilation.get("input_artifact_sha256s")
+    if isinstance(raw_input_hashes, list):
+        input_artifact_sha256s = ", ".join(str(item) for item in raw_input_hashes)
+    else:
+        input_artifact_sha256s = str(raw_input_hashes or "-")
+    rows = [
+        ("状态", decompilation.get("status") or "-"),
+        ("工具", f"{decompilation.get('tool') or '-'} {decompilation.get('tool_version') or ''}".strip()),
+        ("输入清单 SHA-256", decompilation.get("input_sha256") or "-"),
+        ("原始制品 SHA-256", input_artifact_sha256s),
+        ("输出 SHA-256", decompilation.get("output_sha256") or "-"),
+        ("输出文件数", decompilation.get("output_file_count", 0)),
+        ("输出字节数", decompilation.get("output_size_bytes", 0)),
+        ("退出码", decompilation.get("exit_code", "-")),
+        ("日志", decompilation.get("log_ref") or "-"),
+        ("制品", artifacts),
+    ]
+    table_data: List[List[Any]] = [[
+        Paragraph("字段", styles["table_header"]),
+        Paragraph("值", styles["table_header"]),
+    ]]
+    for label, value in rows:
+        table_data.append([
+            Paragraph(escape(str(label)), styles["normal"]),
+            Paragraph(escape(str(value)), styles["code"]),
+        ])
+    table = Table(table_data, colWidths=[38 * mm, 132 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#374151")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("FONTNAME", (0, 0), (-1, 0), font_name),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    return [
+        Paragraph("反编译证据", styles["heading"]),
+        table,
+        Spacer(1, 6 * mm),
+    ]
 
 
 def _build_issue_section(
@@ -397,6 +461,7 @@ def export_to_pdf(
         leftMargin=18 * mm,
         rightMargin=18 * mm,
         title=f"代码审查报告 - {task_info.get('task_name', '')}",
+        pageCompression=0,
     )
 
     elements: List[Any] = []
@@ -411,12 +476,17 @@ def export_to_pdf(
         elements.append(Paragraph(escape(str(summary_text)), styles["normal"]))
         elements.append(Spacer(1, 4 * mm))
 
-    # 3. 统计摘要
+    # 3. 反编译证据
+    elements.extend(_build_decompilation_evidence_elements(
+        context.get("evidence", {}), styles, font_name,
+    ))
+
+    # 4. 统计摘要
     elements.append(Paragraph("统计摘要", styles["heading"]))
     elements.append(_build_summary_table(statistics, font_name))
     elements.append(Spacer(1, 6 * mm))
 
-    # 4. 问题详情(按严重度分组)
+    # 5. 问题详情(按严重度分组)
     elements.extend(_build_issues_section(sorted_issues, styles, font_name))
 
     # 构建 PDF

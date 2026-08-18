@@ -1962,6 +1962,19 @@ def _extract_decompilation_result(log_text: str) -> dict[str, Any] | None:
         return None
     if output_sha256 and not re.fullmatch(r"[0-9a-f]{64}", output_sha256):
         return None
+    raw_input_artifact_sha256s = result.get("input_artifact_sha256s")
+    input_artifact_sha256s: list[str] = []
+    if raw_input_artifact_sha256s is not None:
+        if not isinstance(raw_input_artifact_sha256s, list):
+            return None
+        input_artifact_sha256s = [str(item) for item in raw_input_artifact_sha256s]
+        if any(not re.fullmatch(r"[0-9a-f]{64}", item) for item in input_artifact_sha256s):
+            return None
+    if status == "succeeded" and (
+        not input_sha256
+        or len(input_artifact_sha256s) != candidate_count
+    ):
+        return None
     try:
         output_size_bytes = int(result.get("output_size_bytes") or 0)
     except (TypeError, ValueError):
@@ -1981,6 +1994,7 @@ def _extract_decompilation_result(log_text: str) -> dict[str, Any] | None:
         "candidate_count": candidate_count,
         "output_file_count": output_file_count,
         "input_sha256": input_sha256,
+        "input_artifact_sha256s": input_artifact_sha256s,
         "output_sha256": output_sha256,
         "output_size_bytes": output_size_bytes,
         "exit_code": raw_exit_code,
@@ -2141,7 +2155,12 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
         if decompilation.get("tool_version"):
             details.append(f"版本：`{decompilation['tool_version']}`")
         if decompilation.get("input_sha256"):
-            details.append(f"输入 SHA-256：`{decompilation['input_sha256']}`")
+            details.append(f"输入清单 SHA-256：`{decompilation['input_sha256']}`")
+        if decompilation.get("input_artifact_sha256s"):
+            artifacts = "、".join(
+                f"`{digest}`" for digest in decompilation["input_artifact_sha256s"]
+            )
+            details.append(f"原始制品 SHA-256：{artifacts}")
         if decompilation.get("output_sha256"):
             details.append(f"派生源码 SHA-256：`{decompilation['output_sha256']}`")
         if "output_file_count" in decompilation:

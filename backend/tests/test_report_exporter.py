@@ -9,6 +9,8 @@
 - IssueOut Pydantic 模型与原生 dict 输入兼容性
 - 内置模板载入
 """
+import io
+import zipfile
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -26,6 +28,8 @@ from app.services.report_exporter import (
     export_to_json,
     load_builtin_template,
 )
+from app.services.report_pdf_exporter import export_to_pdf
+from app.services.report_word_exporter import export_to_word
 
 # ============ 测试数据工厂 ============
 
@@ -632,3 +636,53 @@ def test_export_to_html_all_three_templates_with_empty_issues():
         html = export_to_html(task, [], "", 90, tpl)
         assert "<!DOCTYPE html>" in html
         assert "未发现问题" in html or "暂无高危漏洞" in html
+
+
+def _decompilation_evidence() -> Dict[str, Any]:
+    return {
+        "decompilation": {
+            "status": "succeeded",
+            "tool": "jadx",
+            "tool_version": "1.5.6",
+            "input_sha256": "98f7476e" + "1" * 56,
+            "input_artifact_sha256s": ["3a47fa04" + "3" * 56],
+            "output_sha256": "8e9350b2" + "2" * 56,
+            "output_file_count": 2,
+            "output_size_bytes": 1369,
+            "exit_code": 0,
+            "log_ref": "worker.log",
+            "artifact_refs": ["decompilation-manifest"],
+        }
+    }
+
+
+def test_html_templates_render_structured_decompilation_evidence():
+    """三套 HTML 报告必须实际展示反编译哈希和工具版本。"""
+    for template_type in ("simple", "detailed", "compliance"):
+        html = export_to_html(
+            _make_task(), [], "摘要", 90,
+            load_builtin_template(template_type),
+            _decompilation_evidence(),
+        )
+        assert "反编译证据" in html
+        assert "jadx 1.5.6" in html
+        assert "98f7476e" in html
+        assert "3a47fa04" in html
+        assert "8e9350b2" in html
+
+
+def test_pdf_and_word_render_structured_decompilation_evidence():
+    """PDF/Word 报告必须包含可人工核对的反编译哈希。"""
+    evidence = _decompilation_evidence()
+    pdf = export_to_pdf(_make_task(), [], "摘要", 90, evidence=evidence)
+    assert b"98f7476e" in pdf
+    assert b"3a47fa04" in pdf
+    assert b"8e9350b2" in pdf
+
+    word = export_to_word(_make_task(), [], "摘要", 90, evidence=evidence)
+    with zipfile.ZipFile(io.BytesIO(word)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+    assert "反编译证据" in document_xml
+    assert "98f7476e" in document_xml
+    assert "3a47fa04" in document_xml
+    assert "8e9350b2" in document_xml

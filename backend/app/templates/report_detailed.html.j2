@@ -90,6 +90,22 @@
     <div class="summary-box">{{ summary }}</div>
     {% endif %}
 
+    {% if evidence and evidence.decompilation %}
+    {% set decomp = evidence.decompilation %}
+    <h2>反编译证据</h2>
+    <div class="summary-box">
+      <div><strong>状态:</strong> {{ decomp.status or "-" }}</div>
+      <div><strong>工具:</strong> {{ decomp.tool or "-" }} {{ decomp.tool_version or "" }}</div>
+      <div><strong>输入清单 SHA-256:</strong> <code>{{ decomp.input_sha256 or "-" }}</code></div>
+      {% if decomp.input_artifact_sha256s %}<div><strong>原始制品 SHA-256:</strong> <code>{{ decomp.input_artifact_sha256s | join(", ") }}</code></div>{% endif %}
+      <div><strong>输出 SHA-256:</strong> <code>{{ decomp.output_sha256 or "-" }}</code></div>
+      <div><strong>输出:</strong> {{ decomp.output_file_count or 0 }} 个文件 / {{ decomp.output_size_bytes or 0 }} 字节</div>
+      <div><strong>退出码:</strong> {{ decomp.exit_code if decomp.exit_code is not none else "-" }}</div>
+      {% if decomp.log_ref %}<div><strong>日志:</strong> {{ decomp.log_ref }}</div>{% endif %}
+      {% if decomp.artifact_refs %}<div><strong>制品:</strong> {{ decomp.artifact_refs | join(", ") }}</div>{% endif %}
+    </div>
+    {% endif %}
+
     <h2>任务概览</h2>
     <div class="overview">
       <div class="stat-card"><div class="stat-num">{{ task_info.total_files or 0 }}</div><div class="stat-label">审查文件数</div></div>
