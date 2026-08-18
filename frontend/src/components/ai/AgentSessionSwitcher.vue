@@ -89,6 +89,16 @@ function select(sessionId: string): void {
   emit('select', sessionId)
 }
 
+/** 外部主动聚焦某会话(如后台 mesh 消息处理完成):仅当目标在列表且非当前忙碌时切换。 */
+function focusSession(sessionId: string): void {
+  if (!sessionId || sessionId === activeId.value) return
+  if (!sessions.value.some((item) => item.id === sessionId)) return
+  // 当前会话忙碌(运行/等待审批)时不切走,保留用户上下文。
+  const current = sessions.value.find((item) => item.id === activeId.value)
+  if (current && inferBusy(current)) return
+  select(sessionId)
+}
+
 function createSession(): void {
   const meta = createAgentChatSession(props.storageKey, props.idPrefix)
   pendingHeartbeatId = meta.id
@@ -149,9 +159,13 @@ function restoreSessionAfterArchiveFailure(): void {
 
 async function ensureFreshOnOpen(): Promise<void> {
   // 首次打开前先拉一次服务端权威状态,避免用陈旧本地快照把已完成会话当忙碌。
+  // 必须 await 完成后再做下面的 pristine/新建判断,否则在 discovery 未落库时
+  // 会把「服务端 running 但本地无快照」的会话误判为空,进而误新建顶掉它。
   if (props.discoverRemote && !discoveryLoadedOnce.value) {
     await refreshFromAgentMesh()
   }
+  // discovery 完成后,会话列表与权威运行状态已就位;此前的任何 select/新建都基于
+  // 不完整信息,这里以最新 sessions 重新评估,确保忙碌会话不会被误切/覆盖。
   const welcomeText = props.welcomeText ?? ''
   const current = sessions.value.find((item) => item.id === activeId.value)
   // 1) 任一历史会话未完成(运行中/等待审批/等待输入) → 优先跳回该会话,
@@ -162,7 +176,9 @@ async function ensureFreshOnOpen(): Promise<void> {
     return
   }
   // 2) 当前就是空的新对话(无输入输出) → 保留它,不重复创建空白条目。
-  if (current && isPristineAgentChatSession(current.id, welcomeText, current.title)) return
+  //    pristine 判断只看本地快照,对「无本地快照但服务端 running」的会话会误判为空,
+  //    因此叠加 inferBusy(含服务端权威状态)兜底,忙碌会话绝不当作空会话被跳过/顶掉。
+  if (current && !inferBusy(current) && isPristineAgentChatSession(current.id, welcomeText, current.title)) return
   // 3) 历史对话均已完成后:复用既有空对话。
   const reusable = findPristineAgentChatSession(sessions.value, welcomeText, busyIds.value)
   if (reusable) {
@@ -300,6 +316,28 @@ async function refreshFromAgentMesh(): Promise<void> {
         activeId.value = merged[0].id
         if (activeId.value !== previousActiveId) emit('select', activeId.value)
       }
+    } else {
+      // 自动聚焦「最新活跃对话」:仅当前停留在「确知的空会话」时让位,
+      // 有内容/忙碌/非占位标题的对话绝不切走(保留用户上下文)。
+      // 注意:此处 remoteRunState 已在上方赋值完成,inferBusy 用的是权威状态。
+      const currentMeta = sessions.value.find((item) => item.id === activeId.value)
+      const currentIdle = currentMeta
+        && !inferBusy(currentMeta)
+        && isPristineAgentChatSession(currentMeta.id, props.welcomeText ?? '', currentMeta.title)
+      if (currentIdle) {
+        const liveliest = discovered
+          .filter((item) => item.id !== activeId.value && merged.some((m) => m.id === item.id))
+          .sort((a, b) => Date.parse(b.lastSeenAt || '') - Date.parse(a.lastSeenAt || ''))[0]
+        if (liveliest) {
+          // 该会话刚活跃过(近 30s),或正有任务在跑——值得把用户带过去。
+          const recent = Date.now() - Date.parse(liveliest.lastSeenAt || '') < 30_000
+          const occupied = isAgentResponseSessionOccupied(liveliest.activeRunStatus)
+          if (recent || occupied) {
+            activeId.value = liveliest.id
+            if (activeId.value !== previousActiveId) emit('select', activeId.value)
+          }
+        }
+      }
     }
     notify()
   } catch {
@@ -309,7 +347,7 @@ async function refreshFromAgentMesh(): Promise<void> {
   }
 }
 
-defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, removeSession, restoreSessionAfterArchiveFailure })
+defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, removeSession, restoreSessionAfterArchiveFailure, focusSession })
 </script>
 
 <template>

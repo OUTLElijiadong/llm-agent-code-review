@@ -1,4 +1,5 @@
 import {
+  AGENT_MESH_SESSION_GONE_CODE,
   heartbeatAgentMesh,
   pullAgentMeshInbox,
   type AgentMeshMessage,
@@ -18,6 +19,11 @@ export interface AgentMeshBridgeOptions {
   getActiveRun?: () => { run_id?: string; status?: string } | null
   isBusy: (sessionId: string) => boolean
   onMessage: (message: AgentMeshMessage, sessionId: string) => Promise<boolean>
+  /**
+   * 某会话被判定「已归档/未注册」(轮询命中 40321)时回调。
+   * 宿主应让切换器从服务端重新收敛会话列表,把该会话剔除,停止后续轮询。
+   */
+  onSessionGone?: (sessionId: string) => void
   intervalMs?: number
 }
 
@@ -27,10 +33,27 @@ export interface AgentMeshBridge {
   syncNow: () => Promise<void>
 }
 
+/** 从 axios reject 的对象里读出后端业务码(Resp 或 AxiosError 两种形态都兼容)。 */
+function errorCode(reason: unknown): number | undefined {
+  if (!reason || typeof reason !== 'object') return undefined
+  // http.ts 拦截器 reject 的是 data(Resp) —— 直接带 code
+  const direct = (reason as { code?: unknown }).code
+  if (typeof direct === 'number') return direct
+  return undefined
+}
+
 export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMeshBridge {
   const handled = new Set<string>()
+  /** 本轮已判定归档/未注册的会话:跳过轮询,避免对死会话反复 heartbeat+403。 */
+  const goneSessions = new Set<string>()
   let timer: number | undefined
   let syncing = false
+
+  function markGone(sessionId: string): void {
+    if (goneSessions.has(sessionId)) return
+    goneSessions.add(sessionId)
+    options.onSessionGone?.(sessionId)
+  }
 
   async function syncNow(): Promise<void> {
     if (syncing) return
@@ -46,6 +69,8 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
     try {
       const activeRun = options.getActiveRun?.()
       for (const session of sessions) {
+        // 已归档会话跳过 heartbeat:服务端本就不会复活它,徒增一次无效请求。
+        if (goneSessions.has(session.id)) continue
         const isCurrent = session.id === currentSessionId
         await heartbeatAgentMesh({
           surface: options.surface,
@@ -61,8 +86,19 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
         (left, right) => Number(right.id === currentSessionId) - Number(left.id === currentSessionId),
       )
       for (const session of orderedSessions) {
+        if (goneSessions.has(session.id)) continue
         if (options.isBusy(session.id)) continue
-        const inbox = await pullAgentMeshInbox(options.surface, session.id, 20)
+        let inbox: AgentMeshMessage[]
+        try {
+          inbox = await pullAgentMeshInbox(options.surface, session.id, 20)
+        } catch (reason) {
+          // 会话已归档/未注册:正常生命周期,标记后跳过,并通知宿主收敛会话列表。
+          if (errorCode(reason) === AGENT_MESH_SESSION_GONE_CODE) {
+            markGone(session.id)
+            continue
+          }
+          throw reason
+        }
         const message = inbox.find((item) => (
           item.status === 'delivered' && !handled.has(item.message_id)
         ))

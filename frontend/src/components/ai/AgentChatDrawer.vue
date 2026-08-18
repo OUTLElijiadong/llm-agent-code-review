@@ -253,6 +253,8 @@ const meshBridge = createAgentMeshBridge({
   getActiveRun: () => sessionRun.value,
   isBusy: isMeshSessionBusy,
   onMessage: handleMeshMessage,
+  // 会话被服务端归档(空会话定时清理/他端删除)后,让切换器重新收敛列表并剔除它
+  onSessionGone: () => { void switcherRef.value?.refreshFromAgentMesh() },
 })
 
 function messageId(): string {
@@ -597,6 +599,8 @@ async function runBackgroundMeshMessage(
   })
   try {
     await handle.done
+    // 后台会话处理完成:把小菱聚焦到刚活跃起来的这条对话(忙碌/有内容的当前会话不切走)
+    if (succeeded) switcherRef.value?.focusSession(targetSessionId)
     return succeeded
   } catch {
     return false
@@ -1926,7 +1930,7 @@ onMounted(() => {
               </div>
             </Transition>
 
-            <div ref="chatBody" class="chat-body" @click="onMessageClick">
+            <div ref="chatBody" class="chat-body" :class="{ 'is-restoring': sessionRestoring }" @click="onMessageClick">
             <div v-for="(msg, i) in messages" :key="msg.id ?? i" class="msg-row" :class="msg.role">
               <div class="msg-avatar">
                 <template v-if="msg.role === 'user'">U</template>
@@ -2233,7 +2237,7 @@ onMounted(() => {
                 <PrismMascot :size="26" :status="'running'" />
               </div>
               <div class="msg-bubble typing" aria-label="小菱正在思考">
-                <AiOrb :size="30" state="thinking" :halo="false" />
+                <AiOrb :size="28" state="thinking" :halo="false" />
                 <span class="typing-label">小菱正在想</span>
                 <span class="typing-dot" />
                 <span class="typing-dot" />
@@ -2576,6 +2580,8 @@ onMounted(() => {
   z-index: 1;
   pointer-events: none;
   opacity: 0.95;
+  /* 吉祥物周围的光谱环境光晕,营造「AI 在场」的氛围 */
+  filter: drop-shadow(0 8px 24px rgba(91, 88, 232, 0.22)) drop-shadow(0 2px 8px rgba(61, 188, 217, 0.14));
 }
 
 .quick-questions {
@@ -2592,31 +2598,49 @@ onMounted(() => {
 .quick-question {
   border: 1px solid var(--brand-200);
   border-radius: 999px;
-  background: var(--brand-50);
+  /* 玻璃拟态白胶囊:半透渐变 + 内高光 */
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(239, 238, 254, 0.78));
   color: var(--brand-700);
   font-size: var(--fs-xs);
   min-height: 36px;
   padding: 8px var(--sp-4);
   cursor: pointer;
-  box-shadow: var(--shadow-1);
+  box-shadow: 0 2px 8px rgba(91, 88, 232, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.7);
   transition: all var(--transition-fast);
   white-space: nowrap;
+  /* 逐个错峰入场 */
+  animation: quick-question-in 0.4s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
+}
+.quick-question:nth-child(2) { animation-delay: 60ms; }
+.quick-question:nth-child(3) { animation-delay: 120ms; }
+
+@keyframes quick-question-in {
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 .quick-question:hover {
-  background: var(--brand-100);
+  background: linear-gradient(135deg, #ffffff, var(--brand-100));
   border-color: var(--brand-300);
   transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(91, 88, 232, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .quick-question { transition: none; }
+  .quick-question { transition: none; animation: none; }
   .quick-question:hover { transform: none; }
   .msg-copy-btn { transition: none; }
   .typing-label { animation: none; }
+  .typing-dot { animation: none; opacity: 1; transform: none; }
   .msg-bubble { animation: none; }
+  .msg-row.assistant .msg-bubble { transition: none; }
+  .msg-row.assistant .msg-bubble:hover { transform: none; }
   .chat-header.is-running::after { animation: none; opacity: 0.6; }
   .stop-btn { transition: none; }
+  .run-running i, .run-waiting i { animation: none; opacity: 1; }
+  .send-btn { transition: none; }
+  .send-btn:hover:not(:disabled) { transform: none; }
+  .chat-input { transition: none; }
 }
 
 .mascot-float-enter-active,
@@ -2658,7 +2682,18 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* 极淡品牌氛围底:斜向紫青渐变 + 顶部光晕,替代纯白贯穿 */
+  background:
+    radial-gradient(circle at 85% 0%, rgba(142, 136, 245, 0.10), transparent 42%),
+    radial-gradient(circle at 8% 100%, rgba(61, 188, 217, 0.07), transparent 46%),
+    linear-gradient(180deg, #fbfbfe 0%, #f7f8fc 100%);
+  /* 滚动内容在顶/底部轻微柔化(8px),不切文字与阴影 */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
 }
+
+/* 恢复历史时整片渲染,跳过入场动画避免整屏闪烁 */
+.chat-body.is-restoring .msg-bubble { animation: none; }
 
 .msg-row {
   display: flex;
@@ -2790,10 +2825,37 @@ onMounted(() => {
 }
 
 .msg-row.assistant .msg-bubble {
-  background: #fff;
+  /* 极浅品牌渐变底 + 光谱发丝线,替代纯白平涂,与用户气泡的渐变质感呼应 */
+  background: linear-gradient(160deg, #ffffff 0%, #f7f7ff 55%, #f2f6ff 100%);
   border: 1px solid var(--gray-200);
   border-top-left-radius: 4px;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 2px 10px rgba(91, 88, 232, 0.06), 0 1px 3px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+/* 顶部光谱发丝线:贴合气泡顶边,overflow:hidden 裁出圆角,hover 时显色 */
+.msg-row.assistant .msg-bubble::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg,
+    var(--brand-400), var(--accent-400), var(--brand-300));
+  opacity: 0.35;
+  transition: opacity var(--transition-base);
+  pointer-events: none;
+}
+
+.msg-row.assistant .msg-bubble:hover {
+  box-shadow: 0 6px 18px rgba(91, 88, 232, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+
+.msg-row.assistant .msg-bubble:hover::before {
+  opacity: 0.85;
 }
 
 .msg-content {
@@ -3247,17 +3309,23 @@ onMounted(() => {
 .chat-input {
   flex: 1;
   border: 1px solid var(--color-border-light);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 10px 12px;
   font-size: 13px;
   line-height: 1.5;
   resize: none;
   outline: none;
   font-family: inherit;
-  transition: border-color var(--transition-fast);
+  background: rgba(255, 255, 255, 0.85);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
 
-.chat-input:focus { border-color: var(--brand-400); }
+/* focus 时品牌紫光晕,替代仅换边色 */
+.chat-input:focus {
+  border-color: var(--brand-400);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(91, 88, 232, 0.12), 0 2px 8px rgba(91, 88, 232, 0.08);
+}
 
 .source-upload-input {
   position: absolute;
@@ -3307,18 +3375,25 @@ onMounted(() => {
   min-height: 40px;
   padding: 8px 24px;
   border: none;
-  border-radius: 8px;
-  background: var(--brand-500);
+  border-radius: 10px;
+  /* 品牌紫渐变 + 投影,替代纯平色 */
+  background: linear-gradient(135deg, var(--brand-500), var(--brand-600));
   color: #fff;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  box-shadow: 0 3px 10px rgba(91, 88, 232, 0.28);
   transition: all var(--transition-fast);
   white-space: nowrap;
 }
 
-.send-btn:hover:not(:disabled) { background: var(--brand-600); }
-.send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.send-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--brand-400), var(--brand-600));
+  box-shadow: 0 6px 16px rgba(91, 88, 232, 0.38);
+  transform: translateY(-1px);
+}
+.send-btn:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+.send-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 
 /* 停止响应:红色醒目,运行中替换发送按钮 */
 .stop-btn {

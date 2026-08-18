@@ -141,4 +141,20 @@ describe('mergeAgentChatSessions 服务端发现优先', () => {
     expect(merged[0].title).toBe('本地标题')
     expect(merged[1].title).toBe('远程会话')
   })
+
+  it('心跳未落库的 preserve 会话(新建/当前)始终排在最前不被误切', () => {
+    // preserve 的会话是「本地新建、服务端 heartbeat 尚未落库」的,因此只出现在 local,
+    // 不出现在 discovered——即使服务端已有会话,它仍被保留在列表中避免误切。
+    const merged = mergeAgentChatSessions(
+      [{ id: 'user-current', title: '当前对话', createdAt: 30 }],
+      [
+        { id: 'user-fresh', title: '最新对话', surface: 'user', kind: 'session', lastSeenAt: '2026-08-12T00:05:00Z' },
+      ],
+      'user',
+      new Set(['user-current']),
+    )
+
+    expect(merged.some((item) => item.id === 'user-current')).toBe(true)
+    expect(merged[0].id).toBe('user-current')
+  })
 })

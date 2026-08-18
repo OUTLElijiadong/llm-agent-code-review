@@ -63,6 +63,13 @@ export function listAgentMeshAgents(): Promise<AgentMeshDiscovery> {
   return get<AgentMeshDiscovery>('/agent-mesh/agents')
 }
 
+/**
+ * 目标会话已归档/未注册(或表面归属不符)时的后端业务码。
+ * 轮询收件箱命中它是正常生命周期(空会话 24h 被服务端定时归档、他端删除等),
+ * 不该弹全局红字;由桥接层静默并触发会话收敛。
+ */
+export const AGENT_MESH_SESSION_GONE_CODE = 40321
+
 export function pullAgentMeshInbox(
   surface: AgentMeshSurface,
   sessionId: string,
@@ -72,7 +79,7 @@ export function pullAgentMeshInbox(
     surface,
     session_id: sessionId,
     limit,
-  })
+  }, [AGENT_MESH_SESSION_GONE_CODE])
 }
 
 export function getAgentMeshTrace(traceId: string): Promise<{

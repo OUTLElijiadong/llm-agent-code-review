@@ -267,6 +267,8 @@ const meshBridge = createAgentMeshBridge({
   getActiveRun: () => sessionRun.value,
   isBusy: isMeshSessionBusy,
   onMessage: handleMeshMessage,
+  // 会话被服务端归档(空会话定时清理/他端删除)后,让切换器重新收敛列表并剔除它
+  onSessionGone: () => { void switcherRef.value?.refreshFromAgentMesh() },
 })
 
 function welcomeEntry(): ChatEntry {
@@ -671,6 +673,8 @@ async function runBackgroundMeshMessage(
   })
   try {
     await handle.done
+    // 后台会话处理完成:把小菱聚焦到刚活跃起来的这条对话(忙碌/有内容的当前会话不切走)
+    if (succeeded) switcherRef.value?.focusSession(targetSessionId)
     return succeeded
   } catch {
     return false
@@ -1417,7 +1421,7 @@ onMounted(() => {
       <div v-if="dragActive" class="drop-mask">
         <div class="drop-mask-text">松开鼠标,把文件交给小菱建项目</div>
       </div>
-      <header class="copilot-header">
+      <header class="copilot-header" :class="{ 'is-running': mascotStatus === 'running' }">
         <button class="panel-drag-handle" type="button" aria-label="移动管理副驾驶窗口" title="拖拽移动窗口" @pointerdown="beginDrag">
           ⠿
         </button>
@@ -1472,7 +1476,16 @@ onMounted(() => {
           <span>正在恢复这个对话<span v-if="sessionRun?.status === 'running'">，小菱还有任务在后台跑着，马上接回进度…</span><span v-else>，从服务器拉取历史消息…</span></span>
         </div>
       </Transition>
-      <div ref="messageArea" class="copilot-messages" aria-live="polite" @click="onMessageClick">
+      <div ref="messageArea" class="copilot-messages" :class="{ 'is-restoring': sessionRestoring }" aria-live="polite" @click="onMessageClick">
+        <Transition name="copilot-hero">
+          <div v-if="messages.length <= 1 && !showTyping" class="copilot-hero" aria-hidden="true">
+            <div class="copilot-hero-orb">
+              <AiOrb :size="88" state="idle" :pulse="false" />
+            </div>
+            <p class="copilot-hero-title">我是小菱,你的管理副驾驶</p>
+            <p class="copilot-hero-sub">直接告诉我你想做什么,或从下面挑一个试试</p>
+          </div>
+        </Transition>
         <div v-if="messages.length <= 1 && !showTyping" class="quick-questions" aria-label="快捷问题">
           <button
             v-for="question in QUICK_QUESTIONS"
@@ -1659,7 +1672,8 @@ onMounted(() => {
             <PrismMascot :size="22" :status="'running'" />
           </div>
           <div class="typing-bubble">
-            <AiOrb :size="24" state="thinking" :halo="false" />
+            <AiOrb :size="28" state="thinking" :halo="false" />
+            <span class="typing-label">小菱正在想</span>
             <i></i><i></i><i></i>
           </div>
         </div>
@@ -1711,7 +1725,11 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .admin-copilot {
-  --agent-primary: #006eff;
+  /* 管理端主色统一到品牌紫(原亮蓝 #006eff 与全站品牌紫脱节),
+     与全局 --brand-500 对齐;--agent-* 变量保留以兼容内部引用。 */
+  --agent-primary: var(--brand-500, #5B58E8);
+  --agent-primary-strong: var(--brand-600, #4A46D4);
+  --agent-primary-soft: var(--brand-50, #EFEEFE);
   --agent-bg: #ffffff;
   --agent-text: #1f2329;
   --agent-text-secondary: #8f959e;
@@ -1719,7 +1737,7 @@ onMounted(() => {
   --agent-danger: #d54941;
   --agent-warning: #ed7b2f;
   --agent-radius: 12px;
-  --agent-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  --agent-shadow: 0 6px 24px rgba(91, 88, 232, 0.16);
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -1740,12 +1758,12 @@ input { font: inherit; }
   border: 0;
   border-radius: 50%;
   background: linear-gradient(145deg, #ffffff, #eef0fb);
-  box-shadow: 0 8px 24px rgba(0, 110, 255, 0.24), 0 2px 6px rgba(15, 18, 34, 0.1);
+  box-shadow: 0 8px 24px rgba(91, 88, 232, 0.24), 0 2px 6px rgba(15, 18, 34, 0.1);
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
-.copilot-trigger:hover { transform: scale(1.06) translateY(-2px); box-shadow: 0 12px 30px rgba(0, 110, 255, 0.32), 0 3px 8px rgba(15, 18, 34, 0.12); }
+.copilot-trigger:hover { transform: scale(1.06) translateY(-2px); box-shadow: 0 12px 30px rgba(91, 88, 232, 0.32), 0 3px 8px rgba(15, 18, 34, 0.12); }
 .copilot-trigger.is-busy::after {
   content: '';
   position: absolute;
@@ -1773,15 +1791,22 @@ input { font: inherit; }
     'input';
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid rgba(0, 110, 255, 0.14);
+  border: 1px solid rgba(91, 88, 232, 0.14);
   border-radius: 18px;
   background: var(--agent-bg);
-  box-shadow: 0 18px 48px rgba(0, 60, 140, 0.16), 0 4px 14px rgba(15, 18, 34, 0.08);
+  box-shadow: 0 18px 48px rgba(91, 88, 232, 0.18), 0 4px 14px rgba(15, 18, 34, 0.08);
+  /* 面板展开:上浮+轻放大入场,与用户端 drawer 过渡呼应 */
+  animation: copilot-panel-in 0.3s cubic-bezier(0.16, 0.84, 0.44, 1);
+}
+
+@keyframes copilot-panel-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .copilot-panel.is-dragging { user-select: none; }
 .panel-drag-handle { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 30px; margin-left: -10px; border: 0; border-radius: 6px; background: transparent; color: var(--agent-text-secondary); font-size: 18px; line-height: 1; cursor: grab; touch-action: none; }
-.panel-drag-handle:hover { color: var(--agent-primary); background: rgba(0, 110, 255, 0.08); }
+.panel-drag-handle:hover { color: var(--agent-primary); background: rgba(91, 88, 232, 0.08); }
 .copilot-panel.is-dragging .panel-drag-handle { cursor: grabbing; }
 .copilot-header {
   grid-area: header;
@@ -1790,19 +1815,42 @@ input { font: inherit; }
   gap: 8px;
   padding: 10px 14px 10px 16px;
   border-bottom: 1px solid var(--agent-border);
-  background: linear-gradient(135deg, rgba(0, 110, 255, 0.06), rgba(61, 188, 217, 0.05) 70%, transparent);
+  background: linear-gradient(135deg, rgba(91, 88, 232, 0.06), rgba(61, 188, 217, 0.05) 70%, transparent);
   /* 会话切换下拉(.session-menu)绝对定位在 header 内,不能被裁剪 */
   overflow: visible;
   position: relative;
   z-index: 6;
   border-radius: 18px 18px 0 0;
 }
+
+/* 运行中头部底边流动光线,与用户端 chat-header-flow 呼应 */
+.copilot-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--brand-400, #8E88F5), var(--accent-400, #3DBCD9), transparent);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+.copilot-header.is-running::after {
+  opacity: 1;
+  animation: copilot-header-flow 2.2s linear infinite;
+}
+@keyframes copilot-header-flow {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
 .copilot-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .copilot-title-block { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .copilot-title-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .copilot-identity strong { display: block; font-size: 15px; line-height: 20px; }
 .copilot-avatar,
-.message-avatar { display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: linear-gradient(145deg, #f2f3ff, #e4ecfb); box-shadow: inset 0 0 0 1px rgba(0, 110, 255, 0.16); overflow: hidden; }
+.message-avatar { display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: linear-gradient(145deg, #f2f3ff, #e4ecfb); box-shadow: inset 0 0 0 1px rgba(91, 88, 232, 0.16); overflow: hidden; }
 .copilot-avatar { width: 40px; height: 40px; }
 .message-avatar { width: 26px; height: 26px; margin-top: 3px; }
 
@@ -1812,12 +1860,12 @@ input { font: inherit; }
   border: 1px solid #d9dce0;
   border-radius: 999px;
   background: #fff;
-  color: #1769d2;
+  color: var(--agent-primary-strong);
   font-size: 11px;
   line-height: 18px;
   cursor: pointer;
 }
-.retry-run-btn:hover { border-color: #1769d2; background: #eef5ff; }
+.retry-run-btn:hover { border-color: var(--agent-primary); background: var(--agent-primary-soft); }
 .copilot-run-badge {
   display: inline-flex;
   align-items: center;
@@ -1844,7 +1892,7 @@ input { font: inherit; }
   grid-area: progress;
   font-size: 11px;
   color: var(--agent-text-secondary);
-  background: linear-gradient(90deg, rgba(0, 110, 255, 0.05), rgba(61, 188, 217, 0.05));
+  background: linear-gradient(90deg, rgba(91, 88, 232, 0.05), rgba(61, 188, 217, 0.05));
   border-bottom: 1px solid var(--agent-border);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1854,12 +1902,38 @@ input { font: inherit; }
   font-family: monospace;
   color: var(--agent-primary);
   font-size: 10.5px;
-  background: rgba(0, 110, 255, 0.08);
+  background: rgba(91, 88, 232, 0.08);
   padding: 0 5px;
   border-radius: 3px;
 }
 .icon-button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; color: var(--agent-text-secondary); background: transparent; cursor: pointer; }
 .icon-button:hover { color: var(--agent-text); background: #f2f3f5; }
+
+.copilot-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 18px 12px 6px;
+}
+.copilot-hero-orb {
+  filter: drop-shadow(0 10px 26px rgba(91, 88, 232, 0.24)) drop-shadow(0 2px 8px rgba(61, 188, 217, 0.16));
+}
+.copilot-hero-title {
+  margin: 10px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--agent-text);
+}
+.copilot-hero-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--agent-text-secondary);
+}
+.copilot-hero-enter-active,
+.copilot-hero-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.copilot-hero-enter-from,
+.copilot-hero-leave-to { opacity: 0; transform: translateY(8px) scale(0.96); }
 
 .quick-questions {
   display: flex;
@@ -1869,21 +1943,26 @@ input { font: inherit; }
   padding: 4px 0 12px;
 }
 .quick-question {
-  border: 1px solid rgba(0, 110, 255, 0.2);
+  border: 1px solid rgba(91, 88, 232, 0.22);
   border-radius: 999px;
-  background: rgba(0, 110, 255, 0.05);
-  color: var(--agent-primary);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(239, 238, 254, 0.78));
+  color: var(--agent-primary-strong);
   font-size: 12px;
-  padding: 5px 14px;
+  padding: 6px 14px;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 110, 255, 0.08);
+  box-shadow: 0 2px 8px rgba(91, 88, 232, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.7);
   transition: all 160ms ease;
   white-space: nowrap;
+  animation: copilot-quick-in 0.4s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
 }
+.quick-question:nth-child(2) { animation-delay: 60ms; }
+.quick-question:nth-child(3) { animation-delay: 120ms; }
+@keyframes copilot-quick-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
 .quick-question:hover:not(:disabled) {
-  background: rgba(0, 110, 255, 0.12);
-  border-color: rgba(0, 110, 255, 0.35);
-  box-shadow: 0 2px 8px rgba(0, 110, 255, 0.15);
+  background: linear-gradient(135deg, #ffffff, var(--agent-primary-soft));
+  border-color: rgba(91, 88, 232, 0.4);
+  box-shadow: 0 4px 14px rgba(91, 88, 232, 0.18);
+  transform: translateY(-1px);
 }
 .quick-question:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -1911,9 +1990,21 @@ input { font: inherit; }
 @keyframes session-restoring-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .session-restoring-spinner { animation: none; } }
 
-.copilot-messages { grid-area: messages; min-height: 0; overflow-y: auto; padding: 16px 14px; background: #f7f8fa; }
-.message-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 14px; }
-.message-row.is-user { justify-content: flex-end; }
+.copilot-messages { grid-area: messages; min-height: 0; overflow-y: auto; padding: 16px 14px;
+  /* 极淡品牌氛围底 + 滚动渐隐,替代平涂灰 */
+  background:
+    radial-gradient(circle at 88% 0%, rgba(142, 136, 245, 0.10), transparent 42%),
+    radial-gradient(circle at 6% 100%, rgba(61, 188, 217, 0.07), transparent 46%),
+    linear-gradient(180deg, #fbfbfe 0%, #f7f8fc 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+}
+.message-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 14px; animation: copilot-msg-in 0.26s cubic-bezier(0.16, 0.84, 0.44, 1) backwards; }
+.message-row.is-user { justify-content: flex-end; animation-name: copilot-msg-in-user; }
+/* 恢复历史时整片渲染,跳过入场动画避免整屏闪烁 */
+.copilot-messages.is-restoring .message-row { animation: none; }
+@keyframes copilot-msg-in { from { opacity: 0; transform: translateY(8px) translateX(-6px); } to { opacity: 1; transform: translateY(0) translateX(0); } }
+@keyframes copilot-msg-in-user { from { opacity: 0; transform: translateY(8px) translateX(6px); } to { opacity: 1; transform: translateY(0) translateX(0); } }
 .message-stack { max-width: calc(100% - 34px); min-width: 0; position: relative; }
 
 /* hover 复制按钮:默认淡出,气泡悬停/键盘聚焦时可见(与用户端对齐) */
@@ -1943,8 +2034,27 @@ input { font: inherit; }
 .message-stack.has-response-control { width: calc(100% - 34px); }
 .message-row.is-user .message-stack { display: flex; align-items: flex-end; flex-direction: column; }
 .message-stack time { display: block; margin-top: 5px; color: var(--agent-text-secondary); font-size: 10px; }
-.message-bubble { padding: 9px 11px; border-radius: 8px; color: var(--agent-text); background: #eef0f3; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.is-user .message-bubble { color: #fff; background: var(--agent-primary); }
+.message-bubble { padding: 9px 12px; border-radius: 12px; color: var(--agent-text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; position: relative; transition: box-shadow 0.2s ease, transform 0.2s ease; }
+/* assistant 气泡:极浅品牌渐变白卡 + 微阴影,替代平涂灰块 */
+.message-row.is-assistant .message-bubble,
+.message-row.is-assistant .message-bubble.markdown-body {
+  background: linear-gradient(160deg, #ffffff 0%, #f7f7ff 55%, #f2f6ff 100%);
+  border: 1px solid #e6e4f8;
+  border-top-left-radius: 4px;
+  box-shadow: 0 2px 10px rgba(91, 88, 232, 0.07), 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+.message-row.is-assistant .message-stack:hover .message-bubble {
+  box-shadow: 0 6px 18px rgba(91, 88, 232, 0.13), 0 2px 6px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+/* user 气泡:品牌紫渐变 + 投影,替代纯平蓝(置于 assistant 之后确保优先级) */
+.is-user .message-bubble {
+  color: #fff;
+  background: linear-gradient(135deg, var(--agent-primary), var(--agent-primary-strong));
+  border: none;
+  border-top-right-radius: 4px;
+  box-shadow: 0 3px 10px rgba(91, 88, 232, 0.24);
+}
 .message-bubble.markdown-body {
   max-width: 100%;
   overflow-x: auto;
@@ -1954,6 +2064,22 @@ input { font: inherit; }
 .message-bubble.markdown-body :deep(p) { margin: 0; }
 .message-bubble.markdown-body :deep(ul) { list-style: none; padding-left: 0; margin: 0; }
 .message-bubble.markdown-body :deep(li) { margin: 2px 0; }
+.message-bubble.markdown-body :deep(ol) { padding-left: 18px; margin: 4px 0; }
+/* inline code:灰底品牌字,与用户端对齐 */
+.message-bubble.markdown-body :deep(p code),
+.message-bubble.markdown-body :deep(li code) {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  background: rgba(91, 88, 232, 0.08);
+  color: var(--agent-primary-strong);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.message-bubble.markdown-body :deep(pre) {
+  background: #1e1e2e; color: #cdd6f4;
+  border-radius: 8px; padding: 12px;
+  overflow-x: auto; font-size: 12px; line-height: 1.5; margin: 8px 0;
+}
 /* 站内页面引导链接:品牌色导航样式,未授权目标已由守卫隐藏 */
 .message-bubble.markdown-body :deep(a) {
   color: var(--agent-primary, #5b58e8);
@@ -1961,6 +2087,10 @@ input { font: inherit; }
   text-decoration: none;
   border-bottom: 1px dashed var(--agent-primary, #5b58e8);
   cursor: pointer;
+  transition: border-bottom-color 0.15s ease;
+}
+.message-bubble.markdown-body :deep(a:hover) {
+  border-bottom-style: solid;
 }
 .nav-directives {
   display: flex;
@@ -2112,8 +2242,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .expand-button { width: 100%; padding: 7px; border: 0; color: var(--agent-primary); background: #fff; cursor: pointer; }
 
 .typing-row { display: flex; align-items: flex-start; gap: 8px; }
-.typing-bubble { display: flex; gap: 4px; padding: 11px 13px; border-radius: 8px; background: #eef0f3; }
-.typing-bubble i { width: 5px; height: 5px; border-radius: 50%; background: #8f959e; animation: typing 1s infinite ease-in-out; }
+.typing-bubble { display: flex; align-items: center; gap: 8px; padding: 8px 13px 8px 9px; border-radius: 12px; border-top-left-radius: 4px; background: linear-gradient(160deg, #ffffff 0%, #f7f7ff 55%, #f2f6ff 100%); border: 1px solid #e6e4f8; box-shadow: 0 2px 10px rgba(91, 88, 232, 0.07); }
+.typing-label { font-size: 11.5px; color: var(--agent-text-secondary); animation: copilot-run-blink 1.6s ease-in-out infinite; }
+.typing-bubble i { width: 5px; height: 5px; border-radius: 50%; background: var(--agent-primary); animation: typing 1s infinite ease-in-out; }
 .typing-bubble i:nth-child(2) { animation-delay: 120ms; }
 .typing-bubble i:nth-child(3) { animation-delay: 240ms; }
 @keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
@@ -2185,13 +2316,33 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: #fff; border-radius: 0 0 18px 18px; }
+.copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px); border-radius: 0 0 18px 18px; }
 .composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
-.composer textarea { min-height: 38px; max-height: 84px; resize: none; padding: 9px 10px; border: 1px solid #d8dade; border-radius: 7px; color: var(--agent-text); outline: none; line-height: 18px; }
-.composer textarea:focus { border-color: var(--agent-primary); box-shadow: 0 0 0 2px rgba(0, 110, 255, 0.1); }
-.send-button { width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #fff; background: var(--agent-primary); cursor: pointer; }
+.composer textarea { min-height: 38px; max-height: 84px; resize: none; padding: 9px 12px; border: 1px solid #d8dade; border-radius: 10px; color: var(--agent-text); outline: none; line-height: 18px; background: rgba(255, 255, 255, 0.85); transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease; }
+.composer textarea:focus { border-color: var(--agent-primary); background: #fff; box-shadow: 0 0 0 3px rgba(91, 88, 232, 0.12), 0 2px 8px rgba(91, 88, 232, 0.08); }
+.send-button { width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #fff; background: linear-gradient(135deg, var(--agent-primary), var(--agent-primary-strong)); cursor: pointer; box-shadow: 0 3px 10px rgba(91, 88, 232, 0.3); transition: all 0.15s ease; }
+.send-button:hover:not(:disabled) { box-shadow: 0 5px 14px rgba(91, 88, 232, 0.4); transform: translateY(-1px); }
+.send-button:active:not(:disabled) { transform: translateY(0) scale(0.96); }
+.send-button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 .stop-button { width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #fff; background: var(--agent-danger, #d54941); cursor: pointer; animation: stop-pulse 1.5s ease-in-out infinite; }
 @keyframes stop-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(213, 73, 65, 0.4); } 50% { box-shadow: 0 0 0 6px rgba(213, 73, 65, 0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .copilot-panel { animation: none; }
+  .copilot-header.is-running::after { animation: none; opacity: 0.6; }
+  .message-row { animation: none !important; }
+  .quick-question { animation: none !important; transition: none; }
+  .quick-question:hover:not(:disabled) { transform: none; }
+  .copilot-hero-enter-active, .copilot-hero-leave-active { transition: none; }
+  .typing-label { animation: none; }
+  .typing-bubble i { animation: none; opacity: 1; transform: none; }
+  .stop-button { animation: none; }
+  .copilot-run-badge.run-running i, .copilot-run-badge.run-waiting i { animation: none; opacity: 1; }
+  .message-row.is-assistant .message-stack:hover .message-bubble { transform: none; }
+  .send-button { transition: none; }
+  .send-button:hover:not(:disabled) { transform: none; }
+  .composer textarea { transition: none; }
+}
 
 @media (max-width: 520px) {
   .admin-copilot { right: 12px; bottom: 12px; left: 12px; }

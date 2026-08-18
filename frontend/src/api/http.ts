@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosResponse } from 'axios'
+import axios, { AxiosError, AxiosResponse, type AxiosRequestConfig } from 'axios'
 
 import router from '@/router'
 import { getToken, clearToken } from '@/utils/token'
@@ -16,6 +16,25 @@ declare global {
   interface Window {
     __prismAuthExpiredHandled?: boolean
   }
+}
+
+/**
+ * 可预期业务错误的免弹配置:命中 silentCodes 的响应仍 reject(供调用方走流程),
+ * 但不弹全局 Toast。用于 mesh 收件箱轮询等「会话已归档属正常生命周期」的场景,
+ * 避免后台轮询反复弹红字干扰用户。
+ */
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    silentCodes?: number[]
+  }
+}
+
+/** 判断本次失败响应是否命中免弹业务码。 */
+function isSilent(config: AxiosRequestConfig | undefined, data: Resp | undefined): boolean {
+  const codes = config?.silentCodes
+  if (!codes?.length) return false
+  const code = data?.code
+  return typeof code === 'number' && codes.includes(code)
 }
 
 const http = axios.create({
@@ -40,7 +59,9 @@ http.interceptors.response.use(
       window.__prismAuthExpiredHandled = false
       return resp
     }
-    ElMessage.error(!(data instanceof Blob) ? data?.message || '请求失败' : '请求失败')
+    if (!(data instanceof Blob) && !isSilent(resp.config, data)) {
+      ElMessage.error(data?.message || '请求失败')
+    }
     return Promise.reject(data)
   },
   (err: AxiosError<Resp>) => {
@@ -64,8 +85,10 @@ http.interceptors.response.use(
       }
       return Promise.reject(data || err)
     }
-    const message = data?.message || err.message || '网络错误'
-    ElMessage.error(message)
+    if (!isSilent(err.config, data)) {
+      const message = data?.message || err.message || '网络错误'
+      ElMessage.error(message)
+    }
     return Promise.reject(data || err)
   },
 )
@@ -89,8 +112,8 @@ function cleanParams(params?: object): object | undefined {
   return out
 }
 
-export async function get<T>(url: string, params?: object): Promise<T> {
-  const r = await http.get<Resp<T>>(url, { params: cleanParams(params) })
+export async function get<T>(url: string, params?: object, silentCodes?: number[]): Promise<T> {
+  const r = await http.get<Resp<T>>(url, { params: cleanParams(params), silentCodes })
   return r.data.data as T
 }
 

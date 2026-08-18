@@ -233,6 +233,54 @@ describe('AgentSessionSwitcher authoritative remote busy state', () => {
     await flushPromises()
     expect(lastSelect(wrapper)).toBe('user-running')
   })
+
+  it('当前停在空会话时,自动聚焦到最新活跃的服务端会话', async () => {
+    // 当前是一个新建的空会话(pristine,占位标题,无内容)。
+    seedIndex([{ id: 'user-new', title: '新对话', createdAt: 5 }])
+    const freshTs = new Date().toISOString()
+    meshApi.list.mockResolvedValue({
+      items: [
+        // user-new 已在服务端落库,保持其空会话状态
+        { kind: 'session', session_id: 'user-new', surface: 'user', name: '新对话', last_seen_at: '2026-08-13T00:00:00Z', active_run_status: 'completed' },
+        // 另一个刚活跃起来的会话(JARVIS/他端投递),值得自动聚焦
+        { kind: 'session', session_id: 'user-lively', surface: 'user', name: '最新活跃对话', last_seen_at: freshTs, active_run_status: 'running' },
+      ],
+      total: 2,
+      by_kind: { session: 2 },
+    })
+    const wrapper = await mount(AgentSessionSwitcher, {
+      props: { storageKey: 'user', legacyKey: 'legacy', idPrefix: 'user', welcomeText: WELCOME, discoverRemote: true },
+    })
+    await flushPromises()
+    expect(lastSelect(wrapper)).toBe('user-lively')
+    wrapper.unmount()
+  })
+
+  it('当前会话有内容或忙碌时,不自动聚焦到其他会话', async () => {
+    // 当前会话有真实内容(非空),不应被「刚活跃的新对话」顶掉。
+    // user-busy 是本地第一项(最近使用),discovery 也发现了它。
+    // user-lively 仅「刚活跃」(recent),非 running——否则会被 step1 的忙碌跳回逻辑接管。
+    seedIndex([
+      { id: 'user-busy', title: '进行中的工作', createdAt: 5 },
+      { id: 'user-lively', title: '最新活跃对话', createdAt: 4 },
+    ])
+    seedSnapshot('user-busy', [{ role: 'user', content: '帮我审查这个项目' }], 'completed')
+    const freshTs = new Date().toISOString()
+    meshApi.list.mockResolvedValue({
+      items: [
+        { kind: 'session', session_id: 'user-busy', surface: 'user', name: '进行中的工作', last_seen_at: '2026-08-13T00:00:00Z', active_run_status: 'completed' },
+        { kind: 'session', session_id: 'user-lively', surface: 'user', name: '最新活跃对话', last_seen_at: freshTs, active_run_status: 'completed' },
+      ],
+      total: 2,
+      by_kind: { session: 2 },
+    })
+    const wrapper = await mount(AgentSessionSwitcher, {
+      props: { storageKey: 'user', legacyKey: 'legacy', idPrefix: 'user', welcomeText: WELCOME, discoverRemote: true },
+    })
+    await flushPromises()
+    expect(lastSelect(wrapper)).not.toBe('user-lively')
+    wrapper.unmount()
+  })
 })
 
 describe('AgentSessionSwitcher remote empty run state', () => {

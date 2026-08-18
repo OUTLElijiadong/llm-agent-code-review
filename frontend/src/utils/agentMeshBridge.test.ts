@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
 vi.mock('@/api/agentMesh', () => ({
   heartbeatAgentMesh: api.heartbeat,
   pullAgentMeshInbox: api.inbox,
+  AGENT_MESH_SESSION_GONE_CODE: 40321,
 }))
 
 import { createAgentMeshBridge } from './agentMeshBridge'
@@ -122,5 +123,40 @@ describe('Agent Mesh session bridge', () => {
       expect.objectContaining({ message_id: 'msg_background' }),
       'session-background',
     )
+  })
+
+  it('轮询命中 40321(会话已归档)时静默跳过并通知 onSessionGone,不再对该会话重试', async () => {
+    const receive = vi.fn().mockResolvedValue(true)
+    const onSessionGone = vi.fn()
+    // 归档会话的 inbox 拉取被后端以 40321 拒绝(Resp 形态 reject)
+    api.inbox.mockImplementation((_surface: string, sessionId: string) => (
+      sessionId === 'session-archived'
+        ? Promise.reject({ code: 40321, message: '目标会话尚未注册或不属于当前账户' })
+        : Promise.resolve([])
+    ))
+    const bridge = createAgentMeshBridge({
+      surface: 'user',
+      getSessionId: () => 'session-current-01',
+      getTitle: () => '当前会话',
+      getSessions: () => [
+        { id: 'session-current-01', title: '当前会话' },
+        { id: 'session-archived', title: '已归档会话' },
+      ],
+      isBusy: () => false,
+      onMessage: receive,
+      onSessionGone,
+    })
+
+    await bridge.syncNow()
+    expect(onSessionGone).toHaveBeenCalledWith('session-archived')
+
+    // 下一轮:归档会话不再 heartbeat 也不再 pull,不会反复触发 403
+    api.heartbeat.mockClear()
+    api.inbox.mockClear()
+    await bridge.syncNow()
+    const heartbeatIds = api.heartbeat.mock.calls.map((c) => c[0].session_id)
+    const inboxIds = api.inbox.mock.calls.map((c) => c[1])
+    expect(heartbeatIds).not.toContain('session-archived')
+    expect(inboxIds).not.toContain('session-archived')
   })
 })
