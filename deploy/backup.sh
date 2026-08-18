@@ -57,7 +57,11 @@ mkdir -p "$backup_dir"
 chmod 700 "$backup_dir" 2>/dev/null || true
 lock_dir="$(maintenance_lock_path)"
 mkdir -p "$(dirname "$lock_dir")"
-acquire_directory_lock "$lock_dir"
+lock_acquired=0
+if [[ "${PRISM_MAINTENANCE_LOCK_HELD:-0}" != "1" ]]; then
+  acquire_directory_lock "$lock_dir"
+  lock_acquired=1
+fi
 tmp_file=""
 
 # 清理临时文件和锁。
@@ -65,6 +69,7 @@ tmp_file=""
 # 返回: 始终返回 0。
 cleanup() {
   [[ -z "$tmp_file" || ! -f "$tmp_file" ]] || rm -f "$tmp_file"
+  [[ "$lock_acquired" == "1" ]] || return 0
   release_directory_lock "$lock_dir"
 }
 trap cleanup EXIT

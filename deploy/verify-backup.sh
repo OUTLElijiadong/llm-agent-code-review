@@ -34,8 +34,12 @@ require_commands docker gzip awk date find stat
 validate_compose_environment
 lock_dir="$(maintenance_lock_path)"
 mkdir -p "$(dirname "$lock_dir")"
-acquire_directory_lock "$lock_dir"
-trap 'release_directory_lock "$lock_dir"' EXIT
+lock_acquired=0
+if [[ "${PRISM_MAINTENANCE_LOCK_HELD:-0}" != "1" ]]; then
+  acquire_directory_lock "$lock_dir"
+  lock_acquired=1
+fi
+trap 'if [[ "$lock_acquired" == "1" ]]; then release_directory_lock "$lock_dir"; fi' EXIT
 wait_for_service_health mysql "${MYSQL_HEALTH_TIMEOUT:-120}" || fatal "MySQL 未就绪"
 gzip -t "$backup_file" || fatal "备份 gzip 完整性校验失败"
 
