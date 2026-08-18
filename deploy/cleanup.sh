@@ -61,14 +61,14 @@ done
 
 [[ "$keep_release_images" =~ ^[0-9]+$ ]] || fatal "镜像保留数必须是非负整数"
 [[ "$keep_release_states" =~ ^[0-9]+$ ]] || fatal "状态保留数必须是非负整数"
-[[ "$cache_until" =~ ^[0-9]+[smhdw]$ ]] || fatal "缓存年龄格式必须类似 168h 或 7d"
+[[ "$cache_until" =~ ^[0-9]+[smh]$ ]] || fatal "缓存年龄格式必须类似 168h"
 require_commands docker find sort awk
 
 docker compose version >/dev/null 2>&1 || fatal "docker compose 不可用"
 release_dir="${RELEASE_STATE_DIR:-.releases}"
 current_state="$release_dir/current.env"
 previous_state="$release_dir/previous.env"
-lock_dir="$release_dir/.deploy.lock"
+lock_dir="$(maintenance_lock_path)"
 if [[ "$apply" == "1" ]]; then
   mkdir -p "$release_dir"
   acquire_directory_lock "$lock_dir"
@@ -128,6 +128,36 @@ running_image_id() {
   docker inspect --format '{{.Image}}' "$1" 2>/dev/null || true
 }
 
+# 从沙箱 systemd 单元读取并保护当前 Playwright 镜像，避免 prune 先删除仍在使用的 digest。
+protect_playwright_image() {
+  local sandbox_env_file="${SANDBOX_ENV_FILE:-}"
+  local environment_line sandbox_image sandbox_digest expected_digest sandbox_pid process_env process_digest process_image
+  if [[ -z "$sandbox_env_file" ]] && command -v systemctl >/dev/null 2>&1; then
+    environment_line="$(systemctl show prism-sandbox-executor.service --property=EnvironmentFiles --value 2>/dev/null || true)"
+    sandbox_env_file="${environment_line%% *}"
+    sandbox_env_file="${sandbox_env_file#-}"
+  fi
+  [[ -n "$sandbox_env_file" && -f "$sandbox_env_file" ]] || fatal "缺少沙箱 systemd 单元环境文件"
+  log_info "使用沙箱 systemd 单元环境文件: $sandbox_env_file"
+  sandbox_image="$(read_env_value PLAYWRIGHT_IMAGE "$sandbox_env_file" || true)"
+  expected_digest="$(read_env_value PLAYWRIGHT_IMAGE_DIGEST "$sandbox_env_file" || true)"
+  [[ "$sandbox_image" =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]] || fatal "沙箱 Playwright 镜像必须固定 digest"
+  [[ "$expected_digest" == "sha256:${sandbox_image##*@sha256:}" ]] || fatal "沙箱 Playwright 镜像 digest 配置不一致"
+  docker image inspect "$sandbox_image" >/dev/null 2>&1 || fatal "缺少沙箱 Playwright 镜像: $sandbox_image"
+  sandbox_digest="${sandbox_image##*@sha256:}"
+  sandbox_pid="$(systemctl show prism-sandbox-executor.service --property=MainPID --value 2>/dev/null || printf '0')"
+  if [[ "$sandbox_pid" =~ ^[1-9][0-9]*$ ]]; then
+    process_env="${PROC_ROOT:-/proc}/$sandbox_pid/environ"
+    [[ -r "$process_env" ]] || fatal "运行中沙箱执行器的进程环境不可读"
+    process_digest="$(tr '\0' '\n' < "$process_env" | awk -F= '$1 == "PLAYWRIGHT_IMAGE_DIGEST" {print $2; exit}')"
+    [[ "$process_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fatal "运行中沙箱执行器的 Playwright digest 无效"
+    process_image="${sandbox_image%@sha256:*}@${process_digest}"
+    docker image inspect "$process_image" >/dev/null 2>&1 || fatal "缺少运行中沙箱使用的 Playwright 镜像: $process_image"
+    run_mutation docker image tag "$process_image" "prism-sandbox-playwright:protected-${process_digest#sha256:}"
+  fi
+  run_mutation docker image tag "$sandbox_image" "prism-sandbox-playwright:protected-$sandbox_digest"
+}
+
 # 清理单个 release 镜像仓库中的旧 tag。
 # 参数: $1 仓库；$2 当前运行镜像 ID。
 # 返回: 始终返回 0，删除失败会由 set -e 中止。
@@ -175,6 +205,7 @@ cleanup_release_history() {
 if [[ ! -f "$current_state" ]]; then
   log_warn "缺少 current.env，无法证明历史 tag 非当前版本；跳过 tagged release 镜像清理"
 else
+  protect_playwright_image
   cleanup_repository_tags prism-backend "$(running_image_id cr_backend)"
   cleanup_repository_tags prism-frontend "$(running_image_id cr_frontend)"
 fi

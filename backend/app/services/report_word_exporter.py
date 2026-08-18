@@ -323,6 +323,7 @@ def export_to_word(
     summary: Optional[str],
     score: int,
     template_type: str = "detailed",
+    evidence: dict[str, Any] | None = None,
 ) -> bytes:
     """导出 Word 报告字节流。
 
@@ -341,7 +342,7 @@ def export_to_word(
         bytes: Word 文档的二进制字节流(可直接写入文件或作为 HTTP 响应体)。
     """
     # 构建报告上下文(复用 T11 的归一化逻辑)
-    context = export_to_dict(task, issues, summary, score)
+    context = export_to_dict(task, issues, summary, score, evidence)
     task_info = context.get("task_info", {})
     statistics = context.get("statistics", {})
     sorted_issues = context.get("issues", [])

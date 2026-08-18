@@ -286,6 +286,7 @@ def _build_report_context(
     issues: List[Any],
     summary: Optional[str],
     score: int,
+    evidence: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """构建 Jinja2 渲染上下文(同时用于 JSON / dict 导出)。
 
@@ -353,6 +354,7 @@ def _build_report_context(
         "score": score,
         "issues": sorted_issues,
         "statistics": statistics,
+        "evidence": _to_serializable(evidence or {}),
     }
 
 
@@ -363,6 +365,7 @@ def export_to_dict(
     issues: List[Any],
     summary: Optional[str],
     score: int,
+    evidence: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """导出报告为字典(便于后续 PDF / Word 渲染消费)。
 
@@ -376,7 +379,7 @@ def export_to_dict(
         Dict[str, Any]: 报告字典,包含 task_info / summary / score / issues / statistics
             五个顶层键;所有值均为 JSON 可序列化类型。
     """
-    return _build_report_context(task, issues, summary, score)
+    return _build_report_context(task, issues, summary, score, evidence)
 
 
 def export_to_json(
@@ -384,6 +387,7 @@ def export_to_json(
     issues: List[Any],
     summary: Optional[str],
     score: int,
+    evidence: Optional[Dict[str, Any]] = None,
 ) -> str:
     """导出报告为 JSON 字符串。
 
@@ -397,7 +401,7 @@ def export_to_json(
         str: JSON 字符串,ensure_ascii=False 以正常显示中文,缩进 2 空格;
             结构包含 task_info / summary / score / issues / statistics。
     """
-    payload = export_to_dict(task, issues, summary, score)
+    payload = export_to_dict(task, issues, summary, score, evidence)
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
@@ -407,6 +411,7 @@ def export_to_html(
     summary: Optional[str],
     score: int,
     template_content: str,
+    evidence: Optional[Dict[str, Any]] = None,
 ) -> str:
     """导出报告为 HTML 字符串(使用 Jinja2 渲染)。
 
@@ -420,7 +425,7 @@ def export_to_html(
     Returns:
         str: 渲染后的 HTML 字符串;模板渲染异常时抛出 jinja2 异常。
     """
-    context = _build_report_context(task, issues, summary, score)
+    context = _build_report_context(task, issues, summary, score, evidence)
     # 008 迁移预置的模板使用 task / metrics / compliance_summary，后续内置
     # HTML 模板改为 task_info / statistics。保留旧变量别名，确保历史数据库中
     # 已保存的模板和用户基于旧契约创建的模板仍可导出。

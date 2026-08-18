@@ -32,6 +32,10 @@ fi
 
 require_commands docker gzip awk date find stat
 validate_compose_environment
+lock_dir="$(maintenance_lock_path)"
+mkdir -p "$(dirname "$lock_dir")"
+acquire_directory_lock "$lock_dir"
+trap 'release_directory_lock "$lock_dir"' EXIT
 wait_for_service_health mysql "${MYSQL_HEALTH_TIMEOUT:-120}" || fatal "MySQL 未就绪"
 gzip -t "$backup_file" || fatal "备份 gzip 完整性校验失败"
 
@@ -41,8 +45,11 @@ if [[ -f "$checksum_file" ]]; then
   actual="$(sha256_file "$backup_file")"
   [[ "$expected" == "$actual" ]] || fatal "备份 SHA-256 不匹配"
 else
-  log_warn "未找到校验和文件: $checksum_file"
+  fatal "备份缺少校验和文件: $checksum_file"
 fi
+
+metadata_file="$backup_file.meta"
+[[ -f "$metadata_file" ]] || fatal "备份缺少元数据文件: $metadata_file"
 
 temp_database="prism_verify_$(date -u '+%Y%m%d%H%M%S')_${RANDOM}"
 [[ "$temp_database" =~ ^[A-Za-z0-9_]+$ ]] || fatal "临时数据库名非法"
@@ -61,6 +68,7 @@ cleanup() {
         -e "DROP DATABASE IF EXISTS \`$db\`"
     ' sh "$temp_database" >/dev/null 2>&1 || true
   fi
+  release_directory_lock "$lock_dir"
 }
 trap cleanup EXIT
 
@@ -101,5 +109,16 @@ alembic_revision="$(compose exec -T mysql sh -ec '
     --batch --skip-column-names \
     -e "SELECT version_num FROM alembic_version LIMIT 1"
 ' sh "$temp_database" 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
+
+if [[ "$alembic_revision" =~ ^0*([0-9]+)$ ]] && (( 10#${BASH_REMATCH[1]} >= 24 )); then
+  archive_table_count="$(compose exec -T mysql sh -ec '
+    db="$1"
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
+      --protocol=TCP -h 127.0.0.1 -uroot "$db" \
+      --batch --skip-column-names \
+      -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=\"$db\" AND table_name=\"project_source_archive\""
+  ' sh "$temp_database" 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
+  [[ "$archive_table_count" == "1" ]] || fatal "024 及以上备份缺少隔离源码归档表"
+fi
 
 log_info "隔离恢复验证通过(tables=$table_count, alembic=${alembic_revision:-unknown})"

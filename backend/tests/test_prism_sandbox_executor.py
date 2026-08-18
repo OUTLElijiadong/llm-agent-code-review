@@ -151,6 +151,7 @@ def test_docker_create_uses_non_overridable_hardening(isolated_paths: Path) -> N
         request_id=request_id,
         purpose="test",
         test_mode="combined",
+        db_type="none",
         profile=profile,
         runtime="runsc",
         image=image,
@@ -827,6 +828,13 @@ class _DormantThread:
 
 def _patch_environment_creation(monkeypatch, archive: bytes) -> MagicMock:
     db = MagicMock()
+    project_query = MagicMock()
+    project_query.filter.return_value.with_for_update.return_value.first.return_value = SimpleNamespace(
+        id=91, language="python", status="active"
+    )
+    active_test_query = MagicMock()
+    active_test_query.filter.return_value.first.return_value = None
+    db.query.side_effect = [project_query, active_test_query]
     _DormantThread.created.clear()
     monkeypatch.setattr(sandbox_service, "require_project_access", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -1069,13 +1077,15 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
     # 本用例聚焦 worker 事件顺序;跳过 agent 动态用例生成与部署补丁(另有专门测试)
     monkeypatch.setattr(sandbox_service, "_generate_agent_test_cases", lambda *_a, **_k: None)
     monkeypatch.setattr(sandbox_service, "_generate_deployment_patch", lambda *_a, **_k: None)
+    monkeypatch.setattr(sandbox_service, "_run_test_review_report", lambda *_a, **_k: None)
+    monkeypatch.setattr(sandbox_service.strategy_learning_service, "observe_sandbox_outcome", lambda *_a, **_k: None)
 
     sandbox_service._execute_environment(environment.id, "c291cmNl")
 
     stages = [event[1] for event in stored_events]
     assert worker_calls == ["/execute"]
-    # 黑白盒测试完成后触发多 Agent 审查(multi_agent_review)再输出结论
-    assert stages == ["executor", "running_whitebox", "succeeded", "multi_agent_review", "conclusion"], environment.error  # noqa: E501
+    # 本用例显式跳过多 Agent 审查,验证 worker 事件先于最终结论持久化。
+    assert stages == ["executor", "running_whitebox", "succeeded", "conclusion"], environment.error
     assert stages.index("succeeded") < stages.index("conclusion")
     assert environment.status == "succeeded"
     assert json.loads(environment.result_json)["passed"] is True
@@ -1239,6 +1249,8 @@ def test_quarantined_project_allowed_deploy_in_sandbox(db, monkeypatch) -> None:
         captured["archive"] = data
         return data
     monkeypatch.setattr(sandbox_service.project_source_service, "build_source_archive", _build)
+    monkeypatch.setattr(sandbox_service.threading, "Thread", _DormantThread)
+    monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
     worker = SandboxWorker(
         code="php-deploy",
         name="PHP deploy worker",
@@ -1305,6 +1317,8 @@ def test_deploy_creation_locks_project_even_with_archive(db, monkeypatch) -> Non
         return data
 
     monkeypatch.setattr(sandbox_service.project_source_service, "build_source_archive", _build)
+    monkeypatch.setattr(sandbox_service.threading, "Thread", _DormantThread)
+    monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
 
     # 隔离归档项目允许部署且生成不可变快照(内部对项目加了行锁)。
     sandbox_service.create_environment(

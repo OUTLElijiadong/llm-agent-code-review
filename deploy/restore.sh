@@ -51,15 +51,37 @@ done
 require_commands docker gzip
 validate_compose_environment
 
-./verify-backup.sh "$backup_file"
-if [[ "$skip_safety_backup" != "1" ]]; then
-  ./backup.sh --reason pre_restore >/dev/null
-fi
-
-lock_dir="${BACKUP_DIR:-../backups}/.restore.lock"
+lock_dir="$(maintenance_lock_path)"
 mkdir -p "$(dirname "$lock_dir")"
 acquire_directory_lock "$lock_dir"
-trap 'release_directory_lock "$lock_dir"' EXIT
+export PRISM_MAINTENANCE_LOCK_HELD=1
+safety_backup=""
+# 失败处置时由人工确认后执行：restore_database_file "$safety_backup"
+on_restore_exit() {
+  exit_code="$?"
+  release_directory_lock "$lock_dir"
+  if [[ "$exit_code" != "0" ]]; then
+    log_warn "生产保持维护状态，需人工确认恢复结果"
+  fi
+  return "$exit_code"
+}
+trap on_restore_exit EXIT
+
+./verify-backup.sh "$backup_file"
+
+if [[ "$skip_safety_backup" != "1" ]]; then
+  safety_backup="$(./backup.sh --reason pre_restore | tail -n 1)"
+  ./verify-backup.sh "$safety_backup"
+fi
+
+restore_database_file() {
+  local source_file="$1"
+  gzip -dc "$source_file" | compose exec -T mysql sh -ec '
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
+      --protocol=TCP -h 127.0.0.1 -uroot \
+      --max-allowed-packet=64M "$MYSQL_DATABASE"
+  '
+}
 
 log_warn "即将停止 Backend 并重建生产应用数据库"
 compose stop backend
@@ -74,10 +96,26 @@ compose exec -T mysql sh -ec '
     -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
 ' sh "$database_name"
 
-gzip -dc "$backup_file" | compose exec -T mysql sh -ec '
-  MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
-    --protocol=TCP -h 127.0.0.1 -uroot "$MYSQL_DATABASE"
-'
+restore_rc=0
+if restore_database_file "$backup_file"; then
+  restore_rc=0
+else
+  restore_rc=$?
+fi
+if [[ "$restore_rc" != "0" ]]; then
+  if [[ -n "$safety_backup" && -f "$safety_backup" ]]; then
+    log_warn "恢复事务失败，正在回填事前安全备份"
+    compose stop backend
+    restore_database_file "$safety_backup"
+    run_admin_alembic upgrade head
+    compose up -d --no-deps backend
+    wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-180}" || fatal "安全备份回填后 Backend 未恢复健康"
+    log_warn "已回填事前数据并恢复 Backend"
+  else
+    fatal "恢复事务失败且未创建事前安全备份"
+  fi
+  exit "$restore_rc"
+fi
 
 run_admin_alembic upgrade head
 assert_alembic_at_head || fatal "恢复后 Alembic 未位于 head，Backend 保持停止"

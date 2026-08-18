@@ -27,7 +27,7 @@ ARCHIVE_EXTENSIONS = (
     ".tar.lzip", ".tgz", ".tbz2", ".txz", ".tzst", ".tlz",
     ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".zst",
     ".lz", ".lzma", ".lzip", ".z", ".cpio", ".cab", ".ar", ".xar",
-    ".lha", ".lzh", ".iso",
+    ".lha", ".lzh", ".iso", ".apk", ".aab",
 )
 
 _RAW_COMPRESSED_EXTENSIONS = (
@@ -127,7 +127,7 @@ class _TarEntry:
 def _iter_archive_entries(raw: bytes, filename: str) -> Iterator[object]:
     """按后缀选择 zip/tar 解析器,返回统一成员遍历器。"""
     lower = filename.lower()
-    if lower.endswith(".zip"):
+    if lower.endswith((".zip", ".apk", ".aab")):
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             for info in archive.infolist():
                 yield _ZipEntry(info, archive)

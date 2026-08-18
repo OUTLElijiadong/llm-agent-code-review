@@ -57,7 +57,8 @@ previous_state="$release_dir/previous.env"
 pending_state="$release_dir/pending.env"
 [[ -f "$previous_state" ]] || fatal "不存在上一发布状态: $previous_state"
 
-lock_dir="$release_dir/.deploy.lock"
+lock_dir="$(maintenance_lock_path)"
+mkdir -p "$(dirname "$lock_dir")"
 if [[ "$from_deploy_failure" != "1" ]]; then
   acquire_directory_lock "$lock_dir"
   trap 'release_directory_lock "$lock_dir"' EXIT

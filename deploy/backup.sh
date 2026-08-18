@@ -55,7 +55,8 @@ validate_compose_environment
 
 mkdir -p "$backup_dir"
 chmod 700 "$backup_dir" 2>/dev/null || true
-lock_dir="$backup_dir/.backup.lock"
+lock_dir="$(maintenance_lock_path)"
+mkdir -p "$(dirname "$lock_dir")"
 acquire_directory_lock "$lock_dir"
 tmp_file=""
 
@@ -69,6 +70,18 @@ cleanup() {
 trap cleanup EXIT
 
 wait_for_service_health mysql "${MYSQL_HEALTH_TIMEOUT:-120}" || fatal "MySQL 未就绪，无法备份"
+
+# 归档表在 mysqldump 期间必须保持稳定，避免备份元数据与数据内容不一致。
+read_archive_stats() {
+  compose exec -T mysql sh -ec '
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
+      --protocol=TCP -h 127.0.0.1 -uroot "$MYSQL_DATABASE" \
+      --batch --skip-column-names \
+      -e "SELECT COUNT(*), COALESCE(SUM(compressed_size),0), COALESCE(SUM(expanded_size),0) FROM project_source_archive"
+  ' 2>/dev/null | tr -d '\r' | tail -n 1
+}
+
+archive_stats_before="$(read_archive_stats)"
 
 timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
 git_sha="$(current_git_sha ..)"
@@ -89,10 +102,14 @@ compose exec -T mysql sh -ec '
     --default-character-set=utf8mb4 "$MYSQL_DATABASE"
 ' | gzip -9 > "$tmp_file"
 
+archive_stats_after="$(read_archive_stats)"
+[[ "$archive_stats_before" == "$archive_stats_after" ]] || fatal "隔离归档统计在备份期间发生变化"
+
 gzip -t "$tmp_file" || fatal "备份 gzip 完整性校验失败"
 [[ -s "$tmp_file" ]] || fatal "备份文件为空"
 mv "$tmp_file" "$backup_file"
 tmp_file=""
+log_info "最后发布 .sql.gz 完成标志: $backup_file"
 chmod 600 "$backup_file"
 checksum="$(sha256_file "$backup_file")"
 printf '%s  %s\n' "$checksum" "$(basename "$backup_file")" > "$checksum_file"

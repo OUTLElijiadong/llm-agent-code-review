@@ -235,19 +235,109 @@ run_agent_blackbox() {
   return 0
 }
 
+run_decompilation() {
+  # 仅处理归档中已经安全解包出的 Android 制品；固定工具和固定参数，
+  # 不接受用户或 Agent 提供的命令、镜像、网络、挂载和宿主路径。
+  readonly jadx_version="${PRISM_JADX_VERSION:-1.5.6}"
+  readonly max_decomp_files=20000
+  readonly max_decomp_bytes=$((512 * 1024 * 1024))
+  find . -type f \( -name '*.apk' -o -name '*.aab' -o -name '*.dex' \) \
+    -not -path './_agent_tests/*' -not -path './.prism-*/*' -print \
+    | sort > /tmp/prism-decomp-candidates
+  if [ ! -s /tmp/prism-decomp-candidates ]; then
+    printf '%s\n' 'PRISM_DECOMPILATION_JSON {"status":"skipped","tool":"none","candidate_count":0,"exit_code":0}'
+    return 0
+  fi
+  if [ ! -x /opt/jadx/bin/jadx ]; then
+    printf '%s\n' 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"unknown","candidate_count":0,"exit_code":127,"reason":"tool_unavailable","log_ref":"worker.log"}'
+    return 1
+  fi
+  decomp_root="./.prism-decompiled"
+  rm -rf "$decomp_root"
+  mkdir -p "$decomp_root"
+  : > /tmp/prism-decomp-input-manifest
+  while IFS= read -r artifact; do
+    [ -n "$artifact" ] || continue
+    sha256sum "$artifact" >> /tmp/prism-decomp-input-manifest
+  done < /tmp/prism-decomp-candidates
+  input_sha="$(sha256sum /tmp/prism-decomp-input-manifest | cut -d' ' -f1)"
+  candidate_count=0
+  while IFS= read -r artifact; do
+    [ -n "$artifact" ] || continue
+    candidate_count=$((candidate_count + 1))
+    output_dir="$decomp_root/$candidate_count"
+    mkdir -p "$output_dir"
+    if timeout 180 /opt/jadx/bin/jadx \
+      --output-dir "$output_dir" \
+      --no-debug-info \
+      --no-inline-anonymous \
+      --show-bad-code \
+      "$artifact" >"/tmp/prism-jadx-$candidate_count.out" 2>&1; then
+      :
+    else
+      rc=$?
+      printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","exit_code":%s,"reason":"exit_nonzero","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$rc"
+      cat "/tmp/prism-jadx-$candidate_count.out" >&2 || true
+      return 1
+    fi
+  done < /tmp/prism-decomp-candidates
+  source_count="$(find "$decomp_root" -type f \( -name '*.java' -o -name '*.kt' \) -print | wc -l | tr -d ' ')"
+  output_bytes="$(find "$decomp_root" -type f \( -name '*.java' -o -name '*.kt' \) -printf '%s\n' | awk '{sum += $1} END {print sum + 0}')"
+  if [ "$source_count" -gt "$max_decomp_files" ] || [ "$output_bytes" -gt "$max_decomp_bytes" ]; then
+    printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","output_file_count":%s,"output_size_bytes":%s,"exit_code":65,"reason":"output_limit","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$source_count" "$output_bytes"
+    return 1
+  fi
+  if [ "$source_count" -le 0 ]; then
+    printf 'PRISM_DECOMPILATION_JSON {"status":"failed","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","output_file_count":0,"output_size_bytes":0,"exit_code":65,"reason":"empty_output","log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha"
+    return 1
+  fi
+  find "$decomp_root" -type f \( -name '*.java' -o -name '*.kt' \) -print \
+    | sort | while IFS= read -r file; do sha256sum "$file"; done \
+    > /tmp/prism-decomp-manifest
+  output_sha="$(sha256sum /tmp/prism-decomp-manifest | cut -d' ' -f1)"
+  cp /tmp/prism-decomp-manifest ./decompilation-manifest
+  printf 'PRISM_DECOMPILATION_JSON {"status":"succeeded","tool":"jadx","tool_version":"%s","candidate_count":%s,"input_sha256":"%s","output_file_count":%s,"output_size_bytes":%s,"output_sha256":"%s","exit_code":0,"log_ref":"worker.log","artifact_refs":["decompilation-manifest"]}\n' "$jadx_version" "$candidate_count" "$input_sha" "$source_count" "$output_bytes" "$output_sha"
+  return 0
+}
+
 run_test() {
+  if ! run_decompilation; then
+    printf '%s\n' 'whitebox: decompilation failed (see logs)' >&2
+    printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true,"passed":false,"reason":"decompilation_failed"}'
+    return 66
+  fi
   # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
+  # 反编译前置必须先完成,避免注入脚本绕过 Android 证据门禁。
   if [ -f ./_prism_verify.sh ]; then
     sh ./_prism_verify.sh whitebox
     return $?
   fi
   # 基础测试继续收集所有失败证据，但最终必须以非零退出码反映任何真实失败。
-  if ! find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.java' -o -name '*.go' -o -name '*.php' \) \
+  source_present=0
+  if find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.java' -o -name '*.go' -o -name '*.php' \) \
       -not -path './_agent_tests/*' -not -path './.prism-*/*' -print -quit | grep -q .; then
+    source_present=1
+  fi
+  if [ -d ./.prism-decompiled ] && find ./.prism-decompiled -type f \( -name '*.java' -o -name '*.kt' \) -print -quit | grep -q .; then
+    source_present=1
+  fi
+  if [ "$source_present" -eq 0 ]; then
     printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":false,"reason":"no_source_files"}'
     return 66
   fi
   test_failed=0
+  if [ -d ./.prism-decompiled ]; then
+    if find ./.prism-decompiled -type f \( -name '*.java' -o -name '*.kt' \) -size 0 -print -quit | grep -q .; then
+      printf '%s\n' 'whitebox: decompiled output contains empty source files' >&2
+      test_failed=1
+    elif grep -R -n 'JADX ERROR' ./.prism-decompiled >/tmp/prism-jadx-errors 2>/dev/null; then
+      cat /tmp/prism-jadx-errors >&2
+      printf '%s\n' 'whitebox: JADX emitted recovery errors' >&2
+      test_failed=1
+    else
+      printf '%s\n' 'whitebox: JADX output static integrity check passed; project runtime not compiled' >&2
+    fi
+  fi
   case "$language" in
     python)
       if ! python -m compileall -q -x '(^|/)_agent_tests(/|$)' . 2>/dev/null; then
@@ -293,13 +383,15 @@ run_test() {
           printf '%s\n' 'whitebox: gradle test reported failures (see logs)' >&2
           test_failed=1
         fi
-      else
+    else
         find . -type f -name '*.java' -not -path './_agent_tests/*' -print > /tmp/prism-java-sources
         if [ -s /tmp/prism-java-sources ]; then
-          mkdir -p /workspace/.prism-classes
-          if ! javac -d /workspace/.prism-classes @/tmp/prism-java-sources 2>/dev/null; then
-            printf '%s\n' 'whitebox: javac reported errors (see logs)' >&2
-            test_failed=1
+          if [ ! -d ./.prism-decompiled ]; then
+            mkdir -p /workspace/.prism-classes
+            if ! javac -d /workspace/.prism-classes @/tmp/prism-java-sources 2>/dev/null; then
+              printf '%s\n' 'whitebox: javac reported errors (see logs)' >&2
+              test_failed=1
+            fi
           fi
         fi
       fi

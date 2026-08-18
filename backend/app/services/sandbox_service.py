@@ -58,6 +58,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.services import (
     audit_service,
+    decompilation_service,
     project_source_revision_service,
     project_source_service,
     rbac_service,
@@ -1929,6 +1930,66 @@ def _extract_agent_tests_result(log_text: str) -> dict[str, Any] | None:
     return result
 
 
+def _extract_decompilation_result(log_text: str) -> dict[str, Any] | None:
+    """读取受信 runner 的单一反编译结果标记，重复标记失败关闭。"""
+    records: list[dict[str, Any]] = []
+    for match in re.finditer(r"PRISM_DECOMPILATION_JSON\s+(\{.*?\})", log_text, re.S):
+        try:
+            payload = json.loads(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    if len(records) != 1:
+        return None
+    result = records[0]
+    status = str(result.get("status") or "").strip().lower()
+    if status not in {"skipped", "succeeded", "failed"}:
+        return None
+    try:
+        candidate_count = int(result.get("candidate_count") or 0)
+        output_file_count = int(result.get("output_file_count") or 0)
+    except (TypeError, ValueError):
+        return None
+    if candidate_count < 0 or output_file_count < 0:
+        return None
+    raw_exit_code = result.get("exit_code", 0)
+    if type(raw_exit_code) is not int or not -255 <= raw_exit_code <= 255:
+        return None
+    input_sha256 = str(result.get("input_sha256") or "")[:64]
+    output_sha256 = str(result.get("output_sha256") or "")[:64]
+    if input_sha256 and not re.fullmatch(r"[0-9a-f]{64}", input_sha256):
+        return None
+    if output_sha256 and not re.fullmatch(r"[0-9a-f]{64}", output_sha256):
+        return None
+    try:
+        output_size_bytes = int(result.get("output_size_bytes") or 0)
+    except (TypeError, ValueError):
+        return None
+    if output_size_bytes < 0:
+        return None
+    raw_artifacts = result.get("artifact_refs")
+    artifact_refs = []
+    if raw_artifacts is not None:
+        if not isinstance(raw_artifacts, list):
+            return None
+        artifact_refs = [str(item)[:120] for item in raw_artifacts if str(item).strip()]
+    return {
+        "status": status,
+        "tool": str(result.get("tool") or "none")[:40],
+        "tool_version": str(result.get("tool_version") or "")[:40],
+        "candidate_count": candidate_count,
+        "output_file_count": output_file_count,
+        "input_sha256": input_sha256,
+        "output_sha256": output_sha256,
+        "output_size_bytes": output_size_bytes,
+        "exit_code": raw_exit_code,
+        "log_ref": str(result.get("log_ref") or "")[:120],
+        "artifact_refs": artifact_refs,
+        "reason": str(result.get("reason") or "")[:300],
+    }
+
+
 def _agent_tests_succeeded(result: dict[str, Any] | None) -> bool:
     """没有动态用例时沿用基础测试；生成后必须全部通过。"""
     if not isinstance(result, dict):
@@ -2072,7 +2133,48 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
         "",
         str(report_md or ""),
     ).lstrip()
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    decompilation = evidence.get("decompilation") if isinstance(evidence.get("decompilation"), dict) else None
+    if decompilation:
+        status = str(decompilation.get("status") or "unknown")
+        details = [f"状态：`{status}`", f"工具：`{str(decompilation.get('tool') or 'none')}`"]
+        if decompilation.get("tool_version"):
+            details.append(f"版本：`{decompilation['tool_version']}`")
+        if decompilation.get("input_sha256"):
+            details.append(f"输入 SHA-256：`{decompilation['input_sha256']}`")
+        if decompilation.get("output_sha256"):
+            details.append(f"派生源码 SHA-256：`{decompilation['output_sha256']}`")
+        if "output_file_count" in decompilation:
+            details.append(f"派生源码文件：`{decompilation['output_file_count']}`")
+        if "output_size_bytes" in decompilation:
+            details.append(f"派生源码字节数：`{decompilation['output_size_bytes']}`")
+        if "exit_code" in decompilation:
+            details.append(f"退出码：`{decompilation['exit_code']}`")
+        if decompilation.get("log_ref"):
+            details.append(f"日志制品：`{decompilation['log_ref']}`")
+        if decompilation.get("artifact_refs"):
+            details.append(f"证据制品：`{', '.join(decompilation['artifact_refs'])}`")
+        canonical += "\n\n## 反编译证据\n\n" + "；".join(details) + "。"
     return canonical + ("\n\n" + remainder if remainder else "")
+
+
+def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
+    """模型不可用时生成可导出的确定性报告，禁止把缺少模型伪装成成功。"""
+    passed = bool(conclusion.get("passed"))
+    agent_tests = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else {}
+    generated = int(agent_tests.get("generated") or 0)
+    passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
+    failed_count = int(agent_tests.get("failed") or 0)
+    report = (
+        "## 总体结论\n\n"
+        f"系统事实门禁：{'通过' if passed else '未通过'}。\n\n"
+        "## 执行摘要\n\n"
+        f"Worker 结论：{str(conclusion.get('summary') or ('测试通过' if passed else '测试未通过'))}。\n"
+        f"动态用例：生成 {generated} 个，通过 {passed_count} 个，失败 {failed_count} 个。\n\n"
+        "## 问题清单\n\n"
+        + ("- 反编译或白盒执行未通过，详见执行日志与结构化证据。\n" if not passed else "- 未发现确定性执行失败。\n")
+    )
+    return _fact_gate_report(report, conclusion)
 
 
 def _run_test_review_report(
@@ -2090,27 +2192,32 @@ def _run_test_review_report(
         from app.agents.test_review_reporter_agent import TestReviewReporterAgent
 
         agent = TestReviewReporterAgent()
+        data: dict[str, Any] = {}
+        roles: dict[str, Any] = {}
+        report_md = _build_deterministic_test_report(conclusion)
         if not agent._api_key:
-            _append_event(db, environment, "progress", "multi_agent_review", "LLM 未配置,跳过多 Agent 测试审查报告")
-            db.commit()
-            return None
-        ctx = AgentContext(
-            user_id=environment.owner_id,
-            project_id=environment.project_id,
-            extra={"trace_id": environment.public_id},
-        )
-        result = agent.review(db, environment=environment, conclusion=conclusion, ctx=ctx)
-        if not result.success:
-            _append_event(
-                db, environment, "progress", "multi_agent_review", f"多 Agent 测试审查未生成: {str(result.error)[:120]}"
+            _append_event(db, environment, "progress", "multi_agent_review", "LLM 未配置，已使用确定性测试报告兜底")
+        else:
+            ctx = AgentContext(
+                user_id=environment.owner_id,
+                project_id=environment.project_id,
+                extra={"trace_id": environment.public_id},
             )
-            db.commit()
-            return None
-        data = result.data if isinstance(result.data, dict) else {}
-        report_md = _fact_gate_report(str(data.get("report_md") or ""), conclusion)
-        roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
-        if not report_md:
-            return None
+            result = agent.review(db, environment=environment, conclusion=conclusion, ctx=ctx)
+            if result.success:
+                data = result.data if isinstance(result.data, dict) else {}
+                candidate = _fact_gate_report(str(data.get("report_md") or ""), conclusion)
+                if candidate.strip():
+                    report_md = candidate
+                roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
+            else:
+                _append_event(
+                    db,
+                    environment,
+                    "progress",
+                    "multi_agent_review",
+                    f"多 Agent 测试审查未生成，已使用确定性报告兜底: {str(result.error)[:120]}",
+                )
         artifact = _persist_browser_artifact(
             db,
             environment,
@@ -2229,14 +2336,24 @@ def _publish_sandbox_report(
             report_row = ReviewReport(
                 task_id=task.id,
                 user_id=owner_id,
-                content_json={"source": "sandbox_test", "public_id": public_id, "report_md": report_md},
+                content_json={
+                    "source": "sandbox_test",
+                    "public_id": public_id,
+                    "report_md": report_md,
+                    "evidence": conclusion.get("evidence", {}),
+                },
                 summary=report_md[:2000],
                 score=report_score,
                 create_time=now,
             )
             db.add(report_row)
         else:
-            report_row.content_json = {"source": "sandbox_test", "public_id": public_id, "report_md": report_md}
+            report_row.content_json = {
+                "source": "sandbox_test",
+                "public_id": public_id,
+                "report_md": report_md,
+                "evidence": conclusion.get("evidence", {}),
+            }
             report_row.summary = report_md[:2000]
             report_row.score = report_score
         db.commit()
@@ -3070,7 +3187,10 @@ def _create_environment_locked(
             project_id,
         )
     else:
-        archive, _ = project_source_service.build_source_archive(db, actor, project_id)
+        archive, archive_filename = project_source_service.build_source_archive(db, actor, project_id)
+    if source_revision_id:
+        archive_filename = "source-revision.zip"
+    decompilation_plan = decompilation_service.plan_decompilation_archive(archive, archive_filename)
     source_sha256 = hashlib.sha256(archive).hexdigest()
     worker = (
         None
@@ -3118,6 +3238,7 @@ def _create_environment_locked(
                 "language_source": "project" if project_language else "request",
                 "db_type": db_type,
                 "source_revision_id": int(source_revision_id) if source_revision_id else None,
+                "decompilation": decompilation_plan,
                 "agent_team": (
                     {
                         "team_id": agent_team_context["team_id"],
@@ -3685,6 +3806,28 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             if isinstance(worker_conclusion, dict) and isinstance(worker_conclusion.get("logs"), dict)
             else None
         )
+        expected_decompilation = config.get("decompilation") if isinstance(config.get("decompilation"), dict) else {}
+        expected_decompilation_status = str(expected_decompilation.get("status") or "skipped")
+        if expected_decompilation_status == "unsupported":
+            target_status = "failed"
+            evidence["decompilation"] = {
+                **expected_decompilation,
+                "status": "unsupported",
+                "reason": str(expected_decompilation.get("reason") or "输入类型不受支持"),
+            }
+            _append_event(
+                db,
+                environment,
+                "failed",
+                "decompilation",
+                "反编译输入类型不受支持，已失败关闭",
+                evidence["decompilation"],
+            )
+            db.commit()
+        if expected_decompilation_status == "planned" and not (
+            worker_logs and str(worker_logs.get("text") or "").strip()
+        ):
+            raise RuntimeError("反编译 runner 未返回执行日志")
         if worker_logs and str(worker_logs.get("text") or ""):
             log_text_for_facts = str(worker_logs["text"])
             recon_facts = _extract_prism_facts(log_text_for_facts)
@@ -3699,6 +3842,24 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                     content=json.dumps(recon_facts, ensure_ascii=False).encode("utf-8"),
                 )
             agent_tests_result = _extract_agent_tests_result(log_text_for_facts)
+            decompilation_result = _extract_decompilation_result(log_text_for_facts)
+            if expected_decompilation_status == "planned":
+                if decompilation_result is None:
+                    raise RuntimeError("反编译 runner 未返回唯一可信结果")
+                if decompilation_result.get("status") != "succeeded":
+                    target_status = "failed"
+                evidence["decompilation"] = decompilation_result
+                _append_event(
+                    db,
+                    environment,
+                    "complete" if decompilation_result.get("status") == "succeeded" else "failed",
+                    "decompilation",
+                    "Android 制品反编译完成" if decompilation_result.get("status") == "succeeded" else "Android 制品反编译失败",
+                    decompilation_result,
+                )
+                db.commit()
+            elif expected_decompilation_status != "unsupported" and decompilation_result is not None:
+                evidence["decompilation"] = decompilation_result
         agent_tests_result = _reconcile_agent_tests_result(expected_agent_tests, agent_tests_result)
         if agent_tests_result is not None:
             evidence["agent_tests"] = agent_tests_result

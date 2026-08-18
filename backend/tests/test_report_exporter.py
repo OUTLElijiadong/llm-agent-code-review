@@ -177,6 +177,23 @@ def test_export_to_dict_returns_dict_with_required_keys():
     assert "statistics" in result
 
 
+def test_export_to_dict_keeps_structured_decompilation_evidence():
+    evidence = {
+        "decompilation": {
+            "status": "succeeded",
+            "tool": "jadx",
+            "tool_version": "1.5.6",
+            "input_sha256": "c" * 64,
+            "output_sha256": "a" * 64,
+            "exit_code": 0,
+            "artifact_refs": ["decompilation-manifest"],
+        }
+    }
+    result = export_to_dict(_make_task(), [], "摘要", 80, evidence)
+    assert result["evidence"]["decompilation"]["input_sha256"] == "c" * 64
+    assert result["evidence"]["decompilation"]["artifact_refs"] == ["decompilation-manifest"]
+
+
 def test_export_to_dict_statistics_contains_required_fields():
     """statistics 应包含 severity_count / type_count / cwe_count / compliance_summary / top_vulnerabilities。"""
     result = export_to_dict(_make_task(), _make_mixed_issues(), "摘要", 70)

@@ -33,6 +33,10 @@ from app.models.project_source_archive import ProjectSourceArchive
 from app.models.user import User
 from app.schemas.project import ProjectIn
 from app.services import audit_service, code_file_service, project_service
+from app.services.decompilation_service import (
+    DecompilationStatus,
+    plan_decompilation_archive,
+)
 from app.services.project_member_service import require_project_access
 from app.utils.archive_extractor import (
     ARCHIVE_EXTENSIONS,
@@ -599,9 +603,21 @@ def _ingest_source_archive_bytes_locked(
     )
     # 隔离项目没有可编辑 CodeFile,建档时填写的语言常与真实源码不符;
     # 以归档内容推断的主语言纠正,确保后续白盒/黑盒测试选中正确的受控运行时。
+    decompilation = plan_decompilation_archive(raw, safe_filename)
     detected_language = _dominant_source_language(members)
+    if decompilation.get("status") == DecompilationStatus.PLANNED.value:
+        # JADX 产物按 Java profile 进入隔离白盒阶段；原始制品仍保持只读。
+        detected_language = "java"
     if detected_language and str(project.language or "").strip().lower() != detected_language:
         project.language = detected_language
+    scan_summary = json.loads(scan_summary_json)
+    scan_summary["decompilation"] = decompilation
+    scan_summary_json = json.dumps(
+        scan_summary,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     row = ProjectSourceArchive(
         project_id=project_id,
         owner_id=user.id,
