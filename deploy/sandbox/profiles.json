@@ -3,7 +3,7 @@
   "profiles": {
     "python": {
       "image": "prism-sandbox-python:3.11",
-      "digest": "sha256:1b1c7c12c96fb5a57152022b362f2d912521208c8b46e88d99184f54627c2932",
+      "digest": "sha256:1e9970ff79abc6e0893e8d03ea401d4ffcebc96eec4c15656500788a1600acef",
       "memory_mb": 512,
       "cpus": 1.0,
       "pids": 128,
@@ -13,7 +13,7 @@
     },
     "node": {
       "image": "prism-sandbox-node:20",
-      "digest": "sha256:5bca1928e179d203f5959d7995cbce4d4caee962717444d14fc8a8bdf5ff78f9",
+      "digest": "sha256:a3503fdf8ba5279bb1296f877be1ce6c87d91cd2eee81134ee4f72ce4825a063",
       "memory_mb": 768,
       "cpus": 1.0,
       "pids": 256,
@@ -23,7 +23,7 @@
     },
     "java": {
       "image": "prism-sandbox-java:17",
-      "digest": "sha256:33df346dbd9fcd81272db7c169c52522bef2840b1b311f4f39ed40553b79b812",
+      "digest": "sha256:58c86acec527faa4f65301b95f1e13a0c5bcf38bba9a6fe67698f7327d77524c",
       "memory_mb": 1024,
       "cpus": 1.0,
       "pids": 256,
@@ -33,7 +33,7 @@
     },
     "go": {
       "image": "prism-sandbox-go:1.23",
-      "digest": "sha256:0f9c71a2fe1730b1f010951781c92e32eb66a8255a37e594b25a03f66955502a",
+      "digest": "sha256:250fddeca94e261748589f986148e4ba8b49d560ae7e8ed3ea4ce254e7b1dbb3",
       "memory_mb": 768,
       "cpus": 1.0,
       "pids": 256,
@@ -43,7 +43,7 @@
     },
     "php": {
       "image": "prism-sandbox-php:8.3",
-      "digest": "sha256:4563f7d7d80840bb25fd6e80e53332ec2ba518c013541e435a14e027db652ef6",
+      "digest": "sha256:24eb4a3b301c86b9ef4b8bb80672f456c5c158e50caddde128a89c8694e89918",
       "memory_mb": 512,
       "cpus": 1.0,
       "pids": 128,

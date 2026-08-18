@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile.python
       args:
-        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-3c6ba5f746d9725d2199c1555debaa3686248398f75eef1df9fbd95859c35372}
+        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-64ec9e51835243c12e523aeffebfdb9387dd8f404a982816cf0c3c804a40b655}
         BASE_IMAGE: ${PYTHON_BASE_IMAGE:?PYTHON_BASE_IMAGE must name the reviewed image}@sha256:${PYTHON_BASE_IMAGE_DIGEST:?PYTHON_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
   node:
     image: prism-sandbox-node:20
@@ -13,7 +13,7 @@ services:
       context: .
       dockerfile: Dockerfile.node
       args:
-        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-3c6ba5f746d9725d2199c1555debaa3686248398f75eef1df9fbd95859c35372}
+        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-64ec9e51835243c12e523aeffebfdb9387dd8f404a982816cf0c3c804a40b655}
         BASE_IMAGE: ${NODE_BASE_IMAGE:?NODE_BASE_IMAGE must name the reviewed image}@sha256:${NODE_BASE_IMAGE_DIGEST:?NODE_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
   java:
     image: prism-sandbox-java:17
@@ -21,7 +21,7 @@ services:
       context: .
       dockerfile: Dockerfile.java
       args:
-        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-3c6ba5f746d9725d2199c1555debaa3686248398f75eef1df9fbd95859c35372}
+        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-64ec9e51835243c12e523aeffebfdb9387dd8f404a982816cf0c3c804a40b655}
         JADX_VERSION: ${JADX_VERSION:-1.5.6}
         JADX_SHA256: ${JADX_SHA256:-545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974}
         BASE_IMAGE: ${JAVA_BASE_IMAGE:?JAVA_BASE_IMAGE must name the reviewed image}@sha256:${JAVA_BASE_IMAGE_DIGEST:?JAVA_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
@@ -31,7 +31,7 @@ services:
       context: .
       dockerfile: Dockerfile.go
       args:
-        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-3c6ba5f746d9725d2199c1555debaa3686248398f75eef1df9fbd95859c35372}
+        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-64ec9e51835243c12e523aeffebfdb9387dd8f404a982816cf0c3c804a40b655}
         BASE_IMAGE: ${GO_BASE_IMAGE:?GO_BASE_IMAGE must name the reviewed image}@sha256:${GO_BASE_IMAGE_DIGEST:?GO_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
   php:
     image: prism-sandbox-php:8.3
@@ -39,5 +39,5 @@ services:
       context: .
       dockerfile: Dockerfile.php
       args:
-        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-3c6ba5f746d9725d2199c1555debaa3686248398f75eef1df9fbd95859c35372}
+        PRISM_RUNNER_SHA256: ${PRISM_RUNNER_SHA256:-64ec9e51835243c12e523aeffebfdb9387dd8f404a982816cf0c3c804a40b655}
         BASE_IMAGE: ${PHP_BASE_IMAGE:?PHP_BASE_IMAGE must name the reviewed image}@sha256:${PHP_BASE_IMAGE_DIGEST:?PHP_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest}
