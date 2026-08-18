@@ -11,7 +11,8 @@ RUN (sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list
     && rm -rf /var/lib/apt/lists/*
 
 # 将 Python 索引参数放在系统依赖层之后，切换索引时仍可复用 apt 缓存。
-ARG PIP_INDEX_URL=https://pypi.org/simple
+# 国内构建默认使用腾讯云 PyPI 镜像；仍可通过 --build-arg PIP_INDEX_URL 切回官方索引。
+ARG PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
 
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}"
