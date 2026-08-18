@@ -7,18 +7,23 @@
 | Git 基线与工作树保护 | 通过 | `origin/main=4b698f2`；备份分支 `codex/pre-whitebox-backup-20260818164924`；未执行破坏性清理 |
 | 输入识别与失败关闭 | 通过 | `backend/tests/unit/services/test_decompilation_service.py`；14 项通过 |
 | 普通上传边界 | 通过 | APK/AAB 不进入普通 MIME 白名单；恶意扫描回归通过 |
-| runner 证据协议 | 通过 | marker 单一性、字段类型、哈希、退出码与制品引用测试通过；runner shell 语法通过 |
+| runner 证据协议 | 通过 | marker 单一性、字段类型、输入清单 SHA、逐制品原始 SHA、输出 SHA、退出码与制品引用测试通过；成功记录缺少任一原始制品 SHA 时失败关闭 |
 | 反编译前置与派生源码门禁 | 通过 | runner 先执行反编译，再执行固定白盒链；派生 Java/Kotlin 源码进入 source-present 和静态完整性门禁 |
-| 结构化报告证据 | 通过 | JSON/dict 上的 `evidence.decompilation` 回归通过；HTML/PDF/Word 复用同一上下文 |
+| 结构化报告证据 | 通过 | JSON 可解析；三套 HTML、PDF、Word 均显示工具版本、输入清单 SHA、原始制品 SHA、输出 SHA 和制品引用；PDF 已经 Poppler 提取及逐页 PNG 视觉检查 |
 | 确定性报告兜底 | 通过 | 无 LLM 时仍生成事实门禁报告并发布 ReviewReport |
-| 后端全量回归 | 通过 | `1887 passed, 1 PytestCollectionWarning` |
+| 后端全量回归 | 通过 | `1890 passed, 1 PytestCollectionWarning`；未处理线程异常告警已提升为错误 |
 | 前端回归与构建 | 通过 | Vitest `35 files / 232 tests`；`npm run build` 通过；测试存在既有 Vue warning |
 | 部署脚本回归 | 通过 | `deploy/tests/test_scripts.sh` 通过；备份漂移、恢复回填、共享锁和 Playwright 保护均覆盖 |
-| JADX Java 镜像构建 | 待公网发布 | 需在生产/构建主机执行固定版本 1.5.6 下载与 SHA 校验 |
-| 公网完整验收 | 待公网发布 | 需确认发布后版本、登录、项目/源码、白盒、四格式导出和 `/healthz` |
+| JADX Java 镜像构建 | 通过 | 生产固定 JADX CLI 1.5.6；官方 ZIP SHA-256 `545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974`；Java 镜像、profile digest 和 runner label 一致 |
+| 真实 APK 沙箱执行 | 通过 | 官方 `small.apk` 原始 SHA-256 `3a47fa04968991670b5e417fa3b4daba32b5af59e764650f1a996be44b518bc1`；在 runsc、无网络、只读根文件系统、cap-drop 和资源限制下完成 JADX 及白盒完整性检查 |
+| 生产备份与发布 | 通过 | 发布脚本生成并校验数据库备份，隔离恢复为 84 张表、Alembic `036`；Backend/Frontend 双容器 healthy，权威账本为 `deploy/.releases/current.env` |
+| 公网基础验收 | 通过 | `https://www.lijiadong.cn/`、`/healthz`、`/readyz` 均为 200；浏览器登录页正常渲染且控制台无错误；最终 release 以权威账本和健康接口一致值为准 |
+| 公网认证业务验收 | 未执行 | 当前会话没有可用登录凭据，因此未声称已完成项目上传、真实任务创建及四格式公网下载；生产容器内四格式导出与解析已独立通过 |
 
 ## 证据边界
 
 - 用户提供的 `jadx-gui.zip` 是 Windows GUI 包，不能直接作为 Linux 沙箱 CLI；生产使用官方 JADX CLI 1.5.6，Dockerfile 固定 SHA-256。
 - APK/AAB 的动态 Android 运行不在现有 Java 沙箱能力内；报告必须区分反编译静态审计与动态部署未验证。
 - 前端 lint 仍有既有无关文件错误，未因本任务扩大修改范围。
+- `/opt/prism-release-state/current.env` 是遗留账本；当前发布脚本的唯一权威账本为 `/opt/code-review/deploy/.releases/current.env`。
+- 报告与证据协议实现提交为 `0eb4c29`；最终生产提交还包含本组 6A 文档，精确完整 SHA 由发布账本记录。
