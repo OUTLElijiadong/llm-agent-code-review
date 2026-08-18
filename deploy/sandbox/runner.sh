@@ -103,6 +103,7 @@ export GOMODCACHE=/workspace/.prism-cache/go/modules
 export COMPOSER_DISABLE_NETWORK=1
 export HOME=/workspace/.prism-home
 export TMPDIR=/workspace/.prism-tmp
+export JAVA_TOOL_OPTIONS="-Duser.home=$HOME -Djava.io.tmpdir=$TMPDIR"
 
 preflight_agent_test_file() {
   # 先用语言原生工具完成解析/编译，避免后端根据自由文本猜测失败阶段。
