@@ -47,7 +47,7 @@
     </el-alert>
 
     <!-- ============ 6 张统计卡 ============ -->
-    <section class="stat-grid">
+    <section class="stat-grid prism-stagger">
       <div v-for="card in statCards" :key="card.label" class="stat" :class="{ feature: card.feature }">
         <div v-if="card.feature" class="feature-spectrum"></div>
         <div class="stat-label">
@@ -62,7 +62,7 @@
         <div v-if="card.delta" class="stat-delta" :class="card.deltaDir">{{ card.delta }}</div>
         <div v-if="card.feature" class="stat-gauge">
           <div class="gauge-track">
-            <div class="gauge-fill" :style="{ width: gaugeWidth }"></div>
+            <FluidProgress class="gauge-fluid" :progress="avgScoreAnim" :height="6" />
           </div>
           <div class="gauge-label">
             <span>风险等级 · {{ riskLevel }}</span>
@@ -181,6 +181,8 @@ import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
+import FluidProgress from '@/components/common/FluidProgress.vue'
+import { useCountUp } from '@/composables/useCountUp'
 import SecurityPostureCard from '@/components/security/SecurityPostureCard.vue'
 import { PRISM_SEVERITY_COLORS } from '@/components/chart/prismTheme'
 import { severityClass, severityDisplayLabel } from '@/constants/severity'
@@ -220,6 +222,20 @@ const summary = ref<SummaryOut>({
   recent_tasks: [],
 })
 
+/* 数字滚动:统计卡数值从旧值平滑滚动到新值 */
+const reviewCountSrc = computed(() => summary.value.review_count)
+const totalIssuesSrc = computed(() => summary.value.total_issues)
+const severeIssuesSrc = computed(() => summary.value.severe_issues)
+const avgScoreSrc = computed(() => Number(summary.value.avg_score || 0))
+const projectCountSrc = computed(() => summary.value.project_count)
+const fileCountSrc = computed(() => summary.value.file_count)
+const reviewCountAnim = useCountUp(reviewCountSrc)
+const totalIssuesAnim = useCountUp(totalIssuesSrc)
+const severeIssuesAnim = useCountUp(severeIssuesSrc)
+const avgScoreAnim = useCountUp(avgScoreSrc)
+const projectCountAnim = useCountUp(projectCountSrc)
+const fileCountAnim = useCountUp(fileCountSrc)
+
 const riskData = ref<{ name: string; value: number; severity: string }[]>([])
 const issueTypeData = ref<{ key: string; name: string; value: number }[]>([])
 const scoreTrendData = ref<{ name: string; value: number }[]>([])
@@ -234,7 +250,6 @@ const today = computed(() => {
 const dimMeta = DIM_META
 
 const statCards = computed(() => {
-  const avgScore = summary.value.avg_score || 0
   const hasReview = summary.value.review_count > 0
   const hasIssue = summary.value.total_issues > 0
   const hasSevere = summary.value.severe_issues > 0
@@ -242,48 +257,46 @@ const statCards = computed(() => {
   const hasFile = summary.value.file_count > 0
   return [
     {
-      label: '累计审查任务', value: summary.value.review_count, unit: '次', icon: 'DocumentChecked',
+      label: '累计审查任务', value: Math.round(reviewCountAnim.value), unit: '次', icon: 'DocumentChecked',
       iconStyle: { background: 'var(--brand-50)', color: 'var(--brand-600)' },
       delta: hasReview ? '持续积累中' : '— 暂无数据', deltaDir: 'flat',
       feature: false,
     },
     {
-      label: '累计发现问题', value: summary.value.total_issues, unit: '个', icon: 'Warning',
+      label: '累计发现问题', value: Math.round(totalIssuesAnim.value), unit: '个', icon: 'Warning',
       iconStyle: { background: 'rgba(226,92,115,.10)', color: 'var(--dim-bug)' },
-      delta: hasIssue ? `共 ${summary.value.severe_issues} 个严重` : '— 暂无',
+      delta: hasIssue ? `共 ${Math.round(severeIssuesAnim.value)} 个严重` : '— 暂无',
       deltaDir: 'flat',
       feature: false,
     },
     {
-      label: '严重问题', value: summary.value.severe_issues, unit: '个', icon: 'CircleClose',
+      label: '严重问题', value: Math.round(severeIssuesAnim.value), unit: '个', icon: 'CircleClose',
       iconStyle: { background: 'rgba(220,73,97,.10)', color: 'var(--sev-severe)' },
       delta: hasSevere ? '需优先处理' : '— 暂无',
       deltaDir: hasSevere ? 'down' : 'flat',
       feature: false,
     },
     {
-      label: '平均代码评分', value: avgScore.toFixed(1), unit: '/100', icon: 'TrendCharts',
+      label: '平均代码评分', value: avgScoreAnim.value.toFixed(1), unit: '/100', icon: 'TrendCharts',
       iconStyle: { background: 'rgba(255,255,255,.16)', color: '#fff' },
       delta: hasReview ? null : '— 暂无审查',
       deltaDir: 'flat',
       feature: true,
     },
     {
-      label: '活跃项目', value: summary.value.project_count, unit: '个', icon: 'FolderOpened',
+      label: '活跃项目', value: Math.round(projectCountAnim.value), unit: '个', icon: 'FolderOpened',
       iconStyle: { background: 'rgba(75,155,255,.10)', color: 'var(--dim-naming)' },
       delta: hasProject ? '持续更新中' : '— 暂无', deltaDir: 'flat',
       feature: false,
     },
     {
-      label: '代码文件', value: summary.value.file_count, unit: '份', icon: 'Document',
+      label: '代码文件', value: Math.round(fileCountAnim.value), unit: '份', icon: 'Document',
       iconStyle: { background: 'rgba(61,188,217,.12)', color: 'var(--accent-600)' },
       delta: hasFile ? '持续更新中' : '— 暂无', deltaDir: 'flat',
       feature: false,
     },
   ]
 })
-
-const gaugeWidth = computed(() => `${Math.min(100, Math.max(0, summary.value.avg_score || 0))}%`)
 
 const riskLevel = computed(() => {
   const s = summary.value.avg_score || 0
@@ -699,10 +712,34 @@ onBeforeUnmount(() => {
   overflow: hidden;
   transition: all 0.2s ease;
 
+  /* hover 时顶部掠过一记光谱细线,强化「棱镜」品牌感 */
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -30%;
+    width: 55%;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+      transparent,
+      var(--brand-300),
+      var(--accent-400),
+      transparent);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+  }
+
   &:hover {
     border-color: var(--brand-200);
     box-shadow: var(--panel-shadow);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+
+    &::before {
+      opacity: 1;
+      animation: statSheen 0.9s ease forwards;
+    }
   }
 
   &.feature {
@@ -745,6 +782,15 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
   color: var(--gray-500);
   z-index: 1;
+}
+
+@keyframes statSheen {
+  from { left: -30%; }
+  to   { left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat:hover::before { animation: none; opacity: 0.7; }
 }
 
 .stat-ico {
@@ -792,16 +838,14 @@ onBeforeUnmount(() => {
   z-index: 1;
 
   .gauge-track {
-    height: 6px;
-    background: rgba(255, 255, 255, 0.12);
     border-radius: 3px;
     overflow: hidden;
-  }
-  .gauge-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--brand-300), var(--accent-300));
-    border-radius: 3px;
-    transition: width 0.6s cubic-bezier(.4, 0, .2, 1);
+
+    /* 深色卡上的流体进度:轨道透明化,融进卡片底色 */
+    .gauge-fluid {
+      background: rgba(255, 255, 255, 0.12);
+      box-shadow: none;
+    }
   }
   .gauge-label {
     display: flex;

@@ -351,6 +351,117 @@ select {
   50%      { opacity: 0; }
 }
 
+/* ============================================================
+ * Prism Motion 系统 · 进场/扫光/按压/数字滚动
+ * 约定:全部只用 transform/opacity;元素自身已动画时不叠加
+ * ============================================================ */
+
+/* 面板/卡片进场:位移 + 上浮,配合 --rise-delay 做阶梯 */
+@keyframes prismRise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.prism-rise {
+  animation: prismRise 0.42s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
+  animation-delay: var(--rise-delay, 0ms);
+}
+
+/* 骨架扫光:浅紫高光斜向掠过,替代生硬的灰块闪烁 */
+@keyframes prismShimmer {
+  0%   { transform: translateX(-120%) skewX(-18deg); }
+  100% { transform: translateX(320%) skewX(-18deg); }
+}
+
+.prism-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--gray-100);
+  border-radius: var(--r-sm);
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 38%;
+    background: linear-gradient(90deg,
+      transparent,
+      rgba(220, 218, 253, 0.85) 45%,
+      rgba(61, 188, 217, 0.22) 60%,
+      transparent);
+    animation: prismShimmer 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+}
+
+/* 主按钮按压回馈 */
+.el-button:not(.is-disabled):active {
+  transform: translateY(1px) scale(0.985);
+}
+
+.el-button {
+  transition: transform 0.12s ease, box-shadow var(--transition-fast),
+    background-color var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+/* 数字滚动跳变时由 JS 驱动,这里提供 tabular-nums 保证宽度稳定 */
+.stat-num,
+.stat .stat-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 页面级进场:主要区块的通用阶梯容器
+ * 用法:容器加 .prism-stagger,直接子元素自动错峰上浮(最多 12 个) */
+.prism-stagger > * {
+  animation: prismRise 0.42s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
+}
+.prism-stagger > *:nth-child(1)  { animation-delay: 0ms; }
+.prism-stagger > *:nth-child(2)  { animation-delay: 45ms; }
+.prism-stagger > *:nth-child(3)  { animation-delay: 90ms; }
+.prism-stagger > *:nth-child(4)  { animation-delay: 135ms; }
+.prism-stagger > *:nth-child(5)  { animation-delay: 180ms; }
+.prism-stagger > *:nth-child(6)  { animation-delay: 225ms; }
+.prism-stagger > *:nth-child(7)  { animation-delay: 270ms; }
+.prism-stagger > *:nth-child(8)  { animation-delay: 315ms; }
+.prism-stagger > *:nth-child(9)  { animation-delay: 360ms; }
+.prism-stagger > *:nth-child(10) { animation-delay: 405ms; }
+.prism-stagger > *:nth-child(11) { animation-delay: 450ms; }
+.prism-stagger > *:nth-child(n + 12) { animation-delay: 495ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .prism-rise,
+  .prism-stagger > * {
+    animation: none !important;
+  }
+  .prism-shimmer::after {
+    animation: none !important;
+  }
+  .el-button:not(.is-disabled):active {
+    transform: none;
+  }
+}
+
+/* Element Plus 骨架屏品牌化:紫青渐变扫光替代默认灰闪 */
+.el-skeleton__item {
+  background: linear-gradient(90deg,
+    var(--gray-100) 25%,
+    #E7E5FD 42%,
+    rgba(61, 188, 217, 0.14) 55%,
+    var(--gray-100) 68%) !important;
+  background-size: 400% 100% !important;
+}
+
+.el-skeleton.is-animated .el-skeleton__item {
+  animation: prismSkeleton 1.5s ease-in-out infinite !important;
+}
+
+@keyframes prismSkeleton {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
 .think-dots {
   display: inline-flex;
   gap: 4px;

@@ -6,10 +6,7 @@
     aria-live="polite"
     :aria-label="label"
   >
-    <div class="loader-core" aria-hidden="true">
-      <span class="prism-ring"></span>
-      <span class="prism-mark on-light"></span>
-    </div>
+    <AiOrb :size="compact ? 44 : 72" state="thinking" />
     <div class="loader-text">
       <div class="loader-label font-display">{{ label }}</div>
       <div v-if="sublabel" class="loader-sub">
@@ -17,13 +14,14 @@
         <span class="font-mono">{{ sublabel }}</span>
       </div>
     </div>
-    <div class="loader-beam" aria-hidden="true">
-      <span></span>
-    </div>
+    <FluidProgress class="loader-fluid" indeterminate :height="5" />
   </div>
 </template>
 
 <script setup lang="ts">
+import AiOrb from '@/components/common/AiOrb.vue'
+import FluidProgress from '@/components/common/FluidProgress.vue'
+
 withDefaults(defineProps<{
   label?: string
   sublabel?: string
@@ -69,60 +67,6 @@ withDefaults(defineProps<{
   }
 }
 
-.loader-core {
-  position: relative;
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
-
-  .prism-mark {
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    z-index: 2;
-  }
-
-  .on-light {
-    background: linear-gradient(135deg, #8E88F5, #5B58E8);
-    box-shadow: 0 2px 8px rgba(91, 88, 232, 0.25);
-  }
-}
-
-.compact .loader-core {
-  width: 44px;
-  height: 44px;
-
-  .prism-mark {
-    width: 22px;
-    height: 22px;
-    border-radius: 7px;
-  }
-}
-
-.prism-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: conic-gradient(from 210deg,
-    transparent,
-    #6B7CFF,
-    #2BBFB9,
-    #D4A53A,
-    #E25C73,
-    transparent);
-  animation: prismSpin 1.4s linear infinite;
-
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 7px;
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: inset 0 0 0 1px #EEF0F4;
-  }
-}
-
 .loader-text {
   display: flex;
   flex-direction: column;
@@ -146,30 +90,7 @@ withDefaults(defineProps<{
   color: #6E7689;
 }
 
-.loader-beam {
-  position: relative;
+.loader-fluid {
   width: min(280px, 100%);
-  height: 4px;
-  border-radius: 999px;
-  background: #DCDAFD;
-  overflow: hidden;
-
-  span {
-    position: absolute;
-    inset: 0 auto 0 -45%;
-    width: 45%;
-    border-radius: inherit;
-    background: linear-gradient(90deg, transparent, #6F69EE, #3DBCD9, transparent);
-    animation: prismBeam 1.35s ease-in-out infinite;
-  }
-}
-
-@keyframes prismSpin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes prismBeam {
-  0% { left: -45%; }
-  100% { left: 100%; }
 }
 </style>

@@ -905,12 +905,12 @@ it('运行中展示小菱执行进度条(已完成 X/Y 步 + 当前动作),完�
   })
   await flushPromises()
 
-  // 进度条:0/1 步,当前动作为「查看项目列表」
+  // 进度条:0/1 步,当前动作为「查看项目列表」(进度轨道为 FluidProgress 流体进度)
   const progress = wrapper.find('.chat-progress')
   expect(progress.exists()).toBe(true)
   expect(progress.text()).toContain('0/1 步')
   expect(progress.text()).toContain('查看项目列表')
-  expect(progress.find('.chat-progress-track').exists()).toBe(true)
+  expect(progress.find('.chat-progress-fluid').exists()).toBe(true)
 
   emit(0, {
     type: 'response.tool.completed',

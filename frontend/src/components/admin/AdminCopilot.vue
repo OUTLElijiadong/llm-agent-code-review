@@ -23,6 +23,8 @@ import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
+import AiOrb from '@/components/common/AiOrb.vue'
+import FluidProgress from '@/components/common/FluidProgress.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
@@ -1656,17 +1658,21 @@ onMounted(() => {
           <div class="message-avatar">
             <PrismMascot :size="22" :status="'running'" />
           </div>
-          <div class="typing-bubble"><i></i><i></i><i></i></div>
+          <div class="typing-bubble">
+            <AiOrb :size="24" state="thinking" :halo="false" />
+            <i></i><i></i><i></i>
+          </div>
         </div>
       </div>
 
       <footer class="copilot-input-area">
         <div v-if="uploadStatusVisible" class="upload-status" role="status" aria-label="上传进度">
-          <span class="upload-status-spinner" />
           <span class="upload-status-text" :title="uploadProgress.phase">{{ uploadProgress.phase }}</span>
-          <span class="upload-status-track" aria-hidden="true">
-            <i :style="{ width: `${uploadPercent}%` }"></i>
-          </span>
+          <FluidProgress
+            class="upload-status-fluid"
+            :progress="uploadPercent"
+            :height="8"
+          />
           <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
         </div>
         <div class="composer">
@@ -2155,15 +2161,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 12.5px;
   color: var(--brand-500, #5b58e8);
 }
-.upload-status-spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--brand-200, #d4d2f8);
-  border-top-color: var(--brand-500, #5b58e8);
-  border-radius: 50%;
-  animation: upload-spin 0.8s linear infinite;
-  flex-shrink: 0;
-}
 .upload-status-text {
   flex: none;
   max-width: 45%;
@@ -2171,20 +2168,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.upload-status-track {
+/* 流体进度:取代原 CSS 渐变轨道 */
+.upload-status-fluid {
   flex: 1 1 60px;
   min-width: 48px;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--brand-100, #dcdafd);
-}
-.upload-status-track i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--brand-400, #6f69ee), var(--accent-400, #3dbcd9));
-  transition: width 0.3s ease;
 }
 .upload-status-count {
   flex: none;
@@ -2192,9 +2179,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-weight: 600;
   color: var(--brand-600, #4a46d4);
   white-space: nowrap;
-}
-@keyframes upload-spin {
-  to { transform: rotate(360deg); }
 }
 .upload-status-text {
   overflow: hidden;

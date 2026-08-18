@@ -15,6 +15,8 @@ import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
+import AiOrb from '@/components/common/AiOrb.vue'
+import FluidProgress from '@/components/common/FluidProgress.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
@@ -1906,9 +1908,11 @@ onMounted(() => {
                 <template v-else>小菱正在推进…</template>
               </span>
               <template v-if="showToolProgress">
-                <span class="chat-progress-track" aria-hidden="true">
-                  <i :style="{ width: `${toolProgressPercent}%` }"></i>
-                </span>
+                <FluidProgress
+                  class="chat-progress-fluid"
+                  :progress="toolProgressPercent"
+                  :height="6"
+                />
                 <span class="chat-progress-count">{{ toolStepProgress.done }}/{{ toolStepProgress.total }} 步</span>
               </template>
             </div>
@@ -2229,6 +2233,7 @@ onMounted(() => {
                 <PrismMascot :size="26" :status="'running'" />
               </div>
               <div class="msg-bubble typing" aria-label="小菱正在思考">
+                <AiOrb :size="30" state="thinking" :halo="false" />
                 <span class="typing-label">小菱正在想</span>
                 <span class="typing-dot" />
                 <span class="typing-dot" />
@@ -2240,11 +2245,12 @@ onMounted(() => {
 
           <div class="chat-input-area">
             <div v-if="uploadStatusVisible" class="upload-status" role="status" aria-label="上传进度">
-              <span class="upload-status-spinner" />
               <span class="upload-status-text" :title="uploadProgress.phase">{{ uploadProgress.phase }}</span>
-              <span class="upload-status-track" aria-hidden="true">
-                <i :style="{ width: `${uploadPercent}%` }"></i>
-              </span>
+              <FluidProgress
+                class="upload-status-fluid"
+                :progress="uploadPercent"
+                :height="8"
+              />
               <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
             </div>
             <p v-else class="chat-input-hint">支持直接拖入代码文件帮你建项目;Shift+Enter 换行</p>
@@ -2468,30 +2474,6 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-progress-track {
-  flex: 1 1 72px;
-  min-width: 48px;
-  max-width: 160px;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--gray-100);
-}
-.chat-progress-track i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--brand-400), var(--accent-400));
-  transition: width 0.4s ease;
-}
-/* 运行中呼吸:整条进度带轻微明暗起伏 */
-.chat-progress.is-busy .chat-progress-track i {
-  animation: chat-progress-breathe 1.4s ease-in-out infinite;
-}
-@keyframes chat-progress-breathe {
-  0%, 100% { filter: brightness(1); }
-  50% { filter: brightness(1.22); }
-}
 .chat-progress-count {
   flex: none;
   color: var(--brand-600);
@@ -2630,9 +2612,6 @@ onMounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .quick-question { transition: none; }
   .quick-question:hover { transform: none; }
-  .chat-progress-track i { transition: none; }
-  .chat-progress.is-busy .chat-progress-track i { animation: none; }
-  .upload-status-track i { transition: none; }
   .msg-copy-btn { transition: none; }
   .typing-label { animation: none; }
   .msg-bubble { animation: none; }
@@ -2868,9 +2847,14 @@ onMounted(() => {
 
 .msg-bubble.typing {
   display: flex;
-  gap: 4px;
+  gap: 10px;
   align-items: center;
-  padding: 12px 16px;
+  padding: 10px 16px 10px 12px;
+
+  /* AI 思考球与文字行对齐 */
+  .ai-orb {
+    flex: none;
+  }
 }
 
 /* 「小菱正在想」标签:跟三点动画同色呼吸,状态拟人化 */
@@ -3224,20 +3208,6 @@ onMounted(() => {
   color: var(--brand-600, #5b58e8);
 }
 
-.upload-status-spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--brand-200, #d4d2f8);
-  border-top-color: var(--brand-500, #5b58e8);
-  border-radius: 50%;
-  animation: upload-spin 0.8s linear infinite;
-  flex-shrink: 0;
-}
-
-@keyframes upload-spin {
-  to { transform: rotate(360deg); }
-}
-
 .upload-status-text {
   flex: none;
   max-width: 45%;
@@ -3246,21 +3216,16 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.upload-status-track {
+/* 流体进度:取代原 CSS 渐变轨道 */
+.upload-status-fluid {
   flex: 1 1 60px;
   min-width: 48px;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--brand-100, #dcdafd);
 }
 
-.upload-status-track i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--brand-400, #6f69ee), var(--accent-400, #3dbcd9));
-  transition: width 0.3s ease;
+.chat-progress-fluid {
+  flex: 1 1 72px;
+  min-width: 48px;
+  max-width: 160px;
 }
 
 .upload-status-count {

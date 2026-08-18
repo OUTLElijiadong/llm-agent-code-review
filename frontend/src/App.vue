@@ -55,7 +55,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <router-view />
+  <router-view v-slot="{ Component }">
+    <transition name="page-fade" mode="out-in">
+      <component :is="Component" />
+    </transition>
+  </router-view>
   <AgentActivityBorder />
   <VirtualCursor />
   <transition name="route-loading-fade">
@@ -88,5 +92,34 @@ onBeforeUnmount(() => {
 .route-loading-fade-enter-from,
 .route-loading-fade-leave-to {
   opacity: 0;
+}
+
+/* 页面级过渡:淡出旧页 + 新页轻微上浮,120ms 内完成避免拖慢导航 */
+.page-fade-enter-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.page-fade-leave-active {
+  transition: opacity 0.12s ease;
+}
+
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.page-fade-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-fade-enter-active,
+  .page-fade-leave-active {
+    transition: none;
+  }
+
+  .page-fade-enter-from {
+    transform: none;
+  }
 }
 </style>
