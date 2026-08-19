@@ -407,6 +407,80 @@ def _require_execution_lease(db: Session, environment_id: int, execution_token: 
         raise RuntimeError("沙箱执行租约已失效")
 
 
+def _persist_worker_execution_snapshot(
+    db: Session,
+    environment: SandboxEnvironment,
+    *,
+    execution_bytes: bytes,
+    source_sha256: str,
+    repair_round: int,
+    request_envelope: dict[str, Any],
+    request_config_json: str,
+    execution_token: str | None,
+) -> bool:
+    """Persist the exact Worker input only while this executor owns the lease."""
+    updated = (
+        db.query(SandboxEnvironment)
+        .filter(
+            SandboxEnvironment.id == environment.id,
+            *([SandboxEnvironment.execution_token == execution_token] if execution_token is not None else []),
+        )
+        .update(
+            {
+                "execution_archive_blob": execution_bytes,
+                "execution_source_sha256": source_sha256,
+                "execution_round": repair_round,
+                "worker_request_json": _json(request_envelope),
+                "agent_config_json": request_config_json,
+                **({"started_at": environment.started_at} if environment.started_at is not None else {}),
+            },
+            synchronize_session=False,
+        )
+    )
+    if not updated:
+        db.rollback()
+        db.expire_all()
+        return False
+    return True
+
+
+def _enter_finalizing(
+    db: Session,
+    environment: SandboxEnvironment,
+    *,
+    result: dict[str, Any],
+    target_status: str,
+    execution_token: str | None,
+) -> bool:
+    """Move to finalizing atomically so a stale executor cannot steal a recovered run."""
+    values: dict[str, Any] = {
+        "status": "finalizing",
+        "executor_ref": str(result.get("executor_ref") or result.get("request_id") or "")[:160] or None,
+        "runtime": str(result.get("runtime") or environment.runtime)[:50],
+        "image_ref": str(result.get("image_ref") or environment.image_ref)[:300],
+        "image_digest": str(result.get("image_digest") or "")[:100] or None,
+        "started_at": environment.started_at or _utcnow(),
+    }
+    if isinstance(result.get("resource_policy"), dict):
+        values["resource_policy_json"] = _json(result["resource_policy"])
+    if environment.purpose == "deploy" and target_status == "ready":
+        values["preview_path"] = f"/api/sandboxes/{environment.public_id}/preview/"
+    updated = (
+        db.query(SandboxEnvironment)
+        .filter(
+            SandboxEnvironment.id == environment.id,
+            SandboxEnvironment.status.notin_({"stopping", "stopped", "expired", "finalizing"}),
+            *([SandboxEnvironment.execution_token == execution_token] if execution_token is not None else []),
+        )
+        .update(values, synchronize_session=False)
+    )
+    if not updated:
+        db.rollback()
+        db.expire_all()
+        return False
+    return True
+
+
 def _persist_browser_artifact(
     db: Session,
     environment: SandboxEnvironment,
@@ -3847,27 +3921,16 @@ def _execute_environment(
                     and persisted_request.get("source_sha256") == effective_sha
                 ):
                     saved_request = persisted_request
-                saved_request_json = _json(saved_request)
-                updated = (
-                    db.query(SandboxEnvironment)
-                    .filter(
-                        SandboxEnvironment.id == environment_id,
-                        *([SandboxEnvironment.execution_token == execution_token] if execution_token is not None else []),
-                    )
-                    .update(
-                        {
-                            "execution_archive_blob": execution_bytes,
-                            "execution_source_sha256": effective_sha,
-                            "execution_round": repair_round,
-                            "worker_request_json": saved_request_json,
-                            "agent_config_json": request_config_json,
-                            **({"started_at": environment.started_at} if environment.started_at is not None else {}),
-                        },
-                        synchronize_session=False,
-                    )
-                )
-                if not updated:
-                    db.rollback()
+                if not _persist_worker_execution_snapshot(
+                    db,
+                    environment,
+                    execution_bytes=execution_bytes,
+                    source_sha256=effective_sha,
+                    repair_round=repair_round,
+                    request_envelope=saved_request,
+                    request_config_json=request_config_json,
+                    execution_token=execution_token,
+                ):
                     return
                 db.commit()
                 environment = db.get(SandboxEnvironment, environment_id)
@@ -3974,29 +4037,13 @@ def _execute_environment(
         }.get(state, "failed")
         # Worker 的确定性结果已返回，但制品和多 Agent 报告尚未完成。
         # 先用租约条件更新进入 finalizing，旧 Worker 不能用普通 ORM commit 抢占新租约。
-        finalizing_values: dict[str, Any] = {
-            "status": "finalizing",
-            "executor_ref": str(result.get("executor_ref") or result.get("request_id") or "")[:160] or None,
-            "runtime": str(result.get("runtime") or environment.runtime)[:50],
-            "image_ref": str(result.get("image_ref") or environment.image_ref)[:300],
-            "image_digest": str(result.get("image_digest") or "")[:100] or None,
-            "started_at": environment.started_at or _utcnow(),
-        }
-        if isinstance(result.get("resource_policy"), dict):
-            finalizing_values["resource_policy_json"] = _json(result["resource_policy"])
-        if environment.purpose == "deploy" and target_status == "ready":
-            finalizing_values["preview_path"] = f"/api/sandboxes/{environment.public_id}/preview/"
-        finalizing_update = (
-            db.query(SandboxEnvironment)
-            .filter(
-                SandboxEnvironment.id == environment_id,
-                SandboxEnvironment.status.notin_({"stopping", "stopped", "expired", "finalizing"}),
-                *([SandboxEnvironment.execution_token == execution_token] if execution_token is not None else []),
-            )
-            .update(finalizing_values, synchronize_session=False)
-        )
-        if not finalizing_update:
-            db.rollback()
+        if not _enter_finalizing(
+            db,
+            environment,
+            result=result,
+            target_status=target_status,
+            execution_token=execution_token,
+        ):
             return
         db.commit()
         environment = db.get(SandboxEnvironment, environment_id)

@@ -1466,6 +1466,95 @@ def test_sandbox_terminal_transition_requires_current_execution_token(db) -> Non
     ) is True
 
 
+def test_sandbox_snapshot_and_finalizing_require_current_execution_token(db) -> None:
+    owner = User(username="sandbox_snapshot_lease_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="sandbox-snapshot-lease", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_snapshot_lease_01",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="whitebox_tester",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        status="dispatching",
+        runtime="runsc",
+        image_ref="prism-sandbox-python:3.12",
+        source_sha256="a" * 64,
+        execution_token="current-token",
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(environment)
+    db.commit()
+
+    request_envelope = {
+        "request_id": environment.public_id,
+        "purpose": "test",
+        "language": "python",
+        "test_mode": "whitebox",
+        "db_type": "none",
+        "source_sha256": "b" * 64,
+        "ttl_seconds": 3600,
+        "image_digest": "sha256:" + "c" * 64,
+    }
+    assert sandbox_service._persist_worker_execution_snapshot(
+        db,
+        environment,
+        execution_bytes=b"archive",
+        source_sha256="b" * 64,
+        repair_round=0,
+        request_envelope=request_envelope,
+        request_config_json='{"active_worker_request_id":"sbx_snapshot_lease_01"}',
+        execution_token="stale-token",
+    ) is False
+    db.refresh(environment)
+    assert environment.execution_archive_blob is None
+    assert environment.worker_request_json is None
+
+    assert sandbox_service._persist_worker_execution_snapshot(
+        db,
+        environment,
+        execution_bytes=b"archive",
+        source_sha256="b" * 64,
+        repair_round=0,
+        request_envelope=request_envelope,
+        request_config_json='{"active_worker_request_id":"sbx_snapshot_lease_01"}',
+        execution_token="current-token",
+    ) is True
+    db.commit()
+    db.refresh(environment)
+    persisted = json.loads(environment.worker_request_json)
+    assert persisted["ttl_seconds"] == 3600
+    assert persisted["image_digest"] == "sha256:" + "c" * 64
+
+    assert sandbox_service._enter_finalizing(
+        db,
+        environment,
+        result={"request_id": environment.public_id, "runtime": "runsc"},
+        target_status="succeeded",
+        execution_token="stale-token",
+    ) is False
+    db.refresh(environment)
+    assert environment.status == "dispatching"
+
+    assert sandbox_service._enter_finalizing(
+        db,
+        environment,
+        result={"request_id": environment.public_id, "runtime": "runsc"},
+        target_status="succeeded",
+        execution_token="current-token",
+    ) is True
+    db.commit()
+    db.refresh(environment)
+    assert environment.status == "finalizing"
+
+
 def test_agent_test_paths_restore_persisted_execution_snapshot() -> None:
     source = base64.b64encode(
         _archive({"app.py": "print('ok')\n", "_agent_tests/test_app.py": "def test_ok(): assert True\n"})
