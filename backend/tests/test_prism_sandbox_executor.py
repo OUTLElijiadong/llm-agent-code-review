@@ -854,6 +854,31 @@ def _patch_environment_creation(monkeypatch, archive: bytes) -> MagicMock:
     return db
 
 
+def test_create_environment_maps_decompilation_input_error_to_validation(monkeypatch) -> None:
+    archive = _archive({"main.py": "print('invalid archive')\n"})
+    db = _patch_environment_creation(monkeypatch, archive)
+    monkeypatch.setattr(
+        sandbox_service.decompilation_service,
+        "plan_decompilation_archive",
+        MagicMock(side_effect=sandbox_service.decompilation_service.DecompilationError("源码归档无法读取反编译候选成员")),
+    )
+
+    with pytest.raises(sandbox_service.ValidationError) as exc_info:
+        sandbox_service.create_environment(
+            db,
+            SimpleNamespace(id=17),
+            {
+                "project_id": 91,
+                "purpose": "test",
+                "language": "python",
+                "test_mode": "whitebox",
+            },
+        )
+
+    assert exc_info.value.code == 40001
+    assert "源码归档无法读取" in exc_info.value.message
+
+
 def test_remote_only_blackbox_never_selects_or_dispatches_a_worker(monkeypatch) -> None:
     archive = _archive({"main.py": "print('remote')\n"})
     db = _patch_environment_creation(monkeypatch, archive)

@@ -3209,7 +3209,11 @@ def _create_environment_locked(
         archive, archive_filename = project_source_service.build_source_archive(db, actor, project_id)
     if source_revision_id:
         archive_filename = "source-revision.zip"
-    decompilation_plan = decompilation_service.plan_decompilation_archive(archive, archive_filename)
+    try:
+        decompilation_plan = decompilation_service.plan_decompilation_archive(archive, archive_filename)
+    except decompilation_service.DecompilationError as exc:
+        # 归档格式/安全约束属于用户输入问题，不能冒泡成通用 500。
+        raise ValidationError(str(exc), code=40001) from exc
     source_sha256 = hashlib.sha256(archive).hexdigest()
     worker = (
         None

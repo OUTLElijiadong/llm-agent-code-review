@@ -149,6 +149,67 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
 }
 
 describe('AgentChatDrawer Responses stream', () => {
+  it('运行中调用 create_agent_team 时立即显示团队卡片', async () => {
+    const wrapper = await mountReadyDrawer()
+    teamApi.list.mockResolvedValue({
+      items: [{ team_id: 44, title: '实时白盒团队', surface: 'user', session_id: 'user-test', status: 'running', max_active_children: 3, trace_id: 'trace-44', counts: { total: 2, completed: 0, running: 2, queued: 0, failed: 0, blocked: 0 } }],
+      total: 1,
+    })
+    teamApi.detail.mockResolvedValue({
+      team_id: 44, title: '实时白盒团队', surface: 'user', session_id: 'user-test', status: 'running', max_active_children: 3, trace_id: 'trace-44',
+      counts: { total: 2, completed: 0, running: 2, queued: 0, failed: 0, blocked: 0 }, members: [], tasks: [], events: [], messages: [],
+    })
+
+    await wrapper.find('.chat-input').setValue('请组建团队检查白盒测试')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-live-team', model: 'deepseek-v4-flash' } })
+    emit(0, { type: 'response.tool.started', call_id: 'call-team', tool_name: 'create_agent_team', arguments: { objective: '检查白盒测试' } })
+    await settleAll()
+
+    expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
+    expect(wrapper.text()).toContain('实时白盒团队')
+    expect(wrapper.text()).not.toContain('最终结论')
+
+    emit(0, { type: 'response.tool.completed', call_id: 'call-team', tool_name: 'create_agent_team', output_summary: '团队已创建' })
+    emit(0, { type: 'response.output_text.delta', delta: '最终结论' })
+    emit(0, { type: 'response.completed', response: { id: 'run-live-team' } })
+    await finish(0)
+    wrapper.unmount()
+  })
+
+  it('团队卡片锚定在调用时间线,不会排到最终结论之后', async () => {
+    sessionApi.get.mockResolvedValueOnce({
+      surface: 'user',
+      session_id: 'user-test',
+      run: { run_id: 'run-team-order', status: 'completed', model: 'deepseek-v4-flash', rounds: 1, error: '', updated_at: '2026-08-01T12:00:00Z' },
+      messages: [
+        { role: 'user', content: '启动协作审查' },
+        { role: 'assistant', content: '最终结论已经生成' },
+      ],
+      events: [],
+      mesh_messages: [],
+      pending: null,
+    })
+    teamApi.list.mockResolvedValueOnce({
+      items: [{ team_id: 43, title: '白盒核验团队', surface: 'user', session_id: 'user-test', status: 'completed', max_active_children: 3, trace_id: 'trace-43', counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 } }],
+      total: 1,
+    })
+    teamApi.detail.mockResolvedValueOnce({
+      team_id: 43, title: '白盒核验团队', surface: 'user', session_id: 'user-test', status: 'completed', max_active_children: 3, trace_id: 'trace-43',
+      counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 }, members: [], tasks: [], events: [], messages: [],
+    })
+
+    const wrapper = await mountReadyDrawer()
+    const rows = wrapper.findAll('.msg-row')
+    const teamRowIndex = rows.findIndex((row) => row.find('.agent-team-trace').exists())
+    const conclusionIndex = rows.findIndex((row) => row.text().includes('最终结论已经生成'))
+
+    expect(teamRowIndex).toBeGreaterThanOrEqual(0)
+    expect(conclusionIndex).toBeGreaterThan(teamRowIndex)
+    wrapper.unmount()
+  })
+
   it('恢复当前会话时拉取服务端团队并默认折叠展示协作过程', async () => {
     teamApi.list.mockResolvedValue({
       items: [{ team_id: 42, title: '发布前验证', surface: 'user', session_id: 'user-test', status: 'running', max_active_children: 3, trace_id: 'trace-42', counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 } }],

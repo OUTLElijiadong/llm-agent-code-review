@@ -30,10 +30,28 @@ export interface DiscoveredAgentChatSession {
 export interface AgentChatSnapshotMessage {
   role: 'user' | 'assistant'
   content: string
+  /** 消息发起时已发现的子 Agent 团队,用于关闭/重开后恢复卡片位置。 */
+  teamIds?: number[]
+}
+
+export interface AgentChatSnapshotTeam {
+  team_id: number
+  title: string
+  objective?: string
+  surface: 'user' | 'admin'
+  session_id: string
+  status: string
+  max_active_children: number
+  trace_id: string
+  counts?: { total: number; completed: number; running: number; queued: number; failed: number; blocked: number }
+  created_at?: string
+  updated_at?: string
 }
 
 export interface AgentChatSnapshot {
   messages: AgentChatSnapshotMessage[]
+  /** 团队 API 暂时不可用时仍可恢复卡片标题、状态和进度。 */
+  teams?: AgentChatSnapshotTeam[]
   runStatus: string | null
   updatedAt: number
 }
@@ -262,7 +280,8 @@ export function findPristineAgentChatSession(
 
 export function saveAgentChatSnapshot(sessionId: string, snapshot: AgentChatSnapshot): void {
   try {
-    const trimmed = snapshot.messages.filter((item) => item.content.trim()).slice(-60)
+    // 空的时间线消息也可能携带团队锚点,不能在快照压缩时丢掉。
+    const trimmed = snapshot.messages.filter((item) => item.content.trim() || item.teamIds?.length).slice(-60)
     window.localStorage.setItem(
       SNAPSHOT_PREFIX + sessionId,
       JSON.stringify({ ...snapshot, messages: trimmed }),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -28,6 +29,16 @@ def _zip_bytes(files: dict[str, bytes]) -> bytes:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         for path, content in files.items():
             archive.writestr(path, content)
+    return out.getvalue()
+
+
+def _tar_gz_bytes(files: dict[str, bytes]) -> bytes:
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w:gz") as archive:
+        for path, content in files.items():
+            info = tarfile.TarInfo(path)
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
     return out.getvalue()
 
 
@@ -112,6 +123,31 @@ def test_plan_decompilation_archive_handles_direct_apk() -> None:
 
     assert plan["status"] == "planned"
     assert plan["tool"] == "jadx"
+
+
+def test_plan_decompilation_archive_handles_tar_gz_source_archive() -> None:
+    raw = _tar_gz_bytes({"src/index.php": b"<?php echo 'ok';"})
+
+    plan = plan_decompilation_archive(raw, "bWAPP-master.tar.gz")
+
+    assert plan["status"] == "skipped"
+    assert plan["candidate_count"] == 0
+
+
+def test_plan_decompilation_archive_detects_embedded_apk_in_tar_gz() -> None:
+    apk = _zip_bytes({"AndroidManifest.xml": b"manifest", "classes.dex": b"dex\n039\x00"})
+    raw = _tar_gz_bytes({"artifacts/client.apk": apk})
+
+    plan = plan_decompilation_archive(raw, "bundle.tar.gz")
+
+    assert plan["status"] == "planned"
+    assert plan["candidate_count"] == 1
+    assert plan["candidates"][0]["path"] == "artifacts/client.apk"
+
+
+def test_plan_decompilation_archive_rejects_corrupt_tar_gz() -> None:
+    with pytest.raises(DecompilationError, match="无法读取"):
+        plan_decompilation_archive(b"not a tar gzip", "broken.tar.gz")
 
 
 def test_build_jadx_command_is_fixed_and_contains_no_shell() -> None:

@@ -5,6 +5,7 @@ import {
   findPristineAgentChatSession,
   isPlaceholderAgentChatTitle,
   isPristineAgentChatSession,
+  loadAgentChatSnapshot,
   loadAgentChatSessions,
   mergeAgentChatSessions,
   saveAgentChatSnapshot,
@@ -156,5 +157,47 @@ describe('mergeAgentChatSessions 服务端发现优先', () => {
 
     expect(merged.some((item) => item.id === 'user-current')).toBe(true)
     expect(merged[0].id).toBe('user-current')
+  })
+})
+
+describe('Agent Team 快照锚点', () => {
+  it('保留无正文但带团队 ID 的调用时间线消息', () => {
+    saveAgentChatSnapshot('user-team', {
+      messages: [
+        { role: 'user', content: '启动白盒测试' },
+        { role: 'assistant', content: '', teamIds: [42] },
+      ],
+      runStatus: 'running',
+      updatedAt: Date.now(),
+    })
+
+    expect(loadAgentChatSnapshot('user-team')?.messages).toEqual([
+      { role: 'user', content: '启动白盒测试' },
+      { role: 'assistant', content: '', teamIds: [42] },
+    ])
+  })
+
+  it('保留团队最小摘要,团队接口暂时失败时仍能恢复卡片', () => {
+    saveAgentChatSnapshot('user-team-summary', {
+      messages: [{ role: 'assistant', content: '', teamIds: [42] }],
+      teams: [{
+        team_id: 42,
+        title: '白盒核验团队',
+        surface: 'user',
+        session_id: 'user-team-summary',
+        status: 'running',
+        max_active_children: 3,
+        trace_id: 'trace-42',
+        counts: { total: 2, completed: 0, running: 2, queued: 0, failed: 0, blocked: 0 },
+      }],
+      runStatus: 'running',
+      updatedAt: Date.now(),
+    })
+
+    expect(loadAgentChatSnapshot('user-team-summary')?.teams?.[0]).toMatchObject({
+      team_id: 42,
+      title: '白盒核验团队',
+      status: 'running',
+    })
   })
 })

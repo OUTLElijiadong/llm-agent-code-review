@@ -58,6 +58,8 @@ import {
   loadAgentChatSnapshot,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
+  type AgentChatSnapshotMessage,
+  type AgentChatSnapshotTeam,
 } from '@/utils/agentChatSessions'
 import {
   applyResponseToolEvent,
@@ -125,6 +127,8 @@ interface ChatMessage {
   auditPhases?: Array<{ phase: string; label: string; message: string }>
   /** 助手回复末尾解析出的"带我去"导航指令 */
   navigations?: AgentNavigateDirective[]
+  /** 这条时间线消息发起时已创建/发现的子 Agent 团队。 */
+  teamIds?: number[]
 }
 
 const props = defineProps<{ visible: boolean; prefill?: string }>()
@@ -154,6 +158,7 @@ let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
 let sessionPollFailures = 0
 let sessionPollTimer: number | undefined
+let liveTeamPollTimer: number | undefined
 let sessionPollStopped = false
 let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
@@ -165,6 +170,7 @@ const reconnectHint = ref(false)
 let reconnectHintTimer: number | undefined
 const cancelPromptVisible = ref(false)
 const agentTeams = ref<AgentTeamDetail[]>([])
+const cachedAgentTeams = ref<AgentTeamSummary[]>([])
 const agentTeamLoading = ref(false)
 const agentTeamError = ref('')
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
@@ -190,6 +196,43 @@ const teamWindowTeamId = ref<number | null>(null)
 const teamWindowTeam = computed(() => (
   agentTeams.value.find((team) => team.team_id === teamWindowTeamId.value) ?? null
 ))
+const visibleAgentTeams = computed<Array<AgentTeamDetail | AgentTeamSummary>>(() => {
+  const merged = new Map<number, AgentTeamDetail | AgentTeamSummary>()
+  for (const team of cachedAgentTeams.value) merged.set(team.team_id, team)
+  for (const team of agentTeams.value) merged.set(team.team_id, team)
+  return [...merged.values()]
+})
+const teamById = (teamId: number): AgentTeamDetail | AgentTeamSummary | undefined => (
+  visibleAgentTeams.value.find((team) => team.team_id === teamId)
+)
+const anchoredTeamIds = computed(() => new Set(
+  messages.value.flatMap((message) => message.teamIds ?? []),
+))
+const unanchoredAgentTeams = computed(() => (
+  visibleAgentTeams.value.filter((team) => !anchoredTeamIds.value.has(team.team_id))
+))
+
+function snapshotTeam(team: AgentTeamDetail | AgentTeamSummary): AgentChatSnapshotTeam {
+  return {
+    team_id: team.team_id,
+    title: team.title,
+    objective: team.objective,
+    surface: team.surface,
+    session_id: team.session_id,
+    status: team.status,
+    max_active_children: team.max_active_children,
+    trace_id: team.trace_id,
+    counts: team.counts,
+    created_at: team.created_at,
+    updated_at: team.updated_at,
+  }
+}
+
+function restoreCachedTeams(teams: AgentChatSnapshotTeam[] | undefined): void {
+  cachedAgentTeams.value = (teams ?? [])
+    .filter((team) => team.surface === 'user' && team.session_id === sessionId.value)
+    .map((team) => ({ ...team, status: team.status as AgentTeamSummary['status'] }))
+}
 
 function openTeamWindow(team: AgentTeamDetail | AgentTeamSummary): void {
   teamWindowTeamId.value = team.team_id
@@ -308,7 +351,9 @@ function persistSnapshot(): void {
     messages: messages.value.map((message) => ({
       role: message.role === 'error' ? 'assistant' : message.role,
       content: message.content,
+      teamIds: message.teamIds?.length ? [...message.teamIds] : undefined,
     })),
+    teams: visibleAgentTeams.value.map(snapshotTeam),
     runStatus: sessionRun.value?.status ?? null,
     updatedAt: Date.now(),
   })
@@ -334,6 +379,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   if (hasRealContent || sessionRun.value?.status) persistSnapshot()
   activeResponse?.abort()
   activeResponse = null
+  clearLiveTeamPoll()
   sessionPollStopped = true
   invalidateSessionPoll()
   sessionPollStopped = false
@@ -344,6 +390,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   cancelPromptVisible.value = false
   sessionRun.value = null
   agentTeams.value = []
+  cachedAgentTeams.value = []
   agentTeamError.value = ''
   teamWindowVisible.value = false
   teamWindowTeamId.value = null
@@ -383,20 +430,52 @@ function restoredMessages(
   session: Awaited<ReturnType<typeof getAgentResponseSession>>,
   restoredTime: string,
 ): ChatMessage[] {
-  return restoredSessionMessages(session, restoredTime)
+  return restoredSessionMessages(session, restoredTime, loadAgentChatSnapshot(session.session_id)?.messages)
+}
+
+function persistedTeamBuckets(
+  persistedMessages: readonly AgentChatSnapshotMessage[] | undefined,
+): Map<string, number[][]> {
+  const buckets = new Map<string, number[][]>()
+  for (const message of persistedMessages ?? []) {
+    if (!message.teamIds?.length) continue
+    const key = `${message.role}\u0000${message.content}`
+    const entries = buckets.get(key) ?? []
+    entries.push(message.teamIds)
+    buckets.set(key, entries)
+  }
+  return buckets
+}
+
+function takePersistedTeamIds(
+  buckets: Map<string, number[][]>,
+  role: 'user' | 'assistant',
+  content: string,
+): number[] | undefined {
+  const key = `${role}\u0000${content}`
+  const entries = buckets.get(key)
+  if (!entries?.length) return undefined
+  const ids = entries.shift()
+  if (!entries.length) buckets.delete(key)
+  return ids?.length ? [...ids] : undefined
 }
 
 /** 恢复会话消息:完整历史 + 非终态运行的部分输出(模型已生成但尚未结束的文本)。 */
 function restoredSessionMessages(
   session: Awaited<ReturnType<typeof getAgentResponseSession>>,
   restoredTime: string,
+  persistedMessages?: readonly AgentChatSnapshotMessage[],
 ): ChatMessage[] {
   // 早期版本曾把本地欢迎语带入模型上下文并被服务端持久化,恢复时去重
+  const teamBuckets = persistedTeamBuckets(persistedMessages)
   const restored: ChatMessage[] = session.messages
     .filter((message) => message.content.trim() !== WELCOME_TEXT.trim())
     .map((message) => {
       if (message.role !== 'assistant') {
-        return { id: messageId(), role: message.role, content: message.content, time: restoredTime }
+        return {
+          id: messageId(), role: message.role, content: message.content, time: restoredTime,
+          teamIds: takePersistedTeamIds(teamBuckets, message.role, message.content),
+        }
       }
       const { cleaned, directives } = extractNavigateDirectives(message.content)
       return {
@@ -405,13 +484,17 @@ function restoredSessionMessages(
         content: compactOutsideCodeBlocks(cleaned),
         time: restoredTime,
         navigations: directives.length ? directives : undefined,
+        teamIds: takePersistedTeamIds(teamBuckets, message.role, message.content),
       }
     })
   const toolCalls = [
     ...agentMeshToolCalls(session.mesh_messages, `session:user:${session.session_id}`),
     ...responseToolCallsFromEvents(session.events),
   ]
-  if (!toolCalls.length) return restored
+  const emptyTeamAnchors = (persistedMessages ?? [])
+    .filter((message) => message.role === 'assistant' && !message.content.trim() && message.teamIds?.length)
+    .flatMap((message) => message.teamIds ?? [])
+  if (!toolCalls.length && !emptyTeamAnchors.length) return restored
   const timeline: ChatMessage = {
     id: messageId(),
     role: 'assistant',
@@ -420,6 +503,8 @@ function restoredSessionMessages(
     runId: session.run?.run_id,
     toolCalls,
   }
+  // 本地快照中的空时间线消息就是团队卡片的稳定锚点。
+  if (emptyTeamAnchors.length) timeline.teamIds = [...new Set(emptyTeamAnchors)]
   let conclusionIndex = -1
   for (let index = restored.length - 1; index >= 0; index -= 1) {
     if (restored[index].role === 'assistant' && restored[index].content.trim()) {
@@ -470,6 +555,7 @@ async function restoreSession(): Promise<void> {
   sessionRestoreStarted = true
   try {
     const requestedSessionId = sessionId.value
+    restoreCachedTeams(loadAgentChatSnapshot(requestedSessionId)?.teams)
     const session = await getAgentResponseSession('user', requestedSessionId)
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。
     if (requestedSessionId !== sessionId.value || loading.value || activeResponse) {
@@ -619,6 +705,26 @@ function clearSessionPoll(): void {
   }
 }
 
+function clearLiveTeamPoll(): void {
+  if (liveTeamPollTimer !== undefined) {
+    window.clearTimeout(liveTeamPollTimer)
+    liveTeamPollTimer = undefined
+  }
+}
+
+/** SSE 运行期间会话轮询暂停，团队账本需要独立轮询才能在创建时立即展示。 */
+function scheduleLiveTeamPoll(delay = 0): void {
+  clearLiveTeamPoll()
+  if (!loading.value || !sessionId.value) return
+  const requestedSessionId = sessionId.value
+  liveTeamPollTimer = window.setTimeout(async () => {
+    liveTeamPollTimer = undefined
+    if (!loading.value || requestedSessionId !== sessionId.value) return
+    await refreshAgentTeam()
+    if (loading.value && requestedSessionId === sessionId.value) scheduleLiveTeamPoll(1000)
+  }, delay)
+}
+
 function invalidateSessionPoll(): void {
   sessionPollGeneration += 1
   clearSessionPoll()
@@ -635,13 +741,41 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
     const listed = await listAgentTeams({ surface: 'user', session_id: requestedSessionId, limit: 20 })
     if (!isCurrent()) return
     if (!listed.items.length) {
-      agentTeams.value = []
+      // 短暂网络/账本延迟时不要把已展示的卡片清空;下次轮询会用服务端事实刷新。
+      if (!agentTeams.value.length) agentTeams.value = []
       agentTeamError.value = ''
       return
     }
     const details = await Promise.all(listed.items.map((item) => getAgentTeam(item.team_id)))
     if (!isCurrent()) return
     agentTeams.value = details
+    cachedAgentTeams.value = details
+    const unanchored = details.filter((team) => !anchoredTeamIds.value.has(team.team_id))
+    if (unanchored.length) {
+      let anchor = [...messages.value].reverse().find((message) => (
+        message.role === 'assistant'
+        && message.runId === sessionRun.value?.run_id
+        && (!message.content.trim() || message.toolCalls?.length)
+      ))
+      if (!anchor) {
+        let conclusionIndex = -1
+        for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+          if (messages.value[index].role === 'assistant' && messages.value[index].content.trim().length > 0) {
+            conclusionIndex = index
+            break
+          }
+        }
+        anchor = {
+          id: messageId(),
+          role: 'assistant',
+          content: '',
+          time: dayjs().format('HH:mm'),
+          runId: sessionRun.value?.run_id,
+        }
+        messages.value.splice(conclusionIndex >= 0 ? conclusionIndex : messages.value.length, 0, anchor)
+      }
+      anchor.teamIds = [...new Set([...(anchor.teamIds ?? []), ...unanchored.map((team) => team.team_id)])]
+    }
     agentTeamError.value = ''
   } catch {
     if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
@@ -964,6 +1098,7 @@ async function retryRun(): Promise<void> {
 
 async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   invalidateSessionPoll()
+  clearLiveTeamPoll()
   loading.value = true
   showTyping.value = true
   let rawText = ''
@@ -1068,6 +1203,15 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
           applyResponseToolEvent(runToolCalls, event)
           syncTimeline()
         }
+        if (
+          typeof event.tool_name === 'string'
+          && ['create_agent_team', 'get_agent_team', 'retry_agent_team'].includes(event.tool_name)
+          && (event.type === 'response.tool.started' || event.type === 'response.tool.completed')
+        ) {
+          // create_agent_team.started 时可能尚未落库，独立轮询会持续到 SSE 结束；
+          // completed 再立即刷新一次，保证卡片在最终文本输出前出现。
+          scheduleLiveTeamPoll(0)
+        }
         syncBusy()
       } else if (event.type === 'response.output_text.delta') {
         rawText += event.delta
@@ -1106,6 +1250,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         || event.type === 'response.cancelled'
         || event.type === 'error'
       ) {
+        clearLiveTeamPoll()
         showTyping.value = false
         lastActiveToolName.value = ''
         // 流进入终态:兜底熄灭彩框/虚拟鼠标(单工具结束事件已按 call_id 精确清除)
@@ -1158,6 +1303,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
     return false
   } finally {
+    clearLiveTeamPoll()
     if (activeResponse === handle) activeResponse = null
     loading.value = false
     showTyping.value = false
@@ -1775,6 +1921,7 @@ onBeforeUnmount(() => {
   persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
+  clearLiveTeamPoll()
   activeResponse?.abort()
   activityStore.clear()
   window.clearTimeout(projectSearchTimer)
@@ -2073,6 +2220,20 @@ onMounted(() => {
                   :audit-phases="msg.auditPhases"
                 />
 
+                <!-- 团队卡片属于调用时间线,随消息锚点出现,不会在最终结论后统一补充。 -->
+                <template
+                  v-for="(teamId, teamIndex) in msg.teamIds ?? []"
+                  :key="`team-${teamId}`"
+                >
+                  <AgentTeamTrace
+                    v-if="teamById(teamId)"
+                    :team="teamById(teamId) ?? null"
+                    :loading="agentTeamLoading"
+                    :error="teamIndex === 0 ? agentTeamError : ''"
+                    @open-detail="openTeamWindow"
+                  />
+                </template>
+
                 <ResponseApprovalCard
                   v-if="msg.approval"
                   :approval="msg.approval"
@@ -2224,8 +2385,8 @@ onMounted(() => {
             </div>
 
             <AgentTeamTrace
-              v-for="(team, index) in agentTeams"
-              :key="team.team_id"
+              v-for="(team, index) in unanchoredAgentTeams"
+              :key="`unanchored-team-${team.team_id}`"
               :team="team"
               :loading="agentTeamLoading"
               :error="index === 0 ? agentTeamError : ''"

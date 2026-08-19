@@ -17,7 +17,8 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-from app.utils.archive_extractor import ArchiveMember
+from app.core.exceptions import ValidationError
+from app.utils.archive_extractor import ArchiveMember, read_archive_members
 
 ANDROID_EXTENSIONS = frozenset({".apk", ".aab", ".dex"})
 DECOMPILED_SOURCE_EXTENSIONS = frozenset({".java", ".kt"})
@@ -197,19 +198,16 @@ def plan_decompilation_archive(raw: bytes, filename: str) -> dict[str, object]:
     if direct.kind is not InputKind.SOURCE_ARCHIVE:
         return choose_decompilation_tool(direct).to_dict()
     try:
-        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            members = [
-                ArchiveMember(info.filename, archive.read(info))
-                for info in archive.infolist()
-                if not info.is_dir()
-                and Path(info.filename.lower()).suffix in ANDROID_EXTENSIONS.union({".jar"})
-            ]
-    except (zipfile.BadZipFile, OSError, ValueError) as exc:
+        # 源码包可能是 ZIP、TAR.GZ、TGZ 等格式。复用统一安全读取器，
+        # 避免把合法 TAR 流误交给 ZipFile，同时保留归档内嵌 Android 候选检测。
+        members, _ = read_archive_members(
+            raw,
+            filename,
+            filter_sensitive=False,
+            strict_paths=True,
+        )
+    except ValidationError as exc:
         raise DecompilationError("源码归档无法读取反编译候选成员") from exc
-    for member in members:
-        normalized = PurePosixPath(member.path.replace("\\", "/"))
-        if normalized.is_absolute() or ".." in normalized.parts:
-            raise DecompilationError("反编译候选成员路径不安全")
     return inspect_archive_members(members)
 
 
