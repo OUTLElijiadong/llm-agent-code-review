@@ -23,12 +23,12 @@
 - 前端侧边栏组件回归：2 passed（版本显示、普通用户入口、折叠持久化）。
 - 前端 `eslint`、`vue-tsc`、`vite build`：通过。
 - 部署 Shell/运维契约：`deploy shell and operations tests: PASS`。
-- Alembic head：`039`，迁移链 `036 -> 037 -> 038 -> 039` 连续。
+- Alembic head：`040`，迁移链 `036 -> 037 -> 038 -> 039 -> 040` 连续。
 - 健康接口回归已同步为 `status/version/release` 正式契约并通过。
 - 生产发布强制 `all` 双镜像同版本，禁止部分发布造成 3.6 展示与健康契约漂移。
 - Responses 与沙箱启动恢复取消固定 200 条上限，启动时处理全部遗留活动任务。
 - Alembic 全历史离线 SQL 生成会被既有迁移 `010` 的在线查询写法阻断；新迁移在生产发布中由真实 MySQL 在线执行并验收。
-- 生产发布完成：`release=e52c2b4a17298af587a1a477e789087f07117b4f`，双镜像均为同一 release，数据库 Alembic revision 为 `039`。
+- 上一版生产发布完成：`release=e52c2b4a17298af587a1a477e789087f07117b4f`，双镜像均为同一 release，数据库 Alembic revision 为 `039`；本轮沙箱租约修复将随新 release 全量发布并升级到 `040`。
 - 生产备份完成：`../backups/code_review_20260819T101634Z_e52c2b4a1729.sql.gz`；备份隔离恢复检查通过，基线为 84 张表、Alembic `036`。
 - 公网 `https://www.lijiadong.cn/healthz` 返回 `status=ok`、`version=3.6.0` 和上述 release；`/readyz` 返回 `status=ready`，首页 HTTP/2 200。
 - 真实浏览器登录后确认侧边栏显示 `v3.6 · PRISM`，包含工作区、智能审查、Agent 与安全、社区与支持、个人空间五组；整体收起和展开均正常，原有权限入口仍可见。

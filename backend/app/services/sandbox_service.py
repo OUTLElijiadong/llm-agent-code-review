@@ -154,6 +154,11 @@ def _is_environment_worker_request_id(environment: SandboxEnvironment, request_i
 
 def _register_worker_request(environment: SandboxEnvironment, request_id: str) -> None:
     """Persist every concrete Worker request before it can be submitted."""
+    environment.agent_config_json = _worker_request_config_json(environment, request_id)
+
+
+def _worker_request_config_json(environment: SandboxEnvironment, request_id: str) -> str:
+    """Build the worker-request ledger without mutating the ORM object."""
     if not _is_environment_worker_request_id(environment, request_id):
         raise RuntimeError("Sandbox Worker request_id 不属于当前环境")
     config = _loads(environment.agent_config_json, {})
@@ -174,7 +179,7 @@ def _register_worker_request(environment: SandboxEnvironment, request_id: str) -
     # 受控流程最多两轮修复加部署验证；上限防止异常状态无限增长。
     config["worker_request_ids"] = request_ids[-16:]
     config["active_worker_request_id"] = request_id
-    environment.agent_config_json = _json(config)
+    return _json(config)
 
 
 def _registered_worker_request_ids(environment: SandboxEnvironment) -> list[str]:
@@ -396,6 +401,12 @@ def _execution_lease_valid(db: Session, environment_id: int, execution_token: st
     )
 
 
+def _require_execution_lease(db: Session, environment_id: int, execution_token: str | None) -> None:
+    """Stop stale workers before they append events or persist a new snapshot."""
+    if execution_token is not None and not _execution_lease_valid(db, environment_id, execution_token):
+        raise RuntimeError("沙箱执行租约已失效")
+
+
 def _persist_browser_artifact(
     db: Session,
     environment: SandboxEnvironment,
@@ -404,8 +415,10 @@ def _persist_browser_artifact(
     file_name: str,
     mime_type: str,
     content: bytes,
+    execution_token: str | None = None,
 ) -> SandboxArtifact:
     """追加浏览器证据；不得删除同一环境已有的白盒/黑盒制品。"""
+    _require_execution_lease(db, environment.id, execution_token)
 
     row = SandboxArtifact(
         environment_id=environment.id,
@@ -3706,6 +3719,7 @@ def _execute_environment(
         environment.status = "dispatching"
         _append_event(db, environment, "progress", "executor", "独立执行器已接收固定测试配置")
         db.commit()
+        _require_execution_lease(db, environment_id, execution_token)
         _emit(environment, AgentEventType.PROGRESS, "独立执行器已接收任务", {"stage": "executor"})
         worker_mode = config.get("worker_mode", environment.test_mode)
         # 隔离源码项目建档语言可能与真实源码不符(上传时手动选择)。白盒/黑盒测试
@@ -3784,6 +3798,7 @@ def _execute_environment(
                 db.refresh(environment)
                 if environment.status in {"stopping", "stopped", "expired"}:
                     return
+                _require_execution_lease(db, environment_id, execution_token)
                 worker_request_id = (
                     environment.public_id if repair_round == 0 else f"{environment.public_id}-r{repair_round}"
                 )
@@ -3791,6 +3806,7 @@ def _execute_environment(
 
                 def persist_worker_events(state: dict[str, Any]) -> None:
                     nonlocal last_sequence
+                    _require_execution_lease(db, environment_id, execution_token)
                     worker_events = state.get("events") if isinstance(state.get("events"), list) else []
                     for item in worker_events:
                         if not isinstance(item, dict):
@@ -3808,16 +3824,55 @@ def _execute_environment(
                 if environment.started_at is None:
                     environment.started_at = _utcnow()
                     db.commit()
+                    _require_execution_lease(db, environment_id, execution_token)
                 sandbox_db_type = str(
                     (_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none"
                 )
                 execution_bytes = base64.b64decode(effective_source)
-                environment.execution_archive_blob = execution_bytes
-                environment.execution_source_sha256 = effective_sha
-                environment.execution_round = repair_round
-                _register_worker_request(environment, worker_request_id)
+                request_config_json = _worker_request_config_json(environment, worker_request_id)
+                saved_request = {
+                    "request_id": worker_request_id,
+                    "purpose": environment.purpose,
+                    "language": environment.language,
+                    "test_mode": worker_mode if worker_mode in {"whitebox", "blackbox", "combined"} else "whitebox",
+                    "db_type": sandbox_db_type,
+                    "source_sha256": effective_sha,
+                    "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
+                    "image_digest": environment.image_digest or "",
+                }
+                persisted_request = _loads(getattr(environment, "worker_request_json", None), {})
+                if (
+                    isinstance(persisted_request, dict)
+                    and persisted_request.get("request_id") == worker_request_id
+                    and persisted_request.get("source_sha256") == effective_sha
+                ):
+                    saved_request = persisted_request
+                saved_request_json = _json(saved_request)
+                updated = (
+                    db.query(SandboxEnvironment)
+                    .filter(
+                        SandboxEnvironment.id == environment_id,
+                        *([SandboxEnvironment.execution_token == execution_token] if execution_token is not None else []),
+                    )
+                    .update(
+                        {
+                            "execution_archive_blob": execution_bytes,
+                            "execution_source_sha256": effective_sha,
+                            "execution_round": repair_round,
+                            "worker_request_json": saved_request_json,
+                            "agent_config_json": request_config_json,
+                            **({"started_at": environment.started_at} if environment.started_at is not None else {}),
+                        },
+                        synchronize_session=False,
+                    )
+                )
+                if not updated:
+                    db.rollback()
+                    return
                 db.commit()
-                db.refresh(environment)
+                environment = db.get(SandboxEnvironment, environment_id)
+                if environment is None:
+                    return
                 if environment.status in {"stopping", "stopped", "expired"}:
                     try:
                         _stop_registered_worker_requests(worker, environment)
@@ -3829,22 +3884,17 @@ def _execute_environment(
                         environment.error = f"停止 worker 失败：{str(exc)[:1000]}"
                     db.commit()
                     return
+                execute_payload = {
+                    **saved_request,
+                    "source_archive_base64": effective_source,
+                }
                 execute_response = _call_worker(
                     worker,
                     "POST",
                     "/execute",
-                    {
-                        "request_id": worker_request_id,
-                        "purpose": environment.purpose,
-                        "language": environment.language,
-                        "test_mode": worker_mode if worker_mode in {"whitebox", "blackbox", "combined"} else "whitebox",
-                        "source_archive_base64": effective_source,
-                        "source_sha256": effective_sha,
-                        "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
-                        "image_digest": environment.image_digest or "",
-                        "db_type": sandbox_db_type,
-                    },
+                    execute_payload,
                 )
+                _require_execution_lease(db, environment_id, execution_token)
                 result = (
                     execute_response.get("result")
                     if isinstance(execute_response.get("result"), dict)
@@ -3875,6 +3925,7 @@ def _execute_environment(
                             "after_sequence": last_sequence,
                         },
                     )
+                    _require_execution_lease(db, environment_id, execution_token)
                     result = (
                         status_response.get("result")
                         if isinstance(status_response.get("result"), dict)
@@ -3883,6 +3934,7 @@ def _execute_environment(
                     persist_worker_events(result)
                     db.commit()
                 environment = db.get(SandboxEnvironment, environment_id)
+                _require_execution_lease(db, environment_id, execution_token)
                 if environment.status in {"stopping", "stopped", "expired"}:
                     if environment.status == "stopping":
                         try:
@@ -3905,12 +3957,14 @@ def _execute_environment(
                             effective_source = repaired["source"]
                             effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
                             repair_round += 1
+                            environment.worker_request_json = None
                             db.commit()
                             continue
                 break
         else:
             result = {"request_id": environment.public_id, "status": "succeeded", "result": {"exit_code": 0}}
         state = str(result.get("status") or "failed")
+        _require_execution_lease(db, environment_id, execution_token)
         target_status = {
             "completed": "succeeded",
             "succeeded": "succeeded",
@@ -3919,18 +3973,35 @@ def _execute_environment(
             "stopped": "stopped",
         }.get(state, "failed")
         # Worker 的确定性结果已返回，但制品和多 Agent 报告尚未完成。
-        # 对外保持可轮询的非终态，防止团队在长报告事务期间提前交接资源。
-        environment.status = "finalizing"
-        environment.executor_ref = str(result.get("executor_ref") or result.get("request_id") or "")[:160] or None
-        environment.runtime = str(result.get("runtime") or environment.runtime)[:50]
-        environment.image_ref = str(result.get("image_ref") or environment.image_ref)[:300]
-        environment.image_digest = str(result.get("image_digest") or "")[:100] or None
+        # 先用租约条件更新进入 finalizing，旧 Worker 不能用普通 ORM commit 抢占新租约。
+        finalizing_values: dict[str, Any] = {
+            "status": "finalizing",
+            "executor_ref": str(result.get("executor_ref") or result.get("request_id") or "")[:160] or None,
+            "runtime": str(result.get("runtime") or environment.runtime)[:50],
+            "image_ref": str(result.get("image_ref") or environment.image_ref)[:300],
+            "image_digest": str(result.get("image_digest") or "")[:100] or None,
+            "started_at": environment.started_at or _utcnow(),
+        }
         if isinstance(result.get("resource_policy"), dict):
-            environment.resource_policy_json = _json(result["resource_policy"])
-        if environment.started_at is None:
-            environment.started_at = _utcnow()
+            finalizing_values["resource_policy_json"] = _json(result["resource_policy"])
         if environment.purpose == "deploy" and target_status == "ready":
-            environment.preview_path = f"/api/sandboxes/{environment.public_id}/preview/"
+            finalizing_values["preview_path"] = f"/api/sandboxes/{environment.public_id}/preview/"
+        finalizing_update = (
+            db.query(SandboxEnvironment)
+            .filter(
+                SandboxEnvironment.id == environment_id,
+                SandboxEnvironment.status.notin_({"stopping", "stopped", "expired", "finalizing"}),
+                *([SandboxEnvironment.execution_token == execution_token] if execution_token is not None else []),
+            )
+            .update(finalizing_values, synchronize_session=False)
+        )
+        if not finalizing_update:
+            db.rollback()
+            return
+        db.commit()
+        environment = db.get(SandboxEnvironment, environment_id)
+        if environment is None:
+            return
         auto_smoke: dict[str, Any] | None = None
         auto_test_chain: list[dict[str, Any]] = []
         if (
@@ -3959,6 +4030,7 @@ def _execute_environment(
                 {"stage": "auto_smoke", "passed": bool(auto_smoke.get("passed"))},
             )
             db.commit()
+            _require_execution_lease(db, environment_id, execution_token)
         if environment.purpose == "deploy":
             if pre_whitebox:
                 auto_test_chain.append(pre_whitebox)
@@ -3972,6 +4044,7 @@ def _execute_environment(
                         "via": "preview_smoke",
                     }
                 )
+        _require_execution_lease(db, environment_id, execution_token)
         worker_conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
         evidence: dict[str, Any] = {"worker_result": worker_conclusion}
         agent_tests_result: dict[str, Any] | None = None
@@ -4014,6 +4087,7 @@ def _execute_environment(
                     file_name=f"recon-facts-{environment.public_id}.json",
                     mime_type="application/json",
                     content=json.dumps(recon_facts, ensure_ascii=False).encode("utf-8"),
+                    execution_token=execution_token,
                 )
             agent_tests_result = _extract_agent_tests_result(log_text_for_facts)
             decompilation_result = _extract_decompilation_result(log_text_for_facts)
@@ -4095,9 +4169,11 @@ def _execute_environment(
         artifacts = _persist_artifacts(db, environment, conclusion, execution_token)
         # 先发布确定性结果并释放 SandboxEnvironment 行锁；此时仍为
         # finalizing，调度器不会把尚未完成多 Agent 报告的结果误判为终态。
+        _require_execution_lease(db, environment_id, execution_token)
         db.commit()
         # 黑白盒链路结束后,由多Agent审查编排产出中文报告(失败只记录,不阻断)
         review_report = _run_test_review_report(db, environment, conclusion)
+        _require_execution_lease(db, environment_id, execution_token)
         if review_report is not None:
             conclusion["multi_agent_review"] = review_report
         final_result_json = _json(conclusion)

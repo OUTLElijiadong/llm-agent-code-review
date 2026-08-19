@@ -138,6 +138,8 @@ class SandboxEnvironment(Base, IdMixin, TimestampMixin):
     )
     execution_source_sha256 = Column(String(64))
     execution_round = Column(Integer, nullable=False, default=0)
+    # Worker 请求信封只保存稳定元数据；源码本体存于 execution_archive_blob。
+    worker_request_json = Column(LONGTEXT().with_variant(Text, "sqlite"))
     execution_token = Column(String(64), nullable=False, default="")
     resource_policy_json = Column(Text, nullable=False)
     agent_config_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=False)
