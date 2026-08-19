@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
-import { CircleCheck, Loading, WarningFilled } from '@element-plus/icons-vue'
+import { CircleCheck, WarningFilled } from '@element-plus/icons-vue'
 
 import { toolDisplayInfo } from '@/utils/toolDisplay'
 import type { ResponseToolCall, ResponseToolCallStatus } from '@/utils/responsesTimeline'
@@ -157,7 +157,15 @@ function summaryText(): string {
           </template>
         </div>
 
-        <div class="xl-step-body">
+        <div
+          class="xl-step-body"
+          :class="{ 'is-expandable': Boolean(step.error) }"
+          :role="step.error ? 'button' : undefined"
+          :tabindex="step.error ? 0 : undefined"
+          @click="step.error && toggle(step)"
+          @keydown.enter.prevent="step.error && toggle(step)"
+          @keydown.space.prevent="step.error && toggle(step)"
+        >
           <div class="xl-step-line">
             <span class="xl-step-action">{{ step.action }}</span>
             <span v-if="step.isPageAction" class="xl-step-chip is-page" title="小菱正在替你操作页面">帮我操作</span>

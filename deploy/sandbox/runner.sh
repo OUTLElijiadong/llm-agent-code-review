@@ -419,13 +419,18 @@ run_test() {
       ;;
     php)
       # 分批语法检查:PHP8 对老库的 Fatal/Parse error 是真实语法问题,Deprecated/Warning 是提示级。
-      # 无论发现多少语法错误,都算"测试已执行";错误输出进日志供多Agent审查引用。
+      # 所有输出仍进入日志供多Agent审查引用,但只把 Fatal/Parse/Errors parsing 判为失败。
       find . -type f -name '*.php' -not -path './_agent_tests/*' -print0 | xargs -0 -n 50 -r php -l 2>&1 \
         | grep -v 'No syntax errors detected' > /tmp/.lint_all || true
       if [ -s /tmp/.lint_all ]; then
         cat /tmp/.lint_all
-        printf '%s\n' 'whitebox: php lint reported issues (see logs)' >&2
-        test_failed=1
+        if grep -E 'Fatal error|Parse error|Errors parsing' /tmp/.lint_all > /tmp/.lint_fatal; then
+          cat /tmp/.lint_fatal >&2
+          printf '%s\n' 'whitebox: php lint reported fatal/parse errors (see logs)' >&2
+          test_failed=1
+        else
+          printf '%s\n' 'whitebox: php lint reported warnings (see logs)' >&2
+        fi
       fi
       if [ -f vendor/bin/phpunit ]; then
         if ! php vendor/bin/phpunit --colors=never; then

@@ -801,6 +801,8 @@ def test_service_and_images_encode_required_hardening() -> None:
     assert 'f"/workspace:rw,exec,nosuid,nodev' in executor_source
     runner = (root / "sandbox" / "runner.sh").read_text(encoding="utf-8")
     assert "[1-5][0-9][0-9]" in runner  # 黑盒探活接受任何合法 HTTP 状态(5xx 属应用自身错误非服务失败)
+    assert "grep -E 'Fatal error|Parse error|Errors parsing'" in runner
+    assert "whitebox: php lint reported warnings" in runner
     assert 'if [ "${1:-}" = "proxy" ]' in runner
     assert 'exec 3<>"/dev/tcp/127.0.0.1/$port"' in runner
     for language in ("python", "node", "java", "go", "php"):

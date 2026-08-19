@@ -98,26 +98,6 @@ function eventTime(e: AgentTeamEvent): string {
   return new Date(e.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
-const MEMBER_STATUS_TEXT: Record<string, string> = {
-  created: "排队中",
-  queued: "排队中",
-  completed: "已完成",
-  failed: "失败",
-  reclaimed: "已回收",
-}
-
-function memberStatusText(member: AgentTeamMember): string {
-  if (member.status === "running") {
-    const start = member.started_at ?? team.value?.started_at
-    const value = start ? new Date(start).getTime() : 0
-    const seconds = Number.isFinite(value) ? Math.max(0, Math.floor((now.value - value) / 1000)) : 0
-    const minutes = Math.floor(seconds / 60)
-    if (seconds <= 0) return "已开始工作"
-    return minutes > 0 ? `工作中 ${minutes}分${seconds % 60}秒` : `工作中 ${seconds}秒`
-  }
-  return MEMBER_STATUS_TEXT[member.status] ?? member.status
-}
-
 function askMember(member: AgentTeamMember): void {
   emit("ask-member", { name: member.display_name, address: member.address })
 }

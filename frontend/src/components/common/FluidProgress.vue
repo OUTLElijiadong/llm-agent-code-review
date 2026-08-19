@@ -203,7 +203,8 @@ function draw2d(canvas: HTMLCanvasElement, t: number, level: number): void {
     const base = (1 - (level + wave.lift)) * h
     for (let x = 0; x <= w; x += 3) {
       const y = base + Math.sin((x / w) * wave.freq * 6 + t * wave.speed) * wave.amp * h
-      x === 0 ? ctx2d.moveTo(x, y) : ctx2d.lineTo(x, y)
+      if (x === 0) ctx2d.moveTo(x, y)
+      else ctx2d.lineTo(x, y)
     }
     ctx2d.lineTo(w, h)
     ctx2d.lineTo(0, h)
@@ -268,7 +269,10 @@ function paintOnce(): void {
 
 function onVisibility(): void {
   if (document.hidden) stop()
-  else if (visible) reduceMotion() ? paintOnce() : start()
+  else if (visible) {
+    if (reduceMotion()) paintOnce()
+    else start()
+  }
 }
 
 watch(() => props.progress, () => {
@@ -293,7 +297,10 @@ onMounted(() => {
   observer = new IntersectionObserver((entries) => {
     visible = Boolean(entries[0]?.isIntersecting)
     if (!visible) stop()
-    else if (!document.hidden) reduceMotion() ? paintOnce() : start()
+    else if (!document.hidden) {
+      if (reduceMotion()) paintOnce()
+      else start()
+    }
   }, { threshold: 0.05 })
   observer.observe(canvas)
 
