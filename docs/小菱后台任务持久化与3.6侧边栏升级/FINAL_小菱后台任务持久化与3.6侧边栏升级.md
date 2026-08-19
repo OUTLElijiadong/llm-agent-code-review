@@ -13,7 +13,7 @@
 
 代码静态检查、Python 编译、前端 lint/类型检查/生产构建、部署 Shell 契约、后端相关 146 项回归及侧边栏 2 项组件回归均通过。
 
-上一版代码已通过全量双镜像流程发布到 `https://www.lijiadong.cn`：release 为 `e52c2b4a17298af587a1a477e789087f07117b4f`，数据库已升级到 Alembic `039`，`/healthz` 和 `/readyz` 均返回 `version=3.6.0` 与相同 release，首页 HTTP/2 200。真实浏览器已确认 `v3.6 · PRISM`、五组悬浮岛导航、侧边栏收起/展开，以及小菱历史团队卡片在关闭悬浮窗后重新打开仍可恢复。沙箱租约与 Worker 请求信封修复已通过本地回归，待本轮新 release 发布后更新线上 SHA 与 Alembic `040` 证据。
+最终代码已通过全量双镜像流程发布到 `https://www.lijiadong.cn`：release 为 `7627cfc1124ab71adb6984529cd8b9c01c91c30e`，数据库已升级到 Alembic `040`，`/healthz` 和 `/readyz` 均返回 `version=3.6.0` 与相同 release，首页 HTTP 200。真实浏览器已确认 `v3.6 · PRISM`、五组悬浮岛导航、侧边栏收起/展开，以及小菱历史团队卡片在关闭悬浮窗后重新打开仍可恢复。
 
 ## 生产边界
 
