@@ -316,7 +316,7 @@ def test_start_persists_links_and_starts_daemon_thread(db: Any, monkeypatch: pyt
     assert [link.file_id for link in links] == [first.id, second.id]
     assert len(CapturingThread.created) == 1
     thread = CapturingThread.created[0]
-    assert thread.args == (task.id, user.id)
+    assert thread.args == (task.id, user.id, task.execution_token)
     assert thread.daemon is True
     assert thread.started is True
 

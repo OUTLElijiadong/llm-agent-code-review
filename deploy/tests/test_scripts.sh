@@ -1055,6 +1055,7 @@ assert_contains deploy.sh 'assert_alembic_at_head'
 assert_contains deploy.sh 'backup.sh --reason pre_deploy'
 assert_contains deploy.sh 'smoke_backend'
 assert_contains deploy.sh "smoke_https \"\$desired_backend\""
+assert_contains deploy.sh "3.6 版本必须使用 all 发布"
 assert_contains deploy.sh 'rollback.sh'
 assert_not_contains deploy.sh 'reset --hard'
 assert_not_contains deploy.sh 'docker image prune'

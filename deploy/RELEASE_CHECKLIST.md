@@ -5,6 +5,7 @@
 ## 1. 发布前（T-30 分钟）
 
 - [ ] 已确认计划发布的完整 Git commit SHA，且构建源目录无未提交变更。
+- [ ] 根目录 `VERSION` 为本次语义版本，前后端健康接口/构建均使用同一值。
 - [ ] CI 的后端测试/覆盖率/Ruff/compileall、前端 lint/test/build、依赖审计、Alembic、Compose、Shell 与契约门禁全部通过。
 - [ ] 已确认变更范围、维护窗口、负责人、观察人和回滚决策人。
 - [ ] 当前 `current.env`、`previous.env` 与运行容器镜像可读，上一版本镜像仍存在。
@@ -35,7 +36,7 @@ cd /path/to/project/deploy
 
 - [ ] 目标 revision 解析为计划中的完整 SHA。
 - [ ] 只发布本次必要组件；数据库迁移只执行 `alembic upgrade head`。
-- [ ] Backend `/healthz`、`/readyz`、release 标识和日志通过后，才继续前端/全量步骤。
+- [ ] Backend `/healthz`、`/readyz`、version、release 标识和日志通过后，才继续前端/全量步骤。
 - [ ] HTTP 仅保留 ACME challenge，其余返回 308；HTTPS 首页和同源 `/healthz` 通过。
 - [ ] 生产 `/docs`、`/redoc`、`/openapi.json` 均不可公开访问。
 - [ ] MySQL、ClamAV、Backend、Frontend 四个容器均 healthy，ClamAV 3310 未映射公网。

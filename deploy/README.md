@@ -18,7 +18,7 @@
 - Backend 生产镜像采用 builder/runtime 双阶段构建，Docker CLI 体积由 `964 MB` 降至 `494 MB`，最终镜像不含编译器和开发头文件。
 - 全新隔离 MySQL 已完成 Alembic `001 → 009`，最终为 52 张表（51 ORM + `alembic_version`）。
 - Backend 容器 `/healthz`、`/readyz`、`/metrics` 返回 200；公网只放行 `/healthz`
-  与最小 `/readyz` 契约（仅 `status`/`release`），`/metrics`、`/docs`、`/redoc`、`/openapi.json` 返回 404。
+  与最小 `/readyz` 契约（`status`/`version`/`release`），`/metrics`、`/docs`、`/redoc`、`/openapi.json` 返回 404。
 - ClamAV/YARA 已覆盖干净、EICAR、YARA WebShell、引擎不可达降级和生产 fail-closed；ClamAV 未发布宿主端口。
 - Nginx 已通过 `nginx -t`、HTTP 308、HTTPS 首页和公网敏感运维路径拒绝验证。
 - 真实隔离 MySQL 备份已通过 gzip、SHA-256、元数据、恢复和临时库清理验证。
@@ -88,6 +88,8 @@ curl -fsS http://127.0.0.1:8000/readyz
 Alembic 必须只有一个 head，且 `current=head`。不要把 `deploy/mysql/init.sql` 当作完整迁移替代品。
 
 ## 5. 日常精确 SHA 发布
+
+根目录 `VERSION` 是产品语义版本唯一来源，必须使用 `x.y.z` 格式。发布脚本会读取并校验它，将其作为 `APP_VERSION` 注入后端、作为 `VITE_APP_VERSION` 注入前端；Git 完整 SHA 继续作为不可变 `release`。修改版本后必须提交，再发布该精确提交，禁止只改页面文字。
 
 先在仓库层完成安全的 fetch/checkout，并确认当前 HEAD 就是计划版本；`deploy.sh` 本身不会修改 Git：
 

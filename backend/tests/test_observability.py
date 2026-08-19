@@ -86,12 +86,17 @@ def test_unhandled_error_uses_validated_request_id() -> None:
     assert response.json()["request_id"] != "bad\nvalue"
 
 
-def test_healthz_exposes_release(monkeypatch) -> None:
-    """存活端点应返回当前不可变 release 标识。"""
+def test_healthz_exposes_version_and_release(monkeypatch) -> None:
+    """存活端点应返回当前语义版本和不可变 release 标识。"""
     from app import main
 
     monkeypatch.setattr(main.settings, "app_release", "a" * 40)
-    assert main.healthz() == {"status": "ok", "release": "a" * 40}
+    monkeypatch.setattr(main.settings, "app_version", "3.6.0")
+    assert main.healthz() == {
+        "status": "ok",
+        "version": "3.6.0",
+        "release": "a" * 40,
+    }
 
 
 def test_readyz_returns_503_when_database_is_unavailable(monkeypatch) -> None:
@@ -104,21 +109,27 @@ def test_readyz_returns_503_when_database_is_unavailable(monkeypatch) -> None:
     assert response.headers["Cache-Control"] == "no-store"
     assert json.loads(response.body) == {
         "status": "not_ready",
+        "version": main.settings.app_version,
         "release": main.settings.app_release,
     }
 
 
-def test_readyz_returns_only_release_and_ready_status(monkeypatch) -> None:
-    """数据库可用时公网契约不得暴露连接或内部详情。"""
+def test_readyz_returns_version_release_and_ready_status(monkeypatch) -> None:
+    """数据库可用时公网契约只返回状态、版本和 release。"""
     from app import main
 
     monkeypatch.setattr(main, "database_is_ready", lambda: True)
     monkeypatch.setattr(main.settings, "app_release", "b" * 40)
+    monkeypatch.setattr(main.settings, "app_version", "3.6.0")
     response = main.readyz()
 
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
-    assert json.loads(response.body) == {"status": "ready", "release": "b" * 40}
+    assert json.loads(response.body) == {
+        "status": "ready",
+        "version": "3.6.0",
+        "release": "b" * 40,
+    }
 
 
 def test_metrics_endpoint_uses_prometheus_content_type() -> None:

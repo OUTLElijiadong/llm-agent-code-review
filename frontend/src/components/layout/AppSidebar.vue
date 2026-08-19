@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   HomeFilled,
@@ -28,8 +28,12 @@ import {
   Stamp,
   UserFilled,
   Monitor,
+  Fold,
+  Expand,
+  ArrowDown,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
 import {
   canRoleSeeNavigationItem,
   normalizeRole,
@@ -43,6 +47,12 @@ interface MenuItem {
   admin?: boolean
   superAdmin?: boolean
   roles?: UserRole[]
+}
+
+interface MenuGroup {
+  key: string
+  title: string
+  items: MenuItem[]
 }
 
 const route = useRoute()
@@ -111,6 +121,64 @@ const visibleAdminItems = computed(() => (
   adminItems.filter((item) => !item.superAdmin || userStore.isSuperAdmin())
 ))
 
+const COLLAPSED_KEY = 'prism.sidebar.collapsed'
+const GROUPS_KEY = 'prism.sidebar.groups'
+const isCollapsed = ref(
+  typeof window !== 'undefined' && window.localStorage.getItem(COLLAPSED_KEY) === '1',
+)
+const expandedGroups = ref<Record<string, boolean>>({})
+
+if (typeof window !== 'undefined') {
+  try {
+    expandedGroups.value = JSON.parse(window.localStorage.getItem(GROUPS_KEY) || '{}')
+  } catch {
+    expandedGroups.value = {}
+  }
+}
+
+const userGroupDefinitions = [
+  { key: 'workspace', title: '工作区', paths: ['/dashboard', '/projects', '/code'] },
+  { key: 'review', title: '智能审查', paths: ['/reviews', '/issues', '/reports', '/rules'] },
+  { key: 'agents', title: 'Agent 与安全', paths: ['/agents', '/sandboxes', '/agent-studio', '/security'] },
+  { key: 'community', title: '社区与支持', paths: ['/forum', '/support/maintenance', '/support/feedback'] },
+  { key: 'personal', title: '个人空间', paths: ['/knowledge', '/profile/personalization', '/profile'] },
+]
+
+const navigationGroups = computed<MenuGroup[]>(() => {
+  if (isAdmin.value) {
+    return [{ key: 'admin', title: '系统管理', items: visibleAdminItems.value }]
+  }
+  return userGroupDefinitions
+    .map((group) => ({
+      key: group.key,
+      title: group.title,
+      items: group.paths
+        .map((path) => visibleMenuItems.value.find((item) => item.path === path))
+        .filter((item): item is MenuItem => Boolean(item)),
+    }))
+    .filter((group) => group.items.length > 0)
+})
+
+watch(isCollapsed, (value) => {
+  window.localStorage.setItem(COLLAPSED_KEY, value ? '1' : '0')
+})
+
+watch(expandedGroups, (value) => {
+  window.localStorage.setItem(GROUPS_KEY, JSON.stringify(value))
+}, { deep: true })
+
+function isGroupExpanded(key: string): boolean {
+  return expandedGroups.value[key] !== false
+}
+
+function toggleGroup(key: string): void {
+  expandedGroups.value[key] = !isGroupExpanded(key)
+}
+
+function toggleCollapsed(): void {
+  isCollapsed.value = !isCollapsed.value
+}
+
 /**
  * 判断菜单项是否匹配当前路由
  * @param path - 菜单路径
@@ -132,47 +200,72 @@ function go(item: MenuItem): void {
 </script>
 
 <template>
-  <aside class="app-sidebar" :class="{ 'is-mobile-open': props.mobileOpen }">
+  <aside
+    class="app-sidebar"
+    :class="{
+      'is-mobile-open': props.mobileOpen,
+      'is-collapsed': isCollapsed,
+    }"
+  >
     <div class="sidebar-logo">
       <span class="prism-mark sm"></span>
-      <div class="logo-meta">
+      <div v-show="!isCollapsed" class="logo-meta">
         <span class="logo-text font-display">Prism</span>
         <span class="logo-sub font-mono">CODE REVIEW</span>
       </div>
+      <el-tooltip :content="isCollapsed ? '展开侧边栏' : '收起侧边栏'" placement="right">
+        <button
+          class="sidebar-toggle"
+          type="button"
+          :aria-label="isCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          @click="toggleCollapsed"
+        >
+          <el-icon><component :is="isCollapsed ? Expand : Fold" /></el-icon>
+        </button>
+      </el-tooltip>
     </div>
 
-    <nav class="sidebar-nav">
-      <div class="nav-group">
-        <div class="nav-group-label font-mono">主导航</div>
+    <nav class="sidebar-nav" aria-label="主导航">
+      <section v-for="group in navigationGroups" :key="group.key" class="nav-group">
         <button
-          v-for="item in visibleMenuItems"
-          :key="item.path"
-          class="nav-item"
-          :class="{ 'is-active': isActive(item.path) }"
-          @click="go(item)"
+          class="nav-group-toggle"
+          type="button"
+          :aria-expanded="isGroupExpanded(group.key)"
+          @click="toggleGroup(group.key)"
         >
-          <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
-          <span class="nav-text">{{ item.title }}</span>
+          <span>{{ group.title }}</span>
+          <el-icon :class="{ 'is-folded': !isGroupExpanded(group.key) }"><ArrowDown /></el-icon>
         </button>
-      </div>
+        <div v-if="isCollapsed" class="nav-group-divider" aria-hidden="true"></div>
 
-      <div v-if="isAdmin" class="nav-group">
-        <div class="nav-group-label font-mono">管理</div>
-        <button
-          v-for="item in visibleAdminItems"
-          :key="item.path"
-          class="nav-item"
-          :class="{ 'is-active': isActive(item.path) }"
-          @click="go(item)"
-        >
-          <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
-          <span class="nav-text">{{ item.title }}</span>
-        </button>
-      </div>
+        <div v-show="isCollapsed || isGroupExpanded(group.key)" class="nav-group-items">
+          <el-tooltip
+            v-for="item in group.items"
+            :key="item.path"
+            :content="item.title"
+            placement="right"
+            :disabled="!isCollapsed"
+          >
+            <button
+              class="nav-item"
+              :class="{ 'is-active': isActive(item.path) }"
+              type="button"
+              :aria-label="item.title"
+              :aria-current="isActive(item.path) ? 'page' : undefined"
+              @click="go(item)"
+            >
+              <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
+              <span v-show="!isCollapsed" class="nav-text">{{ item.title }}</span>
+            </button>
+          </el-tooltip>
+        </div>
+      </section>
     </nav>
 
     <div class="sidebar-foot">
-      <div class="version font-mono">v3.4 · PRISM</div>
+      <div class="version font-mono" :title="APP_DISPLAY_VERSION">
+        {{ isCollapsed ? APP_DISPLAY_VERSION : `${APP_DISPLAY_VERSION} · PRISM` }}
+      </div>
     </div>
   </aside>
 </template>
@@ -180,15 +273,23 @@ function go(item: MenuItem): void {
 <style scoped lang="scss">
 .app-sidebar {
   width: var(--sidebar-width);
-  height: 100%;
+  height: calc(100% - 24px);
+  margin: 12px 0 12px 12px;
   background: var(--side-bg);
-  border-right: 1px solid var(--side-border);
+  border: 1px solid var(--side-border);
+  border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(8, 12, 24, 0.18);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
   position: relative;
   z-index: 2000;
+  transition: width 0.2s ease, box-shadow 0.2s ease;
+
+  &.is-collapsed {
+    width: 72px;
+  }
 }
 
 /* 顶部品牌区 ----------------------------- */
@@ -200,6 +301,11 @@ function go(item: MenuItem): void {
   padding: 0 20px;
   border-bottom: 1px solid var(--side-border);
   flex-shrink: 0;
+}
+
+.is-collapsed .sidebar-logo {
+  justify-content: center;
+  padding: 0 10px;
 }
 
 .logo-meta {
@@ -222,25 +328,87 @@ function go(item: MenuItem): void {
   color: var(--side-text-dim);
 }
 
+.sidebar-toggle {
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--side-text);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+
+  &:hover,
+  &:focus-visible {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.24);
+    outline: none;
+  }
+}
+
+.is-collapsed .sidebar-toggle {
+  position: absolute;
+  right: -13px;
+  top: 17px;
+  background: var(--side-bg);
+  box-shadow: 0 8px 20px rgba(8, 12, 24, 0.24);
+}
+
 /* 导航 ----------------------------------- */
 .sidebar-nav {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 0;
+  padding: 10px 0;
+  scrollbar-width: thin;
 }
 
 .nav-group + .nav-group {
-  margin-top: 16px;
-  padding-top: 16px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--side-border);
 }
 
-.nav-group-label {
-  padding: 6px 24px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+.nav-group-toggle {
+  width: calc(100% - 16px);
+  min-height: 32px;
+  margin: 0 8px 2px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
   color: var(--side-text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+
+  .el-icon {
+    transition: transform 0.18s ease;
+  }
+
+  .el-icon.is-folded {
+    transform: rotate(-90deg);
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: #fff;
+    outline: none;
+  }
+}
+
+.is-collapsed .nav-group-toggle {
+  display: none;
+}
+
+.nav-group-divider {
+  width: 24px;
+  height: 1px;
+  margin: 7px auto;
+  background: var(--side-border);
 }
 
 .nav-item {
@@ -274,7 +442,7 @@ function go(item: MenuItem): void {
     &::before {
       content: '';
       position: absolute;
-      left: -8px;
+      left: 0;
       top: 50%;
       transform: translateY(-50%);
       width: 3px;
@@ -283,6 +451,14 @@ function go(item: MenuItem): void {
       border-radius: 0 2px 2px 0;
     }
   }
+}
+
+.is-collapsed .nav-item {
+  width: 44px;
+  height: 42px;
+  margin: 2px auto;
+  padding: 0;
+  justify-content: center;
 }
 
 .nav-icon {
@@ -300,8 +476,13 @@ function go(item: MenuItem): void {
 
 /* 底部 ----------------------------------- */
 .sidebar-foot {
-  padding: 16px 24px;
+  padding: 14px 20px;
   border-top: 1px solid var(--side-border);
+}
+
+.is-collapsed .sidebar-foot {
+  padding: 14px 4px;
+  text-align: center;
 }
 
 .version {
@@ -316,6 +497,9 @@ function go(item: MenuItem): void {
     left: 0;
     top: 0;
     width: min(var(--sidebar-width), 82vw);
+    height: 100%;
+    margin: 0;
+    border-radius: 0;
     max-width: 320px;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
@@ -324,6 +508,39 @@ function go(item: MenuItem): void {
 
   .app-sidebar.is-mobile-open {
     transform: translateX(0);
+  }
+
+  .app-sidebar.is-collapsed {
+    width: min(var(--sidebar-width), 82vw);
+  }
+
+  .app-sidebar.is-collapsed .logo-meta,
+  .app-sidebar.is-collapsed .nav-text {
+    display: flex !important;
+  }
+
+  .app-sidebar.is-collapsed .nav-group-toggle {
+    display: flex;
+  }
+
+  .app-sidebar.is-collapsed .nav-group-divider {
+    display: none;
+  }
+
+  .app-sidebar.is-collapsed .nav-item {
+    width: calc(100% - 16px);
+    justify-content: flex-start;
+    padding: 0 14px;
+  }
+
+  .app-sidebar.is-collapsed .sidebar-logo {
+    justify-content: flex-start;
+    padding: 0 20px;
+  }
+
+  .app-sidebar.is-collapsed .sidebar-toggle {
+    position: static;
+    margin-left: auto;
   }
 }
 </style>

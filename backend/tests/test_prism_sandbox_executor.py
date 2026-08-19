@@ -1420,6 +1420,59 @@ def test_quarantine_allows_new_and_existing_preview_sessions(db, monkeypatch) ->
     assert authed_worker.id == worker.id
 
 
+def test_sandbox_terminal_transition_requires_current_execution_token(db) -> None:
+    owner = User(username="sandbox_lease_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="sandbox-lease", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_execution_lease_01",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="whitebox_tester",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        status="finalizing",
+        runtime="runsc",
+        image_ref="prism-sandbox-python:3.12",
+        source_sha256="a" * 64,
+        execution_token="current-token",
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(environment)
+    db.commit()
+
+    assert sandbox_service._complete_finalizing_transition(
+        db,
+        environment,
+        final_status="succeeded",
+        result_json='{"passed":true}',
+        execution_token="stale-token",
+    ) is False
+    db.refresh(environment)
+    assert environment.status == "finalizing"
+
+    assert sandbox_service._complete_finalizing_transition(
+        db,
+        environment,
+        final_status="succeeded",
+        result_json='{"passed":true}',
+        execution_token="current-token",
+    ) is True
+
+
+def test_agent_test_paths_restore_persisted_execution_snapshot() -> None:
+    source = base64.b64encode(
+        _archive({"app.py": "print('ok')\n", "_agent_tests/test_app.py": "def test_ok(): assert True\n"})
+    ).decode("ascii")
+    assert sandbox_service._agent_test_paths(source) == {"test_app.py"}
+
+
 def _persist_browser_environment(db, owner: User, *, suffix: str) -> tuple[Project, SandboxEnvironment]:
     project = Project(user_id=owner.id, project_name=f"browser-{suffix}", status="active")
     db.add(project)

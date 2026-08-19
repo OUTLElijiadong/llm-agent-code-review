@@ -1924,7 +1924,9 @@ onBeforeUnmount(() => {
   sessionPollStopped = true
   invalidateSessionPoll()
   clearLiveTeamPoll()
-  activeResponse?.abort()
+  // 组件卸载（退出登录/离开布局）只断开本地订阅。服务端任务由持久检查点继续执行；
+  // 只有用户点击“停止”才走 cancelResponse() 并取消服务端运行。
+  activeResponse = null
   activityStore.clear()
   window.clearTimeout(projectSearchTimer)
   window.clearTimeout(copiedResetTimer)

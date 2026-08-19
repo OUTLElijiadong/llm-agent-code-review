@@ -11,6 +11,7 @@ import concurrent.futures
 import json as json_lib
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -68,6 +69,8 @@ _COLLAB_PARALLEL_THREADS = 4
 # 全局审查并发上限:限制同时进行的后台审查任务数,防止 2C2G 机器上线程/内存放大
 # 及撞 LLM 侧限流。超出上限的任务会在后台线程内排队等待(任务状态先入库为 running)。
 _REVIEW_SEMAPHORE = threading.BoundedSemaphore(max(1, settings.review_max_concurrency))
+_RECOVERING_REVIEW_TASK_IDS: set[int] = set()
+_RECOVERY_LOCK = threading.Lock()
 
 
 def _enabled_review_profiles(
@@ -164,6 +167,7 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
         model_name=get_model_label(agent.model, profiles),
         rules_snapshot=[{"code": r.rule_code, "name": r.rule_name} for r in rules],
         start_time=datetime.now(timezone.utc),
+        execution_token=uuid.uuid4().hex,
     )
     db.add(task)
     _safe_commit(db)
@@ -173,7 +177,7 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
 
     threading.Thread(
         target=_run_review_task,
-        args=(task.id, user.id),
+        args=(task.id, user.id, str(task.execution_token)),
         name=f"review-task-{task.id}",
         daemon=True,
     ).start()
@@ -183,7 +187,92 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
     return task
 
 
-def _run_review_task(task_id: int, user_id: int) -> None:
+def resume_interrupted_tasks(task_refs: list[tuple[int, int, str]]) -> int:
+    """重新派发上个进程遗留的审查任务。
+
+    每个任务先删除不完整问题并重置统计，再复用原审查入口。进程再次中断时，
+    任务仍保持 running，下一次启动会继续恢复。
+    """
+    dispatched = 0
+    for task_id, user_id, previous_token in task_refs:
+        with _RECOVERY_LOCK:
+            if task_id in _RECOVERING_REVIEW_TASK_IDS:
+                continue
+            _RECOVERING_REVIEW_TASK_IDS.add(task_id)
+        threading.Thread(
+            target=_resume_interrupted_task,
+            args=(task_id, user_id, previous_token),
+            name=f"review-recovery-{task_id}",
+            daemon=True,
+        ).start()
+        dispatched += 1
+    if dispatched:
+        logger.warning("[recovery] 已派发 {} 个孤儿审查任务继续执行", dispatched)
+    return dispatched
+
+
+def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) -> None:
+    """CAS 换发执行租约、清理部分产物后，通过原有后台入口完整重跑。"""
+    db = SessionLocal()
+    next_token = uuid.uuid4().hex
+    try:
+        claimed = (
+            db.query(ReviewTask)
+            .filter(
+                ReviewTask.id == task_id,
+                ReviewTask.status == "running",
+                ReviewTask.execution_token == previous_token,
+            )
+            .update(
+                {"execution_token": next_token},
+                synchronize_session=False,
+            )
+        )
+        if claimed != 1:
+            db.rollback()
+            with _RECOVERY_LOCK:
+                _RECOVERING_REVIEW_TASK_IDS.discard(task_id)
+            return
+        task = db.query(ReviewTask).filter(ReviewTask.id == task_id).one()
+        db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id).delete(
+            synchronize_session=False,
+        )
+        task.processed_files = 0
+        task.total_issues = 0
+        task.severe_issues = 0
+        task.high_issues = 0
+        task.medium_issues = 0
+        task.low_issues = 0
+        task.score = 0
+        task.summary = None
+        task.end_time = None
+        task.duration_ms = 0
+        task.error_message = None
+        task.start_time = datetime.now(timezone.utc)
+        _safe_commit(db, task)
+    except Exception as exc:  # noqa: BLE001 - 恢复准备失败必须落库并隔离
+        db.rollback()
+        task = db.get(ReviewTask, task_id)
+        if task is not None:
+            task.status = "failed"
+            task.error_message = f"重启后自动恢复失败: {exc}"[:500]
+            task.end_time = datetime.now(timezone.utc)
+            _safe_commit(db, task)
+        logger.exception("[recovery] 审查任务 #{} 恢复准备失败: {}", task_id, exc)
+        with _RECOVERY_LOCK:
+            _RECOVERING_REVIEW_TASK_IDS.discard(task_id)
+        return
+    finally:
+        db.close()
+
+    try:
+        _run_review_task(task_id, user_id, next_token)
+    finally:
+        with _RECOVERY_LOCK:
+            _RECOVERING_REVIEW_TASK_IDS.discard(task_id)
+
+
+def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] = None) -> None:
     """后台线程入口: 用独立 DB Session 执行完整审查流水线。
 
     线程没有调用方,任何异常都在此被吞掉(失败状态已由 _execute_review 落库),
@@ -200,6 +289,14 @@ def _run_review_task(task_id: int, user_id: int) -> None:
         user = db.get(User, user_id)
         if not task or not user:
             logger.error(f"[review] 后台任务 #{task_id} 找不到 task/user,放弃执行")
+            return
+        active_token = (
+            execution_token
+            if execution_token is not None
+            else str(getattr(task, "execution_token", "") or "")
+        )
+        if str(getattr(task, "execution_token", "") or "") != active_token:
+            logger.info("[review] 后台任务 #{} 的执行租约已失效，跳过旧 Worker", task_id)
             return
 
         project = db.get(Project, task.project_id)
@@ -245,6 +342,7 @@ def _run_review_task(task_id: int, user_id: int) -> None:
         if isinstance(db, Session):
             db.commit()
         if not profiles:
+            _check_cancelled(db, task, active_token, lock=True)
             task.status = "failed"
             task.error_message = "本次审查所需 Agent 均已停用，任务未执行"
             task.end_time = datetime.now(timezone.utc)
@@ -271,7 +369,18 @@ def _run_review_task(task_id: int, user_id: int) -> None:
             .all()
         )
 
-        _execute_review(db, collab_agent, api_config, task, user, files, rules, profiles, experience_section)
+        _execute_review(
+            db,
+            collab_agent,
+            api_config,
+            task,
+            user,
+            files,
+            rules,
+            profiles,
+            experience_section,
+            execution_token=active_token,
+        )
     except Exception as e:
         logger.exception(e)
     finally:
@@ -381,6 +490,7 @@ def _execute_review(
     db: Session, collab_agent: DeepSeekAgent, api_config, task: ReviewTask, user: User,
     files: list, rules: list, profiles: tuple[ReviewAgentProfile, ...],
     experience_section: str,
+    execution_token: Optional[str] = None,
 ) -> None:
     """执行审查主循环并将统计结果落库。
 
@@ -400,10 +510,12 @@ def _execute_review(
     try:
         all_issues: list[ReviewIssue] = []
         for code_file in files:
-            _check_cancelled(db, task)
+            _check_cancelled(db, task, execution_token)
             file_issues = _review_one_file(db, collab_agent, api_config, task, code_file, rules, user, profiles,
-                                           experience_section=experience_section)
+                                           experience_section=experience_section,
+                                           execution_token=execution_token)
             all_issues.extend(file_issues)
+            _check_cancelled(db, task, execution_token, lock=True)
             task.processed_files += 1
             _safe_commit(db)
             db.refresh(task)
@@ -413,6 +525,7 @@ def _execute_review(
                                    f"累计 {len(all_issues)} 个问题",
                                    agent_code=ac)
 
+        _check_cancelled(db, task, execution_token, lock=True)
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
         for it in all_issues:
             # 归一化:LLM 偶发返回四类之外的 severity 时归入「中」,
@@ -446,8 +559,21 @@ def _execute_review(
         for ac in set(agent_codes):
             _emit_review_event(AgentEventType.FAILED, task, user,
                                f"审查任务 #{task.id} 已取消", agent_code=ac)
+    except TaskSupersededError:
+        if hasattr(db, "rollback"):
+            db.rollback()
+        logger.info("[review] 审查任务 #{} 的旧执行者已停止写入", task.id)
     except Exception as e:
         logger.exception(e)
+        if hasattr(db, "rollback"):
+            db.rollback()
+        try:
+            _check_cancelled(db, task, execution_token, lock=True)
+        except (TaskCancelledError, TaskSupersededError):
+            if hasattr(db, "rollback"):
+                db.rollback()
+            logger.info("[review] 审查任务 #{} 已取消或租约被接管，不覆盖新状态", task.id)
+            return
         task.status = "failed"
         task.error_message = str(e)[:500]
         task.end_time = datetime.now(timezone.utc)
@@ -463,7 +589,8 @@ def _execute_review(
 def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                      task: ReviewTask, code_file: CodeFile, rules: list, user: User,
                      profiles: tuple[ReviewAgentProfile, ...],
-                     experience_section: str = "") -> list[ReviewIssue]:
+                     experience_section: str = "",
+                     execution_token: Optional[str] = None) -> list[ReviewIssue]:
     """审查单个文件:双引擎 — 静态规则前置过滤 + LLM 深度审查 → 合并去重 → 入库
 
     T08 v3 双引擎流程:
@@ -542,6 +669,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
         _issue_to_review_issue(task.id, code_file, issue) for issue in merged_issues
     ]
     if issues_acc:
+        _check_cancelled(db, task, execution_token, lock=True)
         db.add_all(issues_acc)
         db.commit()
     return issues_acc
@@ -1499,7 +1627,17 @@ class TaskCancelledError(Exception):
     """任务已被取消的内部信号"""
 
 
-def _check_cancelled(db: Session, task: ReviewTask) -> None:
+class TaskSupersededError(Exception):
+    """当前 Worker 的数据库执行租约已被恢复调度器接管。"""
+
+
+def _check_cancelled(
+    db: Session,
+    task: ReviewTask,
+    execution_token: Optional[str] = None,
+    *,
+    lock: bool = False,
+) -> None:
     """检查任务是否被取消,若已取消则抛出中断信号
 
     Args:
@@ -1509,9 +1647,20 @@ def _check_cancelled(db: Session, task: ReviewTask) -> None:
     Raises:
         TaskCancelledError: 任务已被用户取消
     """
-    db.refresh(task)
+    if lock:
+        task = (
+            db.query(ReviewTask)
+            .filter(ReviewTask.id == task.id)
+            .with_for_update()
+            .populate_existing()
+            .one()
+        )
+    else:
+        db.refresh(task)
     if task.status == "cancelled":
         raise TaskCancelledError("审查任务已被用户取消")
+    if execution_token is not None and str(task.execution_token or "") != execution_token:
+        raise TaskSupersededError("审查任务执行租约已被新的 Worker 接管")
 
 
 def _emit_review_event(

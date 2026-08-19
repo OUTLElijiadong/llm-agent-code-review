@@ -51,10 +51,15 @@ validate_compose_environment
 repo_dir="$(cd .. && pwd)"
 git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1 || fatal "上级目录不是 Git 仓库"
 assert_deploy_sources_clean "$repo_dir" || fatal "拒绝从脏构建上下文发布"
+version_file="$repo_dir/VERSION"
+[[ -f "$version_file" ]] || fatal "缺少根目录 VERSION，拒绝发布无法识别的版本"
+app_version="$(tr -d '[:space:]' < "$version_file")"
+[[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fatal "VERSION 必须是 x.y.z 语义版本"
 target_sha="$(resolve_git_revision "$repo_dir" "$revision")" || fatal "无法解析 revision: $revision"
 head_sha="$(current_git_sha "$repo_dir")"
 [[ "$target_sha" == "$head_sha" ]] || fatal "revision=$target_sha 与当前 HEAD=$head_sha 不一致；请先安全 checkout 精确提交"
 [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || fatal "目标 SHA 格式非法"
+[[ "$target" == "all" ]] || fatal "3.6 版本必须使用 all 发布，禁止单独发布 backend/frontend 造成版本漂移"
 
 release_dir="${RELEASE_STATE_DIR:-.releases}"
 current_state="$release_dir/current.env"
@@ -136,13 +141,14 @@ case "$target" in
 esac
 
 export APP_RELEASE="$target_sha"
+export APP_VERSION="$app_version"
 export BACKEND_RELEASE="$desired_backend"
 export FRONTEND_RELEASE="$desired_frontend"
 write_release_state \
   "$pending_state" "$target_sha" "$desired_backend" "$desired_frontend" \
   "$target" none "$(current_alembic_revision)"
 validate_compose_environment
-log_info "发布预检通过(target=$target, sha=$target_sha)"
+log_info "发布预检通过(target=$target, version=$APP_VERSION, sha=$target_sha)"
 
 backup_file="none"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then

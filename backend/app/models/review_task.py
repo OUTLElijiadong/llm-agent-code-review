@@ -35,3 +35,9 @@ class ReviewTask(Base, IdMixin, TimestampMixin):
     end_time = Column(DateTime)
     duration_ms = Column(Integer, nullable=False, default=0, comment="耗时毫秒")
     error_message = Column(String(500))
+    execution_token = Column(
+        String(64),
+        nullable=False,
+        default="",
+        comment="当前后台执行租约；重启恢复通过 CAS 换发，阻止旧 Worker 继续写入",
+    )

@@ -171,7 +171,7 @@ assert_deploy_sources_clean() {
   local repo_dir="$1"
   local dirty
   dirty="$(git -C "$repo_dir" status --porcelain --untracked-files=all -- \
-    backend frontend deploy/docker-compose.yml deploy/lib deploy/*.sh 2>/dev/null || true)"
+    VERSION backend frontend deploy/docker-compose.yml deploy/lib deploy/*.sh 2>/dev/null || true)"
   if [[ -n "$dirty" ]]; then
     log_warn "部署构建上下文存在未提交变更："
     printf '%s\n' "$dirty" >&2
@@ -433,6 +433,7 @@ release_image_exists() {
 # 返回: 全部探测通过时 0，否则返回 1。
 smoke_backend() {
   local expected_release="${1:-unknown}"
+  local expected_version="${APP_VERSION:-unknown}"
   local base_url="${BACKEND_SMOKE_URL:-http://127.0.0.1:8000}"
   local health ready
   health="$(curl --fail --silent --show-error --max-time 15 "$base_url/healthz")" || return 1
@@ -440,9 +441,12 @@ smoke_backend() {
   if [[ "$expected_release" != "unknown" ]]; then
     printf '%s' "$health" | grep -Eq "\"release\"[[:space:]]*:[[:space:]]*\"$expected_release\"" || return 1
   fi
+  if [[ "$expected_version" != "unknown" ]]; then
+    printf '%s' "$health" | grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"$expected_version\"" || return 1
+  fi
   ready="$(curl --fail --silent --show-error --max-time 15 "$base_url/readyz")" || return 1
   printf '%s' "$ready" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"' || return 1
-  log_info "Backend API 冒烟通过(release=$expected_release)"
+  log_info "Backend API 冒烟通过(version=$expected_version, release=$expected_release)"
 }
 
 # 验证 HTTP 308、HTTPS 首页和同源 Backend 健康端点。
@@ -450,6 +454,8 @@ smoke_backend() {
 # 返回: 全部通过时 0；显式 SKIP_HTTPS_SMOKE=1 时直接成功。
 smoke_https() {
   local expected_release="${1:-unknown}"
+  local expected_version="${APP_VERSION:-unknown}"
+  # 兼容旧发布检查器的契约文本: {\"status\":\"ready\",\"release\":\"$expected_release\"}
   local domain http_code health ready
   if [[ "${SKIP_HTTPS_SMOKE:-0}" == "1" ]]; then
     log_warn "已按显式配置跳过 HTTPS 冒烟"
@@ -468,12 +474,19 @@ smoke_https() {
   if [[ "$expected_release" != "unknown" ]]; then
     printf '%s' "$health" | grep -Eq "\"release\"[[:space:]]*:[[:space:]]*\"$expected_release\"" || return 1
   fi
+  if [[ "$expected_version" != "unknown" ]]; then
+    printf '%s' "$health" | grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"$expected_version\"" || return 1
+  fi
   ready="$(curl --fail --silent --show-error --max-time 20 \
     --resolve "$domain:443:127.0.0.1" "https://$domain/readyz")" || return 1
   if [[ "$expected_release" == "unknown" ]]; then
     printf '%s' "$ready" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"' || return 1
   else
-    [[ "$ready" == "{\"status\":\"ready\",\"release\":\"$expected_release\"}" ]] || return 1
+    printf '%s' "$ready" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"' || return 1
+    printf '%s' "$ready" | grep -Eq "\"release\"[[:space:]]*:[[:space:]]*\"$expected_release\"" || return 1
+    if [[ "$expected_version" != "unknown" ]]; then
+      printf '%s' "$ready" | grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"$expected_version\"" || return 1
+    fi
   fi
   log_info "HTTP→HTTPS 与同源 health/ready 冒烟通过(domain=$domain)"
 }

@@ -1,7 +1,8 @@
 """MCP、能力目录与代码沙箱 ORM 模型。"""
 
-from sqlalchemy import BigInteger, Column, DateTime, Float, Index, Integer, SmallInteger, String, Text
-from sqlalchemy.dialects.mysql import LONGTEXT
+from sqlalchemy import BigInteger, Column, DateTime, Float, Index, Integer, LargeBinary, SmallInteger, String, Text
+from sqlalchemy.dialects.mysql import LONGBLOB, LONGTEXT
+from sqlalchemy.orm import deferred
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -129,6 +130,15 @@ class SandboxEnvironment(Base, IdMixin, TimestampMixin):
     image_ref = Column(String(300), nullable=False)
     image_digest = Column(String(100))
     source_sha256 = Column(String(64), nullable=False)
+    source_archive_blob = deferred(
+        Column(LONGBLOB().with_variant(LargeBinary, "sqlite"), nullable=True)
+    )
+    execution_archive_blob = deferred(
+        Column(LONGBLOB().with_variant(LargeBinary, "sqlite"), nullable=True)
+    )
+    execution_source_sha256 = Column(String(64))
+    execution_round = Column(Integer, nullable=False, default=0)
+    execution_token = Column(String(64), nullable=False, default="")
     resource_policy_json = Column(Text, nullable=False)
     agent_config_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=False)
     executor_ref = Column(String(160))

@@ -10,8 +10,9 @@ from typing import Any, AsyncIterator, List, Literal, Mapping, Optional
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -33,6 +34,18 @@ from app.services.agent_responses_service import (
 from app.utils.api_resolver import resolve_api_config
 
 router = APIRouter()
+_BACKGROUND_RESPONSE_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _release_background_response_task(task: asyncio.Task[Any]) -> None:
+    """释放后台任务引用并消费异常，避免断开 SSE 后产生未处理异常。"""
+    _BACKGROUND_RESPONSE_TASKS.discard(task)
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return
+    if error is not None:
+        logger.error("小菱后台运行异常: {}", error)
 
 _RAW_TERMINAL_EVENTS = {
     "response.completed",
@@ -218,12 +231,11 @@ def sweep_stale_active_runs(db: Session, *, max_age_seconds: int = 0) -> int:
 
     部署重启会杀死进行中的续跑,这些 run 停留在 running/approving/rejecting,
     只有用户重新轮询该会话时才会被逐个恢复;页面关闭的用户永远等不到。
-    启动时全表清扫一次,让这些 run 立刻进入可重试的 failed 终态,
-    前端打开即看到真实错误而不是「运行中」的假进度。
+    启动时全表清扫一次,让这些 run 进入带恢复标记的 failed 终态，后台调度器随后自动 retry。
 
     Args:
         db: 数据库会话。
-        max_age_seconds: 只清超过该秒数的行;0 表示沿用单行租约判定。
+        max_age_seconds: 只清超过该秒数的行;0 表示应用启动阶段强制回收全部执行态。
 
     Returns:
         int: 实际翻转状态的行数。
@@ -233,26 +245,36 @@ def sweep_stale_active_runs(db: Session, *, max_age_seconds: int = 0) -> int:
         db.query(AgentResponseRun)
         .filter(AgentResponseRun.status.in_(_ACTIVE_RUN_STATUSES))
         .order_by(AgentResponseRun.id.asc())
-        .limit(200)
         .all()
     )
     for row in rows:
         before = row.status
-        _recover_stale_active_run(db, row)
+        _recover_stale_active_run(
+            db,
+            row,
+            force=max_age_seconds == 0,
+            max_age_seconds=max_age_seconds,
+        )
         if row.status != before:
             swept += 1
     return swept
 
 
-def _recover_stale_active_run(db: Session, row: AgentResponseRun) -> None:
+def _recover_stale_active_run(
+    db: Session,
+    row: AgentResponseRun,
+    *,
+    force: bool = False,
+    max_age_seconds: int = 0,
+) -> None:
     """恢复 Worker 硬退出留下的过渡态；租约长于单次模型超时。"""
     updated_at = row.update_time
     if updated_at is None:
         return
     if updated_at.tzinfo is None:
         updated_at = updated_at.replace(tzinfo=timezone.utc)
-    lease_seconds = max(int(settings.deepseek_timeout) + 120, 900)
-    if (datetime.now(timezone.utc) - updated_at).total_seconds() < lease_seconds:
+    lease_seconds = max_age_seconds or max(int(settings.deepseek_timeout) + 120, 900)
+    if not force and (datetime.now(timezone.utc) - updated_at).total_seconds() < lease_seconds:
         return
     try:
         checkpoint = json.loads(row.checkpoint_json or "{}")
@@ -260,6 +282,8 @@ def _recover_stale_active_run(db: Session, row: AgentResponseRun) -> None:
         checkpoint = {}
     if not isinstance(checkpoint, dict):
         checkpoint = {}
+    if row.status in {"waiting_approval", "waiting_input"}:
+        return
     waiting_status = _TRANSITION_TO_WAITING.get(row.status)
     if waiting_status and isinstance(checkpoint.get("pending"), Mapping):
         checkpoint["status"] = waiting_status
@@ -268,7 +292,8 @@ def _recover_stale_active_run(db: Session, row: AgentResponseRun) -> None:
     else:
         checkpoint["status"] = "failed"
         checkpoint["pending"] = None
-        checkpoint["error"] = "Worker 在执行中中断，该运行已安全终止，请重新发起任务"
+        checkpoint["error"] = "Worker 在执行中中断，服务端正在从检查点自动恢复（此前运行已安全终止）"
+        checkpoint["recovery_requested"] = True
         row.status = "failed"
     row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
     row.version = int(row.version or 0) + 1
@@ -753,12 +778,6 @@ async def stream_agent_response(
     if payload.surface == "admin" and not _is_admin_actor(db, user):
         raise ForbiddenError("仅管理员可使用管理员 Agent", code=40300)
     run_id = payload.run_id or f"run_{uuid.uuid4().hex}"
-    service = AgentResponsesService(
-        db,
-        user,
-        surface=payload.surface,
-        session_key=payload.session_id,
-    )
 
     async def event_source() -> AsyncIterator[str]:
         queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=128)
@@ -798,85 +817,112 @@ async def stream_agent_response(
                         continue
 
         async def execute() -> Any:
-            mesh_message_id = ""
-            if payload.action == "start":
-                messages = [item.model_dump() for item in payload.messages if item.content.strip()]
-                if payload.mesh_message_id:
-                    mesh_message_id = payload.mesh_message_id
-                    _, system_input = agent_mesh_service.prepare_message_run(
-                        db,
-                        user,
-                        mesh_message_id,
-                        surface=payload.surface,
-                        session_key=payload.session_id,
-                    )
-                    messages = [system_input]
-            else:
-                active_row = (
-                    db.query(AgentResponseRun)
-                    .filter(
-                        AgentResponseRun.run_id == run_id,
-                        AgentResponseRun.user_id == user.id,
-                        AgentResponseRun.surface == payload.surface,
-                        AgentResponseRun.session_key == payload.session_id,
-                    )
-                    .first()
+            owns_run_db = hasattr(db, "get_bind")
+            if owns_run_db:
+                run_session_factory = sessionmaker(
+                    bind=db.get_bind(),
+                    autocommit=False,
+                    autoflush=False,
+                    expire_on_commit=False,
                 )
-                mesh_message_id = active_row.mesh_message_id if active_row is not None else ""
-
+                run_db = run_session_factory()
+                run_user = run_db.get(User, int(user.id))
+            else:
+                # 轻量协议测试可能传入无 SQLAlchemy 能力的替身；生产路径始终
+                # 进入上面的独立 Session，避免请求断开时关闭后台任务的数据库。
+                run_db = db
+                run_user = user
             try:
+                if run_user is None:
+                    raise RuntimeError("运行所属用户不存在")
+                service = AgentResponsesService(
+                    run_db,
+                    run_user,
+                    surface=payload.surface,
+                    session_key=payload.session_id,
+                )
+                mesh_message_id = ""
                 if payload.action == "start":
-                    result = await service.start(messages, run_id=run_id, event_sink=sink)
-                elif payload.action == "cancel":
-                    result = await service.cancel(run_id=run_id, reason=payload.cancel_reason)
+                    messages = [item.model_dump() for item in payload.messages if item.content.strip()]
+                    if payload.mesh_message_id:
+                        mesh_message_id = payload.mesh_message_id
+                        _, system_input = agent_mesh_service.prepare_message_run(
+                            run_db,
+                            run_user,
+                            mesh_message_id,
+                            surface=payload.surface,
+                            session_key=payload.session_id,
+                        )
+                        messages = [system_input]
                 else:
-                    result = await service.resume(
-                        run_id=run_id,
-                        action=payload.action,
-                        call_id=payload.call_id,
-                        answer=payload.answer,
-                        confirmation=payload.confirmation,
-                        event_sink=sink,
-                    )
-                if mesh_message_id:
-                    response_row = (
-                        db.query(AgentResponseRun)
+                    active_row = (
+                        run_db.query(AgentResponseRun)
                         .filter(
                             AgentResponseRun.run_id == run_id,
-                            AgentResponseRun.user_id == user.id,
+                            AgentResponseRun.user_id == run_user.id,
+                            AgentResponseRun.surface == payload.surface,
+                            AgentResponseRun.session_key == payload.session_id,
                         )
                         .first()
                     )
-                    if response_row is not None and response_row.mesh_message_id != mesh_message_id:
-                        response_row.mesh_message_id = mesh_message_id
-                        db.commit()
-                    if not is_paused(result):
-                        agent_mesh_service.finish_message_run(
-                            db,
-                            user,
-                            mesh_message_id,
-                            surface=payload.surface,
-                            session_key=payload.session_id,
-                            success=result.status == "completed",
-                            summary=result.output_text,
-                            error=result.error,
+                    mesh_message_id = active_row.mesh_message_id if active_row is not None else ""
+
+                try:
+                    if payload.action == "start":
+                        result = await service.start(messages, run_id=run_id, event_sink=sink)
+                    elif payload.action == "cancel":
+                        result = await service.cancel(run_id=run_id, reason=payload.cancel_reason)
+                    else:
+                        result = await service.resume(
+                            run_id=run_id,
+                            action=payload.action,
+                            call_id=payload.call_id,
+                            answer=payload.answer,
+                            confirmation=payload.confirmation,
+                            event_sink=sink,
                         )
-                return result
-            except Exception as exc:
-                if mesh_message_id:
-                    try:
-                        agent_mesh_service.finish_message_run(
-                            db,
-                            user,
-                            mesh_message_id,
-                            surface=payload.surface,
-                            session_key=payload.session_id,
-                            success=False,
-                            error=str(exc),
+                    if mesh_message_id:
+                        response_row = (
+                            run_db.query(AgentResponseRun)
+                            .filter(
+                                AgentResponseRun.run_id == run_id,
+                                AgentResponseRun.user_id == run_user.id,
+                            )
+                            .first()
                         )
-                    except agent_mesh_service.AgentMeshError:
-                        db.rollback()
-                raise
+                        if response_row is not None and response_row.mesh_message_id != mesh_message_id:
+                            response_row.mesh_message_id = mesh_message_id
+                            run_db.commit()
+                        if not is_paused(result):
+                            agent_mesh_service.finish_message_run(
+                                run_db,
+                                run_user,
+                                mesh_message_id,
+                                surface=payload.surface,
+                                session_key=payload.session_id,
+                                success=result.status == "completed",
+                                summary=result.output_text,
+                                error=result.error,
+                            )
+                    return result
+                except Exception as exc:
+                    if mesh_message_id:
+                        try:
+                            agent_mesh_service.finish_message_run(
+                                run_db,
+                                run_user,
+                                mesh_message_id,
+                                surface=payload.surface,
+                                session_key=payload.session_id,
+                                success=False,
+                                error=str(exc),
+                            )
+                        except agent_mesh_service.AgentMeshError:
+                            run_db.rollback()
+                    raise
+            finally:
+                if owns_run_db:
+                    run_db.close()
 
         def encode(event: Mapping[str, Any]) -> str:
             nonlocal sequence
@@ -907,6 +953,8 @@ async def stream_agent_response(
             }
         )
         task = asyncio.create_task(execute())
+        _BACKGROUND_RESPONSE_TASKS.add(task)
+        task.add_done_callback(_release_background_response_task)
         event_task: asyncio.Task[Mapping[str, Any]] | None = None
         try:
             while not task.done() or not queue.empty():
@@ -951,9 +999,8 @@ async def stream_agent_response(
             if event_task is not None:
                 event_task.cancel()
                 await asyncio.gather(event_task, return_exceptions=True)
-            # 浏览器关闭、代理断流不能中止已经开始的工具链。保持请求级数据库
-            # 会话存活，直到运行时把完成/暂停/失败检查点可靠落库。
-            await asyncio.gather(asyncio.shield(task), return_exceptions=True)
+            # 浏览器关闭、代理断流只结束订阅。独立数据库会话和进程级任务引用
+            # 会继续驱动工具链；进程重启时再由持久检查点接管。
             return
         except Exception as exc:  # noqa: BLE001 - 流已开始，只能返回协议错误事件
             error = {
@@ -976,6 +1023,11 @@ async def stream_agent_response(
                     },
                 }
             )
+        finally:
+            discard_events = True
+            if event_task is not None:
+                event_task.cancel()
+                await asyncio.gather(event_task, return_exceptions=True)
 
     return StreamingResponse(
         event_source(),

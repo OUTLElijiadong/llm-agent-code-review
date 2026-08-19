@@ -71,7 +71,7 @@ from app.utils.public_http import pin_public_http_url
 
 LANGUAGES = ("python", "node", "java", "go", "php")
 MODES = ("whitebox", "blackbox", "combined", "deploy")
-ACTIVE_STATES = ("queued", "dispatching", "running", "finalizing", "ready", "stopping")
+ACTIVE_STATES = ("queued", "recovering", "dispatching", "running", "finalizing", "ready", "stopping")
 TERMINAL_STATES = ("succeeded", "failed", "blocked", "stopped", "expired")
 PREVIEW_COOKIE_NAME = "prism_sandbox_preview"
 PREVIEW_SESSION_SECONDS = 300
@@ -356,7 +356,10 @@ def _persist_artifacts(
     db: Session,
     environment: SandboxEnvironment,
     conclusion: dict[str, Any],
+    execution_token: str | None = None,
 ) -> list[SandboxArtifact]:
+    if execution_token is not None and not _execution_lease_valid(db, environment.id, execution_token):
+        raise RuntimeError("沙箱执行租约已失效")
     db.query(SandboxArtifact).filter(SandboxArtifact.environment_id == environment.id).delete(
         synchronize_session=False,
     )
@@ -378,6 +381,19 @@ def _persist_artifacts(
         rows.append(row)
     db.flush()
     return rows
+
+
+def _execution_lease_valid(db: Session, environment_id: int, execution_token: str) -> bool:
+    """验证执行器仍持有当前环境租约，阻断旧线程覆盖恢复结果。"""
+    return (
+        db.query(SandboxEnvironment.id)
+        .filter(
+            SandboxEnvironment.id == environment_id,
+            SandboxEnvironment.execution_token == execution_token,
+        )
+        .first()
+        is not None
+    )
 
 
 def _persist_browser_artifact(
@@ -973,6 +989,19 @@ def _inject_agent_test_files(source_archive_base64: str, files: list[dict[str, s
                 continue
             zf.writestr(f"_agent_tests/{path}", content)
     return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _agent_test_paths(source_archive_base64: str) -> set[str]:
+    """从已持久化的执行归档恢复 Agent 测试文件清单。"""
+    try:
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(source_archive_base64))) as archive:
+            return {
+                name.removeprefix("_agent_tests/")
+                for name in archive.namelist()
+                if name.startswith("_agent_tests/") and not name.endswith("/")
+            }
+    except (ValueError, zipfile.BadZipFile):
+        return set()
 
 
 def _generated_test_contract_issues(files: list[dict[str, str]], language: str) -> list[str]:
@@ -3261,6 +3290,7 @@ def _create_environment_locked(
     ttl_hours = max(1, min(requested_ttl, settings.sandbox_max_ttl_hours))
     public_id = f"sbx_{uuid.uuid4().hex[:24]}"
     agent_code = "sandbox_deployer" if purpose == "deploy" else "test_verifier"
+    execution_token = uuid.uuid4().hex
     environment = SandboxEnvironment(
         public_id=public_id,
         project_id=project_id,
@@ -3274,6 +3304,8 @@ def _create_environment_locked(
         runtime=worker.runtime if worker else "remote_http",
         image_ref=_IMAGE_REFS[language] if worker else "remote-http-probe:v1",
         source_sha256=source_sha256,
+        source_archive_blob=archive,
+        execution_token=execution_token,
         resource_policy_json=_json(
             _profile_policy(language)
             if worker
@@ -3367,12 +3399,71 @@ def _create_environment_locked(
     _emit(environment, AgentEventType.DISPATCH, f"{agent_code} 已调用 {worker_label}", {"stage": "worker"})
     thread = threading.Thread(
         target=_execute_environment,
-        args=(environment.id, base64.b64encode(archive).decode("ascii")),
+        args=(environment.id, None, execution_token),
         name=f"sandbox-{public_id}",
         daemon=True,
     )
     thread.start()
     return environment
+
+
+def resume_interrupted_environments() -> int:
+    """在启动阶段 CAS 领取并重启上个进程遗留的沙箱测试。"""
+    db = SessionLocal()
+    dispatched: list[tuple[int, str, str]] = []
+    try:
+        rows = (
+            db.query(SandboxEnvironment.id, SandboxEnvironment.status, SandboxEnvironment.execution_token)
+            .filter(SandboxEnvironment.status.in_(("queued", "dispatching", "running", "finalizing")))
+            .order_by(SandboxEnvironment.id.asc())
+            .all()
+        )
+        for environment_id, previous_status, previous_token in rows:
+            next_token = uuid.uuid4().hex
+            claimed = (
+                db.query(SandboxEnvironment)
+                .filter(
+                    SandboxEnvironment.id == environment_id,
+                    SandboxEnvironment.status == previous_status,
+                    SandboxEnvironment.execution_token == str(previous_token or ""),
+                )
+                .update(
+                    {"status": "recovering", "execution_token": next_token},
+                    synchronize_session=False,
+                )
+            )
+            if claimed != 1:
+                db.rollback()
+                continue
+            environment = db.get(SandboxEnvironment, environment_id)
+            if environment is None or environment.source_archive_blob is None:
+                if environment is not None:
+                    environment.status = "failed"
+                    environment.error = "旧沙箱缺少持久化源码快照，无法在重启后安全恢复"
+                    environment.stopped_at = _utcnow()
+                db.commit()
+                continue
+            raw = bytes(environment.source_archive_blob)
+            if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), environment.source_sha256):
+                environment.status = "failed"
+                environment.error = "沙箱持久化源码快照完整性校验失败"
+                environment.stopped_at = _utcnow()
+                db.commit()
+                continue
+            _append_event(db, environment, "progress", "recovery", "服务重启后已从不可变源码快照恢复执行")
+            db.commit()
+            dispatched.append((int(environment_id), next_token, environment.public_id))
+    finally:
+        db.close()
+
+    for environment_id, execution_token, public_id in dispatched:
+        threading.Thread(
+            target=_execute_environment,
+            args=(environment_id, None, execution_token),
+            name=f"sandbox-recovery-{public_id}",
+            daemon=True,
+        ).start()
+    return len(dispatched)
 
 
 def _select_repair_targets(lint_errors: list[dict[str, Any]], max_files: int) -> list[dict[str, Any]]:
@@ -3589,12 +3680,25 @@ def heartbeat_and_recover_sandboxes(db: Session) -> dict[str, int]:
     return {"heartbeat": heartbeat_count, "recovered": recovered_count}
 
 
-def _execute_environment(environment_id: int, source_archive_base64: str) -> None:
+def _execute_environment(
+    environment_id: int,
+    source_archive_base64: str | None = None,
+    execution_token: str | None = None,
+) -> None:
     db = SessionLocal()
     try:
         environment = db.get(SandboxEnvironment, environment_id)
-        if not environment or environment.status != "queued":
+        if not environment or environment.status not in {"queued", "recovering"}:
             return
+        if execution_token is not None and str(environment.execution_token or "") != execution_token:
+            return
+        if source_archive_base64 is None:
+            if environment.source_archive_blob is None:
+                raise RuntimeError("沙箱缺少持久化源码快照")
+            source_bytes = bytes(environment.source_archive_blob)
+            if not hmac.compare_digest(hashlib.sha256(source_bytes).hexdigest(), environment.source_sha256):
+                raise RuntimeError("沙箱持久化源码快照完整性校验失败")
+            source_archive_base64 = base64.b64encode(source_bytes).decode("ascii")
         worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
         config = _loads(environment.agent_config_json, {})
         if not worker and not config.get("remote_only"):
@@ -3631,8 +3735,21 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 return
         effective_source = source_archive_base64
         effective_sha = environment.source_sha256
+        repair_round = 0
         expected_agent_tests: set[str] = set()
-        if worker and environment.purpose == "test":
+        if getattr(environment, "execution_archive_blob", None) is not None:
+            execution_bytes = bytes(environment.execution_archive_blob)
+            execution_sha = hashlib.sha256(execution_bytes).hexdigest()
+            if not getattr(environment, "execution_source_sha256", None) or not hmac.compare_digest(
+                execution_sha,
+                environment.execution_source_sha256,
+            ):
+                raise RuntimeError("沙箱 Worker 执行快照完整性校验失败")
+            effective_source = base64.b64encode(execution_bytes).decode("ascii")
+            effective_sha = execution_sha
+            repair_round = int(getattr(environment, "execution_round", 0) or 0)
+            expected_agent_tests = _agent_test_paths(effective_source)
+        elif worker and environment.purpose == "test":
             # 1) 完整部署核验:LLM 判断入口/依赖,生成补全启动脚本 _prism_launch.sh
             deploy_patch = _generate_deployment_patch(
                 db,
@@ -3659,10 +3776,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 effective_source = _inject_agent_test_files(effective_source, agent_test_files)
             if effective_source != source_archive_base64:
                 effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
-                environment.source_sha256 = effective_sha
-                db.commit()
         if worker:
-            repair_round = 0
             max_repair_rounds = int(getattr(settings, "sandbox_max_repair_rounds", 2) or 2)
             while True:
                 # 尽量在提交前观察本地停止状态；最终竞态仍由 Worker
@@ -3697,6 +3811,10 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                 sandbox_db_type = str(
                     (_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none"
                 )
+                execution_bytes = base64.b64decode(effective_source)
+                environment.execution_archive_blob = execution_bytes
+                environment.execution_source_sha256 = effective_sha
+                environment.execution_round = repair_round
                 _register_worker_request(environment, worker_request_id)
                 db.commit()
                 db.refresh(environment)
@@ -3786,7 +3904,6 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
                         if repaired:
                             effective_source = repaired["source"]
                             effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
-                            environment.source_sha256 = effective_sha
                             repair_round += 1
                             db.commit()
                             continue
@@ -3975,7 +4092,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             conclusion["auto_smoke_test"] = auto_smoke
             evidence["auto_smoke_test"] = auto_smoke
         environment.result_json = _json(conclusion)
-        artifacts = _persist_artifacts(db, environment, conclusion)
+        artifacts = _persist_artifacts(db, environment, conclusion, execution_token)
         # 先发布确定性结果并释放 SandboxEnvironment 行锁；此时仍为
         # finalizing，调度器不会把尚未完成多 Agent 报告的结果误判为终态。
         db.commit()
@@ -3989,6 +4106,7 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
             environment,
             final_status=final_status,
             result_json=final_result_json,
+            execution_token=execution_token,
         ):
             # 报告生成期间已被另一会话停止或到期回收，保留真实终态。
             return
@@ -4016,6 +4134,8 @@ def _execute_environment(environment_id: int, source_archive_base64: str) -> Non
         db.rollback()
         environment = db.get(SandboxEnvironment, environment_id)
         if environment:
+            if execution_token is not None and not _execution_lease_valid(db, environment_id, execution_token):
+                return
             if environment.status in {"stopped", "expired"}:
                 return
             failure = str(exc)[:4000]
@@ -4083,6 +4203,7 @@ def _complete_finalizing_transition(
     *,
     final_status: str,
     result_json: str,
+    execution_token: str | None = None,
 ) -> bool:
     """Atomically publish the terminal/ready state without reviving a stopped sandbox."""
 
@@ -4099,6 +4220,7 @@ def _complete_finalizing_transition(
         .filter(
             SandboxEnvironment.id == environment.id,
             SandboxEnvironment.status == "finalizing",
+            *([SandboxEnvironment.execution_token == execution_token] if execution_token is not None else []),
         )
         .update(values, synchronize_session=False)
     )

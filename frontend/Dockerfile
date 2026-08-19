@@ -5,6 +5,10 @@ COPY package*.json ./
 # npm 默认 registry 在国内/跨境拉包慢甚至卡死,统一走 npmmirror(可被 --build-arg 覆盖)
 ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY}
+ARG VITE_APP_VERSION=3.6.0
+ARG VITE_APP_RELEASE_SHA=local
+ENV VITE_APP_VERSION=${VITE_APP_VERSION}
+ENV VITE_APP_RELEASE_SHA=${VITE_APP_RELEASE_SHA}
 RUN npm ci --registry=${NPM_CONFIG_REGISTRY}
 COPY . .
 # 生产构建跳过 vue-tsc:服务器内存有限(1.9G),vue-tsc+vite 并联易 OOM。

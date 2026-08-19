@@ -52,15 +52,14 @@ def _ensure_schema() -> None:
         logger.warning(f"[schema] token_version 自动补列检查失败(忽略): {e}")
 
 
-def _reconcile_orphan_reviews() -> None:
-    """启动时回收孤儿审查任务。
+def _reconcile_orphan_reviews() -> list[tuple[int, int, str]]:
+    """启动时识别孤儿审查任务并返回恢复引用。
 
     审查在后台守护线程中执行,进程重启/崩溃会让线程随进程消失,但 DB 中任务仍停留在
     status='running',在前端表现为永远「运行中」。新进程刚启动尚未派生任何审查线程,
-    因此此刻所有 running 任务都是上一个进程遗留的孤儿,统一标记为 failed,闭合数据状态。
+    因此此刻所有 running 任务都是上一个进程遗留的孤儿。保持 running 并写入恢复提示，
+    待 Agent 注册完成后重新派发，避免页面关闭或服务更新造成任务永久中止。
     """
-    from datetime import datetime, timezone
-
     from loguru import logger
     from sqlalchemy import inspect
 
@@ -69,27 +68,31 @@ def _reconcile_orphan_reviews() -> None:
     try:
         insp = inspect(engine)
         if "review_task" not in insp.get_table_names():
-            return
+            return []
         db = SessionLocal()
         try:
             from app.models.review_task import ReviewTask
 
             orphans = db.query(ReviewTask).filter(ReviewTask.status == "running").all()
             if not orphans:
-                return
-            now = datetime.now(timezone.utc)
+                return []
+            task_refs = [
+                (int(t.id), int(t.user_id), str(t.execution_token or ""))
+                for t in orphans
+            ]
             for t in orphans:
-                t.status = "failed"
-                t.error_message = "进程重启导致审查中断(启动时自动回收)"
-                t.end_time = now
+                t.error_message = "进程重启导致审查中断，服务端正在自动恢复"
+                t.end_time = None
             db.commit()
             logger.warning(
-                f"[reconcile] 启动回收 {len(orphans)} 个孤儿审查任务(running→failed)"
+                f"[reconcile] 识别 {len(orphans)} 个孤儿审查任务，等待自动恢复"
             )
+            return task_refs
         finally:
             db.close()
     except Exception as e:  # 回收失败不应阻断启动
-        logger.warning(f"[reconcile] 孤儿审查任务回收失败(忽略): {e}")
+        logger.warning(f"[reconcile] 孤儿审查任务识别失败(忽略): {e}")
+        return []
 
 
 @asynccontextmanager
@@ -97,18 +100,17 @@ async def lifespan(app: FastAPI):
     """应用生命周期: 启动时初始化日志、补齐表结构、Agent注册中心与治理调度器"""
     setup_logger()
     _ensure_schema()
-    _reconcile_orphan_reviews()
+    orphan_reviews = _reconcile_orphan_reviews()
     from app.agents.event_bus import AgentEventBus
     from app.agents.orchestrator import get_orchestrator
+
+    # 部署重启善后:把执行中的运行转为带恢复标记的可重试状态；原生等待态保留。
+    from app.api.v1.agent_responses import sweep_stale_active_runs
+    from app.core.database import SessionLocal as _SessionLocal
     from app.services.agent_mesh_dispatcher import start_agent_mesh_dispatcher, stop_agent_mesh_dispatcher
     from app.services.agent_scheduler_runtime import start_agent_governance_scheduler, stop_agent_governance_scheduler
     from app.services.agent_team_dispatcher import start_agent_team_dispatcher, stop_agent_team_dispatcher
     from app.services.jarvis_patrol_service import start_jarvis_patrol, stop_jarvis_patrol
-
-    # 部署重启善后:把被杀死的进行中运行立刻翻成可重试的 failed 终态,
-    # 避免用户重开页面时看到永远「运行中」的假进度。
-    from app.api.v1.agent_responses import sweep_stale_active_runs
-    from app.core.database import SessionLocal as _SessionLocal
 
     _sweep_db = _SessionLocal()
     try:
@@ -126,6 +128,13 @@ async def lifespan(app: FastAPI):
     start_agent_team_dispatcher()
     start_agent_governance_scheduler()
     start_jarvis_patrol()
+    from app.services.background_task_recovery import start_agent_run_recovery
+    from app.services.review_service import resume_interrupted_tasks
+    from app.services.sandbox_service import resume_interrupted_environments
+
+    start_agent_run_recovery()
+    resume_interrupted_tasks(orphan_reviews)
+    resume_interrupted_environments()
     try:
         yield
     finally:
@@ -138,7 +147,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="棱镜 Prism · 智能代码审查平台",
-    version="1.0.0",
+    version=settings.app_version,
     docs_url="/docs" if settings.openapi_enabled else None,
     redoc_url="/redoc" if settings.openapi_enabled else None,
     openapi_url="/openapi.json" if settings.openapi_enabled else None,
@@ -188,7 +197,11 @@ def healthz() -> dict[str, str]:
     Returns:
         dict[str, str]: 存活状态和当前应用 release。
     """
-    return {"status": "ok", "release": settings.app_release}
+    return {
+        "status": "ok",
+        "version": settings.app_version,
+        "release": settings.app_release,
+    }
 
 
 @app.get("/readyz", include_in_schema=False)
@@ -201,12 +214,20 @@ def readyz() -> JSONResponse:
     if database_is_ready():
         return JSONResponse(
             status_code=200,
-            content={"status": "ready", "release": settings.app_release},
+            content={
+                "status": "ready",
+                "version": settings.app_version,
+                "release": settings.app_release,
+            },
             headers={"Cache-Control": "no-store"},
         )
     return JSONResponse(
         status_code=503,
-        content={"status": "not_ready", "release": settings.app_release},
+        content={
+            "status": "not_ready",
+            "version": settings.app_version,
+            "release": settings.app_release,
+        },
         headers={"Cache-Control": "no-store"},
     )
 
