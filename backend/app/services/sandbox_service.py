@@ -66,6 +66,7 @@ from app.services import (
 )
 from app.services.project_member_service import get_visible_project_ids, require_project_access
 from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
+from app.utils.archive_extractor import read_archive_members
 from app.utils.public_http import pin_public_http_url
 
 LANGUAGES = ("python", "node", "java", "go", "php")
@@ -2399,6 +2400,29 @@ def _profile_policy(language: str) -> dict[str, Any]:
     return policy
 
 
+def _normalize_source_archive_for_worker(source_archive: bytes, filename: str) -> tuple[bytes, str]:
+    """将 worker 的源码快照统一为 ZIP,兼容 GitHub 常见 tar.gz/tgz 输入。
+
+    worker/executor 的协议只接收无文件名的 base64,因此不能把归档后缀交给
+    worker 自己判断。先用统一安全读取器校验路径、链接和解压倍率,再重建为
+    普通 ZIP;原始归档的反编译计划和摘要仍由调用方单独保留。
+    """
+    lower = (filename or "").lower()
+    if lower.endswith((".zip", ".apk", ".aab")):
+        return source_archive, filename
+    members, _ = read_archive_members(
+        source_archive,
+        filename,
+        filter_sensitive=False,
+        strict_paths=True,
+    )
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for member in members:
+            archive.writestr(member.path, member.content)
+    return output.getvalue(), "source-normalized.zip"
+
+
 def _project_deployment_language(project_language: str | None) -> str | None:
     """将项目主语言映射到固定沙箱 profile。
 
@@ -3214,6 +3238,14 @@ def _create_environment_locked(
     except decompilation_service.DecompilationError as exc:
         # 归档格式/安全约束属于用户输入问题，不能冒泡成通用 500。
         raise ValidationError(str(exc), code=40001) from exc
+    original_source_sha256 = hashlib.sha256(archive).hexdigest()
+    if worker_mode in {"whitebox", "blackbox", "combined", "deploy"}:
+        try:
+            archive, worker_archive_filename = _normalize_source_archive_for_worker(archive, archive_filename)
+        except ValidationError as exc:
+            raise ValidationError(str(exc), code=40001) from exc
+    else:
+        worker_archive_filename = archive_filename
     source_sha256 = hashlib.sha256(archive).hexdigest()
     worker = (
         None
@@ -3261,6 +3293,8 @@ def _create_environment_locked(
                 "language_source": "project" if project_language else "request",
                 "db_type": db_type,
                 "source_revision_id": int(source_revision_id) if source_revision_id else None,
+                "source_archive_filename": worker_archive_filename,
+                "original_source_sha256": original_source_sha256,
                 "decompilation": decompilation_plan,
                 "agent_team": (
                     {

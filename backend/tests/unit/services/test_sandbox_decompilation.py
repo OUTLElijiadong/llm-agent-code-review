@@ -1,6 +1,10 @@
 """反编译证据进入沙箱结论和报告的回归测试。"""
 from __future__ import annotations
 
+import io
+import tarfile
+import zipfile
+
 from app.services import sandbox_service
 
 
@@ -63,6 +67,23 @@ def test_fact_gate_report_includes_decompilation_evidence() -> None:
 def test_decompilation_marker_rejects_invalid_numeric_fields() -> None:
     log = 'PRISM_DECOMPILATION_JSON {"status":"succeeded","candidate_count":"bad"}'
     assert sandbox_service._extract_decompilation_result(log) is None
+
+
+def test_worker_archive_normalizes_github_tar_gz_to_zip() -> None:
+    source = io.BytesIO()
+    with tarfile.open(fileobj=source, mode="w:gz") as archive:
+        info = tarfile.TarInfo("bWAPP/index.php")
+        content = b"<?php echo 'ok';"
+        info.size = len(content)
+        archive.addfile(info, io.BytesIO(content))
+
+    normalized, filename = sandbox_service._normalize_source_archive_for_worker(
+        source.getvalue(), "bWAPP-master.tar.gz"
+    )
+    assert filename == "source-normalized.zip"
+    with zipfile.ZipFile(io.BytesIO(normalized)) as archive:
+        assert archive.read("bWAPP/index.php") == content
+    assert normalized
 
 
 def test_succeeded_marker_requires_one_raw_hash_per_candidate() -> None:
