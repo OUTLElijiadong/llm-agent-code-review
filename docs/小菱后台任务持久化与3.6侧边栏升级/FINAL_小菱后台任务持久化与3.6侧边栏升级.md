@@ -11,9 +11,11 @@
 
 ## 验证结论
 
-代码静态检查、Python 编译、前端 lint/类型检查/生产构建、部署 Shell 契约、后端相关 146 项回归及侧边栏 2 项组件回归均通过。
+代码静态检查、Python 编译、前端 lint/类型检查/生产构建、部署 Shell 契约、后端相关 147 项回归及侧边栏 2 项组件回归均通过。
 
-最终代码已通过全量双镜像流程发布到 `https://www.lijiadong.cn`：release 为 `7627cfc1124ab71adb6984529cd8b9c01c91c30e`，数据库已升级到 Alembic `040`，`/healthz` 和 `/readyz` 均返回 `version=3.6.0` 与相同 release，首页 HTTP 200。真实浏览器已确认 `v3.6 · PRISM`、五组悬浮岛导航、侧边栏收起/展开，以及小菱历史团队卡片在关闭悬浮窗后重新打开仍可恢复。
+最终代码已通过全量双镜像流程发布到 `https://www.lijiadong.cn`：release 为 `3cd8882034415b0b8a64d3d1f4702524500dab48`，数据库已升级到 Alembic `040`，`/healthz` 和 `/readyz` 均返回 `version=3.6.0` 与相同 release，首页 HTTP 200。真实浏览器已确认 `v3.6 · PRISM`、五组悬浮岛导航、侧边栏收起/展开，以及小菱历史团队卡片在关闭悬浮窗后重新打开仍可恢复。
+
+发布期间还复现并修复了 MySQL 通用查询日志无界增长：25 GB 的 `mysql.general_log` 已先完整备份，再修复和截断；生产 Compose 已固定 `--general-log=0`，避免查询日志继续进入全库备份并触发资源耗尽。
 
 ## 生产边界
 
