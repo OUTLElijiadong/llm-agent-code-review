@@ -43,7 +43,7 @@
     },
     "php": {
       "image": "prism-sandbox-php:8.3",
-      "digest": "sha256:24eb4a3b301c86b9ef4b8bb80672f456c5c158e50caddde128a89c8694e89918",
+      "digest": "sha256:70e524b4b8722efb53f3033602372dee0ae4727a37c9f69eae4002abae860c1e",
       "memory_mb": 512,
       "cpus": 1.0,
       "pids": 128,
