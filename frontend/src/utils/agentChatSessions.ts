@@ -58,6 +58,7 @@ export interface AgentChatSnapshot {
 
 const INDEX_PREFIX = 'prism-agent-sessions:'
 const SNAPSHOT_PREFIX = 'prism-agent-session-snapshot:'
+const ACTIVE_PREFIX = 'prism-agent-active-session:'
 
 function readIndex(storageKey: string): AgentChatSessionMeta[] {
   try {
@@ -110,6 +111,25 @@ export function loadAgentChatSessions(
 /** 将服务端发现结果持久化为当前 surface 的本地索引。 */
 export function saveAgentChatSessions(storageKey: string, metas: AgentChatSessionMeta[]): void {
   writeIndex(storageKey, metas)
+}
+
+/** 保存用户最后查看的会话,供悬浮窗卸载后重开恢复上下文。 */
+export function saveActiveAgentChatSession(storageKey: string, sessionId: string): void {
+  if (!sessionId) return
+  try {
+    window.localStorage.setItem(ACTIVE_PREFIX + storageKey, sessionId)
+  } catch {
+    // 存储异常时仍允许当前窗口内正常切换会话。
+  }
+}
+
+/** 读取用户最后查看的会话;不存在或存储异常时返回空值。 */
+export function loadActiveAgentChatSession(storageKey: string): string {
+  try {
+    return window.localStorage.getItem(ACTIVE_PREFIX + storageKey) ?? ''
+  } catch {
+    return ''
+  }
 }
 
 /**
@@ -233,6 +253,9 @@ export function removeAgentChatSession(storageKey: string, sessionId: string): v
   writeIndex(storageKey, readIndex(storageKey).filter((item) => item.id !== sessionId))
   try {
     window.localStorage.removeItem(SNAPSHOT_PREFIX + sessionId)
+    if (window.localStorage.getItem(ACTIVE_PREFIX + storageKey) === sessionId) {
+      window.localStorage.removeItem(ACTIVE_PREFIX + storageKey)
+    }
   } catch {
     // 忽略存储异常
   }

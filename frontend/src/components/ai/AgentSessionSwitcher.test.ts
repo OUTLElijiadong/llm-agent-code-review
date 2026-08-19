@@ -5,7 +5,7 @@ const meshApi = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock('@/api/agentMesh', () => ({ listAgentMeshAgents: meshApi.list }))
 
 import AgentSessionSwitcher from './AgentSessionSwitcher.vue'
-import { loadAgentChatSessions, saveAgentChatSnapshot } from '@/utils/agentChatSessions'
+import { loadAgentChatSessions, saveActiveAgentChatSession, saveAgentChatSnapshot } from '@/utils/agentChatSessions'
 
 const WELCOME = '你好,我是小菱!'
 
@@ -48,6 +48,17 @@ function lastSelect(wrapper: VueWrapper): string | undefined {
 }
 
 describe('AgentSessionSwitcher.ensureFreshOnOpen', () => {
+  it('重新挂载时恢复最后查看的历史会话', async () => {
+    seedIndex([
+      { id: 'user-default', title: '默认对话', createdAt: 2 },
+      { id: 'user-history', title: '历史团队审计', createdAt: 1 },
+    ])
+    seedSnapshot('user-history', [{ role: 'assistant', content: '历史结论' }], 'completed')
+    saveActiveAgentChatSession('user', 'user-history')
+    const wrapper = await mountSwitcher()
+    expect(lastSelect(wrapper)).toBe('user-history')
+  })
+
   it('历史存在未完成会话且当前是空对话时,跳转到未完成会话', async () => {
     // sessions 顺序:s2(空对话,active) -> s1(未完成 waiting_input)
     seedIndex([

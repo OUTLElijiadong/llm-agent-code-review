@@ -56,6 +56,7 @@ import { buildAutoValidationPrompt } from '@/utils/autoValidation'
 import {
   autoTitleAgentChatSession,
   loadAgentChatSnapshot,
+  saveActiveAgentChatSession,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
   type AgentChatSnapshotMessage,
@@ -1864,6 +1865,7 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
 
 function close(): void {
   // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
+  saveActiveAgentChatSession('user', sessionId.value)
   persistSnapshot()
   activityStore.clear()
   emit('update:visible', false)

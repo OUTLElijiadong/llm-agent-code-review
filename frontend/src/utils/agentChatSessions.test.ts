@@ -5,9 +5,11 @@ import {
   findPristineAgentChatSession,
   isPlaceholderAgentChatTitle,
   isPristineAgentChatSession,
+  loadActiveAgentChatSession,
   loadAgentChatSnapshot,
   loadAgentChatSessions,
   mergeAgentChatSessions,
+  saveActiveAgentChatSession,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
 } from './agentChatSessions'
@@ -120,6 +122,14 @@ describe('createAgentChatSession 保持既有会话', () => {
     expect(created.id.startsWith('user-')).toBe(true)
     expect(all[0].id).toBe(created.id)
     expect(all.some((item) => item.id === 'user-old')).toBe(true)
+  })
+})
+
+describe('当前会话持久化', () => {
+  it('保存并恢复最后查看的会话', () => {
+    expect(loadActiveAgentChatSession('user')).toBe('')
+    saveActiveAgentChatSession('user', 'user-history')
+    expect(loadActiveAgentChatSession('user')).toBe('user-history')
   })
 })
 

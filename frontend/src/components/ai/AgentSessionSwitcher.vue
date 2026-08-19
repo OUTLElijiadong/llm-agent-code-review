@@ -5,11 +5,13 @@ import {
   createAgentChatSession,
   findPristineAgentChatSession,
   isPristineAgentChatSession,
+  loadActiveAgentChatSession,
   loadAgentChatSessions,
   loadAgentChatSnapshot,
   mergeAgentChatSessions,
   removeAgentChatSession,
   renameAgentChatSession,
+  saveActiveAgentChatSession,
   saveAgentChatSessions,
   setAgentChatSessionPinned,
   type AgentChatSessionMeta,
@@ -85,6 +87,7 @@ function select(sessionId: string): void {
     return
   }
   activeId.value = sessionId
+  saveActiveAgentChatSession(props.storageKey, sessionId)
   menuFor.value = ''
   emit('select', sessionId)
 }
@@ -175,6 +178,9 @@ async function ensureFreshOnOpen(): Promise<void> {
     if (busySession.id !== activeId.value) select(busySession.id)
     return
   }
+  // 关闭悬浮窗后重新挂载时,用户最后明确查看的会话优先于“找一个空会话”。
+  // 否则历史团队卡片虽已写入快照,重开会话却会被切回默认对话,看起来像卡片丢失。
+  if (current && loadActiveAgentChatSession(props.storageKey) === current.id) return
   // 2) 当前就是空的新对话(无输入输出) → 保留它,不重复创建空白条目。
   //    pristine 判断只看本地快照,对「无本地快照但服务端 running」的会话会误判为空,
   //    因此叠加 inferBusy(含服务端权威状态)兜底,忙碌会话绝不当作空会话被跳过/顶掉。
@@ -222,6 +228,10 @@ onMounted(() => {
     pendingHeartbeatId = meta.id
   }
   activeId.value = sessions.value[0].id
+  const persistedActiveId = loadActiveAgentChatSession(props.storageKey)
+  if (persistedActiveId && sessions.value.some((item) => item.id === persistedActiveId)) {
+    activeId.value = persistedActiveId
+  }
   notify()
   emit('select', activeId.value)
   // 首次挂载也要执行一次“打开即新对话”策略，避免父组件 visible watcher 在
