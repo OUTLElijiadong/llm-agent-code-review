@@ -28,7 +28,8 @@ services:
       # 叠加连接/临时表护栏，常驻可稳在 ~350MB 以下，为 343MB 大表备份留余量。
       - --performance-schema=OFF
       # 开启 SQL 审计日志到表，供安全监控只读采样数据库内部威胁（破坏性写/外泄）。
-      - --general-log=1
+      # 通用查询日志会无界增长并进入全库备份；业务审计使用应用审计表。
+      - --general-log=0
       - --log-output=TABLE
       - --innodb-buffer-pool-size=192M
       - --max-connections=60

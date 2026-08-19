@@ -407,6 +407,21 @@ def _require_execution_lease(db: Session, environment_id: int, execution_token: 
         raise RuntimeError("沙箱执行租约已失效")
 
 
+def _commit_execution(db: Session, environment_id: int, execution_token: str | None) -> None:
+    """Validate the lease under a row lock and commit the current transaction."""
+    if execution_token is not None:
+        row = (
+            db.query(SandboxEnvironment.execution_token)
+            .filter(SandboxEnvironment.id == environment_id)
+            .with_for_update()
+            .first()
+        )
+        if row is None or str(row[0] or "") != execution_token:
+            db.rollback()
+            raise RuntimeError("沙箱执行租约已失效")
+    db.commit()
+
+
 def _persist_worker_execution_snapshot(
     db: Session,
     environment: SandboxEnvironment,
@@ -3792,8 +3807,7 @@ def _execute_environment(
             raise RuntimeError("Sandbox worker 已被删除")
         environment.status = "dispatching"
         _append_event(db, environment, "progress", "executor", "独立执行器已接收固定测试配置")
-        db.commit()
-        _require_execution_lease(db, environment_id, execution_token)
+        _commit_execution(db, environment_id, execution_token)
         _emit(environment, AgentEventType.PROGRESS, "独立执行器已接收任务", {"stage": "executor"})
         worker_mode = config.get("worker_mode", environment.test_mode)
         # 隔离源码项目建档语言可能与真实源码不符(上传时手动选择)。白盒/黑盒测试
@@ -3811,7 +3825,7 @@ def _execute_environment(
                     {"declared_language": environment.language, "resolved_language": source_language},
                 )
                 environment.language = source_language
-                db.commit()
+                _commit_execution(db, environment_id, execution_token)
         # deploy 前自动白盒:测试容器跑完即回收、不占槽,避免常驻 deploy 把单槽 worker 占成 429。
         pre_whitebox: dict[str, Any] | None = None
         if worker and environment.purpose == "deploy" and environment.agent_code == "sandbox_deployer":
@@ -3897,8 +3911,7 @@ def _execute_environment(
 
                 if environment.started_at is None:
                     environment.started_at = _utcnow()
-                    db.commit()
-                    _require_execution_lease(db, environment_id, execution_token)
+                    _commit_execution(db, environment_id, execution_token)
                 sandbox_db_type = str(
                     (_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none"
                 )
@@ -3932,7 +3945,7 @@ def _execute_environment(
                     execution_token=execution_token,
                 ):
                     return
-                db.commit()
+                _commit_execution(db, environment_id, execution_token)
                 environment = db.get(SandboxEnvironment, environment_id)
                 if environment is None:
                     return
@@ -3945,7 +3958,7 @@ def _execute_environment(
                     except Exception as exc:  # noqa: BLE001 - keep cleanup visible and retryable
                         environment.status = "stopping"
                         environment.error = f"停止 worker 失败：{str(exc)[:1000]}"
-                    db.commit()
+                    _commit_execution(db, environment_id, execution_token)
                     return
                 execute_payload = {
                     **saved_request,
@@ -3967,7 +3980,7 @@ def _execute_environment(
                 configured_policy = _loads(environment.resource_policy_json, {})
                 deadline = time.monotonic() + int(configured_policy.get("timeout_seconds") or 600) + 180
                 persist_worker_events(result)
-                db.commit()
+                _commit_execution(db, environment_id, execution_token)
                 while str(result.get("status") or "") not in {
                     "succeeded",
                     "failed",
@@ -3995,7 +4008,7 @@ def _execute_environment(
                         else status_response
                     )
                     persist_worker_events(result)
-                    db.commit()
+                    _commit_execution(db, environment_id, execution_token)
                 environment = db.get(SandboxEnvironment, environment_id)
                 _require_execution_lease(db, environment_id, execution_token)
                 if environment.status in {"stopping", "stopped", "expired"}:
@@ -4006,7 +4019,7 @@ def _execute_environment(
                             environment.stopped_at = _utcnow()
                         except Exception as exc:  # noqa: BLE001 - keep cleanup visible and retryable
                             environment.error = f"停止 worker 失败：{str(exc)[:1000]}"
-                        db.commit()
+                        _commit_execution(db, environment_id, execution_token)
                     return
                 # ── 后端语法修复:白盒 php -l 报错时,LLM 修复文件后重跑(最多 max_repair_rounds 轮) ──
                 if environment.purpose == "test" and environment.language == "php" and repair_round < max_repair_rounds:
@@ -4020,8 +4033,34 @@ def _execute_environment(
                             effective_source = repaired["source"]
                             effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
                             repair_round += 1
-                            environment.worker_request_json = None
-                            db.commit()
+                            next_request_id = f"{environment.public_id}-r{repair_round}"
+                            next_config_json = _worker_request_config_json(environment, next_request_id)
+                            next_request = {
+                                "request_id": next_request_id,
+                                "purpose": environment.purpose,
+                                "language": environment.language,
+                                "test_mode": (
+                                    worker_mode
+                                    if worker_mode in {"whitebox", "blackbox", "combined"}
+                                    else "whitebox"
+                                ),
+                                "db_type": sandbox_db_type,
+                                "source_sha256": effective_sha,
+                                "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
+                                "image_digest": environment.image_digest or "",
+                            }
+                            if not _persist_worker_execution_snapshot(
+                                db,
+                                environment,
+                                execution_bytes=base64.b64decode(effective_source),
+                                source_sha256=effective_sha,
+                                repair_round=repair_round,
+                                request_envelope=next_request,
+                                request_config_json=next_config_json,
+                                execution_token=execution_token,
+                            ):
+                                return
+                            _commit_execution(db, environment_id, execution_token)
                             continue
                 break
         else:
@@ -4045,7 +4084,7 @@ def _execute_environment(
             execution_token=execution_token,
         ):
             return
-        db.commit()
+        _commit_execution(db, environment_id, execution_token)
         environment = db.get(SandboxEnvironment, environment_id)
         if environment is None:
             return
@@ -4076,8 +4115,7 @@ def _execute_environment(
                 "部署后自动 Agent 冒烟测试完成",
                 {"stage": "auto_smoke", "passed": bool(auto_smoke.get("passed"))},
             )
-            db.commit()
-            _require_execution_lease(db, environment_id, execution_token)
+            _commit_execution(db, environment_id, execution_token)
         if environment.purpose == "deploy":
             if pre_whitebox:
                 auto_test_chain.append(pre_whitebox)
@@ -4117,7 +4155,7 @@ def _execute_environment(
                 "反编译输入类型不受支持，已失败关闭",
                 evidence["decompilation"],
             )
-            db.commit()
+            _commit_execution(db, environment_id, execution_token)
         if expected_decompilation_status == "planned" and not (
             worker_logs and str(worker_logs.get("text") or "").strip()
         ):
@@ -4152,7 +4190,7 @@ def _execute_environment(
                     "Android 制品反编译完成" if decompilation_result.get("status") == "succeeded" else "Android 制品反编译失败",
                     decompilation_result,
                 )
-                db.commit()
+                _commit_execution(db, environment_id, execution_token)
             elif expected_decompilation_status != "unsupported" and decompilation_result is not None:
                 evidence["decompilation"] = decompilation_result
         agent_tests_result = _reconcile_agent_tests_result(expected_agent_tests, agent_tests_result)
@@ -4170,10 +4208,10 @@ def _execute_environment(
                 )
                 event_type = "complete" if agent_ok else "failed"
             _append_event(db, environment, event_type, "agent_tests", message, agent_tests_result)
-            db.commit()
+            _commit_execution(db, environment_id, execution_token)
         if environment.remote_target_url:
             _append_event(db, environment, "progress", "remote_blackbox", "已在授权边界内调用远程 HTTP(S) 黑盒探测")
-            db.commit()
+            _commit_execution(db, environment_id, execution_token)
             evidence["remote_blackbox"] = _probe_remote_target(environment.remote_target_url)
             if int(evidence["remote_blackbox"]["status_code"]) >= 500:
                 target_status = "failed"
@@ -4216,8 +4254,7 @@ def _execute_environment(
         artifacts = _persist_artifacts(db, environment, conclusion, execution_token)
         # 先发布确定性结果并释放 SandboxEnvironment 行锁；此时仍为
         # finalizing，调度器不会把尚未完成多 Agent 报告的结果误判为终态。
-        _require_execution_lease(db, environment_id, execution_token)
-        db.commit()
+        _commit_execution(db, environment_id, execution_token)
         # 黑白盒链路结束后,由多Agent审查编排产出中文报告(失败只记录,不阻断)
         review_report = _run_test_review_report(db, environment, conclusion)
         _require_execution_lease(db, environment_id, execution_token)
@@ -4241,10 +4278,10 @@ def _execute_environment(
             conclusion["summary"],
             {"passed": passed, "artifact_count": len(artifacts), "multi_agent_review": bool(review_report)},
         )
-        db.commit()
+        _commit_execution(db, environment_id, execution_token)
         try:
             strategy_learning_service.observe_sandbox_outcome(db, environment, conclusion)
-            db.commit()
+            _commit_execution(db, environment_id, execution_token)
         except Exception:  # noqa: BLE001 - 策略固化失败不得篡改已持久化的沙箱结论
             db.rollback()
         _emit(
@@ -4270,7 +4307,7 @@ def _execute_environment(
                 environment.status = "stopping"
                 environment.error = failure
                 _append_event(db, environment, "progress", "cleanup", "执行异常，正在回收已提交的 Worker 请求")
-                db.commit()
+                _commit_execution(db, environment_id, execution_token)
                 try:
                     _stop_registered_worker_requests(worker, environment)
                     cleanup_confirmed = True

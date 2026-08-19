@@ -1151,6 +1151,8 @@ assert_contains lib/common.sh '"https://$domain/readyz"'
 assert_contains lib/common.sh '{\"status\":\"ready\",\"release\":\"$expected_release\"}'
 assert_contains lib/common.sh '-e MALWARE_SCAN_FAIL_CLOSED=true'
 assert_contains deploy.sh 'release_image_exists prism-frontend "$current_frontend"'
+assert_contains docker-compose.yml '--general-log=0'
+assert_not_contains docker-compose.yml '--general-log=1'
 
 DEPLOY_ENV_FILE=.env.example \
   docker compose --env-file .env.example config --quiet
