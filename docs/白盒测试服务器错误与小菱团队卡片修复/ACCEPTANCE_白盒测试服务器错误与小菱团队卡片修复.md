@@ -11,8 +11,8 @@
 
 ## 公网
 
-- 部署 SHA：`4b0237050a43269a53c608068b2b0a1bca661afb`；后端、前端镜像均使用该 SHA。
-- 发布时间：`2026-08-19T02:12:40Z`；数据库备份：`../backups/code_review_20260819T020912Z_4b0237050a43.sql.gz`；隔离恢复校验 84 张表，Alembic `036`。
+- 部署 SHA：`fbf651d276317fe31cf487c2c511bf4c64ad3108`；服务器 HEAD、后端和前端镜像均使用该 SHA，生产 Git 工作树干净。
+- 发布时间：`2026-08-19T02:30:29Z`；数据库备份：`../backups/code_review_20260819T022811Z_fbf651d27631.sql.gz`；隔离恢复校验 84 张表，Alembic `036`。
 - `cr_backend`、`cr_frontend`、`cr_mysql`、`cr_redis`、`cr_clamav` 均为 `healthy`；`https://www.lijiadong.cn/` 根入口返回 `200`。
 - PHP worker 镜像已按固定基础镜像摘要重建并固化：`sha256:70e524b4b8722efb53f3033602372dee0ae4727a37c9f69eae4002abae860c1e`；runner SHA-256 为 `2a3092b8ee18eded75c58ed72dd1a2f6baa9665d24aed1f33541af356047f644`，executor 重启后为 active。
 - 公网白盒任务 `sbx_caf6d82214ee4076960c040a` 创建成功，生产日志无该请求 5xx。`bWAPP-master.tar.gz` 被正确解析并归一化为 worker 可执行 ZIP，部署核验识别入口 `bWAPP-master/app/index.php`。
