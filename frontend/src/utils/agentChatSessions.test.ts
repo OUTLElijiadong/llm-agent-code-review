@@ -9,6 +9,8 @@ import {
   loadAgentChatSnapshot,
   loadAgentChatSessions,
   mergeAgentChatSessions,
+  markAgentChatLoginFreshStart,
+  consumeAgentChatLoginFreshStart,
   saveActiveAgentChatSession,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
@@ -26,6 +28,21 @@ function seedSnapshot(id: string, messages: Array<{ role: 'user' | 'assistant'; 
 
 beforeEach(() => {
   window.localStorage.clear()
+  window.sessionStorage.clear()
+})
+
+describe('登录周期新对话标记', () => {
+  it('普通端与管理端各消费一次,再次登录可重新置位', () => {
+    markAgentChatLoginFreshStart()
+    expect(consumeAgentChatLoginFreshStart('user')).toBe(true)
+    expect(consumeAgentChatLoginFreshStart('user')).toBe(false)
+    expect(consumeAgentChatLoginFreshStart('admin')).toBe(true)
+    expect(consumeAgentChatLoginFreshStart('admin')).toBe(false)
+
+    markAgentChatLoginFreshStart()
+    expect(consumeAgentChatLoginFreshStart('user')).toBe(true)
+    expect(consumeAgentChatLoginFreshStart('admin')).toBe(true)
+  })
 })
 
 describe('isPlaceholderAgentChatTitle', () => {

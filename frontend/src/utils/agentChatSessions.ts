@@ -59,6 +59,31 @@ export interface AgentChatSnapshot {
 const INDEX_PREFIX = 'prism-agent-sessions:'
 const SNAPSHOT_PREFIX = 'prism-agent-session-snapshot:'
 const ACTIVE_PREFIX = 'prism-agent-active-session:'
+const LOGIN_FRESH_PREFIX = 'prism-agent-login-fresh:'
+const CHAT_SURFACES = ['user', 'admin'] as const
+
+/** 成功凭据登录后,两个小菱入口各自需要在首次挂载时创建一个新对话。 */
+export function markAgentChatLoginFreshStart(): void {
+  try {
+    for (const surface of CHAT_SURFACES) {
+      window.sessionStorage.setItem(LOGIN_FRESH_PREFIX + surface, '1')
+    }
+  } catch {
+    // sessionStorage 不可用时不阻断登录,会话仍按最后一次显式选择恢复。
+  }
+}
+
+/** 按入口一次性消费本次登录的新对话标记。 */
+export function consumeAgentChatLoginFreshStart(surface: 'user' | 'admin'): boolean {
+  try {
+    const key = LOGIN_FRESH_PREFIX + surface
+    const pending = window.sessionStorage.getItem(key) === '1'
+    if (pending) window.sessionStorage.removeItem(key)
+    return pending
+  } catch {
+    return false
+  }
+}
 
 function readIndex(storageKey: string): AgentChatSessionMeta[] {
   try {

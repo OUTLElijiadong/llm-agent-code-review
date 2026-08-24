@@ -10,6 +10,7 @@ import {
   fetchUserDataScope as apiFetchUserDataScope,
 } from '@/api/rbac'
 import { setToken, clearToken, getToken } from '@/utils/token'
+import { markAgentChatLoginFreshStart } from '@/utils/agentChatSessions'
 
 let authExpiredListenerRegistered = false
 
@@ -155,6 +156,7 @@ export const useUserStore = defineStore('user', () => {
     setToken(res.access_token)
     profile.value = res.user
     await loadRbacInfo()
+    markAgentChatLoginFreshStart()
   }
 
   /**

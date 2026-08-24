@@ -3,8 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
   createAgentChatSession,
-  findPristineAgentChatSession,
-  isPristineAgentChatSession,
+  consumeAgentChatLoginFreshStart,
   loadActiveAgentChatSession,
   loadAgentChatSessions,
   loadAgentChatSnapshot,
@@ -92,16 +91,6 @@ function select(sessionId: string): void {
   emit('select', sessionId)
 }
 
-/** 外部主动聚焦某会话(如后台 mesh 消息处理完成):仅当目标在列表且非当前忙碌时切换。 */
-function focusSession(sessionId: string): void {
-  if (!sessionId || sessionId === activeId.value) return
-  if (!sessions.value.some((item) => item.id === sessionId)) return
-  // 当前会话忙碌(运行/等待审批)时不切走,保留用户上下文。
-  const current = sessions.value.find((item) => item.id === activeId.value)
-  if (current && inferBusy(current)) return
-  select(sessionId)
-}
-
 function createSession(): void {
   const meta = createAgentChatSession(props.storageKey, props.idPrefix)
   pendingHeartbeatId = meta.id
@@ -161,38 +150,11 @@ function restoreSessionAfterArchiveFailure(): void {
 }
 
 async function ensureFreshOnOpen(): Promise<void> {
-  // 首次打开前先拉一次服务端权威状态,避免用陈旧本地快照把已完成会话当忙碌。
-  // 必须 await 完成后再做下面的 pristine/新建判断,否则在 discovery 未落库时
-  // 会把「服务端 running 但本地无快照」的会话误判为空,进而误新建顶掉它。
+  // 打开/重开只同步服务端状态,不改变用户最后显式选择的当前会话。
+  // 本次登录首次新建由挂载阶段的一次性标记控制。
   if (props.discoverRemote && !discoveryLoadedOnce.value) {
     await refreshFromAgentMesh()
   }
-  // discovery 完成后,会话列表与权威运行状态已就位;此前的任何 select/新建都基于
-  // 不完整信息,这里以最新 sessions 重新评估,确保忙碌会话不会被误切/覆盖。
-  const welcomeText = props.welcomeText ?? ''
-  const current = sessions.value.find((item) => item.id === activeId.value)
-  // 1) 任一历史会话未完成(运行中/等待审批/等待输入) → 优先跳回该会话,
-  //    保留正在执行任务的上下文;当前就是这个会话时保持不动。
-  const busySession = sessions.value.find((item) => inferBusy(item))
-  if (busySession) {
-    if (busySession.id !== activeId.value) select(busySession.id)
-    return
-  }
-  // 关闭悬浮窗后重新挂载时,用户最后明确查看的会话优先于“找一个空会话”。
-  // 否则历史团队卡片虽已写入快照,重开会话却会被切回默认对话,看起来像卡片丢失。
-  if (current && loadActiveAgentChatSession(props.storageKey) === current.id) return
-  // 2) 当前就是空的新对话(无输入输出) → 保留它,不重复创建空白条目。
-  //    pristine 判断只看本地快照,对「无本地快照但服务端 running」的会话会误判为空,
-  //    因此叠加 inferBusy(含服务端权威状态)兜底,忙碌会话绝不当作空会话被跳过/顶掉。
-  if (current && !inferBusy(current) && isPristineAgentChatSession(current.id, welcomeText, current.title)) return
-  // 3) 历史对话均已完成后:复用既有空对话。
-  const reusable = findPristineAgentChatSession(sessions.value, welcomeText, busyIds.value)
-  if (reusable) {
-    select(reusable.id)
-    return
-  }
-  // 4) 全部为已完成对话且无空会话 → 新建空对话。
-  createSession()
 }
 
 function toggleMenu(): void {
@@ -213,7 +175,7 @@ function handleOutsideClick(event: MouseEvent): void {
 function inferBusy(meta: AgentChatSessionMeta): boolean {
   if (busyIds.value.has(meta.id)) return true
   // 服务端 agent_response_run 是权威事实源:后台已完成时,即使本地快照陈旧为
-  // running/waiting,也不能再把会话当忙碌从而阻止“打开即新对话”。
+  // running/waiting,也不能继续显示为忙碌或阻止归档等显式操作。
   const remote = remoteRunState.value.get(meta.id)
   if (remote !== undefined) return isAgentResponseSessionOccupied(remote)
   const snapshot = loadAgentChatSnapshot(meta.id)
@@ -227,15 +189,23 @@ onMounted(() => {
     sessions.value = [meta]
     pendingHeartbeatId = meta.id
   }
-  activeId.value = sessions.value[0].id
-  const persistedActiveId = loadActiveAgentChatSession(props.storageKey)
-  if (persistedActiveId && sessions.value.some((item) => item.id === persistedActiveId)) {
-    activeId.value = persistedActiveId
+  const surface = props.storageKey === 'admin' ? 'admin' : 'user'
+  if (consumeAgentChatLoginFreshStart(surface)) {
+    const fresh = createAgentChatSession(props.storageKey, props.idPrefix)
+    pendingHeartbeatId = fresh.id
+    sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+    activeId.value = fresh.id
+    saveActiveAgentChatSession(props.storageKey, fresh.id)
+  } else {
+    activeId.value = sessions.value[0].id
+    const persistedActiveId = loadActiveAgentChatSession(props.storageKey)
+    if (persistedActiveId && sessions.value.some((item) => item.id === persistedActiveId)) {
+      activeId.value = persistedActiveId
+    }
   }
   notify()
   emit('select', activeId.value)
-  // 首次挂载也要执行一次“打开即新对话”策略，避免父组件 visible watcher 在
-  // 子组件尚未就绪时错过 ensureFreshOnOpen，导致页面加载后第一次点开仍复用旧会话。
+  // 首次挂载同步服务端目录；当前会话只由登录标记或用户动作决定。
   void ensureFreshOnOpen()
   if (props.discoverRemote) {
     void refreshFromAgentMesh()
@@ -326,28 +296,6 @@ async function refreshFromAgentMesh(): Promise<void> {
         activeId.value = merged[0].id
         if (activeId.value !== previousActiveId) emit('select', activeId.value)
       }
-    } else {
-      // 自动聚焦「最新活跃对话」:仅当前停留在「确知的空会话」时让位,
-      // 有内容/忙碌/非占位标题的对话绝不切走(保留用户上下文)。
-      // 注意:此处 remoteRunState 已在上方赋值完成,inferBusy 用的是权威状态。
-      const currentMeta = sessions.value.find((item) => item.id === activeId.value)
-      const currentIdle = currentMeta
-        && !inferBusy(currentMeta)
-        && isPristineAgentChatSession(currentMeta.id, props.welcomeText ?? '', currentMeta.title)
-      if (currentIdle) {
-        const liveliest = discovered
-          .filter((item) => item.id !== activeId.value && merged.some((m) => m.id === item.id))
-          .sort((a, b) => Date.parse(b.lastSeenAt || '') - Date.parse(a.lastSeenAt || ''))[0]
-        if (liveliest) {
-          // 该会话刚活跃过(近 30s),或正有任务在跑——值得把用户带过去。
-          const recent = Date.now() - Date.parse(liveliest.lastSeenAt || '') < 30_000
-          const occupied = isAgentResponseSessionOccupied(liveliest.activeRunStatus)
-          if (recent || occupied) {
-            activeId.value = liveliest.id
-            if (activeId.value !== previousActiveId) emit('select', activeId.value)
-          }
-        }
-      }
     }
     notify()
   } catch {
@@ -357,7 +305,7 @@ async function refreshFromAgentMesh(): Promise<void> {
   }
 }
 
-defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, removeSession, restoreSessionAfterArchiveFailure, focusSession })
+defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, removeSession, restoreSessionAfterArchiveFailure })
 </script>
 
 <template>

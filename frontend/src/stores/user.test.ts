@@ -34,6 +34,7 @@ vi.mock('@/utils/token', () => ({
 }))
 
 import { useUserStore } from './user'
+import { consumeAgentChatLoginFreshStart } from '@/utils/agentChatSessions'
 
 let store: ReturnType<typeof useUserStore>
 
@@ -47,6 +48,7 @@ const member = {
 
 /** 重置单例 Store 状态并提供默认成功的 RBAC API。 */
 function resetUserStore(): void {
+  window.sessionStorage.clear()
   store.$patch({
     token: '',
     profile: null,
@@ -112,6 +114,8 @@ describe('user store authentication and RBAC', () => {
     expect(store.menus[0].path).toBe('/dashboard')
     expect(store.dataScope?.scope_type).toBe('custom')
     expect(store.dataScope?.project_ids).toEqual([1, 2])
+    expect(consumeAgentChatLoginFreshStart('user')).toBe(true)
+    expect(consumeAgentChatLoginFreshStart('admin')).toBe(true)
   })
 
   it('keeps successful RBAC slices while failed slices degrade to empty state', async () => {
@@ -193,6 +197,8 @@ describe('user store authentication and RBAC', () => {
     expect(api.authMe).toHaveBeenCalledOnce()
     expect(store.profile).toEqual(member)
     expect(store.roles).toEqual(['user'])
+    expect(consumeAgentChatLoginFreshStart('user')).toBe(false)
+    expect(consumeAgentChatLoginFreshStart('admin')).toBe(false)
   })
 
   it('logout and auth-expired events clear all local authorization state', () => {

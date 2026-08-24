@@ -78,6 +78,8 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
 }
 
 beforeEach(() => {
+  window.localStorage.clear()
+  window.sessionStorage.clear()
   meshApi.heartbeat.mockReset().mockResolvedValue({})
   meshApi.inbox.mockReset().mockResolvedValue([])
   meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
@@ -107,6 +109,47 @@ afterEach(() => {
 })
 
 describe('AdminCopilot Responses stream', () => {
+  it('后台历史会话完成 Mesh 任务后不抢占当前管理新对话', async () => {
+    window.localStorage.setItem('prism-agent-sessions:admin', JSON.stringify([
+      { id: 'admin-current', title: '新对话', createdAt: 2 },
+      { id: 'admin-history', title: '历史运维', createdAt: 1 },
+    ]))
+    window.localStorage.setItem('prism-agent-active-session:admin', 'admin-current')
+    meshApi.list.mockResolvedValue({
+      items: [
+        { kind: 'session', session_id: 'admin-current', surface: 'admin', name: '新对话', last_seen_at: '2026-08-24T00:00:00Z' },
+        { kind: 'session', session_id: 'admin-history', surface: 'admin', name: '历史运维', last_seen_at: '2026-08-23T00:00:00Z' },
+      ],
+      total: 2,
+      by_kind: { session: 2 },
+    })
+    meshApi.inbox.mockImplementation((_surface: string, sessionId: string) => Promise.resolve(
+      sessionId === 'admin-history'
+        ? [{
+            schema_version: '1.0', message_id: 'msg-admin-background', idempotency_key: 'idem-admin-background',
+            trace_id: 'trace-admin-background', correlation_id: 'corr-admin-background', causation_id: '',
+            sent_from: 'agent:ops', send_to: 'session:admin:admin-history', message_type: 'task.result',
+            priority: 'normal', subject: '后台运维完成', status: 'delivered', payload: {}, context: {},
+            artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+            expires_at: '2026-08-24T01:00:00Z', create_time: '2026-08-24T00:00:00Z', update_time: '2026-08-24T00:00:01Z',
+          }]
+        : [],
+    ))
+
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    await flushPromises()
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body.session_id).toBe('admin-history')
+    expect(wrapper.find('.session-current').text()).toContain('新对话')
+
+    emit(0, { type: 'response.completed', response: { id: 'run-admin-background' } })
+    await finish(0)
+    expect(wrapper.find('.session-current').text()).toContain('新对话')
+    wrapper.unmount()
+  })
+
   it('恢复当前管理会话时拉取服务端团队并默认折叠展示协作过程', async () => {
     teamApi.list.mockResolvedValue({
       items: [{ team_id: 42, title: '管理端验证', surface: 'admin', session_id: 'admin-test', status: 'verifying', max_active_children: 3, trace_id: 'trace-admin-42', counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 } }],

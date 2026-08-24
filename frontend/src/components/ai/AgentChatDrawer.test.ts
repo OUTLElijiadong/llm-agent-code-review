@@ -88,6 +88,8 @@ async function settleAll(): Promise<void> {
 }
 
 beforeEach(() => {
+  window.localStorage.clear()
+  window.sessionStorage.clear()
   // 组件在 setup 顶层使用 useAgentActivityStore,测试环境需先激活 Pinia
   setActivePinia(createPinia())
   meshApi.heartbeat.mockReset().mockResolvedValue({})
@@ -149,6 +151,45 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
 }
 
 describe('AgentChatDrawer Responses stream', () => {
+  it('后台历史会话完成 Mesh 任务后不抢占当前新对话', async () => {
+    window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
+      { id: 'user-current', title: '新对话', createdAt: 2 },
+      { id: 'user-history', title: '历史审计', createdAt: 1 },
+    ]))
+    window.localStorage.setItem('prism-agent-active-session:user', 'user-current')
+    meshApi.list.mockResolvedValue({
+      items: [
+        { kind: 'session', session_id: 'user-current', surface: 'user', name: '新对话', last_seen_at: '2026-08-24T00:00:00Z' },
+        { kind: 'session', session_id: 'user-history', surface: 'user', name: '历史审计', last_seen_at: '2026-08-23T00:00:00Z' },
+      ],
+      total: 2,
+      by_kind: { session: 2 },
+    })
+    meshApi.inbox.mockImplementation((_surface: string, sessionId: string) => Promise.resolve(
+      sessionId === 'user-history'
+        ? [{
+            schema_version: '1.0', message_id: 'msg-user-background', idempotency_key: 'idem-user-background',
+            trace_id: 'trace-user-background', correlation_id: 'corr-user-background', causation_id: '',
+            sent_from: 'agent:security', send_to: 'session:user:user-history', message_type: 'task.result',
+            priority: 'normal', subject: '后台审计完成', status: 'delivered', payload: {}, context: {},
+            artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+            expires_at: '2026-08-24T01:00:00Z', create_time: '2026-08-24T00:00:00Z', update_time: '2026-08-24T00:00:01Z',
+          }]
+        : [],
+    ))
+
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body.session_id).toBe('user-history')
+    expect(wrapper.find('.session-current').text()).toContain('新对话')
+
+    emit(0, { type: 'response.completed', response: { id: 'run-user-background' } })
+    await finish(0)
+    expect(wrapper.find('.session-current').text()).toContain('新对话')
+    wrapper.unmount()
+  })
+
   it('运行中调用 create_agent_team 时立即显示团队卡片', async () => {
     const wrapper = await mountReadyDrawer()
     teamApi.list.mockResolvedValue({

@@ -686,8 +686,6 @@ async function runBackgroundMeshMessage(
   })
   try {
     await handle.done
-    // 后台会话处理完成:把小菱聚焦到刚活跃起来的这条对话(忙碌/有内容的当前会话不切走)
-    if (succeeded) switcherRef.value?.focusSession(targetSessionId)
     return succeeded
   } catch {
     return false
