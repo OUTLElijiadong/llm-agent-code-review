@@ -25,5 +25,6 @@
 - 公网地址：`https://www.lijiadong.cn`
 - 自动化：246 项前端测试通过，类型、Lint、构建通过
 - 生产：双镜像健康，公网 200，数据库 `040`，备份与隔离恢复通过，普通端与管理端公网验收通过
+- GitHub：`codex/whitebox-decompilation` 已推送，远端 HEAD 为 `8d21c119b689b82a56eab29043ad154cdb3281bf`
 
 详细证据见 [验收文档](./ACCEPTANCE_小菱登录新对话与防自动切换修复.md)。
