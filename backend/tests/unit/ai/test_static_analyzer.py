@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.ai.static_analyzer import Finding, scan, scan_file
 from app.ai.security_static_rules import apply_static_rules
+from app.ai.static_analyzer import Finding, scan, scan_file
 from app.models.code_file import CodeFile
 
 # 漏洞样本目录

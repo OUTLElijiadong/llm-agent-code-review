@@ -472,7 +472,10 @@ _PARAM_ROUTING_RULES: Tuple[StaticRule, ...] = (
             "url/callback/webhook/imageUrl 等参数直接进入 HTTP 请求。"
             "攻击者可传入内网地址(如云元数据 169.254.169.254)读取凭证或打内网服务。"
         ),
-        fix_suggestion="URL 先解析校验:协议只允许 http/https、禁止内网/环回/链路本地网段、解析后再次校验 IP,并禁用重定向跟随。",
+        fix_suggestion=(
+            "URL 先解析校验:协议只允许 http/https、禁止内网/环回/链路本地网段、"
+            "解析后再次校验 IP,并禁用重定向跟随。"
+        ),
         pattern=re.compile(
             r"""(?ix)
             (?:requests\.(?:get|post|head)|httpx\.(?:get|post)|urlopen|fetch\s*\(|axios\.(?:get|post)|restTemplate\.\w+|HttpClient)
@@ -492,7 +495,10 @@ _PARAM_ROUTING_RULES: Tuple[StaticRule, ...] = (
             "file/filePath/filename/path/download 等参数未经规范化校验直接进入文件操作,"
             "攻击者可用 ../../ 读取任意文件(配置、密钥、源码)。"
         ),
-        fix_suggestion="用 realpath 归一化后校验仍位于允许的基础目录内;文件名只允许白名单字符,拒绝包含 ../ 与绝对路径。",
+        fix_suggestion=(
+            "用 realpath 归一化后校验仍位于允许的基础目录内;文件名只允许白名单字符,"
+            "拒绝包含 ../ 与绝对路径。"
+        ),
         pattern=re.compile(
             r"""(?ix)
             (?:open\s*\(|os\.path\.join|Path\s*\(|File\s*\(|readFile|readfile|file_get_contents|send_file|sendFile)
@@ -545,7 +551,10 @@ _PARAM_ROUTING_RULES: Tuple[StaticRule, ...] = (
         owasp="A07:2021-Identification and Authentication Failures",
         severity="严重",
         description="密码以明文形式参与比较或存储,库一旦拖走全部凭证立即泄露。",
-        fix_suggestion="注册时用 bcrypt/argon2 加盐哈希存储;登录用常数时间比较(checkpw/verify),全程不让明文密码落库或落日志。",
+        fix_suggestion=(
+            "注册时用 bcrypt/argon2 加盐哈希存储;登录用常数时间比较(checkpw/verify),"
+            "全程不让明文密码落库或落日志。"
+        ),
         pattern=re.compile(
             r"""(?ix)
             (?:password|passwd|pwd)\s*(?:==|===|!=|\.equals\()\s*\w+

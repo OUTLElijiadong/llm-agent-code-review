@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.agents.contracts import CONTRACTS
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
+from app.models.agent_response_run import AgentResponseRun
 from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
 from app.services import agent_mesh_service
 
@@ -22,8 +24,6 @@ def db():
     AgentMeshConversation.__table__.create(engine)
     AgentMeshMessage.__table__.create(engine)
     AgentMeshMessageEvent.__table__.create(engine)
-    from app.models.agent_response_run import AgentResponseRun
-
     AgentResponseRun.__table__.create(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
@@ -373,3 +373,72 @@ def test_list_agents_uses_authoritative_run_status_over_heartbeat() -> None:
     finally:
         db.close()
         engine.dispose()
+
+
+def test_sweep_blocked_jarvis_messages_closes_history_and_active_run(db, user, monkeypatch) -> None:
+    """成本保护应收敛历史 JARVIS,但不影响普通协作消息。"""
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="admin", session_key=key, title=key)
+
+    jarvis = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="admin",
+        session_key="session-a1",
+        message=_message(
+            idempotency_key="jarvis-history-001",
+            sent_from="session:admin:session-a1",
+            send_to="session:admin:session-b1",
+            message_type="status.update",
+            subject="JARVIS 运维简报",
+            payload={"patrol_kind": "jarvis", "evidence": []},
+        ),
+    )
+    ordinary = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="admin",
+        session_key="session-a1",
+        message=_message(
+            idempotency_key="ordinary-history-001",
+            sent_from="session:admin:session-a1",
+            send_to="session:admin:session-b1",
+            message_type="status.update",
+            subject="普通协作通知",
+            payload={"summary": "保留普通消息"},
+        ),
+    )
+    jarvis_row = db.query(AgentMeshMessage).filter_by(message_id=jarvis["message_id"]).one()
+    jarvis_row.status = "processing"
+    jarvis_row.processing_at = datetime.now(timezone.utc)
+    db.add(AgentResponseRun(
+        run_id="jarvis-history-run",
+        user_id=user.id,
+        surface="admin",
+        session_key="session-b1",
+        mesh_message_id=jarvis["message_id"],
+        status="running",
+        checkpoint_json=json.dumps({"status": "running", "pending": {"tool": "status"}}),
+        version=1,
+    ))
+    db.commit()
+    monkeypatch.setattr(agent_mesh_service.settings, "agent_jarvis_auto_dispatch_enabled", False)
+
+    result = agent_mesh_service.sweep_blocked_jarvis_messages(db)
+
+    assert result == {"messages": 1, "runs": 1}
+    assert jarvis_row.status == "completed"
+    assert db.query(AgentMeshMessage).filter_by(
+        message_id=ordinary["message_id"]
+    ).one().status == "queued"
+    run = db.query(AgentResponseRun).filter_by(run_id="jarvis-history-run").one()
+    assert run.status == "failed"
+    checkpoint = json.loads(run.checkpoint_json)
+    assert checkpoint["recovery_requested"] is False
+    assert checkpoint["pending"] is None
+    assert "成本保护" in checkpoint["error"]
+    assert db.query(AgentMeshMessageEvent).filter_by(
+        message_id=jarvis["message_id"], status="completed"
+    ).count() == 1
+
+    assert agent_mesh_service.sweep_blocked_jarvis_messages(db) == {"messages": 0, "runs": 0}

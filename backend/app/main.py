@@ -107,6 +107,7 @@ async def lifespan(app: FastAPI):
     # 部署重启善后:把执行中的运行转为带恢复标记的可重试状态；原生等待态保留。
     from app.api.v1.agent_responses import sweep_stale_active_runs
     from app.core.database import SessionLocal as _SessionLocal
+    from app.services import agent_mesh_service
     from app.services.agent_mesh_dispatcher import start_agent_mesh_dispatcher, stop_agent_mesh_dispatcher
     from app.services.agent_scheduler_runtime import start_agent_governance_scheduler, stop_agent_governance_scheduler
     from app.services.agent_team_dispatcher import start_agent_team_dispatcher, stop_agent_team_dispatcher
@@ -115,10 +116,19 @@ async def lifespan(app: FastAPI):
     _sweep_db = _SessionLocal()
     try:
         _swept = sweep_stale_active_runs(_sweep_db)
+        _jarvis_cleanup = agent_mesh_service.sweep_blocked_jarvis_messages(_sweep_db)
         if _swept:
             from loguru import logger as _logger
 
             _logger.info("[startup] 清扫 {} 个部署重启遗留的僵尸运行", _swept)
+        if _jarvis_cleanup["messages"] or _jarvis_cleanup["runs"]:
+            from loguru import logger as _logger
+
+            _logger.info(
+                "[startup] JARVIS 成本保护收敛 messages={} runs={}",
+                _jarvis_cleanup["messages"],
+                _jarvis_cleanup["runs"],
+            )
     finally:
         _sweep_db.close()
 

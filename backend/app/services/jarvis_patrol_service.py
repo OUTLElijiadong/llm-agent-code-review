@@ -135,6 +135,15 @@ def patrol_once() -> dict[str, int]:
         return {"alerts": 0, "delivered": 0, "skipped": 0}
     db = SessionLocal()
     try:
+        from app.services import agent_mesh_service
+
+        cleanup = agent_mesh_service.sweep_blocked_jarvis_messages(db)
+        if cleanup["messages"] or cleanup["runs"]:
+            logger.info(
+                "[jarvis-patrol] cost guard swept messages={} runs={}",
+                cleanup["messages"],
+                cleanup["runs"],
+            )
         items, fingerprint = _brief_evidence(db)
         if not items:
             return {"alerts": 0, "delivered": 0, "skipped": 0}

@@ -276,7 +276,7 @@ class TestReviewOneFileDualEngine:
 
         task = _make_review_task()
         user = _make_user()
-        db.add(user)
+        db.add_all([task, user])
         db.commit()
 
         # Mock LLM 路径返回空(仅测试静态引擎)
@@ -300,7 +300,7 @@ class TestReviewOneFileDualEngine:
 
         task = _make_review_task()
         user = _make_user()
-        db.add(user)
+        db.add_all([task, user])
         db.commit()
 
         llm_finding = _make_finding(line_number=1, cwe="CWE-89", source="llm", static_rule_hits=0)
@@ -323,7 +323,7 @@ class TestReviewOneFileDualEngine:
 
         task = _make_review_task()
         user = _make_user()
-        db.add(user)
+        db.add_all([task, user])
         db.commit()
 
         # 先用静态扫描得到实际命中的 cwe 与行号,确保 LLM finding 与之匹配(同 cwe + 同行号 ±2)
@@ -356,7 +356,7 @@ class TestReviewOneFileDualEngine:
 
         task = _make_review_task()
         user = _make_user()
-        db.add(user)
+        db.add_all([task, user])
         db.commit()
 
         llm_finding = _make_finding(
@@ -393,7 +393,7 @@ class TestReviewOneFileDualEngine:
 
         task = _make_review_task()
         user = _make_user()
-        db.add(user)
+        db.add_all([task, user])
         db.commit()
 
         profiles = (_GENERAL_PROFILE,)
@@ -519,7 +519,7 @@ class TestDualEngineFlowOrder:
 
         task = _make_review_task()
         user = _make_user()
-        db.add(user)
+        db.add_all([task, user])
         db.commit()
 
         # LLM 返回一个不同位置的发现(确保不与静态去重)
@@ -546,7 +546,7 @@ class TestDualEngineFlowOrder:
 
         task = _make_review_task()
         user = _make_user()
-        db.add(user)
+        db.add_all([task, user])
         db.commit()
 
         llm_findings = [

@@ -22,6 +22,16 @@ from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
 
 ONLINE_WINDOW = timedelta(seconds=90)
 _SESSION_TERMINAL = {"completed", "failed", "expired", "dead_letter"}
+_BLOCKED_JARVIS_MESSAGE_STATUSES = ("queued", "delivered", "acknowledged", "processing")
+_ACTIVE_RESPONSE_RUN_STATUSES = (
+    "running",
+    "approving",
+    "rejecting",
+    "answering",
+    "waiting_approval",
+    "waiting_input",
+)
+_JARVIS_COST_GUARD_SUMMARY = "后台成本保护已关闭 JARVIS 自动模型派发;历史消息已收敛,未执行模型调用。"
 
 
 class AgentMeshError(ValueError):
@@ -50,6 +60,73 @@ def is_jarvis_auto_dispatch_blocked(row: AgentMeshMessage) -> bool:
         return False
     payload = _load(row.payload_json, {})
     return isinstance(payload, dict) and payload.get("patrol_kind") == "jarvis"
+
+
+def sweep_blocked_jarvis_messages(db: Session, *, limit: int = 500) -> dict[str, int]:
+    """收敛成本保护开启时遗留的 JARVIS 消息和关联运行。
+
+    旧版本可能已经把简报写成 queued/processing,但新版本不应让这些记录
+    长期伪装成活动任务,也不能被恢复器重新送入模型。这里只推进账本状态
+    和检查点,不删除消息、不触碰普通协作消息。
+    """
+    if settings.agent_jarvis_auto_dispatch_enabled:
+        return {"messages": 0, "runs": 0}
+
+    rows = (
+        db.query(AgentMeshMessage)
+        .filter(AgentMeshMessage.status.in_(_BLOCKED_JARVIS_MESSAGE_STATUSES))
+        .order_by(AgentMeshMessage.id.asc())
+        .limit(max(1, min(int(limit), 1000)))
+        .all()
+    )
+    jarvis_rows: list[AgentMeshMessage] = []
+    for row in rows:
+        if is_jarvis_auto_dispatch_blocked(row):
+            jarvis_rows.append(row)
+    if not jarvis_rows:
+        return {"messages": 0, "runs": 0}
+
+    now = _now()
+    message_ids = [row.message_id for row in jarvis_rows]
+    for row in jarvis_rows:
+        row.status = "completed"
+        row.completed_at = now
+        row.lease_token = None
+        row.lease_expires_at = None
+        row.next_attempt_at = None
+        _event(
+            db,
+            row,
+            "completed",
+            "system:jarvis-cost-guard",
+            {"summary": _JARVIS_COST_GUARD_SUMMARY},
+        )
+
+    runs = (
+        db.query(AgentResponseRun)
+        .filter(
+            AgentResponseRun.mesh_message_id.in_(message_ids),
+            AgentResponseRun.status.in_(_ACTIVE_RESPONSE_RUN_STATUSES),
+        )
+        .all()
+    )
+    for run in runs:
+        try:
+            checkpoint = json.loads(run.checkpoint_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            checkpoint = {}
+        if not isinstance(checkpoint, dict):
+            checkpoint = {}
+        checkpoint["status"] = "failed"
+        checkpoint["pending"] = None
+        checkpoint["recovery_requested"] = False
+        checkpoint["error"] = "后台成本保护已阻止 JARVIS 自动运行;请管理员明确发起核验"
+        run.status = "failed"
+        run.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+        run.version = int(run.version or 0) + 1
+
+    db.commit()
+    return {"messages": len(jarvis_rows), "runs": len(runs)}
 
 
 def _now() -> datetime:
