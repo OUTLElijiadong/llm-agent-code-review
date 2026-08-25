@@ -76,4 +76,13 @@
 - `/healthz` 与 `/readyz` 均返回 `status=ok/ready`，版本和 release 均为上述提交。
 - 管理员 `admin` 真实登录 `https://lijiadong.cn/` 后点击“打开小菱 · 管理副驾驶”：当前会话显示“新对话”，运行状态为“空闲”，无进度条、无停止按钮、无 JARVIS/每日运维内容；等待 15 秒后状态不变。
 - 浏览器复验期间页面错误/警告为空；发布后数据库没有新增 JARVIS 消息、模型调用或 `agent_response_run` 运行记录。
-- 数据库中仍有 2026-08-14 遗留的 11 条未收敛 JARVIS Mesh 历史记录（8 queued、3 processing），均无对应运行中的 Responses；它们不会被当前成本保护路径自动恢复或启动模型，属于当前会话的记录在被拉取时会由前端过滤并完成回执。
+- 发布后数据库中仍保留 JARVIS 审计历史，但不再有 queued/delivered/acknowledged/processing 活动记录；原先 8 条 queued、3 条 processing 已由启动收敛逻辑完成回执，不删除历史数据。
+
+## 2026-08-25 历史 JARVIS 收敛补丁与重新验收
+
+- 发布提交：`c67680421210e9bc2af176db90b637855c4ab60d`；生产分支：`codex/jarvis-cost-guard-c676804`。
+- 生产镜像：`prism-backend:c67680421210e9bc2af176db90b637855c4ab60d`、`prism-frontend:c67680421210e9bc2af176db90b637855c4ab60d`；Backend、Frontend、MySQL、Redis、ClamAV 均 healthy。
+- 发布前完成 `.env` 备份和隔离恢复校验；Alembic 仍为 `040`。`/healthz`、`/readyz` 返回 `status=ok/ready` 与 release `c676804...`。
+- 后端启动日志明确记录：`JARVIS 成本保护收敛 messages=11 runs=0`。数据库状态为 `completed=94、dead_letter=177`，JARVIS 活动记录数 `0`，活动 `agent_response_run` 数 `0`。
+- 管理员真实执行“退出 → admin 重新登录 → 打开小菱 · 管理副驾驶”：登录后未自动启动任务；手动打开后显示“新对话”和“空闲”，观察 10 秒无进度条、无 JARVIS/每日运维内容。
+- 两次线上观察的浏览器 error/warn 均为空；发布后 `ai_call_log` 与 `agent_response_run` 均无新增记录，证明登录和打开面板没有触发模型调用。

@@ -75,4 +75,17 @@
 | 发布后模型调用 | ✅ | 发布后 `ai_call_log` 与 `agent_response_run` 均无新增记录 |
 | 浏览器控制台 | ✅ | 线上复验页 error/warn 日志为空 |
 
-说明：数据库仍保留 2026-08-14 的 8 条 queued、3 条 processing 历史 JARVIS Mesh 记录；当前没有运行中的 Responses，后端恢复清扫不会重新启动它们，作为审计历史保留。属于当前会话的 queued 记录在被拉取时会由前端过滤并完成回执。
+说明：上一版发布时数据库仍保留 2026-08-14 的 8 条 queued、3 条 processing 历史 JARVIS Mesh 记录；`c676804` 发布启动时已将这 11 条记录完成回执并保留审计历史，不再有 JARVIS 活动记录。
+
+## 2026-08-25 历史收敛补丁线上验收
+
+| 检查项 | 结果 | 证据 |
+| --- | --- | --- |
+| 最新生产版本 | ✅ | Backend/Frontend 均为 `c67680421210e9bc2af176db90b637855c4ab60d`；`/healthz`、`/readyz` 通过 |
+| 启动收敛 | ✅ | 启动日志 `messages=11 runs=0`；不删除消息，只完成状态和事件回执 |
+| JARVIS 状态 | ✅ | `completed=94、dead_letter=177`；queued/delivered/acknowledged/processing 为 0 |
+| 活动响应运行 | ✅ | `agent_response_run` 活动状态计数为 0 |
+| 退出后重新登录 | ✅ | `admin` 真实退出并重新登录，未自动启动小菱任务 |
+| 手动打开小菱 | ✅ | 显示“新对话”+“空闲”，观察 10 秒无进度条、无 JARVIS 文案 |
+| 成本回归 | ✅ | 发布后 `ai_call_log=0`、`agent_response_run=0` |
+| 浏览器日志 | ✅ | 两次线上观察 error/warn 均为空 |
