@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from app.core.config import settings
 from app.core.exceptions import ForbiddenError
 from app.models.agent_governance import AgentJob, AgentJobRun, AgentProfile
 from app.models.ai_call_log import AiCallLog
@@ -148,6 +149,70 @@ def test_unhealthy_ops_result_marks_job_run_failed(db: Any, monkeypatch: Any) ->
 
     assert run.status == "failed"
     assert run.error == "AI 自动运维巡检检测到不健康状态"
+
+
+def test_unhealthy_ops_skips_background_model_diagnosis_by_default(db: Any, monkeypatch: Any) -> None:
+    """健康巡检可生成告警,但默认不得隐式调用 LLM。"""
+    calls = {"diagnose": 0}
+
+    class FakeOperationsAgent:
+        def execute_action(self, *_args: Any, **_kwargs: Any) -> Any:
+            return SimpleNamespace(success=False, data={})
+
+        def diagnose(self, *_args: Any, **_kwargs: Any) -> Any:
+            calls["diagnose"] += 1
+            return SimpleNamespace(data="不应被调用", error="")
+
+    job = AgentJob(
+        job_code="ops-health-cost-guard",
+        job_type="ops_health_check",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    db.add(job)
+    db.commit()
+    monkeypatch.setattr("app.agents.operations_agent.OperationsAgent", FakeOperationsAgent)
+    monkeypatch.setattr(scheduler_service, "_collect_application_health", lambda *_args: {"ok": False})
+    monkeypatch.setattr(settings, "ops_health_diagnosis_enabled", False)
+
+    result = scheduler_service._execute_ops_health_check(db, job)
+
+    assert result["success"] is False
+    assert result["diagnosis_skipped"] is True
+    assert "成本保护" in result["diagnosis"]
+    assert calls["diagnose"] == 0
+
+
+def test_unhealthy_ops_can_explicitly_enable_model_diagnosis(db: Any, monkeypatch: Any) -> None:
+    calls = {"diagnose": 0}
+
+    class FakeOperationsAgent:
+        def execute_action(self, *_args: Any, **_kwargs: Any) -> Any:
+            return SimpleNamespace(success=False, data={})
+
+        def diagnose(self, *_args: Any, **_kwargs: Any) -> Any:
+            calls["diagnose"] += 1
+            return SimpleNamespace(data="明确开启后的诊断", error="")
+
+    job = AgentJob(
+        job_code="ops-health-explicit-diagnosis",
+        job_type="ops_health_check",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    db.add(job)
+    db.commit()
+    monkeypatch.setattr("app.agents.operations_agent.OperationsAgent", FakeOperationsAgent)
+    monkeypatch.setattr(scheduler_service, "_collect_application_health", lambda *_args: {"ok": False})
+    monkeypatch.setattr(settings, "ops_health_diagnosis_enabled", True)
+
+    result = scheduler_service._execute_ops_health_check(db, job)
+
+    assert result["diagnosis"] == "明确开启后的诊断"
+    assert "diagnosis_skipped" not in result
+    assert calls["diagnose"] == 1
 
 
 def test_only_unique_super_admin_can_control_or_run_ops_health_job(db: Any, monkeypatch: Any) -> None:

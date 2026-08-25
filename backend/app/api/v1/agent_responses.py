@@ -20,6 +20,7 @@ from app.core.dependencies import get_current_user
 from app.core.exceptions import ForbiddenError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
+from app.models.agent_mesh import AgentMeshMessage
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
 from app.schemas.common import Resp
@@ -249,6 +250,11 @@ def sweep_stale_active_runs(db: Session, *, max_age_seconds: int = 0) -> int:
     )
     for row in rows:
         before = row.status
+        if _is_blocked_jarvis_run(db, row):
+            _stop_blocked_jarvis_run(db, row)
+            if row.status != before:
+                swept += 1
+            continue
         _recover_stale_active_run(
             db,
             row,
@@ -258,6 +264,42 @@ def sweep_stale_active_runs(db: Session, *, max_age_seconds: int = 0) -> int:
         if row.status != before:
             swept += 1
     return swept
+
+
+def _is_blocked_jarvis_run(db: Session, row: AgentResponseRun) -> bool:
+    """重启清扫时识别旧版自动 JARVIS 运行,避免它被后台恢复再次计费。"""
+    if settings.agent_jarvis_auto_dispatch_enabled or not row.mesh_message_id:
+        return False
+    message = (
+        db.query(AgentMeshMessage)
+        .filter(AgentMeshMessage.message_id == row.mesh_message_id)
+        .first()
+    )
+    if message is None:
+        return False
+    try:
+        payload = json.loads(message.payload_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return isinstance(payload, dict) and payload.get("patrol_kind") == "jarvis"
+
+
+def _stop_blocked_jarvis_run(db: Session, row: AgentResponseRun) -> None:
+    """把被成本保护拦截的活跃运行收敛为不可恢复失败。"""
+    try:
+        checkpoint = json.loads(row.checkpoint_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        checkpoint = {}
+    if not isinstance(checkpoint, dict):
+        checkpoint = {}
+    checkpoint["status"] = "failed"
+    checkpoint["pending"] = None
+    checkpoint["recovery_requested"] = False
+    checkpoint["error"] = "后台成本保护已阻止 JARVIS 自动恢复;请管理员明确发起核验"
+    row.status = "failed"
+    row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+    row.version = int(row.version or 0) + 1
+    db.commit()
 
 
 def _recover_stale_active_run(

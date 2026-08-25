@@ -51,3 +51,14 @@
   3. 后端容器未读到 `SECURITY_*` 环境（env 文件漂移）→ 显式 `DEPLOY_ENV_FILE=/opt/code-review/deploy/.env` 重建；
   4. 爆破规则未跳过白名单 IP、备份 SHA256 校验误含超期文件 → 规则修复并验证。
 - 生产运行验证：security_monitor 每 5 分钟成功巡检；白名单 IP 登录 → info（不弹窗）；爆破跳过白名单；真实告警：备份 SHA256 缺失 critical（5 份 7/31 备份）、Nginx 代理探测 info。
+
+## 2026-08-25 成本保护复验
+
+| 检查项 | 结果 | 证据 |
+| --- | --- | --- |
+| JARVIS 只读证据采集 | ✅ | 无异常时不建 Mesh 简报；有异常时默认 `delivered=0`，不触发 Responses |
+| 定时健康检查不隐式调用模型 | ✅ | `OPS_HEALTH_DIAGNOSIS_ENABLED=false` 分支单测通过，`diagnose` 调用次数为 0 |
+| 历史 JARVIS 消息不自动续跑 | ✅ | 前端策略过滤 + 完成回执，后端 `prepare_message_run` 二次拦截 |
+| 重启恢复不绕过保护 | ✅ | 启动清扫与恢复队列均识别 JARVIS 运行并取消自动恢复标记 |
+| 显式开启兼容 | ✅ | JARVIS 派发、旧健康诊断路径的定向测试仍通过 |
+| 定向质量门禁 | ✅ | 后端 25 项 + Mesh 11 项、前端桥接 6 项、Ruff/Lint 全绿 |

@@ -1,8 +1,8 @@
-"""管理小菱 JARVIS 全自动运维巡逻。
+"""管理小菱 JARVIS 只读运维巡逻。
 
-周期性地收集平台异常证据(未处理高危告警、卡死/不健康沙箱、近期失败运行),
-把结构化简报作为 Mesh 消息投递给"在线"的管理会话;管理小菱收到后自动续跑,
-向管理员汇报并给出建议。写入/运维动作仍由小菱走既有审批链,巡逻本身只读、不执行。
+周期性地收集平台异常证据(未处理高危告警、卡死/不健康沙箱、近期失败运行)。
+为避免后台巡逻消耗用户额度,默认只保留证据采集;只有显式开启自动派发时,
+才把简报投递给在线管理会话。写入/运维动作仍由小菱走既有审批链。
 """
 
 from __future__ import annotations
@@ -130,7 +130,7 @@ def _online_admin_sessions(db, now: datetime) -> list[AgentMeshConversation]:
 
 
 def patrol_once() -> dict[str, int]:
-    """执行一次 JARVIS 巡逻;返回投递统计。"""
+    """执行一次 JARVIS 巡逻;默认只采集证据,不触发模型调用。"""
     if not settings.agent_jarvis_patrol_enabled:
         return {"alerts": 0, "delivered": 0, "skipped": 0}
     db = SessionLocal()
@@ -139,6 +139,10 @@ def patrol_once() -> dict[str, int]:
         if not items:
             return {"alerts": 0, "delivered": 0, "skipped": 0}
         sessions = _online_admin_sessions(db, _now())
+        if not settings.agent_jarvis_auto_dispatch_enabled:
+            # 保留在线会话数量作为可观测统计,但不写入会触发模型运行的 Mesh 消息。
+            # 管理员可在小菱中明确发起只读核验,不影响告警和审计记录。
+            return {"alerts": len(items), "delivered": 0, "skipped": len(sessions)}
         delivered = 0
         for conversation in sessions:
             try:
@@ -212,7 +216,10 @@ def _deliver_brief(
                     "auto_safe": True,
                 },
                 "stuck_sandbox": {
-                    "action": "已超 2 小时未终态的沙箱:向管理员建议关闭(close_sandbox 走审批),并说明该沙箱归属项目与用途",
+                    "action": (
+                        "已超 2 小时未终态的沙箱:向管理员建议关闭(close_sandbox 走审批),"
+                        "并说明该沙箱归属项目与用途"
+                    ),
                     "auto_safe": False,
                 },
             },

@@ -17,7 +17,11 @@ import {
   type AdminCopilotMessage,
 } from '@/api/adminCopilot'
 import { cancelAgentResponseRun, getAgentResponseSession, type AgentResponseSession } from '@/api/agentResponses'
-import { archiveAgentMeshSession, type AgentMeshMessage } from '@/api/agentMesh'
+import {
+  acknowledgeAgentMeshMessage,
+  archiveAgentMeshSession,
+  type AgentMeshMessage,
+} from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail } from '@/api/agentTeams'
 import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
@@ -267,6 +271,24 @@ const meshBridge = createAgentMeshBridge({
   getActiveRun: () => sessionRun.value,
   isBusy: isMeshSessionBusy,
   onMessage: handleMeshMessage,
+  // JARVIS 默认只作为告警证据留存;不能因为管理员打开页面就自动消耗模型额度。
+  shouldAutoProcess: (message) => message.payload?.patrol_kind !== 'jarvis',
+  onDeferredMessage: async (message, targetSessionId) => {
+    if (message.payload?.patrol_kind !== 'jarvis') return false
+    try {
+      await acknowledgeAgentMeshMessage(
+        'admin',
+        targetSessionId,
+        message.message_id,
+        'completed',
+        'JARVIS 简报已记入运维告警;成本保护已阻止自动模型调用,请管理员明确发起核验。',
+      )
+      unreadAlerts.value += 1
+      return true
+    } catch {
+      return false
+    }
+  },
   // 会话被服务端归档(空会话定时清理/他端删除)后,让切换器重新收敛列表并剔除它
   onSessionGone: () => { void switcherRef.value?.refreshFromAgentMesh() },
 })

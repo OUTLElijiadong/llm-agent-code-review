@@ -38,6 +38,32 @@ def _seed(db, *, online=True):
     db.commit()
 
 
+def _enable_auto_dispatch(monkeypatch):
+    """旧行为测试显式开启派发;生产默认值必须保持成本保护。"""
+    monkeypatch.setattr(module.settings, "agent_jarvis_auto_dispatch_enabled", True)
+
+
+def test_patrol_collects_evidence_without_auto_dispatch(tmp_path, monkeypatch):
+    engine, factory = _make_db(tmp_path, monkeypatch)
+    db = factory()
+    _seed(db)
+    db.add(AgentAlert(
+        alert_type="sandbox_stuck", severity="critical", status="open",
+        title="沙箱卡死", detail_json="{}", category="sandbox_stuck", source="watchdog",
+    ))
+    db.commit()
+
+    monkeypatch.setattr(module.settings, "agent_jarvis_auto_dispatch_enabled", False)
+    result = module.patrol_once()
+
+    assert result["alerts"] == 1
+    assert result["delivered"] == 0
+    assert result["skipped"] == 1
+    assert db.query(AgentMeshMessage).count() == 0
+    db.close()
+    engine.dispose()
+
+
 def test_patrol_delivers_brief_for_high_alert(tmp_path, monkeypatch):
     engine, factory = _make_db(tmp_path, monkeypatch)
     db = factory()
@@ -48,6 +74,7 @@ def test_patrol_delivers_brief_for_high_alert(tmp_path, monkeypatch):
         category="sandbox_stuck", source="sandbox_watchdog",
     ))
     db.commit()
+    _enable_auto_dispatch(monkeypatch)
 
     result = module.patrol_once()
 
@@ -85,6 +112,7 @@ def test_patrol_is_idempotent_for_unchanged_anomalies(tmp_path, monkeypatch):
         title="爆破尝试", detail_json="{}", category="brute_force", source="security_monitor",
     ))
     db.commit()
+    _enable_auto_dispatch(monkeypatch)
 
     assert module.patrol_once()["delivered"] == 1
     assert module.patrol_once()["delivered"] == 1
@@ -105,6 +133,7 @@ def test_failed_run_count_change_refreshes_brief(tmp_path, monkeypatch):
     )
     db.add(run_row)
     db.commit()
+    _enable_auto_dispatch(monkeypatch)
 
     assert module.patrol_once()["delivered"] == 1
     first = db.query(AgentMeshMessage).filter(AgentMeshMessage.idempotency_key.like("jarvis:%")).one()
@@ -158,6 +187,7 @@ def test_patrol_includes_stuck_sandbox_evidence(tmp_path, monkeypatch):
         create_time=datetime.now(timezone.utc) - timedelta(hours=3),
     ))
     db.commit()
+    _enable_auto_dispatch(monkeypatch)
     stats = module.patrol_once()
     assert stats["alerts"] >= 1
     msg = db.query(AgentMeshMessage).filter(

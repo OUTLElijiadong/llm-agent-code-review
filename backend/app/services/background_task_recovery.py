@@ -10,7 +10,9 @@ from typing import Iterable
 
 from loguru import logger
 
+from app.core.config import settings
 from app.core.database import SessionLocal
+from app.models.agent_mesh import AgentMeshMessage
 from app.models.agent_response_run import AgentResponseRun
 from app.models.user import User
 from app.services.agent_responses_service import AgentResponsesService
@@ -47,6 +49,13 @@ def find_interrupted_agent_runs() -> list[AgentRunRecovery]:
                 continue
             if not isinstance(checkpoint, dict) or checkpoint.get("recovery_requested") is not True:
                 continue
+            if _is_blocked_jarvis_recovery(db, row):
+                checkpoint["recovery_requested"] = False
+                checkpoint["error"] = "后台成本保护已阻止 JARVIS 自动恢复;请管理员明确发起核验"
+                row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+                row.version = int(row.version or 0) + 1
+                db.commit()
+                continue
             recoveries.append(
                 AgentRunRecovery(
                     run_id=str(row.run_id),
@@ -58,6 +67,24 @@ def find_interrupted_agent_runs() -> list[AgentRunRecovery]:
         return recoveries
     finally:
         db.close()
+
+
+def _is_blocked_jarvis_recovery(db, row: AgentResponseRun) -> bool:
+    """恢复队列中的旧 JARVIS 运行不得绕过自动派发开关。"""
+    if settings.agent_jarvis_auto_dispatch_enabled or not row.mesh_message_id:
+        return False
+    message = (
+        db.query(AgentMeshMessage)
+        .filter(AgentMeshMessage.message_id == row.mesh_message_id)
+        .first()
+    )
+    if message is None:
+        return False
+    try:
+        payload = json.loads(message.payload_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return isinstance(payload, dict) and payload.get("patrol_kind") == "jarvis"
 
 
 def start_agent_run_recovery(recoveries: Iterable[AgentRunRecovery] | None = None) -> int:

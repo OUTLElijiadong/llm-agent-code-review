@@ -57,3 +57,13 @@
 - 生产 .env 已配置 `SECURITY_SSH_ALLOWLIST_CIDRS=["117.141.0.0/16","39.144.0.0/16"]` 等阈值。
 - 上线调试期修复：alembic 022-026 补齐、调度 system_scheduled 身份、容器 env 文件对齐、爆破/备份规则细化。
 - 待办：生产部署分支与本地 main 分叉待合并；APP_RELEASE 环境显示旧值（.env 内 3ffbfe）属展示问题；SSH 白名单网段为默认家宽段，可按需调整。
+
+## 2026-08-25 线上成本保护修订
+
+本次复现发现，JARVIS 巡逻简报会被多个在线管理会话自动消费并启动小菱模型；`ops_health_check` 在不健康时也会隐式调用模型诊断，造成后台额度消耗。当前口径已修订为：
+
+- `AGENT_JARVIS_PATROL_ENABLED=true` 只保留告警证据采集；`AGENT_JARVIS_AUTO_DISPATCH_ENABLED=false` 默认不自动投递到模型。
+- `OPS_HEALTH_DIAGNOSIS_ENABLED=false` 默认只生成确定性告警和处置建议，不调用 LLM。
+- 管理员登录/打开小菱保持当前显式选择的新对话；历史 JARVIS 消息写完成回执，不自动启动 Responses。
+- 后端 `prepare_message_run` 与重启恢复清扫均有同一成本保护，旧前端或旧检查点不能绕过开关。
+- 管理员仍可在小菱中明确发起只读核验；如确需旧的自动派发/后台模型诊断，必须在生产 `.env` 显式开启对应开关并重新部署。

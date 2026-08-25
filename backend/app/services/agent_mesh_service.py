@@ -44,6 +44,14 @@ class AgentMeshSupervisionError(AgentMeshError):
     """监督式调度信封校验不合法。"""
 
 
+def is_jarvis_auto_dispatch_blocked(row: AgentMeshMessage) -> bool:
+    """判断一条 JARVIS 简报是否被后台成本保护拦截。"""
+    if settings.agent_jarvis_auto_dispatch_enabled:
+        return False
+    payload = _load(row.payload_json, {})
+    return isinstance(payload, dict) and payload.get("patrol_kind") == "jarvis"
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -1255,6 +1263,19 @@ def prepare_message_run(
         db.refresh(row)
     if row.status not in {"delivered", "acknowledged"}:
         raise AgentMeshStateError(f"消息当前状态 {row.status} 不能启动新回合")
+    if is_jarvis_auto_dispatch_blocked(row):
+        ack_message(
+            db,
+            user,
+            message_id,
+            surface=surface,
+            session_key=session_key,
+            acknowledgement=AgentMeshAckIn(
+                status="completed",
+                summary="JARVIS 简报已留存;后台成本保护阻止自动模型调用。",
+            ),
+        )
+        raise AgentMeshStateError("JARVIS 后台自动派发已关闭,请由管理员明确发起核验")
     ack_message(
         db,
         user,

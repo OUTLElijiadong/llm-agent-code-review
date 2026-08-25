@@ -82,6 +82,24 @@ export function pullAgentMeshInbox(
   }, [AGENT_MESH_SESSION_GONE_CODE])
 }
 
+/**
+ * 对不需要自动执行的结构化消息写入完成回执。
+ * 例如后台 JARVIS 简报在成本保护模式下只进入告警记录,不启动模型回合。
+ */
+export function acknowledgeAgentMeshMessage(
+  surface: AgentMeshSurface,
+  sessionId: string,
+  messageId: string,
+  status: 'acknowledged' | 'processing' | 'completed' | 'failed' = 'completed',
+  summary = '',
+): Promise<{ message_id: string; status: string }> {
+  return post<{ message_id: string; status: string }>(
+    `/agent-mesh/messages/${encodeURIComponent(messageId)}/ack`,
+    { status, summary },
+    { surface, session_id: sessionId },
+  )
+}
+
 export function getAgentMeshTrace(traceId: string): Promise<{
   trace_id: string
   messages: AgentMeshMessage[]

@@ -70,6 +70,33 @@ describe('Agent Mesh session bridge', () => {
     expect(receive).toHaveBeenCalledTimes(2)
   })
 
+  it('被策略延后的消息只写完成回执,不会进入 Responses', async () => {
+    const receive = vi.fn().mockResolvedValue(true)
+    const deferred = vi.fn().mockResolvedValue(true)
+    api.inbox.mockResolvedValue([{
+      message_id: 'msg_jarvis',
+      status: 'delivered',
+      subject: 'JARVIS 运维简报',
+      payload: { patrol_kind: 'jarvis' },
+    }])
+    const bridge = createAgentMeshBridge({
+      surface: 'admin',
+      getSessionId: () => 'session-admin-cost-01',
+      getTitle: () => '管理对话',
+      isBusy: () => false,
+      onMessage: receive,
+      shouldAutoProcess: (message) => message.payload.patrol_kind !== 'jarvis',
+      onDeferredMessage: deferred,
+    })
+
+    await bridge.syncNow()
+    await bridge.syncNow()
+
+    expect(deferred).toHaveBeenCalledOnce()
+    expect(deferred).toHaveBeenCalledWith(expect.objectContaining({ message_id: 'msg_jarvis' }), 'session-admin-cost-01')
+    expect(receive).not.toHaveBeenCalled()
+  })
+
   it('优先认领当前会话消息,再处理后台会话', async () => {
     const receive = vi.fn().mockResolvedValue(true)
     const pullOrder: string[] = []

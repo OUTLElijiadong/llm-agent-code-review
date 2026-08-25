@@ -116,8 +116,10 @@ class Settings(BaseSettings):
     agent_mesh_supervision_max_rounds: int = Field(default=3, ge=1, le=5)
     # 空 Mesh 会话归档阈值:活跃但无消息、无 Responses 运行且超过此时长的会话将被归档。
     agent_mesh_empty_session_archive_hours: int = Field(default=24, ge=1, le=720)
-    # 管理小菱 JARVIS 全自动运维巡逻:发现异常后主动向在线管理会话投递简报。
+    # 管理小菱 JARVIS 巡逻:发现异常后采集只读证据。
     agent_jarvis_patrol_enabled: bool = True
+    # 成本保护:默认不把定时巡逻简报自动交给模型处理;管理员明确发起时仍可核验。
+    agent_jarvis_auto_dispatch_enabled: bool = False
     agent_jarvis_patrol_interval_seconds: int = Field(default=300, ge=60, le=86400)
     agent_jarvis_online_window_minutes: int = Field(default=10, ge=1, le=1440)
     # 动态子 Agent 团队的持久化队列和租约边界；小菱不计入子 Agent 槽位。
@@ -182,6 +184,8 @@ class Settings(BaseSettings):
     ops_executor_socket: str = "/run/prism-ops/agent.sock"
     ops_executor_token: str = ""
     ops_automation_enabled: bool = True
+    # 成本保护:定时健康检查只采集状态和生成告警,默认不调用 LLM 诊断。
+    ops_health_diagnosis_enabled: bool = False
 
     # ── 安全监控（security_monitor_service 规则阈值） ──
     security_monitor_enabled: bool = True

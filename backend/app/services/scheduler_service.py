@@ -745,8 +745,13 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
         existing_alert.detail_json = json.dumps(alert_detail, ensure_ascii=False, default=str)
         db.commit()
 
-    diagnosis = agent.diagnose(db, None, alert_detail, f"trc_ops_sched_{job.id}")
-    summary["diagnosis"] = str(diagnosis.data or diagnosis.error or "").strip()[:4000]
+    if settings.ops_health_diagnosis_enabled:
+        diagnosis = agent.diagnose(db, None, alert_detail, f"trc_ops_sched_{job.id}")
+        summary["diagnosis"] = str(diagnosis.data or diagnosis.error or "").strip()[:4000]
+    else:
+        # 巡检仍然生成告警和确定性处置建议,但不在后台隐式消耗模型额度。
+        summary["diagnosis_skipped"] = True
+        summary["diagnosis"] = "后台成本保护已跳过模型诊断;请管理员在小菱中明确发起只读核验。"
 
     remediation: Optional[Dict[str, Any]] = None
     if failed_services:

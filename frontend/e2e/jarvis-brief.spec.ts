@@ -11,16 +11,15 @@ async function login(page: Page, username: string, password: string): Promise<vo
   await page.waitForURL(/dashboard|admin\/overview/, { timeout: 15_000 })
 }
 
-test('管理端:JARVIS 运维简报自动续跑并汇报', async ({ page }) => {
-  test.setTimeout(960_000)
+test('管理端:登录打开小菱保持新对话且不自动启动 JARVIS 模型', async ({ page }) => {
+  test.setTimeout(60_000)
   await login(page, ADMIN, ADMIN_PW)
   await page.getByTitle('小菱 · 管理副驾驶').first().click()
-  await page.waitForTimeout(2_500)
-  // 新会话在线后,下一巡逻周期会把简报投递到该会话,避免历史会话干扰。
+  await expect(page.locator('.copilot-panel')).toBeVisible()
+  await expect(page.locator('.copilot-run-badge').first()).toContainText('空闲', { timeout: 15_000 })
+  // 登录新会话只显示空闲对话;后台 JARVIS 不得自动启动 Responses。
   await page.locator('.session-new').first().click()
-  await page.waitForTimeout(1_000)
-  await expect(
-    page.locator('.copilot-messages').getByText(/JARVIS|运维简报|高危告警|巡逻/).first(),
-  ).toBeVisible({ timeout: 780_000 })
-  await expect(page.locator('.copilot-run-badge').first()).toContainText('空闲', { timeout: 120_000 })
+  await expect(page.locator('.session-current .session-name')).toHaveText('新对话')
+  await expect(page.locator('.copilot-run-badge').first()).toContainText('空闲', { timeout: 15_000 })
+  await expect(page.locator('.copilot-progress')).toBeHidden()
 })

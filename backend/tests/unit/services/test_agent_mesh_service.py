@@ -235,6 +235,45 @@ def test_inbox_delivery_ack_and_terminal_state_are_ordered(db, user) -> None:
     ]
 
 
+def test_disabled_jarvis_message_is_completed_without_preparing_model_run(db, user, monkeypatch) -> None:
+    for key in ("session-admin-a", "session-admin-b"):
+        agent_mesh_service.heartbeat(db, user, surface="admin", session_key=key, title=key)
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="admin",
+        session_key="session-admin-a",
+        message=_message(
+            idempotency_key="jarvis-cost-guard-001",
+            sent_from="session:admin:session-admin-a",
+            send_to="session:admin:session-admin-b",
+            message_type="status.update",
+            subject="JARVIS 运维简报",
+            payload={"patrol_kind": "jarvis", "evidence": []},
+        ),
+    )
+    agent_mesh_service.pull_inbox(
+        db,
+        user,
+        surface="admin",
+        session_key="session-admin-b",
+        limit=10,
+    )
+    monkeypatch.setattr(agent_mesh_service.settings, "agent_jarvis_auto_dispatch_enabled", False)
+
+    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="自动派发已关闭"):
+        agent_mesh_service.prepare_message_run(
+            db,
+            user,
+            created["message_id"],
+            surface="admin",
+            session_key="session-admin-b",
+        )
+
+    row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+    assert row.status == "completed"
+
+
 def test_expired_message_is_not_delivered(db, user) -> None:
     for key in ("session-a1", "session-b1"):
         agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)

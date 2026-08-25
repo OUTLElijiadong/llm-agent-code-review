@@ -19,6 +19,9 @@ export interface AgentMeshBridgeOptions {
   getActiveRun?: () => { run_id?: string; status?: string } | null
   isBusy: (sessionId: string) => boolean
   onMessage: (message: AgentMeshMessage, sessionId: string) => Promise<boolean>
+  /** 返回 false 的消息不进入 Responses;宿主可用 onDeferredMessage 做审计回执。 */
+  shouldAutoProcess?: (message: AgentMeshMessage, sessionId: string) => boolean
+  onDeferredMessage?: (message: AgentMeshMessage, sessionId: string) => Promise<boolean>
   /**
    * 某会话被判定「已归档/未注册」(轮询命中 40321)时回调。
    * 宿主应让切换器从服务端重新收敛会话列表,把该会话剔除,停止后续轮询。
@@ -103,6 +106,13 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
           item.status === 'delivered' && !handled.has(item.message_id)
         ))
         if (!message) continue
+        if (options.shouldAutoProcess && !options.shouldAutoProcess(message, session.id)) {
+          const deferred = options.onDeferredMessage
+            ? await options.onDeferredMessage(message, session.id)
+            : false
+          if (deferred) handled.add(message.message_id)
+          return
+        }
         if (await options.onMessage(message, session.id)) handled.add(message.message_id)
         return
       }
