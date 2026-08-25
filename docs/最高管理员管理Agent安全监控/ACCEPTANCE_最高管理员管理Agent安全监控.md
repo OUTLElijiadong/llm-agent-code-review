@@ -62,3 +62,17 @@
 | 重启恢复不绕过保护 | ✅ | 启动清扫与恢复队列均识别 JARVIS 运行并取消自动恢复标记 |
 | 显式开启兼容 | ✅ | JARVIS 派发、旧健康诊断路径的定向测试仍通过 |
 | 定向质量门禁 | ✅ | 后端 25 项 + Mesh 11 项、前端桥接 6 项、Ruff/Lint 全绿 |
+
+## 三、线上发布与真实点击复验（2026-08-25）
+
+| 检查项 | 结果 | 证据 |
+| --- | --- | --- |
+| 生产版本 | ✅ | Backend/Frontend 均为 `6469a20e94fdc16d4385be2a1e85b394899a951b`，`/healthz`、`/readyz` 通过 |
+| 成本保护配置 | ✅ | `AGENT_JARVIS_AUTO_DISPATCH_ENABLED=false`、`OPS_HEALTH_DIAGNOSIS_ENABLED=false` |
+| 管理员真实登录 | ✅ | `admin` 登录公网首页后进入 `/admin/overview` |
+| 点击小菱默认会话 | ✅ | 点击“打开小菱 · 管理副驾驶”后显示“新对话”+“空闲” |
+| 防止自动运行 | ✅ | 等待 15 秒无进度条、无停止按钮、无 JARVIS 内容，状态保持空闲 |
+| 发布后模型调用 | ✅ | 发布后 `ai_call_log` 与 `agent_response_run` 均无新增记录 |
+| 浏览器控制台 | ✅ | 线上复验页 error/warn 日志为空 |
+
+说明：数据库仍保留 2026-08-14 的 8 条 queued、3 条 processing 历史 JARVIS Mesh 记录；当前没有运行中的 Responses，后端恢复清扫不会重新启动它们，作为审计历史保留。属于当前会话的 queued 记录在被拉取时会由前端过滤并完成回执。

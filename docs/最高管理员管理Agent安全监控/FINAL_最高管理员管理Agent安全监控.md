@@ -67,3 +67,13 @@
 - 管理员登录/打开小菱保持当前显式选择的新对话；历史 JARVIS 消息写完成回执，不自动启动 Responses。
 - 后端 `prepare_message_run` 与重启恢复清扫均有同一成本保护，旧前端或旧检查点不能绕过开关。
 - 管理员仍可在小菱中明确发起只读核验；如确需旧的自动派发/后台模型诊断，必须在生产 `.env` 显式开启对应开关并重新部署。
+
+## 2026-08-25 线上部署与真实点击验收
+
+- 发布提交：`6469a20e94fdc16d4385be2a1e85b394899a951b`；生产分支：`codex/jarvis-cost-guard-6469a20`。
+- 生产镜像：`prism-backend:6469a20e94fdc16d4385be2a1e85b394899a951b`、`prism-frontend:6469a20e94fdc16d4385be2a1e85b394899a951b`；Backend、Frontend、MySQL、Redis、ClamAV 均 healthy。
+- 发布前已备份并通过隔离恢复校验生产数据库；备份位于 `/opt/code-review-env-backups/.env.pre-jarvis-20260825T013521Z`，Alembic 当前为 `040`。
+- `/healthz` 与 `/readyz` 均返回 `status=ok/ready`，版本和 release 均为上述提交。
+- 管理员 `admin` 真实登录 `https://lijiadong.cn/` 后点击“打开小菱 · 管理副驾驶”：当前会话显示“新对话”，运行状态为“空闲”，无进度条、无停止按钮、无 JARVIS/每日运维内容；等待 15 秒后状态不变。
+- 浏览器复验期间页面错误/警告为空；发布后数据库没有新增 JARVIS 消息、模型调用或 `agent_response_run` 运行记录。
+- 数据库中仍有 2026-08-14 遗留的 11 条未收敛 JARVIS Mesh 历史记录（8 queued、3 processing），均无对应运行中的 Responses；它们不会被当前成本保护路径自动恢复或启动模型，属于当前会话的记录在被拉取时会由前端过滤并完成回执。
