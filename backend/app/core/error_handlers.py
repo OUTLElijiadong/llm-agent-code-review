@@ -29,13 +29,17 @@ def register_handlers(app: FastAPI) -> None:
         """处理项目自定义业务异常。"""
         request_id = get_request_id(req)
         content: dict = {"code": exc.code, "message": exc.message}
+        headers = {"X-Request-Id": request_id}
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after is not None:
+            headers["Retry-After"] = str(max(1, int(retry_after)))
         # 生产环境收敛 detail/request_id 等调试细节,仅保留业务 code 与 message
         if not _is_prod():
             content["detail"] = exc.detail
             content["request_id"] = request_id
         return JSONResponse(
             status_code=exc.http_status,
-            headers={"X-Request-Id": request_id},
+            headers=headers,
             content=content,
         )
 

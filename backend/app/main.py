@@ -112,6 +112,10 @@ async def lifespan(app: FastAPI):
     from app.services.agent_scheduler_runtime import start_agent_governance_scheduler, stop_agent_governance_scheduler
     from app.services.agent_team_dispatcher import start_agent_team_dispatcher, stop_agent_team_dispatcher
     from app.services.jarvis_patrol_service import start_jarvis_patrol, stop_jarvis_patrol
+    from app.services.project_import_dispatcher import (
+        start_project_import_dispatcher,
+        stop_project_import_dispatcher,
+    )
 
     _sweep_db = _SessionLocal()
     try:
@@ -138,6 +142,7 @@ async def lifespan(app: FastAPI):
     start_agent_team_dispatcher()
     start_agent_governance_scheduler()
     start_jarvis_patrol()
+    start_project_import_dispatcher()
     from app.services.background_task_recovery import start_agent_run_recovery
     from app.services.review_service import resume_interrupted_tasks
     from app.services.sandbox_service import resume_interrupted_environments
@@ -153,6 +158,7 @@ async def lifespan(app: FastAPI):
         stop_agent_team_dispatcher()
         stop_agent_governance_scheduler()
         stop_jarvis_patrol()
+        stop_project_import_dispatcher()
 
 
 app = FastAPI(
@@ -181,7 +187,7 @@ app.state.limiter = limiter
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
     """命中限流时返回 429 + 统一错误结构"""
     request_id = get_request_id(request)
-    return JSONResponse(
+    response = JSONResponse(
         status_code=429,
         headers={"X-Request-Id": request_id},
         content={
@@ -191,6 +197,12 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
             "request_id": request_id,
         },
     )
+    # SlowAPI 根据当前窗口注入 Retry-After / X-RateLimit-*；旧处理器覆盖响应后
+    # 丢失这些兼容头，客户端无法判断何时可重试。
+    try:
+        return limiter._inject_headers(response, request.state.view_rate_limit)
+    except Exception:
+        return response
 
 
 register_handlers(app)

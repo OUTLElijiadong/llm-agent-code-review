@@ -26,7 +26,6 @@ from app.agents.tool_contracts import (
     DownloadProjectSourceArguments,
     FixedToolArgumentError,
     FixedToolArguments,
-    ImportRemoteProjectArguments,
     UpdateProjectArguments,
     get_fixed_tool_description,
     get_fixed_tool_names,
@@ -160,6 +159,22 @@ class ControlRoundtableDiscussionArguments(FixedToolArguments):
     content: str = ""
 
 
+class QueueRemoteProjectImportArguments(FixedToolArguments):
+    """创建可恢复远程导入任务的参数。"""
+
+    url: str
+    project_name: str
+    description: str = ""
+    language: Optional[str] = None
+    audit_mode: bool = False
+
+
+class GetRemoteProjectImportArguments(FixedToolArguments):
+    """查询可恢复远程导入任务的参数。"""
+
+    task_id: str
+
+
 _ADMIN_TOOL_PREFIX = "admin_"
 _SUPER_ADMIN_FIXED_TOOLS = frozenset({"admin_system_status"})
 _SECURITY_SCAN_FIXED_TOOLS = frozenset({
@@ -171,7 +186,7 @@ _WRITE_TOOLS = {
     "create_project",
     "update_project",
     "delete_project",
-    "import_remote_project",
+    "queue_remote_project_import",
     "start_roundtable_discussion",
     "control_roundtable_discussion",
     "start_review",
@@ -193,7 +208,8 @@ _DANGER_TOOLS = {
 }
 _USER_CAPABILITY_NAMES = {
     "update_project",
-    "import_remote_project",
+    "queue_remote_project_import",
+    "get_remote_project_import",
     "download_project_source",
     "download_report",
     "download_code_file",
@@ -756,7 +772,8 @@ class PrismToolExecutor:
             try:
                 model_by_name = {
                     "update_project": UpdateProjectArguments,
-                    "import_remote_project": ImportRemoteProjectArguments,
+                    "queue_remote_project_import": QueueRemoteProjectImportArguments,
+                    "get_remote_project_import": GetRemoteProjectImportArguments,
                     "download_project_source": DownloadProjectSourceArguments,
                     "download_report": DownloadReportArguments,
                     "download_code_file": DownloadCodeFileArguments,
@@ -944,6 +961,17 @@ class PrismToolExecutor:
             # 审计类工具:同步转发事件总线里的 fullchain 阶段事件为 SSE 进度
             # (侦察→分析→验证→汇报),前端渲染成通俗角色阶段卡
             return await self._execute_audit_with_progress(call)
+        if call.name in _USER_CAPABILITY_NAMES:
+            return await self._execute_once(
+                call,
+                lambda: self._agent_result(
+                    call,
+                    getattr(self._orch, call.name)(
+                        **call.arguments,
+                        ctx=self._agent_context(),
+                    ),
+                ),
+            )
         return await self._execute_once(
             call,
             lambda: self._agent_result(
@@ -2435,8 +2463,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "重启服务用 restart_service，装/卸软件包用 package_action，"
             "改防火墙/服务/账号等写操作都会自动等待用户批准，批准后系统会把结果交还给你。"
             "用户直接发送 GitHub 公开仓库网址(https://github.com/{owner}/{repo} 或 /tree/<分支>)时："
-            "调用 import_remote_project(url=原始网址, project_name=仓库名, audit_mode=true) 导入为隔离审计项目；"
-            "导入成功后立即调用 audit_security_for_project(project_id=返回的 id, scan_mode='static_full') "
+            "调用 queue_remote_project_import(url=原始网址, project_name=仓库名, audit_mode=true) 创建可恢复导入任务；"
+            "queued/running 只报告真实 task_id 和进度，不要忙轮询或声称已完成；后续查询使用 get_remote_project_import。"
+            "任务 succeeded 后才调用 audit_security_for_project(project_id=返回的 project_id, scan_mode='static_full') "
             "执行整包安全审计，并基于工具返回的真实结果汇报；不要伪造下载或审计结果。"
         )
     else:
@@ -2463,8 +2492,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "把对应副本 id 传给 run_project_tests 或 deploy_project_sandbox 的 source_revision_id，"
             "不传则默认使用原始源码。"
             "用户直接发送 GitHub 公开仓库网址(https://github.com/{owner}/{repo} 或 /tree/<分支>)时："
-            "调用 import_remote_project(url=原始网址, project_name=仓库名, audit_mode=true) 导入为隔离审计项目；"
-            "导入成功后立即调用 audit_security_for_project(project_id=返回的 id, scan_mode='static_full') "
+            "调用 queue_remote_project_import(url=原始网址, project_name=仓库名, audit_mode=true) 创建可恢复导入任务；"
+            "queued/running 只报告真实 task_id 和进度，不要忙轮询或声称已完成；后续查询使用 get_remote_project_import。"
+            "任务 succeeded 后才调用 audit_security_for_project(project_id=返回的 project_id, scan_mode='static_full') "
             "执行整包安全审计，并基于工具返回的真实结果汇报；不要伪造下载或审计结果。"
         )
         role_behavior = (
@@ -2928,9 +2958,15 @@ def _user_capability_schemas() -> list[Dict[str, Any]]:
         },
         {
             "type": "function",
-            "name": "import_remote_project",
-            "description": "导入公开 HTTPS 源码归档并创建项目；执行前需要用户批准",
-            "parameters": ImportRemoteProjectArguments.model_json_schema(),
+            "name": "queue_remote_project_import",
+            "description": "创建可恢复、可查询进度的公开 HTTPS/GitHub 项目导入任务；执行前需要用户批准",
+            "parameters": QueueRemoteProjectImportArguments.model_json_schema(),
+        },
+        {
+            "type": "function",
+            "name": "get_remote_project_import",
+            "description": "查询当前用户远程项目导入任务的进度、结果或具体失败原因",
+            "parameters": GetRemoteProjectImportArguments.model_json_schema(),
         },
         {
             "type": "function",

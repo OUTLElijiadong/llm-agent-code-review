@@ -9,8 +9,8 @@ from app.core.captcha import create_captcha, verify_captcha
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import ValidationError
-from app.core.rate_limit import limiter
+from app.core.exceptions import AuthError, ForbiddenError, TooManyRequestsError, ValidationError
+from app.core.rate_limit import client_ip, limiter, login_failure_limiter
 from app.models.user import User
 from app.schemas.auth import ChangePasswordIn, LoginIn, LoginOut, RegisterIn, UserOut
 from app.schemas.common import Resp
@@ -20,11 +20,8 @@ router = APIRouter()
 
 
 def _client_ip(request: Request) -> str:
-    """优先取 X-Forwarded-For 第一段,降级到 client.host"""
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else ""
+    """只信任配置网段内反向代理覆盖写入的真实来源。"""
+    return client_ip(request)
 
 
 @router.get("/captcha", response_model=Resp[dict])
@@ -57,12 +54,27 @@ def register(payload: RegisterIn, request: Request, db: Session = Depends(get_db
 
 
 @router.post("/login", response_model=Resp[LoginOut])
-@limiter.limit("10/minute")
 def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
     """用户登录"""
     ip = _client_ip(request)
+    limit_state = login_failure_limiter.check(ip)
+    if not limit_state.allowed:
+        raise TooManyRequestsError(retry_after=limit_state.retry_after)
     try:
         token, user = auth_service.login(db, payload.username, payload.password, ip=ip)
+    except (AuthError, ForbiddenError) as exc:
+        login_failure_limiter.record_failure(ip)
+        audit_service.log(
+            db,
+            None,
+            "login",
+            target_type="user",
+            target_id=payload.username,
+            detail=f"登录失败: {exc}",
+            status="failed",
+            ip=ip,
+        )
+        raise
     except Exception as exc:
         audit_service.log(
             db,
@@ -75,6 +87,7 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
             ip=ip,
         )
         raise
+    login_failure_limiter.reset(ip)
     audit_service.log(
         db,
         user,

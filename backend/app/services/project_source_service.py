@@ -12,12 +12,17 @@ import hashlib
 import hmac
 import io
 import json
+import os
 import re
+import tempfile
 import time
 import uuid
 import zipfile
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+from typing import Callable, Iterator
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -100,6 +105,16 @@ class RemoteArchiveNotFoundError(ExternalServiceError):
     继承 ExternalServiceError 保持既有错误语义，同时让 GitHub 默认分支解析
     能可靠识别 404 并继续尝试下一个候选分支。
     """
+
+
+@dataclass(frozen=True)
+class DownloadedRemoteArchive:
+    """下载期间存在于本机临时目录的远程源码归档。"""
+
+    path: Path
+    filename: str
+    byte_size: int
+    sha256: str
 
 
 def _github_url_has_credentials(payload: str) -> bool:
@@ -760,7 +775,7 @@ def build_source_archive(db: Session, user: User, project_id: int) -> tuple[byte
 
 def _pin_remote_url(url: str) -> PinnedPublicUrl:
     parsed = urlsplit(url)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise ValidationError("远程源码仅支持不带凭据的 HTTPS 公共地址", code=40001)
     try:
         port = parsed.port
@@ -768,12 +783,42 @@ def _pin_remote_url(url: str) -> PinnedPublicUrl:
         raise ValidationError("远程源码地址端口格式无效", code=40001) from exc
     if port not in (None, 443):
         raise ValidationError("远程源码地址只允许 HTTPS 默认端口", code=40001)
+    if _github_url_has_credentials(parsed.query) or _github_url_has_credentials(parsed.fragment):
+        raise ValidationError("远程源码地址不能包含凭据", code=40001)
     return pin_public_http_url(url, require_https=True)
 
 
 def _assert_public_url(url: str) -> None:
     """兼容旧调用方的只校验入口。"""
     _pin_remote_url(url)
+
+
+def validate_remote_project_url(url: str) -> None:
+    """在任务入队前做无网络的 URL 语法与凭据校验。
+
+    DNS 与逐跳公网地址校验仍在真正下载时执行，避免入队接口被慢 DNS 阻塞。
+    """
+
+    value = (url or "").strip()
+    if _is_github_project_page_url(value):
+        _normalize_github_project_url(value)
+        return
+    try:
+        parsed = urlsplit(value)
+    except ValueError as exc:
+        raise ValidationError("远程源码地址格式无效", code=40001) from exc
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValidationError("远程源码仅支持 HTTPS 公共地址", code=40001)
+    if parsed.username or parsed.password:
+        raise ValidationError("远程源码地址不能包含用户名或密码", code=40001)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValidationError("远程源码地址端口格式无效", code=40001) from exc
+    if port not in (None, 443):
+        raise ValidationError("远程源码地址只允许 HTTPS 默认端口", code=40001)
+    if _github_url_has_credentials(parsed.query) or _github_url_has_credentials(parsed.fragment):
+        raise ValidationError("远程源码地址不能包含凭据", code=40001)
 
 
 def _archive_name(url: str, headers: httpx.Headers) -> str:
@@ -786,64 +831,147 @@ def _archive_name(url: str, headers: httpx.Headers) -> str:
     return name
 
 
-def download_remote_archive(url: str) -> tuple[bytes, str]:
-    """下载公开 HTTPS 源码归档并逐跳校验重定向。
+@contextmanager
+def download_remote_archive_to_temp(
+    url: str,
+    *,
+    temp_dir: Path | str | None = None,
+    progress_callback: Callable[[int, int | None], None] | None = None,
+) -> Iterator[DownloadedRemoteArchive]:
+    """逐跳校验并把远程归档流式写入一次性临时文件。"""
 
-    不设业务大小上限,但当响应体超过 MAX_REMOTE_BYTES 时立即中止,
-    防止超大响应把服务内存耗尽。
-    """
     current = url.strip()
-    for _ in range(MAX_REDIRECTS + 1):
-        target = _pin_remote_url(current)
-        # 每一跳独立连接池，保证固定 IP、Host 和 TLS SNI 是同一个目标。
-        with httpx.Client(
-            timeout=httpx.Timeout(30.0, connect=10.0),
-            follow_redirects=False,
-            trust_env=False,
-        ) as client:
-            with client.stream(
-                "GET",
-                target.request_url,
-                headers={"Host": target.host_header},
-                extensions=target.request_extensions,
-            ) as response:
-                if response.status_code in {301, 302, 303, 307, 308}:
-                    location = response.headers.get("location")
-                    if not location:
-                        raise ValidationError("远程源码重定向缺少目标地址", code=40001)
-                    from urllib.parse import urljoin
+    temporary_path: Path | None = None
+    try:
+        for _ in range(MAX_REDIRECTS + 1):
+            target = _pin_remote_url(current)
+            # 每一跳独立连接池，保证固定 IP、Host 和 TLS SNI 是同一个目标。
+            with httpx.Client(
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
+                with client.stream(
+                    "GET",
+                    target.request_url,
+                    headers={"Host": target.host_header},
+                    extensions=target.request_extensions,
+                ) as response:
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location")
+                        if not location:
+                            raise ValidationError("远程源码重定向缺少目标地址", code=40001)
+                        from urllib.parse import urljoin
 
-                    current = urljoin(current, location)
-                    continue
-                if response.status_code == 404:
-                    not_found = RemoteArchiveNotFoundError(
-                        f"远程源码归档不存在(HTTP {response.status_code})",
-                        code=50201,
-                    )
-                    not_found.status_code = response.status_code
-                    raise not_found
-                if response.status_code >= 400:
-                    raise ExternalServiceError(
-                        f"远程源码下载失败(HTTP {response.status_code})",
-                        code=50201,
-                    )
-                try:
-                    _ = int(response.headers.get("content-length") or 0)
-                except (TypeError, ValueError) as exc:
-                    raise ExternalServiceError("远程源码响应长度无效", code=50201) from exc
-                chunks: list[bytes] = []
-                received = 0
-                for chunk in response.iter_bytes():
-                    received += len(chunk)
-                    if received > MAX_REMOTE_BYTES:
+                        current = urljoin(current, location)
+                        continue
+                    if response.status_code == 404:
+                        not_found = RemoteArchiveNotFoundError(
+                            f"远程源码归档不存在(HTTP {response.status_code})",
+                            code=50201,
+                        )
+                        not_found.status_code = response.status_code
+                        raise not_found
+                    if response.status_code >= 400:
+                        raise ExternalServiceError(
+                            f"远程源码下载失败(HTTP {response.status_code})",
+                            code=50201,
+                        )
+                    try:
+                        content_length = int(response.headers.get("content-length") or 0)
+                    except (TypeError, ValueError) as exc:
+                        raise ExternalServiceError("远程源码响应长度无效", code=50201) from exc
+                    if content_length > MAX_REMOTE_BYTES:
                         limit_mb = MAX_REMOTE_BYTES // (1024 * 1024)
                         raise ValidationError(
                             f"远程源码大小超过 {limit_mb}MB 上限，已中止下载",
                             code=40001,
                         )
-                    chunks.append(chunk)
-                return b"".join(chunks), _archive_name(current, response.headers)
-    raise ValidationError("远程源码重定向次数过多", code=40001)
+                    filename = _archive_name(current, response.headers)
+                    digest = hashlib.sha256()
+                    received = 0
+                    with tempfile.NamedTemporaryFile(
+                        mode="wb",
+                        prefix="prism-remote-import-",
+                        suffix=".archive",
+                        dir=temp_dir,
+                        delete=False,
+                    ) as handle:
+                        temporary_path = Path(handle.name)
+                        for chunk in response.iter_bytes():
+                            if not chunk:
+                                continue
+                            received += len(chunk)
+                            if received > MAX_REMOTE_BYTES:
+                                limit_mb = MAX_REMOTE_BYTES // (1024 * 1024)
+                                raise ValidationError(
+                                    f"远程源码大小超过 {limit_mb}MB 上限，已中止下载",
+                                    code=40001,
+                                )
+                            handle.write(chunk)
+                            digest.update(chunk)
+                            if progress_callback is not None:
+                                progress_callback(received, content_length or None)
+                    downloaded = DownloadedRemoteArchive(
+                        path=temporary_path,
+                        filename=filename,
+                        byte_size=received,
+                        sha256=digest.hexdigest(),
+                    )
+                    yield downloaded
+                    return
+        raise ValidationError("远程源码重定向次数过多", code=40001)
+    finally:
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+
+
+@contextmanager
+def download_remote_project_archive_to_temp(
+    url: str,
+    *,
+    temp_dir: Path | str | None = None,
+    progress_callback: Callable[[int, int | None], None] | None = None,
+) -> Iterator[DownloadedRemoteArchive]:
+    """下载远程项目，GitHub 仓库页按 main、master 兼容回退。"""
+
+    if not _is_github_project_page_url(url):
+        with download_remote_archive_to_temp(
+            url,
+            temp_dir=temp_dir,
+            progress_callback=progress_callback,
+        ) as downloaded:
+            yield downloaded
+        return
+
+    last_error: Exception | None = None
+    for candidate in _github_archive_candidates(url):
+        entered = False
+        try:
+            with download_remote_archive_to_temp(
+                candidate,
+                temp_dir=temp_dir,
+                progress_callback=progress_callback,
+            ) as downloaded:
+                entered = True
+                yield downloaded
+                return
+        except Exception as exc:
+            if entered or not _is_remote_archive_not_found(exc):
+                raise
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+def download_remote_archive(url: str) -> tuple[bytes, str]:
+    """兼容旧调用：内部流式落盘，完成后返回原有 bytes/filename。"""
+
+    with download_remote_archive_to_temp(url) as downloaded:
+        return downloaded.path.read_bytes(), downloaded.filename
 
 
 def import_remote_project(

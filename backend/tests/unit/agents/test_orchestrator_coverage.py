@@ -310,8 +310,8 @@ def test_archive_agent_wrappers_forward_static_full_and_remote_audit_mode(
         "static_full",
     )
 
-    import_remote = MagicMock(return_value={"id": 91, "source_mode": "quarantined_archive"})
-    monkeypatch.setattr(orchestrator_module.project_source_service, "import_remote_project", import_remote)
+    import_remote = MagicMock(return_value={"task_id": "abc123", "status": "queued"})
+    monkeypatch.setattr(orchestrator_module.project_import_service, "create_import_task", import_remote)
 
     imported = orch.import_remote_project(
         "https://example.test/source.zip",
@@ -322,6 +322,8 @@ def test_archive_agent_wrappers_forward_static_full_and_remote_audit_mode(
     )
 
     assert imported.success is True
+    assert imported.data["status"] == "queued"
+    assert imported.data["status_url"] == "/api/projects/remote-imports/abc123"
     import_remote.assert_called_once_with(
         orch._db,
         orch._user,
@@ -330,6 +332,7 @@ def test_archive_agent_wrappers_forward_static_full_and_remote_audit_mode(
         description="whole archive",
         language="php",
         audit_mode=True,
+        idempotency_key=None,
     )
 
 

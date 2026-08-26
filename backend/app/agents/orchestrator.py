@@ -33,7 +33,12 @@ from app.core.exceptions import AuthError
 from app.core.permission_codes import PermissionCode
 from app.models.user import User
 from app.schemas.project import ProjectUpdateIn
-from app.services import auth_service, project_service, project_source_service
+from app.services import (
+    auth_service,
+    project_import_service,
+    project_service,
+    project_source_service,
+)
 from app.services.rbac_service import check_permission
 from app.utils.api_resolver import ApiConfig, resolve_api_config
 
@@ -279,15 +284,68 @@ class Orchestrator(BaseAgent):
                               language: Optional[str] = None,
                               audit_mode: bool = False,
                               ctx: Optional[AgentContext] = None) -> AgentResult:
-        """通过当前用户导入公开远程源码归档。"""
+        """兼容旧 Agent 调用名，内部统一迁移到可恢复任务模式。"""
+
+        return self.queue_remote_project_import(
+            url=url,
+            project_name=project_name,
+            description=description,
+            language=language,
+            audit_mode=audit_mode,
+            ctx=ctx,
+        )
+
+    def queue_remote_project_import(
+        self,
+        url: str,
+        project_name: str,
+        description: str = "",
+        language: Optional[str] = None,
+        audit_mode: bool = False,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """以当前用户身份创建可恢复的远程导入任务。"""
+
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if not check_permission(self._db, self._user.id, PermissionCode.PROJECT_IMPORT):
+            return AgentResult(success=False, error="当前用户没有 project:import 权限")
+        run_id = str((ctx.extra or {}).get("run_id") or "") if ctx else ""
+        idempotency_key = (
+            f"agent-remote-import:{run_id}:{project_name}:{url}" if run_id else None
+        )
+        try:
+            data = project_import_service.create_import_task(
+                self._db,
+                self._user,
+                url=url,
+                project_name=project_name,
+                description=description,
+                language=language,
+                audit_mode=audit_mode,
+                idempotency_key=idempotency_key,
+            )
+            data["status_url"] = f"/api/projects/remote-imports/{data['task_id']}"
+            return AgentResult(success=True, data=data)
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
+    def get_remote_project_import(
+        self,
+        task_id: str,
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """读取当前用户远程导入任务的真实状态和失败原因。"""
+
         if self._db is None or self._user is None:
             return AgentResult(success=False, error="DB 或用户上下文未注入")
         if not check_permission(self._db, self._user.id, PermissionCode.PROJECT_IMPORT):
             return AgentResult(success=False, error="当前用户没有 project:import 权限")
         try:
-            data = project_source_service.import_remote_project(
-                self._db, self._user, url=url, project_name=project_name,
-                description=description, language=language, audit_mode=audit_mode,
+            data = project_import_service.get_import_task(
+                self._db,
+                self._user,
+                task_id,
             )
             return AgentResult(success=True, data=data)
         except Exception as exc:

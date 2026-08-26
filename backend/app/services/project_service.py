@@ -146,7 +146,14 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
     return pagination.to_dict(items)
 
 
-def create_project(db: Session, user: User, payload: ProjectIn) -> Project:
+def create_project(
+    db: Session,
+    user: User,
+    payload: ProjectIn,
+    *,
+    initial_status: str = "active",
+    commit: bool = True,
+) -> Project:
     """创建新项目并写入 project_member(owner) 记录
 
     Args:
@@ -160,6 +167,8 @@ def create_project(db: Session, user: User, payload: ProjectIn) -> Project:
     Raises:
         ConflictError: 项目名与已有项目重复
     """
+    if initial_status not in {"active", "importing"}:
+        raise ValueError("项目初始状态只允许 active 或 importing")
     exists = db.query(Project.id).filter(
         Project.user_id == user.id, Project.project_name == payload.project_name,
         Project.status != "deleted").first()
@@ -171,13 +180,22 @@ def create_project(db: Session, user: User, payload: ProjectIn) -> Project:
         project_name=sanitize_text(payload.project_name),
         description=sanitize_text(payload.description),
         language=payload.language,
-        status="active",
+        status=initial_status,
     )
     db.add(project)
-    db.commit()
-    db.refresh(project)
-    # 同步写入 project_member(owner) 记录,确保后续数据隔离能查到该项目
-    ensure_owner_member(db, project.id, user.id)
+    if commit:
+        db.commit()
+        db.refresh(project)
+        # 同步写入 project_member(owner) 记录,确保后续数据隔离能查到该项目
+        ensure_owner_member(db, project.id, user.id)
+    else:
+        db.flush()
+        db.add(ProjectMember(
+            project_id=project.id,
+            user_id=user.id,
+            role_in_project="owner",
+        ))
+        db.flush()
     return project
 
 

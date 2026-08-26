@@ -60,6 +60,7 @@ from app.models.code_version import CodeVersion  # noqa: F401,E402
 from app.models.eval_case import EvalCase  # noqa: F401,E402
 from app.models.evolution_proposal import EvolutionProposal  # noqa: F401,E402
 from app.models.project import Project  # noqa: F401,E402
+from app.models.project_import_task import ProjectImportTask  # noqa: F401,E402
 from app.models.project_member import ProjectMember  # noqa: F401,E402  -- v2.4
 from app.models.project_source_archive import ProjectSourceArchive  # noqa: F401,E402
 

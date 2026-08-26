@@ -24,6 +24,7 @@ _MODEL_MODULES = (
     "app.models.code_version",
     "app.models.custom_agent",
     "app.models.project",
+    "app.models.project_import_task",
     "app.models.project_source_archive",
     "app.models.project_source_revision",
     "app.models.review_issue",

@@ -150,6 +150,25 @@ class Settings(BaseSettings):
     # Agent SSE 跨 worker 广播。留空时自动降级为当前进程内事件总线。
     redis_url: str = ""
 
+    # 反向代理与登录失败限流。生产 Nginx 会覆盖写入 X-Real-IP；应用只在
+    # 直连对端属于这些网段时信任该请求头，避免客户端伪造 X-Forwarded-For。
+    trusted_proxy_cidrs: List[str] = [
+        "127.0.0.0/8",
+        "::1/128",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+    ]
+    login_failure_limit: int = Field(default=5, ge=1, le=100)
+    login_failure_window_seconds: int = Field(default=60, ge=10, le=3600)
+
+    # 远程项目异步导入队列。任务与租约落库，进程或容器重启后可重新领取。
+    project_import_dispatcher_enabled: bool = True
+    project_import_dispatch_interval_seconds: int = Field(default=2, ge=1, le=60)
+    project_import_max_workers: int = Field(default=1, ge=1, le=4)
+    project_import_max_attempts: int = Field(default=3, ge=1, le=10)
+    project_import_lease_seconds: int = Field(default=900, ge=60, le=3600)
+
     # MCP Server 由平台在本地发现并转换为 function tools。DeepSeek 当前会忽略
     # 原生 type=mcp，因此不能把配置直接透传给上游。
     mcp_servers_json: str = "[]"

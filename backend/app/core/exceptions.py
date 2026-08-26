@@ -15,6 +15,10 @@ class AppError(Exception):
         self.code = code or self.code
         self.detail = detail
 
+    def __str__(self) -> str:
+        """异常跨任务/SSE 边界时保留可操作的业务原因。"""
+        return self.message
+
 
 class AuthError(AppError):
     """鉴权异常: 未登录或token无效"""
@@ -91,3 +95,21 @@ class ServiceUnavailableError(AppError):
 
     code = 50301
     http_status = 503
+
+
+class TooManyRequestsError(AppError):
+    """请求在短时间窗口内超过安全阈值。"""
+
+    code = 42900
+    http_status = 429
+
+    def __init__(
+        self,
+        message: str = "请求过于频繁,请稍后再试",
+        *,
+        retry_after: int = 1,
+        code: Optional[int] = None,
+        detail: Any = None,
+    ) -> None:
+        super().__init__(message, code=code, detail=detail)
+        self.retry_after = max(1, int(retry_after))

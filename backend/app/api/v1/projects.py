@@ -7,18 +7,32 @@ import json
 import urllib.parse
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Header, Query, Request, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
-from app.schemas.project import ProjectDetailOut, ProjectIn, ProjectOut, ProjectUpdateIn, RemoteProjectImportIn
-from app.services import audit_service, project_service, project_source_revision_service, project_source_service
+from app.schemas.project import (
+    ProjectDetailOut,
+    ProjectIn,
+    ProjectOut,
+    ProjectUpdateIn,
+    RemoteProjectImportIn,
+    RemoteProjectImportTaskOut,
+)
+from app.services import (
+    audit_service,
+    project_import_service,
+    project_service,
+    project_source_revision_service,
+    project_source_service,
+)
 
 router = APIRouter()
 
@@ -78,6 +92,52 @@ def import_remote_project(payload: RemoteProjectImportIn, db: Session = Depends(
         audit_mode=payload.audit_mode,
     )
     return Resp(data=data)
+
+
+@router.post(
+    "/remote-imports",
+    response_model=Resp[RemoteProjectImportTaskOut],
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_permission(PermissionCode.PROJECT_IMPORT))],
+)
+def queue_remote_project_import(
+    payload: RemoteProjectImportIn,
+    response: Response,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """创建可恢复的远程导入任务；显式幂等键可安全重放。"""
+
+    data = project_import_service.create_import_task(
+        db,
+        user,
+        url=payload.url,
+        project_name=payload.project_name,
+        description=payload.description or "",
+        language=payload.language,
+        audit_mode=payload.audit_mode,
+        idempotency_key=idempotency_key,
+    )
+    response.headers["Location"] = f"/api/projects/remote-imports/{data['task_id']}"
+    response.headers["Retry-After"] = str(settings.project_import_dispatch_interval_seconds)
+    return Resp(data=RemoteProjectImportTaskOut(**data))
+
+
+@router.get(
+    "/remote-imports/{task_id}",
+    response_model=Resp[RemoteProjectImportTaskOut],
+    dependencies=[Depends(require_permission(PermissionCode.PROJECT_IMPORT))],
+)
+def get_remote_project_import(
+    task_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """查询当前用户创建的远程导入任务和可操作失败原因。"""
+
+    data = project_import_service.get_import_task(db, user, task_id)
+    return Resp(data=RemoteProjectImportTaskOut(**data))
 
 
 @router.get("/{project_id}", response_model=Resp[ProjectDetailOut],
