@@ -15,6 +15,7 @@ import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
+import ThinkingCity from '@/components/ai/ThinkingCity.vue'
 import AiOrb from '@/components/common/AiOrb.vue'
 import FluidProgress from '@/components/common/FluidProgress.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
@@ -149,6 +150,8 @@ const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const loading = ref(false)
 const showTyping = ref(false)
+/** 思考城市(想法可视化)展开态:默认展开,可一键收起只看紧凑气泡 */
+const thinkingCityOpen = ref(true)
 const modelName = ref('deepseek-v4-flash')
 const chatBody = ref<HTMLElement>()
 const chatInputRef = ref<HTMLTextAreaElement>()
@@ -2399,14 +2402,26 @@ onMounted(() => {
               <div class="msg-avatar">
                 <PrismMascot :size="26" :status="'running'" />
               </div>
-              <div class="msg-bubble typing" aria-label="小菱正在思考">
+              <div class="msg-bubble typing" :class="{ 'is-city-open': thinkingCityOpen }" aria-label="小菱正在思考">
                 <AiOrb :size="28" state="thinking" :halo="false" />
                 <span class="typing-label">小菱正在想</span>
                 <span class="typing-dot" />
                 <span class="typing-dot" />
                 <span class="typing-dot" />
+                <button
+                  class="thinking-city-toggle"
+                  type="button"
+                  :aria-expanded="thinkingCityOpen"
+                  :title="thinkingCityOpen ? '收起思考城市' : '看看小菱的脑子里在想什么'"
+                  @click="thinkingCityOpen = !thinkingCityOpen"
+                >{{ thinkingCityOpen ? '收起' : '看看在想什么' }}</button>
               </div>
             </div>
+            <Transition name="thinking-city">
+              <div v-if="showTyping && thinkingCityOpen" class="thinking-city-wrap">
+                <ThinkingCity :active="showTyping" />
+              </div>
+            </Transition>
             </div>
           </div>
 
@@ -3079,6 +3094,55 @@ onMounted(() => {
   /* AI 思考球与文字行对齐 */
   .ai-orb {
     flex: none;
+  }
+
+  &.is-city-open {
+    border-bottom-right-radius: 4px;
+  }
+}
+
+/* 思考城市展开/收起按钮 */
+.thinking-city-toggle {
+  margin-left: 2px;
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: var(--el-color-primary-light-9);
+  }
+}
+
+.thinking-city-wrap {
+  margin: 2px 0 10px 34px; /* 与消息气泡左对齐(头像宽 26 + 间距) */
+  max-width: 560px;
+}
+
+/* 展开/收起过渡 */
+.thinking-city-enter-active,
+.thinking-city-leave-active {
+  transition: opacity 0.32s ease, transform 0.32s cubic-bezier(0.16, 0.84, 0.44, 1);
+}
+
+.thinking-city-enter-from,
+.thinking-city-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.985);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-city-enter-active,
+  .thinking-city-leave-active {
+    transition: none;
+  }
+  .thinking-city-toggle {
+    transition: none;
   }
 }
 

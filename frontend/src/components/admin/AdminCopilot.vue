@@ -27,6 +27,7 @@ import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
+import ThinkingCity from '@/components/ai/ThinkingCity.vue'
 import AiOrb from '@/components/common/AiOrb.vue'
 import FluidProgress from '@/components/common/FluidProgress.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
@@ -149,6 +150,8 @@ const LEGACY_SESSION_KEY = 'prism-admin-copilot-session'
 const visible = ref(false)
 const loading = ref(false)
 const showTyping = ref(false)
+/** 思考城市(想法可视化)展开态:默认展开,可一键收起只看紧凑气泡 */
+const thinkingCityOpen = ref(true)
 const inputText = ref('')
 const chatInputRef = ref<HTMLTextAreaElement | null>(null)
 const uploading = ref(false)
@@ -1691,12 +1694,24 @@ onMounted(() => {
           <div class="message-avatar">
             <PrismMascot :size="22" :status="'running'" />
           </div>
-          <div class="typing-bubble">
+          <div class="typing-bubble" :class="{ 'is-city-open': thinkingCityOpen }">
             <AiOrb :size="28" state="thinking" :halo="false" />
             <span class="typing-label">小菱正在想</span>
             <i></i><i></i><i></i>
+            <button
+              class="thinking-city-toggle"
+              type="button"
+              :aria-expanded="thinkingCityOpen"
+              :title="thinkingCityOpen ? '收起思考城市' : '看看小菱的脑子里在想什么'"
+              @click="thinkingCityOpen = !thinkingCityOpen"
+            >{{ thinkingCityOpen ? '收起' : '看看在想什么' }}</button>
           </div>
         </div>
+        <Transition name="thinking-city">
+          <div v-if="showTyping && thinkingCityOpen" class="thinking-city-wrap">
+            <ThinkingCity :active="showTyping" />
+          </div>
+        </Transition>
       </div>
 
       <footer class="copilot-input-area">
@@ -2263,10 +2278,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .typing-row { display: flex; align-items: flex-start; gap: 8px; }
 .typing-bubble { display: flex; align-items: center; gap: 8px; padding: 8px 13px 8px 9px; border-radius: 12px; border-top-left-radius: 4px; background: linear-gradient(160deg, #ffffff 0%, #f7f7ff 55%, #f2f6ff 100%); border: 1px solid #e6e4f8; box-shadow: 0 2px 10px rgba(91, 88, 232, 0.07); }
+.typing-bubble.is-city-open { border-bottom-right-radius: 4px; }
+.thinking-city-toggle { margin-left: 2px; border: none; background: transparent; color: var(--agent-primary); font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 4px; white-space: nowrap; transition: background 0.2s ease; }
+.thinking-city-toggle:hover { background: rgba(91, 88, 232, 0.08); }
+.thinking-city-wrap { margin: 2px 0 10px 30px; max-width: 560px; }
+.thinking-city-enter-active,
+.thinking-city-leave-active { transition: opacity 0.32s ease, transform 0.32s cubic-bezier(0.16, 0.84, 0.44, 1); }
+.thinking-city-enter-from,
+.thinking-city-leave-to { opacity: 0; transform: translateY(-6px) scale(0.985); }
+@media (prefers-reduced-motion: reduce) {
+  .thinking-city-enter-active,
+  .thinking-city-leave-active,
+  .thinking-city-toggle { transition: none; }
+}
 .typing-label { font-size: 11.5px; color: var(--agent-text-secondary); animation: copilot-run-blink 1.6s ease-in-out infinite; }
 .typing-bubble i { width: 5px; height: 5px; border-radius: 50%; background: var(--agent-primary); animation: typing 1s infinite ease-in-out; }
-.typing-bubble i:nth-child(2) { animation-delay: 120ms; }
-.typing-bubble i:nth-child(3) { animation-delay: 240ms; }
+.typing-bubble i:nth-of-type(1) { animation-delay: 0ms; }
+.typing-bubble i:nth-of-type(2) { animation-delay: 120ms; }
+.typing-bubble i:nth-of-type(3) { animation-delay: 240ms; }
 @keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
 
 .copilot-panel.drag-over::after {

@@ -1,0 +1,60 @@
+import { describe, expect, it } from 'vitest'
+
+import { createCityEngine, messengerPos, tokenizeSentence } from '@/utils/thinkingCityEngine'
+
+describe('thinkingCityEngine', () => {
+  it('tokenizeSentence 优先匹配词库词', () => {
+    const lexicon = ['SQL注入', '修复', '数据流']
+    expect(tokenizeSentence('SQL注入需要修复', lexicon)).toEqual(['SQL注入', '需要', '修复'])
+    expect(tokenizeSentence('数据流', lexicon)).toEqual(['数据流'])
+  })
+
+  it('推进后逐阶段点亮房间并送达词汇', () => {
+    const engine = createCityEngine({ width: 800, height: 500, seed: 7 })
+    expect(engine.state.stats.litRooms).toBe(0)
+
+    // 跑 2 秒:应已点亮一批房间,进入收集阶段
+    for (let i = 0; i < 100; i++) engine.tick(20)
+    expect(engine.state.stats.litRooms).toBeGreaterThan(5)
+    expect(['gather', 'assemble']).toContain(engine.state.phase)
+
+    // 跑到 30 秒:应有信使出发、送达,且第一句已拼成
+    for (let i = 0; i < 1400; i++) engine.tick(20)
+    expect(engine.state.stats.delivered).toBeGreaterThan(0)
+    expect(engine.state.stats.sentences).toBeGreaterThan(0)
+    expect(engine.state.events.length).toBeGreaterThan(0)
+  })
+
+  it('长时间运行后全部句子完成且 done=true', () => {
+    const engine = createCityEngine({ width: 800, height: 500, seed: 42, timeScale: 3 })
+    for (let i = 0; i < 4000 && !engine.state.done; i++) engine.tick(25)
+    expect(engine.state.done).toBe(true)
+    expect(engine.state.sentences.every((s) => s.completedAt >= 0)).toBe(true)
+  })
+
+  it('messengerPos 在路径上插值,起点与终点正确', () => {
+    const engine = createCityEngine({ width: 800, height: 500, seed: 3 })
+    for (let i = 0; i < 200; i++) engine.tick(20)
+    const m = engine.state.messengers.find((x) => !x.arrived)
+    if (!m) return
+    const start = messengerPos({ ...m, dist: 0 })
+    expect(start.x).toBeCloseTo(m.path[0].x, 5)
+    expect(start.y).toBeCloseTo(m.path[0].y, 5)
+    const end = messengerPos({ ...m, dist: m.total + 1 })
+    const last = m.path[m.path.length - 1]
+    expect(end.x).toBeCloseTo(last.x, 5)
+    expect(end.y).toBeCloseTo(last.y, 5)
+  })
+
+  it('reset 清空进度但保留布局', () => {
+    const engine = createCityEngine({ width: 800, height: 500, seed: 9 })
+    for (let i = 0; i < 500; i++) engine.tick(20)
+    const buildingCount = engine.state.buildings.length
+    engine.reset()
+    expect(engine.state.time).toBe(0)
+    expect(engine.state.stats.litRooms).toBe(0)
+    expect(engine.state.messengers.length).toBe(0)
+    expect(engine.state.buildings.length).toBe(buildingCount)
+    expect(engine.state.phase).toBe('ignite')
+  })
+})
