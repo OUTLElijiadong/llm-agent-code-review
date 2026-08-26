@@ -237,8 +237,8 @@ watch(mode, () => {
         </div>
         <div class="mode-switch">
           <el-radio-group :model-value="mode" size="small" @change="switchMode">
-            <el-radio-button label="review">审查环境</el-radio-button>
-            <el-radio-button label="discussion">讨论环境</el-radio-button>
+            <el-radio-button value="review">审查环境</el-radio-button>
+            <el-radio-button value="discussion">讨论环境</el-radio-button>
           </el-radio-group>
         </div>
       </header>

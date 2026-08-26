@@ -46,6 +46,8 @@ function mountProjectList() {
         'el-form': GenericStub,
         'el-alert': GenericStub,
         'el-dialog': GenericStub,
+        'el-tooltip': GenericStub,
+        'el-checkbox': GenericStub,
         ProjectForm: true,
         EmptyState: true,
       },
@@ -74,6 +76,26 @@ describe('ProjectList remote import permission', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="remote-import-button"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('ProjectList 视图切换', () => {
+  it('通过 aria-pressed 暴露当前视图并在点击后同步更新', async () => {
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    const [tableButton, cardButton] = wrapper.findAll('.view-btn')
+    expect(tableButton.attributes('aria-pressed')).toBe('true')
+    expect(cardButton.attributes('aria-pressed')).toBe('false')
+    expect(wrapper.find('tbody td[colspan]').attributes('colspan')).toBe('9')
+
+    await cardButton.trigger('click')
+
+    expect(tableButton.attributes('aria-pressed')).toBe('false')
+    expect(cardButton.attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('.card-grid').isVisible()).toBe(true)
+    expect(wrapper.find('.table-card').isVisible()).toBe(false)
     wrapper.unmount()
   })
 })

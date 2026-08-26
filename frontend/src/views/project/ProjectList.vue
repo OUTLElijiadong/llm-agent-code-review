@@ -7,17 +7,23 @@
         <p class="page-sub">共 <b class="hl">{{ total }}</b> 个项目<template v-if="showStatusSplit"> · {{ activeCount }} 活跃 · {{ archivedCount }} 归档</template></p>
       </div>
       <div class="page-actions">
-        <div class="view-switch">
+        <div class="view-switch" role="group" aria-label="项目视图">
           <button
+            type="button"
             class="view-btn"
             :class="{ active: view === 'table' }"
+            :aria-pressed="view === 'table'"
+            aria-controls="project-table-view"
             @click="view = 'table'"
           >
             <span class="ico">☰</span><span>表格</span>
           </button>
           <button
+            type="button"
             class="view-btn"
             :class="{ active: view === 'card' }"
+            :aria-pressed="view === 'card'"
+            aria-controls="project-card-view"
             @click="view = 'card'"
           >
             <span class="ico">▦</span><span>卡片</span>
@@ -62,7 +68,7 @@
     </section>
 
     <!-- ============ 表格视图 ============ -->
-    <section v-show="view === 'table'" class="table-card" v-loading="loading">
+    <section id="project-table-view" v-show="view === 'table'" class="table-card" v-loading="loading">
       <table class="prism-table">
         <thead>
           <tr>
@@ -140,7 +146,7 @@
             </td>
           </tr>
           <tr v-if="!loading && projects.length === 0">
-            <td colspan="8">
+            <td colspan="9">
               <EmptyState description="还没有项目，点击右上角新建一个吧">
                 <el-button type="primary" @click="handleCreate">+ 新建项目</el-button>
               </EmptyState>
@@ -151,7 +157,7 @@
     </section>
 
     <!-- ============ 卡片视图 ============ -->
-    <section v-show="view === 'card'" class="card-grid" v-loading="loading">
+    <section id="project-card-view" v-show="view === 'card'" class="card-grid" v-loading="loading">
       <article
         v-for="row in projects"
         :key="row.id"
@@ -551,7 +557,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
+  min-width: 72px;
+  height: 40px;
   padding: 0 14px;
   border: none;
   background: transparent;
@@ -562,6 +569,11 @@ onBeforeUnmount(() => {
   transition: all 0.15s ease;
 
   &:hover { color: var(--gray-900); }
+
+  &:focus-visible {
+    outline: 2px solid var(--brand-500);
+    outline-offset: 2px;
+  }
 
   &.active {
     background: #fff;

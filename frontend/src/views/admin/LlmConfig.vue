@@ -91,8 +91,8 @@ onMounted(load)
         style="margin-bottom: 20px" />
 
       <el-radio-group v-model="mode" class="mode-group">
-        <el-radio-button label="deepseek">系统默认 DeepSeek</el-radio-button>
-        <el-radio-button label="custom">自定义 (OpenAI 兼容)</el-radio-button>
+        <el-radio-button value="deepseek">系统默认 DeepSeek</el-radio-button>
+        <el-radio-button value="custom">自定义 (OpenAI 兼容)</el-radio-button>
       </el-radio-group>
 
       <template v-if="mode === 'custom'">

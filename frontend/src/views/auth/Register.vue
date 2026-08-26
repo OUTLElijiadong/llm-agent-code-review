@@ -96,7 +96,12 @@ const rules: FormRules = {
     { validator: validateConfirmPassword, trigger: 'blur' },
   ],
   email: [
-    { type: 'email', message: '请输入有效的邮箱地址', trigger: 'blur' },
+    {
+      type: 'email',
+      transform: (value: unknown) => String(value ?? '').trim(),
+      message: '请输入有效的邮箱地址',
+      trigger: 'blur',
+    },
   ],
   captcha_answer: [
     { required: true, message: '请输入人机验证结果', trigger: 'blur' },
@@ -124,7 +129,7 @@ async function handleRegister(): Promise<void> {
       await userStore.register({
         username: form.username,
         password: form.password,
-        email: form.email || undefined,
+        email: form.email.trim() || undefined,
         nickname: form.nickname || undefined,
         beta_code: captcha.value.beta_registration_enabled
           ? form.beta_code.trim().toUpperCase()
@@ -244,6 +249,8 @@ function goLogin(): void {
               :prefix-icon="Message"
               size="large"
               autocomplete="email"
+              inputmode="email"
+              @blur="form.email = form.email.trim()"
             />
           </el-form-item>
 

@@ -55,7 +55,13 @@
             @click="handleGenerate('word')"
           >生成 Word</el-button>
         </el-button-group>
-        <el-button size="small" :loading="previewing" @click="handlePreview">
+        <el-button
+          ref="previewButtonRef"
+          size="small"
+          :loading="previewing"
+          data-testid="report-preview-button"
+          @click="handlePreview"
+        >
           <el-icon><View /></el-icon>预览 HTML
         </el-button>
         <el-dropdown trigger="click" @command="handleExport">
@@ -313,6 +319,7 @@
               v-for="(it, idx) in top10Issues"
               :key="it.id"
               :class="{ 'row-selected': selectedRemediationIssue?.id === it.id }"
+              :aria-current="selectedRemediationIssue?.id === it.id ? 'true' : undefined"
               @click="selectRemediation(it.id)"
             >
               <td class="font-mono col-rank">{{ idx + 1 }}</td>
@@ -344,9 +351,22 @@
       </section>
 
       <!-- ============ T15 v3 字段:详细修复方案 ============ -->
-      <section v-if="selectedRemediationIssue" class="card v3-card no-break">
+      <section
+        v-if="selectedRemediationIssue"
+        id="remediation-detail"
+        ref="remediationSectionRef"
+        class="card v3-card no-break remediation-detail"
+        data-testid="remediation-detail"
+        aria-labelledby="remediation-heading"
+      >
         <header class="card-head">
-          <h3 class="font-display">
+          <h3
+            id="remediation-heading"
+            ref="remediationHeadingRef"
+            class="font-display remediation-heading"
+            data-testid="remediation-heading"
+            tabindex="-1"
+          >
             <span class="prism-mark sm"></span>详细修复方案
           </h3>
           <p class="card-desc">
@@ -395,11 +415,32 @@
       sublabel="正在整理评分、问题和导出信息"
     />
     <EmptyState v-else-if="!loading" description="报告数据加载失败" />
+
+    <el-dialog
+      v-model="previewFallbackVisible"
+      title="HTML 报告预览"
+      width="min(1100px, 94vw)"
+      top="5vh"
+      append-to-body
+      destroy-on-close
+      class="report-preview-dialog no-print"
+      @closed="handlePreviewFallbackClosed"
+    >
+      <iframe
+        v-if="previewFallbackHtml"
+        class="report-preview-frame"
+        data-testid="report-preview-fallback"
+        title="HTML 报告预览内容"
+        :srcdoc="previewFallbackHtml"
+        sandbox=""
+        referrerpolicy="no-referrer"
+      ></iframe>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ArrowLeft, ArrowDown, Document, Download, Printer, View } from '@element-plus/icons-vue'
@@ -439,6 +480,13 @@ const templateType = ref<ReportTemplateType>('detailed')
 const generatingFormat = ref<ReportFormat | null>(null)
 /** 预览 HTML 报告的 loading 状态 */
 const previewing = ref(false)
+/** 弹窗被拦截时的页内安全预览。 */
+const previewFallbackVisible = ref(false)
+const previewFallbackHtml = ref('')
+type PreviewButtonTarget = { $el?: HTMLElement; focus?: () => void }
+const previewButtonRef = ref<PreviewButtonTarget | null>(null)
+/** 统一管理新窗口 Blob URL，避免请求失败或页面卸载时泄漏。 */
+const previewUrlTimers = new Map<string, ReturnType<typeof setTimeout>>()
 /** 当前正在导出的格式(用于导出下拉按钮 loading 态),null 表示无操作 */
 const exportingFormat = ref<ReportFormat | null>(null)
 /** 报告关联的全部问题列表(含 v3 字段,用于 CVSS/合规/Top10/修复方案展示) */
@@ -814,20 +862,95 @@ async function handleGenerate(format: ReportFormat): Promise<void> {
 }
 
 /**
- * 预览 HTML 报告(在新窗口打开)。
- * 调用 previewReport 获取 HTML 字符串,通过 Blob URL 在新窗口打开。
+ * 释放预览 Blob URL 及对应计时器。
+ */
+function releasePreviewUrl(url: string): void {
+  const timer = previewUrlTimers.get(url)
+  if (timer) clearTimeout(timer)
+  previewUrlTimers.delete(url)
+  window.URL.revokeObjectURL(url)
+}
+
+/** 在新窗口完成加载后延迟释放 Blob URL。 */
+function schedulePreviewUrlRelease(url: string): void {
+  const timer = setTimeout(() => releasePreviewUrl(url), 60_000)
+  previewUrlTimers.set(url, timer)
+}
+
+/** 清理页内预览内容，不在对话框关闭后长期保留报告 HTML。 */
+function clearPreviewFallback(): void {
+  previewFallbackHtml.value = ''
+}
+
+/** 关闭页内预览后把键盘焦点还给触发按钮。 */
+async function handlePreviewFallbackClosed(): Promise<void> {
+  clearPreviewFallback()
+  await nextTick()
+  const target = previewButtonRef.value
+  const element = target?.$el ?? target
+  element?.focus?.()
+}
+
+/** 同步预开与当前页面断开关系的窗口；安全属性设置失败时改走页内预览。 */
+function preopenPreviewWindow(): Window | null {
+  let candidate: Window | null
+  try {
+    candidate = window.open('about:blank', '_blank')
+  } catch {
+    return null
+  }
+  if (!candidate) return null
+
+  try {
+    candidate.opener = null
+  } catch {
+    try { candidate.close() } catch { /* 页内预览仍可继续 */ }
+    return null
+  }
+
+  try {
+    candidate.document.title = '正在准备 HTML 报告'
+    candidate.document.body.textContent = '正在准备 HTML 报告…'
+  } catch {
+    // 部分浏览器在断开 opener 后不允许读写预开页，不影响后续导航。
+  }
+  return candidate
+}
+
+/**
+ * 预览 HTML 报告。
+ * 用户点击时同步预开窗口，请求完成后再导航到 Blob URL；
+ * 弹窗被拦截或在等待期间被关闭时，改用 sandbox iframe 页内预览。
  */
 async function handlePreview(): Promise<void> {
+  const popup = preopenPreviewWindow()
+
   previewing.value = true
+  previewFallbackVisible.value = false
   try {
     const html = await apiPreviewReport(taskId, templateType.value)
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-    const url = window.URL.createObjectURL(blob)
-    window.open(url, '_blank', 'noopener,noreferrer')
-    // 延迟回收 URL,避免新窗口尚未加载完
-    setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
-    ElMessage.success('HTML 报告已在新窗口打开')
+    if (popup && !popup.closed) {
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+      const url = window.URL.createObjectURL(blob)
+      try {
+        popup.location.replace(url)
+        schedulePreviewUrlRelease(url)
+        ElMessage.success('HTML 报告已在新窗口打开')
+        return
+      } catch {
+        releasePreviewUrl(url)
+        try { popup.close() } catch { /* 页内预览仍可继续 */ }
+      }
+    }
+
+    previewFallbackHtml.value = html
+    previewFallbackVisible.value = true
+    await nextTick()
+    ElMessage.success('HTML 报告已在当前页面打开')
   } catch {
+    if (popup && !popup.closed) {
+      try { popup.close() } catch { /* 忽略浏览器关闭窗口限制 */ }
+    }
     ElMessage.error('预览报告失败')
   } finally {
     previewing.value = false
@@ -858,8 +981,24 @@ async function handleExport(format: ReportFormat): Promise<void> {
  * 选中某个 issue 展示其修复方案。
  * @param id - issue ID
  */
-function selectRemediation(id: number): void {
+const remediationSectionRef = ref<HTMLElement | null>(null)
+const remediationHeadingRef = ref<HTMLElement | null>(null)
+
+async function selectRemediation(id: number): Promise<void> {
   selectedRemediationId.value = id
+  await nextTick()
+  const section = remediationSectionRef.value
+  const heading = remediationHeadingRef.value
+  if (!section) return
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  section.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' })
+  if (heading) {
+    try {
+      heading.focus({ preventScroll: true })
+    } catch {
+      heading.focus()
+    }
+  }
 }
 
 onMounted(() => {
@@ -871,6 +1010,10 @@ onMounted(() => {
     router.replace({ query: {} })
     handleGenerate('html')
   }
+})
+
+onBeforeUnmount(() => {
+  for (const url of [...previewUrlTimers.keys()]) releasePreviewUrl(url)
 })
 </script>
 
@@ -1444,6 +1587,16 @@ onMounted(() => {
 }
 
 /* ============ 详细修复方案 ============ */
+.remediation-detail {
+  scroll-margin-top: 24px;
+}
+
+.remediation-heading:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
 .remediation-block {
   display: flex;
   flex-direction: column;
@@ -1488,6 +1641,18 @@ onMounted(() => {
 
 .remediation-empty {
   padding: 12px 0;
+}
+
+:global(.report-preview-dialog .el-dialog__body) {
+  padding: 0;
+}
+
+.report-preview-frame {
+  display: block;
+  width: 100%;
+  height: min(72vh, 820px);
+  border: 0;
+  background: #fff;
 }
 
 /* ============ 页脚 ============ */

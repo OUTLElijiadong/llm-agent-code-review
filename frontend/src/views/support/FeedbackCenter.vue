@@ -98,8 +98,8 @@ onMounted(load)
 
     <el-card v-if="isAdmin" shadow="never" class="filter-card">
       <el-radio-group v-model="scope" @change="() => { page = 1; load() }">
-        <el-radio-button label="mine">我的反馈</el-radio-button>
-        <el-radio-button label="all">全部反馈</el-radio-button>
+        <el-radio-button value="mine">我的反馈</el-radio-button>
+        <el-radio-button value="all">全部反馈</el-radio-button>
       </el-radio-group>
     </el-card>
 
