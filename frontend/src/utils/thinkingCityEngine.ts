@@ -86,6 +86,8 @@ export interface CityStats {
   delivered: number
   /** 拼成句子数 */
   sentences: number
+  /** 历史积累:本次会话开始前就已点亮的房间数 */
+  memoryRooms: number
 }
 
 export interface CityState {
@@ -113,6 +115,8 @@ export interface CityEngineOptions {
   sentences?: string[]
   /** 时间倍率 */
   timeScale?: number
+  /** 历史积累:预先点亮的房间 key(格式 `${buildingId}:${roomIdx}`) */
+  memoryKeys?: string[]
 }
 
 const DEFAULT_THEMES: Array<{ theme: string; words: string[] }> = [
@@ -281,11 +285,24 @@ export function createCityEngine(options: CityEngineOptions) {
     buildings,
     messengers: [],
     sentences: sentenceTexts.map((target) => ({ target, arrived: [], completedAt: -1 })),
-    stats: { litRooms: 0, totalRooms, delivered: 0, sentences: 0 },
+    stats: { litRooms: 0, totalRooms, delivered: 0, sentences: 0, memoryRooms: 0 },
     plaza,
     done: false,
     events: [],
   }
+
+  // 历史积累:把以往点亮的房间先点亮(发柔和的「已有积累」光,不参与本次节奏)
+  const memorySet = new Set(options.memoryKeys ?? [])
+  let memoryRooms = 0
+  for (const b of buildings) {
+    for (let i = 0; i < b.rooms.length; i++) {
+      if (memorySet.has(`${b.id}:${i}`)) {
+        b.rooms[i] = -2 // -2 = 记忆点亮(区别于 -1 未点亮 / >=0 本次点亮时刻)
+        memoryRooms += 1
+      }
+    }
+  }
+  state.stats.memoryRooms = memoryRooms
 
   let messengerSeq = 0
   /** 点亮节奏:开局密,随后放缓 */
@@ -302,11 +319,11 @@ export function createCityEngine(options: CityEngineOptions) {
   }
 
   function igniteRoom() {
-    // 优先点还有词可送的楼,让画面与叙事一致
-    const candidates = buildings.filter((b) => b.rooms.some((r) => r < 0))
+    // 只点「完全黑暗」(-1)的房间;-2 是历史记忆,不动
+    const candidates = buildings.filter((b) => b.rooms.some((r) => r === -1))
     if (!candidates.length) return
     const b = candidates[Math.floor(rand() * candidates.length)]
-    const dark = b.rooms.map((r, i) => (r < 0 ? i : -1)).filter((i) => i >= 0)
+    const dark = b.rooms.map((r, i) => (r === -1 ? i : -1)).filter((i) => i >= 0)
     const idx = dark[Math.floor(rand() * dark.length)]
     b.rooms[idx] = state.time
     state.stats.litRooms += 1
@@ -423,7 +440,17 @@ export function createCityEngine(options: CityEngineOptions) {
       }
       return true
     },
-    /** 重置(换一句话/重新思考) */
+    /** 导出本次点亮的房间 key(不含历史记忆),用于写回长期积累 */
+    collectSessionLitKeys(): string[] {
+      const keys: string[] = []
+      for (const b of buildings) {
+        for (let i = 0; i < b.rooms.length; i++) {
+          if (b.rooms[i] >= 0) keys.push(`${b.id}:${i}`)
+        }
+      }
+      return keys
+    },
+    /** 重置(换一句话/重新思考);历史记忆房间保留 */
     reset() {
       state.time = 0
       state.phase = 'ignite'
@@ -432,11 +459,13 @@ export function createCityEngine(options: CityEngineOptions) {
         s.arrived = []
         s.completedAt = -1
       })
-      state.stats = { litRooms: 0, totalRooms, delivered: 0, sentences: 0 }
+      state.stats = { litRooms: 0, totalRooms, delivered: 0, sentences: 0, memoryRooms: state.stats.memoryRooms }
       state.done = false
       state.events = []
       buildings.forEach((b) => {
-        b.rooms.fill(-1)
+        for (let i = 0; i < b.rooms.length; i++) {
+          if (b.rooms[i] >= 0) b.rooms[i] = -1 // 本次点亮的熄灭,历史记忆(-2)保留
+        }
         b.nextSpawnRoom = 0
       })
       messengerSeq = 0

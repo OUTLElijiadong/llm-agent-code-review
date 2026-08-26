@@ -46,8 +46,9 @@ describe('thinkingCityEngine', () => {
     expect(end.y).toBeCloseTo(last.y, 5)
   })
 
-  it('reset 清空进度但保留布局', () => {
-    const engine = createCityEngine({ width: 800, height: 500, seed: 9 })
+  it('reset 清空本次进度但保留布局与历史记忆房间', () => {
+    const engine = createCityEngine({ width: 800, height: 500, seed: 9, memoryKeys: ['0:0', '1:2'] })
+    expect(engine.state.stats.memoryRooms).toBe(2)
     for (let i = 0; i < 500; i++) engine.tick(20)
     const buildingCount = engine.state.buildings.length
     engine.reset()
@@ -56,5 +57,16 @@ describe('thinkingCityEngine', () => {
     expect(engine.state.messengers.length).toBe(0)
     expect(engine.state.buildings.length).toBe(buildingCount)
     expect(engine.state.phase).toBe('ignite')
+    // 记忆房间(-2)在 reset 后仍然保留
+    expect(engine.state.buildings[0].rooms[0]).toBe(-2)
+    expect(engine.state.buildings[1].rooms[2]).toBe(-2)
+  })
+
+  it('collectSessionLitKeys 只导出本次点亮,不含历史记忆', () => {
+    const engine = createCityEngine({ width: 800, height: 500, seed: 11, memoryKeys: ['2:5'] })
+    for (let i = 0; i < 200; i++) engine.tick(20)
+    const keys = engine.collectSessionLitKeys()
+    expect(keys.length).toBeGreaterThan(0)
+    expect(keys).not.toContain('2:5')
   })
 })

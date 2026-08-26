@@ -21,6 +21,8 @@ import {
   type CityEngine,
   type CityPhase,
 } from '@/utils/thinkingCityEngine'
+import { commitSessionMemory, getMemoryEntries, getMemoryKeys } from '@/utils/thinkingCityMemory'
+import { useUserStore } from '@/stores/user'
 
 interface Props {
   /** 思考是否进行中;false 时定格最后一帧并停止 rAF */
@@ -44,10 +46,17 @@ const litRooms = ref(0)
 const totalRooms = ref(0)
 const delivered = ref(0)
 const doneSentences = ref(0)
+const memoryRooms = ref(0)
 const phase = ref<CityPhase>('ignite')
 const lastEvent = ref('')
 /** 已拼成的句子文本(逐句点亮) */
 const sentenceLines = ref<Array<{ target: string; arrived: string[]; done: boolean }>>([])
+/** 当前选中的知识卡片(点击亮灯房间弹出) */
+const selectedRoom = ref<{ key: string; theme: string; label: string; count: number; firstAt: number; lastAt: number } | null>(null)
+
+const userStore = useUserStore()
+/** 当前用户 id,用于按人隔离思考城市记忆 */
+const memoryUserId = computed(() => userStore.profile?.id ?? 'guest')
 
 let engine: CityEngine | null = null
 let rafId = 0
@@ -69,6 +78,8 @@ const PALETTE = {
   buildingEdge: 'rgba(142, 136, 245, 0.28)',
   roomDark: 'rgba(38, 34, 84, 0.9)',
   roomLit: ['#8E88F5', '#7EE3F0', '#D4A53A', '#B85AC4'] as const,
+  /** 历史记忆房间的柔光色(暖白,区别于本次点亮的彩色) */
+  roomMemory: 'rgba(232, 230, 254, 0.85)',
   road: 'rgba(142, 136, 245, 0.16)',
   roadDash: 'rgba(126, 227, 240, 0.32)',
   messenger: '#7EE3F0',
@@ -85,8 +96,10 @@ function initEngine(width: number, height: number): void {
     height,
     seed: 20260826,
     sentences: props.sentences,
+    memoryKeys: getMemoryKeys(memoryUserId.value),
   })
   totalRooms.value = engine.state.stats.totalRooms
+  memoryRooms.value = engine.state.stats.memoryRooms
   stars = []
   const rand = (() => {
     let s = 7
@@ -98,6 +111,28 @@ function initEngine(width: number, height: number): void {
   for (let i = 0; i < 42; i++) {
     stars.push({ x: rand() * width, y: rand() * height * 0.5, r: 0.6 + rand() * 1.2, tw: rand() * Math.PI * 2 })
   }
+}
+
+/** 由房间 key 反查主题与知识点标签(用于记忆写回和知识卡片) */
+function resolveRoomMeta(key: string): { theme: string; label: string } | undefined {
+  const eng = engine
+  if (!eng) return undefined
+  const [bidStr, idxStr] = key.split(':')
+  const b = eng.state.buildings[Number(bidStr)]
+  const idx = Number(idxStr)
+  if (!b || Number.isNaN(idx)) return undefined
+  // 知识点标签:用该房间编号映射到大厦词库的一个词
+  const label = b.words[idx % b.words.length]?.trim() || `${b.theme} · ${idx + 1} 号`
+  return { theme: b.theme, label }
+}
+
+/** 把本次思考点亮的房间写回长期记忆 */
+function flushSessionMemory(): void {
+  const eng = engine
+  if (!eng) return
+  const keys = eng.collectSessionLitKeys()
+  if (!keys.length) return
+  commitSessionMemory(memoryUserId.value, keys, resolveRoomMeta)
 }
 
 /** 按 DPR 适配画布尺寸 */
@@ -200,7 +235,7 @@ function drawFrame(dt: number): void {
       const wy = b.y + b.cell * (row + 0.75)
       const litAt = b.rooms[i]
       if (litAt >= 0) {
-        // 点亮后常亮 + 轻微呼吸;刚点亮 600ms 内做一次 pop 放大
+        // 本次点亮:常亮 + 轻微呼吸;刚点亮 600ms 内做一次 pop 放大
         const age = s.time - litAt
         const pop = age < 600 && !reducedMotion ? 0.6 + 0.4 * (age / 600) : 1
         const breathe = reducedMotion ? 1 : 0.82 + 0.18 * Math.sin(s.time / 520 + i * 1.7)
@@ -213,6 +248,15 @@ function drawFrame(dt: number): void {
         ctx.roundRect(wx + (b.cell * 0.52 - size) / 2, wy + (b.cell * 0.52 - size) / 2, size, size, 1.2)
         ctx.fill()
         ctx.shadowBlur = 0
+        ctx.globalAlpha = 1
+      } else if (litAt === -2) {
+        // 历史记忆:柔和常亮,亮度更低、偏暖,表示「已经积累过」
+        const glow = reducedMotion ? 0.5 : 0.42 + 0.1 * Math.sin(s.time / 900 + i * 0.9)
+        ctx.globalAlpha = glow
+        ctx.fillStyle = PALETTE.roomMemory
+        ctx.beginPath()
+        ctx.roundRect(wx + b.cell * 0.08, wy + b.cell * 0.08, b.cell * 0.36, b.cell * 0.36, 1)
+        ctx.fill()
         ctx.globalAlpha = 1
       } else {
         ctx.fillStyle = PALETTE.roomDark
@@ -290,6 +334,7 @@ function drawFrame(dt: number): void {
     litRooms.value = s.stats.litRooms
     delivered.value = s.stats.delivered
     doneSentences.value = s.stats.sentences
+    memoryRooms.value = s.stats.memoryRooms
     phase.value = s.phase
     const ev = s.events[s.events.length - 1]
     if (ev) lastEvent.value = ev.text
@@ -299,6 +344,53 @@ function drawFrame(dt: number): void {
       done: line.completedAt >= 0,
     }))
   }
+}
+
+/** 画布坐标(逻辑 px)→ 命中的房间 key */
+function hitTestRoom(cssX: number, cssY: number): string | null {
+  const eng = engine
+  if (!eng) return null
+  for (const b of eng.state.buildings) {
+    for (let i = 0; i < b.rooms.length; i++) {
+      if (b.rooms[i] < 0 && b.rooms[i] !== -2) continue // 只响应已点亮(本次或记忆)
+      const col = i % b.cols
+      const row = Math.floor(i / b.cols)
+      const wx = b.x + b.cell * (col + 0.85)
+      const wy = b.y + b.cell * (row + 0.75)
+      const size = b.cell * 0.52
+      if (cssX >= wx - 2 && cssX <= wx + size + 2 && cssY >= wy - 2 && cssY <= wy + size + 2) {
+        return `${b.id}:${i}`
+      }
+    }
+  }
+  return null
+}
+
+function onCanvasClick(ev: MouseEvent): void {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const key = hitTestRoom(ev.clientX - rect.left, ev.clientY - rect.top)
+  if (!key) {
+    selectedRoom.value = null
+    return
+  }
+  const meta = resolveRoomMeta(key)
+  const memory = getMemoryEntries(memoryUserId.value).find((e) => e.key === key)
+  selectedRoom.value = {
+    key,
+    theme: meta?.theme ?? '知识块',
+    label: meta?.label ?? key,
+    count: memory?.count ?? 1,
+    firstAt: memory?.firstAt ?? Date.now(),
+    lastAt: memory?.lastAt ?? Date.now(),
+  }
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function loop(now: number): void {
@@ -317,6 +409,8 @@ watch(
       lastFrameAt = 0
       rafId = window.requestAnimationFrame(loop)
     } else {
+      // 思考结束:把本次点亮的房间写回长期记忆
+      flushSessionMemory()
       window.cancelAnimationFrame(rafId)
       drawFrame(0)
     }
@@ -338,6 +432,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  flushSessionMemory()
   window.cancelAnimationFrame(rafId)
   resizeObserver?.disconnect()
 })
@@ -358,12 +453,37 @@ function slotList(line: { target: string; arrived: string[] }): Array<{ text: st
 <template>
   <div ref="wrapRef" class="thinking-city" :class="{ 'is-compact': compact }" role="img"
     :aria-label="`小菱的思考城市:已点亮 ${litRooms}/${totalRooms} 个知识房间,送达 ${delivered} 个词汇`">
-    <canvas ref="canvasRef" class="thinking-city-canvas" aria-hidden="true" />
+    <canvas ref="canvasRef" class="thinking-city-canvas" aria-hidden="true" @click="onCanvasClick" />
+
+    <!-- 积累徽章:已有历史沉淀时展示 -->
+    <div v-if="memoryRooms > 0" class="memory-badge" :title="`小菱已经为你积累了 ${memoryRooms} 块知识,点击亮灯房间可查看`">
+      <span class="memory-badge-icon" aria-hidden="true">◆</span>
+      我的知识城市 · {{ memoryRooms }} 块
+    </div>
+
+    <!-- 知识卡片:点击亮灯房间弹出 -->
+    <Transition name="room-card">
+      <div v-if="selectedRoom" class="room-card" role="dialog" :aria-label="`知识卡片:${selectedRoom.label}`">
+        <header class="room-card-head">
+          <span class="room-card-theme">{{ selectedRoom.theme }}</span>
+          <button class="room-card-close" type="button" aria-label="关闭" @click="selectedRoom = null">×</button>
+        </header>
+        <div class="room-card-label">{{ selectedRoom.label }}</div>
+        <dl class="room-card-meta">
+          <div><dt>点亮次数</dt><dd>{{ selectedRoom.count }} 次</dd></div>
+          <div><dt>首次点亮</dt><dd>{{ formatTime(selectedRoom.firstAt) }}</dd></div>
+          <div><dt>最近点亮</dt><dd>{{ formatTime(selectedRoom.lastAt) }}</dd></div>
+        </dl>
+      </div>
+    </Transition>
 
     <div class="thinking-city-hud">
       <div class="hud-row hud-stats">
-        <span class="hud-chip" title="知识点亮的房间数 / 全部房间">
-          <i class="hud-dot hud-dot-lit" />知识房间 {{ litRooms }}/{{ totalRooms }}
+        <span class="hud-chip" title="本次思考点亮的房间数 / 全部房间">
+          <i class="hud-dot hud-dot-lit" />本次点亮 {{ litRooms }}
+        </span>
+        <span class="hud-chip" title="历史积累的知识房间数">
+          <i class="hud-dot hud-dot-memory" />已积累 {{ memoryRooms }}
         </span>
         <span class="hud-chip" title="信使已送达广场的词汇数">
           <i class="hud-dot hud-dot-road" />知识流 {{ delivered }}
@@ -440,8 +560,104 @@ function slotList(line: { target: string; arrived: string[] }): Array<{ text: st
 }
 
 .hud-dot-lit { background: #8e88f5; box-shadow: 0 0 5px #8e88f5; }
+.hud-dot-memory { background: #e8e6fe; box-shadow: 0 0 5px #e8e6fe; }
 .hud-dot-road { background: #7ee3f0; box-shadow: 0 0 5px #7ee3f0; }
 .hud-dot-done { background: #d4a53a; box-shadow: 0 0 5px #d4a53a; }
+
+/* 历史积累徽章(右上角) */
+.memory-badge {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  color: #e8e6fe;
+  background: rgba(36, 29, 82, 0.72);
+  border: 1px solid rgba(232, 230, 254, 0.35);
+  border-radius: 999px;
+  padding: 3px 10px;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.memory-badge-icon {
+  font-size: 8px;
+  color: #d4a53a;
+}
+
+/* 知识卡片(点击亮灯房间弹出) */
+.room-card {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  width: 200px;
+  background: rgba(23, 19, 50, 0.95);
+  border: 1px solid rgba(142, 136, 245, 0.5);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  font-family: var(--font-mono);
+  z-index: 3;
+}
+
+.room-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.room-card-theme {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: #7ee3f0;
+  text-transform: uppercase;
+}
+
+.room-card-close {
+  border: none;
+  background: transparent;
+  color: rgba(183, 179, 251, 0.7);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.room-card-close:hover { color: #fff; }
+
+.room-card-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #efeefe;
+  margin-bottom: 8px;
+}
+
+.room-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.room-card-meta > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+}
+
+.room-card-meta dt { color: rgba(183, 179, 251, 0.6); margin: 0; }
+.room-card-meta dd { color: #dcdafd; margin: 0; }
+
+.room-card-enter-active,
+.room-card-leave-active { transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.16, 0.84, 0.44, 1); }
+.room-card-enter-from,
+.room-card-leave-to { opacity: 0; transform: translateY(6px) scale(0.97); }
 
 .hud-phase {
   margin-top: 6px;
@@ -498,6 +714,8 @@ function slotList(line: { target: string; arrived: string[] }): Array<{ text: st
 
 @media (prefers-reduced-motion: reduce) {
   .hud-sentence,
-  .hud-word { transition: none; }
+  .hud-word,
+  .room-card-enter-active,
+  .room-card-leave-active { transition: none; }
 }
 </style>
