@@ -32,17 +32,18 @@
       </div>
 
       <!-- v3: CVSS 评分 + 向量字符串 -->
-      <div v-if="issue.cvss_score != null || issue.cvss_vector" class="drawer-section">
+      <div class="drawer-section">
         <div class="drawer-label">CVSS 评分</div>
         <el-descriptions :column="1" border size="small">
-          <el-descriptions-item v-if="issue.cvss_score != null" label="评分">
-            <el-tag size="small" :type="cvssTagType(issue.cvss_score)" effect="dark">
-              {{ issue.cvss_score.toFixed(1) }}
+          <el-descriptions-item label="评分">
+            <el-tag v-if="verifiedCvssScore != null" size="small" :type="cvssTagType(verifiedCvssScore)" effect="dark">
+              {{ verifiedCvssScore.toFixed(1) }}
             </el-tag>
-            <span class="cvss-level-text">{{ cvssLevelText(issue.cvss_score) }}</span>
+            <span v-if="verifiedCvssScore != null" class="cvss-level-text">{{ cvssLevelText(verifiedCvssScore) }}</span>
+            <span v-else class="cvss-level-text">未评分</span>
           </el-descriptions-item>
-          <el-descriptions-item v-if="issue.cvss_vector" label="向量">
-            <code class="cvss-vector">{{ issue.cvss_vector }}</code>
+          <el-descriptions-item v-if="verifiedCvssVector" label="向量">
+            <code class="cvss-vector">{{ verifiedCvssVector }}</code>
           </el-descriptions-item>
         </el-descriptions>
       </div>
@@ -174,6 +175,28 @@ const visible = computed({
 })
 
 const title = computed(() => props.issue?.title ?? '问题详情')
+
+/** 仅信任后端标记为有效 v3.1 向量派生的分数。 */
+const verifiedCvssScore = computed<number | null>(() => {
+  const issue = props.issue
+  const score = issue?.cvss_score
+  if (
+    issue?.cvss_source !== 'vector'
+    || issue.cvss_version !== '3.1'
+    || !issue.cvss_vector?.trim()
+    || typeof score !== 'number'
+    || !Number.isFinite(score)
+    || score < 0
+    || score > 10
+  ) {
+    return null
+  }
+  return score
+})
+
+const verifiedCvssVector = computed(() => (
+  verifiedCvssScore.value === null ? null : props.issue?.cvss_vector?.trim() || null
+))
 
 const issueTypeLabels: Record<string, string> = {
   style: '代码规范',

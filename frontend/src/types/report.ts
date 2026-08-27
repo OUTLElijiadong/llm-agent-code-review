@@ -50,10 +50,14 @@ export interface ReportIssue {
   status: string
   create_time: string
   /** ===== T01 v3 新增字段 ===== */
-  /** CVSS 3.x 基础评分(0-10,可选,无评分时为 undefined) */
-  cvss_score?: number
+  /** 由有效 CVSS v3.1 向量确定性计算的基础评分 */
+  cvss_score?: number | null
   /** CVSS 向量字符串 */
-  cvss_vector?: string
+  cvss_vector?: string | null
+  /** CVSS 版本；有效评分固定为 3.1 */
+  cvss_version?: string | null
+  /** 评分来源；只有 vector 表示可验证的标准 CVSS */
+  cvss_source?: string | null
   /** 合规标准映射(ISO 27001 / GDPR / PCI DSS / HIPAA) */
   compliance_mapping?: ComplianceMapping
   /** 详细修复方案(多行文本,可包含 markdown) */

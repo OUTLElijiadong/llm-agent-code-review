@@ -36,6 +36,14 @@ class DiscussionSession:
     max_rounds: int = 3
     report_task_id: int = 0  # 讨论沉淀的审查报告 task_id(收尾时回填)
     closed_at: float = 0.0  # concluded 时间戳,供过期清理判断
+    # 续会必须从真实原始审查上下文重新创建任务，不能复用旧 report_task。
+    project_id: int = 0
+    file_id: int = 0
+    review_type: str = "full"
+    # 小菱发起的圆桌结束后，要回投到同一 surface/session。
+    origin_surface: str = ""
+    origin_session_key: str = ""
+    continued_from_session_id: str = ""
 
 
 # 结束后的会话保留时长(秒): 期间刷新页面仍可回放全部发言,超时后随下次
@@ -63,11 +71,23 @@ class DiscussionBus:
 
     def create_session(self, session_id: str, task_id: int, file_name: str,
                        owner_user_id: int = 0,
-                       max_rounds: int = 3) -> DiscussionSession:
+                       max_rounds: int = 3,
+                       project_id: int = 0,
+                       file_id: int = 0,
+                       review_type: str = "full",
+                       origin_surface: str = "",
+                       origin_session_key: str = "",
+                       continued_from_session_id: str = "") -> DiscussionSession:
         session = DiscussionSession(
             session_id=session_id, task_id=task_id,
             file_name=file_name, owner_user_id=owner_user_id,
             max_rounds=max_rounds,
+            project_id=int(project_id or 0),
+            file_id=int(file_id or 0),
+            review_type=str(review_type or "full")[:50],
+            origin_surface=str(origin_surface or "")[:24],
+            origin_session_key=str(origin_session_key or "")[:128],
+            continued_from_session_id=str(continued_from_session_id or "")[:64],
         )
         self._sessions[session_id] = session
         self._queues[session_id] = []

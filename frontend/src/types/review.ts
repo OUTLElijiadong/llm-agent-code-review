@@ -35,10 +35,14 @@ export interface IssueOut {
   fixed_code?: string
   status: string
   create_time: string
-  /** v3: CVSS 评分(0-10) */
-  cvss_score?: number
+  /** v3: 由有效 CVSS v3.1 向量确定性计算的评分(0-10) */
+  cvss_score?: number | null
   /** v3: CVSS 向量字符串,如 "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" */
-  cvss_vector?: string
+  cvss_vector?: string | null
+  /** v3: CVSS 版本；有效评分固定为 3.1 */
+  cvss_version?: string | null
+  /** v3: 评分来源；只有 vector 表示可验证的标准 CVSS */
+  cvss_source?: string | null
   /** v3: 合规映射命中的标准条款 */
   compliance_mapping?: ComplianceMapping
   /** v3: 详细修复方案(markdown 文本) */

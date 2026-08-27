@@ -893,25 +893,40 @@ def test_extract_issues_parses_json_and_isolates_logging_failure(
     assert logged[0]["status"] == "success"
 
 
-def test_extract_issues_returns_empty_when_llm_fails() -> None:
-    """结构化问题 LLM 调用失败时应返回空列表。
+def test_extract_issues_propagates_llm_failure() -> None:
+    """结构化问题 LLM 调用失败时必须让报告收尾进入失败状态。
 
     Returns:
-        None: 断言主调用异常不会传播到报告收尾流程。
+        None: 断言异常携带可读阶段和根因。
     """
-    issues = module._extract_issues(
-        [_turn(1)],
-        "x = 1",
-        "python",
-        "failure.py",
-        RecordingAgent(error=RuntimeError("extract failed")),
-        object(),
-        1,
-        2,
-        3,
-    )
+    with pytest.raises(RuntimeError, match="结构化问题抽取失败.*extract failed"):
+        module._extract_issues(
+            [_turn(1)],
+            "x = 1",
+            "python",
+            "failure.py",
+            RecordingAgent(error=RuntimeError("extract failed")),
+            object(),
+            1,
+            2,
+            3,
+        )
 
-    assert issues == []
+
+def test_extract_issues_propagates_invalid_json() -> None:
+    """结构化输出无法解析时必须暴露可读根因。"""
+    with pytest.raises(RuntimeError, match="结构化问题解析失败.*非合法 JSON"):
+        module._extract_issues(
+            [_turn(1)],
+            "x = 1",
+            "python",
+            "failure.py",
+            RecordingAgent(responses=[("not-json", {"model_name": "fake"})]),
+            object(),
+            1,
+            2,
+            3,
+        )
 
 
 def test_finalize_review_persists_issues_statistics_and_log_labels(
@@ -1090,18 +1105,18 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert saved_task.duration_ms >= 0
 
 
-def test_finalize_review_recovers_task_when_report_processing_fails(
+def test_finalize_review_marks_task_failed_when_extraction_fails(
     db: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """报告整理异常时应回滚并把已有讨论任务标记为可展示成功。
+    """结构化抽取失败时必须回滚并把任务标记为失败。
 
     Args:
         db: 内存 SQLite 会话。
         monkeypatch: Pytest 属性替换工具。
 
     Returns:
-        None: 断言异常恢复状态、摘要与关闭路径。
+        None: 断言失败状态、可读错误与关闭路径。
     """
     task = ReviewTask(
         user_id=4,
@@ -1157,9 +1172,116 @@ def test_finalize_review_recovers_task_when_report_processing_fails(
     saved_task = db.get(ReviewTask, task.id)
     assert result == task.id
     assert saved_task is not None
-    assert saved_task.status == "success"
-    assert saved_task.summary == "圆桌讨论已完成(报告整理部分失败)。"
+    assert saved_task.status == "failed"
+    assert saved_task.summary == "圆桌讨论已完成，但报告整理失败。"
+    assert "parser unavailable" in saved_task.error_message
     assert saved_task.end_time is not None
+
+
+def test_finalize_review_marks_task_failed_when_normalization_fails(
+    db: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """归一化失败不能产出成功报告。"""
+    task = ReviewTask(
+        user_id=4,
+        project_id=5,
+        task_name="归一化失败",
+        review_type="discuss",
+        status="running",
+        total_files=1,
+        processed_files=0,
+    )
+    db.add(task)
+    db.commit()
+
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(module, "_extract_issues", lambda *_args, **_kwargs: [Issue(description="风险")])
+    monkeypatch.setattr(
+        module,
+        "_normalize_discussion_issues",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("normalization unavailable")),
+    )
+
+    module._finalize_review(
+        task_id=task.id,
+        user_id=4,
+        file_id=6,
+        file_name="broken.py",
+        all_turns=[_turn(1)],
+        code="broken()",
+        language="python",
+        deferred_logs=[],
+        agent=RecordingAgent(),
+        stopped=False,
+    )
+
+    saved_task = db.get(ReviewTask, task.id)
+    assert saved_task is not None
+    assert saved_task.status == "failed"
+    assert "normalization unavailable" in saved_task.error_message
+    assert db.query(ReviewIssue).filter_by(task_id=task.id).count() == 0
+
+
+def test_finalize_review_marks_task_failed_when_issue_persistence_fails(
+    db: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """问题入库失败必须回滚问题并保留任务失败原因。"""
+    task = ReviewTask(
+        user_id=4,
+        project_id=5,
+        task_name="入库失败",
+        review_type="discuss",
+        status="running",
+        total_files=1,
+        processed_files=0,
+    )
+    db.add(task)
+    db.commit()
+
+    issue = Issue(
+        line_number=1,
+        issue_type="安全漏洞",
+        severity="高",
+        title="命令注入",
+        description="外部输入进入 shell",
+    )
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(module, "_extract_issues", lambda *_args, **_kwargs: [issue])
+    monkeypatch.setattr(module, "_normalize_discussion_issues", lambda *_args, **_kwargs: [issue])
+
+    real_commit = db.commit
+    failed_once = False
+
+    def fail_issue_commit_once() -> None:
+        nonlocal failed_once
+        if not failed_once and any(isinstance(row, ReviewIssue) for row in db.new):
+            failed_once = True
+            raise RuntimeError("review issue insert failed")
+        real_commit()
+
+    monkeypatch.setattr(db, "commit", fail_issue_commit_once)
+
+    module._finalize_review(
+        task_id=task.id,
+        user_id=4,
+        file_id=6,
+        file_name="broken.py",
+        all_turns=[_turn(1)],
+        code="broken()",
+        language="python",
+        deferred_logs=[],
+        agent=RecordingAgent(),
+        stopped=False,
+    )
+
+    saved_task = db.get(ReviewTask, task.id)
+    assert failed_once is True
+    assert saved_task is not None
+    assert saved_task.status == "failed"
+    assert "review issue insert failed" in saved_task.error_message
+    assert db.query(ReviewIssue).filter_by(task_id=task.id).count() == 0
 
 
 @pytest.mark.asyncio
@@ -1276,26 +1398,36 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
         file_id=34,
         review_type="full",
         max_rounds=1,
+        continuation_context=(
+            "【上一轮结论】输入校验问题已经处理。\n"
+            "【本次纠正要求】重新核对权限边界，不要沿用上一轮判断。"
+        ),
     )
 
     assert session.status == "concluded"
     assert session.report_task_id == 88
-    assert len(session.turns) == 4
+    assert len(session.turns) == 5
     assert [turn.agent_code for turn in session.turns] == [
         "orchestrator",
+        "user",
         "general",
         "security",
         "orchestrator",
     ]
-    assert session.turns[1].content == "通用代理发现第 2 行问题"
+    assert session.turns[1].role == "user"
+    assert "重新核对权限边界" in session.turns[1].content
+    assert session.turns[2].content == "通用代理发现第 2 行问题"
     assert session.turns[-1].content.startswith("📋 **讨论共识小结**")
+    assert "输入校验问题已经处理" in agent.calls[0]["user_prompt"]
+    assert "重新核对权限边界" in agent.calls[0]["user_prompt"]
     assert built["trace_id"] == "trace-roundtable"
     assert built["user_id"] == 42
     assert built["agent_codes"] == ["code_reviewer", "security_sentinel"]
     assert built["max_depth"] == 6
-    assert len(environment.messages) == 4
+    assert len(environment.messages) == 5
     assert [message.cause_by for message in environment.messages] == [
         "StartDiscussion",
+        "DiscussionContinuation",
         "DiscussTurn",
         "DiscussTurn",
         "DiscussionSummary",
@@ -1305,7 +1437,7 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
     assert finalized["create"]["review_type"] == "full"
     review_args = finalized["review"]
     assert review_args["task_id"] == 77
-    assert len(review_args["all_turns"]) == 2
+    assert len(review_args["all_turns"]) == 3
     assert len(review_args["deferred_logs"]) == 3
     assert review_args["consensus"].startswith("📋 **讨论共识小结**")
 

@@ -4,7 +4,7 @@ from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
-from app.services.report_service import get_report_detail
+from app.services.report_service import get_report_detail, list_reports
 
 
 def _make_project(db, admin_user):
@@ -163,6 +163,7 @@ def test_report_detail_uses_final_issue_set_for_all_score_facts(db, admin_user):
     db.commit()
 
     detail = get_report_detail(db, admin_user, task.id)
+    listed = next(item for item in list_reports(db, admin_user)["items"] if item["task_id"] == task.id)
 
     assert detail["task"]["task_name"] == "事实源任务"
     assert detail["task"]["name"] == "事实源任务"
@@ -183,6 +184,8 @@ def test_report_detail_uses_final_issue_set_for_all_score_facts(db, admin_user):
     }
     assert detail["stats"]["score_breakdown"]["score_source"] == "review_issues"
     assert detail["stats"]["risk_level"] == "中风险"
+    assert listed["total_issues"] == detail["stats"]["total_issues"] == 2
+    assert listed["score"] == detail["stats"]["score"] == 77
 
 
 def test_report_detail_preserves_explicit_score_for_empty_historical_task(db, admin_user):

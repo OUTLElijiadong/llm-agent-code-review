@@ -1204,9 +1204,8 @@ class PrismToolExecutor:
     async def _start_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
         """复用用户 REST 预检后，在后台启动同一套圆桌编排器。"""
 
-        from app.ai.discussion_orchestrator import DiscussionOrchestrator
         from app.api.v1.discussion import start_discussion
-        from app.api.v1.ws_discussion import take_pending
+        from app.api.v1.ws_discussion import launch_pending_discussion, take_pending
 
         response = start_discussion(
             project_id=int(call.arguments["project_id"]),
@@ -1222,12 +1221,7 @@ class PrismToolExecutor:
         pending = take_pending(session_id)
         if not session_id or pending is None:
             return ToolExecutionResult.failure("圆桌讨论上下文创建失败")
-        asyncio.create_task(
-            DiscussionOrchestrator().start_discussion(
-                session_id=session_id,
-                **pending.kwargs,
-            )
-        )
+        launch_pending_discussion(pending)
         open_query = urlencode({
             "discuss_session": session_id,
             "discuss_ws": str(data.get("ws_url") or ""),
@@ -1262,7 +1256,7 @@ class PrismToolExecutor:
             "turns": [turn.to_dict() for turn in session.turns[-100:]],
         })
 
-    def _control_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
+    async def _control_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
         """按会话归属发送暂停、恢复、停止或用户发言。"""
 
         from app.agents.discussion_bus import DiscussionBus
@@ -1278,7 +1272,11 @@ class PrismToolExecutor:
         if int(session.owner_user_id) != int(self._user.id) and not _is_admin_actor(self._db, self._user):
             return ToolExecutionResult.failure("无权控制该圆桌讨论")
         if session.status == "concluded":
-            return ToolExecutionResult.failure("圆桌讨论已经结束")
+            if action != "user_input":
+                return ToolExecutionResult.failure("圆桌讨论已经结束，只能提交纠正意见发起续会")
+            if not content:
+                return ToolExecutionResult.failure("user_input 必须提供非空 content")
+            return await self._continue_roundtable_discussion(session, content)
         if action == "user_input":
             if not content:
                 return ToolExecutionResult.failure("user_input 必须提供非空 content")
@@ -1299,6 +1297,76 @@ class PrismToolExecutor:
             "action": action,
             "accepted": True,
             "status": session.status,
+        })
+
+    async def _continue_roundtable_discussion(
+        self,
+        session: Any,
+        correction: str,
+    ) -> ToolExecutionResult:
+        """为已结束圆桌创建独立续会，保留原小菱回投上下文。"""
+
+        from app.api.v1.discussion import start_discussion
+        from app.api.v1.ws_discussion import launch_pending_discussion, take_pending
+
+        project_id = int(getattr(session, "project_id", 0) or 0)
+        file_id = int(getattr(session, "file_id", 0) or 0)
+        review_type = str(getattr(session, "review_type", "") or "").strip()
+        origin_surface = str(getattr(session, "origin_surface", "") or "").strip()
+        origin_session_key = str(getattr(session, "origin_session_key", "") or "").strip()
+        if project_id <= 0 or file_id <= 0 or not review_type:
+            return ToolExecutionResult.failure("原圆桌缺少真实项目、文件或审查类型，无法安全创建续会")
+        if origin_surface not in {"user", "admin"} or not origin_session_key:
+            return ToolExecutionResult.failure("原圆桌缺少小菱回投上下文，无法安全创建续会")
+
+        owner = self._db.get(User, int(session.owner_user_id or 0))
+        if owner is None or int(getattr(owner, "status", 0) or 0) != 1:
+            return ToolExecutionResult.failure("原圆桌所属用户不存在或已停用，无法创建续会")
+
+        previous_summary = ""
+        for turn in reversed(list(getattr(session, "turns", []) or [])):
+            if str(getattr(turn, "agent_code", "")) == "orchestrator":
+                previous_summary = str(getattr(turn, "content", "") or "").strip()
+                if previous_summary:
+                    break
+        if not previous_summary:
+            previous_summary = "上一轮未产生可读的主持人结论。"
+        continuation_context = (
+            "【上一轮结论】\n"
+            f"{previous_summary[:4000]}\n\n"
+            "【本次纠正要求】\n"
+            f"{correction[:2000]}\n\n"
+            "请基于当前项目源码重新独立审查，不得将上一轮结论当作既定事实。"
+        )
+
+        response = start_discussion(
+            project_id=project_id,
+            file_id=file_id,
+            review_type=review_type,
+            db=self._db,
+            user=owner,
+            origin_surface=origin_surface,
+            origin_session_key=origin_session_key,
+            continued_from_session_id=str(session.session_id),
+            continuation_context=continuation_context,
+        )
+        data = dict(response.data or {})
+        new_session_id = str(data.get("session_id") or "")
+        pending = take_pending(new_session_id)
+        if not new_session_id or pending is None:
+            return ToolExecutionResult.failure("圆桌续会上下文创建失败")
+        launch_pending_discussion(pending)
+        return ToolExecutionResult.success({
+            "session_id": new_session_id,
+            "continued_from_session_id": str(session.session_id),
+            "previous_report_task_id": int(getattr(session, "report_task_id", 0) or 0),
+            "action": "user_input",
+            "accepted": True,
+            "status": "active",
+            "started_by": "user_agent",
+            "message": "已基于上一轮结论创建独立续会，完成后将回投原小菱会话。",
+            "open_path": f"/agents?discuss_session={new_session_id}",
+            "open_url": f"/agents?discuss_session={new_session_id}",
         })
 
     async def _execute_batch_user_delete(
@@ -2478,7 +2546,8 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
             "和 control_roundtable_discussion 固定工具。start_roundtable_discussion 启动后立即结束本轮,"
             "告知用户等待期间可以继续对话;讨论结束后系统会把结论回投本会话,收到 task.result 后直接汇报共识、"
-            "报告入口和是否满足要求;结论不满足时用 control_roundtable_discussion 的 user_input 追加纠正意见,"
+            "报告入口和是否满足要求;结论不满足时用 control_roundtable_discussion 的 user_input 追加纠正意见，"
+            "系统会自动创建独立续会并沿用原回投会话，不得把旧会话伪装为运行中;"
             "不得编造讨论进度或结论。"
             "上传源码后用户要求自动完成部署和黑白盒审查时，必须立即调用 "
             "run_full_project_validation；沙箱测试和部署是页面发现协议的例外：白盒、黑盒和组合测试直接使用 "
@@ -3001,7 +3070,10 @@ def _user_capability_schemas() -> list[Dict[str, Any]]:
         {
             "type": "function",
             "name": "control_roundtable_discussion",
-            "description": "暂停、恢复、停止圆桌讨论或提交用户发言；执行前需要批准",
+            "description": (
+                "暂停、恢复、停止运行中的圆桌讨论或提交用户发言；"
+                "对已结束讨论提交 user_input 会自动创建独立续会；执行前需要批准"
+            ),
             "parameters": ControlRoundtableDiscussionArguments.model_json_schema(),
         },
     ]

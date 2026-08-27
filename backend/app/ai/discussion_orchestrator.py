@@ -257,6 +257,8 @@ class DiscussionOrchestrator:
         max_rounds: int = 2,
         origin_surface: str = "",
         origin_session_key: str = "",
+        continuation_context: str = "",
+        continued_from_session_id: str = "",
     ):
         bus = self._bus
         session = bus.get_session(session_id)
@@ -274,6 +276,7 @@ class DiscussionOrchestrator:
         self._file_id = file_id
         self._origin_surface = str(origin_surface or "")[:24]
         self._origin_session_key = str(origin_session_key or "")[:128]
+        self._continued_from_session_id = str(continued_from_session_id or "")[:64]
         self._trace_id = new_trace_id()
         all_turns: list[DiscussionTurn] = []
         self._all_turns = all_turns
@@ -365,6 +368,24 @@ class DiscussionOrchestrator:
                 turn_id=0,
                 cause_by="StartDiscussion",
             )
+            continuation_text = str(continuation_context or "").strip()[:6000]
+            if continuation_text:
+                turn_counter += 1
+                continuation_turn = DiscussionTurn(
+                    turn_id=turn_counter,
+                    agent_code="user",
+                    agent_name="你",
+                    role="user",
+                    content=continuation_text,
+                )
+                all_turns.append(continuation_turn)
+                bus.publish_turn(session_id, continuation_turn)
+                self._publish_to_env(
+                    speaker="user",
+                    content=continuation_text,
+                    turn_id=turn_counter,
+                    cause_by="DiscussionContinuation",
+                )
             await asyncio.sleep(0.5)
 
             for round_idx in range(max_rounds):
@@ -970,7 +991,6 @@ def _finalize_review(
             ))
         if issue_rows:
             db.add_all(issue_rows)
-            db.commit()
 
         # 3) 统计 + 收尾任务
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
@@ -980,36 +1000,42 @@ def _finalize_review(
 
         # 共识小结作为任务 summary(由编排器直接传入主持人汇总文本)
         task = db.get(ReviewTask, task_id)
-        if task:
-            task.processed_files = 1
-            task.total_issues = len(issue_rows)
-            task.severe_issues = sev_count["严重"]
-            task.high_issues = sev_count["高"]
-            task.medium_issues = sev_count["中"]
-            task.low_issues = sev_count["低"]
-            score_breakdown = compute_score_breakdown(sev_count)
-            task.score = int(score_breakdown["score"])
-            task.score_version = SCORING_VERSION
-            task.score_breakdown = score_breakdown
-            task.summary = (consensus or "圆桌讨论已完成。")[:2000]
-            task.status = "success"  # 终止也算成功产出报告
-            task.end_time = datetime.now(timezone.utc)
-            task.duration_ms = int((time.time() - t0) * 1000)
-            db.commit()
+        if task is None:
+            raise RuntimeError(f"圆桌审查任务 #{task_id} 不存在")
+        task.processed_files = 1
+        task.total_issues = len(issue_rows)
+        task.severe_issues = sev_count["严重"]
+        task.high_issues = sev_count["高"]
+        task.medium_issues = sev_count["中"]
+        task.low_issues = sev_count["低"]
+        score_breakdown = compute_score_breakdown(sev_count)
+        task.score = int(score_breakdown["score"])
+        task.score_version = SCORING_VERSION
+        task.score_breakdown = score_breakdown
+        task.summary = (consensus or "圆桌讨论已完成。")[:2000]
+        task.error_message = None
+        task.status = "success"  # 用户停止后仍可保存已完成整理的报告
+        task.end_time = datetime.now(timezone.utc)
+        task.duration_ms = int((time.time() - t0) * 1000)
+        # 问题记录与任务成功状态必须原子提交，避免生成半份报告。
+        db.commit()
         return task_id
-    except Exception:
+    except Exception as exc:
         logger.error(f"[Discussion] _finalize_review 异常: {traceback.format_exc()}")
         db.rollback()
-        # 尽量把任务标记为成功(已有发言),否则报告列表不显示
+        readable_error = str(exc).strip() or exc.__class__.__name__
         try:
             task = db.get(ReviewTask, task_id)
-            if task and task.status == "running":
-                task.status = "success"
-                task.summary = "圆桌讨论已完成(报告整理部分失败)。"
+            if task:
+                task.status = "failed"
+                task.summary = "圆桌讨论已完成，但报告整理失败。"
+                task.error_message = f"圆桌报告整理失败：{readable_error}"[:500]
                 task.end_time = datetime.now(timezone.utc)
+                task.duration_ms = int((time.time() - t0) * 1000)
                 db.commit()
-        except Exception:
-            pass
+        except Exception as status_exc:
+            db.rollback()
+            logger.error(f"[Discussion] 标记圆桌报告失败状态异常: {status_exc}")
         return task_id
     finally:
         db.close()
@@ -1055,17 +1081,19 @@ def _extract_issues(all_turns, code, language, file_name, agent, db,
             system_prompt=system, user_prompt=user_prompt,
             agent_label="general", json_mode=True,
         )
-        try:
-            DeepSeekAgent.log_deferred(
-                db, task_id=task_id, user_id=user_id, file_id=file_id,
-                chunk_index=9100, meta=meta, status="success",
-            )
-        except Exception:
-            pass
+    except Exception as exc:
+        raise RuntimeError(f"结构化问题抽取失败：{exc}") from exc
+    try:
+        DeepSeekAgent.log_deferred(
+            db, task_id=task_id, user_id=user_id, file_id=file_id,
+            chunk_index=9100, meta=meta, status="success",
+        )
+    except Exception as exc:
+        logger.debug(f"[Discussion] 补写结构化抽取日志失败: {exc}")
+    try:
         return parse_issues(raw).issues
-    except Exception as e:
-        logger.warning(f"[Discussion] 抽取问题失败: {e}")
-        return []
+    except Exception as exc:
+        raise RuntimeError(f"结构化问题解析失败：{exc}") from exc
 
 
 def _normalize_discussion_issues(

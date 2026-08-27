@@ -37,11 +37,11 @@ from app.ai.static_analyzer import (
 
 # ============ CVSS 字段解析 ============
 
-def test_coerce_cvss_score_normal():
-    """合法数值正常解析,保留 1 位小数"""
-    assert _coerce_cvss_score(9.8) == 9.8
-    assert _coerce_cvss_score("7.5") == 7.5
-    assert _coerce_cvss_score(8.76) == 8.8
+def test_coerce_cvss_score_without_vector_is_unavailable():
+    """裸分数无法确定性复算，必须保持未评分。"""
+    assert _coerce_cvss_score(9.8) is None
+    assert _coerce_cvss_score("7.5") is None
+    assert _coerce_cvss_score(8.76) is None
 
 
 def test_coerce_cvss_score_out_of_range_returns_missing():

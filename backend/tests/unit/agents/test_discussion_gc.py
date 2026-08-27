@@ -15,6 +15,54 @@ def _fresh_bus() -> DiscussionBus:
 
 
 class TestBusPurge:
+    def test_continuation_session_keeps_lineage_without_mutating_closed_session(self):
+        bus = _fresh_bus()
+        closed = bus.create_session(
+            "disc_original",
+            task_id=0,
+            file_name="main.py",
+            owner_user_id=7,
+            max_rounds=2,
+            project_id=11,
+            file_id=13,
+            review_type="security",
+            origin_surface="user",
+            origin_session_key="chat-original",
+        )
+        closed.report_task_id = 71
+        bus.close_session(closed.session_id)
+
+        continuation = bus.create_session(
+            "disc_continuation",
+            task_id=0,
+            file_name="main.py",
+            owner_user_id=7,
+            max_rounds=2,
+            project_id=11,
+            file_id=13,
+            review_type="security",
+            origin_surface="user",
+            origin_session_key="chat-original",
+            continued_from_session_id=closed.session_id,
+        )
+
+        assert closed.status == "concluded"
+        assert closed.report_task_id == 71
+        assert continuation.status == "active"
+        assert continuation.report_task_id == 0
+        assert continuation.continued_from_session_id == closed.session_id
+        assert continuation.project_id == closed.project_id == 11
+        assert continuation.file_id == closed.file_id == 13
+        assert continuation.review_type == closed.review_type == "security"
+        assert continuation.origin_surface == closed.origin_surface == "user"
+        assert continuation.origin_session_key == closed.origin_session_key == "chat-original"
+
+        legacy = bus.create_session("disc_legacy", task_id=0, file_name="legacy.py")
+        assert legacy.project_id == 0
+        assert legacy.file_id == 0
+        assert legacy.review_type == "full"
+        assert legacy.continued_from_session_id == ""
+
     def test_concluded_session_purged_after_ttl(self):
         bus = _fresh_bus()
         bus.create_session("disc_gc1", task_id=1, file_name="a.py")

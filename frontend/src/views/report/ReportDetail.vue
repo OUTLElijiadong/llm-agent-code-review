@@ -270,7 +270,7 @@
       </section>
 
       <!-- ============ T15 v3 字段:CVSS 评分分布 ============ -->
-      <section v-if="hasV3Data" class="card v3-card no-break" v-loading="issuesLoading">
+      <section v-if="issues.length > 0" class="card v3-card no-break" v-loading="issuesLoading">
         <header class="card-head">
           <h3 class="font-display">
             <span class="prism-mark sm"></span>CVSS 评分分布
@@ -288,7 +288,7 @@
             <span class="cv-val font-mono">{{ r.value }}</span>
           </div>
         </div>
-        <EmptyState v-else description="暂无 CVSS 评分数据" compact />
+        <EmptyState v-else description="CVSS 未评分" compact />
       </section>
 
       <!-- ============ T15 v3 字段:合规映射概览 ============ -->
@@ -340,15 +340,15 @@
                 <span class="it-name">{{ it.title || it.issue_type }}</span>
                 <span v-if="it.file_name" class="it-file font-mono">{{ it.file_name }}:{{ it.line_number ?? '?' }}</span>
               </td>
-              <td class="font-mono col-num" :style="{ color: cvssSeverityColor(it.cvss_score), fontWeight: 600 }">
-                {{ it.cvss_score?.toFixed(1) ?? '未评分' }}
+              <td class="font-mono col-num" :style="{ color: cvssSeverityColor(deterministicCvssScore(it)), fontWeight: 600 }">
+                {{ deterministicCvssScore(it)?.toFixed(1) ?? '未评分' }}
               </td>
               <td class="font-mono col-num">{{ it.cwe || it.issue_type || '-' }}</td>
               <td class="col-num">
                 <span
                   class="sev-tag"
-                  :style="{ color: cvssSeverityColor(it.cvss_score), borderColor: cvssSeverityColor(it.cvss_score) }"
-                >{{ cvssSeverityLabel(it.cvss_score) }}</span>
+                  :style="{ color: cvssSeverityColor(deterministicCvssScore(it)), borderColor: cvssSeverityColor(deterministicCvssScore(it)) }"
+                >{{ cvssSeverityLabel(deterministicCvssScore(it)) }}</span>
               </td>
               <td class="col-num">
                 <el-button
@@ -384,8 +384,8 @@
           </h3>
           <p class="card-desc">
             {{ selectedRemediationIssue.title || selectedRemediationIssue.issue_type }}
-            <span v-if="selectedRemediationIssue.cvss_score" class="card-desc-meta font-mono">
-              · CVSS {{ selectedRemediationIssue.cvss_score.toFixed(1) }}
+            <span v-if="deterministicCvssScore(selectedRemediationIssue) != null" class="card-desc-meta font-mono">
+              · CVSS {{ deterministicCvssScore(selectedRemediationIssue)?.toFixed(1) }}
               <span v-if="selectedRemediationIssue.cvss_vector"> · {{ selectedRemediationIssue.cvss_vector }}</span>
             </span>
           </p>
@@ -505,6 +505,23 @@ const exportingFormat = ref<ReportFormat | null>(null)
 const issues = ref<ReportIssue[]>([])
 /** issues 是否正在加载 */
 const issuesLoading = ref(false)
+
+/** 只有后端确认由有效 v3.1 向量计算的分数才可作为 CVSS 展示。 */
+function deterministicCvssScore(issue: ReportIssue): number | undefined {
+  const score = issue.cvss_score
+  if (
+    issue.cvss_source !== 'vector'
+    || issue.cvss_version !== '3.1'
+    || !issue.cvss_vector?.trim()
+    || typeof score !== 'number'
+    || !Number.isFinite(score)
+    || score < 0
+    || score > 10
+  ) {
+    return undefined
+  }
+  return score
+}
 
 /** 模板类型下拉选项 */
 const templateTypeOptions: Array<{ label: string; value: ReportTemplateType }> = [
@@ -728,8 +745,8 @@ async function loadIssues(): Promise<void> {
 const cvssDistribution = computed(() => {
   const dist = { low: 0, medium: 0, high: 0, critical: 0 }
   for (const it of issues.value) {
-    const s = it.cvss_score
-    if (typeof s !== 'number') continue
+    const s = deterministicCvssScore(it)
+    if (s === undefined) continue
     if (s >= 9) dist.critical += 1
     else if (s >= 7) dist.high += 1
     else if (s >= 4) dist.medium += 1
@@ -787,12 +804,12 @@ const hasCompliance = computed(() => {
   return s.iso27001 + s.gdpr + s.pci_dss + s.hipaa > 0
 })
 
-/** Top 10 高危漏洞列表(按 cvss_score 降序,无评分的排除) */
+/** Top 10 高危漏洞列表(仅按可验证的向量派生评分排序) */
 const top10Issues = computed<ReportIssue[]>(() => {
   return issues.value
-    .filter((it) => typeof it.cvss_score === 'number')
+    .filter((it) => deterministicCvssScore(it) !== undefined)
     .slice()
-    .sort((a, b) => (b.cvss_score ?? 0) - (a.cvss_score ?? 0))
+    .sort((a, b) => (deterministicCvssScore(b) ?? 0) - (deterministicCvssScore(a) ?? 0))
     .slice(0, 10)
 })
 

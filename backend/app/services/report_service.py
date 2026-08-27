@@ -62,14 +62,19 @@ def list_reports(db: Session, user: User, project_id: int = None,
     total = q.count()
     pagination = Pagination(page, page_size, total)
     rows = q.order_by(ReviewTask.create_time.desc()).offset(pagination.offset).limit(pagination.page_size).all()
+    issue_counts = _load_issue_severity_counts(db, [row.id for row in rows])
 
     items = []
     for row in rows:
         project = db.get(Project, row.project_id)
+        issue_count, score, _breakdown, _severity_count = _build_task_score_facts(
+            row,
+            issue_counts.get(row.id, {}),
+        )
         items.append({
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
             "project_name": project.project_name if project else "",
-            "total_issues": row.total_issues, "score": row.score, "status": row.status,
+            "total_issues": issue_count, "score": score, "status": row.status,
             "create_time": row.create_time.isoformat() if row.create_time else None,
         })
     return pagination.to_dict(items)
@@ -94,10 +99,6 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
 
     project = db.get(Project, task.project_id)
 
-    severity_rows = db.query(
-        ReviewIssue.severity, func.count(ReviewIssue.id)
-    ).filter(ReviewIssue.task_id == task_id).group_by(ReviewIssue.severity).all()
-
     type_rows = db.query(
         ReviewIssue.issue_type, func.count(ReviewIssue.id)
     ).filter(ReviewIssue.task_id == task_id).group_by(ReviewIssue.issue_type).all()
@@ -106,16 +107,10 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         ReviewIssue.status == "fixed",
     ).scalar() or 0
 
-    severity_from_issues = {severity: int(count) for severity, count in severity_rows}
-    severity_count = {
-        severity: int(severity_from_issues.get(severity, 0) or 0)
-        for severity in ("严重", "高", "中", "低")
-    }
-    issue_count = sum(int(count) for _, count in severity_rows)
-    score, score_breakdown = build_report_score_facts(
-        severity_count,
-        issue_count,
-        task.score,
+    severity_from_issues = _load_issue_severity_counts(db, [task_id]).get(task_id, {})
+    issue_count, score, score_breakdown, severity_count = _build_task_score_facts(
+        task,
+        severity_from_issues,
     )
 
     from app.services.review_service import _task_agent_release_summaries
@@ -153,6 +148,44 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         "files": _build_file_summaries(db, task_id),
         "rules_snapshot": task.rules_snapshot or [],
     }
+
+
+def _load_issue_severity_counts(db: Session, task_ids: list[int]) -> dict[int, dict[str, int]]:
+    """批量读取最终 ReviewIssue 的严重度计数。"""
+    if not task_ids:
+        return {}
+    rows = db.query(
+        ReviewIssue.task_id,
+        ReviewIssue.severity,
+        func.count(ReviewIssue.id),
+    ).filter(
+        ReviewIssue.task_id.in_(task_ids),
+    ).group_by(
+        ReviewIssue.task_id,
+        ReviewIssue.severity,
+    ).all()
+    counts: dict[int, dict[str, int]] = {}
+    for task_id, severity, count in rows:
+        counts.setdefault(int(task_id), {})[str(severity)] = int(count)
+    return counts
+
+
+def _build_task_score_facts(
+    task: ReviewTask,
+    severity_from_issues: dict[str, int],
+) -> tuple[int, int, dict, dict[str, int]]:
+    """按详情和导出共同使用的最终问题集口径构造任务评分事实。"""
+    severity_count = {
+        severity: int(severity_from_issues.get(severity, 0) or 0)
+        for severity in ("严重", "高", "中", "低")
+    }
+    issue_count = sum(int(count) for count in severity_from_issues.values())
+    score, score_breakdown = build_report_score_facts(
+        severity_count,
+        issue_count,
+        task.score,
+    )
+    return issue_count, score, score_breakdown, severity_count
 
 
 def _build_file_summaries(db: Session, task_id: int) -> list[dict]:

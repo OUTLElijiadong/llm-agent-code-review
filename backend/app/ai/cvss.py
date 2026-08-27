@@ -43,25 +43,15 @@ def normalize_cvss(
     score: object,
     vector: object,
 ) -> Tuple[Optional[float], Optional[str], Optional[str], str]:
-    """Normalize a CVSS pair while keeping vector-derived scores authoritative.
+    """Normalize CVSS data using a valid v3.1 vector as the only score source.
 
-    A valid vector is the only deterministic calculation input. When no vector is
-    available, a valid explicit model score remains available for backward
-    compatibility, but its provenance is marked as ``model``. Missing or invalid
-    values remain missing instead of being represented as a zero-risk score.
+    ``score`` is accepted for call-site compatibility but is never persisted on
+    its own. A model-provided number without a valid vector is not reproducible,
+    so it is represented as unavailable instead of being presented as CVSS.
     """
     normalized_vector = normalize_cvss_vector(vector)
     if normalized_vector is not None:
         calculated = calculate_cvss_score(normalized_vector)
         return calculated, normalized_vector, CVSS_VERSION, "vector"
-
-    normalized_score: Optional[float]
-    try:
-        normalized_score = round(float(score), 1) if score is not None and score != "" else None
-    except (TypeError, ValueError):
-        normalized_score = None
-    # score-only 只是模型估算，不能伪装成完整的 CVSS v3.1 向量。
-    # 0.0 在没有向量时通常表示“未提供”，不要把未知风险展示成零风险。
-    if normalized_score is not None and 0.0 < normalized_score <= 10.0:
-        return normalized_score, None, None, "model"
+    _ = score
     return None, None, None, "unavailable"

@@ -33,6 +33,9 @@ const issue = {
   status: 'open',
   create_time: '2026-08-26T00:00:00Z',
   cvss_score: 9.8,
+  cvss_vector: 'AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+  cvss_version: '3.1',
+  cvss_source: 'vector',
 }
 
 function setupState(wrapper: VueWrapper): Record<string, any> {
@@ -146,6 +149,30 @@ describe('ReportDetail 报告口径', () => {
     await flushPromises()
 
     expect(setupState(wrapper).cvssSeverityLabel(undefined)).toBe('未评分')
+    wrapper.unmount()
+  })
+
+  it('只有 score 没有有效向量时不计入分布并显示未评分', async () => {
+    reviewApi.getTaskIssues.mockResolvedValueOnce({
+      items: [{
+        ...issue,
+        cvss_score: 7.5,
+        cvss_vector: undefined,
+        cvss_version: undefined,
+        cvss_source: 'model',
+      }],
+      total: 1,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(setupState(wrapper).cvssTotal).toBe(0)
+    expect(setupState(wrapper).top10Issues).toHaveLength(0)
+    expect(
+      wrapper.findAll('empty-state-stub')
+        .some((node) => node.attributes('description') === 'CVSS 未评分'),
+    ).toBe(true)
+    expect(wrapper.text()).not.toContain('7.5')
     wrapper.unmount()
   })
 })

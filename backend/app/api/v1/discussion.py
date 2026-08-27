@@ -37,6 +37,8 @@ def start_discussion(
     user: User = Depends(get_current_user),
     origin_surface: str = "",
     origin_session_key: str = "",
+    continued_from_session_id: str = "",
+    continuation_context: str = "",
 ):
     """预检并注册讨论,返回 session_id 和基本信息。
 
@@ -74,6 +76,12 @@ def start_discussion(
         file_name=code_file.file_name,
         owner_user_id=user.id,
         max_rounds=rounds,
+        project_id=project_id,
+        file_id=file_id,
+        review_type=review_type,
+        origin_surface=origin_surface,
+        origin_session_key=origin_session_key,
+        continued_from_session_id=continued_from_session_id,
     )
 
     register_pending(
@@ -91,6 +99,8 @@ def start_discussion(
         # 小菱在会话内启动时记录来源会话,讨论结束后把结论回投给该会话自动汇报。
         origin_surface=str(origin_surface or "")[:24],
         origin_session_key=str(origin_session_key or "")[:128],
+        continued_from_session_id=str(continued_from_session_id or "")[:64],
+        continuation_context=str(continuation_context or "")[:6000],
     )
 
     agent_list = [
@@ -104,6 +114,7 @@ def start_discussion(
         "file_name": code_file.file_name,
         "language": project.language or code_file.language or "plaintext",
         "review_type": review_type,
+        "continued_from_session_id": str(continued_from_session_id or "")[:64],
         "agents": agent_list,
         "rules_count": len(rules),
     })

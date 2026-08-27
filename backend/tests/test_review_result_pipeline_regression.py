@@ -430,10 +430,10 @@ def test_repeated_source_evidence_uses_unique_nearest_occurrence() -> None:
     assert len({item.source_anchor for item in merged}) == 2
 
 
-def test_cvss_zero_and_invalid_vector_are_unavailable_or_unversioned() -> None:
+def test_cvss_requires_a_valid_vector_for_any_score() -> None:
     assert normalize_cvss(0.0, None) == (None, None, None, "unavailable")
-    assert normalize_cvss(7.5, "not-a-vector") == (7.5, None, None, "model")
-    assert normalize_cvss(7.5, None) == (7.5, None, None, "model")
+    assert normalize_cvss(7.5, "not-a-vector") == (None, None, None, "unavailable")
+    assert normalize_cvss(7.5, None) == (None, None, None, "unavailable")
 
 
 def test_review_agent_conversion_preserves_cvss_and_provenance() -> None:

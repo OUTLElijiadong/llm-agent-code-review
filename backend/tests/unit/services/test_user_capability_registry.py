@@ -8,10 +8,13 @@ from typing import Any
 import pytest
 
 from app.agents.discussion_bus import DiscussionBus
+from app.agents.events import DiscussionTurn
 from app.core.permission_codes import ALL_PERMISSION_CODES
 from app.main import app
 from app.models.agent_governance import ApprovalItem
 from app.models.agent_response_run import AgentToolExecution
+from app.models.code_file import CodeFile
+from app.models.project import Project
 from app.models.user import User
 from app.services import agent_responses_service as service_module
 from app.services.admin_capability_registry import operation_contract
@@ -359,6 +362,24 @@ async def test_roundtable_tools_read_and_control_only_owned_session_after_approv
     assert completed.output["accepted"] is True
     assert controls == [("pause", {"session_id": "disc_agent_owned"})]
 
+    user_input_call = ToolCall(
+        "call_discussion_user_input",
+        "control_roundtable_discussion",
+        {
+            "session_id": "disc_agent_owned",
+            "action": "user_input",
+            "content": "请重点复核权限边界",
+        },
+        "{}",
+    )
+    assert (await executor.execute(user_input_call)).status == "approval_required"
+    user_input = await executor.execute(user_input_call, approved=True)
+    assert user_input.status == "success"
+    assert user_input.output["session_id"] == "disc_agent_owned"
+    assert bus.get_session("disc_agent_owned").status == "active"
+    assert bus.get_session("disc_agent_owned").turns[-1].content == "请重点复核权限边界"
+    assert controls[-1] == ("user_input", {"content": "请重点复核权限边界"})
+
     outsider = User(username="roundtable_outsider", password="x", role="user", status=1)
     db.add(outsider)
     db.commit()
@@ -367,6 +388,169 @@ async def test_roundtable_tools_read_and_control_only_owned_session_after_approv
     )
     assert denied.status == "error"
     assert "无权访问" in denied.error
+    DiscussionBus._instance = None
+
+
+@pytest.mark.asyncio
+async def test_concluded_roundtable_user_input_starts_owned_continuation(
+    db,
+    monkeypatch,
+) -> None:
+    from app.api.v1 import discussion as discussion_api
+    from app.api.v1 import ws_discussion
+
+    user = _user(db)
+    project = Project(
+        user_id=user.id,
+        project_name="continuation-project",
+        language="python",
+        status="active",
+    )
+    db.add(project)
+    db.commit()
+    code_file = CodeFile(
+        project_id=project.id,
+        file_name="main.py",
+        file_path="main.py",
+        language="python",
+        content="def guarded():\n    return True\n",
+        size_bytes=31,
+        line_count=2,
+        status="active",
+    )
+    db.add(code_file)
+    db.commit()
+
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(discussion_api.rule_service, "get_enabled_rules", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(discussion_api, "_gen_session_id", lambda: "disc_continued")
+    launched = []
+    monkeypatch.setattr(ws_discussion, "launch_pending_discussion", lambda pending: launched.append(pending))
+
+    DiscussionBus._instance = None
+    bus = DiscussionBus.instance()
+    original = bus.create_session(
+        session_id="disc_concluded",
+        task_id=0,
+        file_name=code_file.file_name,
+        owner_user_id=user.id,
+        max_rounds=2,
+    )
+    original.project_id = project.id
+    original.file_id = code_file.id
+    original.review_type = "security"
+    original.origin_surface = "user"
+    original.origin_session_key = "chat-original"
+    bus.publish_turn(original.session_id, DiscussionTurn(
+        turn_id=9,
+        agent_code="orchestrator",
+        agent_name="主持人",
+        role="agent",
+        content="📋 **讨论共识小结**\n\n上一轮认为权限边界安全。",
+    ))
+    original.report_task_id = 731
+    bus.close_session(original.session_id)
+
+    executor = PrismToolExecutor(
+        db,
+        user,
+        surface="user",
+        run_id="run-roundtable-continuation",
+        session_key="chat-current",
+        mcp_provider=EmptyMcp(),
+    )
+    call = ToolCall(
+        "call-roundtable-continuation",
+        "control_roundtable_discussion",
+        {
+            "session_id": original.session_id,
+            "action": "user_input",
+            "content": "重新核对管理员越权路径，并修正结论。",
+        },
+        "{}",
+    )
+
+    assert (await executor.execute(call)).status == "approval_required"
+    completed = await executor.execute(call, approved=True)
+
+    assert completed.status == "success"
+    assert completed.output["session_id"] == "disc_continued"
+    assert completed.output["continued_from_session_id"] == original.session_id
+    assert completed.output["previous_report_task_id"] == 731
+    assert completed.output["accepted"] is True
+    assert original.status == "concluded"
+    assert original.report_task_id == 731
+
+    continuation = bus.get_session("disc_continued")
+    assert continuation is not None
+    assert continuation.status == "active"
+    assert continuation.report_task_id == 0
+    assert continuation.owner_user_id == user.id
+    assert continuation.project_id == project.id
+    assert continuation.file_id == code_file.id
+    assert continuation.review_type == "security"
+    assert continuation.origin_surface == "user"
+    assert continuation.origin_session_key == "chat-original"
+    assert continuation.continued_from_session_id == original.session_id
+
+    assert len(launched) == 1
+    pending = launched[0]
+    assert pending.session_id == "disc_continued"
+    assert pending.kwargs["project_id"] == project.id
+    assert pending.kwargs["file_id"] == code_file.id
+    assert pending.kwargs["review_type"] == "security"
+    assert pending.kwargs["origin_surface"] == "user"
+    assert pending.kwargs["origin_session_key"] == "chat-original"
+    assert "上一轮认为权限边界安全" in pending.kwargs["continuation_context"]
+    assert "重新核对管理员越权路径" in pending.kwargs["continuation_context"]
+
+    ws_discussion._session_owners.pop("disc_continued", None)
+    ws_discussion._owner_registered_at.pop("disc_continued", None)
+    DiscussionBus._instance = None
+
+
+@pytest.mark.asyncio
+async def test_concluded_roundtable_continuation_rejects_non_owner(
+    db,
+    monkeypatch,
+) -> None:
+    owner = _user(db)
+    outsider = User(username="roundtable_continuation_outsider", password="x", role="user", status=1)
+    db.add(outsider)
+    db.commit()
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+
+    DiscussionBus._instance = None
+    bus = DiscussionBus.instance()
+    original = bus.create_session(
+        session_id="disc_private_concluded",
+        task_id=0,
+        file_name="private.py",
+        owner_user_id=owner.id,
+    )
+    original.project_id = 91
+    original.file_id = 92
+    original.review_type = "full"
+    bus.close_session(original.session_id)
+
+    executor = _executor(db, outsider, "run-roundtable-continuation-denied")
+    call = ToolCall(
+        "call-roundtable-continuation-denied",
+        "control_roundtable_discussion",
+        {
+            "session_id": original.session_id,
+            "action": "user_input",
+            "content": "把结论改成安全",
+        },
+        "{}",
+    )
+    assert (await executor.execute(call)).status == "approval_required"
+    denied = await executor.execute(call, approved=True)
+
+    assert denied.status == "error"
+    assert "无权控制" in denied.error
+    assert list(bus._sessions) == [original.session_id]
+    assert original.status == "concluded"
     DiscussionBus._instance = None
 
 
