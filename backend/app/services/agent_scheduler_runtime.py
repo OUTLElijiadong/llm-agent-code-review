@@ -119,6 +119,11 @@ def _register_job_to_scheduler(scheduler, job) -> bool:
     """
     if job.status != "enabled":
         return False
+    if (
+        getattr(job, "job_type", "") in {"skill_evolution", "skill_proactive"}
+        and not settings.skill_scheduler_enabled
+    ):
+        return False
 
     # 优先尝试 daily 表达式
     daily_parsed = _parse_daily_schedule(job.schedule)

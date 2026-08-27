@@ -49,6 +49,8 @@ _SKILL_EVOLUTION_AGENTS = (
 # 同样 14 个 Agent,与 evolution 任务用不同 cron 表达式
 _SKILL_PROACTIVE_AGENTS = _SKILL_EVOLUTION_AGENTS
 
+_SKILL_JOB_TYPES = frozenset({"skill_evolution", "skill_proactive"})
+
 
 def _utcnow() -> datetime:
     """获取 UTC 当前时间。
@@ -97,12 +99,13 @@ def ensure_default_jobs(db: Session) -> list[AgentJob]:
             config_json=json.dumps({"scheduler": "apscheduler-ready"}, ensure_ascii=False),
         ))
     db.commit()
-    # v3.0 AgentSkill: 同步注册 per-Agent 的 Skill 调度任务
-    try:
-        ensure_skill_jobs(db)
-    except Exception as exc:  # noqa: BLE001 - Skill 调度注册失败不阻断主流程
-        from loguru import logger
-        logger.warning(f"[scheduler_service] ensure_skill_jobs 失败(不影响主流程): {exc}")
+    # v3.0 AgentSkill: 只在显式开启时创建 per-Agent Skill 调度任务。
+    if settings.skill_scheduler_enabled:
+        try:
+            ensure_skill_jobs(db)
+        except Exception as exc:  # noqa: BLE001 - Skill 调度注册失败不阻断主流程
+            from loguru import logger
+            logger.warning(f"[scheduler_service] ensure_skill_jobs 失败(不影响主流程): {exc}")
     return list_jobs(db)
 
 
@@ -119,6 +122,9 @@ def ensure_skill_jobs(db: Session) -> list[AgentJob]:
     Returns:
         list[AgentJob]: 当前已注册的 Skill 调度任务列表。
     """
+    if not settings.skill_scheduler_enabled:
+        return []
+
     added: list[AgentJob] = []
     # 每日 03:00 跑 evolution
     for agent_code in _SKILL_EVOLUTION_AGENTS:
@@ -241,15 +247,26 @@ def run_job(
         and not can_access_restricted_jobs(db, actor)
     ):
         raise ForbiddenError("仅超级管理员 admin 可手动运行受限调度任务", code=40322)
+    if job.job_type in _SKILL_JOB_TYPES and not settings.skill_scheduler_enabled:
+        return _record_skipped_run(db, job, reason="skill_scheduler_disabled")
     run = AgentJobRun(job_id=job.id, status="running", started_at=_utcnow())
     db.add(run)
     db.commit()
     db.refresh(run)
     try:
         result = _execute_job(db, job)
-        run.status = "failed" if job.job_type == "ops_health_check" and result.get("success") is False else "success"
+        run.status = (
+            "failed"
+            if (
+                (job.job_type == "ops_health_check" and result.get("success") is False)
+                or result.get("budget_blocked") is True
+            )
+            else "success"
+        )
         run.result_json = json.dumps(result, ensure_ascii=False, default=str)
-        if run.status == "failed":
+        if result.get("budget_blocked") is True:
+            run.error = str(result.get("error") or "Agent 当日自动任务 token 预算已用尽")
+        elif run.status == "failed":
             run.error = "AI 自动运维巡检检测到不健康状态"
         run.finished_at = _utcnow()
         job.last_run_at = run.finished_at
@@ -257,6 +274,31 @@ def run_job(
         run.status = "failed"
         run.error = str(exc)
         run.finished_at = _utcnow()
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def _record_skipped_run(db: Session, job: AgentJob, *, reason: str) -> AgentJobRun:
+    """Persist a fail-closed scheduler skip without invoking the job body."""
+
+    now = _utcnow()
+    result = {
+        "success": True,
+        "skipped": True,
+        "reason": reason,
+        "job_type": job.job_type,
+        "agent_code": job.agent_code,
+    }
+    run = AgentJobRun(
+        job_id=job.id,
+        status="success",
+        started_at=now,
+        finished_at=now,
+        result_json=json.dumps(result, ensure_ascii=False),
+    )
+    job.last_run_at = now
+    db.add(run)
     db.commit()
     db.refresh(run)
     return run
@@ -324,8 +366,12 @@ def _execute_skill_evolution(db: Session, job: AgentJob) -> Dict[str, Any]:
     """
     from loguru import logger
 
+    if not settings.skill_scheduler_enabled:
+        return _skill_scheduler_disabled_result(job)
+
     from app.agents.base import AgentContext
     from app.agents.orchestrator import Orchestrator
+    from app.services import agent_cost_budget_service
 
     agent_name = job.agent_code or "evolution"
     skill_name = f"{agent_name}.self_improve"
@@ -341,14 +387,19 @@ def _execute_skill_evolution(db: Session, job: AgentJob) -> Dict[str, Any]:
     orch._db = db
     ctx = AgentContext(extra={"job_id": job.id, "job_code": job.job_code})
     try:
-        result = orch.invoke_skill(
-            agent_name=agent_name,
-            skill_name=skill_name,
-            params={"action": action},
-            ctx=ctx,
-            trigger_type="scheduled",
-            trigger_source=f"scheduler:cron:{job.schedule}",
-        )
+        with agent_cost_budget_service.guard_automatic_model_call(db, agent_name):
+            result = orch.invoke_skill(
+                agent_name=agent_name,
+                skill_name=skill_name,
+                params={"action": action},
+                ctx=ctx,
+                trigger_type="scheduled",
+                trigger_source=f"scheduler:cron:{job.schedule}",
+            )
+    except agent_cost_budget_service.AutomaticTokenBudgetExceeded as exc:
+        return _budget_blocked_result(agent_name, skill_name, exc.snapshot)
+    except agent_cost_budget_service.AutomaticBudgetLockUnavailable as exc:
+        return _budget_guard_unavailable_result(agent_name, skill_name, exc)
     except Exception as exc:  # noqa: BLE001 - 调度异常需转成结构化返回
         logger.warning(
             f"[scheduler_service] 定时自进化异常: agent={agent_name} error={exc}"
@@ -386,8 +437,12 @@ def _execute_skill_proactive(db: Session, job: AgentJob) -> Dict[str, Any]:
     """
     from loguru import logger
 
+    if not settings.skill_scheduler_enabled:
+        return _skill_scheduler_disabled_result(job)
+
     from app.agents.base import AgentContext
     from app.agents.orchestrator import Orchestrator
+    from app.services import agent_cost_budget_service
 
     agent_name = job.agent_code or "orchestrator"
     skill_name = f"{agent_name}.proactive"
@@ -403,14 +458,19 @@ def _execute_skill_proactive(db: Session, job: AgentJob) -> Dict[str, Any]:
     orch._db = db
     ctx = AgentContext(extra={"job_id": job.id, "job_code": job.job_code})
     try:
-        result = orch.invoke_skill(
-            agent_name=agent_name,
-            skill_name=skill_name,
-            params={"action_type": action},
-            ctx=ctx,
-            trigger_type="scheduled",
-            trigger_source=f"scheduler:cron:{job.schedule}",
-        )
+        with agent_cost_budget_service.guard_automatic_model_call(db, agent_name):
+            result = orch.invoke_skill(
+                agent_name=agent_name,
+                skill_name=skill_name,
+                params={"action_type": action},
+                ctx=ctx,
+                trigger_type="scheduled",
+                trigger_source=f"scheduler:cron:{job.schedule}",
+            )
+    except agent_cost_budget_service.AutomaticTokenBudgetExceeded as exc:
+        return _budget_blocked_result(agent_name, skill_name, exc.snapshot)
+    except agent_cost_budget_service.AutomaticBudgetLockUnavailable as exc:
+        return _budget_guard_unavailable_result(agent_name, skill_name, exc)
     except Exception as exc:  # noqa: BLE001 - 调度异常需转成结构化返回
         logger.warning(
             f"[scheduler_service] 定时主动监测异常: agent={agent_name} error={exc}"
@@ -428,6 +488,49 @@ def _execute_skill_proactive(db: Session, job: AgentJob) -> Dict[str, Any]:
         "effect": data.get("effect", "?"),
         "duration_ms": data.get("duration_ms", result.duration_ms),
         "record_id": data.get("record_id"),
+        "agent_name": agent_name,
+        "skill_name": skill_name,
+    }
+
+
+def _skill_scheduler_disabled_result(job: AgentJob) -> Dict[str, Any]:
+    return {
+        "success": True,
+        "skipped": True,
+        "reason": "skill_scheduler_disabled",
+        "agent_name": job.agent_code or "",
+    }
+
+
+def _budget_blocked_result(
+    agent_name: str,
+    skill_name: str,
+    snapshot: Any,
+) -> Dict[str, Any]:
+    return {
+        "success": False,
+        "skipped": True,
+        "budget_blocked": True,
+        "reason": "daily_token_budget_exhausted",
+        "error": f"Agent {agent_name} 当日自动任务 token 预算已用尽",
+        "agent_name": agent_name,
+        "skill_name": skill_name,
+        "used_tokens": snapshot.used_tokens,
+        "budget_tokens": snapshot.budget_tokens,
+    }
+
+
+def _budget_guard_unavailable_result(
+    agent_name: str,
+    skill_name: str,
+    exc: Exception,
+) -> Dict[str, Any]:
+    return {
+        "success": False,
+        "skipped": True,
+        "budget_blocked": True,
+        "reason": "budget_guard_unavailable",
+        "error": str(exc),
         "agent_name": agent_name,
         "skill_name": skill_name,
     }
@@ -746,8 +849,35 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
         db.commit()
 
     if settings.ops_health_diagnosis_enabled:
-        diagnosis = agent.diagnose(db, None, alert_detail, f"trc_ops_sched_{job.id}")
-        summary["diagnosis"] = str(diagnosis.data or diagnosis.error or "").strip()[:4000]
+        from app.services import agent_cost_budget_service
+
+        diagnosis_agent = job.agent_code or agent.name
+        try:
+            with agent_cost_budget_service.guard_automatic_model_call(
+                db,
+                diagnosis_agent,
+            ) as budget:
+                diagnosis = agent.diagnose(db, None, alert_detail, f"trc_ops_sched_{job.id}")
+                # OperationsAgent._log_call flushes the AiCallLog. Commit it before
+                # releasing the profile-row lock so another worker sees the spend.
+                db.commit()
+            summary["diagnosis"] = str(diagnosis.data or diagnosis.error or "").strip()[:4000]
+            summary["diagnosis_budget"] = {
+                "used_tokens": budget.used_tokens,
+                "budget_tokens": budget.budget_tokens,
+            }
+        except agent_cost_budget_service.AutomaticTokenBudgetExceeded as exc:
+            summary["diagnosis_skipped"] = True
+            summary["diagnosis_budget_blocked"] = True
+            summary["diagnosis"] = "当日自动运维 token 预算已用尽，已跳过模型诊断。"
+            summary["diagnosis_budget"] = {
+                "used_tokens": exc.snapshot.used_tokens,
+                "budget_tokens": exc.snapshot.budget_tokens,
+            }
+        except agent_cost_budget_service.AutomaticBudgetLockUnavailable as exc:
+            summary["diagnosis_skipped"] = True
+            summary["diagnosis_budget_blocked"] = True
+            summary["diagnosis"] = f"自动运维预算闸门不可用，已跳过模型诊断：{exc}"
     else:
         # 巡检仍然生成告警和确定性处置建议,但不在后台隐式消耗模型额度。
         summary["diagnosis_skipped"] = True

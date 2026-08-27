@@ -140,6 +140,7 @@ class Settings(BaseSettings):
     # 出问题时可设 False 快速降级,不影响主流程
     chat_double_layer_enabled: bool = True
     # Skill 定时进化总开关(每日 03:00 跑 evolution,每小时跑 proactive_check)
+    # 关闭时不创建、注册或执行周期 Skill；不影响用户交互与独立事件触发开关。
     skill_scheduler_enabled: bool = True
     # Skill 事件触发总开关(订阅 event_bus 事件触发 Skill)
     skill_event_trigger_enabled: bool = True
