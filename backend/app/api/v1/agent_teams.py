@@ -84,6 +84,33 @@ def get_team(
 
 
 @router.get(
+    "/{team_id}/events",
+    response_model=Resp[dict],
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
+def list_team_events(
+    team_id: int,
+    after_id: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Resp[dict]:
+    try:
+        return Resp(
+            data=agent_team_service.list_team_events(
+                db,
+                user,
+                team_id,
+                after_id=after_id,
+                limit=limit,
+            )
+        )
+    except agent_team_service.AgentTeamError as exc:
+        _raise_team_error(exc)
+        raise AssertionError("unreachable")
+
+
+@router.get(
     "/{team_id}/messages",
     response_model=Resp[dict],
     dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],

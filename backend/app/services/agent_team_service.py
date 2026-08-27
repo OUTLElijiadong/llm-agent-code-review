@@ -1309,6 +1309,37 @@ def get_team(db: Session, user: User, team_id: int) -> dict[str, Any]:
     return _team_out(db, _team_or_raise(db, user, team_id), include_events=True)
 
 
+def list_team_events(
+    db: Session,
+    user: User,
+    team_id: int,
+    *,
+    after_id: int = 0,
+    limit: int = 200,
+) -> dict[str, Any]:
+    """增量读取团队事件账本,支撑前端实时可视化(思考城市/悬浮窗时间线)。
+
+    只返回 after_id 之后的新事件,避免前端每秒轮询全量 team+events+messages。
+    """
+    team = _team_or_raise(db, user, team_id)
+    page_size = min(max(1, int(limit)), 500)
+    query = db.query(AgentTeamEvent).filter(AgentTeamEvent.team_id == int(team.id))
+    if int(after_id or 0) > 0:
+        query = query.filter(AgentTeamEvent.id > int(after_id))
+    rows = query.order_by(AgentTeamEvent.id.asc()).limit(page_size + 1).all()
+    has_more = len(rows) > page_size
+    page_rows = rows[:page_size]
+    items = [_serialize_event(row) for row in page_rows]
+    next_after_id = int(page_rows[-1].id) if page_rows else int(after_id or 0)
+    return {
+        "items": items,
+        "has_more": has_more,
+        "next_after_id": next_after_id,
+        "page_size": page_size,
+        "team_status": team.status,
+    }
+
+
 def list_team_messages(
     db: Session,
     user: User,

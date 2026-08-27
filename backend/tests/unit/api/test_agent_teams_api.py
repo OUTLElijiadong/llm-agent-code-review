@@ -195,6 +195,56 @@ def test_agent_teams_plain_user_is_limited_to_own_account(team_api):
     hidden_messages = request(other, "GET", f"/api/agent-teams/{team_id}/messages")
     assert hidden_messages.status_code == 404
     assert hidden_messages.json()["code"] == 40431
+    hidden_events = request(other, "GET", f"/api/agent-teams/{team_id}/events")
+    assert hidden_events.status_code == 404
+    assert hidden_events.json()["code"] == 40431
+
+
+def test_agent_teams_events_incremental_feed(team_api):
+    """增量事件流 HTTP 契约:首次全量,after_id 只取新事件,含 team_status。"""
+    request = team_api["request"]
+    owner = team_api["owner"]
+
+    created = _data(request(owner, "POST", "/api/agent-teams", json=_team_payload()))
+    team_id = created["team_id"]
+
+    first = _data(request(owner, "GET", f"/api/agent-teams/{team_id}/events"))
+    assert first["items"], "建队后应有 team.created 等初始事件"
+    assert first["team_status"] == "queued"
+    assert first["has_more"] is False
+    first_ids = [item["event_id"] for item in first["items"]]
+    assert first_ids == sorted(first_ids)
+    assert first["next_after_id"] == first_ids[-1]
+    assert first["items"][0]["event_type"] == "team.created"
+
+    # after_id 取到末尾后,没有新事件时应返回空列表但保持游标
+    drained = _data(
+        request(
+            owner,
+            "GET",
+            f"/api/agent-teams/{team_id}/events",
+            params={"after_id": first["next_after_id"]},
+        )
+    )
+    assert drained["items"] == []
+    assert drained["next_after_id"] == first["next_after_id"]
+    assert drained["team_status"] == "queued"
+
+    # 分页:limit=1 时 has_more=True,游标可续读
+    page_one = _data(
+        request(owner, "GET", f"/api/agent-teams/{team_id}/events", params={"limit": 1})
+    )
+    assert len(page_one["items"]) == 1
+    if page_one["has_more"]:
+        page_two = _data(
+            request(
+                owner,
+                "GET",
+                f"/api/agent-teams/{team_id}/events",
+                params={"after_id": page_one["next_after_id"], "limit": 500},
+            )
+        )
+        assert page_two["items"][0]["event_id"] > page_one["items"][0]["event_id"]
 
 
 def test_plain_user_cannot_create_admin_surface(team_api):

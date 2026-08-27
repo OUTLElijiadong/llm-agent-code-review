@@ -1704,3 +1704,48 @@ def test_non_readonly_team_keeps_original_task_inputs() -> None:
     })
     normalized = agent_team_service._normalize_readonly_task_inputs(payload)
     assert normalized.tasks[0].input["operation"] == "run_project_tests"
+
+
+def test_list_team_events_incremental_pagination(db, team_user):
+    """增量事件流:首次全量,之后只拿 after_id 之后的新事件,支撑前端思考城市实时渲染。"""
+    created = agent_team_service.create_team(db, team_user, _payload())
+    team_id = created["team_id"]
+
+    first = agent_team_service.list_team_events(db, team_user, team_id, after_id=0, limit=500)
+    assert first["items"], "建队时应已产生 team.created 等事件"
+    assert first["team_status"] == "queued"
+    first_ids = [item["event_id"] for item in first["items"]]
+    assert first_ids == sorted(first_ids), "事件必须按 id 升序"
+    assert first["next_after_id"] == first_ids[-1]
+
+    # 推进一次任务,产生新事件
+    claim = agent_team_service.claim_next_task(db, team_id, lease_seconds=60)
+    agent_team_service.complete_task(
+        db,
+        team_id,
+        claim["task_id"],
+        lease_token=claim["lease_token"],
+        result={"status": "completed", "summary": "ok"},
+    )
+
+    incremental = agent_team_service.list_team_events(
+        db, team_user, team_id, after_id=first["next_after_id"], limit=500
+    )
+    assert incremental["items"], "after_id 之后应能拿到 task.claimed/task.completed"
+    new_types = {item["event_type"] for item in incremental["items"]}
+    assert "task.claimed" in new_types
+    assert "task.completed" in new_types
+    # 增量结果不应与首次重复
+    assert not ({item["event_id"] for item in incremental["items"]} & set(first_ids))
+
+
+def test_list_team_events_limit_and_has_more(db, team_user):
+    created = agent_team_service.create_team(db, team_user, _payload())
+    team_id = created["team_id"]
+    page = agent_team_service.list_team_events(db, team_user, team_id, after_id=0, limit=1)
+    assert len(page["items"]) == 1
+    if page["has_more"]:
+        nxt = agent_team_service.list_team_events(
+            db, team_user, team_id, after_id=page["next_after_id"], limit=500
+        )
+        assert nxt["items"][0]["event_id"] > page["items"][0]["event_id"]
