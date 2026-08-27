@@ -69,4 +69,32 @@ describe('thinkingCityEngine', () => {
     expect(keys.length).toBeGreaterThan(0)
     expect(keys).not.toContain('2:5')
   })
+
+  it('多Agent联动:子城市建造/点亮/飞回全生命周期', () => {
+    const engine = createCityEngine({ width: 800, height: 500, seed: 5 })
+    const sub = engine.spawnSubCity(101, '发布前验证', [
+      { memberKey: 'reader', displayName: '读取 Agent' },
+      { memberKey: 'verifier', displayName: '验证 Agent' },
+    ])
+    expect(engine.state.subCities.length).toBe(1)
+    expect(sub.buildProgress).toBe(0)
+
+    // 推进 ~1s,光带建成
+    for (let i = 0; i < 50; i++) engine.tick(20)
+    expect(sub.buildProgress).toBe(1)
+
+    // task.claimed 点亮成员房间
+    engine.subCityTaskStarted(101, 'reader')
+    expect(sub.rooms.find((r) => r.memberKey === 'reader')?.litAt).toBeGreaterThanOrEqual(0)
+    expect(sub.rooms.find((r) => r.memberKey === 'verifier')?.litAt).toBe(-1)
+
+    // team 完成 → 光点飞回
+    engine.subCityFinished(101, 'completed')
+    expect(sub.returnProgress).toBe(0)
+    for (let i = 0; i < 80; i++) engine.tick(20)
+    // 飞回完成后子城市被移除
+    expect(engine.state.subCities.length).toBe(0)
+    // 事件流里有叙事
+    expect(engine.state.events.some((e) => e.text.includes('子城市'))).toBe(true)
+  })
 })

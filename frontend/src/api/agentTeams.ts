@@ -114,6 +114,14 @@ export interface AgentTeamMessagePage {
   page_size: number
 }
 
+export interface AgentTeamEventPage {
+  items: AgentTeamEvent[]
+  has_more: boolean
+  next_after_id: number
+  page_size: number
+  team_status: AgentTeamStatus
+}
+
 export type AgentTeamMessagePageMeta = Omit<AgentTeamMessagePage, 'items'>
 
 export interface AgentTeamSummary {
@@ -218,6 +226,17 @@ export function listAgentTeamMessages(
 ): Promise<AgentTeamMessagePage> {
   return get<AgentTeamMessagePage>(`/agent-teams/${encodeURIComponent(String(teamId))}/messages`, {
     before_id: beforeId,
+    limit,
+  })
+}
+
+export function listAgentTeamEvents(
+  teamId: number,
+  afterId = 0,
+  limit = 200,
+): Promise<AgentTeamEventPage> {
+  return get<AgentTeamEventPage>(`/agent-teams/${encodeURIComponent(String(teamId))}/events`, {
+    after_id: afterId,
     limit,
   })
 }

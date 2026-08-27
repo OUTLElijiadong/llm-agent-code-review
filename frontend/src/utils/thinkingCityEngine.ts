@@ -90,6 +90,29 @@ export interface CityStats {
   memoryRooms: number
 }
 
+/** 子 Agent 城市(多Agent联动):主城市右侧临时长出的微缩城市 */
+export interface SubCity {
+  /** 对应后端 team_id */
+  teamId: number
+  /** 标题(团队名) */
+  title: string
+  /** 子城市中心坐标与尺寸(渲染层计算) */
+  x: number
+  y: number
+  w: number
+  h: number
+  /** 成员微缩房间:member_key → 点亮时刻(-1 未点亮 / >=0 点亮) */
+  rooms: Array<{ memberKey: string; displayName: string; litAt: number }>
+  /** 从主城市飞来的光带进度(0-1),1 表示已建成 */
+  buildProgress: number
+  /** 完成时光点飞回主城市的进度(0-1),-1 未开始 */
+  returnProgress: number
+  /** 状态(running/completed/failed/…) */
+  status: string
+  /** 建立时刻(ms) */
+  createdAt: number
+}
+
 export interface CityState {
   time: number
   phase: CityPhase
@@ -103,6 +126,8 @@ export interface CityState {
   done: boolean
   /** 近期事件(点亮/送达/成句),供 HUD 滚动播报 */
   events: Array<{ at: number; text: string }>
+  /** 多Agent联动:活跃子城市 */
+  subCities: SubCity[]
 }
 
 export interface CityEngineOptions {
@@ -289,6 +314,7 @@ export function createCityEngine(options: CityEngineOptions) {
     plaza,
     done: false,
     events: [],
+    subCities: [],
   }
 
   // 历史积累:把以往点亮的房间先点亮(发柔和的「已有积累」光,不参与本次节奏)
@@ -368,6 +394,53 @@ export function createCityEngine(options: CityEngineOptions) {
 
   const engine = {
     state,
+    /**
+     * 多Agent联动:注册一个子 Agent 团队,在主城市右侧长出一座子城市。
+     * members 为团队成员(member_key/display_name),用于微缩房间。
+     */
+    spawnSubCity(teamId: number, title: string, members: Array<{ memberKey: string; displayName: string }>): SubCity {
+      const existing = state.subCities.find((s) => s.teamId === teamId)
+      if (existing) return existing
+      // 子城市在主城市广场右上方,尺寸按成员数自适应
+      const w = Math.max(64, Math.min(120, 26 + members.length * 14))
+      const h = 54
+      const x = Math.min(width - w - 10, plaza.x + 70 + state.subCities.length * (w + 12))
+      const y = height * 0.86 - h - 8
+      const sub: SubCity = {
+        teamId,
+        title,
+        x,
+        y,
+        w,
+        h,
+        rooms: members.map((m) => ({ memberKey: m.memberKey, displayName: m.displayName, litAt: -1 })),
+        buildProgress: 0,
+        returnProgress: -1,
+        status: 'running',
+        createdAt: state.time,
+      }
+      state.subCities.push(sub)
+      pushEvent(`子 Agent 团队「${title}」出发,在主城旁建起子城市`)
+      return sub
+    },
+    /** 子城市事件:task.claimed 点亮成员房间 */
+    subCityTaskStarted(teamId: number, memberKey: string): void {
+      const sub = state.subCities.find((s) => s.teamId === teamId)
+      if (!sub) return
+      const room = sub.rooms.find((r) => r.memberKey === memberKey)
+      if (room && room.litAt < 0) {
+        room.litAt = state.time
+        pushEvent(`「${sub.title}」的 ${room.displayName} 开始工作`)
+      }
+    },
+    /** 子城市事件:team 终态,触发光点飞回 */
+    subCityFinished(teamId: number, status: string): void {
+      const sub = state.subCities.find((s) => s.teamId === teamId)
+      if (!sub || sub.returnProgress >= 0) return
+      sub.status = status
+      sub.returnProgress = 0
+      pushEvent(`「${sub.title}」${status === 'completed' ? '完成,光点飞回主城' : '结束(' + status + ')'}`)
+    },
     /** 推进 dt(ms)。返回是否仍在运行(全部句子完成后返回 false 之前的帧都 true) */
     tick(dtMs: number): boolean {
       const dt = clamp(dtMs, 0, 100) * timeScale
@@ -438,6 +511,20 @@ export function createCityEngine(options: CityEngineOptions) {
         state.done = true
         pushEvent('回答组装完毕,小菱这就说')
       }
+
+      // 多Agent联动:推进子城市建造/飞回
+      for (const sub of state.subCities) {
+        if (sub.buildProgress < 1) {
+          sub.buildProgress = Math.min(1, sub.buildProgress + dt / 900)
+        }
+        if (sub.returnProgress >= 0 && sub.returnProgress < 1) {
+          sub.returnProgress = Math.min(1, sub.returnProgress + dt / 1400)
+        }
+      }
+      // 飞回完成后淡出移除
+      if (state.subCities.some((s) => s.returnProgress >= 1)) {
+        state.subCities = state.subCities.filter((s) => s.returnProgress < 1)
+      }
       return true
     },
     /** 导出本次点亮的房间 key(不含历史记忆),用于写回长期积累 */
@@ -462,6 +549,7 @@ export function createCityEngine(options: CityEngineOptions) {
       state.stats = { litRooms: 0, totalRooms, delivered: 0, sentences: 0, memoryRooms: state.stats.memoryRooms }
       state.done = false
       state.events = []
+      state.subCities = []
       buildings.forEach((b) => {
         for (let i = 0; i < b.rooms.length; i++) {
           if (b.rooms[i] >= 0) b.rooms[i] = -1 // 本次点亮的熄灭,历史记忆(-2)保留

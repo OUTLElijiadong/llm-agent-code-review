@@ -23,6 +23,8 @@ import {
 } from '@/utils/thinkingCityEngine'
 import { commitSessionMemory, getMemoryEntries, getMemoryKeys } from '@/utils/thinkingCityMemory'
 import { useUserStore } from '@/stores/user'
+import { useAgentTeamEvents } from '@/composables/useAgentTeamEvents'
+import { getAgentTeam } from '@/api/agentTeams'
 
 interface Props {
   /** 思考是否进行中;false 时定格最后一帧并停止 rAF */
@@ -31,12 +33,15 @@ interface Props {
   compact?: boolean
   /** 自定义目标句子(小菱正在组织的话) */
   sentences?: string[]
+  /** 本地演示:挂载后自动模拟一次子 Agent 联动(默认关) */
+  demoSubAgent?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   active: true,
   compact: false,
   sentences: undefined,
+  demoSubAgent: false,
 })
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -135,7 +140,11 @@ function flushSessionMemory(): void {
   commitSessionMemory(memoryUserId.value, keys, resolveRoomMeta)
 }
 
-/** 按 DPR 适配画布尺寸 */
+/** 按 DPR 适配画布尺寸;只有尺寸真的变化才重建引擎,避免 ResizeObserver
+ * 在挂载/父容器过渡动画期间反复触发导致 state.time 反复归零。 */
+let lastFitW = -1
+let lastFitH = -1
+
 function fitCanvas(): void {
   const canvas = canvasRef.value
   const wrap = wrapRef.value
@@ -143,6 +152,9 @@ function fitCanvas(): void {
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
   const w = wrap.clientWidth
   const h = props.compact ? 148 : 210
+  if (w === lastFitW && h === lastFitH && engine) return
+  lastFitW = w
+  lastFitH = h
   canvas.width = Math.round(w * dpr)
   canvas.height = Math.round(h * dpr)
   canvas.style.height = `${h}px`
@@ -325,8 +337,113 @@ function drawFrame(dt: number): void {
     ctx.shadowBlur = 0
   }
 
+  // 多Agent联动:子城市(光带建立 → 成员点亮 → 完成飞回)
+  for (const sub of s.subCities) {
+    const alpha = sub.returnProgress >= 0 ? 1 - sub.returnProgress : 1
+    ctx.globalAlpha = alpha * 0.92
+
+    // 建立期:从主城市广场到子城市拉一条光带
+    if (sub.buildProgress < 1) {
+      const t = sub.buildProgress
+      const ex = s.plaza.x + (sub.x + sub.w / 2 - s.plaza.x) * t
+      const ey = s.plaza.y + (sub.y + sub.h - s.plaza.y) * t
+      const grad = ctx.createLinearGradient(s.plaza.x, s.plaza.y, ex, ey)
+      grad.addColorStop(0, 'rgba(184, 90, 196, 0.05)')
+      grad.addColorStop(1, 'rgba(184, 90, 196, 0.85)')
+      ctx.strokeStyle = grad
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(s.plaza.x, s.plaza.y)
+      ctx.lineTo(ex, ey)
+      ctx.stroke()
+      // 光带头部亮点
+      ctx.fillStyle = '#b85ac4'
+      ctx.shadowColor = '#b85ac4'
+      ctx.shadowBlur = 8
+      ctx.beginPath()
+      ctx.arc(ex, ey, 2.6, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.shadowBlur = 0
+    }
+
+    // 子城市楼体(微缩)
+    const grow = 0.3 + 0.7 * sub.buildProgress
+    const bh = sub.h * grow
+    const by = sub.y + (sub.h - bh)
+    ctx.fillStyle = 'rgba(58, 34, 84, 0.92)'
+    ctx.strokeStyle = 'rgba(184, 90, 196, 0.6)'
+    ctx.lineWidth = 1.2
+    ctx.beginPath()
+    ctx.roundRect(sub.x, by, sub.w, bh, 4)
+    ctx.fill()
+    ctx.stroke()
+
+    // 成员微缩房间
+    if (sub.buildProgress > 0.6) {
+      const cols = Math.max(2, Math.ceil(Math.sqrt(sub.rooms.length)))
+      const cw = (sub.w - 14) / cols
+      sub.rooms.forEach((room, i) => {
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        const rx = sub.x + 7 + col * cw
+        const ry = by + 8 + row * 9
+        if (room.litAt >= 0) {
+          const breathe = reducedMotion ? 1 : 0.75 + 0.25 * Math.sin(s.time / 480 + i)
+          ctx.globalAlpha = alpha * breathe
+          ctx.fillStyle = '#b85ac4'
+          ctx.shadowColor = '#b85ac4'
+          ctx.shadowBlur = 5
+          ctx.beginPath()
+          ctx.roundRect(rx, ry, cw * 0.6, 5.5, 1)
+          ctx.fill()
+          ctx.shadowBlur = 0
+          ctx.globalAlpha = alpha * 0.92
+        } else {
+          ctx.fillStyle = 'rgba(184, 90, 196, 0.18)'
+          ctx.beginPath()
+          ctx.roundRect(rx, ry, cw * 0.6, 5.5, 1)
+          ctx.fill()
+        }
+      })
+    }
+
+    // 标题
+    ctx.fillStyle = 'rgba(230, 179, 236, 0.85)'
+    ctx.font = '8.5px "JetBrains Mono", monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText(`⚡ ${sub.title}`, sub.x + sub.w / 2, by - 5)
+
+    // 完成期:光点从子城市飞回主城市广场
+    if (sub.returnProgress >= 0) {
+      const t = sub.returnProgress
+      const sx = sub.x + sub.w / 2 + (s.plaza.x - (sub.x + sub.w / 2)) * t
+      const sy = by + (s.plaza.y - by) * t
+      ctx.globalAlpha = 1 - t * 0.3
+      const retGrad = ctx.createLinearGradient(sub.x + sub.w / 2, by, sx, sy)
+      retGrad.addColorStop(0, 'rgba(126, 227, 240, 0)')
+      retGrad.addColorStop(1, 'rgba(126, 227, 240, 0.9)')
+      ctx.strokeStyle = retGrad
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(sub.x + sub.w / 2, by)
+      ctx.lineTo(sx, sy)
+      ctx.stroke()
+      ctx.fillStyle = '#7ee3f0'
+      ctx.shadowColor = '#7ee3f0'
+      ctx.shadowBlur = 9
+      ctx.beginPath()
+      ctx.arc(sx, sy, 3, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.shadowBlur = 0
+    }
+    ctx.globalAlpha = 1
+  }
+
   // 引擎推进放在绘制后,保证 reduced-motion 下首帧即完整静态
-  if (!reducedMotion && props.active) eng.tick(dt)
+  if (!reducedMotion && props.active) {
+    eng.tick(dt)
+    if (props.demoSubAgent) driveDemoSubAgent()
+  }
 
   // HUD 同步(节流)
   if (s.time - hudSyncAt > 120 || hudSyncAt === 0) {
@@ -435,7 +552,89 @@ onBeforeUnmount(() => {
   flushSessionMemory()
   window.cancelAnimationFrame(rafId)
   resizeObserver?.disconnect()
+  teamEvents.stop()
 })
+
+/* ---------- 多Agent联动 ---------- */
+
+/** 事件流:收到新事件就翻译成引擎里的子城市动作 */
+const teamEvents = useAgentTeamEvents({
+  interval: 1100,
+  onEvents: (batch) => {
+    for (const ev of batch) {
+      const eng = engine
+      if (!eng) continue
+      if (ev.event_type === 'task.claimed' && typeof ev.detail?.task_key === 'string') {
+        // 用 member 维度点亮;后端 detail 里带 task_key,成员地址在 actor_address
+        const memberKey = String(ev.detail?.member_key ?? ev.detail?.task_key)
+        eng.subCityTaskStarted(Number(ev.team_id ?? 0), memberKey)
+      } else if (ev.event_type === 'team.completed' || ev.event_type === 'team.failed' || ev.event_type === 'team.cancelled') {
+        const status = ev.event_type === 'team.completed' ? 'completed' : ev.event_type === 'team.failed' ? 'failed' : 'cancelled'
+        eng.subCityFinished(Number(ev.team_id ?? 0), status)
+      }
+    }
+  },
+})
+
+/**
+ * 让一座子 Agent 城市长出来并开始跟踪它的事件流。
+ * 由父组件(AgentChatDrawer/AdminCopilot)在发现 team_id 时调用。
+ */
+async function spawnSubAgent(teamId: number): Promise<void> {
+  const eng = engine
+  if (!eng) return
+  try {
+    const detail = await getAgentTeam(teamId)
+    eng.spawnSubCity(
+      teamId,
+      detail.title || `团队 ${teamId}`,
+      detail.members.map((m) => ({ memberKey: m.member_key, displayName: m.display_name })),
+    )
+    teamEvents.start(teamId)
+  } catch {
+    // 团队详情拉不到也先画个占位城市,不阻塞主动画
+    eng.spawnSubCity(teamId, `团队 ${teamId}`, [])
+    teamEvents.start(teamId)
+  }
+}
+
+/** 本地演示:不用后端,按引擎时间在 drawFrame 里驱动一次完整子 Agent 生命周期。
+ * 不用 setTimeout,避免引擎因 resize 重建后时序丢失。 */
+const demoId = 9001
+let demoStep = 0
+let demoLastTime = -1
+
+function driveDemoSubAgent(): void {
+  const eng = engine
+  if (!eng) return
+  const t = eng.state.time
+  // 引擎因 resize 重建时 state.time 归零,同步回退演示状态机
+  if (t < demoLastTime) demoStep = 0
+  demoLastTime = t
+  if (demoStep === 0 && t >= 800) {
+    eng.spawnSubCity(demoId, '发布前验证', [
+      { memberKey: 'reader', displayName: '读取 Agent' },
+      { memberKey: 'reviewer', displayName: '验证 Agent' },
+      { memberKey: 'security', displayName: '安全 Agent' },
+    ])
+    demoStep = 1
+  } else if (demoStep === 1 && t >= 2200) {
+    eng.subCityTaskStarted(demoId, 'reader')
+    demoStep = 2
+  } else if (demoStep === 2 && t >= 3400) {
+    eng.subCityTaskStarted(demoId, 'reviewer')
+    demoStep = 3
+  } else if (demoStep === 3 && t >= 4400) {
+    eng.subCityTaskStarted(demoId, 'security')
+    demoStep = 4
+  } else if (demoStep === 4 && t >= 6000) {
+    eng.subCityFinished(demoId, 'completed')
+    demoStep = 5
+  }
+}
+
+// 暴露给父组件
+defineExpose({ spawnSubAgent })
 
 /** 当前句子的词汇槽位(已到词高亮,未到词虚线占位) */
 const lexiconForSlots = computed(() => {
