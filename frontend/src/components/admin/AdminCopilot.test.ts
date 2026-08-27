@@ -252,6 +252,11 @@ describe('AdminCopilot Responses stream', () => {
     expect(input.value).toContain('安全审计员')
     expect(input.value).toContain('agent:security_auditor')
     expect(input.value).toContain('发送补充要求')
+
+    // 新会话不能继承上一会话的成员追问草稿,避免误把旧指令发到新会话。
+    await wrapper.find('.session-new').trigger('click')
+    await flushSessionRestore()
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('')
     wrapper.unmount()
   })
 

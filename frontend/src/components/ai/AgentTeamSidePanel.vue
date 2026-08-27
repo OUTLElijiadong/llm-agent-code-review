@@ -129,10 +129,21 @@ function askMember(member: AgentTeamMember): void {
   <Teleport to="body">
     <Transition name="panel-slide">
       <div v-if="teamId" class="team-side-panel-overlay" @click.self="emit('close')">
-        <div class="team-side-panel">
+        <div
+          class="team-side-panel"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="team?.title || '子Agent团队详情'"
+        >
           <header class="panel-header">
             <h3 class="panel-title">{{ team?.title || "子Agent团队详情" }}</h3>
-            <button class="panel-close" type="button" @click="emit('close')">
+            <button
+              class="panel-close"
+              type="button"
+              aria-label="关闭团队详情"
+              title="关闭团队详情"
+              @click="emit('close')"
+            >
               <el-icon><Close /></el-icon>
             </button>
           </header>
@@ -161,7 +172,7 @@ function askMember(member: AgentTeamMember): void {
                 <div class="overview-section">
                   <div class="section-label">成员 ({{ members.length }})</div>
                   <div class="overview-badges">
-                    <AgentTeamMemberBadge v-for="m in members" :key="m.member_id" :name="m.display_name" :role="m.role" :status="m.status" :address="m.address" />
+                    <AgentTeamMemberBadge v-for="m in members" :key="m.member_id" :name="m.display_name" :role="m.role" :status="m.status" :address="m.address" :interactive="false" />
                   </div>
                 </div>
                 <div class="overview-section">

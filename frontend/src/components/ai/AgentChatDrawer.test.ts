@@ -880,6 +880,11 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(value).toContain('安全哨兵')
     expect(value).toContain('agent:security_sentinel')
     expect(value).toContain('发送补充要求')
+
+    // 新会话不能继承上一会话的成员追问草稿,避免误把旧指令发到新会话。
+    await wrapper.find('.session-new').trigger('click')
+    await settleAll()
+    expect((wrapper.find('textarea.chat-input').element as HTMLTextAreaElement).value).toBe('')
   })
 
   it('网络错误留在消息流:错误卡片 + Toast,重试可恢复', async () => {

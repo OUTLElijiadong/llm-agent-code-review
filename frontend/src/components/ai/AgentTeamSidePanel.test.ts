@@ -63,4 +63,25 @@ describe('AgentTeamSidePanel', () => {
     ]])
     wrapper.unmount()
   })
+
+  it('概览成员徽章为静态状态展示,不制造无动作的焦点入口', async () => {
+    teamApi.detail.mockReset().mockResolvedValue({
+      ...team(53, '静态成员状态'),
+      members: [{
+        member_id: 1, member_key: 'scanner', display_name: '扫描员',
+        address: 'agent:scanner', kind: 'runtime', role: 'worker', status: 'completed',
+      }],
+    })
+    const wrapper = mount(AgentTeamSidePanel, {
+      props: { teamId: 53 },
+      global: { stubs: { Teleport: true, Transition: false, 'el-icon': true, Close: true } },
+    })
+    await flushPromises()
+
+    const badge = wrapper.get('.team-member-badge')
+    expect(badge.attributes('role')).toBeUndefined()
+    expect(badge.attributes('tabindex')).toBeUndefined()
+    expect(badge.classes()).not.toContain('is-interactive')
+    wrapper.unmount()
+  })
 })

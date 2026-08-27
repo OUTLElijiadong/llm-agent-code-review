@@ -356,6 +356,8 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionPollStopped = false
   sessionSnapshotSignature = ''
   sessionId.value = nextSessionId
+  // 草稿属于上一会话;切换/新建时清空,避免成员追问或半成品指令误发到新会话。
+  inputText.value = ''
   sessionPollFailures = 0
   cancelPromptVisible.value = false
   sessionRun.value = null
@@ -1637,7 +1639,13 @@ onMounted(() => {
                   title="从失败位置继续运行"
                   @click="retryFromErrorCard()"
                 >重试</button>
-                <button class="copilot-error-btn" type="button" @click="startNewChat()">新建对话</button>
+                <button
+                  class="copilot-error-btn"
+                  type="button"
+                  aria-label="新建独立对话"
+                  title="新建独立对话,当前任务记录保留"
+                  @click="startNewChat()"
+                >新建对话</button>
               </div>
             </div>
 

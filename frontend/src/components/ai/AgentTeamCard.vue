@@ -163,7 +163,17 @@ function openPanel(): void {
 </script>
 
 <template>
-  <div v-if="team" class="team-card" :class="`is-${team.status}`" @click="openPanel">
+  <div
+    v-if="team"
+    class="team-card"
+    :class="`is-${team.status}`"
+    role="button"
+    tabindex="0"
+    :aria-label="`${teamCardLabel},${team.title || team.objective || '团队协作任务'}`"
+    @click="openPanel"
+    @keydown.enter.prevent="openPanel"
+    @keydown.space.prevent="openPanel"
+  >
     <div class="team-card-header">
       <div class="team-card-icon">
         <el-icon v-if="isRunning" :size="16"><Loading class="spin-icon" /></el-icon>
@@ -228,6 +238,11 @@ function openPanel(): void {
   max-width: 560px;
 }
 .team-card:hover { border-color: var(--brand-300, #8e88f5); background: var(--brand-50, #EFEEFE); }
+.team-card:focus-visible {
+  outline: 2px solid var(--brand-300, #8e88f5);
+  outline-offset: 2px;
+  border-color: var(--brand-300, #8e88f5);
+}
 .team-card.is-running { border-left: 3px solid var(--brand-500, #5b58e8); }
 .team-card.is-completed { border-left: 3px solid var(--color-success, #4fb87a); }
 .team-card.is-failed { border-left: 3px solid var(--color-danger, #dc4961); }
