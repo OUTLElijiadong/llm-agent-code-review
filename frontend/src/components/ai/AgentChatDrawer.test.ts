@@ -155,6 +155,13 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
 }
 
 describe('AgentChatDrawer Responses stream', () => {
+  it('labels a fresh Xiaoling conversation with the Pro orchestrator model', async () => {
+    const wrapper = await mountReadyDrawer()
+
+    expect(wrapper.find('[title="当前模型:deepseek-v4-pro"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('后台历史会话完成 Mesh 任务后不抢占当前新对话', async () => {
     window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
       { id: 'user-current', title: '新对话', createdAt: 2 },

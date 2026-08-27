@@ -144,6 +144,7 @@ const userStore = useUserStore()
 const activityStore = useAgentActivityStore()
 
 const MASCOT_NAME = '小菱'
+const ORCHESTRATOR_MODEL = 'deepseek-v4-pro'
 const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},Prism 棱镜智能代码审查平台的小助手!我可以帮你发起代码审查、解读报告、查询项目与漏洞。点击左上角「+」可以随时开新对话,多个任务我会并行帮你盯着。`
 
 /** 空状态快捷问题:点击填入输入框并直接发送。 */
@@ -155,7 +156,8 @@ const loading = ref(false)
 const showTyping = ref(false)
 /** 思考城市(想法可视化)展开态:默认展开,可一键收起只看紧凑气泡 */
 const thinkingCityOpen = ref(true)
-const modelName = ref('deepseek-v4-flash')
+// 新会话尚未收到 response.created 时展示总调度默认值；若实际回退，SSE 会覆盖为真实模型。
+const modelName = ref(ORCHESTRATOR_MODEL)
 const chatBody = ref<HTMLElement>()
 const chatInputRef = ref<HTMLTextAreaElement>()
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('user')
@@ -403,6 +405,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionPollFailures = 0
   cancelPromptVisible.value = false
   sessionRun.value = null
+  modelName.value = ORCHESTRATOR_MODEL
   agentTeams.value = []
   cachedAgentTeams.value = []
   agentTeamError.value = ''
