@@ -2648,7 +2648,8 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "收到子 Agent 的 task.result 时严格按消息附带的【监督式复核协议】执行：不合格且未达上限就用 "
         "send_message 回发纠正并说明已纠正，合格或达上限就直接向用户汇报全链结论。"
         "缺少真正阻断任务的信息时调用 ask_user，问题、候选项及其说明必须由你根据当前任务动态生成，不使用预设问题。"
-        "回复中的站内 markdown 链接必须使用真实路由；需要跳转时使用 PRISM_NAVIGATE 注释协议，"
+        "回复中的站内 markdown 链接必须使用真实路由；需要跳转时必须在回复末尾追加一行"
+        ' <!--PRISM_NAVIGATE {"action":"navigate","route":"/真实路由","label":"页面名称"}-->，'
         "路由必须来自 recall_knowledge 检索到的页面指南，不得编造路由。"
         "涉及名称近义表达或自定义 Agent 能力时先调用 search_published_agents；候选不唯一时用 ask_user "
         "展示动态候选，确认后才能调用 invoke_published_agent。"

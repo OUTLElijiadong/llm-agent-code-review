@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { isNavigationPathAllowed } from './agentNavigation'
+import { extractAgentNavigations, isNavigationPathAllowed } from './agentNavigation'
 
 function guard(permission: boolean) {
   return {
@@ -52,5 +52,40 @@ describe('shared navigation visibility', () => {
     reviewerGuard.hasRole = (role: string): boolean => role === 'reviewer'
 
     expect(isNavigationPathAllowed(router as never, '/reviewer-only', reviewerGuard)).toBe(true)
+  })
+})
+
+describe('navigation fallback extraction', () => {
+  const router = {
+    options: {
+      routes: [
+        {
+          path: '/admin',
+          children: [
+            { path: 'audit', meta: { title: '系统操作审计' } },
+          ],
+        },
+      ],
+    },
+  }
+
+  it('turns a known bare route in navigation context into a button directive', () => {
+    const result = extractAgentNavigations(
+      '页面导航\n页面名称：系统操作审计\n路由：/admin/audit\n你可以直接进入该页面。',
+      router as never,
+    )
+
+    expect(result.directives).toEqual([
+      { action: 'navigate', route: '/admin/audit', label: '系统操作审计' },
+    ])
+  })
+
+  it('ignores unknown routes and routes shown only inside code fences', () => {
+    const result = extractAgentNavigations(
+      '页面路由：/model-invented\n```text\n页面路由：/admin/audit\n```',
+      router as never,
+    )
+
+    expect(result.directives).toEqual([])
   })
 })

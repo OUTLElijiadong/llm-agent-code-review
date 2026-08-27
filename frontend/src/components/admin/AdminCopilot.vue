@@ -39,7 +39,7 @@ import AgentTeamSidePanel from '@/components/ai/AgentTeamSidePanel.vue'
 import TaskCancelConfirm from '@/components/ai/TaskCancelConfirm.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import { renderMarkdown } from '@/utils/markdown'
-import { extractNavigateDirectives, isNavigationPathAllowed } from '@/utils/agentNavigation'
+import { extractAgentNavigations, isNavigationPathAllowed } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
 import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
@@ -509,7 +509,7 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
           payload: { type: 'text' as const, content: message.content },
         }
       }
-      const { cleaned, directives } = extractNavigateDirectives(message.content)
+      const { cleaned, directives } = extractAgentNavigations(message.content, router)
       return {
         id: crypto.randomUUID(),
         role: message.role,
@@ -998,7 +998,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
 
   /** 应用文本增量:剥离导航指令并渲染为可点击的「前往页面」确认按钮(不自动跳转) */
   const applyTextDelta = (): void => {
-    const { cleaned, directives } = extractNavigateDirectives(rawText)
+    const { cleaned, directives } = extractAgentNavigations(rawText, router)
     const content = formatStreamContent(cleaned)
     if (!content.trim()) return
     showTyping.value = false

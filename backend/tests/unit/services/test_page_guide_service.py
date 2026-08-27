@@ -33,6 +33,11 @@ def test_instructions_include_guide_protocol_and_recall() -> None:
 
     for text in (user, admin):
         assert "PRISM_NAVIGATE" in text
+        assert (
+            '<!--PRISM_NAVIGATE {"action":"navigate","route":"/真实路由",'
+            '"label":"页面名称"}-->'
+        ) in text
+        assert '\\"action\\"' not in text
         assert "站内 markdown 链接" in text
         assert "不得编造" in text
         assert "recall_knowledge" in text

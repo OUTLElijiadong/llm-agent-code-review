@@ -13,6 +13,8 @@ import { normalizeAgentText, transformOutsideCodeFences } from '@/utils/agentTex
 
 const NAVIGATE_DIRECTIVE_RE = /<!--\s*PRISM_NAVIGATE\s*([\s\S]*?)\s*-->/g
 const MAX_DIRECTIVE_JSON_LENGTH = 2048
+const KNOWN_ROUTE_RE = /\/[a-z0-9][a-z0-9/_-]*(?:\?[a-z0-9%&=_.~-]+)?(?:#[a-z0-9%_.~-]+)?/gi
+const NAVIGATION_CUE_RE = /路由|页面|导航|前往|进入|打开|带(?:我|你)去/
 
 function flattenRoutes(routes: readonly RouteRecordRaw[], prefix: string): RouteRecordRaw[] {
   const out: RouteRecordRaw[] = []
@@ -64,6 +66,48 @@ export function extractNavigateDirectives(
   return {
     cleaned: normalizeAgentText(cleaned),
     directives,
+  }
+}
+
+/**
+ * 当模型遗漏协议注释但已在导航语境中给出真实路由时，生成受鉴权按钮。
+ * 只识别代码围栏外、命中静态路由表的路径；未知地址和代码样例不会变成入口。
+ */
+export function inferKnownRouteDirectives(
+  content: string,
+  router: Pick<Router, 'options'>,
+): AgentNavigateDirective[] {
+  if (!content || !NAVIGATION_CUE_RE.test(content)) return []
+  const routeTable = buildRouteTable(router as Router)
+  const directives: AgentNavigateDirective[] = []
+  const seen = new Set<string>()
+  transformOutsideCodeFences(content, (segment) => {
+    for (const line of segment.split('\n')) {
+      if (!NAVIGATION_CUE_RE.test(line)) continue
+      for (const match of line.matchAll(KNOWN_ROUTE_RE)) {
+        const route = match[0]
+        const pathname = route.split(/[?#]/, 1)[0]
+        const label = routeTable.get(pathname)
+        if (!label || seen.has(route)) continue
+        seen.add(route)
+        directives.push({ action: 'navigate', route, label })
+      }
+    }
+    return segment
+  })
+  return directives
+}
+
+/** 优先解析显式协议，协议缺失时才从已知路由导航语境中安全兜底。 */
+export function extractAgentNavigations(
+  content: string,
+  router: Pick<Router, 'options'>,
+): { cleaned: string; directives: AgentNavigateDirective[] } {
+  const parsed = extractNavigateDirectives(content)
+  if (parsed.directives.length) return parsed
+  return {
+    cleaned: parsed.cleaned,
+    directives: inferKnownRouteDirectives(parsed.cleaned, router),
   }
 }
 
