@@ -38,7 +38,12 @@ export function useFloatingChatPosition(storageKey: string) {
 
   function restoreOrAnchor(): void {
     const panel = panelRef.value
-    if (!panel || mobile()) return
+    if (!panel) return
+    if (mobile()) {
+      // 移动端由组件的响应式 inset 定位。清掉桌面拖拽坐标，避免浮窗留在视口外。
+      position.value = null
+      return
+    }
     let saved: Point | null = null
     try {
       const parsed = JSON.parse(window.localStorage.getItem(storageName(storageKey)) || 'null') as Point | null
@@ -83,7 +88,16 @@ export function useFloatingChatPosition(storageKey: string) {
   }
 
   function clampToViewport(): void {
-    if (panelRef.value && position.value && !mobile()) position.value = clamp(position.value, panelRef.value)
+    if (!panelRef.value) return
+    if (mobile()) {
+      dragging.value = false
+      start = null
+      origin = null
+      position.value = null
+      return
+    }
+    if (position.value) position.value = clamp(position.value, panelRef.value)
+    else restoreOrAnchor()
   }
 
   window.addEventListener('resize', clampToViewport)

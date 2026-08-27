@@ -3703,8 +3703,13 @@ onMounted(() => {
 @media (max-width: 520px) {
   .chat-overlay { right: 16px; bottom: 16px; }
   .chat-fab { right: 16px; bottom: 16px; }
-  .chat-drawer { width: calc(100vw - 32px); height: min(600px, calc(100dvh - 32px)); }
+  .chat-drawer {
+    inset: auto 16px 16px 16px !important;
+    width: auto;
+    height: min(600px, calc(100dvh - 32px));
+  }
   /* 触控适配:关键按钮加大到 40px,更好点 */
+  .panel-drag-handle { display: none; }
   .close-btn { width: 40px; height: 40px; }
   .send-btn,
   .stop-btn { min-height: 40px; padding: 8px 22px; }

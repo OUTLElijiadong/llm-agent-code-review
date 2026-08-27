@@ -211,6 +211,11 @@ select {
     justify-content: flex-start !important;
     padding-bottom: var(--sp-1);
   }
+
+  /* 触控端操作热区保持至少 40px，避免紧凑桌面按钮在手机上难以命中。 */
+  .el-button {
+    min-height: 40px;
+  }
 }
 
 @media (max-width: 520px) {

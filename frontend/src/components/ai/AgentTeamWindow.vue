@@ -700,9 +700,11 @@ async function cancelTeam(): Promise<void> {
 .team-window-leave-to { opacity: 0; transform: translateY(12px) scale(0.98); }
 
 @media (max-width: 520px) {
-  .agent-team-window { right: 12px; bottom: 12px; left: 12px; width: auto; }
+  .agent-team-window { inset: auto 12px 12px 12px !important; width: auto; }
   /* 触控适配:关闭按钮加大到 40px */
+  .team-window-drag { display: none; }
   .team-window-close { width: 40px; height: 40px; }
+  .team-window-action { min-height: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

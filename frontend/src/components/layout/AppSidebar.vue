@@ -516,6 +516,15 @@ function go(item: MenuItem): void {
     transform: translateX(0);
   }
 
+  .sidebar-toggle {
+    width: 40px;
+    height: 40px;
+  }
+
+  .nav-group-toggle {
+    min-height: 40px;
+  }
+
   .app-sidebar.is-collapsed {
     width: min(var(--sidebar-width), 82vw);
   }

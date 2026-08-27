@@ -659,6 +659,30 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
   50% { opacity: 1; transform: scale(1.1); }
 }
 
+@media (max-width: 520px) {
+  .session-current,
+  .session-search,
+  .session-item { min-height: 40px; }
+
+  .session-new {
+    width: 40px;
+    height: 40px;
+  }
+
+  .session-menu {
+    width: min(320px, calc(100vw - 48px));
+    max-height: min(360px, calc(100dvh - 180px));
+  }
+
+  .session-pin,
+  .session-delete,
+  .session-lock,
+  .session-archiving {
+    width: 32px;
+    height: 32px;
+  }
+}
+
 .session-pop-enter-active,
 .session-pop-leave-active {
   transition: opacity 0.16s ease, transform 0.16s ease;

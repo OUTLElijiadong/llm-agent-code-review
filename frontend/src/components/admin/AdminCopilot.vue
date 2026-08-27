@@ -2434,7 +2434,18 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 @media (max-width: 520px) {
   .admin-copilot { right: 12px; bottom: 12px; left: 12px; }
   .copilot-trigger { margin-left: auto; }
-  .copilot-panel { width: 100%; height: min(620px, calc(100dvh - 24px)); max-width: none; max-height: none; }
+  .copilot-panel {
+    inset: auto 12px 12px 12px !important;
+    width: auto;
+    height: min(620px, calc(100dvh - 24px));
+    max-width: none;
+    max-height: none;
+  }
+  .panel-drag-handle { display: none; }
+  .icon-button,
+  .send-button,
+  .stop-button { width: 40px; height: 40px; }
+  .quick-question { min-height: 40px; }
 }
 
 /* Codex-style: 子Agent团队内联条目 */
