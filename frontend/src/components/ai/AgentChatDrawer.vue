@@ -2621,6 +2621,7 @@ onMounted(() => {
 }
 
 .chat-title-text {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -2748,6 +2749,8 @@ onMounted(() => {
 }
 
 .chat-title {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2762,6 +2765,7 @@ onMounted(() => {
 }
 
 .close-btn {
+  flex: 0 0 40px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3710,7 +3714,32 @@ onMounted(() => {
   }
   /* 触控适配:关键按钮加大到 40px,更好点 */
   .panel-drag-handle { display: none; }
+  .mascot-hero { display: none; }
+  .quick-questions {
+    position: static;
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .quick-questions::-webkit-scrollbar { display: none; }
+  .quick-question { flex: 0 0 auto; min-height: 40px; }
+  .chat-body { padding: 12px; gap: 12px; }
   .close-btn { width: 40px; height: 40px; }
+  .msg-row.assistant .msg-bubble { padding-right: 48px; }
+  .msg-copy-btn {
+    top: 2px;
+    right: 2px;
+    width: 40px;
+    height: 40px;
+    opacity: 1;
+  }
+  .msg-error-btn,
+  .response-control-actions button,
+  .response-answer-submit { min-height: 40px; }
   .send-btn,
   .stop-btn { min-height: 40px; padding: 8px 22px; }
   .upload-btn { min-height: 40px; }
