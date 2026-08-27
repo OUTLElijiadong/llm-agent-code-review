@@ -59,4 +59,41 @@ describe('VirtualCursor real navigation click', () => {
 
     expect(navigate).toHaveBeenCalledOnce()
   })
+
+  it('scrolls an offscreen route button into view before the visible click', async () => {
+    const navigate = vi.fn()
+    let scrolled = false
+    target = document.createElement('button')
+    target.dataset.route = '/admin/audit'
+    target.textContent = '系统操作审计'
+    target.scrollIntoView = vi.fn(() => {
+      scrolled = true
+    })
+    target.getBoundingClientRect = () => ({
+      x: 20,
+      y: scrolled ? 120 : window.innerHeight + 80,
+      left: 20,
+      top: scrolled ? 120 : window.innerHeight + 80,
+      right: 180,
+      bottom: scrolled ? 160 : window.innerHeight + 120,
+      width: 160,
+      height: 40,
+      toJSON: () => ({}),
+    })
+    target.addEventListener('click', navigate)
+    document.body.appendChild(target)
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+
+    requestXiaolingNavigation('/admin/audit', '系统操作审计', vi.fn())
+    await flushPromises()
+    vi.advanceTimersByTime(1400)
+    await flushPromises()
+
+    expect(target.scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'auto',
+      block: 'center',
+      inline: 'nearest',
+    })
+    expect(navigate).toHaveBeenCalledOnce()
+  })
 })

@@ -167,6 +167,18 @@ function centerOf(el: HTMLElement): { x: number; y: number; box: { left: number;
   }
 }
 
+/** 将侧栏折叠区或长页面中的真实目标带入视区，保证用户能看到鼠标落点。 */
+function bringTargetIntoView(el: HTMLElement): void {
+  const rect = el.getBoundingClientRect()
+  const margin = 24
+  const outsideViewport = rect.bottom < margin
+    || rect.top > window.innerHeight - margin
+    || rect.right < margin
+    || rect.left > window.innerWidth - margin
+  if (!outsideViewport) return
+  el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
+}
+
 function fallbackPoint(): { x: number; y: number } {
   const el = document.querySelector('.app-main, .layout-main, main, #app')
   const rect = el?.getBoundingClientRect()
@@ -190,6 +202,7 @@ function moveToTarget(): void {
       const target = findTarget()
       let point: { x: number; y: number }
       if (target) {
+        bringTargetIntoView(target.el)
         const c = centerOf(target.el)
         point = { x: c.x, y: c.y }
         targetBox.value = c.box
@@ -326,7 +339,7 @@ onBeforeUnmount(() => {
 .virtual-cursor-layer {
   position: fixed;
   inset: 0;
-  z-index: var(--z-index-tooltip);
+  z-index: calc(var(--z-index-message) + 200);
   pointer-events: none;
 }
 
