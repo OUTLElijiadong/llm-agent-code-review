@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from app.ai.result_parser import Issue
 from app.ai.static_analyzer import Finding
 from app.services.issue_merger import (
@@ -36,6 +38,7 @@ def _make_finding(
     remediation: str = "使用参数化查询",
     static_rule_hits: int = 1,
     owasp: str = "A03:2021-Injection",
+    evidence: Optional[str] = None,
 ) -> Finding:
     """构造 Finding 对象
 
@@ -68,7 +71,7 @@ def _make_finding(
         fixed_code="",
         owasp=owasp,
         cwe=cwe,
-        evidence=f"evidence at line {line_number}",
+        evidence=evidence if evidence is not None else f"evidence at line {line_number}",
         exploit_scenario="攻击者可利用此漏洞",
         references=["https://cwe.mitre.org/"],
         confidence=confidence,
@@ -96,6 +99,7 @@ def _make_issue(
     source: str = "llm",
     static_rule_hits: int = 0,
     owasp: str = "A03:2021-Injection",
+    evidence: Optional[str] = None,
 ) -> Issue:
     """构造 Issue 对象
 
@@ -128,7 +132,7 @@ def _make_issue(
         fixed_code="",
         owasp=owasp,
         cwe=cwe,
-        evidence=f"llm evidence at line {line_number}",
+        evidence=evidence if evidence is not None else f"llm evidence at line {line_number}",
         exploit_scenario="攻击者可注入恶意 SQL",
         references=["https://owasp.org/"],
         confidence=confidence,
@@ -218,12 +222,14 @@ class TestHybridMerge:
         result = merge_findings_and_issues(findings, issues, file_id=1)
         assert len(result) == 1
         assert result[0].source == "hybrid"
-        assert result[0].static_rule_hits == 2  # static=1 + LLM确认+1
+        assert result[0].static_rule_hits == 1
+        assert result[0].confirmation_count == 2
 
     def test_line_within_proximity_merges(self):
         """行号差 ±2 内 + cwe 相同 → 合并"""
-        findings = [_make_finding(line_number=10, cwe="CWE-89")]
-        issues = [_make_issue(line_number=12, cwe="CWE-89")]
+        evidence = "cursor.execute(query, params)"
+        findings = [_make_finding(line_number=10, cwe="CWE-89", evidence=evidence)]
+        issues = [_make_issue(line_number=12, cwe="CWE-89", evidence=evidence)]
         result = merge_findings_and_issues(findings, issues, file_id=1)
         assert len(result) == 1
         assert result[0].source == "hybrid"
@@ -260,12 +266,13 @@ class TestHybridMerge:
         assert len(result) == 1
         assert result[0].confidence == 0.95
 
-    def test_hybrid_static_rule_hits_increments(self):
-        """hybrid 合并后 static_rule_hits = static原值 + 1"""
+    def test_hybrid_tracks_static_hits_and_confirmations_separately(self):
+        """LLM 确认不应伪装成额外静态规则命中。"""
         findings = [_make_finding(static_rule_hits=1)]
         issues = [_make_issue()]
         result = merge_findings_and_issues(findings, issues, file_id=1)
-        assert result[0].static_rule_hits == 2
+        assert result[0].static_rule_hits == 1
+        assert result[0].confirmation_count == 2
 
 
 # ============ v3 字段合并测试 ============
@@ -291,13 +298,17 @@ class TestV3FieldsMerge:
         assert len(result) == 1
         assert result[0].cvss_score == 9.8
         assert result[0].cvss_vector == "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
-        assert result[0].remediation == "llm 修复方案"
-        assert result[0].compliance_mapping == {"gdpr": ["Art.32"]}
+        assert result[0].remediation in {"llm 修复方案", "static 修复方案"}
+        assert result[0].compliance_mapping == {
+            "iso27001": ["A.8"],
+            "gdpr": ["Art.32"],
+        }
 
     def test_hybrid_v3_fallback_to_static_when_llm_empty(self):
         """hybrid 合并: LLM v3 字段为空时回退 static"""
         findings = [_make_finding(
             cvss_score=7.5,
+            cvss_vector="",
             remediation="static 修复",
             compliance_mapping={"pci_dss": ["6.5.1"]},
         )]
@@ -339,24 +350,24 @@ class TestEdgeCases:
         findings = [_make_finding(cwe="")]
         issues = [_make_issue(cwe="")]
         result = merge_findings_and_issues(findings, issues, file_id=1)
-        assert len(result) == 2  # 不合并,各自独立
+        assert len(result) == 1
 
     def test_zero_line_number_does_not_match(self):
         """line_number=0(文件级问题)不参与行号匹配"""
         findings = [_make_finding(line_number=0, cwe="CWE-89")]
         issues = [_make_issue(line_number=0, cwe="CWE-89")]
         result = merge_findings_and_issues(findings, issues, file_id=1)
-        assert len(result) == 2  # 不合并
+        assert len(result) == 1
 
     def test_multiple_findings_multiple_issues_mixed(self):
         """多个 Findings + 多个 Issues 混合场景"""
         findings = [
-            _make_finding(line_number=10, cwe="CWE-89"),   # 与 issue[0] 合并
+            _make_finding(line_number=10, cwe="CWE-89", evidence="shared sql sink"),
             _make_finding(line_number=30, cwe="CWE-79"),   # 独立 static
             _make_finding(line_number=50, cwe="CWE-22"),   # 独立 static
         ]
         issues = [
-            _make_issue(line_number=11, cwe="CWE-89"),     # 与 finding[0] 合并(hybrid)
+            _make_issue(line_number=11, cwe="CWE-89", evidence="shared sql sink"),
             _make_issue(line_number=40, cwe="CWE-352"),    # 独立 llm
         ]
         result = merge_findings_and_issues(findings, issues, file_id=1)

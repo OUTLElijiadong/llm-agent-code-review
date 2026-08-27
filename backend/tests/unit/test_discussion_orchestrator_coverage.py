@@ -1002,6 +1002,15 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
                 description="缺少权限检查",
                 suggestion="增加鉴权",
                 fixed_code="check_permission()",
+                owasp="A01:2021-Broken Access Control",
+                cwe="CWE-639",
+                evidence="return data",
+                exploit_scenario="普通用户可读取其他账号数据",
+                references=["https://cwe.mitre.org/data/definitions/639.html"],
+                confidence=0.92,
+                cvss_vector="AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+                compliance_mapping={"iso27001": ["A.8.3"]},
+                remediation="服务端按资源所有者校验权限",
             ),
             Issue(
                 line_number=0,
@@ -1055,12 +1064,26 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert rows[0].title == ""
     assert rows[1].end_line == 6
     assert rows[1].fixed_code == "check_permission()"
+    assert rows[1].source == "llm"
+    assert rows[1].source_details[0]["source"] == "llm:roundtable"
+    assert rows[1].confirmation_count == 1
+    assert len(rows[1].finding_fingerprint) == 64
+    assert rows[1].cwe == "CWE-639"
+    assert rows[1].evidence == "return data"
+    assert rows[1].cvss_score == pytest.approx(8.1)
+    assert rows[1].cvss_version == "3.1"
+    assert rows[1].cvss_source == "vector"
+    assert rows[1].compliance_mapping == {"iso27001": ["A.8.3"]}
+    assert rows[1].remediation == "服务端按资源所有者校验权限"
     assert saved_task is not None
     assert saved_task.processed_files == 1
     assert saved_task.total_issues == 2
     assert saved_task.high_issues == 1
     assert saved_task.medium_issues == 1
     assert saved_task.score == 89
+    assert saved_task.score_version == "severity-deduction-v1"
+    assert saved_task.score_breakdown["score"] == 89
+    assert saved_task.score_breakdown["counts"] == {"严重": 0, "高": 1, "中": 1, "低": 0}
     assert saved_task.summary == consensus
     assert saved_task.status == "success"
     assert saved_task.end_time is not None

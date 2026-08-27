@@ -39,6 +39,33 @@
       </div>
     </header>
 
+    <section
+      v-if="remoteImportTask || remoteImportRecord || remoteImportError"
+      class="remote-import-feedback"
+      data-testid="remote-import-status"
+      :class="{
+        'is-error': Boolean(remoteImportError) || remoteImportTask?.status === 'failed',
+        'is-success': remoteImportTask?.status === 'succeeded',
+      }"
+    >
+      <span class="remote-import-feedback-dot" aria-hidden="true"></span>
+      <div class="remote-import-feedback-copy">
+        <strong>{{ remoteImportStatusTitle }}</strong>
+        <p>{{ remoteImportStatusDescription }}</p>
+      </div>
+      <el-button
+        v-if="remoteImportRecord"
+        size="small"
+        :loading="remoteImportRetrying"
+        @click="retryRemoteImport"
+      >继续处理</el-button>
+      <el-button
+        v-else-if="remoteImportError"
+        size="small"
+        @click="dismissRemoteImportFeedback"
+      >关闭</el-button>
+    </section>
+
     <!-- ============ 筛选条 ============ -->
     <section class="filter-bar">
       <el-input
@@ -293,10 +320,21 @@ import { useRouter } from 'vue-router'
 import { Connection, Delete as DeleteIcon, Edit as EditIcon, Plus, Search } from '@element-plus/icons-vue'
 
 import dayjs from 'dayjs'
-import { getProjects, deleteProject, createProject, updateProject, importRemoteProject } from '@/api/project'
+import {
+  getProjects,
+  deleteProject,
+  createProject,
+  updateProject,
+  queueRemoteProjectImport,
+  getRemoteProjectImport,
+} from '@/api/project'
 import { uploadFolder } from '@/api/codeFile'
 import { useUserStore } from '@/stores/user'
 import type { ProjectOut } from '@/types/project'
+import type {
+  RemoteProjectImportInput,
+  RemoteProjectImportTask,
+} from '@/api/project'
 import ProjectForm from './ProjectForm.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -322,6 +360,53 @@ const editingProject = ref<ProjectOut | null>(null)
 const remoteVisible = ref(false)
 const remoteLoading = ref(false)
 const remoteForm = ref({ url: '', project_name: '', description: '', audit_mode: false })
+
+const REMOTE_IMPORT_STORAGE_KEY = 'prism:remote-import-task'
+const REMOTE_IMPORT_RECORD_VERSION = 1
+const REMOTE_IMPORT_POLL_INTERVAL_MS = 1000
+const REMOTE_IMPORT_MAX_RETRY_DELAY_MS = 5000
+const remoteImportTask = ref<RemoteProjectImportTask | null>(null)
+const remoteImportRecord = ref<PersistedRemoteImport | null>(null)
+const remoteImportError = ref('')
+const remoteImportRetrying = ref(false)
+
+interface PersistedRemoteImport {
+  version: number
+  taskId: string | null
+  idempotencyKey: string
+  payload: RemoteProjectImportInput
+}
+
+const remoteImportStatusTitle = computed(() => {
+  if (remoteImportError.value) return '远程导入暂时中断'
+  const status = remoteImportTask.value?.status
+  if (status === 'queued') return '远程导入已排队'
+  if (status === 'running') return '远程导入处理中'
+  if (status === 'succeeded') return '远程导入完成'
+  if (status === 'failed') return '远程导入失败'
+  return '远程导入准备中'
+})
+
+const remoteImportStatusDescription = computed(() => {
+  if (remoteImportError.value) {
+    return remoteImportRecord.value
+      ? `${remoteImportError.value}；任务记录已保留，恢复网络后可以继续处理。`
+      : `${remoteImportError.value}；可以重新提交远程导入。`
+  }
+  const task = remoteImportTask.value
+  if (!task) return '正在提交任务，请稍候。'
+  if (task.status === 'queued') return '任务已提交，正在等待服务器处理。'
+  if (task.status === 'running') {
+    const phase = remoteImportPhaseLabel(task.result?.progress?.phase)
+    const progress = formatRemoteImportProgress(task.result?.progress)
+    return `${phase}${progress ? ` · ${progress}` : ''}`
+  }
+  if (task.status === 'succeeded') {
+    const count = task.result?.file_count
+    return typeof count === 'number' ? `已导入 ${count} 个文件，正在打开项目。` : '项目已创建，正在打开项目。'
+  }
+  return task.error?.message || '服务器未提供具体失败原因，请重新提交。'
+})
 
 const activeCount = computed(() => projects.value.filter((p) => p.status === 'active').length)
 const archivedCount = computed(() => projects.value.filter((p) => p.status === 'archived').length)
@@ -369,6 +454,309 @@ function scoreColor(score: number): string {
   if (score >= 70) return 'var(--sev-medium)'
   if (score >= 60) return 'var(--sev-high)'
   return 'var(--sev-severe)'
+}
+
+function newRemoteImportIdempotencyKey(): string {
+  const randomId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `prism-remote-import-${randomId}`
+}
+
+function persistRemoteImport(record: PersistedRemoteImport): void {
+  remoteImportRecord.value = record
+  try {
+    window.localStorage.setItem(REMOTE_IMPORT_STORAGE_KEY, JSON.stringify(record))
+  } catch {
+    // 本地存储不可用时仍继续当前任务,避免因浏览器策略阻断导入请求。
+  }
+}
+
+function clearPersistedRemoteImport(): void {
+  remoteImportRecord.value = null
+  try {
+    window.localStorage.removeItem(REMOTE_IMPORT_STORAGE_KEY)
+  } catch {
+    // 清理失败不影响已完成任务的当前页面状态。
+  }
+}
+
+function readPersistedRemoteImport(): PersistedRemoteImport | null {
+  let raw: string | null
+  try {
+    raw = window.localStorage.getItem(REMOTE_IMPORT_STORAGE_KEY)
+  } catch {
+    return null
+  }
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<PersistedRemoteImport>
+    const payload = parsed.payload
+    if (
+      parsed.version !== REMOTE_IMPORT_RECORD_VERSION
+      || typeof parsed.idempotencyKey !== 'string'
+      || !parsed.idempotencyKey
+      || (parsed.taskId !== null && typeof parsed.taskId !== 'string')
+      || !payload
+      || typeof payload.url !== 'string'
+      || typeof payload.project_name !== 'string'
+    ) {
+      window.localStorage.removeItem(REMOTE_IMPORT_STORAGE_KEY)
+      return null
+    }
+    return {
+      version: REMOTE_IMPORT_RECORD_VERSION,
+      taskId: parsed.taskId ?? null,
+      idempotencyKey: parsed.idempotencyKey,
+      payload: {
+        url: payload.url,
+        project_name: payload.project_name,
+        description: typeof payload.description === 'string' ? payload.description : undefined,
+        language: typeof payload.language === 'string' ? payload.language : undefined,
+        audit_mode: Boolean(payload.audit_mode),
+      },
+    }
+  } catch {
+    try {
+      window.localStorage.removeItem(REMOTE_IMPORT_STORAGE_KEY)
+    } catch {
+      // 忽略损坏记录的清理失败,当前页面仍可继续正常使用。
+    }
+    return null
+  }
+}
+
+function isTransientRemoteImportError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return true
+  const candidate = error as {
+    response?: { status?: unknown }
+    code?: unknown
+  }
+  if (candidate.response) {
+    const status = candidate.response.status
+    if (typeof status !== 'number') return true
+    return status >= 500 || status === 408 || status === 429
+  }
+  if (typeof candidate.code === 'number') {
+    // 后端错误处理器会把 5xx/429 转成 50000/502xx/503xx/429xx 业务码。
+    return candidate.code >= 50000
+      || (candidate.code >= 42900 && candidate.code < 43000)
+      || candidate.code === 429
+      || candidate.code === 500
+  }
+  if (typeof candidate.code === 'string') {
+    return new Set([
+      'ERR_NETWORK',
+      'ECONNABORTED',
+      'ETIMEDOUT',
+      'ECONNRESET',
+      'ERR_BAD_RESPONSE',
+    ]).has(candidate.code)
+  }
+  // 通用 Error 和无响应的 Axios 错误都属于可恢复的连接/传输失败。
+  return true
+}
+
+function readableRemoteImportError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const candidate = error as {
+      message?: unknown
+      detail?: unknown
+      error?: { message?: unknown } | unknown
+      response?: { data?: { message?: unknown; detail?: unknown } }
+    }
+    const responseData = candidate.response?.data
+    const values = [
+      candidate.error && typeof candidate.error === 'object'
+        ? (candidate.error as { message?: unknown }).message
+        : undefined,
+      candidate.message,
+      typeof candidate.detail === 'string' ? candidate.detail : undefined,
+      responseData?.message,
+      typeof responseData?.detail === 'string' ? responseData.detail : undefined,
+    ]
+    const message = values.find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    if (message) return message.trim()
+  }
+  if (error instanceof Error && error.message.trim()) return error.message.trim()
+  return '远程导入请求失败，请稍后重试。'
+}
+
+function remoteImportPhaseLabel(phase?: string): string {
+  const labels: Record<string, string> = {
+    downloading: '正在下载源码',
+    validating: '正在校验压缩包',
+    ingesting: '正在写入项目',
+    importing: '正在写入项目',
+    scanning: '正在安全扫描',
+    project_created: '正在准备项目',
+  }
+  return labels[phase || ''] || '正在处理源码'
+}
+
+function isRemoteImportTask(value: unknown): value is RemoteProjectImportTask {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as { task_id?: unknown; status?: unknown }
+  return typeof candidate.task_id === 'string'
+    && ['queued', 'running', 'succeeded', 'failed'].includes(String(candidate.status))
+}
+
+function formatRemoteImportProgress(progress?: RemoteProjectImportTask['result']['progress']): string {
+  if (!progress || typeof progress.received_bytes !== 'number') return ''
+  const received = formatBytes(progress.received_bytes)
+  if (typeof progress.total_bytes === 'number' && progress.total_bytes > 0) {
+    return `${received} / ${formatBytes(progress.total_bytes)}`
+  }
+  return received
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function remoteImportProjectId(task: RemoteProjectImportTask): number | null {
+  const value = task.project_id ?? task.result?.id
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
+  return null
+}
+
+function clearRemoteImportPoll(): void {
+  if (remoteImportPollTimer !== undefined) {
+    clearTimeout(remoteImportPollTimer)
+    remoteImportPollTimer = undefined
+  }
+}
+
+function scheduleRemoteImportPoll(delay = REMOTE_IMPORT_POLL_INTERVAL_MS): void {
+  clearRemoteImportPoll()
+  if (componentDisposed || !remoteImportRecord.value?.taskId) return
+  remoteImportPollTimer = setTimeout(() => {
+    remoteImportPollTimer = undefined
+    void pollRemoteImportTask()
+  }, delay)
+}
+
+async function settleRemoteImportTask(task: RemoteProjectImportTask): Promise<void> {
+  remoteImportTask.value = task
+  if (task.status === 'queued' || task.status === 'running') {
+    scheduleRemoteImportPoll()
+    return
+  }
+
+  clearRemoteImportPoll()
+  if (task.status === 'failed') {
+    clearPersistedRemoteImport()
+    remoteImportError.value = task.error?.message || '服务器未提供具体失败原因，请重新提交。'
+    return
+  }
+
+  remoteImportError.value = ''
+  const projectId = remoteImportProjectId(task)
+  if (projectId === null) {
+    remoteImportError.value = '远程导入已完成，但服务器没有返回项目编号。'
+    return
+  }
+  clearPersistedRemoteImport()
+  const count = task.result?.file_count
+  ElMessage.success(
+    typeof count === 'number' ? `远程源码导入完成，共 ${count} 个文件` : '远程源码导入完成',
+  )
+  await fetchProjects()
+  if (!componentDisposed) await router.push(`/projects/${projectId}`)
+}
+
+async function pollRemoteImportTask(): Promise<void> {
+  const record = remoteImportRecord.value
+  if (componentDisposed || !record?.taskId || remoteImportPollInFlight) return
+  remoteImportPollInFlight = true
+  try {
+    const task = await getRemoteProjectImport(record.taskId)
+    if (componentDisposed) return
+    if (!isRemoteImportTask(task)) throw new Error('服务器返回的远程导入任务状态无效')
+    remoteImportPollFailures = 0
+    remoteImportError.value = ''
+    await settleRemoteImportTask(task)
+  } catch (error) {
+    remoteImportPollFailures += 1
+    remoteImportError.value = readableRemoteImportError(error)
+    if (isTransientRemoteImportError(error)) {
+      const delay = Math.min(
+        REMOTE_IMPORT_MAX_RETRY_DELAY_MS,
+        REMOTE_IMPORT_POLL_INTERVAL_MS * (2 ** Math.min(remoteImportPollFailures - 1, 3)),
+      )
+      scheduleRemoteImportPoll(delay)
+    } else {
+      clearRemoteImportPoll()
+      clearPersistedRemoteImport()
+    }
+  } finally {
+    remoteImportPollInFlight = false
+  }
+}
+
+async function enqueuePersistedRemoteImport(record: PersistedRemoteImport, isRetry = false): Promise<void> {
+  if (!userStore.hasPermission('project:import')) return
+  if (isRetry) remoteImportRetrying.value = true
+  else remoteLoading.value = true
+  try {
+    const task = await queueRemoteProjectImport(record.payload, record.idempotencyKey)
+    if (componentDisposed) return
+    if (!isRemoteImportTask(task)) throw new Error('服务器返回的远程导入任务状态无效')
+    remoteImportTask.value = task
+    remoteImportError.value = ''
+    persistRemoteImport({ ...record, taskId: task.task_id })
+    remoteVisible.value = false
+    remoteForm.value = { url: '', project_name: '', description: '', audit_mode: false }
+    if (task.status === 'queued' || task.status === 'running') {
+      scheduleRemoteImportPoll()
+    } else {
+      await settleRemoteImportTask(task)
+    }
+  } catch (error) {
+    remoteImportError.value = readableRemoteImportError(error)
+    if (!isTransientRemoteImportError(error)) {
+      clearPersistedRemoteImport()
+      remoteImportTask.value = null
+    }
+  } finally {
+    if (isRetry) remoteImportRetrying.value = false
+    else remoteLoading.value = false
+  }
+}
+
+async function restoreRemoteImport(): Promise<void> {
+  if (!userStore.hasPermission('project:import')) return
+  const record = readPersistedRemoteImport()
+  if (!record) return
+  remoteImportRecord.value = record
+  if (record.taskId) {
+    await pollRemoteImportTask()
+  } else {
+    await enqueuePersistedRemoteImport(record, true)
+  }
+}
+
+async function retryRemoteImport(): Promise<void> {
+  const record = remoteImportRecord.value
+  if (
+    !record
+    || remoteImportRetrying.value
+    || remoteLoading.value
+    || !userStore.hasPermission('project:import')
+  ) return
+  remoteImportError.value = ''
+  remoteImportPollFailures = 0
+  if (record.taskId) await pollRemoteImportTask()
+  else await enqueuePersistedRemoteImport(record, true)
+}
+
+function dismissRemoteImportFeedback(): void {
+  if (remoteImportRecord.value) return
+  remoteImportError.value = ''
+  remoteImportTask.value = null
 }
 
 async function fetchProjects(): Promise<void> {
@@ -436,28 +824,30 @@ async function handleDelete(id: number): Promise<void> {
 }
 
 async function submitRemoteImport(): Promise<void> {
+  if (!userStore.hasPermission('project:import')) return
   if (!remoteForm.value.url.trim() || !remoteForm.value.project_name.trim()) {
     ElMessage.warning('请填写源码地址和项目名称')
     return
   }
-  remoteLoading.value = true
-  try {
-    const result = await importRemoteProject({
-      url: remoteForm.value.url.trim(),
-      project_name: remoteForm.value.project_name.trim(),
-      description: remoteForm.value.description.trim() || undefined,
-      audit_mode: remoteForm.value.audit_mode,
-    })
-    ElMessage.success(`远程源码导入完成，共 ${result.file_count} 个文件`)
-    remoteVisible.value = false
-    remoteForm.value = { url: '', project_name: '', description: '', audit_mode: false }
-    await fetchProjects()
-    router.push(`/projects/${result.id}`)
-  } catch {
-    /* http 拦截器已提示错误 */
-  } finally {
-    remoteLoading.value = false
+  if (remoteImportRecord.value) {
+    remoteImportError.value = '已有远程导入任务正在处理中，请等待当前任务完成。'
+    return
   }
+  const payload: RemoteProjectImportInput = {
+    url: remoteForm.value.url.trim(),
+    project_name: remoteForm.value.project_name.trim(),
+    description: remoteForm.value.description.trim() || undefined,
+    audit_mode: remoteForm.value.audit_mode,
+  }
+  const record: PersistedRemoteImport = {
+    version: REMOTE_IMPORT_RECORD_VERSION,
+    taskId: null,
+    idempotencyKey: newRemoteImportIdempotencyKey(),
+    payload,
+  }
+  // 先保存请求，再发起网络调用;响应丢失时可用同一幂等键恢复。
+  persistRemoteImport(record)
+  await enqueuePersistedRemoteImport(record)
 }
 
 async function onFormSubmit(data: { project_name: string; description?: string; language?: string; files?: File[] }): Promise<void> {
@@ -490,18 +880,26 @@ async function onFormSubmit(data: { project_name: string; description?: string; 
 }
 
 let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined
+let remoteImportPollTimer: ReturnType<typeof setTimeout> | undefined
+let remoteImportPollInFlight = false
+let remoteImportPollFailures = 0
+let componentDisposed = false
 function onAgentTaskComplete(): void {
-  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  if (taskRefreshTimer !== undefined) clearTimeout(taskRefreshTimer)
   taskRefreshTimer = setTimeout(() => { void fetchProjects() }, 600)
 }
 
 onMounted(() => {
+  componentDisposed = false
   fetchProjects()
   window.addEventListener('prism:agent-task-complete', onAgentTaskComplete)
+  void restoreRemoteImport()
 })
 
 onBeforeUnmount(() => {
-  if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+  componentDisposed = true
+  if (taskRefreshTimer !== undefined) clearTimeout(taskRefreshTimer)
+  clearRemoteImportPoll()
   window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
 </script>
@@ -544,6 +942,67 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.remote-import-feedback {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-200);
+  border-radius: 8px;
+  color: var(--gray-700);
+
+  &.is-error {
+    background: rgba(214, 76, 89, 0.06);
+    border-color: rgba(214, 76, 89, 0.28);
+  }
+
+  &.is-success {
+    background: rgba(79, 184, 122, 0.08);
+    border-color: rgba(79, 184, 122, 0.3);
+  }
+}
+
+.remote-import-feedback-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--brand-500);
+  box-shadow: 0 0 0 4px rgba(91, 88, 232, 0.1);
+
+  .is-error & {
+    background: var(--sev-severe);
+    box-shadow: 0 0 0 4px rgba(214, 76, 89, 0.1);
+  }
+
+  .is-success & {
+    background: var(--status-fixed);
+    box-shadow: 0 0 0 4px rgba(79, 184, 122, 0.1);
+  }
+}
+
+.remote-import-feedback-copy {
+  flex: 1;
+  min-width: 0;
+
+  strong {
+    display: block;
+    color: var(--gray-900);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 3px 0 0;
+    color: var(--gray-600);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
 }
 
 .view-switch {
@@ -895,6 +1354,19 @@ onBeforeUnmount(() => {
   .filter-spacer,
   .filter-result {
     display: none;
+  }
+
+  .remote-import-feedback {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .remote-import-feedback-copy {
+    flex-basis: calc(100% - 24px);
+  }
+
+  .remote-import-feedback :deep(.el-button) {
+    margin-left: 21px;
   }
 
   .proj-desc {

@@ -26,6 +26,7 @@ class ReviewIssue(Base, IdMixin, TimestampMixin):
         Index("ix_review_issue_create_time", "create_time"),
         Index("ix_review_issue_task_cwe", "task_id", "cwe"),
         Index("ix_review_issue_task_severity_cwe", "task_id", "severity", "cwe"),
+        Index("ix_review_issue_task_fingerprint", "task_id", "finding_fingerprint"),
     )
 
     task_id = Column(BigInteger, nullable=False)
@@ -52,10 +53,15 @@ class ReviewIssue(Base, IdMixin, TimestampMixin):
     references_json = Column(JSON, nullable=True, comment="参考链接列表")
     confidence = Column(Float, nullable=True, comment="置信度 0.0-1.0")
     source = Column(String(16), nullable=True, default="llm", comment="发现来源:llm/static/regex")
+    source_details = Column(JSON, nullable=True, comment="合并前各来源的置信度、证据与位置")
+    confirmation_count = Column(Integer, nullable=False, default=1, comment="独立来源确认数量")
+    finding_fingerprint = Column(String(64), nullable=True, comment="文件内规范化问题指纹")
 
     # === v3 全量漏洞元数据(2026-06-25 006 迁移新增)===
     cvss_score = Column(Float, nullable=True, comment="CVSS v3.1 基础分 0.0-10.0")
     cvss_vector = Column(String(64), nullable=True, comment="CVSS 向量,如 AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")
+    cvss_version = Column(String(8), nullable=True, comment="CVSS 版本,当前为 3.1")
+    cvss_source = Column(String(16), nullable=True, comment="vector/model/unavailable")
     compliance_mapping = Column(
         JSON,
         nullable=True,

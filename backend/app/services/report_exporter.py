@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from jinja2 import Environment, select_autoescape
 
+from app.ai.scoring import SCORING_VERSION, compute_score_breakdown, score_risk_level
 from app.constants.compliance import build_compliance_summary
 
 # ============ 模块常量 ============
@@ -57,17 +58,18 @@ _SEVERITY_KEYS: tuple = ("严重", "高", "中", "低")
 _ISSUE_FIELDS: tuple = (
     "id", "task_id", "file_id", "file_name", "line_number", "end_line",
     "issue_type", "severity", "title", "description", "suggestion",
-    "fixed_code", "status", "create_time",
+    "fixed_code", "status", "handled_by", "handled_at", "create_time", "update_time",
     "owasp", "cwe", "evidence", "exploit_scenario", "references_json",
-    "confidence", "source", "cvss_score", "cvss_vector",
+    "confidence", "source", "source_details", "confirmation_count", "finding_fingerprint",
+    "cvss_score", "cvss_vector", "cvss_version", "cvss_source",
     "compliance_mapping", "remediation", "static_rule_hits",
 )
 # Task 已知字段列表(用于 ORM → dict 转换,与 ReviewTask ORM 对齐)
 _TASK_FIELDS: tuple = (
-    "id", "task_name", "project_id", "review_type", "status",
+    "id", "task_name", "name", "project_id", "review_type", "status",
     "total_files", "processed_files", "total_issues",
     "severe_issues", "high_issues", "medium_issues", "low_issues",
-    "score", "summary", "model_name", "duration_ms",
+    "score", "score_version", "score_breakdown", "summary", "model_name", "duration_ms",
     "start_time", "end_time", "create_time",
 )
 
@@ -136,6 +138,8 @@ def _normalize_issue(issue: Any) -> Dict[str, Any]:
     # references_json / compliance_mapping 保持原值(可能为 None 或容器)
     if normalized.get("references_json") is None:
         normalized["references_json"] = []
+    if normalized.get("source_details") is None:
+        normalized["source_details"] = []
     if normalized.get("compliance_mapping") is None:
         normalized["compliance_mapping"] = {}
     return normalized
@@ -163,9 +167,59 @@ def _normalize_task(task: Any) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
     for field in _TASK_FIELDS:
         normalized[field] = _to_serializable(raw.get(field))
+    task_name = normalized.get("task_name") or normalized.get("name") or ""
+    normalized["task_name"] = task_name
+    normalized["name"] = task_name
     # project_name 不在 ReviewTask ORM 上,需调用方传入或补空
     normalized["project_name"] = _to_serializable(raw.get("project_name", "")) or ""
     return normalized
+
+
+def _normalized_explicit_score(value: Any) -> Optional[int]:
+    """将历史显式评分约束到报告支持的 0-100 整数范围。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return max(0, min(100, int(float(value))))
+    except (TypeError, ValueError):
+        return None
+
+
+def build_report_score_facts(
+    severity_count: Dict[str, int],
+    issue_count: int,
+    explicit_score: Any = None,
+) -> tuple[int, Dict[str, Any]]:
+    """构造所有报告出口共享的评分事实。
+
+    最终 ReviewIssue 非空时，评分严格按 15/8/3/1 从问题集重算。空问题
+    历史任务可能保存了人工或旧算法的显式评分；该值为兼容保留，并通过
+    ``score_source`` 与 ``compatibility_override`` 明确标识，避免伪造扣分。
+    """
+    breakdown: Dict[str, Any] = compute_score_breakdown(severity_count)
+    if max(0, int(issue_count or 0)) > 0:
+        breakdown["score_source"] = "review_issues"
+        return int(breakdown["score"]), breakdown
+
+    preserved_score = _normalized_explicit_score(explicit_score)
+    if preserved_score is None:
+        preserved_score = int(breakdown["score"])
+        score_source = "review_issues"
+    else:
+        score_source = "task_explicit_empty_report"
+
+    canonical_score = int(breakdown["score"])
+    breakdown.update({
+        "score": preserved_score,
+        "risk_level": score_risk_level(preserved_score),
+        "score_source": score_source,
+    })
+    if preserved_score != canonical_score:
+        breakdown["compatibility_override"] = {
+            "reason": "empty_report_explicit_score",
+            "canonical_score": canonical_score,
+        }
+    return preserved_score, breakdown
 
 
 def _severity_weight(severity: Optional[str]) -> int:
@@ -336,6 +390,25 @@ def _build_report_context(
 
     compliance_summary = _build_compliance_summary(normalized_issues)
     top_vulnerabilities = _build_top_vulnerabilities(normalized_issues, top_n=10)
+    explicit_score = score if score is not None else task_info.get("score")
+    effective_score, score_breakdown = build_report_score_facts(
+        severity_count,
+        len(normalized_issues),
+        explicit_score,
+    )
+    score_version = score_breakdown.get("version") or SCORING_VERSION
+
+    # task_info 也是导出契约的一部分，不能继续暴露与 statistics 冲突的任务快照。
+    task_info.update({
+        "total_issues": len(normalized_issues),
+        "severe_issues": severity_count["严重"],
+        "high_issues": severity_count["高"],
+        "medium_issues": severity_count["中"],
+        "low_issues": severity_count["低"],
+        "score": effective_score,
+        "score_version": score_version,
+        "score_breakdown": score_breakdown,
+    })
 
     statistics: Dict[str, Any] = {
         "total_issues": len(normalized_issues),
@@ -346,12 +419,15 @@ def _build_report_context(
         "compliance_summary": compliance_summary,
         "top_vulnerabilities": top_vulnerabilities,
         "standard_labels": dict(_STANDARD_LABELS),
+        "score_version": score_version,
+        "score_breakdown": score_breakdown,
+        "risk_level": score_breakdown["risk_level"],
     }
 
     return {
         "task_info": task_info,
         "summary": summary or "",
-        "score": score,
+        "score": effective_score,
         "issues": sorted_issues,
         "statistics": statistics,
         "evidence": _to_serializable(evidence or {}),

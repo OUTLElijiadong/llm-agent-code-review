@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, PermissionError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.review_issue import ReviewIssue
@@ -56,6 +56,13 @@ from app.services.report_pdf_exporter import export_to_pdf
 from app.services.report_word_exporter import export_to_word
 
 router = APIRouter()
+
+_REPORT_EXPORT_PERMISSION_BY_FORMAT = {
+    "json": PermissionCode.REPORT_EXPORT_JSON,
+    "html": PermissionCode.REPORT_EXPORT_HTML,
+    "pdf": PermissionCode.REPORT_EXPORT_PDF,
+    "word": PermissionCode.REPORT_EXPORT_WORD,
+}
 
 
 # ============ T12 请求体 Schema ============
@@ -155,6 +162,16 @@ def _build_download_response(
     )
 
 
+def _ensure_report_export_permission(db: Session, user: User, format: str) -> None:
+    """校验指定报告格式的独立导出权限。"""
+    permission = _REPORT_EXPORT_PERMISSION_BY_FORMAT[format]
+    if not check_permission(db, user.id, permission):
+        raise PermissionError(
+            f"无操作权限: 需要 {permission}",
+            detail={"required_permission": permission, "format": format},
+        )
+
+
 # ============ T12 报告生成与导出路由(字面路径优先) ============
 
 @router.post("/generate")
@@ -182,9 +199,10 @@ def generate_report(
     Raises:
         NotFoundError: 任务不存在或未完成(404)。
     """
+    fmt = payload.format
+    _ensure_report_export_permission(db, user, fmt)
     task, issues, summary, score = _get_task_with_issues(db, payload.task_id, user)
     evidence = _get_report_evidence(db, payload.task_id)
-    fmt = payload.format
 
     if fmt == "json":
         json_str = export_to_json(task, issues, summary, score, evidence)
@@ -249,19 +267,7 @@ def _require_report_export_permission(
     user: User = Depends(get_current_user),
 ) -> User:
     """按实际导出格式校验权限，避免使用不存在的 report:export。"""
-    permission_by_format = {
-        "json": PermissionCode.REPORT_EXPORT_JSON,
-        "html": PermissionCode.REPORT_EXPORT_HTML,
-        "pdf": PermissionCode.REPORT_EXPORT_PDF,
-        "word": PermissionCode.REPORT_EXPORT_WORD,
-    }
-    permission = permission_by_format[format]
-    if not check_permission(db, user.id, permission):
-        from app.core.exceptions import PermissionError
-        raise PermissionError(
-            f"无操作权限: 需要 {permission}",
-            detail={"required_permission": permission, "format": format},
-        )
+    _ensure_report_export_permission(db, user, format)
     return user
 
 
@@ -462,26 +468,28 @@ def get_report(task_id: int, db: Session = Depends(get_db),
 @router.get("/{task_id}/export/word")
 def export_word(task_id: int, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
-    """导出Word报告"""
-    from app.exporters.word_exporter import export_word_report
-    detail = report_service.get_report_detail(db, user, task_id)
-    buffer = export_word_report(detail)
-    return StreamingResponse(
-        buffer,
+    """兼容旧 Word 地址，委托统一报告导出器。"""
+    _ensure_report_export_permission(db, user, "word")
+    task, issues, summary, score = _get_task_with_issues(db, task_id, user)
+    evidence = _get_report_evidence(db, task_id)
+    content = export_to_word(task, issues, summary, score, "detailed", evidence)
+    return _build_download_response(
+        content,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f"attachment; filename=review_report_{task_id}.docx"},
+        filename=f"review_report_{task_id}.docx",
     )
 
 
 @router.get("/{task_id}/export/pdf")
 def export_pdf(task_id: int, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
-    """导出PDF报告"""
-    from app.exporters.pdf_exporter import export_pdf_report
-    detail = report_service.get_report_detail(db, user, task_id)
-    buffer = export_pdf_report(detail)
-    return StreamingResponse(
-        buffer,
+    """兼容旧 PDF 地址，委托统一报告导出器。"""
+    _ensure_report_export_permission(db, user, "pdf")
+    task, issues, summary, score = _get_task_with_issues(db, task_id, user)
+    evidence = _get_report_evidence(db, task_id)
+    content = export_to_pdf(task, issues, summary, score, "detailed", evidence)
+    return _build_download_response(
+        content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=review_report_{task_id}.pdf"},
+        filename=f"review_report_{task_id}.pdf",
     )

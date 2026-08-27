@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,6 +24,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
+from app.ai.scoring import score_risk_level
 from app.services.report_exporter import export_to_dict
 
 # ============ 模块常量 ============
@@ -137,15 +139,7 @@ def _format_score(score: int) -> str:
     Returns:
         str: 格式化后的评分文本,如 "72/100 (中风险)"。
     """
-    if score >= 80:
-        level = "低风险"
-    elif score >= 60:
-        level = "中风险"
-    elif score >= 40:
-        level = "高风险"
-    else:
-        level = "极高风险"
-    return f"{score}/100 ({level})"
+    return f"{score}/100 ({score_risk_level(score)})"
 
 
 # ============ Word 文档构建 ============
@@ -229,6 +223,75 @@ def _build_summary_table(doc: Any, statistics: Dict[str, Any]) -> None:
         row.cells[1].width = Pt(80)
 
 
+def _build_score_breakdown(doc: Any, statistics: Dict[str, Any]) -> None:
+    """写入所有报告出口共用的 15/8/3/1 评分明细。"""
+    breakdown = statistics.get("score_breakdown") or {}
+    weights = breakdown.get("weights") or {}
+    counts = breakdown.get("counts") or {}
+    deductions = breakdown.get("deductions") or {}
+    rows = [
+        ("字段", "值"),
+        ("评分版本", str(breakdown.get("version") or "-")),
+        ("基础分", str(breakdown.get("base_score", 100))),
+        (
+            "扣分权重",
+            "严重 × {0}；高 × {1}；中 × {2}；低 × {3}".format(
+                weights.get("严重", 15),
+                weights.get("高", 8),
+                weights.get("中", 3),
+                weights.get("低", 1),
+            ),
+        ),
+        (
+            "问题计数",
+            "严重 {0}；高 {1}；中 {2}；低 {3}".format(
+                counts.get("严重", 0),
+                counts.get("高", 0),
+                counts.get("中", 0),
+                counts.get("低", 0),
+            ),
+        ),
+        (
+            "分级扣分",
+            "严重 {0}；高 {1}；中 {2}；低 {3}".format(
+                deductions.get("严重", 0),
+                deductions.get("高", 0),
+                deductions.get("中", 0),
+                deductions.get("低", 0),
+            ),
+        ),
+        ("总扣分", str(breakdown.get("total_deduction", 0))),
+        ("原始分", str(breakdown.get("raw_score", 100))),
+        ("最终分", str(breakdown.get("score", 100))),
+        ("风险等级", str(breakdown.get("risk_level") or "-")),
+        ("评分来源", str(breakdown.get("score_source") or "-")),
+    ]
+    override = breakdown.get("compatibility_override")
+    if isinstance(override, dict):
+        rows.append((
+            "兼容说明",
+            f"{override.get('reason') or '-'}; canonical={override.get('canonical_score')}",
+        ))
+
+    doc.add_heading("评分明细", level=1)
+    table = doc.add_table(rows=len(rows), cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = "Table Grid"
+    for row_idx, (label, value) in enumerate(rows):
+        _add_run(
+            table.rows[row_idx].cells[0].paragraphs[0],
+            label,
+            bold=(row_idx == 0),
+            size=10,
+        )
+        _add_run(
+            table.rows[row_idx].cells[1].paragraphs[0],
+            value,
+            bold=(row_idx == 0),
+            size=10,
+        )
+
+
 def _build_decompilation_evidence(doc: Any, evidence: Dict[str, Any]) -> None:
     """将结构化反编译证据写入 Word 报告。"""
     decompilation = evidence.get("decompilation") if isinstance(evidence, dict) else None
@@ -302,6 +365,54 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
     cwe = str(issue.get("cwe") or "-")
     _add_run(info_para, f"文件:{file_name} | 行号:{line_number} | 类型:{issue_type} | CWE:{cwe}", size=10)
 
+    cvss_parts = []
+    if issue.get("cvss_score") is not None:
+        cvss_parts.append(f"评分: {issue.get('cvss_score')}")
+    if issue.get("cvss_vector"):
+        cvss_parts.append(f"向量: {issue.get('cvss_vector')}")
+    if issue.get("cvss_version"):
+        cvss_parts.append(f"版本: {issue.get('cvss_version')}")
+    if issue.get("cvss_source"):
+        cvss_parts.append(f"来源: {issue.get('cvss_source')}")
+    if cvss_parts:
+        cvss_para = doc.add_paragraph()
+        _add_run(cvss_para, "CVSS: ", bold=True, size=10)
+        _add_run(cvss_para, " | ".join(cvss_parts), font_name=_CODE_FONT, size=9)
+
+    source_para = doc.add_paragraph()
+    _add_run(source_para, "来源与确认: ", bold=True, size=10)
+    _add_run(
+        source_para,
+        "发现来源: {0} | 确认数: {1} | 指纹: {2}".format(
+            issue.get("source") or "-",
+            issue.get("confirmation_count") or 0,
+            issue.get("finding_fingerprint") or "-",
+        ),
+        font_name=_CODE_FONT,
+        size=9,
+    )
+    if issue.get("source_details"):
+        details_para = doc.add_paragraph()
+        _add_run(details_para, "来源明细: ", bold=True, size=10)
+        _add_run(
+            details_para,
+            json.dumps(issue.get("source_details"), ensure_ascii=False, default=str),
+            size=9,
+        )
+
+    status_para = doc.add_paragraph()
+    _add_run(status_para, "处理状态: ", bold=True, size=10)
+    _add_run(
+        status_para,
+        "状态: {0} | 处理人: {1} | 处理时间: {2} | 更新时间: {3}".format(
+            issue.get("status") or "-",
+            issue.get("handled_by") or "-",
+            issue.get("handled_at") or "-",
+            issue.get("update_time") or "-",
+        ),
+        size=9,
+    )
+
     # 问题描述
     description = issue.get("description") or ""
     if description:
@@ -309,12 +420,30 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
         _add_run(desc_para, "描述:", bold=True, size=10)
         _add_run(desc_para, str(description), size=10)
 
+    evidence = issue.get("evidence") or ""
+    if evidence:
+        evidence_para = doc.add_paragraph()
+        _add_run(evidence_para, "证据:", bold=True, size=10)
+        _add_run(evidence_para, str(evidence), font_name=_CODE_FONT, size=9)
+
+    exploit_scenario = issue.get("exploit_scenario") or ""
+    if exploit_scenario:
+        exploit_para = doc.add_paragraph()
+        _add_run(exploit_para, "攻击场景:", bold=True, size=10)
+        _add_run(exploit_para, str(exploit_scenario), size=10)
+
     # 修复建议
     suggestion = issue.get("suggestion") or ""
     if suggestion:
         sug_para = doc.add_paragraph()
         _add_run(sug_para, "修复建议:", bold=True, size=10)
         _add_run(sug_para, str(suggestion), size=10)
+
+    remediation = issue.get("remediation") or ""
+    if remediation:
+        remediation_para = doc.add_paragraph()
+        _add_run(remediation_para, "详细修复:", bold=True, size=10)
+        _add_run(remediation_para, str(remediation), size=10)
 
     # 修复代码(Courier New 字体)
     fixed_code = issue.get("fixed_code") or ""
@@ -325,6 +454,19 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
         code_para = doc.add_paragraph()
         _add_run(code_para, str(fixed_code), font_name=_CODE_FONT, size=9,
                  color=RGBColor(0x05, 0x96, 0x69))
+
+    references = issue.get("references_json") or []
+    if not isinstance(references, (list, tuple)):
+        references = [references]
+    if references:
+        refs_para = doc.add_paragraph()
+        _add_run(refs_para, "参考:", bold=True, size=10)
+        _add_run(
+            refs_para,
+            "\n".join(str(reference) for reference in references if reference),
+            font_name=_CODE_FONT,
+            size=9,
+        )
 
 
 def _build_issues_section(doc: Any, issues: List[Dict[str, Any]]) -> None:
@@ -410,7 +552,7 @@ def export_to_word(
     rfonts.set(qn("w:eastAsia"), _CHINESE_FONT)
 
     # 1. 报告头
-    _build_header(doc, task_info, score)
+    _build_header(doc, task_info, context.get("score", score))
 
     # 2. 总体评价
     if summary_text:
@@ -424,7 +566,10 @@ def export_to_word(
     # 4. 统计摘要表
     _build_summary_table(doc, statistics)
 
-    # 5. 问题详情(按严重度分组)
+    # 5. 评分明细
+    _build_score_breakdown(doc, statistics)
+
+    # 6. 问题详情(按严重度分组)
     _build_issues_section(doc, sorted_issues)
 
     # 导出字节流

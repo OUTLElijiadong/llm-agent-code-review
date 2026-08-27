@@ -1,103 +1,75 @@
-"""Issue 合并去重工具(T08 双引擎核心组件)
+"""Normalize and N-way merge review findings from every analysis source."""
 
-将静态分析引擎(Finding)与 LLM 审查引擎(Issue)的结果合并去重,
-生成统一的 Issue 列表供 ReviewIssue 持久化使用。
+from __future__ import annotations
 
-去重规则:
-    file_id + line_number(±2 行内) + cwe 相同视为同一问题
+import ast
+import hashlib
+import re
+from dataclasses import dataclass, replace
+from typing import Iterable, List, Optional
 
-合并策略:
-    - 静态+LLM 同时命中: source="hybrid", static_rule_hits += 1, confidence 取较高者
-    - 仅静态命中: source 保留 Finding 原值(regex/static), confidence=Finding.confidence
-    - 仅 LLM 命中: source="llm", confidence=Issue.confidence
-
-设计要点:
-    1. 纯函数,无 DB 写入,无 LLM 调用,可独立测试
-    2. 不修改输入列表(返回新列表)
-    3. 合并后的 Issue 携带全量 v3 字段(cvss_score/cvss_vector/compliance_mapping/
-       remediation/static_rule_hits),可直接转换为 ReviewIssue ORM
-"""
-from typing import List, Optional
-
-from app.ai.result_parser import Issue
+from app.ai.cvss import normalize_cvss
+from app.ai.result_parser import Issue, normalize_severity
 from app.ai.static_analyzer import Finding
 
-# 行号邻近阈值:±2 行内视为同一位置
 _LINE_PROXIMITY = 2
+_SEVERITY_RANK = {"低": 1, "中": 2, "高": 3, "严重": 4}
+_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[\u4e00-\u9fff]")
 
 
 def merge_findings_and_issues(
     findings: List[Finding],
     issues: List[Issue],
     file_id: int,
+    code: Optional[str] = None,
 ) -> List[Issue]:
-    """合并静态分析结果与 LLM 审查结果,去重后返回 Issue 列表
+    """N-way deduplicate static and LLM results for one file.
 
-    将静态引擎的 Finding 列表与 LLM 引擎的 Issue 列表合并,
-    基于 (file_id, line_number ±2, cwe) 三元组去重。
-    同时被两个引擎命中时合并为 hybrid 问题,置信度取较高者,
-    static_rule_hits +1;仅被一个引擎命中时保留原来源标记。
-
-    Args:
-        findings: 静态分析引擎产出的 Finding 列表(可能为空)
-        issues: LLM 审查引擎产出的 Issue 列表(可能为空)
-        file_id: 当前文件 ID(用于上下文标识,不写入 Issue 本身)
-
-    Returns:
-        List[Issue]: 合并去重后的 Issue 列表,每个 Issue 的 source 和
-                     static_rule_hits 字段已正确填充,可直接持久化到 ReviewIssue
+    Matching requires a common vulnerability identity plus a defensible code
+    anchor. Merely sharing a CWE on adjacent lines is not enough, which keeps
+    separate sinks separate. Every contributing source is retained in
+    ``source_details`` while the legacy ``source`` field remains a compact
+    static/regex/llm/hybrid value.
     """
-    # 1. 将静态 Finding 转换为 Issue(source="static")
-    static_issues: List[Issue] = [finding_to_issue(f) for f in findings]
+    candidates = [finding_to_issue(item) for item in findings]
+    candidates.extend(_copy_issue(item) for item in issues)
+    if not candidates:
+        return []
 
-    # 2. 确保 LLM Issues 的 source 默认为 "llm"(parse 时已设默认值,这里做保护)
-    llm_issues: List[Issue] = []
-    for it in issues:
-        if not it.source or it.source == "llm":
-            llm_issues.append(it)
+    anchor_index = _build_anchor_index(code) if code else _AnchorIndex.empty()
+    candidates = _attach_code_anchors(candidates, anchor_index)
+
+    candidates.sort(key=_candidate_sort_key)
+    clusters: List[List[Issue]] = []
+    for candidate in candidates:
+        best_cluster: Optional[List[Issue]] = None
+        best_score = -1.0
+        for cluster in clusters:
+            score = _cluster_match_score(cluster, candidate)
+            if score > best_score:
+                best_cluster = cluster
+                best_score = score
+        if best_cluster is not None and best_score >= 1.0:
+            best_cluster.append(candidate)
         else:
-            llm_issues.append(it)
+            clusters.append([candidate])
 
-    # 3. 匹配合并:对每个 LLM Issue,寻找行号邻近且 cwe 相同的 static Issue
-    matched_static_indices: set[int] = set()
-    merged: List[Issue] = []
-
-    for llm_issue in llm_issues:
-        match_idx = _find_match(llm_issue, static_issues, matched_static_indices)
-        if match_idx is not None:
-            matched_static_indices.add(match_idx)
-            merged.append(_merge_pair(static_issues[match_idx], llm_issue))
-        else:
-            # 仅 LLM 命中:保留原 Issue,确保 source="llm"
-            merged.append(_ensure_source(llm_issue, "llm"))
-
-    # 4. 未被匹配的 static Issues 作为仅静态命中加入结果
-    for idx, static_issue in enumerate(static_issues):
-        if idx not in matched_static_indices:
-            merged.append(static_issue)
-
+    merged = [_merge_cluster(cluster, file_id, anchor_index) for cluster in clusters]
+    merged.sort(key=lambda item: (item.line_number or 0, item.cwe or "", item.title or ""))
     return merged
 
 
 def finding_to_issue(finding: Finding) -> Issue:
-    """将 Finding 数据类转换为 Issue 数据类(保留全量 v3 字段)
-
-    Finding 与 Issue 字段对齐,此函数做 1:1 映射。
-    source 保留 Finding 原值(regex/static/llm),为空时回退到 "static";
-    static_rule_hits 保留 Finding 原值(至少为 1)。
-    此函数为公开接口,供 review_service 将 LLM 路径的 Finding 转换为 Issue 后参与合并。
-
-    Args:
-        finding: 静态分析或 LLM 审查产出的标准化漏洞发现
-
-    Returns:
-        Issue: 转换后的问题对象,source 保留原值(默认 "static"),携带全量 v3 字段
-    """
+    """Convert a Finding to Issue without losing provenance or CVSS metadata."""
+    cvss_score, cvss_vector, cvss_version, cvss_source = normalize_cvss(
+        finding.cvss_score,
+        finding.cvss_vector,
+    )
     return Issue(
         line_number=finding.line_number,
         end_line=finding.end_line,
         issue_type=finding.issue_type,
-        severity=finding.severity,
+        severity=normalize_severity(finding.severity),
         title=finding.title or None,
         description=finding.description,
         suggestion=finding.suggestion or None,
@@ -106,128 +78,35 @@ def finding_to_issue(finding: Finding) -> Issue:
         cwe=finding.cwe,
         evidence=finding.evidence,
         exploit_scenario=finding.exploit_scenario,
-        references=list(finding.references) if finding.references else [],
+        references=list(finding.references or []),
         confidence=finding.confidence,
-        cvss_score=finding.cvss_score,
-        cvss_vector=finding.cvss_vector,
-        compliance_mapping=dict(finding.compliance_mapping) if finding.compliance_mapping else {},
+        cvss_score=cvss_score,
+        cvss_vector=cvss_vector,
+        cvss_version=cvss_version,
+        cvss_source=cvss_source,
+        compliance_mapping={key: list(values) for key, values in (finding.compliance_mapping or {}).items()},
         remediation=finding.remediation,
         source=finding.source or "static",
-        static_rule_hits=finding.static_rule_hits,
+        static_rule_hits=max(0, int(finding.static_rule_hits or 0)),
+        source_details=[dict(item) for item in (finding.source_details or []) if isinstance(item, dict)],
+        confirmation_count=max(1, int(finding.confirmation_count or 1)),
+        finding_fingerprint=finding.finding_fingerprint,
+        source_anchor=finding.source_anchor or "",
+        column_start=finding.column_start,
+        column_end=finding.column_end,
     )
 
 
-def _find_match(
-    llm_issue: Issue,
-    static_issues: List[Issue],
-    excluded: Optional[set] = None,
-) -> Optional[int]:
-    """为 LLM Issue 寻找行号邻近且 cwe 相同的 static Issue 索引
-
-    匹配条件(全部满足):
-        1. cwe 非空且相同(空 cwe 不参与匹配,避免误合并)
-        2. line_number 差值 ≤ _LINE_PROXIMITY(±2 行)
-        3. 该 static Issue 索引不在 excluded 集合中(避免重复匹配)
-
-    Args:
-        llm_issue: LLM 审查产出的问题
-        static_issues: 静态分析产出的问题列表
-        excluded: 已匹配的 static_issues 索引集合(跳过这些索引)
-
-    Returns:
-        Optional[int]: 匹配到的 static_issues 索引;未匹配返回 None
-    """
-    llm_cwe = (llm_issue.cwe or "").strip().upper()
-    if not llm_cwe:
-        return None
-
-    llm_line = llm_issue.line_number or 0
-    if llm_line == 0:
-        # 行号为 0(文件级问题)不参与行号邻近匹配
-        return None
-
-    excluded_set = excluded or set()
-    for idx, static_issue in enumerate(static_issues):
-        if idx in excluded_set:
-            continue
-        static_cwe = (static_issue.cwe or "").strip().upper()
-        if static_cwe != llm_cwe:
-            continue
-        static_line = static_issue.line_number or 0
-        if static_line == 0:
-            continue
-        if abs(static_line - llm_line) <= _LINE_PROXIMITY:
-            return idx
-
-    return None
-
-
-def _merge_pair(static_issue: Issue, llm_issue: Issue) -> Issue:
-    """合并同一问题(静态+LLM 双引擎命中)为 hybrid Issue
-
-    合并策略:
-        - source = "hybrid"
-        - static_rule_hits = static_issue.static_rule_hits + 1(静态命中 + LLM 确认)
-        - confidence = max(static, llm)(取较高者)
-        - 其余字段优先取 LLM(LLM 描述更丰富),LLM 为空时回退到 static
-
-    Args:
-        static_issue: 静态分析产出的问题(已转换为 Issue)
-        llm_issue: LLM 审查产出的问题
-
-    Returns:
-        Issue: 合并后的问题对象,source="hybrid"
-    """
-    merged_confidence = max(static_issue.confidence, llm_issue.confidence)
-    merged_hits = static_issue.static_rule_hits + 1
-
-    # v3 字段优先取 LLM(LLM 通常给出更详细的 CVSS/合规/修复方案),为空时回退 static
-    merged_cvss_score = llm_issue.cvss_score or static_issue.cvss_score
-    merged_cvss_vector = llm_issue.cvss_vector or static_issue.cvss_vector
-    merged_compliance = llm_issue.compliance_mapping or static_issue.compliance_mapping
-    merged_remediation = llm_issue.remediation or static_issue.remediation
-
-    return Issue(
-        line_number=llm_issue.line_number or static_issue.line_number,
-        end_line=llm_issue.end_line or static_issue.end_line,
-        issue_type=llm_issue.issue_type or static_issue.issue_type,
-        severity=llm_issue.severity or static_issue.severity,
-        title=llm_issue.title or static_issue.title,
-        description=llm_issue.description or static_issue.description,
-        suggestion=llm_issue.suggestion or static_issue.suggestion,
-        fixed_code=llm_issue.fixed_code or static_issue.fixed_code,
-        owasp=llm_issue.owasp or static_issue.owasp,
-        cwe=llm_issue.cwe or static_issue.cwe,
-        evidence=llm_issue.evidence or static_issue.evidence,
-        exploit_scenario=llm_issue.exploit_scenario or static_issue.exploit_scenario,
-        references=llm_issue.references or static_issue.references,
-        confidence=merged_confidence,
-        cvss_score=merged_cvss_score,
-        cvss_vector=merged_cvss_vector,
-        compliance_mapping=merged_compliance,
-        remediation=merged_remediation,
-        source="hybrid",
-        static_rule_hits=merged_hits,
+def _copy_issue(issue: Issue) -> Issue:
+    cvss_score, cvss_vector, cvss_version, cvss_source = normalize_cvss(
+        issue.cvss_score,
+        issue.cvss_vector,
     )
-
-
-def _ensure_source(issue: Issue, source: str) -> Issue:
-    """确保 Issue 的 source 字段为指定值(不修改原对象)
-
-    Args:
-        issue: 原始问题对象
-        source: 期望的来源标识
-
-    Returns:
-        Issue: source 已设置为指定值的新 Issue 对象
-    """
-    if issue.source == source:
-        return issue
     return Issue(
         line_number=issue.line_number,
         end_line=issue.end_line,
         issue_type=issue.issue_type,
-        severity=issue.severity,
+        severity=normalize_severity(issue.severity),
         title=issue.title,
         description=issue.description,
         suggestion=issue.suggestion,
@@ -236,12 +115,626 @@ def _ensure_source(issue: Issue, source: str) -> Issue:
         cwe=issue.cwe,
         evidence=issue.evidence,
         exploit_scenario=issue.exploit_scenario,
-        references=issue.references,
+        references=list(issue.references or []),
         confidence=issue.confidence,
-        cvss_score=issue.cvss_score,
-        cvss_vector=issue.cvss_vector,
-        compliance_mapping=issue.compliance_mapping,
+        cvss_score=cvss_score,
+        cvss_vector=cvss_vector,
+        cvss_version=cvss_version,
+        cvss_source=cvss_source,
+        compliance_mapping={key: list(values) for key, values in (issue.compliance_mapping or {}).items()},
         remediation=issue.remediation,
-        source=source,
-        static_rule_hits=issue.static_rule_hits,
+        source=issue.source or "llm",
+        static_rule_hits=max(0, int(issue.static_rule_hits or 0)),
+        source_details=[dict(item) for item in (issue.source_details or []) if isinstance(item, dict)],
+        confirmation_count=max(1, int(issue.confirmation_count or 1)),
+        finding_fingerprint=issue.finding_fingerprint,
+        source_anchor=issue.source_anchor or "",
+        column_start=issue.column_start,
+        column_end=issue.column_end,
     )
+
+
+def _candidate_sort_key(issue: Issue) -> tuple:
+    family_priority = {"static": 0, "regex": 0, "llm": 1}.get(_source_family(issue.source), 2)
+    return (
+        issue.line_number or 0,
+        family_priority,
+        issue.source_anchor or "",
+        _normalize_evidence(issue.evidence),
+        -float(issue.confidence or 0.0),
+        issue.title or "",
+        issue.description or "",
+    )
+
+
+@dataclass(frozen=True)
+class _CodeAnchor:
+    """源码中的一个可审计接收点。"""
+
+    anchor: str
+    line_number: int
+    end_line: int
+    column_start: Optional[int]
+    column_end: Optional[int]
+    normalized_segment: str
+    cwe: str
+
+
+@dataclass(frozen=True)
+class _AnchorIndex:
+    records: tuple[_CodeAnchor, ...]
+    by_anchor: dict[str, _CodeAnchor]
+
+    @classmethod
+    def empty(cls) -> "_AnchorIndex":
+        return cls(records=(), by_anchor={})
+
+
+def _build_anchor_index(code: Optional[str]) -> _AnchorIndex:
+    """从 Python 源码建立确定性 sink 索引；解析失败时安全降级为空索引。"""
+    if not code:
+        return _AnchorIndex.empty()
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, TypeError):
+        return _AnchorIndex.empty()
+
+    aliases = _python_import_aliases(tree)
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    calls.sort(
+        key=lambda node: (
+            int(getattr(node, "lineno", 0) or 0),
+            int(getattr(node, "col_offset", 0) or 0),
+            int(getattr(node, "end_lineno", 0) or 0),
+            int(getattr(node, "end_col_offset", 0) or 0),
+        )
+    )
+    occurrences: dict[str, int] = {}
+    records: list[_CodeAnchor] = []
+    for node in calls:
+        name = _canonical_call_name(_ast_call_name(node.func), aliases)
+        cwe = _call_cwe(name, node)
+        if not cwe:
+            continue
+        segment = ast.get_source_segment(code, node) or ""
+        normalized = _normalize_source_anchor(segment)
+        if not normalized:
+            continue
+        occurrence = occurrences.get(normalized, 0) + 1
+        occurrences[normalized] = occurrence
+        line_number = int(getattr(node, "lineno", 0) or 0)
+        end_line = int(getattr(node, "end_lineno", line_number) or line_number)
+        record = _CodeAnchor(
+            anchor=f"py:{normalized[:240]}#{max(1, occurrence)}",
+            line_number=line_number,
+            end_line=end_line,
+            column_start=getattr(node, "col_offset", None),
+            column_end=getattr(node, "end_col_offset", None),
+            normalized_segment=normalized,
+            cwe=cwe,
+        )
+        records.append(record)
+    return _AnchorIndex(
+        records=tuple(records),
+        by_anchor={record.anchor: record for record in records},
+    )
+
+
+def _ast_call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _ast_call_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def _python_import_aliases(tree: ast.AST) -> dict[str, str]:
+    """提取 Python import 别名，确保源码锚点识别真实 API 身份。"""
+
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for item in node.names:
+                local = item.asname or item.name.split(".", 1)[0]
+                aliases[local] = item.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for item in node.names:
+                if item.name == "*":
+                    continue
+                aliases[item.asname or item.name] = f"{node.module}.{item.name}"
+    return aliases
+
+
+def _canonical_call_name(name: str, aliases: dict[str, str]) -> str:
+    if not name:
+        return ""
+    root, separator, suffix = name.partition(".")
+    canonical_root = aliases.get(root, root)
+    return f"{canonical_root}.{suffix}" if separator else canonical_root
+
+
+def _call_cwe(name: str, node: ast.Call) -> str:
+    normalized = (name or "").lower()
+    tail = normalized.rsplit(".", 1)[-1]
+    if normalized in {"os.system", "os.popen"}:
+        return "CWE-78"
+    if normalized.startswith("subprocess.") and tail in {
+        "run", "call", "check_call", "check_output", "popen",
+        "getoutput", "getstatusoutput",
+    }:
+        # 只有带 shell=True 的 subprocess 调用才是此规则的明确接收点。
+        if tail in {"getoutput", "getstatusoutput"}:
+            return "CWE-78"
+        if any(
+            keyword.arg == "shell"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is True
+            for keyword in node.keywords
+        ):
+            return "CWE-78"
+        return ""
+    if normalized.endswith((".pickle.loads", ".pickle.load", ".pkl.loads", ".pkl.load")):
+        return "CWE-502"
+    if normalized in {"pickle.loads", "pickle.load", "pkl.loads", "pkl.load"}:
+        return "CWE-502"
+    if normalized in {"yaml.load", "yaml.unsafe_load", "yaml.full_load"}:
+        return "CWE-502"
+    if normalized in {"eval", "exec"}:
+        return "CWE-95"
+    return ""
+
+
+def _attach_code_anchors(candidates: List[Issue], index: _AnchorIndex) -> List[Issue]:
+    if not index.records:
+        return candidates
+    output: list[Issue] = []
+    for candidate in candidates:
+        if candidate.source_anchor:
+            output.append(candidate)
+            continue
+        record = _resolve_anchor(candidate, index)
+        if record is None:
+            output.append(candidate)
+            continue
+        output.append(
+            replace(
+                candidate,
+                source_anchor=record.anchor,
+                column_start=record.column_start,
+                column_end=record.column_end,
+            )
+        )
+    return output
+
+
+def _resolve_anchor(issue: Issue, index: _AnchorIndex) -> Optional[_CodeAnchor]:
+    cwe = _normalize_cwe(issue.cwe)
+    records = [record for record in index.records if not cwe or record.cwe == cwe]
+    if not records:
+        return None
+    evidence = _normalize_evidence(issue.evidence)
+    if evidence:
+        scored: list[tuple[int, int, _CodeAnchor]] = []
+        for record in records:
+            if evidence == record.normalized_segment:
+                match_score = 4
+            elif len(record.normalized_segment) >= 8 and record.normalized_segment in evidence:
+                match_score = 3
+            elif len(evidence) >= 8 and evidence in record.normalized_segment:
+                match_score = 2
+            else:
+                continue
+            distance = abs(int(issue.line_number or 0) - record.line_number)
+            scored.append((match_score, -distance, record))
+        if not scored:
+            return None
+        scored.sort(key=lambda item: (item[0], item[1], item[2].anchor), reverse=True)
+        best = scored[0]
+        tied = [item for item in scored if item[0:2] == best[0:2]]
+        return best[2] if len(tied) == 1 else None
+
+    # 没有证据时只有唯一同类 sink，或最近位置唯一，才做自动定位。
+    if len(records) == 1:
+        return records[0]
+    line = int(issue.line_number or 0)
+    if line <= 0:
+        return None
+    ranked = sorted(
+        records,
+        key=lambda record: (abs(line - record.line_number), record.anchor),
+    )
+    nearest_distance = abs(line - ranked[0].line_number)
+    if nearest_distance > _LINE_PROXIMITY:
+        return None
+    if len(ranked) > 1 and abs(line - ranked[1].line_number) == nearest_distance:
+        return None
+    return ranked[0]
+
+
+def _common_anchor(cluster: List[Issue]) -> str:
+    anchors = {item.source_anchor.strip() for item in cluster if item.source_anchor}
+    return next(iter(anchors)) if len(anchors) == 1 else ""
+
+
+def _preferred_column(cluster: List[Issue], field_name: str) -> Optional[int]:
+    values = [getattr(item, field_name, None) for item in cluster]
+    values = [int(value) for value in values if value is not None]
+    return min(values) if values else None
+
+
+def _looks_like_code(value: Optional[str]) -> bool:
+    text = str(value or "")
+    if not text.strip():
+        return False
+    return bool(
+        re.search(
+            r"(?:\b(?:os|subprocess|pickle|yaml|eval|exec|execute|system|popen)\b|[()\[\]{}=;]|::)",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _cluster_match_score(cluster: List[Issue], candidate: Issue) -> float:
+    """Use complete linkage so a broad middle result cannot bridge two sinks."""
+    scores = [_match_score(member, candidate) for member in cluster]
+    if not scores or any(score < 1.0 for score in scores):
+        return -1.0
+    return min(scores)
+
+
+def _match_score(left: Issue, right: Issue) -> float:
+    left_cwe = _normalize_cwe(left.cwe)
+    right_cwe = _normalize_cwe(right.cwe)
+    if left_cwe and right_cwe and left_cwe != right_cwe:
+        return -1.0
+    if not left_cwe and not right_cwe and left.issue_type != right.issue_type:
+        return -1.0
+
+    left_anchor = (left.source_anchor or "").strip()
+    right_anchor = (right.source_anchor or "").strip()
+    if left_anchor and right_anchor:
+        # 已解析到两个明确调用点时，锚点是硬边界；相邻行和相同 CWE
+        # 不能覆盖两个不同 sink。
+        return 5.0 if left_anchor == right_anchor else -1.0
+
+    left_line = int(left.line_number or 0)
+    right_line = int(right.line_number or 0)
+    if left_line == 0 or right_line == 0:
+        if left_line != right_line:
+            return -1.0
+        title_score = _similarity(left.title or "", right.title or "")
+        evidence_score = _evidence_similarity(left.evidence, right.evidence)
+        return 1.0 + max(title_score, evidence_score) if max(title_score, evidence_score) >= 0.8 else -1.0
+
+    line_distance = abs(left_line - right_line)
+    if line_distance > _LINE_PROXIMITY:
+        # 只有同一个确定性源码锚点才允许跨越模型行号漂移。
+        return -1.0
+
+    evidence_score = _evidence_similarity(left.evidence, right.evidence)
+    title_score = _similarity(left.title or "", right.title or "")
+    description_score = _similarity(left.description or "", right.description or "")
+    left_evidence = _normalize_evidence(left.evidence)
+    right_evidence = _normalize_evidence(right.evidence)
+    if (
+        left_evidence
+        and right_evidence
+        and left_evidence != right_evidence
+        and (left.source_anchor or right.source_anchor)
+        and _looks_like_code(left.evidence)
+        and _looks_like_code(right.evidence)
+    ):
+        # 两段不同的代码证据，即使标题和行号相同，也代表可能的独立 sink。
+        return -1.0
+    if line_distance == 0:
+        if evidence_score >= 0.8 or title_score >= 0.5 or description_score >= 0.65:
+            return 2.0 + max(evidence_score, title_score, description_score)
+        return -1.0
+
+    # Adjacent lines merge only when both sources point to the same code anchor.
+    if evidence_score >= 0.8:
+        return 1.5 + evidence_score
+    if not left.evidence and not right.evidence and title_score >= 0.8 and description_score >= 0.7:
+        return 1.0 + min(title_score, description_score)
+    return -1.0
+
+
+def _merge_cluster(cluster: List[Issue], file_id: int, anchor_index: "_AnchorIndex") -> Issue:
+    canonical = max(cluster, key=_content_quality_key)
+    static_candidates = [item for item in cluster if _source_family(item.source) in {"static", "regex"}]
+    line_source = max(static_candidates, key=_content_quality_key) if static_candidates else canonical
+
+    details = _merge_source_details(cluster)
+    cvss_score, cvss_vector, cvss_version, cvss_source = _select_cvss(cluster)
+    severity = max(
+        (normalize_severity(item.severity) for item in cluster),
+        key=lambda value: _SEVERITY_RANK.get(value, 0),
+    )
+    references = _unique_strings(value for item in cluster for value in (item.references or []))
+    compliance = _merge_compliance(item.compliance_mapping for item in cluster)
+    source = _aggregate_source(item.source for item in cluster)
+    source_anchor = _common_anchor(cluster)
+    anchor_record = anchor_index.by_anchor.get(source_anchor) if source_anchor else None
+    evidence = _preferred_evidence(static_candidates or cluster, anchor_record)
+    line_number = int(anchor_record.line_number if anchor_record else line_source.line_number or 0)
+    end_lines = [int(item.end_line) for item in cluster if item.end_line]
+    end_line = (
+        int(anchor_record.end_line)
+        if anchor_record
+        else (max(end_lines) if end_lines else (line_number or None))
+    )
+    column_start = anchor_record.column_start if anchor_record else _preferred_column(cluster, "column_start")
+    column_end = anchor_record.column_end if anchor_record else _preferred_column(cluster, "column_end")
+    fingerprint = _build_fingerprint(
+        file_id=file_id,
+        cwe=canonical.cwe,
+        line_number=line_number,
+        evidence=evidence,
+        title=canonical.title or "",
+        description=canonical.description,
+        source_anchor=source_anchor,
+    )
+
+    return Issue(
+        line_number=line_number,
+        end_line=end_line,
+        issue_type=canonical.issue_type,
+        severity=severity,
+        title=_longest_text(item.title for item in cluster),
+        description=_longest_text(item.description for item in cluster) or "",
+        suggestion=_longest_text(item.suggestion for item in cluster),
+        fixed_code=_longest_text(item.fixed_code for item in cluster),
+        owasp=_longest_text(item.owasp for item in cluster) or "",
+        cwe=_normalize_cwe(canonical.cwe) or _normalize_cwe(_longest_text(item.cwe for item in cluster)) or "",
+        evidence=evidence,
+        exploit_scenario=_longest_text(item.exploit_scenario for item in cluster) or "",
+        references=references,
+        confidence=max(float(item.confidence or 0.0) for item in cluster),
+        cvss_score=cvss_score,
+        cvss_vector=cvss_vector,
+        cvss_version=cvss_version,
+        cvss_source=cvss_source,
+        compliance_mapping=compliance,
+        remediation=_longest_text(item.remediation for item in cluster) or "",
+        source=source,
+        static_rule_hits=sum(
+            max(0, int(item.static_rule_hits or 0))
+            for item in cluster
+            if _source_family(item.source) in {"static", "regex"}
+        ),
+        source_details=details,
+        confirmation_count=max(
+            len(details),
+            *(max(1, int(item.confirmation_count or 1)) for item in cluster),
+        ),
+        finding_fingerprint=fingerprint,
+        source_anchor=source_anchor,
+        column_start=column_start,
+        column_end=column_end,
+    )
+
+
+def _merge_source_details(cluster: List[Issue]) -> List[dict]:
+    details: List[dict] = []
+    seen: set[tuple] = set()
+    for issue in cluster:
+        raw_details = issue.source_details or [{
+            "source": issue.source or "llm",
+            "confidence": round(float(issue.confidence or 0.0), 4),
+            "evidence": (issue.evidence or "")[:2000],
+            "line_number": int(issue.line_number or 0),
+            "title": (issue.title or "")[:200],
+        }]
+        for raw in raw_details:
+            try:
+                confidence = round(float(raw.get("confidence", issue.confidence) or 0.0), 4)
+            except (TypeError, ValueError):
+                confidence = round(float(issue.confidence or 0.0), 4)
+            try:
+                line_number = max(0, int(raw.get("line_number") or 0))
+            except (TypeError, ValueError):
+                line_number = max(0, int(issue.line_number or 0))
+            detail = {
+                "source": str(raw.get("source") or issue.source or "llm")[:80],
+                "confidence": max(0.0, min(1.0, confidence)),
+                "evidence": str(raw.get("evidence") or "")[:2000],
+                "line_number": line_number,
+                "title": str(raw.get("title") or "")[:200],
+            }
+            if raw.get("source_anchor") or issue.source_anchor:
+                detail["source_anchor"] = str(
+                    raw.get("source_anchor") or issue.source_anchor or ""
+                )[:300]
+            key = tuple(detail.values())
+            if key not in seen:
+                details.append(detail)
+                seen.add(key)
+    return sorted(
+        details,
+        key=lambda item: (
+            str(item.get("source") or ""),
+            int(item.get("line_number") or 0),
+            str(item.get("source_anchor") or ""),
+            str(item.get("evidence") or ""),
+            str(item.get("title") or ""),
+            float(item.get("confidence") or 0.0),
+        ),
+    )
+
+
+def _select_cvss(cluster: List[Issue]) -> tuple[Optional[float], Optional[str], Optional[str], str]:
+    normalized = [normalize_cvss(item.cvss_score, item.cvss_vector) for item in cluster]
+    vectors = [item for item in normalized if item[1] is not None and item[0] is not None]
+    if vectors:
+        return max(
+            vectors,
+            key=lambda item: (
+                float(item[0] or 0.0),
+                str(item[1] or ""),
+            ),
+        )
+    scores = [item for item in normalized if item[0] is not None]
+    if scores:
+        return max(
+            scores,
+            key=lambda item: (float(item[0] or 0.0), str(item[3] or "")),
+        )
+    return None, None, None, "unavailable"
+
+
+def _source_family(source: str) -> str:
+    normalized = (source or "llm").strip().lower()
+    if normalized.startswith("regex"):
+        return "regex"
+    if normalized.startswith("static"):
+        return "static"
+    if normalized.startswith("llm") or "collab" in normalized or "roundtable" in normalized:
+        return "llm"
+    if normalized == "hybrid":
+        return "hybrid"
+    return normalized
+
+
+def _aggregate_source(sources: Iterable[str]) -> str:
+    families = {_source_family(source) for source in sources}
+    if "hybrid" in families or ("llm" in families and families & {"static", "regex"}):
+        return "hybrid"
+    if families == {"regex"}:
+        return "regex"
+    if families <= {"static", "regex"}:
+        return "static"
+    if families == {"llm"}:
+        return "llm"
+    return sorted(families)[0] if families else "llm"
+
+
+def _content_quality_key(issue: Issue) -> tuple:
+    family = _source_family(issue.source)
+    richness = sum(len(str(value or "")) for value in (
+        issue.title,
+        issue.description,
+        issue.suggestion,
+        issue.evidence,
+        issue.remediation,
+    ))
+    return (
+        1 if family == "llm" else 0,
+        richness,
+        float(issue.confidence or 0.0),
+        issue.title or "",
+        issue.description or "",
+        issue.evidence or "",
+        issue.source or "",
+    )
+
+
+def _preferred_evidence(
+    candidates: List[Issue],
+    anchor_record: Optional[_CodeAnchor] = None,
+) -> str:
+    populated = [item for item in candidates if item.evidence]
+    if not populated:
+        return anchor_record.normalized_segment if anchor_record else ""
+    return max(
+        populated,
+        key=lambda item: (
+            float(item.confidence or 0.0),
+            len(item.evidence),
+            _normalize_evidence(item.evidence),
+            item.source or "",
+            item.title or "",
+        ),
+    ).evidence
+
+
+def _normalize_cwe(value: Optional[str]) -> str:
+    text = (value or "").strip().upper()
+    if not text:
+        return ""
+    match = re.search(r"(?:CWE-?)?(\d+)", text)
+    return f"CWE-{match.group(1)}" if match else text[:64]
+
+
+def _normalize_evidence(value: Optional[str]) -> str:
+    return re.sub(r"\s+", "", (value or "").strip().lower())
+
+
+def _normalize_source_anchor(value: Optional[str]) -> str:
+    """源码锚点使用保留标点的空白压缩形式。"""
+    return re.sub(r"\s+", " ", (value or "").strip())
+
+
+def _tokens(value: str) -> set[str]:
+    return {
+        token.lower()
+        for token in _TOKEN_RE.findall(value or "")
+        if len(token) > 1 or "\u4e00" <= token <= "\u9fff"
+    }
+
+
+def _similarity(left: str, right: str) -> float:
+    left_tokens = _tokens(left)
+    right_tokens = _tokens(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def _evidence_similarity(left: Optional[str], right: Optional[str]) -> float:
+    normalized_left = _normalize_evidence(left)
+    normalized_right = _normalize_evidence(right)
+    if not normalized_left or not normalized_right:
+        return 0.0
+    if normalized_left == normalized_right:
+        return 1.0
+    shorter, longer = sorted((normalized_left, normalized_right), key=len)
+    if len(shorter) >= 12 and shorter in longer:
+        return 0.95
+    return _similarity(normalized_left, normalized_right)
+
+
+def _longest_text(values: Iterable[Optional[str]]) -> Optional[str]:
+    populated = [str(value) for value in values if value]
+    return max(populated, key=lambda value: (len(value), value)) if populated else None
+
+
+def _unique_strings(values: Iterable[str]) -> List[str]:
+    output: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in seen:
+            output.append(text)
+            seen.add(text)
+    return sorted(output)
+
+
+def _merge_compliance(mappings: Iterable[dict]) -> dict:
+    output: dict[str, List[str]] = {}
+    for mapping in mappings:
+        for standard, controls in (mapping or {}).items():
+            output[standard] = _unique_strings([*output.get(standard, []), *(controls or [])])
+    return {standard: sorted(output[standard]) for standard in sorted(output)}
+
+
+def _build_fingerprint(
+    *,
+    file_id: int,
+    cwe: str,
+    line_number: int,
+    evidence: str,
+    title: str,
+    description: str,
+    source_anchor: str = "",
+) -> str:
+    anchor = (
+        (source_anchor or "").strip()
+        or _normalize_evidence(evidence)
+        or " ".join(sorted(_tokens(f"{title} {description}")))
+    )
+    # 锚点存在时不把模型行号混入指纹，保证分片重试和行号漂移不产生新问题。
+    line_part = "" if source_anchor else str(int(line_number))
+    material = f"{int(file_id)}|{_normalize_cwe(cwe)}|{line_part}|{anchor}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()

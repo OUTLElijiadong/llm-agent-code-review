@@ -2,12 +2,14 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const permissionState = vi.hoisted(() => ({ allowed: false }))
+const routerState = vi.hoisted(() => ({ push: vi.fn() }))
 const projectApi = vi.hoisted(() => ({
   getProjects: vi.fn(),
   deleteProject: vi.fn(),
   createProject: vi.fn(),
   updateProject: vi.fn(),
-  importRemoteProject: vi.fn(),
+  queueRemoteProjectImport: vi.fn(),
+  getRemoteProjectImport: vi.fn(),
 }))
 
 vi.mock('@/stores/user', () => ({
@@ -15,7 +17,7 @@ vi.mock('@/stores/user', () => ({
     hasPermission: (code: string) => code === 'project:import' && permissionState.allowed,
   }),
 }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', () => ({ useRouter: () => routerState }))
 vi.mock('@/api/project', () => projectApi)
 vi.mock('@/api/codeFile', () => ({ uploadFolder: vi.fn() }))
 vi.mock('element-plus/es/components/message-box/index', () => ({
@@ -58,6 +60,10 @@ function mountProjectList() {
 
 beforeEach(() => {
   permissionState.allowed = false
+  routerState.push.mockReset()
+  projectApi.queueRemoteProjectImport.mockReset()
+  projectApi.getRemoteProjectImport.mockReset()
+  window.localStorage.clear()
   projectApi.getProjects.mockResolvedValue({ items: [], total: 0 })
 })
 
@@ -96,6 +102,235 @@ describe('ProjectList 视图切换', () => {
     expect(cardButton.attributes('aria-pressed')).toBe('true')
     expect(wrapper.find('.card-grid').isVisible()).toBe(true)
     expect(wrapper.find('.table-card').isVisible()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+function remoteTask(overrides: Record<string, unknown> = {}) {
+  return {
+    task_id: 'remote-task-1',
+    status: 'queued',
+    attempt_count: 0,
+    max_attempts: 3,
+    project_id: null,
+    result: {},
+    error: null,
+    next_attempt_at: null,
+    started_at: null,
+    completed_at: null,
+    create_time: '2026-08-27T00:00:00Z',
+    update_time: '2026-08-27T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function pendingImport(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    taskId: 'remote-task-1',
+    idempotencyKey: 'remote-import-test-key',
+    payload: {
+      url: 'https://example.com/project.zip',
+      project_name: '测试项目',
+      description: '',
+      audit_mode: false,
+    },
+    ...overrides,
+  }
+}
+
+describe('ProjectList 远程导入异步任务', () => {
+  it('提交时携带幂等键，轮询完成后刷新项目并跳转', async () => {
+    permissionState.allowed = true
+    vi.useFakeTimers()
+    projectApi.queueRemoteProjectImport.mockResolvedValue(remoteTask())
+    projectApi.getRemoteProjectImport
+      .mockResolvedValueOnce(remoteTask({ status: 'running', result: { progress: { phase: 'downloading' } } }))
+      .mockResolvedValueOnce(remoteTask({
+        status: 'succeeded',
+        project_id: 42,
+        result: { id: 42, file_count: 6 },
+      }))
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.remoteForm = {
+      url: 'https://example.com/project.zip',
+      project_name: '测试项目',
+      description: '异步导入',
+      audit_mode: true,
+    }
+
+    await vm.submitRemoteImport()
+    await flushPromises()
+
+    expect(projectApi.queueRemoteProjectImport).toHaveBeenCalledWith(
+      {
+        url: 'https://example.com/project.zip',
+        project_name: '测试项目',
+        description: '异步导入',
+        audit_mode: true,
+      },
+      expect.stringMatching(/^prism-remote-import-/),
+    )
+    expect(window.localStorage.getItem('prism:remote-import-task')).toContain('remote-task-1')
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(projectApi.getRemoteProjectImport).toHaveBeenCalledWith('remote-task-1')
+    expect(projectApi.getProjects).toHaveBeenCalledTimes(2)
+    expect(routerState.push).toHaveBeenCalledWith('/projects/42')
+    expect(window.localStorage.getItem('prism:remote-import-task')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('刷新后从 localStorage 恢复任务，网络错误时保留待恢复记录', async () => {
+    permissionState.allowed = true
+    vi.useFakeTimers()
+    window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
+    projectApi.getRemoteProjectImport.mockRejectedValue(new Error('网络暂时不可用'))
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    expect(projectApi.getRemoteProjectImport).toHaveBeenCalledWith('remote-task-1')
+    expect(window.localStorage.getItem('prism:remote-import-task')).toContain('remote-task-1')
+    expect((wrapper.vm as any).remoteImportError).toContain('网络暂时不可用')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(window.localStorage.getItem('prism:remote-import-task')).toContain('remote-task-1')
+    wrapper.unmount()
+  })
+
+  it('服务端 5xx/429 错误仍保留待恢复记录', async () => {
+    permissionState.allowed = true
+    window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
+    projectApi.getRemoteProjectImport.mockRejectedValue({ code: 50201, message: '上游服务暂不可用' })
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    expect(window.localStorage.getItem('prism:remote-import-task')).toContain('remote-task-1')
+    expect((wrapper.vm as any).remoteImportError).toBe('上游服务暂不可用')
+    wrapper.unmount()
+  })
+
+  it('明确的任务不存在错误清理记录并保留失败原因', async () => {
+    permissionState.allowed = true
+    window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
+    projectApi.getRemoteProjectImport.mockRejectedValue({ code: 40400, message: '远程导入任务不存在' })
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    expect(window.localStorage.getItem('prism:remote-import-task')).toBeNull()
+    expect((wrapper.vm as any).remoteImportError).toBe('远程导入任务不存在')
+    wrapper.unmount()
+  })
+
+  it('刷新时若提交响应丢失，会用原幂等键重新排队而不是创建重复任务', async () => {
+    permissionState.allowed = true
+    vi.useFakeTimers()
+    window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport({ taskId: null })))
+    projectApi.queueRemoteProjectImport.mockResolvedValue(remoteTask())
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    expect(projectApi.queueRemoteProjectImport).toHaveBeenCalledWith(
+      expect.objectContaining({ project_name: '测试项目' }),
+      'remote-import-test-key',
+    )
+    expect(window.localStorage.getItem('prism:remote-import-task')).toContain('remote-task-1')
+    wrapper.unmount()
+  })
+
+  it('没有导入权限时不恢复或轮询本地任务', async () => {
+    window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    expect(projectApi.getRemoteProjectImport).not.toHaveBeenCalled()
+    expect(projectApi.queueRemoteProjectImport).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem('prism:remote-import-task')).toContain('remote-task-1')
+    wrapper.unmount()
+  })
+
+  it('队列请求网络失败时不删除幂等任务，且显示可读提示', async () => {
+    permissionState.allowed = true
+    projectApi.queueRemoteProjectImport.mockRejectedValue(new Error('连接服务器失败'))
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.remoteForm = {
+      url: 'https://example.com/project.zip',
+      project_name: '待恢复项目',
+      description: '',
+      audit_mode: false,
+    }
+
+    await vm.submitRemoteImport()
+    await flushPromises()
+
+    const saved = window.localStorage.getItem('prism:remote-import-task')
+    expect(saved).toContain('待恢复项目')
+    expect(saved).toContain('prism-remote-import-')
+    expect((wrapper.vm as any).remoteImportError).toContain('连接服务器失败')
+    wrapper.unmount()
+  })
+
+  it('任务失败时保留可读原因并清理已结束的恢复记录', async () => {
+    permissionState.allowed = true
+    vi.useFakeTimers()
+    projectApi.queueRemoteProjectImport.mockResolvedValue(remoteTask())
+    projectApi.getRemoteProjectImport.mockResolvedValue(remoteTask({
+      status: 'failed',
+      error: { code: 'archive_invalid', message: '压缩包路径校验失败' },
+    }))
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.remoteForm = {
+      url: 'https://example.com/bad.zip',
+      project_name: '失败项目',
+      description: '',
+      audit_mode: false,
+    }
+
+    await vm.submitRemoteImport()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect((wrapper.vm as any).remoteImportError).toContain('压缩包路径校验失败')
+    expect(wrapper.text()).toContain('压缩包路径校验失败')
+    expect(window.localStorage.getItem('prism:remote-import-task')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('成功响应缺少项目编号时保留恢复记录并显示可操作原因', async () => {
+    permissionState.allowed = true
+    window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
+    projectApi.getRemoteProjectImport.mockResolvedValue(remoteTask({
+      status: 'succeeded',
+      project_id: null,
+      result: { file_count: 6 },
+    }))
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    expect((wrapper.vm as any).remoteImportError).toContain('没有返回项目编号')
+    expect(window.localStorage.getItem('prism:remote-import-task')).toContain('remote-task-1')
+    expect(routerState.push).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

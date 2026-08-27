@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from app.ai.cvss import normalize_cvss, normalize_cvss_vector
 from app.ai.exceptions import ResultParseError
 from app.constants.compliance import get_compliance_mapping
 
@@ -27,7 +28,38 @@ ALLOWED_TYPES = {
 }
 ALLOWED_SEVERITY = {"严重", "高", "中", "低"}
 
+_SEVERITY_ALIASES = {
+    "critical": "严重",
+    "crit": "严重",
+    "危急": "严重",
+    "致命": "严重",
+    "严重": "严重",
+    "high": "高",
+    "高危": "高",
+    "高": "高",
+    "medium": "中",
+    "moderate": "中",
+    "warning": "中",
+    "中危": "中",
+    "中": "中",
+    "low": "低",
+    "info": "低",
+    "informational": "低",
+    "低危": "低",
+    "低": "低",
+}
+
 _FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
+
+
+def normalize_severity(value: object, default: str = "中") -> str:
+    """把模型、协同 Agent 与静态引擎的严重度收敛为四级中文枚举。"""
+
+    fallback = default if default in ALLOWED_SEVERITY else "中"
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    return _SEVERITY_ALIASES.get(text.lower(), _SEVERITY_ALIASES.get(text, fallback))
 
 
 @dataclass
@@ -67,13 +99,22 @@ class Issue:
     references: List[str] = field(default_factory=list)
     confidence: float = 0.8
     # v3 新增 CVSS / 合规映射 / 修复方案字段
-    cvss_score: float = 0.0
-    cvss_vector: str = ""
+    cvss_score: Optional[float] = None
+    cvss_vector: Optional[str] = None
+    cvss_version: Optional[str] = None
+    cvss_source: str = "unavailable"
     compliance_mapping: Dict[str, List[str]] = field(default_factory=dict)
     remediation: str = ""
     # v3 新增来源标识与静态命中统计(由 issue_merger 填充,默认 llm/0 向后兼容)
     source: str = "llm"
     static_rule_hits: int = 0
+    source_details: List[dict] = field(default_factory=list)
+    confirmation_count: int = 1
+    finding_fingerprint: str = ""
+    # 稳定的源码调用点；用于跨 Agent/分片归并，不依赖模型行号。
+    source_anchor: str = ""
+    column_start: Optional[int] = None
+    column_end: Optional[int] = None
 
 
 @dataclass
@@ -132,39 +173,29 @@ def _coerce_float(v, default: float = 0.8) -> float:
         return default
 
 
-def _coerce_cvss_score(v) -> float:
-    """安全解析 CVSS v3.1 基础分,强制范围 [0.0, 10.0]
+def _coerce_cvss_score(v) -> Optional[float]:
+    """Parse a CVSS score without converting missing data to zero.
 
     Args:
         v: 待转换值(LLM 输出的原始字段)
 
     Returns:
-        float: 0.0-10.0 之间的浮点数;缺失或非法时返回 0.0
+        Optional[float]: 0.0-10.0 之间的浮点数;缺失或非法时返回 None
     """
-    score = _coerce_float(v, 0.0)
-    return max(0.0, min(10.0, round(score, 1)))
+    score, _, _, _ = normalize_cvss(v, None)
+    return score
 
 
-def _coerce_cvss_vector(v) -> str:
+def _coerce_cvss_vector(v) -> Optional[str]:
     """安全解析 CVSS v3.1 向量字符串,做最小合法性校验
 
     Args:
         v: 待转换值(LLM 输出的原始字段)
 
     Returns:
-        str: 合法的 CVSS 向量字符串;非法或空则返回空字符串
+        Optional[str]: 合法的 CVSS 向量字符串;非法或空则返回 None
     """
-    if not v:
-        return ""
-    s = str(v).strip().upper()
-    # CVSS v3.1 向量至少包含 AV:/AC:/PR:/UI:/S:/C:/I:/A: 八个度量项
-    required_metrics = ("AV:", "AC:", "PR:", "UI:", "S:", "C:", "I:", "A:")
-    if not all(m in s for m in required_metrics):
-        return ""
-    # 移除可能的前缀 "CVSS:3.1/"
-    if s.startswith("CVSS:"):
-        s = s.split("/", 1)[1] if "/" in s else s
-    return s
+    return normalize_cvss_vector(v)
 
 
 def _coerce_remediation(v) -> str:
@@ -288,9 +319,7 @@ def _normalize_issue(raw: dict) -> Issue:
     issue_type = raw.get("issue_type") or "其他"
     if issue_type not in ALLOWED_TYPES:
         issue_type = "其他"
-    severity = raw.get("severity") or "中"
-    if severity not in ALLOWED_SEVERITY:
-        severity = "中"
+    severity = normalize_severity(raw.get("severity"))
 
     title = (raw.get("title") or "")[:200] or None
     description = str(raw.get("description") or "")
@@ -308,8 +337,10 @@ def _normalize_issue(raw: dict) -> Issue:
     confidence = max(0.0, min(1.0, confidence))
 
     # 解析 v3 新增字段
-    cvss_score = _coerce_cvss_score(raw.get("cvss_score"))
-    cvss_vector = _coerce_cvss_vector(raw.get("cvss_vector"))
+    cvss_score, cvss_vector, cvss_version, cvss_source = normalize_cvss(
+        raw.get("cvss_score"),
+        raw.get("cvss_vector"),
+    )
     remediation = _coerce_remediation(raw.get("remediation"))
 
     # 安全类 issue 缺 cwe 时,基于 title/description 推断补全
@@ -319,11 +350,6 @@ def _normalize_issue(raw: dict) -> Issue:
             owasp = inferred_owasp
         if not cwe:
             cwe = inferred_cwe
-
-    # 安全类 issue 缺 cvss_score 时,基于 severity 给出经验值
-    if issue_type == "安全漏洞" and cvss_score == 0.0:
-        severity_to_cvss = {"严重": 9.5, "高": 7.5, "中": 5.0, "低": 2.5}
-        cvss_score = severity_to_cvss.get(severity, 5.0)
 
     # 基于 cwe 反查 4 大合规标准映射(LLM 不输出 compliance_mapping)
     compliance_mapping = _build_compliance_mapping(cwe) if cwe else {}
@@ -345,6 +371,8 @@ def _normalize_issue(raw: dict) -> Issue:
         confidence=confidence,
         cvss_score=cvss_score,
         cvss_vector=cvss_vector,
+        cvss_version=cvss_version,
+        cvss_source=cvss_source,
         compliance_mapping=compliance_mapping,
         remediation=remediation,
     )

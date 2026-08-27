@@ -26,7 +26,6 @@ from app.ai.result_parser import (
 from app.ai.static_analyzer import (
     Finding,
     _cwe_to_cvss_vector,
-    _severity_to_cvss_score,
     scan,
 )
 from app.ai.static_analyzer import (
@@ -45,18 +44,18 @@ def test_coerce_cvss_score_normal():
     assert _coerce_cvss_score(8.76) == 8.8
 
 
-def test_coerce_cvss_score_out_of_range_clamped():
-    """超出 [0, 10] 范围的值被裁剪"""
-    assert _coerce_cvss_score(-1.5) == 0.0
-    assert _coerce_cvss_score(15.0) == 10.0
-    assert _coerce_cvss_score(100) == 10.0
+def test_coerce_cvss_score_out_of_range_returns_missing():
+    """超出 [0, 10] 范围的值不应伪装成边界分数。"""
+    assert _coerce_cvss_score(-1.5) is None
+    assert _coerce_cvss_score(15.0) is None
+    assert _coerce_cvss_score(100) is None
 
 
-def test_coerce_cvss_score_invalid_returns_zero():
-    """非法值返回默认 0.0"""
-    assert _coerce_cvss_score(None) == 0.0
-    assert _coerce_cvss_score("abc") == 0.0
-    assert _coerce_cvss_score([]) == 0.0
+def test_coerce_cvss_score_invalid_returns_missing():
+    """非法值保持缺失。"""
+    assert _coerce_cvss_score(None) is None
+    assert _coerce_cvss_score("abc") is None
+    assert _coerce_cvss_score([]) is None
 
 
 def test_coerce_cvss_vector_normal():
@@ -72,16 +71,16 @@ def test_coerce_cvss_vector_with_prefix_stripped():
     assert _coerce_cvss_vector(v) == expected
 
 
-def test_coerce_cvss_vector_missing_metrics_returns_empty():
-    """缺失必备度量项的向量返回空字符串"""
-    assert _coerce_cvss_vector("AV:N/AC:L") == ""
-    assert _coerce_cvss_vector("not-a-vector") == ""
+def test_coerce_cvss_vector_missing_metrics_returns_missing():
+    """缺失必备度量项的向量保持缺失。"""
+    assert _coerce_cvss_vector("AV:N/AC:L") is None
+    assert _coerce_cvss_vector("not-a-vector") is None
 
 
 def test_coerce_cvss_vector_empty():
-    """空值返回空字符串"""
-    assert _coerce_cvss_vector("") == ""
-    assert _coerce_cvss_vector(None) == ""
+    """空值保持缺失。"""
+    assert _coerce_cvss_vector("") is None
+    assert _coerce_cvss_vector(None) is None
 
 
 def test_coerce_remediation_normal():
@@ -187,16 +186,16 @@ def test_normalize_issue_v2_only_backward_compatible():
     # v2 字段正常
     assert issue.cwe == "CWE-79"
     assert issue.confidence == 0.85
-    # v3 字段默认值 + severity 经验值补全
-    assert issue.cvss_score == 7.5  # 高 -> 7.5
-    assert issue.cvss_vector == ""  # LLM 未输出,默认空
+    # v3 字段保持缺失,不能由 severity 猜测
+    assert issue.cvss_score is None
+    assert issue.cvss_vector is None
     assert issue.remediation == ""
     # 合规映射仍基于 cwe 反查
     assert issue.compliance_mapping, "CWE-79 应触发合规反查"
 
 
-def test_normalize_issue_security_missing_cvss_uses_severity():
-    """安全类 issue 缺 cvss_score 时,基于 severity 给经验值"""
+def test_normalize_issue_security_missing_cvss_stays_missing():
+    """安全类 issue 缺 CVSS 时保持缺失。"""
     raw = {
         "issue_type": "安全漏洞",
         "severity": "严重",
@@ -205,11 +204,11 @@ def test_normalize_issue_security_missing_cvss_uses_severity():
         "cwe": "CWE-78",
     }
     issue = _normalize_issue(raw)
-    assert issue.cvss_score == 9.5  # 严重 -> 9.5
+    assert issue.cvss_score is None
 
 
-def test_normalize_issue_non_security_cvss_zero():
-    """非安全类 issue cvss_score 保持 0.0"""
+def test_normalize_issue_non_security_cvss_missing():
+    """非安全类 issue 不应伪装为零风险。"""
     raw = {
         "issue_type": "代码规范",
         "severity": "低",
@@ -217,12 +216,12 @@ def test_normalize_issue_non_security_cvss_zero():
         "description": "变量名使用单字母",
     }
     issue = _normalize_issue(raw)
-    assert issue.cvss_score == 0.0
+    assert issue.cvss_score is None
     assert issue.compliance_mapping == {}
 
 
-def test_normalize_issue_cvss_score_out_of_range_clamped():
-    """cvss_score 超出 [0, 10] 被裁剪"""
+def test_normalize_issue_cvss_score_out_of_range_is_rejected():
+    """cvss_score 超出 [0, 10] 时保持缺失。"""
     raw = {
         "issue_type": "安全漏洞",
         "severity": "严重",
@@ -230,11 +229,11 @@ def test_normalize_issue_cvss_score_out_of_range_clamped():
         "cwe": "CWE-89",
     }
     issue = _normalize_issue(raw)
-    assert issue.cvss_score == 10.0
+    assert issue.cvss_score is None
 
 
-def test_normalize_issue_cvss_vector_invalid_returns_empty():
-    """非法 cvss_vector 返回空字符串"""
+def test_normalize_issue_cvss_vector_invalid_returns_missing():
+    """非法 cvss_vector 保持缺失。"""
     raw = {
         "issue_type": "安全漏洞",
         "severity": "高",
@@ -242,7 +241,7 @@ def test_normalize_issue_cvss_vector_invalid_returns_empty():
         "cwe": "CWE-89",
     }
     issue = _normalize_issue(raw)
-    assert issue.cvss_vector == ""
+    assert issue.cvss_vector is None
 
 
 # ============ parse() 顶层函数 ============
@@ -309,8 +308,7 @@ def test_parse_v2_only_backward_compatible():
     issue = result.issues[0]
     # v2 字段正常
     assert issue.cwe == "CWE-327"
-    # v3 字段:cvss_score 由 severity 经验值补全(中 -> 5.0)
-    assert issue.cvss_score == 5.0
+    assert issue.cvss_score is None
     # compliance_mapping 仍反查
     assert issue.compliance_mapping
 
@@ -336,8 +334,8 @@ def test_parse_legacy_v1_format():
     issue = result.issues[0]
     assert issue.owasp == ""
     assert issue.cwe == ""
-    assert issue.cvss_score == 0.0
-    assert issue.cvss_vector == ""
+    assert issue.cvss_score is None
+    assert issue.cvss_vector is None
     assert issue.compliance_mapping == {}
     assert issue.remediation == ""
 
@@ -413,15 +411,6 @@ def test_parse_invalid_severity_falls_back_to_medium():
 
 
 # ============ static_analyzer Finding v3 字段 ============
-
-def test_severity_to_cvss_score_mapping():
-    """severity 到 CVSS 分数经验映射正确"""
-    assert _severity_to_cvss_score("严重") == 9.8
-    assert _severity_to_cvss_score("高") == 7.5
-    assert _severity_to_cvss_score("中") == 5.0
-    assert _severity_to_cvss_score("低") == 2.5
-    assert _severity_to_cvss_score("未知") == 5.0
-
 
 def test_cwe_to_cvss_vector_known():
     """已知 CWE 返回预设 CVSS 向量"""
@@ -506,8 +495,8 @@ def test_scan_empty_content_returns_empty_list():
 def test_finding_dataclass_v3_fields_default_values():
     """Finding 数据类 v3 字段默认值合理"""
     f = Finding()
-    assert f.cvss_score == 0.0
-    assert f.cvss_vector == ""
+    assert f.cvss_score is None
+    assert f.cvss_vector is None
     assert f.compliance_mapping == {}
     assert f.remediation == ""
     assert f.static_rule_hits == 1
@@ -518,8 +507,8 @@ def test_finding_dataclass_v3_fields_default_values():
 def test_issue_dataclass_v3_fields_default_values():
     """Issue 数据类 v3 字段默认值合理"""
     issue = Issue()
-    assert issue.cvss_score == 0.0
-    assert issue.cvss_vector == ""
+    assert issue.cvss_score is None
+    assert issue.cvss_vector is None
     assert issue.compliance_mapping == {}
     assert issue.remediation == ""
 

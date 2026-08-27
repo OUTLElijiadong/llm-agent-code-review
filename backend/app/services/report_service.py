@@ -15,6 +15,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
+from app.services.report_exporter import build_report_score_facts
 
 
 def is_report_available(task: ReviewTask | None) -> bool:
@@ -105,28 +106,48 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         ReviewIssue.status == "fixed",
     ).scalar() or 0
 
+    severity_from_issues = {severity: int(count) for severity, count in severity_rows}
+    severity_count = {
+        severity: int(severity_from_issues.get(severity, 0) or 0)
+        for severity in ("严重", "高", "中", "低")
+    }
+    issue_count = sum(int(count) for _, count in severity_rows)
+    score, score_breakdown = build_report_score_facts(
+        severity_count,
+        issue_count,
+        task.score,
+    )
+
     from app.services.review_service import _task_agent_release_summaries
 
     return {
         "project": {"id": project.id, "project_name": project.project_name,
                      "language": project.language} if project else {},
-        "task": {"id": task.id, "name": task.task_name, "review_type": task.review_type,
+        "task": {"id": task.id, "name": task.task_name, "task_name": task.task_name,
+                 "review_type": task.review_type,
                  "total_files": task.total_files,
                  "duration_ms": task.duration_ms,
-                 "score": task.score, "status": task.status,
+                 "total_issues": issue_count,
+                 "score": score,
+                 "score_version": score_breakdown.get("version"),
+                 "score_breakdown": score_breakdown,
+                 "status": task.status,
                  "create_time": task.create_time.isoformat() if task.create_time else None,
                  "agent_releases": _task_agent_release_summaries(db, task_id)},
         "stats": {
-            "total_files": task.total_files, "total_issues": task.total_issues,
-            "score": task.score,
-            "severe": task.severe_issues or 0,
-            "high": task.high_issues or 0,
-            "medium": task.medium_issues or 0,
-            "low": task.low_issues or 0,
+            "total_files": task.total_files, "total_issues": issue_count,
+            "score": score,
+            "severe": severity_count["严重"],
+            "high": severity_count["高"],
+            "medium": severity_count["中"],
+            "low": severity_count["低"],
             "fixed": fixed_count,
-            "severity": {s: c for s, c in severity_rows},
-            "severity_breakdown": {s: c for s, c in severity_rows},
+            "severity": severity_from_issues,
+            "severity_breakdown": severity_from_issues,
             "by_type": {t: c for t, c in type_rows},
+            "score_version": score_breakdown.get("version"),
+            "score_breakdown": score_breakdown,
+            "risk_level": score_breakdown.get("risk_level"),
         },
         "summary": task.summary,
         "files": _build_file_summaries(db, task_id),

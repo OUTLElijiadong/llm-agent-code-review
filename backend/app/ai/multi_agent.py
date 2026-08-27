@@ -212,7 +212,16 @@ COLLAB_CROSS_REVIEW_USER = """## 审查目标
       "line_end": 18,
       "confidence": 0.9,
       "owasp": "OWASP编号(仅安全类)",
-      "cwe": "CWE编号(仅安全类)"
+      "cwe": "CWE编号(仅安全类)",
+      "evidence": "直接来自代码的证据行",
+      "exploit_scenario": "可复现的利用场景(仅安全类)",
+      "references": ["参考链接"],
+      "cvss_score": 9.8,
+      "cvss_vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "remediation": "详细修复步骤",
+      "source_details": [
+        {{"source":"llm:security","confidence":0.9,"evidence":"证据行","line_number":12,"title":"原始标题"}}
+      ]
     }}
   ],
   "summary": {{
@@ -232,6 +241,8 @@ COLLAB_CROSS_REVIEW_USER = """## 审查目标
 - **escalated**: 交叉分析发现该问题在另一个代理的视角下风险更高。例如: 性能代理标记"N+1 查询",
   但安全代理视角下可被 DoS 利用从而升级严重度。
 - **merged**: 多个代理用不同措辞描述了本质上同一条问题。合并为 1 条,标注 merged_from。
+- 同一 CWE 出现在相邻行不代表同一问题;证据代码或调用点不同的独立 sink 必须分别保留。
+- evidence、CVSS、来源明细必须从原始 finding 透传;不得根据 severity 猜测 CVSS 分数。
 - 每条原始 finding 必须被至少 1 条 cross_review 条目引用。
 - 单代理审查(only_reviewer 只有一个)时: 直接 copy 原始 findings 为 confirmed。
 """
@@ -267,7 +278,16 @@ COLLAB_CONSENSUS_USER = """## 任务
       "cross_agent_count": 2,
       "cross_agent_names": ["安全审查代理", "可靠性代理"],
       "owasp": "OWASP编号(仅安全类,可选)",
-      "cwe": "CWE编号(仅安全类,可选)"
+      "cwe": "CWE编号(仅安全类,可选)",
+      "evidence": "直接来自代码的证据行",
+      "exploit_scenario": "攻击场景(可选)",
+      "references": ["参考链接"],
+      "cvss_score": 9.8,
+      "cvss_vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "remediation": "详细修复步骤",
+      "source_details": [
+        {{"source":"llm:security","confidence":0.9,"evidence":"证据行","line_number":12,"title":"原始标题"}}
+      ]
     }}
   ],
   "discarded": [
@@ -285,4 +305,6 @@ COLLAB_CONSENSUS_USER = """## 任务
 - disputed 条目 → 降低 severity 1 档,降低 confidence 到 0.5-0.6
 - merged 条目 → 合并为 1 条 issue,merged_from 中的代理名写入 cross_agent_names
 - discarded 列表记录所有误报/已被合并覆盖的原因
+- evidence 不同的独立代码调用点不得合并;最终列表仍会经过确定性 N-way 归一化。
+- 有合法 CVSS 向量时原样透传;没有向量或分数时保留为空,禁止用 severity 估算。
 """

@@ -344,6 +344,66 @@ def test_generate_word_report_success(admin_client):
     assert response.content[:2] == b"PK"
 
 
+@pytest.mark.parametrize(
+    ("report_format", "permission"),
+    [
+        ("json", PermissionCode.REPORT_EXPORT_JSON),
+        ("html", PermissionCode.REPORT_EXPORT_HTML),
+        ("pdf", PermissionCode.REPORT_EXPORT_PDF),
+        ("word", PermissionCode.REPORT_EXPORT_WORD),
+    ],
+)
+def test_generate_report_checks_format_specific_permission(
+    admin_client,
+    monkeypatch,
+    report_format,
+    permission,
+):
+    """POST generate 不能用 report:view 代替具体格式的导出权限。"""
+    client, _db, task_id = admin_client
+    checked = []
+
+    def fake_check_permission(_db, user_id, requested_permission):
+        checked.append((user_id, requested_permission))
+        return requested_permission == permission
+
+    monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
+
+    response = client.post(
+        "/api/reports/generate",
+        json={"task_id": task_id, "format": report_format},
+    )
+
+    assert response.status_code == 200
+    assert checked == [(1, permission)]
+
+
+@pytest.mark.parametrize(
+    ("report_format", "permission"),
+    [
+        ("json", PermissionCode.REPORT_EXPORT_JSON),
+        ("html", PermissionCode.REPORT_EXPORT_HTML),
+    ],
+)
+def test_generate_json_and_html_reject_without_matching_export_permission(
+    admin_client,
+    monkeypatch,
+    report_format,
+    permission,
+):
+    """JSON 与 HTML 也必须分别拒绝缺少对应权限的生成请求。"""
+    client, _db, task_id = admin_client
+    monkeypatch.setattr("app.api.v1.reports.check_permission", lambda *_args: False)
+
+    response = client.post(
+        "/api/reports/generate",
+        json={"task_id": task_id, "format": report_format},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["required_permission"] == permission
+
+
 # ============ 报告预览测试 ============
 
 def test_preview_report_html_success(admin_client):
@@ -611,6 +671,59 @@ def test_plain_owner_html_export_uses_format_specific_permission(
         (2, PermissionCode.REPORT_EXPORT_HTML),
         (2, PermissionCode.REPORT_EXPORT_PDF),
     ]
+
+
+def test_legacy_word_route_delegates_to_new_exporter_and_checks_permission(
+    admin_client,
+    monkeypatch,
+):
+    """旧 Word 地址只保留兼容路由，事实与内容交给新导出器。"""
+    client, _db, task_id = admin_client
+    checked = []
+    captured = {}
+
+    def fake_check_permission(_db, user_id, permission):
+        checked.append((user_id, permission))
+        return permission == PermissionCode.REPORT_EXPORT_WORD
+
+    def fake_export(task, issues, summary, score, template_type, evidence):
+        captured.update(task=task, issues=issues, summary=summary, score=score)
+        return b"NEW_WORD_EXPORTER"
+
+    monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
+    monkeypatch.setattr("app.api.v1.reports.export_to_word", fake_export)
+
+    response = client.get(f"/api/reports/{task_id}/export/word")
+
+    assert response.status_code == 200
+    assert response.content == b"NEW_WORD_EXPORTER"
+    assert len(captured["issues"]) == 3
+    assert checked == [(1, PermissionCode.REPORT_EXPORT_WORD)]
+
+
+def test_legacy_pdf_route_delegates_to_new_exporter_and_checks_permission(
+    admin_client,
+    monkeypatch,
+):
+    """旧 PDF 地址使用新导出器，并独立要求 PDF 权限。"""
+    client, _db, task_id = admin_client
+    checked = []
+
+    def fake_check_permission(_db, user_id, permission):
+        checked.append((user_id, permission))
+        return permission == PermissionCode.REPORT_EXPORT_PDF
+
+    monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
+    monkeypatch.setattr(
+        "app.api.v1.reports.export_to_pdf",
+        lambda *_args: b"NEW_PDF_EXPORTER",
+    )
+
+    response = client.get(f"/api/reports/{task_id}/export/pdf")
+
+    assert response.status_code == 200
+    assert response.content == b"NEW_PDF_EXPORTER"
+    assert checked == [(1, PermissionCode.REPORT_EXPORT_PDF)]
 
 
 # ============ 补充测试 ============

@@ -32,6 +32,8 @@ class TaskOut(BaseModel):
     medium_issues: int
     low_issues: int
     score: int
+    score_version: Optional[str] = None
+    score_breakdown: Optional[dict] = None
     duration_ms: int
     create_time: datetime
 
@@ -69,6 +71,8 @@ class TaskDetailOut(BaseModel):
     medium_issues: int
     low_issues: int
     score: int
+    score_version: Optional[str] = None
+    score_breakdown: Optional[dict] = None
     summary: Optional[str] = None
     model_name: Optional[str] = None
     duration_ms: int
@@ -126,10 +130,15 @@ class IssueOut(BaseModel):
     references_json: Optional[list] = None
     confidence: Optional[float] = None
     source: Optional[str] = None
+    source_details: Optional[list[dict]] = None
+    confirmation_count: int = 1
+    finding_fingerprint: Optional[str] = None
 
     # === v3 全量漏洞元数据 ===
     cvss_score: Optional[float] = None
     cvss_vector: Optional[str] = None
+    cvss_version: Optional[str] = None
+    cvss_source: Optional[str] = None
     compliance_mapping: Optional[dict] = None
     remediation: Optional[str] = None
     static_rule_hits: int = 0

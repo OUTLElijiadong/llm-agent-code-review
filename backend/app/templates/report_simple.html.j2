@@ -27,6 +27,7 @@
     .score-badge { display: inline-block; padding: 4px 14px; border-radius: 16px; font-weight: 600; font-size: 14px; color: #fff; }
     .score-good { background: #10b981; }
     .score-warn { background: #f59e0b; }
+    .score-risk { background: #ea580c; }
     .score-bad { background: #ef4444; }
     .summary-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px 16px; border-radius: 6px; margin: 16px 0; white-space: pre-wrap; }
     table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
@@ -56,13 +57,31 @@
     <div class="meta">
       综合评分:
       {% if score >= 80 %}
-        <span class="score-badge score-good">{{ score }}/100</span>
+        <span class="score-badge score-good">{{ score }}/100 ({{ statistics.risk_level }})</span>
       {% elif score >= 60 %}
-        <span class="score-badge score-warn">{{ score }}/100</span>
+        <span class="score-badge score-warn">{{ score }}/100 ({{ statistics.risk_level }})</span>
+      {% elif score >= 40 %}
+        <span class="score-badge score-risk">{{ score }}/100 ({{ statistics.risk_level }})</span>
       {% else %}
-        <span class="score-badge score-bad">{{ score }}/100</span>
+        <span class="score-badge score-bad">{{ score }}/100 ({{ statistics.risk_level }})</span>
       {% endif %}
     </div>
+
+    {% set breakdown = statistics.score_breakdown %}
+    <h2>评分明细</h2>
+    <table>
+      <tbody>
+        <tr><th>评分版本</th><td><code>{{ breakdown.version }}</code></td></tr>
+        <tr><th>基础分</th><td>{{ breakdown.base_score }}</td></tr>
+        <tr><th>扣分权重</th><td>严重 × {{ breakdown.weights["严重"] }}；高 × {{ breakdown.weights["高"] }}；中 × {{ breakdown.weights["中"] }}；低 × {{ breakdown.weights["低"] }}</td></tr>
+        <tr><th>问题计数</th><td>严重 {{ breakdown.counts["严重"] }}；高 {{ breakdown.counts["高"] }}；中 {{ breakdown.counts["中"] }}；低 {{ breakdown.counts["低"] }}</td></tr>
+        <tr><th>分级扣分</th><td>严重 {{ breakdown.deductions["严重"] }}；高 {{ breakdown.deductions["高"] }}；中 {{ breakdown.deductions["中"] }}；低 {{ breakdown.deductions["低"] }}</td></tr>
+        <tr><th>总扣分</th><td>{{ breakdown.total_deduction }}</td></tr>
+        <tr><th>最终评分</th><td>{{ breakdown.score }}/100（{{ breakdown.risk_level }}）</td></tr>
+        <tr><th>事实来源</th><td><code>{{ breakdown.score_source }}</code></td></tr>
+        {% if breakdown.compatibility_override %}<tr><th>兼容说明</th><td>空问题历史显式评分；标准零问题评分为 {{ breakdown.compatibility_override.canonical_score }}</td></tr>{% endif %}
+      </tbody>
+    </table>
 
     {% if summary %}
     <h2>总体评价</h2>

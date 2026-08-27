@@ -26,6 +26,8 @@ from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.agents.contracts import compose_system_prompt
 from app.agents.events import AgentEventType
 from app.ai.code_chunker import chunk_code
+from app.ai.result_parser import normalize_severity
+from app.ai.scoring import compute_score_breakdown
 from app.ai.security_patterns import list_patterns, scan_secrets
 from app.ai.security_static_rules import apply_static_rules, list_static_rules
 from app.core.config import settings
@@ -74,6 +76,7 @@ _OWASP_TOP10_2021: Tuple[Tuple[str, str, str], ...] = (
 # 严重度扣分(沿用 app/ai/scoring.py 模型)
 _SEVERITY_DEDUCT = {"严重": 15, "高": 8, "中": 3, "低": 1}
 _ALLOWED_SEVERITY = {"严重", "高", "中", "低"}
+_FINDING_LINE_PROXIMITY = 2
 
 
 @dataclass
@@ -276,7 +279,7 @@ class SecuritySentinelAgent(BaseAgent):
             if not isinstance(raw, dict):
                 continue
             normalized = self._normalize_finding(
-                raw, file_stub, line_offset=0, code=code,
+                raw, file_stub, line_offset=line_offset, code=code,
             )
             if not normalized:
                 continue
@@ -411,9 +414,29 @@ class SecuritySentinelAgent(BaseAgent):
             llm_findings = self._llm_findings_for_file(file, ctx=ctx, scan_depth=scan_depth)
             findings.extend(llm_findings)
 
+        raw_finding_count = len(findings)
+        findings = self._dedup_findings(findings)
+        effective_findings = [
+            item for item in findings
+            if str(item.get("verification") or "") != "refuted"
+        ]
         duration_ms = int((time.time() - t0) * 1000)
-        risk_score = self._compute_risk_score(findings)
-        summary = self._build_file_summary(file, findings)
+        risk_score = self._compute_risk_score(effective_findings)
+        summary = self._build_file_summary(file, effective_findings)
+        compliance = self._compute_compliance(effective_findings)
+        compliance.update({
+            "raw_candidate_count": raw_finding_count,
+            "finding_total_count": len(findings),
+            "deduplicated_finding_count": len(findings),
+            "retained_finding_count": len(findings),
+            "scored_finding_count": len(effective_findings),
+            "refuted_finding_count": sum(
+                1 for item in findings
+                if str(item.get("verification") or "") == "refuted"
+            ),
+            "findings_truncated": False,
+            "finding_severity_counts": self._severity_counts(effective_findings),
+        })
 
         self._emit(
             AgentEventType.COMPLETE, ctx,
@@ -430,7 +453,7 @@ class SecuritySentinelAgent(BaseAgent):
             data={
                 "findings": findings,
                 "threat_model": None,
-                "compliance": self._compute_compliance(findings),
+                "compliance": compliance,
                 "risk_score": risk_score,
                 "summary": summary,
                 "file_count": 1,
@@ -966,17 +989,19 @@ class SecuritySentinelAgent(BaseAgent):
         returned_code_link_count = len(threat_model["code_links"])
 
         duration_ms = int((time.time() - t0) * 1000)
-        deduct = sum(
-            _SEVERITY_DEDUCT[severity] * count
-            for severity, count in finding_severity_counts.items()
-        )
-        risk_score = max(0, min(100, 100 - deduct))
 
-        # ── v3.3 全链路: 去重 + 对抗复检(解决「假警报多 / 真假难辨」) ──
+        # ── v3.3 全链路: 去重 + 对抗复检 + 最终统计 ──
+        # raw_* 只描述扫描器收到的候选，容量截断也只针对原始保留缓冲区；
+        # 有效风险统计必须在去重和复核之后重新计算，避免报告分数与 findings 不一致。
+        raw_candidate_count = finding_total_count
+        raw_severity_counts = dict(finding_severity_counts)
+        raw_retained_count = len(all_findings)
+        raw_capacity_truncated = raw_candidate_count > raw_retained_count
+        all_findings = self._dedup_findings(all_findings)
+        deduplicated_finding_count = len(all_findings)
         verification: dict = {"confirmed": 0, "refuted": 0, "reviewed": 0}
         if self._verify_enabled:
             try:
-                all_findings = self._dedup_findings(all_findings)
                 verification = self._adversarial_verify(all_findings, ctx=ctx)
                 self._emit(
                     AgentEventType.PROGRESS, ctx,
@@ -989,14 +1014,24 @@ class SecuritySentinelAgent(BaseAgent):
             except Exception:
                 logger.exception("[security_sentinel] 对抗复检异常,跳过")
 
+        effective_findings = [
+            item for item in all_findings
+            if str(item.get("verification") or "") != "refuted"
+        ]
+        refuted_finding_count = len(all_findings) - len(effective_findings)
+        # finding_total_count 表示去重后的审计对象总数；raw_candidate_count
+        # 单独保留，便于解释多 Agent 重复上报和容量截断。
+        finding_total_count = len(all_findings)
+        finding_severity_counts = self._severity_counts(effective_findings)
         sev_counts = dict(finding_severity_counts)
-        compliance = self._compute_compliance(all_findings)
+        risk_score = int(compute_score_breakdown(sev_counts)["score"])
+        compliance = self._compute_compliance(effective_findings)
         compliance.update({
             "verification": verification,
-            "owasp_coverage": sorted(finding_owasp_hits),
+            "owasp_coverage": compliance["owasp_coverage"],
             "gb_t_22239": (
-                f"等保 2.0 应用安全相关命中风险 {len(finding_owasp_hits)} 类"
-                if finding_owasp_hits else "未触及等保 2.0 应用安全条款"
+                f"等保 2.0 应用安全相关命中风险 {len(compliance['owasp_coverage'])} 类"
+                if compliance["owasp_coverage"] else "未触及等保 2.0 应用安全条款"
             ),
             "scan_mode": scan_mode,
             "total_file_count": len(files),
@@ -1096,9 +1131,14 @@ class SecuritySentinelAgent(BaseAgent):
             "dataflow_requested": dataflow_requested,
             "dataflow_attempted": dataflow_attempted,
             "dataflow_complete": dataflow_complete,
+            "raw_candidate_count": raw_candidate_count,
+            "raw_finding_severity_counts": raw_severity_counts,
+            "deduplicated_finding_count": deduplicated_finding_count,
+            "scored_finding_count": len(effective_findings),
+            "refuted_finding_count": refuted_finding_count,
             "finding_total_count": finding_total_count,
             "retained_finding_count": len(all_findings),
-            "findings_truncated": finding_total_count > len(all_findings),
+            "findings_truncated": raw_capacity_truncated,
             "finding_severity_counts": sev_counts,
             "entry_point_total_count": entry_total_count,
             "retained_entry_point_count": len(all_entries),
@@ -1387,6 +1427,44 @@ class SecuritySentinelAgent(BaseAgent):
                         "scanned_project_count": 0,
                         "skipped_project_count": 0,
                         "project_errors": [],
+                        "raw_candidate_count": 0,
+                        "deduplicated_finding_count": 0,
+                        "finding_total_count": 0,
+                        "retained_finding_count": 0,
+                        "scored_finding_count": 0,
+                        "refuted_finding_count": 0,
+                        "findings_truncated": False,
+                        "finding_severity_counts": {
+                            "严重": 0,
+                            "高": 0,
+                            "中": 0,
+                            "低": 0,
+                        },
+                        "raw_finding_severity_counts": {
+                            "严重": 0,
+                            "高": 0,
+                            "中": 0,
+                            "低": 0,
+                        },
+                        "verification": {
+                            "confirmed": 0,
+                            "refuted": 0,
+                            "reviewed": 0,
+                        },
+                        "entry_point_total_count": 0,
+                        "retained_entry_point_count": 0,
+                        "returned_entry_point_count": 0,
+                        "api_endpoint_total_count": 0,
+                        "retained_api_endpoint_count": 0,
+                        "returned_api_endpoint_count": 0,
+                        "data_flow_total_count": 0,
+                        "retained_data_flow_count": 0,
+                        "returned_data_flow_count": 0,
+                        "code_link_total_count": 0,
+                        "retained_code_link_count": 0,
+                        "returned_code_link_count": 0,
+                        "graph_items_truncated": False,
+                        "response_graph_truncated": False,
                     },
                     "risk_score": 100,
                     "summary": "当前账号暂无可扫描的活跃项目。",
@@ -2134,7 +2212,10 @@ class SecuritySentinelAgent(BaseAgent):
                 "file_id": file.id,
                 "lines": lines_label,
                 "line_number": m.line_number,
-                "end_line": m.line_number,
+                "end_line": m.end_line or m.line_number,
+                "column_start": m.column_start,
+                "column_end": m.column_end,
+                "source_anchor": m.source_anchor,
                 "evidence": m.evidence_line,
                 "exploit_scenario": m.description,
                 "fix_suggestion": m.fix_suggestion,
@@ -2941,6 +3022,9 @@ class SecuritySentinelAgent(BaseAgent):
             confidence = 0.8
         confidence = max(0.0, min(1.0, confidence))
         file_path = file.file_path or file.file_name
+        source_anchor = str(raw.get("source_anchor") or "")[:300]
+        column_start = self._coerce_int(raw.get("column_start"), -1)
+        column_end = self._coerce_int(raw.get("column_end"), -1)
         return {
             "title": str(raw.get("title") or "安全问题")[:200],
             "category": str(raw.get("category") or "安全漏洞")[:50],
@@ -2956,6 +3040,9 @@ class SecuritySentinelAgent(BaseAgent):
             ),
             "line_number": line_start,
             "end_line": line_end,
+            "column_start": column_start if column_start >= 0 else None,
+            "column_end": column_end if column_end >= 0 else None,
+            "source_anchor": source_anchor,
             "evidence": evidence,
             "exploit_scenario": str(raw.get("exploit_scenario") or "")[:1_000],
             "fix_suggestion": str(raw.get("fix_suggestion") or "")[:1_000],
@@ -3033,15 +3120,13 @@ class SecuritySentinelAgent(BaseAgent):
 
     def _compute_risk_score(self, findings: List[dict]) -> int:
         counts = self._severity_counts(findings)
-        deduct = sum(_SEVERITY_DEDUCT.get(k, 0) * v for k, v in counts.items())
-        return max(0, min(100, 100 - deduct))
+        return int(compute_score_breakdown(counts)["score"])
 
     def _severity_counts(self, findings: List[dict]) -> dict:
         out = {"严重": 0, "高": 0, "中": 0, "低": 0}
         for f in findings:
-            sev = f.get("severity", "中")
-            if sev in out:
-                out[sev] += 1
+            sev = normalize_severity(f.get("severity"))
+            out[sev] += 1
         return out
 
     def _compute_compliance(self, findings: List[dict]) -> dict:
@@ -3076,28 +3161,220 @@ class SecuritySentinelAgent(BaseAgent):
     # ============ v3.3 全链路: 对抗复检 / 去重 / 攻击面 ============
 
     def _dedup_findings(self, findings: List[dict]) -> List[dict]:
-        """按 (文件, 行号归组, 类别) 去重,合并多来源重复报告(压误报第一步)"""
-        seen: dict[tuple, dict] = {}
-        order: List[tuple] = []
-        for f in findings:
-            if not isinstance(f, dict):
-                continue
-            path = str(f.get("file_path") or "")
-            line = self._coerce_int(f.get("line_number"), 0)
-            bucket = line // 4
-            cat = str(f.get("category") or f.get("title") or "")[:12]
-            key = (path, bucket, cat)
-            if key in seen:
-                cur = seen[key]
-                if (float(f.get("confidence", 0) or 0),
-                        _SEVERITY_DEDUCT.get(f.get("severity", "中"), 3)) > \
-                   (float(cur.get("confidence", 0) or 0),
-                        _SEVERITY_DEDUCT.get(cur.get("severity", "中"), 3)):
-                    seen[key] = f
+        """按可解释的源码身份去重，并完整保留多 Agent 来源。
+
+        行号只用于处理模型轻微漂移，不能单独作为身份。不同 CWE、不同
+        非空代码证据或不同源码锚点始终保持分离，避免相邻 sink 被吞掉。
+        """
+        candidates = [dict(item) for item in findings if isinstance(item, dict)]
+        candidates.sort(key=self._finding_sort_key)
+        clusters: List[List[dict]] = []
+        for candidate in candidates:
+            eligible: List[tuple[float, List[dict]]] = []
+            for cluster in clusters:
+                scores = [self._finding_match_score(member, candidate) for member in cluster]
+                if scores and all(score >= 1.0 for score in scores):
+                    eligible.append((min(scores), cluster))
+            if eligible:
+                # 完全连接条件下最多只有一个合理目标；分数相同时按已有簇的
+                # 稳定首项选择，避免输入顺序影响结果。
+                eligible.sort(key=lambda item: (-item[0], self._finding_sort_key(item[1][0])))
+                eligible[0][1].append(candidate)
             else:
-                seen[key] = f
-                order.append(key)
-        return [seen[k] for k in order]
+                clusters.append([candidate])
+        merged = [self._merge_finding_cluster(cluster) for cluster in clusters]
+        merged.sort(key=self._finding_sort_key)
+        return merged
+
+    @staticmethod
+    def _normalized_finding_text(value: object) -> str:
+        return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+    @classmethod
+    def _normalized_finding_cwe(cls, value: object) -> str:
+        text = str(value or "").strip().upper()
+        if not text:
+            return ""
+        match = re.search(r"(?:CWE-?)?(\d+)", text)
+        return f"CWE-{match.group(1)}" if match else text[:64]
+
+    def _finding_sort_key(self, finding: dict) -> tuple:
+        try:
+            confidence = float(finding.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return (
+            self._normalized_finding_text(finding.get("file_path")),
+            self._coerce_int(finding.get("line_number"), 0),
+            self._normalized_finding_cwe(finding.get("cwe")),
+            self._normalized_finding_text(finding.get("source_anchor")),
+            self._normalized_finding_text(finding.get("evidence")),
+            self._normalized_finding_text(finding.get("category")),
+            self._normalized_finding_text(finding.get("title")),
+            -_SEVERITY_DEDUCT.get(str(finding.get("severity") or "中"), 3),
+            -confidence,
+            self._normalized_finding_text(finding.get("exploit_scenario")),
+        )
+
+    def _finding_match_score(self, left: dict, right: dict) -> float:
+        left_path = self._normalized_finding_text(left.get("file_path"))
+        right_path = self._normalized_finding_text(right.get("file_path"))
+        if left_path != right_path:
+            return -1.0
+        left_cwe = self._normalized_finding_cwe(left.get("cwe"))
+        right_cwe = self._normalized_finding_cwe(right.get("cwe"))
+        if left_cwe and right_cwe and left_cwe != right_cwe:
+            return -1.0
+        left_anchor = self._normalized_finding_text(left.get("source_anchor"))
+        right_anchor = self._normalized_finding_text(right.get("source_anchor"))
+        if left_anchor or right_anchor:
+            return 5.0 if left_anchor and left_anchor == right_anchor else -1.0
+
+        left_evidence = self._normalized_finding_text(left.get("evidence"))
+        right_evidence = self._normalized_finding_text(right.get("evidence"))
+        if left_evidence and right_evidence:
+            if left_evidence == right_evidence:
+                evidence_score = 4.0
+            else:
+                shorter, longer = sorted((left_evidence, right_evidence), key=len)
+                if len(shorter) < 10 or shorter not in longer:
+                    return -1.0
+                evidence_score = 3.0
+        elif left_evidence or right_evidence:
+            # 有证据的一方不能和无证据的独立报告仅凭行号合并；否则会
+            # 把两个不同 sink 的“文件级”模型结果错误吸收。
+            return -1.0
+        else:
+            evidence_score = 1.0
+
+        left_line = self._coerce_int(left.get("line_number"), 0)
+        right_line = self._coerce_int(right.get("line_number"), 0)
+        if left_line and right_line and abs(left_line - right_line) > _FINDING_LINE_PROXIMITY:
+            return -1.0
+        if left_line != right_line and (not left_line or not right_line):
+            return -1.0
+        if left_evidence and right_evidence:
+            return evidence_score
+
+        left_identity = self._normalized_finding_text(
+            left.get("category") or left.get("title")
+        )
+        right_identity = self._normalized_finding_text(
+            right.get("category") or right.get("title")
+        )
+        return 2.0 if left_identity and left_identity == right_identity else -1.0
+
+    def _merge_finding_cluster(self, cluster: List[dict]) -> dict:
+        def quality(item: dict) -> tuple:
+            try:
+                confidence = float(item.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            return (
+                _SEVERITY_DEDUCT.get(str(item.get("severity") or "中"), 3),
+                confidence,
+                sum(len(str(item.get(key) or "")) for key in (
+                    "title", "description", "evidence", "exploit_scenario", "fix_suggestion",
+                )),
+                tuple(reversed(self._finding_sort_key(item))),
+            )
+
+        canonical = max(cluster, key=quality)
+        merged = dict(canonical)
+        lines = [self._coerce_int(item.get("line_number"), 0) for item in cluster]
+        lines = [line for line in lines if line > 0]
+        if lines:
+            merged["line_number"] = min(lines)
+            end_lines = [self._coerce_int(item.get("end_line"), 0) for item in cluster]
+            end_lines = [line for line in end_lines if line > 0]
+            merged["end_line"] = max(end_lines or lines)
+            merged["lines"] = (
+                f"L{merged['line_number']}-L{merged['end_line']}"
+                if merged["end_line"] != merged["line_number"]
+                else f"L{merged['line_number']}"
+            )
+
+        details: List[dict] = []
+        seen_details: set[str] = set()
+        for item in cluster:
+            raw_details = item.get("source_details")
+            if not isinstance(raw_details, list) or not raw_details:
+                raw_details = [{
+                    "source": str(item.get("source") or "llm"),
+                    "confidence": item.get("confidence", 0.0),
+                    "evidence": str(item.get("evidence") or "")[:2000],
+                    "line_number": self._coerce_int(item.get("line_number"), 0),
+                    "title": str(item.get("title") or "")[:200],
+                    **({"source_anchor": item.get("source_anchor")}
+                       if item.get("source_anchor") else {}),
+                }]
+            for detail in raw_details:
+                if not isinstance(detail, dict):
+                    continue
+                normalized = {
+                    "source": str(detail.get("source") or item.get("source") or "llm")[:80],
+                    "confidence": max(0.0, min(1.0, self._safe_float(
+                        detail.get("confidence"), item.get("confidence", 0.0)
+                    ))),
+                    "evidence": str(detail.get("evidence") or "")[:2000],
+                    "line_number": self._coerce_int(
+                        detail.get("line_number"), self._coerce_int(item.get("line_number"), 0)
+                    ),
+                    "title": str(detail.get("title") or item.get("title") or "")[:200],
+                }
+                if detail.get("source_anchor") or item.get("source_anchor"):
+                    normalized["source_anchor"] = str(
+                        detail.get("source_anchor") or item.get("source_anchor") or ""
+                    )[:300]
+                marker = json_lib.dumps(normalized, ensure_ascii=False, sort_keys=True)
+                if marker not in seen_details:
+                    seen_details.add(marker)
+                    details.append(normalized)
+        details.sort(key=lambda item: (
+            str(item.get("source") or ""),
+            int(item.get("line_number") or 0),
+            str(item.get("source_anchor") or ""),
+            str(item.get("evidence") or ""),
+            str(item.get("title") or ""),
+        ))
+        merged["source_details"] = details
+        merged["confirmation_count"] = max(
+            len(details),
+            len(cluster),
+            *(self._coerce_int(item.get("confirmation_count"), 1) for item in cluster),
+        )
+        merged["sources"] = sorted({
+            str(item.get("source") or "llm") for item in details
+        })
+        families = {
+            "static" if str(item).lower().startswith("static") else
+            "regex" if str(item).lower().startswith("regex") else "llm"
+            for item in merged["sources"]
+        }
+        if len(families) > 1 or "static" in families and "llm" in families or "regex" in families and "llm" in families:
+            merged["source"] = "hybrid"
+        elif families == {"regex"}:
+            merged["source"] = "regex"
+        elif families == {"static"}:
+            merged["source"] = "static"
+        else:
+            merged["source"] = str(canonical.get("source") or "llm")
+        merged["static_rule_hits"] = sum(
+            max(0, self._coerce_int(item.get("static_rule_hits"), 0))
+            for item in cluster
+            if str(item.get("source") or "").lower().startswith(("static", "regex"))
+        )
+        return merged
+
+    @staticmethod
+    def _safe_float(value: object, fallback: object = 0.0) -> float:
+        try:
+            return float(value if value is not None else fallback)
+        except (TypeError, ValueError):
+            try:
+                return float(fallback)
+            except (TypeError, ValueError):
+                return 0.0
 
     def _adversarial_verify(self, findings: List[dict],
                             ctx: Optional[AgentContext],
@@ -3153,15 +3430,30 @@ class SecuritySentinelAgent(BaseAgent):
                     except (TypeError, ValueError):
                         continue
             for i, f in enumerate(targets, 1):
-                reviewed += 1
                 verdict = verdict_by_index.get(i, "")
                 f["verification"] = verdict or "unreviewed"
+                if verdict not in {"confirmed", "plausible", "refuted"}:
+                    # 只有模型明确给出可识别结论，才算完成复核；空数组、
+                    # 非法 index 和未知 verdict 均必须留在未复核状态。
+                    continue
+                reviewed += 1
                 if verdict == "confirmed":
                     confirmed += 1
                     f["confidence"] = min(1.0, float(f.get("confidence", 0.8) or 0) + 0.15)
                 elif verdict == "refuted":
                     refuted += 1
                     f["confidence"] = min(float(f.get("confidence", 0.8) or 0), 0.3)
+                reason = next(
+                    (
+                        str(item.get("reason") or "")[:1000]
+                        for item in reviews
+                        if isinstance(item, dict)
+                        and self._coerce_int(item.get("index"), -1) == i
+                    ),
+                    "",
+                )
+                if reason:
+                    f["verification_reason"] = reason
         else:
             logger.warning("[security_sentinel] 对抗复检 LLM 调用失败,跳过错杀")
         return {"confirmed": confirmed, "refuted": refuted, "reviewed": reviewed}
@@ -3244,6 +3536,9 @@ def _normalized_dict_to_finding(normalized: dict) -> "Finding":
         references=list(normalized.get("references") or []),
         confidence=float(normalized.get("confidence") or 0.8),
         source="llm",
+        source_anchor=str(normalized.get("source_anchor") or ""),
+        column_start=normalized.get("column_start"),
+        column_end=normalized.get("column_end"),
     )
 
 

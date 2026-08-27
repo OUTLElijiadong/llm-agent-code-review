@@ -28,6 +28,8 @@ class ReviewTask(Base, IdMixin, TimestampMixin):
     medium_issues = Column(Integer, nullable=False, default=0)
     low_issues = Column(Integer, nullable=False, default=0)
     score = Column(Integer, nullable=False, default=0, comment="综合评分0-100")
+    score_version = Column(String(32), nullable=True, comment="评分算法版本")
+    score_breakdown = Column(JSON, nullable=True, comment="评分权重、计数与逐级扣分明细")
     summary = Column(Text, comment="AI总体评价")
     rules_snapshot = Column(JSON, comment="本次启用的规则快照")
     model_name = Column(String(50))

@@ -271,6 +271,134 @@ def test_scan_file_llm_finding_integrates_offset(monkeypatch):
     assert findings[0]["line_number"] == 2
 
 
+def test_dedup_findings_keeps_distinct_cwe_and_sink_evidence():
+    """项目级去重不能用行号桶吞掉相邻的不同接收点。"""
+    agent = SecuritySentinelAgent()
+    findings = [
+        {
+            "file_path": "app.py",
+            "line_number": 3,
+            "category": "注入",
+            "title": "SQL 注入",
+            "cwe": "CWE-89",
+            "evidence": "cursor.execute(sql)",
+            "severity": "高",
+            "confidence": 0.9,
+            "source": "llm:sql",
+        },
+        {
+            "file_path": "app.py",
+            "line_number": 4,
+            "category": "注入",
+            "title": "命令注入",
+            "cwe": "CWE-78",
+            "evidence": "os.system(cmd)",
+            "severity": "严重",
+            "confidence": 0.9,
+            "source": "llm:command",
+        },
+        {
+            "file_path": "app.py",
+            "line_number": 7,
+            "category": "注入",
+            "title": "独立 SQL 接收点",
+            "cwe": "CWE-89",
+            "evidence": "cursor.execute(other_sql)",
+            "severity": "高",
+            "confidence": 0.9,
+            "source": "llm:other",
+        },
+    ]
+
+    result = agent._dedup_findings(findings)
+
+    assert len(result) == 3
+    assert {(item["cwe"], item["evidence"]) for item in result} == {
+        ("CWE-89", "cursor.execute(sql)"),
+        ("CWE-78", "os.system(cmd)"),
+        ("CWE-89", "cursor.execute(other_sql)"),
+    }
+
+
+def test_dedup_findings_is_order_independent_and_preserves_provenance():
+    agent = SecuritySentinelAgent()
+    first = {
+        "file_path": "app.py",
+        "line_number": 12,
+        "category": "注入",
+        "title": "命令注入",
+        "cwe": "CWE-78",
+        "evidence": "subprocess.check_output(cmd, shell=True)",
+        "severity": "严重",
+        "confidence": 0.8,
+        "source": "llm:general",
+    }
+    second = {**first, "line_number": 13, "confidence": 0.95, "source": "static"}
+
+    forward = agent._dedup_findings([first, second])
+    reverse = agent._dedup_findings([second, first])
+
+    assert forward == reverse
+    assert len(forward) == 1
+    assert forward[0]["confirmation_count"] == 2
+    assert {item["source"] for item in forward[0]["source_details"]} == {
+        "llm:general",
+        "static",
+    }
+
+
+def test_dedup_findings_preserves_declared_confirmation_count():
+    agent = SecuritySentinelAgent()
+    finding = {
+        "file_path": "app.py",
+        "line_number": 12,
+        "category": "注入",
+        "title": "命令注入",
+        "cwe": "CWE-78",
+        "evidence": "subprocess.check_output(cmd, shell=True)",
+        "severity": "严重",
+        "confidence": 0.9,
+        "source": "llm:consensus",
+        "confirmation_count": 4,
+        "source_details": [{
+            "source": "llm:consensus",
+            "confidence": 0.9,
+            "evidence": "subprocess.check_output(cmd, shell=True)",
+            "line_number": 12,
+            "title": "命令注入",
+        }],
+    }
+
+    merged = agent._dedup_findings([finding])
+
+    assert merged[0]["confirmation_count"] == 4
+
+
+def test_adversarial_verify_counts_only_explicit_verdicts(monkeypatch):
+    agent = SecuritySentinelAgent()
+    findings = [{
+        "severity": "严重",
+        "category": "注入",
+        "file_path": "app.py",
+        "lines": "L1",
+        "evidence": "os.system(cmd)",
+        "exploit_scenario": "外部输入进入 shell",
+        "confidence": 0.9,
+    }]
+    monkeypatch.setattr(
+        agent,
+        "call_json",
+        lambda *_args, **_kwargs: AgentResult(success=True, data={"reviews": []}),
+    )
+
+    result = agent._adversarial_verify(findings, ctx=None)
+
+    assert result["reviewed"] == 0
+    assert result["confirmed"] == 0
+    assert result["refuted"] == 0
+    assert findings[0]["verification"] == "unreviewed"
+
+
 def test_scan_file_invalid_depth_returns_error():
     agent = SecuritySentinelAgent()
     db = MagicMock()
@@ -1515,10 +1643,9 @@ def test_scan_project_full_does_not_truncate_above_legacy_top_n(monkeypatch):
     assert compliance["truncated"] is False
 
 
-def test_scan_project_bounds_retained_findings_but_preserves_total_counts(monkeypatch):
+def test_scan_project_bounds_raw_findings_then_scores_deduplicated_results(monkeypatch):
     agent = SecuritySentinelAgent()
-    # 本用例断言「保留条数有上限但总计数保留」的原始边界行为,
-    # 需关闭 v3.3 的去重+对抗复检(它会合并重复 finding)。
+    # 关闭的是昂贵的模型复检，不得连带关闭确定性去重。
     agent._verify_enabled = False
     db = MagicMock()
     project = _make_project()
@@ -1548,13 +1675,18 @@ def test_scan_project_bounds_retained_findings_but_preserves_total_counts(monkey
     result = agent.scan_project(project.id, trace_dataflow=False, scan_mode="static_full")
 
     assert result.success is True
-    assert len(result.data["findings"]) == 2_000
+    assert len(result.data["findings"]) == 1
     compliance = result.data["compliance"]
-    assert compliance["finding_total_count"] == 3_000
-    assert compliance["retained_finding_count"] == 2_000
+    assert compliance["raw_candidate_count"] == 3_000
+    assert compliance["deduplicated_finding_count"] == 1
+    assert compliance["finding_total_count"] == 1
+    assert compliance["retained_finding_count"] == 1
+    assert compliance["scored_finding_count"] == 1
     assert compliance["findings_truncated"] is True
-    assert compliance["finding_severity_counts"]["高"] == 3_000
+    assert compliance["raw_finding_severity_counts"]["高"] == 3_000
+    assert compliance["finding_severity_counts"]["高"] == 1
     assert compliance["owasp_coverage"] == ["A03"]
+    assert result.data["risk_score"] == 92
 
 
 def test_scan_project_marks_secondary_graph_response_truncation(monkeypatch):

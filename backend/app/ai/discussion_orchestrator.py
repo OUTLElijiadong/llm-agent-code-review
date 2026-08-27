@@ -28,7 +28,7 @@ import asyncio
 import json
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -46,12 +46,15 @@ from app.agents.metagpt import build_discussion_environment, make_discussion_mes
 from app.agents.metagpt.environment import Environment
 from app.ai.deepseek_agent import DeepSeekAgent
 from app.ai.multi_agent import ReviewAgentProfile
+from app.ai.result_parser import Issue, normalize_severity
 from app.ai.result_parser import parse as parse_issues
-from app.ai.scoring import compute_score
+from app.ai.scoring import SCORING_VERSION, compute_score_breakdown
+from app.ai.static_analyzer import scan as static_scan
 from app.core.database import SessionLocal
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
+from app.services.issue_merger import merge_findings_and_issues
 
 # 讨论画像 code → 注册中心 BaseAgent code(与 review_service 保持一致),
 # 用于向 Agent 办公室广播事件时点亮正确的工位卡。
@@ -923,8 +926,15 @@ def _finalize_review(
                 logger.debug(f"[Discussion] 补写 AiCallLog 失败: {e}")
 
         # 2) 抽取结构化问题
-        issues = _extract_issues(all_turns, code, language, file_name, agent, db,
-                                 task_id, user_id, file_id)
+        extracted_issues = _extract_issues(all_turns, code, language, file_name, agent, db,
+                                           task_id, user_id, file_id)
+        issues = _normalize_discussion_issues(
+            extracted_issues,
+            code=code,
+            language=language,
+            file_name=file_name,
+            file_id=file_id,
+        )
         issue_rows: list[ReviewIssue] = []
         for it in issues:
             issue_rows.append(ReviewIssue(
@@ -934,12 +944,29 @@ def _finalize_review(
                 line_number=it.line_number or 0,
                 end_line=it.end_line,
                 issue_type=it.issue_type,
-                severity=it.severity,
+                severity=normalize_severity(it.severity),
                 title=it.title or "",
                 description=it.description or "",
                 suggestion=it.suggestion or "",
                 fixed_code=it.fixed_code or "",
                 status="unfixed",
+                owasp=it.owasp,
+                cwe=it.cwe,
+                evidence=it.evidence,
+                exploit_scenario=it.exploit_scenario,
+                references_json=it.references if it.references else None,
+                confidence=it.confidence,
+                source=it.source,
+                source_details=it.source_details if it.source_details else None,
+                confirmation_count=it.confirmation_count,
+                finding_fingerprint=it.finding_fingerprint or None,
+                cvss_score=it.cvss_score,
+                cvss_vector=it.cvss_vector,
+                cvss_version=it.cvss_version,
+                cvss_source=it.cvss_source,
+                compliance_mapping=it.compliance_mapping if it.compliance_mapping else None,
+                remediation=it.remediation,
+                static_rule_hits=it.static_rule_hits,
             ))
         if issue_rows:
             db.add_all(issue_rows)
@@ -948,7 +975,8 @@ def _finalize_review(
         # 3) 统计 + 收尾任务
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
         for r in issue_rows:
-            sev_count[r.severity] = sev_count.get(r.severity, 0) + 1
+            severity = normalize_severity(r.severity)
+            sev_count[severity] += 1
 
         # 共识小结作为任务 summary(由编排器直接传入主持人汇总文本)
         task = db.get(ReviewTask, task_id)
@@ -959,7 +987,10 @@ def _finalize_review(
             task.high_issues = sev_count["高"]
             task.medium_issues = sev_count["中"]
             task.low_issues = sev_count["低"]
-            task.score = compute_score(sev_count)
+            score_breakdown = compute_score_breakdown(sev_count)
+            task.score = int(score_breakdown["score"])
+            task.score_version = SCORING_VERSION
+            task.score_breakdown = score_breakdown
             task.summary = (consensus or "圆桌讨论已完成。")[:2000]
             task.status = "success"  # 终止也算成功产出报告
             task.end_time = datetime.now(timezone.utc)
@@ -1006,8 +1037,14 @@ def _extract_issues(all_turns, code, language, file_name, agent, db,
         "严格输出 JSON 对象,格式: "
         '{"issues":[{"issue_type":"安全漏洞|潜在Bug|性能问题|代码规范|命名规范|'
         '异常处理|可维护性|注释完整性|其他","severity":"严重|高|中|低",'
-        '"title":"简短标题","line_number":行号或0,"description":"问题说明",'
-        '"suggestion":"修复建议"}]}。不要输出 JSON 以外的任何内容。'
+        '"title":"简短标题","line_number":行号或0,"end_line":结束行号或null,'
+        '"description":"问题说明","suggestion":"修复建议","fixed_code":"修复示例或空",'
+        '"owasp":"OWASP编号或空","cwe":"CWE编号或空","evidence":"直接来自代码的证据行",'
+        '"exploit_scenario":"攻击场景或空","references":[],"confidence":0.9,'
+        '"cvss_score":9.8或null,"cvss_vector":"完整CVSS v3.1基础向量或空",'
+        '"remediation":"详细修复步骤或空"}]}。'
+        '有合法向量时必须透传;缺失时保持 null/空,不得按严重度猜分。'
+        '不要输出 JSON 以外的任何内容。'
     )
     user_prompt = (
         f"## 审查文件: {file_name}({language})\n```{language}\n{code}\n```\n\n"
@@ -1029,3 +1066,35 @@ def _extract_issues(all_turns, code, language, file_name, agent, db,
     except Exception as e:
         logger.warning(f"[Discussion] 抽取问题失败: {e}")
         return []
+
+
+def _normalize_discussion_issues(
+    extracted: list[Issue],
+    *,
+    code: str,
+    language: str,
+    file_name: str,
+    file_id: int,
+) -> list[Issue]:
+    """Send roundtable and static results through the canonical N-way merger."""
+    roundtable_issues = [
+        replace(
+            issue,
+            severity=normalize_severity(issue.severity),
+            source="llm:roundtable",
+            static_rule_hits=0,
+            finding_fingerprint="",
+        )
+        for issue in extracted
+    ]
+    static_findings = static_scan(
+        content=code,
+        file_name=file_name,
+        language=language,
+    )
+    return merge_findings_and_issues(
+        static_findings,
+        roundtable_issues,
+        file_id,
+        code=code,
+    )

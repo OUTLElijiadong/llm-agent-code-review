@@ -1,4 +1,4 @@
-import { get, post, put, del, download } from './http'
+import http, { get, post, put, del, download, type Resp } from './http'
 import type { Page } from '@/types/common'
 import type { ProjectOut, ProjectDetailOut, ProjectSourceArchiveOut } from '@/types/project'
 import type { SecurityScanOut } from '@/types/security'
@@ -48,14 +48,69 @@ export function deleteProject(projectId: number): Promise<void> {
   return del<void>(`/projects/${projectId}`)
 }
 
-/** 导入公开 HTTPS 源码归档。 */
-export function importRemoteProject(data: {
+export interface RemoteProjectImportInput {
   url: string
   project_name: string
   description?: string
   language?: string
   audit_mode?: boolean
-}): Promise<{ id: number; file_count: number }> {
+}
+
+export type RemoteProjectImportStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+
+export interface RemoteProjectImportTask {
+  task_id: string
+  status: RemoteProjectImportStatus
+  attempt_count: number
+  max_attempts: number
+  project_id: number | null
+  result: {
+    id?: number | string
+    file_count?: number
+    progress?: {
+      phase?: string
+      received_bytes?: number
+      total_bytes?: number | null
+      [key: string]: unknown
+    }
+    [key: string]: unknown
+  }
+  error: { code: string; message: string } | null
+  next_attempt_at: string | null
+  started_at: string | null
+  completed_at: string | null
+  create_time: string
+  update_time: string
+}
+
+/**
+ * 创建可恢复的远程导入任务。
+ *
+ * 这里不能使用通用 post helper,因为导入接口依赖请求级
+ * Idempotency-Key;直接复用同一个 Axios 实例仍保留鉴权和错误拦截器。
+ */
+export async function queueRemoteProjectImport(
+  data: RemoteProjectImportInput,
+  idempotencyKey: string,
+): Promise<RemoteProjectImportTask> {
+  const response = await http.post<Resp<RemoteProjectImportTask>>(
+    '/projects/remote-imports',
+    data,
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  )
+  return response.data.data as RemoteProjectImportTask
+}
+
+/** 查询当前用户创建的远程导入任务。 */
+export function getRemoteProjectImport(taskId: string): Promise<RemoteProjectImportTask> {
+  return get<RemoteProjectImportTask>(`/projects/remote-imports/${encodeURIComponent(taskId)}`)
+}
+
+/**
+ * 兼容旧调用者的同步导入接口;项目列表等第一方页面应使用异步任务接口。
+ * @deprecated 请使用 queueRemoteProjectImport。
+ */
+export function importRemoteProject(data: RemoteProjectImportInput): Promise<{ id: number; file_count: number }> {
   return post<{ id: number; file_count: number }>('/projects/import-remote', data)
 }
 

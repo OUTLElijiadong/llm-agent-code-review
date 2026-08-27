@@ -10,10 +10,19 @@
         <el-button @click="onPrint">
           <el-icon><Printer /></el-icon>打印
         </el-button>
-        <el-button :loading="exportingWord" @click="downloadWord">
+        <el-button
+          :loading="exportingWord"
+          data-testid="report-export-word"
+          @click="downloadWord"
+        >
           <el-icon><Document /></el-icon>导出 Word
         </el-button>
-        <el-button type="primary" :loading="exportingPdf" @click="downloadPdf">
+        <el-button
+          type="primary"
+          :loading="exportingPdf"
+          data-testid="report-export-pdf"
+          @click="downloadPdf"
+        >
           <el-icon><Download /></el-icon>导出 PDF
         </el-button>
       </div>
@@ -115,7 +124,7 @@
                 <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="6"/>
                 <circle
                   cx="60" cy="60" r="52" fill="none"
-                  :stroke="scoreFlatColor(animatedScore)" stroke-width="6"
+                  :stroke="scoreFlatColor(score)" stroke-width="6"
                   stroke-linecap="round"
                   :stroke-dasharray="`${animatedScore * 3.26} 326`"
                   transform="rotate(-90 60 60)"
@@ -126,7 +135,11 @@
                 <div class="ring-out font-mono">/ 100</div>
               </div>
             </div>
-            <div class="risk-tag" :style="{ color: scoreFlatColor(animatedScore), borderColor: scoreFlatColor(animatedScore) }">
+            <div
+              class="risk-tag"
+              data-testid="report-risk-level"
+              :style="{ color: scoreFlatColor(score), borderColor: scoreFlatColor(score) }"
+            >
               {{ riskLevel }}
             </div>
           </div>
@@ -328,7 +341,7 @@
                 <span v-if="it.file_name" class="it-file font-mono">{{ it.file_name }}:{{ it.line_number ?? '?' }}</span>
               </td>
               <td class="font-mono col-num" :style="{ color: cvssSeverityColor(it.cvss_score), fontWeight: 600 }">
-                {{ it.cvss_score?.toFixed(1) ?? '-' }}
+                {{ it.cvss_score?.toFixed(1) ?? '未评分' }}
               </td>
               <td class="font-mono col-num">{{ it.cwe || it.issue_type || '-' }}</td>
               <td class="col-num">
@@ -451,8 +464,6 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import {
   getReportDetail,
-  exportWord as apiExportWord,
-  exportPdf as apiExportPdf,
   generateReport as apiGenerateReport,
   previewReport as apiPreviewReport,
   exportReport as apiExportReport,
@@ -463,6 +474,7 @@ import { PRISM_SEVERITY_COLORS, PRISM_DIM_COLORS } from '@/components/chart/pris
 import { reviewTypeLabel } from '@/constants/reviewType'
 import { goBack } from '@/utils/navigation'
 import { renderMarkdown, stripMarkdown } from '@/utils/markdown'
+import { reviewRiskLevel, reviewScoreColor } from '@/utils/reviewScore'
 
 const route = useRoute()
 const router = useRouter()
@@ -508,7 +520,12 @@ const summaryText = computed(() => stripMarkdown((report.value?.summary as strin
 const summaryHtml = computed(() => renderMarkdown((report.value?.summary as string) ?? ''))
 
 const projectName = computed(() => (report.value?.project?.project_name as string) ?? '未命名项目')
-const taskName    = computed(() => (report.value?.task?.task_name as string) ?? `任务 #${taskId}`)
+const taskName = computed(() => {
+  const task = report.value?.task
+  const name = [task?.task_name, task?.name]
+    .find((value) => typeof value === 'string' && value.trim())
+  return typeof name === 'string' ? name : `任务 #${taskId}`
+})
 const reviewType  = computed(() => reviewTypeLabel(report.value?.task?.review_type as string))
 const language    = computed(() => (report.value?.project?.language as string) ?? '')
 const totalFiles  = computed(() => Number(report.value?.task?.total_files ?? 0))
@@ -518,7 +535,10 @@ const agentReleases = computed<Array<Record<string, unknown>>>(() => (
   (report.value?.task?.agent_releases as Array<Record<string, unknown>>) ?? []
 ))
 
-const score        = computed(() => Math.round(Number(stats.value.score ?? 0)))
+const score = computed(() => {
+  const value = Number(stats.value.score ?? 0)
+  return Number.isFinite(value) ? value : 0
+})
 const animatedScore = ref(0)
 
 function animateScore(target: number): void {
@@ -609,13 +629,7 @@ const radarOption = computed<EChartsOption>(() => ({
   color: PRISM_DIM_COLORS,
 }))
 
-const riskLevel = computed(() => {
-  if (animatedScore.value >= 90) return '优秀 · 可发布'
-  if (animatedScore.value >= 80) return '良好 · 关注潜在风险'
-  if (animatedScore.value >= 70) return '一般 · 建议修复'
-  if (animatedScore.value >= 60) return '及格 · 需重构'
-  return '风险 · 必须处理'
-})
+const riskLevel = computed(() => reviewRiskLevel(score.value))
 
 function formatDate(s?: string): string {
   if (!s) return '-'
@@ -630,10 +644,7 @@ function formatDuration(ms: number): string {
 }
 
 function scoreFlatColor(score: number): string {
-  if (score >= 85) return '#4FB87A'
-  if (score >= 70) return '#D9A857'
-  if (score >= 60) return '#E27C4A'
-  return '#DC4961'
+  return reviewScoreColor(score)
 }
 
 function ruleLabel(rule: Record<string, unknown>): string {
@@ -664,7 +675,7 @@ function downloadBlob(response: Blob, filename: string) {
 async function downloadWord() {
   exportingWord.value = true
   try {
-    const response = await apiExportWord(taskId)
+    const response = await apiExportReport(taskId, 'word', templateType.value)
     downloadBlob(response as unknown as Blob, `review_report_${taskId}.docx`)
     ElMessage.success('Word 报告导出成功')
   } catch {
@@ -677,7 +688,7 @@ async function downloadWord() {
 async function downloadPdf() {
   exportingPdf.value = true
   try {
-    const response = await apiExportPdf(taskId)
+    const response = await apiExportReport(taskId, 'pdf', templateType.value)
     downloadBlob(response as unknown as Blob, `review_report_${taskId}.pdf`)
     ElMessage.success('PDF 报告导出成功')
   } catch {
@@ -810,8 +821,8 @@ const hasV3Data = computed(() => {
  * @param score - CVSS 评分
  * @returns 严重度中文标签
  */
-function cvssSeverityLabel(score?: number): string {
-  if (typeof score !== 'number') return '-'
+function cvssSeverityLabel(score?: number | null): string {
+  if (typeof score !== 'number') return '未评分'
   if (score >= 9) return '危急'
   if (score >= 7) return '高'
   if (score >= 4) return '中'
@@ -823,7 +834,7 @@ function cvssSeverityLabel(score?: number): string {
  * @param score - CVSS 评分
  * @returns 颜色十六进制字符串
  */
-function cvssSeverityColor(score?: number): string {
+function cvssSeverityColor(score?: number | null): string {
   if (typeof score !== 'number') return '#909399'
   if (score >= 9) return '#DC4961'
   if (score >= 7) return '#E27C4A'

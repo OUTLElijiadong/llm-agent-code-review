@@ -11,6 +11,7 @@ from loguru import logger
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.agents.contracts import compose_system_prompt
+from app.ai.cvss import normalize_cvss
 from app.ai.prompt_builder import build_prompt
 from app.ai.result_parser import Issue
 from app.ai.result_parser import parse as parse_review_result
@@ -184,6 +185,10 @@ def _issue_to_finding(issue: Issue, line_offset: int = 0) -> Finding:
     # LLM 返回的是相对行号,需要加上 line_offset 换算为绝对行号
     abs_line = issue.line_number + line_offset if issue.line_number else 0
     abs_end = issue.end_line + line_offset if issue.end_line else None
+    cvss_score, cvss_vector, cvss_version, cvss_source = normalize_cvss(
+        issue.cvss_score,
+        issue.cvss_vector,
+    )
     return Finding(
         line_number=abs_line,
         end_line=abs_end,
@@ -200,4 +205,16 @@ def _issue_to_finding(issue: Issue, line_offset: int = 0) -> Finding:
         references=issue.references,
         confidence=issue.confidence,
         source="llm",
+        cvss_score=cvss_score,
+        cvss_vector=cvss_vector,
+        cvss_version=cvss_version,
+        cvss_source=cvss_source,
+        compliance_mapping=issue.compliance_mapping,
+        remediation=issue.remediation,
+        source_details=[dict(item) for item in issue.source_details if isinstance(item, dict)],
+        confirmation_count=max(1, int(issue.confirmation_count or 1)),
+        finding_fingerprint=issue.finding_fingerprint,
+        source_anchor=issue.source_anchor,
+        column_start=issue.column_start,
+        column_end=issue.column_end,
     )

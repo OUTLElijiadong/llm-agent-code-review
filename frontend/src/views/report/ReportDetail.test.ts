@@ -5,8 +5,6 @@ const route = vi.hoisted(() => ({ params: { id: '42' }, query: {} as Record<stri
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), back: vi.fn() }))
 const reportApi = vi.hoisted(() => ({
   getReportDetail: vi.fn(),
-  exportWord: vi.fn(),
-  exportPdf: vi.fn(),
   generateReport: vi.fn(),
   previewReport: vi.fn(),
   exportReport: vi.fn(),
@@ -70,6 +68,7 @@ function mountPage(): VueWrapper {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   route.query = {}
   reportApi.getReportDetail.mockResolvedValue({
     project: { project_name: '测试项目', language: 'typescript' },
@@ -80,6 +79,7 @@ beforeEach(() => {
   })
   reviewApi.getTaskIssues.mockResolvedValue({ items: [issue], total: 1 })
   reportApi.previewReport.mockResolvedValue('<!doctype html><html><body>report</body></html>')
+  reportApi.exportReport.mockResolvedValue(new Blob(['report']))
   Object.defineProperty(window.URL, 'createObjectURL', {
     configurable: true,
     value: vi.fn(() => 'blob:report-preview'),
@@ -87,6 +87,66 @@ beforeEach(() => {
   Object.defineProperty(window.URL, 'revokeObjectURL', {
     configurable: true,
     value: vi.fn(),
+  })
+})
+
+describe('ReportDetail 报告口径', () => {
+  it('兼容后端 task.name 字段并展示真实任务名', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '测试项目', language: 'typescript' },
+      task: { task_name: '  ', name: '后端真实任务名', review_type: 'security', total_files: 1 },
+      stats: { score: 80, total_issues: 0 },
+      files: [],
+      rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.cover-task').text()).toContain('后端真实任务名')
+    wrapper.unmount()
+  })
+
+  it('顶部 Word 和 PDF 按钮统一调用新导出接口并传递当前模板', async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="report-export-word"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="report-export-pdf"]').trigger('click')
+    await flushPromises()
+
+    expect(reportApi.exportReport).toHaveBeenNthCalledWith(1, 42, 'word', 'detailed')
+    expect(reportApi.exportReport).toHaveBeenNthCalledWith(2, 42, 'pdf', 'detailed')
+    expect(click).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('风险文案和颜色按最终分数计算，不受动画中间值影响', async () => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '测试项目', language: 'typescript' },
+      task: { name: '风险口径验证', review_type: 'security', total_files: 1 },
+      stats: { score: 60, total_issues: 0 },
+      files: [],
+      rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const risk = wrapper.find('[data-testid="report-risk-level"]')
+    expect(setupState(wrapper).animatedScore).toBe(0)
+    expect(risk.text()).toBe('中风险')
+    expect(risk.attributes('style')).toContain('rgb(217, 168, 87)')
+    wrapper.unmount()
+  })
+
+  it('CVSS 缺失时显示未评分', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(setupState(wrapper).cvssSeverityLabel(undefined)).toBe('未评分')
+    wrapper.unmount()
   })
 })
 

@@ -28,7 +28,12 @@ from app.services.report_exporter import (
     export_to_json,
     load_builtin_template,
 )
-from app.services.report_pdf_exporter import export_to_pdf
+from app.services.report_pdf_exporter import (
+    _build_issue_section,
+    _build_styles,
+    _ensure_chinese_font,
+    export_to_pdf,
+)
 from app.services.report_word_exporter import export_to_word
 
 # ============ 测试数据工厂 ============
@@ -99,8 +104,16 @@ def _make_issue(**overrides: Any) -> Dict[str, Any]:
         "references_json": ["https://owasp.org/www-community/attacks/SQL_Injection"],
         "confidence": 0.95,
         "source": "llm",
+        "source_details": [
+            {"source": "llm:reviewer", "confidence": 0.95},
+            {"source": "static:security", "confidence": 1.0},
+        ],
+        "confirmation_count": 2,
+        "finding_fingerprint": "finding-fingerprint-001",
         "cvss_score": 8.6,
         "cvss_vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "cvss_version": "3.1",
+        "cvss_source": "vector",
         "compliance_mapping": {
             "iso27001": ["A.8.25", "A.8.28"],
             "gdpr": ["Art.32"],
@@ -109,6 +122,9 @@ def _make_issue(**overrides: Any) -> Dict[str, Any]:
         },
         "remediation": "1. 改用参数化查询;2. 增加输入校验;3. 最小化数据库账号权限。",
         "static_rule_hits": 2,
+        "handled_by": None,
+        "handled_at": None,
+        "update_time": "2026-06-25T10:06:00",
     }
     base.update(overrides)
     return base
@@ -203,8 +219,84 @@ def test_export_to_dict_statistics_contains_required_fields():
     result = export_to_dict(_make_task(), _make_mixed_issues(), "摘要", 70)
     stats = result["statistics"]
     for key in ("total_issues", "fixed_count", "severity_count", "type_count",
-                "cwe_count", "compliance_summary", "top_vulnerabilities"):
+                "cwe_count", "compliance_summary", "top_vulnerabilities",
+                "score_version", "score_breakdown", "risk_level"):
         assert key in stats, f"statistics 缺少字段 {key}"
+
+
+def test_nonempty_report_uses_final_issues_as_only_score_source():
+    """非空报告必须忽略任务快照与传入旧分数，按最终问题集重算。"""
+    task = _make_task(
+        score=5,
+        total_issues=99,
+        severe_issues=0,
+        high_issues=99,
+        score_version="legacy-v0",
+        score_breakdown={"score": 5, "risk_level": "低风险"},
+    )
+    issues = [
+        _make_issue(id=1, severity="严重"),
+        _make_issue(id=2, severity="高"),
+        _make_issue(id=3, severity="中"),
+        _make_issue(id=4, severity="低"),
+    ]
+
+    result = export_to_dict(task, issues, "摘要", 1)
+
+    assert result["score"] == 73
+    assert result["task_info"]["score"] == 73
+    assert result["task_info"]["total_issues"] == 4
+    assert result["statistics"]["severity_count"] == {
+        "严重": 1,
+        "高": 1,
+        "中": 1,
+        "低": 1,
+        "其他": 0,
+    }
+    assert result["statistics"]["score_breakdown"] == {
+        "version": "severity-deduction-v1",
+        "base_score": 100,
+        "weights": {"严重": 15, "高": 8, "中": 3, "低": 1},
+        "counts": {"严重": 1, "高": 1, "中": 1, "低": 1},
+        "deductions": {"严重": 15, "高": 8, "中": 3, "低": 1},
+        "total_deduction": 27,
+        "raw_score": 73,
+        "score": 73,
+        "risk_level": "中风险",
+        "score_source": "review_issues",
+    }
+
+
+@pytest.mark.parametrize("explicit_score", [100, 72])
+def test_empty_report_preserves_explicit_historical_score(explicit_score):
+    """空问题历史报告保留显式评分，同时保持统一权重与风险说明。"""
+    result = export_to_dict(
+        _make_task(score=explicit_score, total_issues=0),
+        [],
+        "",
+        explicit_score,
+    )
+
+    breakdown = result["statistics"]["score_breakdown"]
+    assert result["score"] == explicit_score
+    assert result["task_info"]["score"] == explicit_score
+    assert breakdown["score"] == explicit_score
+    assert breakdown["weights"] == {"严重": 15, "高": 8, "中": 3, "低": 1}
+    assert breakdown["score_source"] == "task_explicit_empty_report"
+    assert breakdown["risk_level"] == ("低风险" if explicit_score == 100 else "中风险")
+
+
+def test_task_name_and_name_are_bidirectionally_compatible():
+    """新旧报告调用方使用 name 或 task_name 都得到两个稳定别名。"""
+    result = export_to_dict(
+        {"id": 1, "name": "旧字段任务", "score": 100},
+        [],
+        "",
+        100,
+    )
+
+    assert result["task_info"]["name"] == "旧字段任务"
+    assert result["task_info"]["task_name"] == "旧字段任务"
 
 
 # ============ HTML 导出(3 套模板) ============
@@ -216,7 +308,7 @@ def test_export_to_html_simple_renders_with_key_content():
     tpl = load_builtin_template("simple")
     html = export_to_html(task, issues, "总体评价", 75, tpl)
     assert "简洁任务" in html
-    assert "75" in html
+    assert "89" in html
     assert "问题A" in html
     assert "问题B" in html
     assert "<table" in html
@@ -233,6 +325,28 @@ def test_export_to_html_detailed_renders_with_key_content():
     assert "参数化查询" in html  # suggestion
     assert "<pre>" in html and "<code>" in html  # 修复代码
     assert "SQL注入" in html  # 标题(已覆盖)
+
+
+def test_all_html_templates_render_canonical_score_breakdown():
+    """三套 HTML 报告都必须可读地解释 15/8/3/1 评分。"""
+    issues = [
+        _make_issue(id=1, severity="严重"),
+        _make_issue(id=2, severity="高"),
+    ]
+
+    for template_type in ("simple", "detailed", "compliance"):
+        html = export_to_html(
+            _make_task(score=1),
+            issues,
+            "",
+            1,
+            load_builtin_template(template_type),
+        )
+        assert "评分明细" in html
+        assert "严重 × 15" in html
+        assert "高 × 8" in html
+        assert "总扣分" in html
+        assert "77/100" in html
 
 
 def test_export_to_html_supports_legacy_template_context():
@@ -686,3 +800,79 @@ def test_pdf_and_word_render_structured_decompilation_evidence():
     assert "98f7476e" in document_xml
     assert "3a47fa04" in document_xml
     assert "8e9350b2" in document_xml
+
+
+def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
+    """可下载报告必须保留复核漏洞所需的全部可读事实。"""
+    issue = _make_issue(
+        evidence="EVIDENCE_TOKEN_20260827",
+        exploit_scenario="EXPLOIT_TOKEN_20260827",
+        suggestion="SUGGESTION_TOKEN_20260827",
+        remediation="REMEDIATION_TOKEN_20260827",
+        cvss_vector="AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        cvss_version="3.1",
+        cvss_source="vector",
+        source="llm+static",
+        confirmation_count=2,
+        finding_fingerprint="FINGERPRINT_TOKEN_20260827",
+        status="fixed",
+        handled_by=7,
+        handled_at="2026-08-27T01:02:03",
+        references_json=["https://example.com/REFERENCE_TOKEN_20260827"],
+    )
+
+    pdf = export_to_pdf(_make_task(score=1), [issue], "摘要", 1)
+    for token in (
+        b"severity-deduction-v1",
+        b"EVIDENCE_TOKEN_20260827",
+        b"AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        b"vector",
+        b"llm+static",
+        b"FINGERPRINT_TOKEN_20260827",
+        b"2026-08-27T01:02:03",
+        b"REFERENCE_TOKEN_20260827",
+    ):
+        assert token in pdf
+
+    # 普通段落使用中文 CID 字体，PDF 字节流不会保留原始 ASCII；验证进入
+    # ReportLab 文档树的可见文本，避免依赖本机 pdftotext 等外部程序。
+    font_name = _ensure_chinese_font()
+    issue_text = "\n".join(
+        element.getPlainText()
+        for element in _build_issue_section(
+            issue,
+            1,
+            _build_styles(font_name),
+            font_name,
+        )
+        if hasattr(element, "getPlainText")
+    )
+    for token in (
+        "EXPLOIT_TOKEN_20260827",
+        "SUGGESTION_TOKEN_20260827",
+        "REMEDIATION_TOKEN_20260827",
+    ):
+        assert token in issue_text
+
+    word = export_to_word(_make_task(score=1), [issue], "摘要", 1)
+    with zipfile.ZipFile(io.BytesIO(word)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+    for token in (
+        "评分明细",
+        "severity-deduction-v1",
+        "严重 × 15",
+        "EVIDENCE_TOKEN_20260827",
+        "EXPLOIT_TOKEN_20260827",
+        "SUGGESTION_TOKEN_20260827",
+        "REMEDIATION_TOKEN_20260827",
+        "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "vector",
+        "llm+static",
+        "确认数: 2",
+        "FINGERPRINT_TOKEN_20260827",
+        "fixed",
+        "处理人: 7",
+        "2026-08-27T01:02:03",
+        "REFERENCE_TOKEN_20260827",
+    ):
+        assert token in document_xml

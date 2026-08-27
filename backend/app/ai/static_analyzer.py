@@ -16,17 +16,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from app.ai.cvss import CVSS_VERSION, calculate_cvss_score
 from app.ai.security_patterns import SecretMatch, scan_secrets
 from app.ai.security_static_rules import StaticMatch, apply_static_rules
 from app.constants.compliance import get_compliance_mapping
-
-# === 严重度到 CVSS 基础分的经验映射(覆盖静态规则的常见漏洞类型) ===
-_SEVERITY_TO_CVSS: Dict[str, float] = {
-    "严重": 9.8,
-    "高": 7.5,
-    "中": 5.0,
-    "低": 2.5,
-}
 
 # === CWE → CVSS 向量模板(基于该 CWE 的典型攻击路径预设) ===
 _CWE_TO_CVSS_VECTOR: Dict[str, str] = {
@@ -42,18 +35,6 @@ _CWE_TO_CVSS_VECTOR: Dict[str, str] = {
     "CWE-327": "AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",       # 弱加密
     "CWE-522": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",       # 弱口令保护
 }
-
-
-def _severity_to_cvss_score(severity: str) -> float:
-    """根据严重度返回 CVSS 基础分经验值
-
-    Args:
-        severity: 严重/高/中/低
-
-    Returns:
-        float: 0.0-10.0 之间的浮点数;未知严重度返回 5.0
-    """
-    return _SEVERITY_TO_CVSS.get(severity, 5.0)
 
 
 def _cwe_to_cvss_vector(cwe: str) -> str:
@@ -266,8 +247,8 @@ class Finding:
         references: 参考链接列表
         confidence: 置信度 0.0-1.0(静态/regex 命中 ≥0.95)
         source: 发现来源(static/regex/llm)
-        cvss_score: CVSS v3.1 基础分 0.0-10.0(基于 severity 经验值)
-        cvss_vector: CVSS v3.1 向量字符串(基于规则类型固定模板)
+        cvss_score: CVSS v3.1 基础分 0.0-10.0(由合法向量计算,缺失为 None)
+        cvss_vector: CVSS v3.1 向量字符串(基于 CWE 固定模板,缺失为 None)
         compliance_mapping: 合规映射字典,由 cwe 反查填充
         remediation: 详细修复方案文本
         static_rule_hits: 静态规则命中次数(本 Finding 至少为 1)
@@ -288,11 +269,20 @@ class Finding:
     confidence: float = 0.95
     source: str = "static"
     # v3 新增 CVSS / 合规映射 / 修复方案 / 命中统计
-    cvss_score: float = 0.0
-    cvss_vector: str = ""
+    cvss_score: Optional[float] = None
+    cvss_vector: Optional[str] = None
+    cvss_version: Optional[str] = None
+    cvss_source: str = "unavailable"
     compliance_mapping: Dict[str, List[str]] = field(default_factory=dict)
     remediation: str = ""
     static_rule_hits: int = 1
+    source_details: List[dict] = field(default_factory=list)
+    confirmation_count: int = 1
+    finding_fingerprint: str = ""
+    # AST/源码定位元数据；追加字段以保持旧版 positional 构造兼容。
+    source_anchor: str = ""
+    column_start: Optional[int] = None
+    column_end: Optional[int] = None
 
 
 def scan(*, content: str, file_name: str, language: Optional[str] = None) -> List[Finding]:
@@ -391,8 +381,10 @@ def _secret_to_finding(m: SecretMatch) -> Finding:
         references=_build_references(m.cwe, m.owasp),
         confidence=0.99,
         source="regex",
-        cvss_score=_severity_to_cvss_score("严重"),
-        cvss_vector=_cwe_to_cvss_vector(m.cwe),
+        cvss_score=calculate_cvss_score(_cwe_to_cvss_vector(m.cwe)),
+        cvss_vector=_cwe_to_cvss_vector(m.cwe) or None,
+        cvss_version=CVSS_VERSION if _cwe_to_cvss_vector(m.cwe) else None,
+        cvss_source="vector" if _cwe_to_cvss_vector(m.cwe) else "unavailable",
         compliance_mapping=_build_compliance_mapping(m.cwe),
         remediation=_build_remediation(
             f"hardcoded_{pattern_name.lower()}",
@@ -414,7 +406,7 @@ def _static_to_finding(m: StaticMatch) -> Finding:
     """
     return Finding(
         line_number=m.line_number,
-        end_line=m.line_number,
+        end_line=m.end_line or m.line_number,
         issue_type="安全漏洞",
         severity=m.severity,
         title=m.rule_name,
@@ -428,11 +420,16 @@ def _static_to_finding(m: StaticMatch) -> Finding:
         references=_build_references(m.cwe, m.owasp),
         confidence=0.95,
         source="static",
-        cvss_score=_severity_to_cvss_score(m.severity),
-        cvss_vector=_cwe_to_cvss_vector(m.cwe),
+        cvss_score=calculate_cvss_score(_cwe_to_cvss_vector(m.cwe)),
+        cvss_vector=_cwe_to_cvss_vector(m.cwe) or None,
+        cvss_version=CVSS_VERSION if _cwe_to_cvss_vector(m.cwe) else None,
+        cvss_source="vector" if _cwe_to_cvss_vector(m.cwe) else "unavailable",
         compliance_mapping=_build_compliance_mapping(m.cwe),
         remediation=_build_remediation(m.rule_code, m.fix_suggestion, m.cwe),
         static_rule_hits=1,
+        source_anchor=m.source_anchor,
+        column_start=m.column_start,
+        column_end=m.column_end,
     )
 
 
@@ -453,6 +450,7 @@ def _build_exploit_scenario(m: StaticMatch) -> str:
         "ssl_verify_disabled": "中间人攻击者可伪造证书拦截加密通信,窃取凭据或注入恶意数据。",
         "pickle_load": "攻击者构造恶意 pickle 数据,反序列化时执行任意代码,直接 RCE。",
         "eval_user_input": "攻击者通过输入注入 Python/JS 代码,服务端执行后可读写文件、命令执行。",
+        "python_command_injection": "攻击者把 shell 元字符注入动态命令,可在服务端执行任意系统命令。",
         "insecure_random": "攻击者可预测随机数序列,伪造 token 或绕过 CSRF/会话防护。",
         "sql_string_concat": "攻击者通过参数注入 ' OR 1=1 -- 绕过认证或拖库。",
         "xxe_processing": "攻击者构造含外部实体的 XML,读取服务器任意文件或发起 SSRF。",

@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Pattern, Tuple
@@ -290,6 +291,21 @@ _WEAK_CRYPTO_RULES: Tuple[StaticRule, ...] = (
     ),
 )
 
+_PYTHON_COMMAND_INJECTION_RULE = StaticRule(
+    code="python_command_injection",
+    name="Python 命令注入",
+    cwe="CWE-78",
+    owasp="A03:2021-Injection",
+    severity="严重",
+    description="动态外部输入进入系统命令或 shell=True 子进程,可导致任意命令执行。",
+    fix_suggestion=(
+        "禁止 shell=True 和 os.system/os.popen;使用 subprocess 参数列表并保持 shell=False,"
+        "同时对白名单参数做格式校验。"
+    ),
+    pattern=re.compile(r"(?!)"),
+    file_extensions=(".py",),
+)
+
 
 # ============ Cookie 安全标志缺失规则 ============
 # 仅在代码文件中搜索 set_cookie / Set-Cookie 调用,
@@ -436,6 +452,10 @@ class StaticMatch:
     fix_suggestion: str
     line_number: int
     evidence_line: str
+    end_line: Optional[int] = None
+    column_start: Optional[int] = None
+    column_end: Optional[int] = None
+    source_anchor: str = ""
 
 
 
@@ -589,6 +609,10 @@ def apply_static_rules(content: str, file_name: str) -> List[StaticMatch]:
     ext = _file_extension(file_name)
     matches: List[StaticMatch] = []
 
+    # Python 命令执行需要理解调用参数与 shell 边界,使用标准库 AST 而非宽松正则。
+    if ext == ".py":
+        matches.extend(_scan_python_command_injection(content))
+
     # ===== 弱加密 / 危险 API: 直接搜命中 =====
     for rule in _WEAK_CRYPTO_RULES:
         if ext and ext not in rule.file_extensions:
@@ -657,6 +681,155 @@ def apply_static_rules(content: str, file_name: str) -> List[StaticMatch]:
     return matches
 
 
+class _PythonCommandInjectionVisitor(ast.NodeVisitor):
+    """Detect dynamic data entering Python command-execution sinks."""
+
+    _SUBPROCESS_SINKS = {
+        "run", "call", "check_call", "check_output", "Popen",
+        "getoutput", "getstatusoutput",
+    }
+
+    def __init__(self, content: str) -> None:
+        self._content = content
+        self._lines = content.splitlines()
+        self.matches: List[StaticMatch] = []
+        self._module_aliases: dict[str, str] = {"os": "os", "subprocess": "subprocess"}
+        self._function_aliases: dict[str, str] = {}
+        self._scopes: List[dict[str, ast.AST]] = [{}]
+        # 行号不是唯一键：一行可能包含多个独立调用。
+        self._anchor_occurrences: dict[str, int] = {}
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            if alias.name in {"os", "subprocess"}:
+                self._module_aliases[alias.asname or alias.name] = alias.name
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module not in {"os", "subprocess"}:
+            return
+        for alias in node.names:
+            local_name = alias.asname or alias.name
+            self._function_aliases[local_name] = f"{node.module}.{alias.name}"
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        scope: dict[str, ast.AST] = {}
+        for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
+            scope[arg.arg] = ast.Name(id=arg.arg, ctx=ast.Load())
+        if node.args.vararg:
+            scope[node.args.vararg.arg] = ast.Name(id=node.args.vararg.arg, ctx=ast.Load())
+        if node.args.kwarg:
+            scope[node.args.kwarg.arg] = ast.Name(id=node.args.kwarg.arg, ctx=ast.Load())
+        self._scopes.append(scope)
+        for statement in node.body:
+            self.visit(statement)
+        self._scopes.pop()
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self._scopes[-1][target.id] = node.value
+        self.visit(node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if isinstance(node.target, ast.Name) and node.value is not None:
+            self._scopes[-1][node.target.id] = node.value
+            self.visit(node.value)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        sink = self._call_name(node.func)
+        if sink in {"os.system", "os.popen"}:
+            if node.args and self._is_dynamic(node.args[0]):
+                self._record(node)
+        elif sink.startswith("subprocess.") and sink.rsplit(".", 1)[-1] in self._SUBPROCESS_SINKS:
+            function_name = sink.rsplit(".", 1)[-1]
+            shell_true = any(
+                kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+                for kw in node.keywords
+            )
+            implicit_shell = function_name in {"getoutput", "getstatusoutput"}
+            if node.args and (shell_true or implicit_shell) and self._is_dynamic(node.args[0]):
+                self._record(node)
+        self.generic_visit(node)
+
+    def _call_name(self, node: ast.AST) -> str:
+        if isinstance(node, ast.Name):
+            return self._function_aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            module = self._module_aliases.get(node.value.id, node.value.id)
+            return f"{module}.{node.attr}"
+        return ""
+
+    def _resolve_name(self, name: str) -> Optional[ast.AST]:
+        for scope in reversed(self._scopes):
+            if name in scope:
+                value = scope[name]
+                if isinstance(value, ast.Name) and value.id == name:
+                    return None
+                return value
+        return None
+
+    def _is_dynamic(self, node: ast.AST, seen: Optional[set[str]] = None) -> bool:
+        if isinstance(node, ast.Constant):
+            return not isinstance(node.value, (str, bytes))
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return any(self._is_dynamic(item, seen) for item in node.elts)
+        if isinstance(node, ast.Name):
+            visited = seen or set()
+            if node.id in visited:
+                return True
+            resolved = self._resolve_name(node.id)
+            if resolved is None:
+                return True
+            return self._is_dynamic(resolved, visited | {node.id})
+        if isinstance(node, ast.JoinedStr):
+            return any(isinstance(item, ast.FormattedValue) for item in node.values)
+        if isinstance(node, ast.BinOp):
+            return self._is_dynamic(node.left, seen) or self._is_dynamic(node.right, seen)
+        if isinstance(node, ast.Call):
+            return True
+        if isinstance(node, (ast.Attribute, ast.Subscript)):
+            return True
+        return any(self._is_dynamic(child, seen) for child in ast.iter_child_nodes(node))
+
+    def _record(self, node: ast.Call) -> None:
+        line_number = int(getattr(node, "lineno", 0) or 0)
+        end_line = int(getattr(node, "end_lineno", line_number) or line_number)
+        column_start = getattr(node, "col_offset", None)
+        column_end = getattr(node, "end_col_offset", None)
+        if line_number <= 0:
+            return
+        segment = ast.get_source_segment(self._content, node) or ""
+        normalized_segment = _normalize_source_anchor(segment)
+        occurrence = self._anchor_occurrences.get(normalized_segment, 0) + 1
+        self._anchor_occurrences[normalized_segment] = occurrence
+        evidence = segment or (
+            self._lines[line_number - 1] if line_number <= len(self._lines) else ""
+        )
+        self.matches.append(
+            _make_match(
+                _PYTHON_COMMAND_INJECTION_RULE,
+                line_number,
+                evidence,
+                end_line=end_line,
+                column_start=column_start,
+                column_end=column_end,
+                source_anchor=_source_anchor(normalized_segment, occurrence),
+            )
+        )
+
+
+def _scan_python_command_injection(content: str) -> List[StaticMatch]:
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError, TypeError):
+        return []
+    visitor = _PythonCommandInjectionVisitor(content)
+    visitor.visit(tree)
+    return visitor.matches
+
+
 def _evidence_at(content: str, position: int, limit: int = 200) -> str:
     """从命中所在行提取有界证据，不复制整条超长行。"""
     line_start = content.rfind("\n", 0, position) + 1
@@ -669,7 +842,26 @@ def _evidence_at(content: str, position: int, limit: int = 200) -> str:
     return content[window_start:min(line_end, window_start + limit)]
 
 
-def _make_match(rule: StaticRule, line_no: int, line_text: str) -> StaticMatch:
+def _normalize_source_anchor(value: str) -> str:
+    """压缩源码片段中的空白，得到跨 CRLF/缩进稳定的调用表示。"""
+    return re.sub(r"\s+", " ", (value or "").strip())
+
+
+def _source_anchor(normalized_segment: str, occurrence: int = 1) -> str:
+    """生成短且可序列化的源码调用点锚点。"""
+    return f"py:{normalized_segment[:240]}#{max(1, int(occurrence))}"
+
+
+def _make_match(
+    rule: StaticRule,
+    line_no: int,
+    line_text: str,
+    *,
+    end_line: Optional[int] = None,
+    column_start: Optional[int] = None,
+    column_end: Optional[int] = None,
+    source_anchor: str = "",
+) -> StaticMatch:
     return StaticMatch(
         rule_code=rule.code,
         rule_name=rule.name,
@@ -680,13 +872,24 @@ def _make_match(rule: StaticRule, line_no: int, line_text: str) -> StaticMatch:
         fix_suggestion=rule.fix_suggestion,
         line_number=line_no,
         evidence_line=line_text.strip()[:200],
+        end_line=end_line,
+        column_start=column_start,
+        column_end=column_end,
+        source_anchor=source_anchor,
     )
 
 
 def list_static_rules() -> List[dict]:
     """列出所有静态规则(供检查清单接口使用)"""
     out: List[dict] = []
-    for rule in _WEAK_CRYPTO_RULES + _COOKIE_RULES + _HTTP_HEADER_RULES + _PARAM_ROUTING_RULES:
+    all_rules = (
+        _WEAK_CRYPTO_RULES
+        + (_PYTHON_COMMAND_INJECTION_RULE,)
+        + _COOKIE_RULES
+        + _HTTP_HEADER_RULES
+        + _PARAM_ROUTING_RULES
+    )
+    for rule in all_rules:
         out.append({
             "code": rule.code,
             "name": rule.name,

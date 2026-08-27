@@ -314,7 +314,7 @@ class TestReviewOneFileDualEngine:
         assert issues[0].static_rule_hits == 0
 
     def test_hybrid_persisted_with_source_hybrid(self, db):
-        """双引擎命中:source="hybrid", static_rule_hits≥2(static 1 + LLM 确认 1)"""
+        """双引擎同证据命中时保留静态命中数与来源确认数。"""
         # 静态引擎会命中这个秘钥
         code = 'password = "SuperSecret123!"\n'
         code_file = _make_code_file(content=code)
@@ -337,6 +337,8 @@ class TestReviewOneFileDualEngine:
         llm_finding = _make_finding(
             line_number=target_line, cwe=target_cwe, source="llm", static_rule_hits=0,
         )
+        llm_finding.title = static_findings[0].title
+        llm_finding.evidence = static_findings[0].evidence
         with patch("app.services.review_service._review_chunk_sequential", return_value=[llm_finding]):
             profiles = (_GENERAL_PROFILE,)
             issues = _review_one_file(
@@ -345,7 +347,8 @@ class TestReviewOneFileDualEngine:
         # 应有至少一个 hybrid 问题
         hybrid_issues = [ri for ri in issues if ri.source == "hybrid"]
         assert len(hybrid_issues) >= 1
-        assert hybrid_issues[0].static_rule_hits >= 2
+        assert hybrid_issues[0].static_rule_hits == 1
+        assert hybrid_issues[0].confirmation_count == 2
 
     def test_v3_fields_persisted_to_db(self, db):
         """v3 字段全部持久化到 ReviewIssue 表"""

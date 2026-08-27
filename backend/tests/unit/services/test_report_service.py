@@ -121,3 +121,89 @@ def test_report_detail_falls_back_to_issue_files_for_legacy_task(db, admin_user)
     assert len(detail["files"]) == 1
     assert detail["files"][0]["file_name"] == "legacy.py"
     assert detail["files"][0]["language"] == "python"
+
+
+def test_report_detail_uses_final_issue_set_for_all_score_facts(db, admin_user):
+    """详情不得继续返回任务表中的旧问题数、旧评分或旧 breakdown。"""
+    project = _make_project(db, admin_user)
+    task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="事实源任务",
+        status="success",
+        total_issues=99,
+        severe_issues=0,
+        high_issues=99,
+        medium_issues=0,
+        low_issues=0,
+        score=5,
+        score_version="legacy-v0",
+        score_breakdown={"score": 5, "risk_level": "低风险"},
+    )
+    db.add(task)
+    db.commit()
+    db.add_all([
+        ReviewIssue(
+            task_id=task.id,
+            issue_type="安全漏洞",
+            severity="严重",
+            title="严重问题",
+            description="desc",
+            status="fixed",
+        ),
+        ReviewIssue(
+            task_id=task.id,
+            issue_type="潜在Bug",
+            severity="高",
+            title="高风险问题",
+            description="desc",
+            status="unfixed",
+        ),
+    ])
+    db.commit()
+
+    detail = get_report_detail(db, admin_user, task.id)
+
+    assert detail["task"]["task_name"] == "事实源任务"
+    assert detail["task"]["name"] == "事实源任务"
+    assert detail["task"]["score"] == 77
+    assert detail["stats"]["total_issues"] == 2
+    assert detail["stats"]["score"] == 77
+    assert detail["stats"]["severe"] == 1
+    assert detail["stats"]["high"] == 1
+    assert detail["stats"]["medium"] == 0
+    assert detail["stats"]["low"] == 0
+    assert detail["stats"]["fixed"] == 1
+    assert detail["stats"]["score_version"] == "severity-deduction-v1"
+    assert detail["stats"]["score_breakdown"]["weights"] == {
+        "严重": 15,
+        "高": 8,
+        "中": 3,
+        "低": 1,
+    }
+    assert detail["stats"]["score_breakdown"]["score_source"] == "review_issues"
+    assert detail["stats"]["risk_level"] == "中风险"
+
+
+def test_report_detail_preserves_explicit_score_for_empty_historical_task(db, admin_user):
+    """无问题历史任务的显式 100 分必须保持 100，不能被默认值覆盖。"""
+    project = _make_project(db, admin_user)
+    task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="无问题任务",
+        status="success",
+        total_issues=0,
+        score=100,
+    )
+    db.add(task)
+    db.commit()
+
+    detail = get_report_detail(db, admin_user, task.id)
+
+    assert detail["task"]["score"] == 100
+    assert detail["stats"]["total_issues"] == 0
+    assert detail["stats"]["score"] == 100
+    assert detail["stats"]["score_breakdown"]["score"] == 100
+    assert detail["stats"]["score_breakdown"]["score_source"] == "task_explicit_empty_report"
+    assert detail["stats"]["risk_level"] == "低风险"

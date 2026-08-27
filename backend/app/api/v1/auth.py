@@ -2,7 +2,7 @@
 鉴权API路由: 注册、登录、获取当前用户、修改密码、退出登录
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.captcha import create_captcha, verify_captcha
@@ -26,7 +26,7 @@ def _client_ip(request: Request) -> str:
 
 @router.get("/captcha", response_model=Resp[dict])
 @limiter.limit("30/minute")
-def get_captcha(request: Request):
+def get_captcha(request: Request, response: Response):
     """获取注册验证码(数学题)。返回 captcha_id 与题目,不返回答案。"""
     data = create_captcha()
     data["beta_registration_enabled"] = settings.beta_registration_enabled
@@ -35,7 +35,7 @@ def get_captcha(request: Request):
 
 @router.post("/register", response_model=Resp[dict])
 @limiter.limit("10/minute")
-def register(payload: RegisterIn, request: Request, db: Session = Depends(get_db)):
+def register(payload: RegisterIn, request: Request, response: Response, db: Session = Depends(get_db)):
     """用户注册(生产环境需先通过一次性验证码)"""
     if settings.register_captcha_enabled:
         if not payload.captcha_id or not verify_captcha(payload.captcha_id, payload.captcha_answer or ""):
@@ -57,13 +57,13 @@ def register(payload: RegisterIn, request: Request, db: Session = Depends(get_db
 def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
     """用户登录"""
     ip = _client_ip(request)
-    limit_state = login_failure_limiter.check(ip)
-    if not limit_state.allowed:
-        raise TooManyRequestsError(retry_after=limit_state.retry_after)
+    attempt = login_failure_limiter.begin_attempt(ip)
+    if not attempt.allowed:
+        raise TooManyRequestsError(retry_after=attempt.retry_after)
     try:
         token, user = auth_service.login(db, payload.username, payload.password, ip=ip)
     except (AuthError, ForbiddenError) as exc:
-        login_failure_limiter.record_failure(ip)
+        login_failure_limiter.finish_attempt(ip, attempt.reservation_id, success=False)
         audit_service.log(
             db,
             None,
@@ -76,6 +76,7 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
         )
         raise
     except Exception as exc:
+        login_failure_limiter.release_attempt(ip, attempt.reservation_id)
         audit_service.log(
             db,
             None,
@@ -87,7 +88,7 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
             ip=ip,
         )
         raise
-    login_failure_limiter.reset(ip)
+    login_failure_limiter.finish_attempt(ip, attempt.reservation_id, success=True)
     audit_service.log(
         db,
         user,

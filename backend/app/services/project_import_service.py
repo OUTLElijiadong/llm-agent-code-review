@@ -22,10 +22,12 @@ from app.core.exceptions import (
     NotFoundError,
 )
 from app.models.code_file import CodeFile
+from app.models.code_version import CodeVersion
 from app.models.project import Project
 from app.models.project_import_task import ProjectImportTask
 from app.models.project_member import ProjectMember
 from app.models.project_source_archive import ProjectSourceArchive
+from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.project import ProjectIn
 from app.services import audit_service, code_file_service, project_service, project_source_service
@@ -52,6 +54,12 @@ def _load_json(value: str | None) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return dict(loaded) if isinstance(loaded, Mapping) else {}
+
+
+def _merge_progress(row: ProjectImportTask, progress: Mapping[str, Any]) -> None:
+    result = _load_json(row.result_json)
+    result["progress"] = dict(progress)
+    row.result_json = _canonical_json(result)
 
 
 def _request_payload(
@@ -304,25 +312,24 @@ def touch_import_task(
 ) -> bool:
     """刷新租约并可选持久化当前下载/入库阶段。"""
 
-    values: dict[Any, Any] = {
-        ProjectImportTask.lease_expires_at: _utcnow() + timedelta(
-            seconds=max(30, int(lease_seconds or settings.project_import_lease_seconds))
-        ),
-    }
-    if progress is not None:
-        values[ProjectImportTask.result_json] = _canonical_json({"progress": dict(progress)})
-    updated = (
+    row = (
         db.query(ProjectImportTask)
         .filter(
             ProjectImportTask.id == task_db_id,
             ProjectImportTask.status == RUNNING,
             ProjectImportTask.lease_token == lease_token,
         )
-        .update(values, synchronize_session=False)
+        .with_for_update()
+        .first()
     )
-    if updated != 1:
+    if row is None:
         db.rollback()
         return False
+    row.lease_expires_at = _utcnow() + timedelta(
+        seconds=max(30, int(lease_seconds or settings.project_import_lease_seconds))
+    )
+    if progress is not None:
+        _merge_progress(row, progress)
     db.commit()
     return True
 
@@ -343,28 +350,6 @@ def recover_expired_leases(db: Session, *, now: datetime | None = None) -> int:
     )
     recovered = 0
     for row in rows:
-        project = db.get(Project, int(row.project_id)) if row.project_id is not None else None
-        if project is not None:
-            payload = _load_json(row.request_json)
-            existing = _existing_result(
-                db,
-                project,
-                source_url=str(payload.get("url") or ""),
-                audit_mode=bool(payload.get("audit_mode")),
-            )
-            if existing is not None:
-                project.status = "active"
-                row.status = SUCCEEDED
-                row.result_json = _canonical_json(existing)
-                row.lease_token = None
-                row.lease_expires_at = None
-                row.next_attempt_at = None
-                row.error_code = None
-                row.error_message = None
-                row.completed_at = current
-                db.commit()
-                recovered += 1
-                continue
         terminal = int(row.attempt_count or 0) >= int(row.max_attempts or 1)
         values: dict[Any, Any] = {
             ProjectImportTask.status: FAILED if terminal else QUEUED,
@@ -391,8 +376,7 @@ def recover_expired_leases(db: Session, *, now: datetime | None = None) -> int:
         )
         if updated != 1:
             continue
-        if terminal:
-            _delete_empty_internal_project(db, row)
+        _cleanup_partial_import_project(db, row)
         recovered += 1
     if recovered:
         db.commit()
@@ -428,33 +412,56 @@ def _ensure_import_project(
         commit=False,
     )
     row.project_id = project.id
-    row.result_json = _canonical_json({"progress": {"phase": "project_created"}})
+    _merge_progress(row, {"phase": "project_created"})
     db.commit()
     db.refresh(project)
     return project
 
 
-def _delete_empty_internal_project(db: Session, row: ProjectImportTask) -> bool:
-    """终态失败时清理仅供导入使用且尚未产生源码的半成品项目。"""
+def _cleanup_partial_import_project(db: Session, row: ProjectImportTask) -> bool:
+    """清理当前任务创建且尚未激活的整棵半成品项目数据。"""
 
     if row.project_id is None:
         return False
-    project = db.get(Project, int(row.project_id))
-    if project is None or project.status not in {"importing", "import_failed"}:
-        return False
-    has_files = db.query(CodeFile.id).filter(CodeFile.project_id == project.id).first()
-    has_archive = (
-        db.query(ProjectSourceArchive.id)
-        .filter(ProjectSourceArchive.project_id == project.id)
-        .first()
+    project_id = int(row.project_id)
+    project = db.get(Project, project_id)
+    if project is None:
+        row.project_id = None
+        return True
+    payload = _load_json(row.request_json)
+    expected_name = str(payload.get("project_name") or "").strip()
+    task_owns_project = (
+        project.status in {"importing", "import_failed"}
+        and int(project.user_id) == int(row.user_id)
+        and bool(expected_name)
+        and project.project_name == expected_name
     )
-    if has_files is not None or has_archive is not None:
+    if not task_owns_project:
         return False
-    db.query(ProjectMember).filter(ProjectMember.project_id == project.id).delete(
+
+    file_ids = [
+        int(file_id)
+        for (file_id,) in db.query(CodeFile.id).filter(CodeFile.project_id == project_id).all()
+    ]
+    if file_ids:
+        db.query(CodeVersion).filter(CodeVersion.file_id.in_(file_ids)).delete(
+            synchronize_session=False,
+        )
+    db.query(CodeFile).filter(CodeFile.project_id == project_id).delete(
+        synchronize_session=False,
+    )
+    db.query(ProjectSourceArchive).filter(
+        ProjectSourceArchive.project_id == project_id
+    ).delete(synchronize_session=False)
+    db.query(ProjectSourceRevision).filter(
+        ProjectSourceRevision.project_id == project_id
+    ).delete(synchronize_session=False)
+    db.query(ProjectMember).filter(ProjectMember.project_id == project_id).delete(
         synchronize_session=False,
     )
     db.delete(project)
     row.project_id = None
+    db.flush()
     return True
 
 
@@ -686,8 +693,7 @@ def fail_import_task(
     row.error_code = code[:80]
     row.error_message = message[:2000]
     row.completed_at = None if should_retry else now
-    if not should_retry:
-        _delete_empty_internal_project(db, row)
+    _cleanup_partial_import_project(db, row)
     audit_service.log(
         db,
         db.get(User, int(row.user_id)),

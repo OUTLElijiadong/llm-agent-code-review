@@ -18,6 +18,17 @@ class RegisterIn(BaseModel):
     captcha_answer: Optional[str] = Field(default=None, max_length=16)
     beta_code: Optional[str] = Field(default=None, max_length=64)
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_optional_email(cls, value):
+        """将选填邮箱的空字符串归一化为空值，再执行 EmailStr 校验。"""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
 
 class LoginIn(BaseModel):
     """用户登录请求体"""

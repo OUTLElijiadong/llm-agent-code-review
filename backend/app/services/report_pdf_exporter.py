@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 from xml.sax.saxutils import escape
@@ -26,6 +27,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from app.ai.scoring import score_risk_level
 from app.services.report_exporter import export_to_dict
 
 # ============ 模块常量 ============
@@ -162,15 +164,7 @@ def _format_score(score: int) -> str:
     Returns:
         str: 格式化后的评分文本,如 "72/100 (中风险)"。
     """
-    if score >= 80:
-        level = "低风险"
-    elif score >= 60:
-        level = "中风险"
-    elif score >= 40:
-        level = "高风险"
-    else:
-        level = "极高风险"
-    return f"{score}/100 ({level})"
+    return f"{score}/100 ({score_risk_level(score)})"
 
 
 # ============ PDF 文档构建 ============
@@ -253,6 +247,93 @@ def _build_summary_table(
         ("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#FED7AA")),
     ]))
     return table
+
+
+def _build_score_breakdown_elements(
+    statistics: Dict[str, Any],
+    styles: Dict[str, ParagraphStyle],
+    font_name: str,
+) -> List[Any]:
+    """构建可人工核对的统一评分明细。"""
+    breakdown = statistics.get("score_breakdown") or {}
+    weights = breakdown.get("weights") or {}
+    counts = breakdown.get("counts") or {}
+    deductions = breakdown.get("deductions") or {}
+    rows = [
+        ("评分版本", breakdown.get("version") or "-", True),
+        ("基础分", breakdown.get("base_score", 100), False),
+        (
+            "扣分权重",
+            "严重 × {0}；高 × {1}；中 × {2}；低 × {3}".format(
+                weights.get("严重", 15),
+                weights.get("高", 8),
+                weights.get("中", 3),
+                weights.get("低", 1),
+            ),
+            False,
+        ),
+        (
+            "问题计数",
+            "严重 {0}；高 {1}；中 {2}；低 {3}".format(
+                counts.get("严重", 0),
+                counts.get("高", 0),
+                counts.get("中", 0),
+                counts.get("低", 0),
+            ),
+            False,
+        ),
+        (
+            "分级扣分",
+            "严重 {0}；高 {1}；中 {2}；低 {3}".format(
+                deductions.get("严重", 0),
+                deductions.get("高", 0),
+                deductions.get("中", 0),
+                deductions.get("低", 0),
+            ),
+            False,
+        ),
+        ("总扣分", breakdown.get("total_deduction", 0), False),
+        ("原始分", breakdown.get("raw_score", 100), False),
+        ("最终分", breakdown.get("score", 100), False),
+        ("风险等级", breakdown.get("risk_level") or "-", False),
+        ("评分来源", breakdown.get("score_source") or "-", True),
+    ]
+    override = breakdown.get("compatibility_override")
+    if isinstance(override, dict):
+        rows.append((
+            "兼容说明",
+            f"{override.get('reason') or '-'}; canonical={override.get('canonical_score')}",
+            True,
+        ))
+
+    table_data: List[List[Any]] = [[
+        Paragraph("字段", styles["table_header"]),
+        Paragraph("值", styles["table_header"]),
+    ]]
+    for label, value, code_value in rows:
+        table_data.append([
+            Paragraph(escape(str(label)), styles["normal"]),
+            Paragraph(
+                escape(str(value)).replace("\n", "<br/>") or "-",
+                styles["code"] if code_value else styles["normal"],
+            ),
+        ])
+    table = Table(table_data, colWidths=[38 * mm, 132 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#374151")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("FONTNAME", (0, 0), (-1, 0), font_name),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    return [
+        Paragraph("评分明细", styles["heading"]),
+        table,
+        Spacer(1, 6 * mm),
+    ]
 
 
 def _build_decompilation_evidence_elements(
@@ -353,15 +434,68 @@ def _build_issue_section(
         styles["normal"],
     ))
 
+    cvss_parts = []
+    if issue.get("cvss_score") is not None:
+        cvss_parts.append(f"score={issue.get('cvss_score')}")
+    if issue.get("cvss_vector"):
+        cvss_parts.append(f"vector={issue.get('cvss_vector')}")
+    if issue.get("cvss_version"):
+        cvss_parts.append(f"version={issue.get('cvss_version')}")
+    if issue.get("cvss_source"):
+        cvss_parts.append(f"source={issue.get('cvss_source')}")
+    if cvss_parts:
+        elements.append(Paragraph("<b>CVSS:</b>", styles["normal"]))
+        elements.append(Paragraph(escape(" | ".join(cvss_parts)), styles["code"]))
+
+    source_parts = [f"source={issue.get('source') or '-'}"]
+    source_parts.append(f"confirmation_count={issue.get('confirmation_count') or 0}")
+    source_parts.append(f"fingerprint={issue.get('finding_fingerprint') or '-'}")
+    elements.append(Paragraph("<b>来源与确认:</b>", styles["normal"]))
+    elements.append(Paragraph(escape(" | ".join(source_parts)), styles["code"]))
+    source_details = issue.get("source_details")
+    if source_details:
+        details_text = json.dumps(source_details, ensure_ascii=False, default=str)
+        elements.append(Paragraph(
+            f"<b>来源明细:</b>{escape(details_text)}",
+            styles["normal"],
+        ))
+
+    status_parts = [f"status={issue.get('status') or '-'}"]
+    status_parts.append(f"handled_by={issue.get('handled_by') or '-'}")
+    status_parts.append(f"handled_at={issue.get('handled_at') or '-'}")
+    status_parts.append(f"updated_at={issue.get('update_time') or '-'}")
+    elements.append(Paragraph("<b>处理状态:</b>", styles["normal"]))
+    elements.append(Paragraph(escape(" | ".join(status_parts)), styles["code"]))
+
     # 问题描述
     description = escape(str(issue.get("description") or ""))
     if description:
         elements.append(Paragraph(f"<b>描述:</b>{description}", styles["normal"]))
 
+    evidence = issue.get("evidence") or ""
+    if evidence:
+        evidence_text = escape(str(evidence)).replace("\n", "<br/>")
+        elements.append(Paragraph("<b>证据:</b>", styles["normal"]))
+        elements.append(Paragraph(evidence_text, styles["code"]))
+
+    exploit_scenario = escape(str(issue.get("exploit_scenario") or ""))
+    if exploit_scenario:
+        elements.append(Paragraph(
+            f"<b>攻击场景:</b>{exploit_scenario}",
+            styles["normal"],
+        ))
+
     # 修复建议
     suggestion = escape(str(issue.get("suggestion") or ""))
     if suggestion:
         elements.append(Paragraph(f"<b>修复建议:</b>{suggestion}", styles["normal"]))
+
+    remediation = escape(str(issue.get("remediation") or ""))
+    if remediation:
+        elements.append(Paragraph(
+            f"<b>详细修复:</b>{remediation}",
+            styles["normal"],
+        ))
 
     # 修复代码(Courier 字体)
     fixed_code = issue.get("fixed_code") or ""
@@ -370,6 +504,15 @@ def _build_issue_section(
         code_escaped = escape(str(fixed_code)).replace("\n", "<br/>")
         elements.append(Paragraph("<b>修复代码:</b>", styles["normal"]))
         elements.append(Paragraph(code_escaped, styles["code"]))
+
+    references = issue.get("references_json") or []
+    if not isinstance(references, (list, tuple)):
+        references = [references]
+    if references:
+        elements.append(Paragraph("<b>参考:</b>", styles["normal"]))
+        for reference in references:
+            if reference:
+                elements.append(Paragraph(escape(str(reference)), styles["code"]))
 
     elements.append(Spacer(1, 4 * mm))
     return elements
@@ -467,7 +610,7 @@ def export_to_pdf(
     elements: List[Any] = []
 
     # 1. 报告头
-    elements.extend(_build_header_elements(task_info, score, styles))
+    elements.extend(_build_header_elements(task_info, context.get("score", score), styles))
 
     # 2. 总体评价
     summary_text = context.get("summary") or ""
@@ -486,7 +629,10 @@ def export_to_pdf(
     elements.append(_build_summary_table(statistics, font_name))
     elements.append(Spacer(1, 6 * mm))
 
-    # 5. 问题详情(按严重度分组)
+    # 5. 评分明细
+    elements.extend(_build_score_breakdown_elements(statistics, styles, font_name))
+
+    # 6. 问题详情(按严重度分组)
     elements.extend(_build_issues_section(sorted_issues, styles, font_name))
 
     # 构建 PDF

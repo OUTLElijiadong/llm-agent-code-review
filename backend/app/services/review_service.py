@@ -23,6 +23,7 @@ from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEvent, AgentEventType
 from app.agents.registry import AgentRegistry
 from app.ai.code_chunker import chunk_code
+from app.ai.cvss import normalize_cvss
 from app.ai.deepseek_agent import DeepSeekAgent
 from app.ai.multi_agent import (
     COLLAB_CONSENSUS_SYSTEM,
@@ -36,8 +37,8 @@ from app.ai.multi_agent import (
     get_model_label,
 )
 from app.ai.prompt_builder import _format_experience, build_prompt
-from app.ai.result_parser import Issue, parse
-from app.ai.scoring import compute_score
+from app.ai.result_parser import Issue, normalize_severity, parse
+from app.ai.scoring import SCORING_VERSION, compute_score, compute_score_breakdown, score_risk_level
 from app.ai.static_analyzer import Finding
 from app.ai.static_analyzer import scan_file as static_scan_file
 from app.core.config import settings
@@ -412,6 +413,10 @@ def _finding_to_review_issue(task_id: int, code_file: CodeFile, finding: Finding
     Returns:
         ReviewIssue: 已填充所有字段的 ORM 对象(未加入 session)
     """
+    cvss_score, cvss_vector, cvss_version, cvss_source = normalize_cvss(
+        finding.cvss_score,
+        finding.cvss_vector,
+    )
     return ReviewIssue(
         task_id=task_id,
         file_id=code_file.id,
@@ -434,11 +439,16 @@ def _finding_to_review_issue(task_id: int, code_file: CodeFile, finding: Finding
         confidence=finding.confidence,
         source=finding.source,
         # v3 新增 CVSS / 合规映射 / 修复方案 / 静态命中统计
-        cvss_score=finding.cvss_score,
-        cvss_vector=finding.cvss_vector,
+        cvss_score=cvss_score,
+        cvss_vector=cvss_vector,
+        cvss_version=cvss_version,
+        cvss_source=cvss_source,
         compliance_mapping=finding.compliance_mapping if finding.compliance_mapping else None,
         remediation=finding.remediation,
         static_rule_hits=finding.static_rule_hits,
+        source_details=finding.source_details if finding.source_details else None,
+        confirmation_count=finding.confirmation_count,
+        finding_fingerprint=finding.finding_fingerprint or None,
     )
 
 
@@ -456,6 +466,10 @@ def _issue_to_review_issue(task_id: int, code_file: CodeFile, issue: Issue) -> R
     Returns:
         ReviewIssue: 已填充全量 v2/v3 字段的 ORM 对象(未加入 session)
     """
+    cvss_score, cvss_vector, cvss_version, cvss_source = normalize_cvss(
+        issue.cvss_score,
+        issue.cvss_vector,
+    )
     return ReviewIssue(
         task_id=task_id,
         file_id=code_file.id,
@@ -478,11 +492,16 @@ def _issue_to_review_issue(task_id: int, code_file: CodeFile, issue: Issue) -> R
         confidence=issue.confidence,
         source=issue.source,
         # v3 CVSS / 合规映射 / 修复方案 / 静态命中统计
-        cvss_score=issue.cvss_score,
-        cvss_vector=issue.cvss_vector,
+        cvss_score=cvss_score,
+        cvss_vector=cvss_vector,
+        cvss_version=cvss_version,
+        cvss_source=cvss_source,
         compliance_mapping=issue.compliance_mapping if issue.compliance_mapping else None,
         remediation=issue.remediation,
         static_rule_hits=issue.static_rule_hits,
+        source_details=issue.source_details if issue.source_details else None,
+        confirmation_count=issue.confirmation_count,
+        finding_fingerprint=issue.finding_fingerprint or None,
     )
 
 
@@ -537,7 +556,21 @@ def _execute_review(
         task.high_issues = sev_count["高"]
         task.medium_issues = sev_count["中"]
         task.low_issues = sev_count["低"]
-        task.score = compute_score(sev_count)
+        # 保留 compute_score 作为旧调用方/测试的兼容入口；生产实现与
+        # breakdown 使用同一公式，因此两者正常情况下始终一致。
+        score = int(compute_score(sev_count))
+        score_breakdown = compute_score_breakdown(sev_count)
+        if score != score_breakdown["score"]:
+            # 外部兼容调用方可能暂时覆盖 compute_score；仍保持接口返回的
+            # 最终分数与风险等级自洽，而不丢失扣分明细。
+            score_breakdown = {
+                **score_breakdown,
+                "score": score,
+                "risk_level": score_risk_level(score),
+            }
+        task.score = score
+        task.score_version = SCORING_VERSION
+        task.score_breakdown = score_breakdown
         task.summary = _build_summary(profiles, len(files), len(all_issues), task.score)
         task.status = "success"
         task.end_time = datetime.now(timezone.utc)
@@ -661,7 +694,10 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
     # 将 LLM Findings 转换为 Issues(source="llm"),与静态 Findings 合并
     llm_issues: List[Issue] = [finding_to_issue(f) for f in llm_findings]
     merged_issues: List[Issue] = merge_findings_and_issues(
-        static_findings, llm_issues, code_file.id,
+        static_findings,
+        llm_issues,
+        code_file.id,
+        code=code_file.content or "",
     )
 
     # ===== v3 字段持久化 =====
@@ -1007,6 +1043,13 @@ def _review_chunk_collaborative(
                         "owasp": getattr(it, "owasp", "") or "",
                         "cwe": getattr(it, "cwe", "") or "",
                         "evidence": getattr(it, "evidence", "") or "",
+                        "exploit_scenario": getattr(it, "exploit_scenario", "") or "",
+                        "references": list(getattr(it, "references", []) or []),
+                        "confidence": float(getattr(it, "confidence", 0.8) or 0.8),
+                        "cvss_score": getattr(it, "cvss_score", None),
+                        "cvss_vector": getattr(it, "cvss_vector", None),
+                        "remediation": getattr(it, "remediation", "") or "",
+                        "source": f"llm:{profile.code}",
                     }
                     for it in parsed.issues
                 ]
@@ -1165,11 +1208,25 @@ def _final_issue_to_finding(item: dict) -> Finding:
     Returns:
         Finding: 标准化漏洞发现
     """
+    cvss_score, cvss_vector, cvss_version, cvss_source = normalize_cvss(
+        item.get("cvss_score"),
+        item.get("cvss_vector"),
+    )
+    try:
+        confidence = max(0.0, min(1.0, float(item.get("confidence", 0.8))))
+    except (TypeError, ValueError):
+        confidence = 0.8
+
+    source_details = _collaborative_source_details(item, confidence)
+    compliance_mapping = item.get("compliance_mapping")
+    if not isinstance(compliance_mapping, dict):
+        compliance_mapping = {}
+
     return Finding(
         line_number=int(item.get("line_number", 0) or 0),
         end_line=int(item["end_line"]) if item.get("end_line") else None,
         issue_type=item.get("issue_type", "") or "",
-        severity=item.get("severity", "中") or "中",
+        severity=normalize_severity(item.get("severity")),
         title=item.get("title", "") or "",
         description=item.get("description", "") or "",
         suggestion=item.get("suggestion", "") or "",
@@ -1179,9 +1236,73 @@ def _final_issue_to_finding(item: dict) -> Finding:
         evidence=item.get("evidence", "") or "",
         exploit_scenario=item.get("exploit_scenario", "") or "",
         references=item.get("references", []) if isinstance(item.get("references"), list) else [],
-        confidence=float(item.get("confidence", 0.8) or 0.8),
+        confidence=confidence,
         source="llm_collab",
+        cvss_score=cvss_score,
+        cvss_vector=cvss_vector,
+        cvss_version=cvss_version,
+        cvss_source=cvss_source,
+        compliance_mapping=compliance_mapping,
+        remediation=item.get("remediation", "") or "",
+        static_rule_hits=0,
+        source_details=source_details,
+        confirmation_count=max(
+            len(source_details),
+            _safe_positive_int(item.get("confirmation_count")),
+            _safe_positive_int(item.get("cross_agent_count")),
+            1,
+        ),
     )
+
+
+def _collaborative_source_details(item: dict, confidence: float) -> list[dict]:
+    target_count = max(
+        _safe_positive_int(item.get("confirmation_count")),
+        _safe_positive_int(item.get("cross_agent_count")),
+        1,
+    )
+    raw_details = item.get("source_details")
+    if isinstance(raw_details, list):
+        details = [dict(detail) for detail in raw_details if isinstance(detail, dict)]
+    else:
+        details = []
+
+    names = item.get("cross_agent_names")
+    if isinstance(names, list):
+        for name in names:
+            if len(details) >= target_count:
+                break
+            details.append(_collaborative_source_detail(item, confidence, name))
+
+    while len(details) < target_count:
+        ordinal = len(details) + 1
+        source = item.get("source") or "llm_collab"
+        if ordinal > 1:
+            source = f"{source}:{ordinal}"
+        details.append(_collaborative_source_detail(item, confidence, source))
+
+    return details
+
+
+def _collaborative_source_detail(
+    item: dict,
+    confidence: float,
+    source: object,
+) -> dict:
+    return {
+        "source": str(source or "llm_collab")[:80],
+        "confidence": confidence,
+        "evidence": str(item.get("evidence") or "")[:2000],
+        "line_number": int(item.get("line_number", 0) or 0),
+        "title": str(item.get("title") or "")[:200],
+    }
+
+
+def _safe_positive_int(value: object) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 # ═══════════════ 协同辅助函数 ═══════════════
@@ -1267,7 +1388,11 @@ def _build_findings_text(
             parts.append(
                 f"  [{i}] [{it.get('severity','中')}] {it.get('title','')}\n"
                 f"      位置={lines} 类型={it.get('issue_type','')}\n"
-                f"      描述={it.get('description','')[:120]}",
+                f"      描述={it.get('description','')[:120]}\n"
+                f"      证据={it.get('evidence','')[:200]}\n"
+                f"      来源={it.get('source', f'llm:{code}')} "
+                f"置信度={it.get('confidence', 0.8)} "
+                f"CVSS={it.get('cvss_score')} {it.get('cvss_vector') or ''}",
             )
         parts.append("")
     return "\n".join(parts)
@@ -1279,14 +1404,10 @@ def _fallback_cross_review(
 ) -> list[dict]:
     """降级方案: 交叉复审 LLM 失败时,直接按规则合并"""
     results: list[dict] = []
-    seen_titles: set[str] = set()
     for code, items in findings.items():
         name = names.get(code, code)
         for it in items:
             title = it.get("title", "")
-            if title in seen_titles:
-                continue
-            seen_titles.add(title)
             results.append({
                 "verdict": "confirmed",
                 "original_titles": [title],
@@ -1297,9 +1418,22 @@ def _fallback_cross_review(
                 "severity_reason": "",
                 "line_start": it.get("line_start", 0),
                 "line_end": it.get("line_end"),
-                "confidence": 0.8,
-                "owasp": "",
-                "cwe": "",
+                "confidence": it.get("confidence", 0.8),
+                "owasp": it.get("owasp", ""),
+                "cwe": it.get("cwe", ""),
+                "evidence": it.get("evidence", ""),
+                "exploit_scenario": it.get("exploit_scenario", ""),
+                "references": it.get("references", []),
+                "cvss_score": it.get("cvss_score"),
+                "cvss_vector": it.get("cvss_vector"),
+                "remediation": it.get("remediation", ""),
+                "source_details": [{
+                    "source": it.get("source", f"llm:{code}"),
+                    "confidence": it.get("confidence", 0.8),
+                    "evidence": it.get("evidence", ""),
+                    "line_number": it.get("line_start", 0),
+                    "title": title,
+                }],
             })
     return results
 
@@ -1321,6 +1455,13 @@ def _fallback_consensus(cross_review: list[dict]) -> list[dict]:
             "cross_agent_names": [],
             "owasp": cr.get("owasp", ""),
             "cwe": cr.get("cwe", ""),
+            "evidence": cr.get("evidence", ""),
+            "exploit_scenario": cr.get("exploit_scenario", ""),
+            "references": cr.get("references", []),
+            "cvss_score": cr.get("cvss_score"),
+            "cvss_vector": cr.get("cvss_vector"),
+            "remediation": cr.get("remediation", ""),
+            "source_details": cr.get("source_details", []),
         }
         for cr in cross_review
     ]
