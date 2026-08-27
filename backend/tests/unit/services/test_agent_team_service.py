@@ -215,7 +215,9 @@ def test_claim_and_complete_events_carry_task_key(db, team_user):
     detail = agent_team_service.get_team(db, team_user, created["team_id"])
     claimed_events = [item for item in detail["events"] if item["event_type"] == "task.claimed"]
     completed_events = [item for item in detail["events"] if item["event_type"] == "task.completed"]
+    assert claimed_events[0]["team_id"] == created["team_id"]
     assert claimed_events and claimed_events[0]["detail"]["task_key"] == claim["task_key"]
+    assert claimed_events[0]["detail"]["member_key"] == "reader"
     assert completed_events and completed_events[0]["detail"]["task_key"] == claim["task_key"]
     assert db.query(AgentTeam).count() == 1
     assert db.query(AgentTeamTask).count() == 2

@@ -33,7 +33,7 @@ const emit = defineEmits<{
   /** 重试/取消成功后通知父组件刷新团队数据 */
   refreshed: []
   /** 在聊天中追问某成员:父组件预填输入框,支持做完后修正。 */
-  'ask-member': [payload: { name: string; address: string }]
+  'ask-member': [payload: { teamId: number; name: string; address: string }]
 }>()
 
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } =
@@ -340,7 +340,7 @@ async function cancelTeam(): Promise<void> {
               :events="props.team?.events ?? []"
               :team-started-at="team.started_at"
               show-ask
-              @ask="emit('ask-member', { name: $event.display_name, address: $event.address })"
+              @ask="team && emit('ask-member', { teamId: team.team_id, name: $event.display_name, address: $event.address })"
             />
           </section>
 

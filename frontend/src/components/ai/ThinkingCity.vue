@@ -24,7 +24,11 @@ import {
 import { commitSessionMemory, getMemoryEntries, getMemoryKeys } from '@/utils/thinkingCityMemory'
 import { useUserStore } from '@/stores/user'
 import { useAgentTeamEvents } from '@/composables/useAgentTeamEvents'
-import { getAgentTeam } from '@/api/agentTeams'
+import {
+  getAgentTeam,
+  type AgentTeamDetail,
+  type AgentTeamStatus,
+} from '@/api/agentTeams'
 
 interface Props {
   /** 思考是否进行中;false 时定格最后一帧并停止 rAF */
@@ -35,6 +39,8 @@ interface Props {
   sentences?: string[]
   /** 本地演示:挂载后自动模拟一次子 Agent 联动(默认关) */
   demoSubAgent?: boolean
+  /** 当前会话内需要持续跟踪的真实子 Agent 团队 */
+  teamIds?: number[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -42,6 +48,7 @@ const props = withDefaults(defineProps<Props>(), {
   compact: false,
   sentences: undefined,
   demoSubAgent: false,
+  teamIds: () => [],
 })
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -69,6 +76,18 @@ let lastFrameAt = 0
 let resizeObserver: ResizeObserver | null = null
 let hudSyncAt = 0
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const TERMINAL_TEAM_STATUS: ReadonlySet<AgentTeamStatus> = new Set([
+  'completed', 'failed', 'cancelled', 'expired',
+])
+
+interface TrackedTeam {
+  detail: AgentTeamDetail
+  startedMembers: Set<string>
+  status: AgentTeamStatus
+}
+
+const trackedTeams = new Map<number, TrackedTeam>()
+const spawningTeams = new Set<number>()
 
 const phaseLabel = computed(() => {
   if (phase.value === 'ignite') return '正在点亮知识房间'
@@ -116,6 +135,7 @@ function initEngine(width: number, height: number): void {
   for (let i = 0; i < 42; i++) {
     stars.push({ x: rand() * width, y: rand() * height * 0.5, r: 0.6 + rand() * 1.2, tw: rand() * Math.PI * 2 })
   }
+  replayTrackedTeams()
 }
 
 /** 由房间 key 反查主题与知识点标签(用于记忆写回和知识卡片) */
@@ -546,6 +566,7 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(() => fitCanvas())
   if (wrapRef.value) resizeObserver.observe(wrapRef.value)
   if (!reducedMotion && props.active) rafId = window.requestAnimationFrame(loop)
+  syncTrackedTeamIds()
 })
 
 onBeforeUnmount(() => {
@@ -565,38 +586,109 @@ const teamEvents = useAgentTeamEvents({
       const eng = engine
       if (!eng) continue
       if (ev.event_type === 'task.claimed' && typeof ev.detail?.task_key === 'string') {
-        // 用 member 维度点亮;后端 detail 里带 task_key,成员地址在 actor_address
-        const memberKey = String(ev.detail?.member_key ?? ev.detail?.task_key)
-        eng.subCityTaskStarted(Number(ev.team_id ?? 0), memberKey)
-      } else if (ev.event_type === 'team.completed' || ev.event_type === 'team.failed' || ev.event_type === 'team.cancelled') {
-        const status = ev.event_type === 'team.completed' ? 'completed' : ev.event_type === 'team.failed' ? 'failed' : 'cancelled'
-        eng.subCityFinished(Number(ev.team_id ?? 0), status)
+        const teamId = Number(ev.team_id ?? 0)
+        const tracked = trackedTeams.get(teamId)
+        const memberFromId = tracked?.detail.members.find((member) => member.member_id === ev.member_id)?.member_key
+        const memberKey = String(ev.detail?.member_key ?? memberFromId ?? ev.detail.task_key)
+        tracked?.startedMembers.add(memberKey)
+        eng.subCityTaskStarted(teamId, memberKey)
+      } else if (ev.event_type === 'team.status_changed' && typeof ev.to_status === 'string') {
+        finishTrackedTeam(Number(ev.team_id ?? 0), ev.to_status as AgentTeamStatus)
       }
     }
   },
+  onStatus: (status, teamId) => finishTrackedTeam(teamId, status),
 })
+
+function startedMemberKeys(detail: AgentTeamDetail): Set<string> {
+  const result = new Set<string>()
+  for (const member of detail.members) {
+    if (['running', 'completed', 'failed', 'reclaimed'].includes(member.status)) result.add(member.member_key)
+  }
+  for (const task of detail.tasks) {
+    if (!['waiting_dependency', 'queued', 'blocked', 'cancelled', 'expired'].includes(task.status)) {
+      const memberKey = task.member_key
+        ?? detail.members.find((member) => member.member_id === task.member_id)?.member_key
+      if (memberKey) result.add(memberKey)
+    }
+  }
+  return result
+}
+
+function replayTrackedTeam(teamId: number, tracked: TrackedTeam): void {
+  const eng = engine
+  if (!eng) return
+  eng.spawnSubCity(
+    teamId,
+    tracked.detail.title || `团队 ${teamId}`,
+    tracked.detail.members.map((member) => ({
+      memberKey: member.member_key,
+      displayName: member.display_name,
+    })),
+  )
+  for (const memberKey of tracked.startedMembers) eng.subCityTaskStarted(teamId, memberKey)
+  if (TERMINAL_TEAM_STATUS.has(tracked.status)) eng.subCityFinished(teamId, tracked.status)
+}
+
+function replayTrackedTeams(): void {
+  for (const [teamId, tracked] of trackedTeams) replayTrackedTeam(teamId, tracked)
+}
+
+function finishTrackedTeam(teamId: number, status: AgentTeamStatus): void {
+  const tracked = trackedTeams.get(teamId)
+  if (!tracked) return
+  tracked.status = status
+  if (TERMINAL_TEAM_STATUS.has(status)) {
+    engine?.subCityFinished(teamId, status)
+    teamEvents.stop(teamId)
+  }
+}
 
 /**
  * 让一座子 Agent 城市长出来并开始跟踪它的事件流。
  * 由父组件(AgentChatDrawer/AdminCopilot)在发现 team_id 时调用。
  */
-async function spawnSubAgent(teamId: number): Promise<void> {
-  const eng = engine
-  if (!eng) return
+async function spawnSubAgent(teamId: number): Promise<boolean> {
+  if (!Number.isInteger(teamId) || teamId <= 0) return false
+  const existing = trackedTeams.get(teamId)
+  if (existing) {
+    replayTrackedTeam(teamId, existing)
+    if (!TERMINAL_TEAM_STATUS.has(existing.status)) teamEvents.start(teamId)
+    return true
+  }
+  if (spawningTeams.has(teamId)) return false
+  spawningTeams.add(teamId)
   try {
     const detail = await getAgentTeam(teamId)
-    eng.spawnSubCity(
-      teamId,
-      detail.title || `团队 ${teamId}`,
-      detail.members.map((m) => ({ memberKey: m.member_key, displayName: m.display_name })),
-    )
-    teamEvents.start(teamId)
+    if (!props.teamIds.includes(teamId)) return false
+    const tracked: TrackedTeam = {
+      detail,
+      startedMembers: startedMemberKeys(detail),
+      status: detail.status,
+    }
+    trackedTeams.set(teamId, tracked)
+    replayTrackedTeam(teamId, tracked)
+    if (!TERMINAL_TEAM_STATUS.has(detail.status)) teamEvents.start(teamId)
+    return true
   } catch {
-    // 团队详情拉不到也先画个占位城市,不阻塞主动画
-    eng.spawnSubCity(teamId, `团队 ${teamId}`, [])
-    teamEvents.start(teamId)
+    lastEvent.value = `团队 ${teamId} 状态暂时无法同步`
+    return false
+  } finally {
+    spawningTeams.delete(teamId)
   }
 }
+
+function syncTrackedTeamIds(): void {
+  const wanted = new Set(props.teamIds.filter((teamId) => Number.isInteger(teamId) && teamId > 0))
+  for (const teamId of [...trackedTeams.keys()]) {
+    if (wanted.has(teamId)) continue
+    trackedTeams.delete(teamId)
+    teamEvents.stop(teamId)
+  }
+  for (const teamId of wanted) void spawnSubAgent(teamId)
+}
+
+watch(() => props.teamIds.join(','), syncTrackedTeamIds)
 
 /** 本地演示:不用后端,按引擎时间在 drawFrame 里驱动一次完整子 Agent 生命周期。
  * 不用 setTimeout,避免引擎因 resize 重建后时序丢失。 */

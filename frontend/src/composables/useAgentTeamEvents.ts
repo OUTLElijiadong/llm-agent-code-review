@@ -24,7 +24,33 @@ export interface UseAgentTeamEventsOptions {
   /** 每批新事件回调(可用于驱动可视化) */
   onEvents?: (events: AgentTeamEvent[]) => void
   /** 团队状态变化回调 */
-  onStatus?: (status: AgentTeamStatus) => void
+  onStatus?: (status: AgentTeamStatus, teamId: number) => void
+}
+
+interface TeamTracker {
+  afterId: number
+  timer?: number
+  generation: number
+  inFlight: boolean
+  stopped: boolean
+  failures: number
+}
+
+const PERMANENT_ERROR_CODES = new Set([40331, 40431])
+
+function errorCode(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'number' ? code : undefined
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (error && typeof error === 'object') {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message) return message
+  }
+  return String(error)
 }
 
 export function useAgentTeamEvents(options: UseAgentTeamEventsOptions = {}) {
@@ -33,71 +59,109 @@ export function useAgentTeamEvents(options: UseAgentTeamEventsOptions = {}) {
 
   const events = ref<AgentTeamEvent[]>([]) as Ref<AgentTeamEvent[]>
   const teamStatus = ref<AgentTeamStatus | ''>('')
+  const teamStatuses = ref<Record<number, AgentTeamStatus>>({})
   const loading = ref(false)
   const error = ref('')
 
-  let teamId: number | null = null
-  let afterId = 0
-  let timer: number | undefined
-  let stopped = true
-  /** 防止上一次请求还没回就发下一次 */
-  let inFlight = false
+  const trackers = new Map<number, TeamTracker>()
+  let generationSeed = 0
 
-  async function pull(): Promise<void> {
-    if (teamId === null || inFlight) return
-    inFlight = true
+  function isCurrent(teamId: number, tracker: TeamTracker): boolean {
+    return trackers.get(teamId) === tracker && !tracker.stopped
+  }
+
+  function syncLoading(): void {
+    loading.value = [...trackers.values()].some((tracker) => tracker.inFlight)
+  }
+
+  function schedule(teamId: number, tracker: TeamTracker): void {
+    if (!isCurrent(teamId, tracker)) return
+    window.clearTimeout(tracker.timer)
+    const delay = Math.min(interval * (2 ** Math.min(tracker.failures, 3)), interval * 8)
+    tracker.timer = window.setTimeout(() => void pull(teamId, tracker), delay)
+  }
+
+  async function pull(teamId: number, tracker: TeamTracker): Promise<void> {
+    if (!isCurrent(teamId, tracker) || tracker.inFlight) return
+    tracker.inFlight = true
+    syncLoading()
     try {
-      const page = await listAgentTeamEvents(teamId, afterId, pageSize)
-      if (page.items.length) {
-        events.value = events.value.concat(page.items)
-        afterId = page.next_after_id
-        options.onEvents?.(page.items)
-      } else {
-        afterId = page.next_after_id
-      }
-      if (page.team_status !== teamStatus.value) {
-        teamStatus.value = page.team_status
-        options.onStatus?.(page.team_status)
-      }
+      let hasMore = false
+      let status: AgentTeamStatus | '' = ''
+      do {
+        const page = await listAgentTeamEvents(teamId, tracker.afterId, pageSize)
+        if (!isCurrent(teamId, tracker)) return
+        const batch = page.items.map((item) => ({ ...item, team_id: item.team_id ?? teamId }))
+        if (batch.length) {
+          events.value = events.value.concat(batch)
+          options.onEvents?.(batch)
+        }
+        tracker.afterId = page.next_after_id
+        status = page.team_status
+        hasMore = page.has_more
+      } while (hasMore && isCurrent(teamId, tracker))
+
+      if (!isCurrent(teamId, tracker)) return
+      tracker.failures = 0
       error.value = ''
-      // 终态后停止轮询
-      if (TERMINAL_STATUS.has(page.team_status)) stop()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-      // 出错不退避太狠,下一轮照常(团队可能还没建完)
+      if (status) {
+        const previous = teamStatuses.value[teamId]
+        teamStatuses.value = { ...teamStatuses.value, [teamId]: status }
+        teamStatus.value = status
+        if (previous !== status) options.onStatus?.(status, teamId)
+        if (TERMINAL_STATUS.has(status)) {
+          stop(teamId)
+          return
+        }
+      }
+      schedule(teamId, tracker)
+    } catch (caught) {
+      if (!isCurrent(teamId, tracker)) return
+      error.value = errorMessage(caught)
+      tracker.failures += 1
+      if (PERMANENT_ERROR_CODES.has(errorCode(caught) ?? -1)) {
+        stop(teamId)
+        return
+      }
+      schedule(teamId, tracker)
     } finally {
-      inFlight = false
+      tracker.inFlight = false
+      syncLoading()
     }
   }
 
-  function schedule(): void {
-    if (stopped) return
-    timer = window.setTimeout(async () => {
-      await pull()
-      schedule()
-    }, interval)
-  }
-
-  /** 开始跟踪一个团队;重复调用会先停掉旧的 */
+  /** 开始跟踪一个团队；多个团队拥有相互隔离的游标和请求代际。 */
   function start(id: number): void {
-    stop()
-    teamId = id
-    afterId = 0
-    events.value = []
-    teamStatus.value = ''
+    if (!Number.isInteger(id) || id <= 0) return
+    const existing = trackers.get(id)
+    if (existing && !existing.stopped) return
+    if (existing?.timer !== undefined) window.clearTimeout(existing.timer)
+    const tracker: TeamTracker = {
+      afterId: 0,
+      generation: ++generationSeed,
+      inFlight: false,
+      stopped: false,
+      failures: 0,
+    }
+    trackers.set(id, tracker)
     error.value = ''
-    stopped = false
-    void pull()
-    schedule()
+    void pull(id, tracker)
   }
 
-  function stop(): void {
-    stopped = true
-    window.clearTimeout(timer)
-    timer = undefined
+  function stop(id?: number): void {
+    const ids = id === undefined ? [...trackers.keys()] : [id]
+    for (const teamId of ids) {
+      const tracker = trackers.get(teamId)
+      if (!tracker) continue
+      tracker.stopped = true
+      window.clearTimeout(tracker.timer)
+      tracker.timer = undefined
+      trackers.delete(teamId)
+    }
+    syncLoading()
   }
 
   onBeforeUnmount(stop)
 
-  return { events, teamStatus, loading, error, start, stop }
+  return { events, teamStatus, teamStatuses, loading, error, start, stop }
 }

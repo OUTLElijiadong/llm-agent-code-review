@@ -215,6 +215,13 @@ const anchoredTeamIds = computed(() => new Set(
 const unanchoredAgentTeams = computed(() => (
   visibleAgentTeams.value.filter((team) => !anchoredTeamIds.value.has(team.team_id))
 ))
+const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
+const activeThinkingTeamIds = computed(() => (
+  visibleAgentTeams.value
+    .filter((team) => !TERMINAL_TEAM_STATUSES.has(team.status))
+    .map((team) => team.team_id)
+))
+const thinkingCityActive = computed(() => showTyping.value || activeThinkingTeamIds.value.length > 0)
 
 function snapshotTeam(team: AgentTeamDetail | AgentTeamSummary): AgentChatSnapshotTeam {
   return {
@@ -940,9 +947,9 @@ function startNewChat(): void {
 
 /** 会话归档:服务端成功后才本地移除;失败保留会话并重新发现。 */
 /** 团队成员追问:关闭悬浮窗并把追问指令预填到输入框。 */
-async function handleAskMember({ name }: { name: string; address: string }): Promise<void> {
+async function handleAskMember({ teamId, name, address }: { teamId: number; name: string; address: string }): Promise<void> {
   teamWindowVisible.value = false
-  inputText.value = `请让「${name}」继续处理，我的要求是：`
+  inputText.value = `请向团队 #${teamId} 的子 Agent「${name}」（目标地址：${address}）发送补充要求：`
   await nextTick()
   // 追问模板全选:打字即替换模板前缀,避免「模板+输入」拼接
   const askInput = chatInputRef.value
@@ -2398,13 +2405,13 @@ onMounted(() => {
               @open-detail="openTeamWindow"
             />
 
-            <div v-if="showTyping" class="msg-row assistant">
+            <div v-if="thinkingCityActive" class="msg-row assistant">
               <div class="msg-avatar">
                 <PrismMascot :size="26" :status="'running'" />
               </div>
-              <div class="msg-bubble typing" :class="{ 'is-city-open': thinkingCityOpen }" aria-label="小菱正在思考">
+              <div class="msg-bubble typing" :class="{ 'is-city-open': thinkingCityOpen }" :aria-label="showTyping ? '小菱正在思考' : '子 Agent 正在协作'">
                 <AiOrb :size="28" state="thinking" :halo="false" />
-                <span class="typing-label">小菱正在想</span>
+                <span class="typing-label">{{ showTyping ? '小菱正在想' : '子 Agent 正在协作' }}</span>
                 <span class="typing-dot" />
                 <span class="typing-dot" />
                 <span class="typing-dot" />
@@ -2418,8 +2425,8 @@ onMounted(() => {
               </div>
             </div>
             <Transition name="thinking-city">
-              <div v-if="showTyping && thinkingCityOpen" class="thinking-city-wrap">
-                <ThinkingCity :active="showTyping" />
+              <div v-if="thinkingCityActive && thinkingCityOpen" class="thinking-city-wrap">
+                <ThinkingCity :active="thinkingCityActive" :team-ids="activeThinkingTeamIds" />
               </div>
             </Transition>
             </div>

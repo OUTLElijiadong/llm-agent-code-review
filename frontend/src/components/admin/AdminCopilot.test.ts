@@ -13,7 +13,7 @@ const streams = vi.hoisted(() => ({
 const messages = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn(), cancel: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
-const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn() }))
+const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
 vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get, cancelAgentResponseRun: sessionApi.cancel }))
@@ -27,6 +27,7 @@ vi.mock('@/api/agentTeams', () => ({
   listAgentTeams: teamApi.list,
   getAgentTeam: teamApi.detail,
   listAgentTeamMessages: teamApi.messages,
+  listAgentTeamEvents: teamApi.events,
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
@@ -85,6 +86,9 @@ beforeEach(() => {
   meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
   teamApi.list.mockReset().mockResolvedValue({ items: [], total: 0 })
   teamApi.detail.mockReset()
+  teamApi.events.mockReset().mockResolvedValue({
+    items: [], has_more: false, next_after_id: 0, page_size: 200, team_status: 'running',
+  })
   sessionApi.get.mockReset()
   sessionApi.cancel.mockReset().mockResolvedValue(undefined)
   sessionApi.get.mockResolvedValue({
@@ -109,6 +113,29 @@ afterEach(() => {
 })
 
 describe('AdminCopilot Responses stream', () => {
+  it('创建团队后主响应结束也持续展示真实子 Agent 协作城市', async () => {
+    teamApi.detail.mockResolvedValue({
+      team_id: 88, title: '管理端实时协作', surface: 'admin', session_id: 'admin-test', status: 'running',
+      max_active_children: 3, trace_id: 'trace-admin-88',
+      counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 },
+      members: [], tasks: [], events: [], messages: [],
+    })
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    await wrapper.find('textarea').setValue('请创建子 Agent 团队')
+    void wrapper.find('.send-button').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-admin-team', model: 'deepseek-v4-pro' } })
+    emit(0, { type: 'response.tool.completed', call_id: 'call-admin-team', tool_name: 'create_agent_team', output: { team_id: 88 } })
+    await flushPromises()
+
+    expect(wrapper.find('.thinking-city').exists()).toBe(true)
+    expect(wrapper.text()).toContain('子 Agent 正在协作')
+    wrapper.unmount()
+  })
+
   it('后台历史会话完成 Mesh 任务后不抢占当前管理新对话', async () => {
     window.localStorage.setItem('prism-agent-sessions:admin', JSON.stringify([
       { id: 'admin-current', title: '新对话', createdAt: 2 },
@@ -221,7 +248,10 @@ describe('AdminCopilot Responses stream', () => {
 
     expect(document.querySelector('.team-side-panel')).toBeNull()
     const input = wrapper.find('textarea').element as HTMLTextAreaElement
+    expect(input.value).toContain('团队 #88')
     expect(input.value).toContain('安全审计员')
+    expect(input.value).toContain('agent:security_auditor')
+    expect(input.value).toContain('发送补充要求')
     wrapper.unmount()
   })
 

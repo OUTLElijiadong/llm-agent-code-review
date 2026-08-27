@@ -11,7 +11,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  "ask-member": [payload: { name: string; address: string }]
+  "ask-member": [payload: { teamId: number; name: string; address: string }]
 }>()
 
 const team = ref<AgentTeamDetail | null>(null)
@@ -19,49 +19,69 @@ const loading = ref(false)
 const error = ref("")
 const activeTab = ref<"overview" | "members" | "tasks" | "events">("overview")
 const now = ref(Date.now())
-let pollTimer: ReturnType<typeof setInterval> | undefined
+let pollTimer: ReturnType<typeof setTimeout> | undefined
 let clockTimer: ReturnType<typeof setInterval> | undefined
+let pollGeneration = 0
 
-async function fetchTeam(): Promise<void> {
-  if (!props.teamId) return
-  loading.value = true
-  error.value = ""
-  try {
-    team.value = await getAgentTeam(props.teamId)
-  } catch {
-    error.value = "加载团队详情失败"
-  } finally {
-    loading.value = false
-  }
+function stopPolling(): void {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
 }
 
-function startPolling(): void {
+function schedulePolling(teamId: number, generation: number): void {
   stopPolling()
-  pollTimer = setInterval(async () => {
-    if (!props.teamId) return
-    try {
-      team.value = await getAgentTeam(props.teamId)
-    } catch { /* ignore */ }
+  if (generation !== pollGeneration || props.teamId !== teamId || isTerminal.value) return
+  pollTimer = setTimeout(() => {
+    pollTimer = undefined
+    void fetchTeam(teamId, generation, false)
   }, 5000)
 }
 
-function stopPolling(): void {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined }
+async function fetchTeam(teamId: number, generation: number, initial: boolean): Promise<void> {
+  if (initial) {
+    loading.value = true
+    error.value = ""
+  }
+  try {
+    const detail = await getAgentTeam(teamId)
+    if (generation !== pollGeneration || props.teamId !== teamId) return
+    team.value = detail
+    error.value = ""
+  } catch {
+    if (generation !== pollGeneration || props.teamId !== teamId) return
+    if (initial) error.value = "加载团队详情失败"
+  } finally {
+    if (generation === pollGeneration && props.teamId === teamId) {
+      if (initial) loading.value = false
+      schedulePolling(teamId, generation)
+    }
+  }
+}
+
+function loadTeam(teamId: number | null): void {
+  pollGeneration += 1
+  stopPolling()
+  team.value = null
+  error.value = ""
+  loading.value = false
+  activeTab.value = "overview"
+  if (!teamId) return
+  void fetchTeam(teamId, pollGeneration, true)
 }
 
 const isTerminal = computed(() => ["completed", "failed", "cancelled", "expired"].includes(team.value?.status ?? ""))
 
-watch(() => props.teamId, (id) => {
-  if (id) { fetchTeam(); startPolling() } else { stopPolling(); team.value = null }
-})
+watch(() => props.teamId, loadTeam, { immediate: true })
 watch(isTerminal, (t) => { if (t) stopPolling() })
 
 onMounted(() => {
   // 秒级节拍驱动成员计时文案;5s 粒度会以 5 为步长跳变
   clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
-  if (props.teamId) { fetchTeam(); startPolling() }
 })
-onBeforeUnmount(() => { stopPolling(); if (clockTimer) clearInterval(clockTimer) })
+onBeforeUnmount(() => {
+  pollGeneration += 1
+  stopPolling()
+  if (clockTimer) clearInterval(clockTimer)
+})
 
 const members = computed<AgentTeamMember[]>(() => team.value?.members ?? [])
 const tasks = computed<AgentTeamTask[]>(() => team.value?.tasks ?? [])
@@ -99,7 +119,9 @@ function eventTime(e: AgentTeamEvent): string {
 }
 
 function askMember(member: AgentTeamMember): void {
-  emit("ask-member", { name: member.display_name, address: member.address })
+  const teamId = team.value?.team_id ?? props.teamId
+  if (!teamId) return
+  emit("ask-member", { teamId, name: member.display_name, address: member.address })
 }
 </script>
 

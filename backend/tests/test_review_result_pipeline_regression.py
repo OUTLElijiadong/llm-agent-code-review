@@ -331,6 +331,105 @@ def test_source_anchor_resolves_python_import_aliases() -> None:
     assert len({item.source_anchor for item in merged}) == 2
 
 
+def test_javascript_unique_evidence_resolves_drifted_lines_without_python_ast() -> None:
+    """非 Python 源码使用完整源码证据定位，且同一行两个 sink 不得误合并。"""
+    code = (
+        'const childProcess = require("node:child_process")\n'
+        'childProcess.exec(firstCommand); childProcess.exec(secondCommand)\n'
+    )
+    issues = [
+        _issue(
+            line=8,
+            evidence="childProcess.exec(firstCommand)",
+            source="llm:first",
+            title="命令注入",
+            cwe="CWE-78",
+        ),
+        _issue(
+            line=9,
+            evidence="childProcess.exec(secondCommand)",
+            source="llm:second",
+            title="命令注入",
+            cwe="CWE-78",
+        ),
+    ]
+
+    merged = merge_findings_and_issues(
+        [],
+        issues,
+        file_id=104,
+        code=code,
+        language="javascript",
+    )
+
+    assert len(merged) == 2
+    assert {item.line_number for item in merged} == {2}
+    assert len({item.source_anchor for item in merged}) == 2
+    assert all(item.source_anchor.startswith("src:") for item in merged)
+
+
+def test_php_multiline_unique_evidence_sets_exact_start_and_end_lines() -> None:
+    code = (
+        "<?php\n"
+        "$result = shell_exec(\n"
+        "    $userCommand\n"
+        ");\n"
+    )
+    issue = _issue(
+        line=20,
+        evidence="shell_exec($userCommand)",
+        source="llm:security",
+        title="命令注入",
+        cwe="CWE-78",
+    )
+
+    merged = merge_findings_and_issues(
+        [],
+        [issue],
+        file_id=105,
+        code=code,
+        language="php",
+    )
+
+    assert len(merged) == 1
+    assert merged[0].line_number == 2
+    assert merged[0].end_line == 4
+    assert merged[0].source_anchor.startswith("src:")
+
+
+def test_repeated_source_evidence_uses_unique_nearest_occurrence() -> None:
+    """重复证据只有在模型位置能唯一消歧时才生成精确锚点。"""
+    code = "exec(command)\nconst safe = true\nexec(command)\n"
+    issues = [
+        _issue(
+            line=1,
+            evidence="exec(command)",
+            source="llm:first",
+            title="命令注入",
+            cwe="CWE-78",
+        ),
+        _issue(
+            line=3,
+            evidence="exec(command)",
+            source="llm:second",
+            title="命令注入",
+            cwe="CWE-78",
+        ),
+    ]
+
+    merged = merge_findings_and_issues(
+        [],
+        issues,
+        file_id=106,
+        code=code,
+        language="javascript",
+    )
+
+    assert len(merged) == 2
+    assert {item.line_number for item in merged} == {1, 3}
+    assert len({item.source_anchor for item in merged}) == 2
+
+
 def test_cvss_zero_and_invalid_vector_are_unavailable_or_unversioned() -> None:
     assert normalize_cvss(0.0, None) == (None, None, None, "unavailable")
     assert normalize_cvss(7.5, "not-a-vector") == (7.5, None, None, "model")

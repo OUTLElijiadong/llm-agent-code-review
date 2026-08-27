@@ -1097,4 +1097,5 @@ def _normalize_discussion_issues(
         roundtable_issues,
         file_id,
         code=code,
+        language=language,
     )

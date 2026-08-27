@@ -616,9 +616,12 @@ def _event(
     message_id: Optional[str] = None,
     correlation_id: str = "",
 ) -> AgentTeamEvent:
-    # 前端子Agent工作卡片用事件日志展示「开始工作 <task_key>」;统一注入,调用点无需各自记得带
+    # 前端按任务/成员驱动团队工作卡片和思考城市；统一补齐上下文，避免调用点遗漏。
+    event_detail = dict(detail or {})
     if task is not None:
-        detail = {"task_key": task.task_key, **(detail or {})}
+        event_detail.setdefault("task_key", task.task_key)
+    if member is not None:
+        event_detail.setdefault("member_key", member.member_key)
     row = AgentTeamEvent(
         team_id=int(team.id),
         task_id=int(task.id) if task else None,
@@ -631,7 +634,7 @@ def _event(
         to_status=to_status,
         actor_address=actor_address,
         trace_id=team.trace_id,
-        detail_json=_json(_public(detail or {})),
+        detail_json=_json(_public(event_detail)),
     )
     db.add(row)
     return row
@@ -1030,6 +1033,7 @@ def _serialize_task(row: AgentTeamTask, member_key: str = "") -> dict[str, Any]:
 def _serialize_event(row: AgentTeamEvent) -> dict[str, Any]:
     return {
         "event_id": int(row.id),
+        "team_id": int(row.team_id),
         "task_id": row.task_id,
         "member_id": row.member_id,
         "event_type": row.event_type,

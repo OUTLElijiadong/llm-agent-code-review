@@ -698,6 +698,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
         llm_issues,
         code_file.id,
         code=code_file.content or "",
+        language=code_file.language,
     )
 
     # ===== v3 字段持久化 =====

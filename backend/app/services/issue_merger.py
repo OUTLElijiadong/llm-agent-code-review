@@ -22,6 +22,7 @@ def merge_findings_and_issues(
     issues: List[Issue],
     file_id: int,
     code: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> List[Issue]:
     """N-way deduplicate static and LLM results for one file.
 
@@ -36,7 +37,11 @@ def merge_findings_and_issues(
     if not candidates:
         return []
 
-    anchor_index = _build_anchor_index(code) if code else _AnchorIndex.empty()
+    anchor_index = (
+        _build_anchor_index(code, language=language, candidates=candidates)
+        if code
+        else _AnchorIndex.empty()
+    )
     candidates = _attach_code_anchors(candidates, anchor_index)
 
     candidates.sort(key=_candidate_sort_key)
@@ -170,54 +175,191 @@ class _AnchorIndex:
         return cls(records=(), by_anchor={})
 
 
-def _build_anchor_index(code: Optional[str]) -> _AnchorIndex:
-    """从 Python 源码建立确定性 sink 索引；解析失败时安全降级为空索引。"""
+def _build_anchor_index(
+    code: Optional[str],
+    *,
+    language: Optional[str] = None,
+    candidates: Iterable[Issue] = (),
+) -> _AnchorIndex:
+    """建立确定性源码索引：Python AST 优先，其次是完整源码证据。"""
     if not code:
         return _AnchorIndex.empty()
-    try:
-        tree = ast.parse(code)
-    except (SyntaxError, ValueError, TypeError):
-        return _AnchorIndex.empty()
-
-    aliases = _python_import_aliases(tree)
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-    calls.sort(
-        key=lambda node: (
-            int(getattr(node, "lineno", 0) or 0),
-            int(getattr(node, "col_offset", 0) or 0),
-            int(getattr(node, "end_lineno", 0) or 0),
-            int(getattr(node, "end_col_offset", 0) or 0),
-        )
-    )
-    occurrences: dict[str, int] = {}
+    candidate_list = list(candidates)
     records: list[_CodeAnchor] = []
-    for node in calls:
-        name = _canonical_call_name(_ast_call_name(node.func), aliases)
-        cwe = _call_cwe(name, node)
-        if not cwe:
-            continue
-        segment = ast.get_source_segment(code, node) or ""
-        normalized = _normalize_source_anchor(segment)
-        if not normalized:
-            continue
-        occurrence = occurrences.get(normalized, 0) + 1
-        occurrences[normalized] = occurrence
-        line_number = int(getattr(node, "lineno", 0) or 0)
-        end_line = int(getattr(node, "end_lineno", line_number) or line_number)
-        record = _CodeAnchor(
-            anchor=f"py:{normalized[:240]}#{max(1, occurrence)}",
-            line_number=line_number,
-            end_line=end_line,
-            column_start=getattr(node, "col_offset", None),
-            column_end=getattr(node, "end_col_offset", None),
-            normalized_segment=normalized,
-            cwe=cwe,
-        )
-        records.append(record)
+    normalized_language = (language or "").strip().lower()
+    if not normalized_language or normalized_language in {"py", "python", "python3"}:
+        try:
+            tree = ast.parse(code)
+        except (SyntaxError, ValueError, TypeError):
+            tree = None
+        if tree is not None:
+            aliases = _python_import_aliases(tree)
+            calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+            calls.sort(
+                key=lambda node: (
+                    int(getattr(node, "lineno", 0) or 0),
+                    int(getattr(node, "col_offset", 0) or 0),
+                    int(getattr(node, "end_lineno", 0) or 0),
+                    int(getattr(node, "end_col_offset", 0) or 0),
+                )
+            )
+            occurrences: dict[str, int] = {}
+            for node in calls:
+                name = _canonical_call_name(_ast_call_name(node.func), aliases)
+                cwe = _call_cwe(name, node)
+                if not cwe:
+                    continue
+                segment = ast.get_source_segment(code, node) or ""
+                normalized = _normalize_source_anchor(segment)
+                if not normalized:
+                    continue
+                occurrence = occurrences.get(normalized, 0) + 1
+                occurrences[normalized] = occurrence
+                line_number = int(getattr(node, "lineno", 0) or 0)
+                end_line = int(getattr(node, "end_lineno", line_number) or line_number)
+                records.append(
+                    _CodeAnchor(
+                        anchor=f"py:{normalized[:240]}#{max(1, occurrence)}",
+                        line_number=line_number,
+                        end_line=end_line,
+                        column_start=getattr(node, "col_offset", None),
+                        column_end=getattr(node, "end_col_offset", None),
+                        normalized_segment=normalized,
+                        cwe=cwe,
+                    )
+                )
+
+    records.extend(_reported_anchor_records(candidate_list, records))
+    records.extend(_evidence_anchor_records(code, candidate_list, records))
     return _AnchorIndex(
         records=tuple(records),
         by_anchor={record.anchor: record for record in records},
     )
+
+
+def _reported_anchor_records(
+    candidates: Iterable[Issue],
+    existing: Iterable[_CodeAnchor],
+) -> list[_CodeAnchor]:
+    """把静态规则已经给出的精确锚点纳入统一索引。"""
+    known = {record.anchor for record in existing}
+    records: list[_CodeAnchor] = []
+    for candidate in candidates:
+        anchor = (candidate.source_anchor or "").strip()
+        line_number = int(candidate.line_number or 0)
+        if not anchor or anchor in known or line_number <= 0:
+            continue
+        records.append(
+            _CodeAnchor(
+                anchor=anchor,
+                line_number=line_number,
+                end_line=int(candidate.end_line or line_number),
+                column_start=candidate.column_start,
+                column_end=candidate.column_end,
+                normalized_segment=_normalize_source_anchor(candidate.evidence),
+                cwe=_normalize_cwe(candidate.cwe),
+            )
+        )
+        known.add(anchor)
+    return records
+
+
+def _compact_source_with_offsets(value: str) -> tuple[str, list[int]]:
+    compact: list[str] = []
+    offsets: list[int] = []
+    for offset, character in enumerate(value):
+        if character.isspace():
+            continue
+        compact.append(character)
+        offsets.append(offset)
+    return "".join(compact), offsets
+
+
+def _all_occurrences(haystack: str, needle: str) -> list[int]:
+    positions: list[int] = []
+    start = 0
+    while needle and start <= len(haystack) - len(needle):
+        position = haystack.find(needle, start)
+        if position < 0:
+            break
+        positions.append(position)
+        start = position + max(1, len(needle))
+    return positions
+
+
+def _source_position(code: str, start: int, end: int) -> tuple[int, int, int, int]:
+    line_number = code.count("\n", 0, start) + 1
+    end_line = code.count("\n", 0, max(start, end - 1)) + 1
+    column_start = start - (code.rfind("\n", 0, start) + 1)
+    column_end = end - (code.rfind("\n", 0, end) + 1)
+    return line_number, end_line, column_start, column_end
+
+
+def _evidence_anchor_records(
+    code: str,
+    candidates: Iterable[Issue],
+    existing: Iterable[_CodeAnchor],
+) -> list[_CodeAnchor]:
+    """用去空白后仍可审计的源码证据补齐非 Python 及解析失败场景。"""
+    compact_code, offsets = _compact_source_with_offsets(code)
+    if not compact_code:
+        return []
+
+    existing_list = list(existing)
+    records: list[_CodeAnchor] = []
+    seen: set[tuple[str, str, int]] = set()
+    for candidate in candidates:
+        evidence = str(candidate.evidence or "").strip()
+        compact_evidence = "".join(character for character in evidence if not character.isspace())
+        if len(compact_evidence) < 8:
+            continue
+        cwe = _normalize_cwe(candidate.cwe)
+        normalized_evidence = _normalize_evidence(evidence)
+        if any(
+            (not cwe or record.cwe == cwe)
+            and (
+                normalized_evidence == _normalize_evidence(record.normalized_segment)
+                or (
+                    len(_normalize_evidence(record.normalized_segment)) >= 8
+                    and _normalize_evidence(record.normalized_segment) in normalized_evidence
+                )
+                or (
+                    len(normalized_evidence) >= 8
+                    and normalized_evidence in _normalize_evidence(record.normalized_segment)
+                )
+            )
+            for record in existing_list
+        ):
+            continue
+        digest = hashlib.sha256(compact_evidence.encode("utf-8")).hexdigest()[:20]
+        cwe_key = (cwe or "generic").lower()
+        for occurrence, position in enumerate(
+            _all_occurrences(compact_code, compact_evidence),
+            1,
+        ):
+            key = (cwe, digest, occurrence)
+            if key in seen:
+                continue
+            start = offsets[position]
+            end = offsets[position + len(compact_evidence) - 1] + 1
+            line_number, end_line, column_start, column_end = _source_position(
+                code,
+                start,
+                end,
+            )
+            records.append(
+                _CodeAnchor(
+                    anchor=f"src:{cwe_key}:{digest}#{occurrence}",
+                    line_number=line_number,
+                    end_line=end_line,
+                    column_start=column_start,
+                    column_end=column_end,
+                    normalized_segment=_normalize_source_anchor(code[start:end]),
+                    cwe=cwe,
+                )
+            )
+            seen.add(key)
+    return records
 
 
 def _ast_call_name(node: ast.AST) -> str:
@@ -317,11 +459,12 @@ def _resolve_anchor(issue: Issue, index: _AnchorIndex) -> Optional[_CodeAnchor]:
     if evidence:
         scored: list[tuple[int, int, _CodeAnchor]] = []
         for record in records:
-            if evidence == record.normalized_segment:
+            normalized_segment = _normalize_evidence(record.normalized_segment)
+            if evidence == normalized_segment:
                 match_score = 4
-            elif len(record.normalized_segment) >= 8 and record.normalized_segment in evidence:
+            elif len(normalized_segment) >= 8 and normalized_segment in evidence:
                 match_score = 3
-            elif len(evidence) >= 8 and evidence in record.normalized_segment:
+            elif len(evidence) >= 8 and evidence in normalized_segment:
                 match_score = 2
             else:
                 continue

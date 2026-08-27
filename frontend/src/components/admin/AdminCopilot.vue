@@ -186,11 +186,18 @@ const agentTeams = ref<AgentTeamDetail[]>([])
 const agentTeamLoading = ref(false)
 const agentTeamError = ref('')
 const selectedTeamId = ref<number | null>(null)
+const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
+const activeThinkingTeamIds = computed(() => (
+  agentTeams.value
+    .filter((team) => !TERMINAL_TEAM_STATUSES.has(team.status))
+    .map((team) => team.team_id)
+))
+const thinkingCityActive = computed(() => showTyping.value || activeThinkingTeamIds.value.length > 0)
 function openTeamPanel(teamId: number): void { selectedTeamId.value = teamId }
 
-async function handleAskMember({ name }: { name: string; address: string }): Promise<void> {
+async function handleAskMember({ teamId, name, address }: { teamId: number; name: string; address: string }): Promise<void> {
   selectedTeamId.value = null
-  inputText.value = `请让「${name}」继续处理，我的要求是：`
+  inputText.value = `请向团队 #${teamId} 的子 Agent「${name}」（目标地址：${address}）发送补充要求：`
   await nextTick()
   const enabled = !loading.value && !uploading.value && !sessionRestoring.value && !sessionBusy.value
   if (enabled) {
@@ -1690,13 +1697,13 @@ onMounted(() => {
           @open-panel="openTeamPanel"
         />
 
-        <div v-if="showTyping" class="typing-row">
+        <div v-if="thinkingCityActive" class="typing-row">
           <div class="message-avatar">
             <PrismMascot :size="22" :status="'running'" />
           </div>
           <div class="typing-bubble" :class="{ 'is-city-open': thinkingCityOpen }">
             <AiOrb :size="28" state="thinking" :halo="false" />
-            <span class="typing-label">小菱正在想</span>
+            <span class="typing-label">{{ showTyping ? '小菱正在想' : '子 Agent 正在协作' }}</span>
             <i></i><i></i><i></i>
             <button
               class="thinking-city-toggle"
@@ -1708,8 +1715,8 @@ onMounted(() => {
           </div>
         </div>
         <Transition name="thinking-city">
-          <div v-if="showTyping && thinkingCityOpen" class="thinking-city-wrap">
-            <ThinkingCity :active="showTyping" />
+          <div v-if="thinkingCityActive && thinkingCityOpen" class="thinking-city-wrap">
+            <ThinkingCity :active="thinkingCityActive" :team-ids="activeThinkingTeamIds" />
           </div>
         </Transition>
       </div>

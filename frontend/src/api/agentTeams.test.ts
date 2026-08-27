@@ -8,6 +8,7 @@ import {
   cancelAgentTeam,
   createAgentTeam,
   getAgentTeam,
+  listAgentTeamEvents,
   listAgentTeamMessages,
   listAgentTeams,
   retryAgentTeam,
@@ -24,6 +25,7 @@ describe('agent teams api', () => {
     await listAgentTeams({ surface: 'user', session_id: 'session-001', status: 'running', limit: 10 })
     await getAgentTeam(42)
     await listAgentTeamMessages(42, 501, 100)
+    await listAgentTeamEvents(42, 7, 50)
 
     expect(http.get).toHaveBeenNthCalledWith(1, '/agent-teams', {
       surface: 'user', session_id: 'session-001', status: 'running', limit: 10,
@@ -32,6 +34,9 @@ describe('agent teams api', () => {
     expect(http.get).toHaveBeenNthCalledWith(3, '/agent-teams/42/messages', {
       before_id: 501, limit: 100,
     })
+    expect(http.get).toHaveBeenNthCalledWith(4, '/agent-teams/42/events', {
+      after_id: 7, limit: 50,
+    }, [40331, 40431])
   })
 
   it('keeps the graph payload and mutation actions explicit', async () => {

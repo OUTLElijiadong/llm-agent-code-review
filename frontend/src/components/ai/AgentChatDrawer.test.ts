@@ -16,7 +16,7 @@ const streams = vi.hoisted(() => ({
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
-const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn() }))
+const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
 vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get }))
@@ -29,6 +29,7 @@ vi.mock('@/api/agentTeams', () => ({
   listAgentTeams: teamApi.list,
   getAgentTeam: teamApi.detail,
   listAgentTeamMessages: teamApi.messages,
+  listAgentTeamEvents: teamApi.events,
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
@@ -97,6 +98,9 @@ beforeEach(() => {
   meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
   teamApi.list.mockReset().mockResolvedValue({ items: [], total: 0 })
   teamApi.detail.mockReset()
+  teamApi.events.mockReset().mockResolvedValue({
+    items: [], has_more: false, next_after_id: 0, page_size: 200, team_status: 'running',
+  })
   sessionApi.get.mockReset()
   sessionApi.get.mockResolvedValue({
     surface: 'user', session_id: 'user-test', run: null, messages: [], pending: null,
@@ -213,6 +217,9 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.text()).not.toContain('最终结论')
 
     emit(0, { type: 'response.tool.completed', call_id: 'call-team', tool_name: 'create_agent_team', output_summary: '团队已创建' })
+    await settleAll()
+    expect(wrapper.find('.thinking-city').exists()).toBe(true)
+    expect(wrapper.text()).toContain('子 Agent 正在协作')
     emit(0, { type: 'response.output_text.delta', delta: '最终结论' })
     emit(0, { type: 'response.completed', response: { id: 'run-live-team' } })
     await finish(0)
@@ -862,7 +869,10 @@ describe('AgentChatDrawer Responses stream', () => {
     await wrapper.find('.team-window-ask').trigger('click')
     await settleAll()
     const value = (wrapper.find('textarea.chat-input').element as HTMLTextAreaElement).value
-    expect(value).toContain('请让「安全哨兵」继续处理')
+    expect(value).toContain('团队 #52')
+    expect(value).toContain('安全哨兵')
+    expect(value).toContain('agent:security_sentinel')
+    expect(value).toContain('发送补充要求')
   })
 
   it('网络错误留在消息流:错误卡片 + Toast,重试可恢复', async () => {

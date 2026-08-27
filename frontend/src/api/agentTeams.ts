@@ -238,7 +238,7 @@ export function listAgentTeamEvents(
   return get<AgentTeamEventPage>(`/agent-teams/${encodeURIComponent(String(teamId))}/events`, {
     after_id: afterId,
     limit,
-  })
+  }, [40331, 40431])
 }
 
 export function createAgentTeam(input: CreateAgentTeamInput): Promise<AgentTeamDetail> {
