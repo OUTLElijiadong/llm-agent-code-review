@@ -14,7 +14,7 @@ vi.mock('./http', () => ({
   download: vi.fn(),
 }))
 
-import { getRemoteProjectImport, queueRemoteProjectImport } from './project'
+import { cancelRemoteProjectImport, getRemoteProjectImport, queueRemoteProjectImport } from './project'
 
 describe('project remote import API', () => {
   beforeEach(() => {
@@ -48,5 +48,18 @@ describe('project remote import API', () => {
 
     await expect(getRemoteProjectImport('task/with-space')).resolves.toEqual(task)
     expect(httpApi.get).toHaveBeenCalledWith('/projects/remote-imports/task%2Fwith-space')
+  })
+
+  it('携带取消原因停止远程导入任务', async () => {
+    const task = { task_id: 'task/with-space', status: 'cancelled' }
+    httpApi.post.mockResolvedValue({ data: { data: task } })
+
+    await expect(cancelRemoteProjectImport('task/with-space', '用户取消'))
+      .resolves.toEqual(task)
+
+    expect(httpApi.post).toHaveBeenCalledWith(
+      '/projects/remote-imports/task%2Fwith-space/cancel',
+      { reason: '用户取消' },
+    )
   })
 })

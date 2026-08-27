@@ -46,6 +46,7 @@
       :class="{
         'is-error': Boolean(remoteImportError) || remoteImportTask?.status === 'failed',
         'is-success': remoteImportTask?.status === 'succeeded',
+        'is-cancelled': remoteImportTask?.status === 'cancelled',
       }"
     >
       <span class="remote-import-feedback-dot" aria-hidden="true"></span>
@@ -54,13 +55,24 @@
         <p>{{ remoteImportStatusDescription }}</p>
       </div>
       <el-button
-        v-if="remoteImportRecord"
+        v-if="canCancelRemoteImport"
+        data-testid="remote-import-cancel"
+        type="danger"
+        plain
+        size="small"
+        :loading="remoteImportCancelling"
+        :disabled="remoteImportCancelling"
+        @click="cancelCurrentRemoteImport"
+      >取消导入</el-button>
+      <el-button
+        v-if="remoteImportRecord && remoteImportError"
         size="small"
         :loading="remoteImportRetrying"
+        :disabled="remoteImportCancelling"
         @click="retryRemoteImport"
       >继续处理</el-button>
       <el-button
-        v-else-if="remoteImportError"
+        v-else-if="remoteImportError || remoteImportTask?.status === 'cancelled'"
         size="small"
         @click="dismissRemoteImportFeedback"
       >关闭</el-button>
@@ -327,6 +339,7 @@ import {
   updateProject,
   queueRemoteProjectImport,
   getRemoteProjectImport,
+  cancelRemoteProjectImport,
 } from '@/api/project'
 import { uploadFolder } from '@/api/codeFile'
 import { useUserStore } from '@/stores/user'
@@ -369,6 +382,7 @@ const remoteImportTask = ref<RemoteProjectImportTask | null>(null)
 const remoteImportRecord = ref<PersistedRemoteImport | null>(null)
 const remoteImportError = ref('')
 const remoteImportRetrying = ref(false)
+const remoteImportCancelling = ref(false)
 
 interface PersistedRemoteImport {
   version: number
@@ -381,11 +395,18 @@ const remoteImportStatusTitle = computed(() => {
   if (remoteImportError.value) return '远程导入暂时中断'
   const status = remoteImportTask.value?.status
   if (status === 'queued') return '远程导入已排队'
-  if (status === 'running') return '远程导入处理中'
+  if (isActiveRemoteImportStatus(status)) return '远程导入处理中'
   if (status === 'succeeded') return '远程导入完成'
   if (status === 'failed') return '远程导入失败'
+  if (status === 'cancelled') return '远程导入已取消'
   return '远程导入准备中'
 })
+
+const canCancelRemoteImport = computed(() => Boolean(
+  remoteImportRecord.value?.taskId
+  && remoteImportTask.value
+  && isActiveRemoteImportStatus(remoteImportTask.value.status),
+))
 
 const remoteImportStatusDescription = computed(() => {
   if (remoteImportError.value) {
@@ -396,14 +417,17 @@ const remoteImportStatusDescription = computed(() => {
   const task = remoteImportTask.value
   if (!task) return '正在提交任务，请稍候。'
   if (task.status === 'queued') return '任务已提交，正在等待服务器处理。'
-  if (task.status === 'running') {
-    const phase = remoteImportPhaseLabel(task.result?.progress?.phase)
+  if (isActiveRemoteImportStatus(task.status)) {
+    const phase = remoteImportPhaseLabel(task.result?.progress?.phase || task.status)
     const progress = formatRemoteImportProgress(task.result?.progress)
     return `${phase}${progress ? ` · ${progress}` : ''}`
   }
   if (task.status === 'succeeded') {
     const count = task.result?.file_count
     return typeof count === 'number' ? `已导入 ${count} 个文件，正在打开项目。` : '项目已创建，正在打开项目。'
+  }
+  if (task.status === 'cancelled') {
+    return task.cancel_reason || task.error?.message || '任务已取消，未继续写入项目。'
   }
   return task.error?.message || '服务器未提供具体失败原因，请重新提交。'
 })
@@ -598,7 +622,20 @@ function isRemoteImportTask(value: unknown): value is RemoteProjectImportTask {
   if (!value || typeof value !== 'object') return false
   const candidate = value as { task_id?: unknown; status?: unknown }
   return typeof candidate.task_id === 'string'
-    && ['queued', 'running', 'succeeded', 'failed'].includes(String(candidate.status))
+    && [
+      'queued',
+      'running',
+      'downloading',
+      'scanning',
+      'ingesting',
+      'succeeded',
+      'failed',
+      'cancelled',
+    ].includes(String(candidate.status))
+}
+
+function isActiveRemoteImportStatus(status?: RemoteProjectImportTask['status']): boolean {
+  return ['queued', 'running', 'downloading', 'scanning', 'ingesting'].includes(status || '')
 }
 
 function formatRemoteImportProgress(progress?: RemoteProjectImportTask['result']['progress']): string {
@@ -641,7 +678,7 @@ function scheduleRemoteImportPoll(delay = REMOTE_IMPORT_POLL_INTERVAL_MS): void 
 
 async function settleRemoteImportTask(task: RemoteProjectImportTask): Promise<void> {
   remoteImportTask.value = task
-  if (task.status === 'queued' || task.status === 'running') {
+  if (isActiveRemoteImportStatus(task.status)) {
     scheduleRemoteImportPoll()
     return
   }
@@ -650,6 +687,13 @@ async function settleRemoteImportTask(task: RemoteProjectImportTask): Promise<vo
   if (task.status === 'failed') {
     clearPersistedRemoteImport()
     remoteImportError.value = task.error?.message || '服务器未提供具体失败原因，请重新提交。'
+    return
+  }
+
+  if (task.status === 'cancelled') {
+    clearPersistedRemoteImport()
+    remoteImportError.value = ''
+    ElMessage.info(task.cancel_reason || task.error?.message || '远程导入已取消')
     return
   }
 
@@ -710,7 +754,7 @@ async function enqueuePersistedRemoteImport(record: PersistedRemoteImport, isRet
     persistRemoteImport({ ...record, taskId: task.task_id })
     remoteVisible.value = false
     remoteForm.value = { url: '', project_name: '', description: '', audit_mode: false }
-    if (task.status === 'queued' || task.status === 'running') {
+    if (isActiveRemoteImportStatus(task.status)) {
       scheduleRemoteImportPoll()
     } else {
       await settleRemoteImportTask(task)
@@ -751,6 +795,24 @@ async function retryRemoteImport(): Promise<void> {
   remoteImportPollFailures = 0
   if (record.taskId) await pollRemoteImportTask()
   else await enqueuePersistedRemoteImport(record, true)
+}
+
+async function cancelCurrentRemoteImport(): Promise<void> {
+  const taskId = remoteImportRecord.value?.taskId
+  if (!taskId || remoteImportCancelling.value || !canCancelRemoteImport.value) return
+  remoteImportCancelling.value = true
+  clearRemoteImportPoll()
+  try {
+    const task = await cancelRemoteProjectImport(taskId, '用户在项目页取消远程导入')
+    if (componentDisposed) return
+    if (!isRemoteImportTask(task)) throw new Error('服务器返回的远程导入任务状态无效')
+    await settleRemoteImportTask(task)
+  } catch (error) {
+    remoteImportError.value = readableRemoteImportError(error)
+    scheduleRemoteImportPoll()
+  } finally {
+    remoteImportCancelling.value = false
+  }
 }
 
 function dismissRemoteImportFeedback(): void {
@@ -964,6 +1026,11 @@ onBeforeUnmount(() => {
     background: rgba(79, 184, 122, 0.08);
     border-color: rgba(79, 184, 122, 0.3);
   }
+
+  &.is-cancelled {
+    background: var(--gray-50);
+    border-color: var(--gray-200);
+  }
 }
 
 .remote-import-feedback-dot {
@@ -982,6 +1049,11 @@ onBeforeUnmount(() => {
   .is-success & {
     background: var(--status-fixed);
     box-shadow: 0 0 0 4px rgba(79, 184, 122, 0.1);
+  }
+
+  .is-cancelled & {
+    background: var(--gray-400);
+    box-shadow: 0 0 0 4px rgba(155, 163, 176, 0.12);
   }
 }
 

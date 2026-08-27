@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.observability import observe_event
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
@@ -23,6 +24,7 @@ from app.schemas.project import (
     ProjectIn,
     ProjectOut,
     ProjectUpdateIn,
+    RemoteProjectImportCancelIn,
     RemoteProjectImportIn,
     RemoteProjectImportTaskOut,
 )
@@ -83,9 +85,20 @@ def create_project(payload: ProjectIn, db: Session = Depends(get_db),
 
 @router.post("/import-remote", response_model=Resp[dict],
              dependencies=[Depends(require_permission(PermissionCode.PROJECT_IMPORT))])
-def import_remote_project(payload: RemoteProjectImportIn, db: Session = Depends(get_db),
-                          user: User = Depends(get_current_user)):
-    """导入公开 HTTPS 源码归档，入库为普通项目文件。"""
+def import_remote_project(
+    payload: RemoteProjectImportIn,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """兼容旧同步导入调用；第一方客户端已经迁移到异步任务接口。"""
+    response.headers["Deprecation"] = "true"
+    response.headers["Sunset"] = "Wed, 30 Sep 2026 00:00:00 GMT"
+    response.headers["Link"] = '</api/projects/remote-imports>; rel="successor-version"'
+    observe_event(
+        "project_remote_import_legacy_sync_called",
+        labels={"role": str(user.role or "unknown"), "surface": "api"},
+    )
     data = project_source_service.import_remote_project(
         db, user, url=payload.url, project_name=payload.project_name,
         description=payload.description or "", language=payload.language,
@@ -137,6 +150,28 @@ def get_remote_project_import(
     """查询当前用户创建的远程导入任务和可操作失败原因。"""
 
     data = project_import_service.get_import_task(db, user, task_id)
+    return Resp(data=RemoteProjectImportTaskOut(**data))
+
+
+@router.post(
+    "/remote-imports/{task_id}/cancel",
+    response_model=Resp[RemoteProjectImportTaskOut],
+    dependencies=[Depends(require_permission(PermissionCode.PROJECT_IMPORT))],
+)
+def cancel_remote_project_import(
+    task_id: str,
+    payload: RemoteProjectImportCancelIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """由任务所有者取消排队、下载、扫描或入库中的远程导入。"""
+
+    data = project_import_service.cancel_import_task(
+        db,
+        user,
+        task_id,
+        reason=payload.reason,
+    )
     return Resp(data=RemoteProjectImportTaskOut(**data))
 
 

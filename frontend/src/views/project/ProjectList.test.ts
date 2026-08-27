@@ -10,6 +10,7 @@ const projectApi = vi.hoisted(() => ({
   updateProject: vi.fn(),
   queueRemoteProjectImport: vi.fn(),
   getRemoteProjectImport: vi.fn(),
+  cancelRemoteProjectImport: vi.fn(),
 }))
 
 vi.mock('@/stores/user', () => ({
@@ -63,6 +64,7 @@ beforeEach(() => {
   routerState.push.mockReset()
   projectApi.queueRemoteProjectImport.mockReset()
   projectApi.getRemoteProjectImport.mockReset()
+  projectApi.cancelRemoteProjectImport.mockReset()
   window.localStorage.clear()
   projectApi.getProjects.mockResolvedValue({ items: [], total: 0 })
 })
@@ -140,6 +142,47 @@ function pendingImport(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ProjectList 远程导入异步任务', () => {
+  it('运行中显示取消按钮并防止重复取消请求', async () => {
+    permissionState.allowed = true
+    projectApi.queueRemoteProjectImport.mockResolvedValue(remoteTask({ status: 'downloading' }))
+    let resolveCancel!: (value: unknown) => void
+    projectApi.cancelRemoteProjectImport.mockReturnValue(new Promise((resolve) => {
+      resolveCancel = resolve
+    }))
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.remoteForm = {
+      url: 'https://example.com/project.zip',
+      project_name: '可取消项目',
+      description: '',
+      audit_mode: false,
+    }
+    await vm.submitRemoteImport()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('正在下载源码')
+    const cancelButton = wrapper.find('[data-testid="remote-import-cancel"]')
+    expect(cancelButton.exists()).toBe(true)
+    await cancelButton.trigger('click')
+    await cancelButton.trigger('click')
+    expect(projectApi.cancelRemoteProjectImport).toHaveBeenCalledTimes(1)
+
+    resolveCancel(remoteTask({
+      status: 'cancelled',
+      cancel_reason: '用户在项目页取消远程导入',
+      error: { code: 'cancelled', message: '用户在项目页取消远程导入' },
+    }))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('远程导入已取消')
+    expect(wrapper.text()).toContain('用户在项目页取消远程导入')
+    expect(window.localStorage.getItem('prism:remote-import-task')).toBeNull()
+    expect(wrapper.find('[data-testid="remote-import-cancel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('提交时携带幂等键，轮询完成后刷新项目并跳转', async () => {
     permissionState.allowed = true
     vi.useFakeTimers()

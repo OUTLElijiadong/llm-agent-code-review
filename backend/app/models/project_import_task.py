@@ -45,5 +45,8 @@ class ProjectImportTask(Base, IdMixin, TimestampMixin):
     result_json = Column(_JSON, nullable=False, default="{}")
     error_code = Column(String(80), nullable=True)
     error_message = Column(Text, nullable=True)
+    cancel_reason = Column(Text, nullable=True)
+    cancel_requested_at = Column(DateTime, nullable=True)
+    heartbeat_at = Column(DateTime, nullable=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)

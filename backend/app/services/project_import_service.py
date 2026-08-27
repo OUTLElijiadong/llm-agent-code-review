@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 import httpx
 from sqlalchemy import or_, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.core.exceptions import (
     AppError,
     ConflictError,
@@ -34,9 +37,15 @@ from app.services import audit_service, code_file_service, project_service, proj
 
 QUEUED = "queued"
 RUNNING = "running"
+DOWNLOADING = "downloading"
+SCANNING = "scanning"
+INGESTING = "ingesting"
 SUCCEEDED = "succeeded"
 FAILED = "failed"
-TERMINAL_STATUSES = frozenset({SUCCEEDED, FAILED})
+CANCELLED = "cancelled"
+LEASED_STATUSES = frozenset({RUNNING, DOWNLOADING, SCANNING, INGESTING})
+CANCELLABLE_STATUSES = frozenset({QUEUED, *LEASED_STATUSES})
+TERMINAL_STATUSES = frozenset({SUCCEEDED, FAILED, CANCELLED})
 validate_remote_project_url = project_source_service.validate_remote_project_url
 
 
@@ -108,6 +117,9 @@ def _task_to_dict(row: ProjectImportTask) -> dict[str, Any]:
         "project_id": int(row.project_id) if row.project_id is not None else None,
         "result": result,
         "error": error,
+        "cancel_reason": row.cancel_reason,
+        "cancel_requested_at": row.cancel_requested_at,
+        "heartbeat_at": row.heartbeat_at,
         "next_attempt_at": row.next_attempt_at,
         "started_at": row.started_at,
         "completed_at": row.completed_at,
@@ -246,6 +258,64 @@ def get_import_task(db: Session, user: User, task_id: str) -> dict[str, Any]:
     return public_task_dict(row)
 
 
+def cancel_import_task(
+    db: Session,
+    user: User,
+    task_id: str,
+    *,
+    reason: str = "用户取消远程导入",
+) -> dict[str, Any]:
+    """由任务所有者幂等取消活动任务，并清理本任务产生的半成品。"""
+
+    row = (
+        db.query(ProjectImportTask)
+        .populate_existing()
+        .filter(
+            ProjectImportTask.public_id == str(task_id),
+            ProjectImportTask.user_id == user.id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        db.rollback()
+        raise NotFoundError("远程导入任务不存在", code=40400)
+    if row.status == CANCELLED:
+        db.rollback()
+        return public_task_dict(row)
+    if row.status not in CANCELLABLE_STATUSES:
+        db.rollback()
+        raise ConflictError("远程导入任务已结束，不能取消", code=40902)
+
+    now = _utcnow()
+    readable_reason = str(reason or "").strip() or "用户取消远程导入"
+    readable_reason = readable_reason[:500]
+    row.status = CANCELLED
+    row.cancel_reason = readable_reason
+    row.cancel_requested_at = now
+    row.error_code = CANCELLED
+    row.error_message = readable_reason
+    row.next_attempt_at = None
+    row.lease_token = None
+    row.lease_expires_at = None
+    row.heartbeat_at = now
+    row.completed_at = now
+    _cleanup_partial_import_project(db, row)
+    audit_service.log(
+        db,
+        user,
+        "project_remote_import_cancelled",
+        target_type="project_import_task",
+        target_id=row.public_id,
+        detail=f"reason={readable_reason}",
+        status="cancelled",
+        commit=False,
+    )
+    db.commit()
+    db.refresh(row)
+    return public_task_dict(row)
+
+
 def claim_next_task(
     db: Session,
     *,
@@ -281,10 +351,11 @@ def claim_next_task(
                 ),
             )
             .values(
-                status=RUNNING,
+                status=DOWNLOADING,
                 attempt_count=ProjectImportTask.attempt_count + 1,
                 lease_token=lease_token,
                 lease_expires_at=now + timedelta(seconds=lease_for),
+                heartbeat_at=now,
                 next_attempt_at=None,
                 started_at=now,
                 completed_at=None,
@@ -308,6 +379,7 @@ def touch_import_task(
     *,
     lease_token: str,
     lease_seconds: int | None = None,
+    status: str | None = None,
     progress: Mapping[str, Any] | None = None,
 ) -> bool:
     """刷新租约并可选持久化当前下载/入库阶段。"""
@@ -316,7 +388,7 @@ def touch_import_task(
         db.query(ProjectImportTask)
         .filter(
             ProjectImportTask.id == task_db_id,
-            ProjectImportTask.status == RUNNING,
+            ProjectImportTask.status.in_(LEASED_STATUSES),
             ProjectImportTask.lease_token == lease_token,
         )
         .with_for_update()
@@ -328,10 +400,114 @@ def touch_import_task(
     row.lease_expires_at = _utcnow() + timedelta(
         seconds=max(30, int(lease_seconds or settings.project_import_lease_seconds))
     )
+    row.heartbeat_at = _utcnow()
+    if status is not None:
+        if status not in LEASED_STATUSES:
+            db.rollback()
+            raise ValueError(f"无效的远程导入运行状态: {status}")
+        row.status = status
     if progress is not None:
         _merge_progress(row, progress)
     db.commit()
     return True
+
+
+def _assert_import_lease(db: Session, task_db_id: int, *, lease_token: str) -> ProjectImportTask:
+    """重新读取数据库权威状态，拒绝取消、回收或已换代的旧 Worker。"""
+
+    # 结束先前只读事务，避免 MySQL REPEATABLE READ 快照看不到刚提交的取消。
+    # 所有调用点都位于已提交的阶段边界，不会借此提交半成品。
+    db.commit()
+    row = (
+        db.query(ProjectImportTask)
+        .populate_existing()
+        .filter(ProjectImportTask.id == int(task_db_id))
+        .first()
+    )
+    if row is None:
+        raise ConflictError("远程导入任务不存在或已被清理", code=40902)
+    if row.status == CANCELLED:
+        raise ConflictError("远程导入任务已取消", code=40902)
+    if row.status not in LEASED_STATUSES or row.lease_token != lease_token:
+        raise ConflictError("远程导入任务租约已失效", code=40902)
+    return row
+
+
+class _ImportLeaseHeartbeat:
+    """长时间扫描或入库时，用独立会话持续刷新 Worker 租约。"""
+
+    def __init__(
+        self,
+        *,
+        task_db_id: int,
+        lease_token: str,
+        interval_seconds: float | None = None,
+        session_factory: Callable[[], Session] = SessionLocal,
+    ) -> None:
+        lease_seconds = max(30, int(settings.project_import_lease_seconds))
+        self.task_db_id = int(task_db_id)
+        self.lease_token = str(lease_token)
+        self.interval_seconds = max(
+            0.01,
+            float(interval_seconds if interval_seconds is not None else min(10, lease_seconds / 3)),
+        )
+        self.session_factory = session_factory
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._failure: BaseException | None = None
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            db = self.session_factory()
+            try:
+                if not touch_import_task(
+                    db,
+                    self.task_db_id,
+                    lease_token=self.lease_token,
+                ):
+                    self._failure = ConflictError("远程导入任务已取消或租约已失效", code=40902)
+                    self._stop.set()
+                    return
+            except BaseException as exc:  # noqa: BLE001 - 传回 Worker 主线程处理
+                try:
+                    db.rollback()
+                except Exception:  # pragma: no cover - 会话已损坏时只保留原异常
+                    pass
+                self._failure = exc
+                self._stop.set()
+                return
+            finally:
+                db.close()
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"project-import-heartbeat-{self.task_db_id}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(1.0, self.interval_seconds + 1.0))
+
+    def assert_healthy(self) -> None:
+        if self._failure is not None:
+            raise self._failure
+
+
+@contextmanager
+def _lease_heartbeat(task_db_id: int, *, lease_token: str) -> Iterator[_ImportLeaseHeartbeat]:
+    heartbeat = _ImportLeaseHeartbeat(task_db_id=task_db_id, lease_token=lease_token)
+    heartbeat.start()
+    try:
+        yield heartbeat
+        heartbeat.assert_healthy()
+    finally:
+        heartbeat.stop()
 
 
 def recover_expired_leases(db: Session, *, now: datetime | None = None) -> int:
@@ -341,7 +517,7 @@ def recover_expired_leases(db: Session, *, now: datetime | None = None) -> int:
     rows = (
         db.query(ProjectImportTask)
         .filter(
-            ProjectImportTask.status == RUNNING,
+            ProjectImportTask.status.in_(LEASED_STATUSES),
             ProjectImportTask.lease_expires_at.is_not(None),
             ProjectImportTask.lease_expires_at < current,
         )
@@ -368,7 +544,7 @@ def recover_expired_leases(db: Session, *, now: datetime | None = None) -> int:
             db.query(ProjectImportTask)
             .filter(
                 ProjectImportTask.id == row.id,
-                ProjectImportTask.status == RUNNING,
+                ProjectImportTask.status.in_(LEASED_STATUSES),
                 ProjectImportTask.lease_token == row.lease_token,
                 ProjectImportTask.lease_expires_at < current,
             )
@@ -516,113 +692,143 @@ def execute_claimed_import(
 ) -> dict[str, Any]:
     """执行已领取任务；已完成的项目内容会被识别并直接收敛。"""
 
-    row = db.get(ProjectImportTask, int(task_db_id))
-    if row is None or row.status != RUNNING or row.lease_token != lease_token:
-        raise ConflictError("远程导入任务租约已失效", code=40902)
+    row = _assert_import_lease(db, int(task_db_id), lease_token=lease_token)
     user = db.get(User, int(row.user_id))
     if user is None or not int(user.status or 0):
         raise ConflictError("远程导入任务所属账号不存在或已停用", code=40902)
     payload = _load_json(row.request_json)
     project: Project | None = None
-    if row.project_id is not None:
-        project = _ensure_import_project(db, row, user, payload)
-        existing = _existing_result(
-            db,
-            project,
-            source_url=str(payload["url"]),
-            audit_mode=bool(payload.get("audit_mode")),
-        )
-        if existing is not None:
-            return existing
-
-    last_heartbeat = 0.0
-
-    def progress(received: int, total: int | None) -> None:
-        nonlocal last_heartbeat
-        now_monotonic = time.monotonic()
-        if received != total and now_monotonic - last_heartbeat < 10:
-            return
-        if not touch_import_task(
-            db,
-            row.id,
-            lease_token=lease_token,
-            progress={
-                "phase": "downloading",
-                "received_bytes": received,
-                "total_bytes": total,
-            },
-        ):
-            raise ConflictError("远程导入任务租约已失效", code=40902)
-        last_heartbeat = now_monotonic
-
-    with project_source_service.download_remote_project_archive_to_temp(
-        str(payload["url"]),
-        progress_callback=progress,
-    ) as downloaded:
-        if not touch_import_task(
-            db,
-            row.id,
-            lease_token=lease_token,
-            progress={
-                "phase": "ingesting",
-                "received_bytes": downloaded.byte_size,
-                "total_bytes": downloaded.byte_size,
-                "sha256": downloaded.sha256,
-            },
-        ):
-            raise ConflictError("远程导入任务租约已失效", code=40902)
-        raw = downloaded.path.read_bytes()
-        # 当前归档解析器接收 bytes；在创建任何项目记录前完成完整路径、文件数和
-        # 解压倍率基础校验。下载本身已流式落盘，峰值仍受 MAX_REMOTE_BYTES 约束。
-        if bool(payload.get("audit_mode")):
-            project_source_service._strict_zip_members(raw, downloaded.filename)
-        else:
-            project_source_service.read_archive_members(raw, downloaded.filename)
-        if project is None:
+    with _lease_heartbeat(row.id, lease_token=lease_token) as heartbeat:
+        if row.project_id is not None:
+            _assert_import_lease(db, row.id, lease_token=lease_token)
             project = _ensure_import_project(db, row, user, payload)
-        existing = _existing_result(
-            db,
-            project,
-            source_url=str(payload["url"]),
-            audit_mode=bool(payload.get("audit_mode")),
-        )
-        if existing is not None:
-            return existing
-        if bool(payload.get("audit_mode")):
-            archive_data = project_source_service.ingest_source_archive_bytes(
+            heartbeat.assert_healthy()
+            _assert_import_lease(db, row.id, lease_token=lease_token)
+            existing = _existing_result(
+                db,
+                project,
+                source_url=str(payload["url"]),
+                audit_mode=bool(payload.get("audit_mode")),
+            )
+            if existing is not None:
+                return existing
+
+        last_progress = 0.0
+
+        def progress(received: int, total: int | None) -> None:
+            nonlocal last_progress
+            heartbeat.assert_healthy()
+            now_monotonic = time.monotonic()
+            if received != total and now_monotonic - last_progress < 10:
+                return
+            if not touch_import_task(
+                db,
+                row.id,
+                lease_token=lease_token,
+                status=DOWNLOADING,
+                progress={
+                    "phase": DOWNLOADING,
+                    "received_bytes": received,
+                    "total_bytes": total,
+                },
+            ):
+                raise ConflictError("远程导入任务已取消或租约已失效", code=40902)
+            last_progress = now_monotonic
+
+        with project_source_service.download_remote_project_archive_to_temp(
+            str(payload["url"]),
+            progress_callback=progress,
+        ) as downloaded:
+            heartbeat.assert_healthy()
+            if not touch_import_task(
+                db,
+                row.id,
+                lease_token=lease_token,
+                status=SCANNING,
+                progress={
+                    "phase": SCANNING,
+                    "received_bytes": downloaded.byte_size,
+                    "total_bytes": downloaded.byte_size,
+                    "sha256": downloaded.sha256,
+                },
+            ):
+                raise ConflictError("远程导入任务已取消或租约已失效", code=40902)
+            raw = downloaded.path.read_bytes()
+            # 在任何项目写入前完成完整路径、文件数和解压倍率基础校验。
+            if bool(payload.get("audit_mode")):
+                project_source_service._strict_zip_members(raw, downloaded.filename)
+            else:
+                project_source_service.read_archive_members(raw, downloaded.filename)
+            heartbeat.assert_healthy()
+            _assert_import_lease(db, row.id, lease_token=lease_token)
+            if not touch_import_task(
+                db,
+                row.id,
+                lease_token=lease_token,
+                status=INGESTING,
+                progress={
+                    "phase": INGESTING,
+                    "received_bytes": downloaded.byte_size,
+                    "total_bytes": downloaded.byte_size,
+                    "sha256": downloaded.sha256,
+                },
+            ):
+                raise ConflictError("远程导入任务已取消或租约已失效", code=40902)
+
+            _assert_import_lease(db, row.id, lease_token=lease_token)
+            if project is None:
+                project = _ensure_import_project(db, row, user, payload)
+            heartbeat.assert_healthy()
+            _assert_import_lease(db, row.id, lease_token=lease_token)
+            existing = _existing_result(
+                db,
+                project,
+                source_url=str(payload["url"]),
+                audit_mode=bool(payload.get("audit_mode")),
+            )
+            if existing is not None:
+                return existing
+
+            _assert_import_lease(db, row.id, lease_token=lease_token)
+            if bool(payload.get("audit_mode")):
+                archive_data = project_source_service.ingest_source_archive_bytes(
+                    db,
+                    user,
+                    project.id,
+                    raw=raw,
+                    filename=downloaded.filename,
+                )
+                heartbeat.assert_healthy()
+                _assert_import_lease(db, row.id, lease_token=lease_token)
+                return {
+                    "id": project.id,
+                    "file_count": archive_data["file_count"],
+                    "first_file_id": None,
+                    "source_url": payload["url"],
+                    "source_mode": "audit_archive",
+                    "source_archive": archive_data,
+                }
+            first_id, _, _ = code_file_service._upload_archive(
                 db,
                 user,
                 project.id,
-                raw=raw,
-                filename=downloaded.filename,
+                raw,
+                downloaded.filename,
+            )
+            heartbeat.assert_healthy()
+            _assert_import_lease(db, row.id, lease_token=lease_token)
+            count = (
+                db.query(CodeFile.id)
+                .filter(CodeFile.project_id == project.id, CodeFile.status == "active")
+                .count()
             )
             return {
                 "id": project.id,
-                "file_count": archive_data["file_count"],
-                "first_file_id": None,
+                "file_count": count,
+                "first_file_id": first_id,
                 "source_url": payload["url"],
-                "source_mode": "audit_archive",
-                "source_archive": archive_data,
+                "source_mode": "files",
             }
-        first_id, _, _ = code_file_service._upload_archive(
-            db,
-            user,
-            project.id,
-            raw,
-            downloaded.filename,
-        )
-        count = (
-            db.query(CodeFile.id)
-            .filter(CodeFile.project_id == project.id, CodeFile.status == "active")
-            .count()
-        )
-        return {
-            "id": project.id,
-            "file_count": count,
-            "first_file_id": first_id,
-            "source_url": payload["url"],
-            "source_mode": "files",
-        }
 
 
 def complete_import_task(
@@ -634,8 +840,18 @@ def complete_import_task(
 ) -> bool:
     """以租约令牌原子提交成功终态，并开放项目列表可见性。"""
 
-    row = db.get(ProjectImportTask, int(task_db_id))
-    if row is None or row.status != RUNNING or row.lease_token != lease_token:
+    row = (
+        db.query(ProjectImportTask)
+        .populate_existing()
+        .filter(
+            ProjectImportTask.id == int(task_db_id),
+            ProjectImportTask.status.in_(LEASED_STATUSES),
+            ProjectImportTask.lease_token == lease_token,
+        )
+        .with_for_update()
+        .first()
+    )
+    if row is None:
         db.rollback()
         return False
     now = _utcnow()
@@ -651,6 +867,7 @@ def complete_import_task(
     row.lease_token = None
     row.lease_expires_at = None
     row.next_attempt_at = None
+    row.heartbeat_at = now
     row.completed_at = now
     audit_service.log(
         db,
@@ -675,8 +892,18 @@ def fail_import_task(
 ) -> bool:
     """记录可操作失败原因；可重试错误按指数退避重新入队。"""
 
-    row = db.get(ProjectImportTask, int(task_db_id))
-    if row is None or row.status != RUNNING or row.lease_token != lease_token:
+    row = (
+        db.query(ProjectImportTask)
+        .populate_existing()
+        .filter(
+            ProjectImportTask.id == int(task_db_id),
+            ProjectImportTask.status.in_(LEASED_STATUSES),
+            ProjectImportTask.lease_token == lease_token,
+        )
+        .with_for_update()
+        .first()
+    )
+    if row is None:
         db.rollback()
         return False
     code, message = _error_details(error)
@@ -692,6 +919,7 @@ def fail_import_task(
     row.lease_expires_at = None
     row.error_code = code[:80]
     row.error_message = message[:2000]
+    row.heartbeat_at = now
     row.completed_at = None if should_retry else now
     _cleanup_partial_import_project(db, row)
     audit_service.log(
@@ -713,4 +941,4 @@ def is_retryable_error(error: Exception) -> bool:
 
     if isinstance(error, project_source_service.RemoteArchiveNotFoundError):
         return False
-    return isinstance(error, (ExternalServiceError, httpx.HTTPError, OSError))
+    return isinstance(error, (ExternalServiceError, httpx.HTTPError, OSError, SQLAlchemyError))

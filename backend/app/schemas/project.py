@@ -32,16 +32,34 @@ class RemoteProjectImportIn(BaseModel):
     audit_mode: bool = False
 
 
+class RemoteProjectImportCancelIn(BaseModel):
+    """取消当前用户创建的活动远程导入任务。"""
+
+    reason: str = Field(default="用户取消远程导入", max_length=500)
+
+
 class RemoteProjectImportTaskOut(BaseModel):
     """可恢复远程导入任务的公开状态。"""
 
     task_id: str
-    status: Literal["queued", "running", "succeeded", "failed"]
+    status: Literal[
+        "queued",
+        "running",
+        "downloading",
+        "scanning",
+        "ingesting",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ]
     attempt_count: int
     max_attempts: int
     project_id: Optional[int] = None
     result: dict[str, Any] = Field(default_factory=dict)
     error: Optional[dict[str, str]] = None
+    cancel_reason: Optional[str] = None
+    cancel_requested_at: Optional[datetime] = None
+    heartbeat_at: Optional[datetime] = None
     next_attempt_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

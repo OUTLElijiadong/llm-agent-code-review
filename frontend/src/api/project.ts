@@ -56,7 +56,15 @@ export interface RemoteProjectImportInput {
   audit_mode?: boolean
 }
 
-export type RemoteProjectImportStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+export type RemoteProjectImportStatus =
+  | 'queued'
+  | 'running'
+  | 'downloading'
+  | 'scanning'
+  | 'ingesting'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
 
 export interface RemoteProjectImportTask {
   task_id: string
@@ -76,6 +84,9 @@ export interface RemoteProjectImportTask {
     [key: string]: unknown
   }
   error: { code: string; message: string } | null
+  cancel_reason?: string | null
+  cancel_requested_at?: string | null
+  heartbeat_at?: string | null
   next_attempt_at: string | null
   started_at: string | null
   completed_at: string | null
@@ -104,6 +115,18 @@ export async function queueRemoteProjectImport(
 /** 查询当前用户创建的远程导入任务。 */
 export function getRemoteProjectImport(taskId: string): Promise<RemoteProjectImportTask> {
   return get<RemoteProjectImportTask>(`/projects/remote-imports/${encodeURIComponent(taskId)}`)
+}
+
+/** 取消当前用户创建的活动远程导入任务。 */
+export async function cancelRemoteProjectImport(
+  taskId: string,
+  reason = '用户取消远程导入',
+): Promise<RemoteProjectImportTask> {
+  const response = await http.post<Resp<RemoteProjectImportTask>>(
+    `/projects/remote-imports/${encodeURIComponent(taskId)}/cancel`,
+    { reason },
+  )
+  return response.data.data as RemoteProjectImportTask
 }
 
 /**
