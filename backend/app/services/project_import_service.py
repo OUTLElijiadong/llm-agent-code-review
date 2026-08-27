@@ -415,21 +415,43 @@ def touch_import_task(
 def _assert_import_lease(db: Session, task_db_id: int, *, lease_token: str) -> ProjectImportTask:
     """重新读取数据库权威状态，拒绝取消、回收或已换代的旧 Worker。"""
 
-    # 结束先前只读事务，避免 MySQL REPEATABLE READ 快照看不到刚提交的取消。
-    # 所有调用点都位于已提交的阶段边界，不会借此提交半成品。
-    db.commit()
-    row = (
-        db.query(ProjectImportTask)
-        .populate_existing()
-        .filter(ProjectImportTask.id == int(task_db_id))
-        .first()
+    # 不能在这里 commit 当前 Session：调用点可能位于一段尚未提交的导入写入之后。
+    # 如果另一会话正好将任务取消，提交会把半成品变成可见数据，并且错过取消时的清理。
+    # 用同一数据库绑定建立独立 Session，让新事务快照读到 MySQL REPEATABLE READ 下刚提交的取消状态。
+    authority_db = Session(
+        bind=db.get_bind(mapper=ProjectImportTask),
+        autoflush=False,
+        expire_on_commit=False,
     )
+    try:
+        authority_row = (
+            authority_db.query(ProjectImportTask)
+            .filter(ProjectImportTask.id == int(task_db_id))
+            .first()
+        )
+        authority_status = authority_row.status if authority_row is not None else None
+        authority_lease_token = authority_row.lease_token if authority_row is not None else None
+    finally:
+        # SELECT 会在独立 Session 中开启事务；显式回滚保证不留任何状态或写入。
+        authority_db.rollback()
+        authority_db.close()
+
+    if authority_status is None:
+        db.rollback()
+        raise ConflictError("远程导入任务不存在或已被清理", code=40902)
+    if authority_status == CANCELLED:
+        db.rollback()
+        raise ConflictError("远程导入任务已取消", code=40902)
+    if authority_status not in LEASED_STATUSES or authority_lease_token != lease_token:
+        db.rollback()
+        raise ConflictError("远程导入任务租约已失效", code=40902)
+
+    # no_autoflush 很关键：获取本会话 ORM 对象时不得因此次检查先刷新半成品。
+    # 权威会话只用于判定，不把字段回写到当前事务。
+    with db.no_autoflush:
+        row = db.get(ProjectImportTask, int(task_db_id))
     if row is None:
         raise ConflictError("远程导入任务不存在或已被清理", code=40902)
-    if row.status == CANCELLED:
-        raise ConflictError("远程导入任务已取消", code=40902)
-    if row.status not in LEASED_STATUSES or row.lease_token != lease_token:
-        raise ConflictError("远程导入任务租约已失效", code=40902)
     return row
 
 

@@ -13,8 +13,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.core.exceptions import ConflictError, NotFoundError
+from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_import_task import ProjectImportTask
+from app.models.project_member import ProjectMember
+from app.models.project_source_archive import ProjectSourceArchive
 from app.models.user import User
 from app.services import project_import_service
 
@@ -26,13 +29,14 @@ def _user(db, username: str) -> User:
     return row
 
 
-def _create(db, user: User, monkeypatch, *, key: str) -> dict:
+def _create(db, user: User, monkeypatch, *, key: str, audit_mode: bool = False) -> dict:
     monkeypatch.setattr(project_import_service, "validate_remote_project_url", lambda _url: None)
     return project_import_service.create_import_task(
         db,
         user,
         url="https://example.com/source.zip",
         project_name=f"project-{key}",
+        audit_mode=audit_mode,
         idempotency_key=key,
     )
 
@@ -234,6 +238,184 @@ def test_cancel_during_scan_is_seen_before_project_write(db, monkeypatch, tmp_pa
     visible = project_import_service.get_import_task(db, owner, created["task_id"])
     assert visible["status"] == "cancelled"
     assert visible["cancel_reason"] == "扫描阶段取消"
+
+
+@pytest.mark.parametrize("audit_mode", [False, True], ids=["files", "audit-archive"])
+def test_cancel_after_staged_ingest_never_commits_partial_project(
+    tmp_path,
+    monkeypatch,
+    audit_mode: bool,
+) -> None:
+    """另一会话在入库返回后取消时，Worker 的未提交写入必须全部回滚。"""
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / f'cancel-after-ingest-{audit_mode}.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    setup = Session()
+    worker = Session()
+    observer = Session()
+    archive_path = tmp_path / "source.zip"
+    archive_path.write_bytes(b"placeholder")
+
+    class HealthyHeartbeat:
+        def assert_healthy(self) -> None:
+            return None
+
+    @contextmanager
+    def no_background_heartbeat(*_args, **_kwargs):
+        yield HealthyHeartbeat()
+
+    @contextmanager
+    def fake_download(*_args, **_kwargs):
+        yield project_import_service.project_source_service.DownloadedRemoteArchive(
+            path=archive_path,
+            filename="source.zip",
+            byte_size=archive_path.stat().st_size,
+            sha256="b" * 64,
+        )
+
+    try:
+        owner = _user(setup, f"post-ingest-cancel-{audit_mode}")
+        created = _create(
+            setup,
+            owner,
+            monkeypatch,
+            key=f"post-ingest-cancel-{audit_mode}",
+            audit_mode=audit_mode,
+        )
+        claimed = project_import_service.claim_next_task(setup, lease_seconds=60)
+        assert claimed is not None
+        project_id = 9101 if not audit_mode else 9201
+        artifact_id = project_id + 1
+
+        def stage_project(db, row, user, payload):
+            project = Project(
+                id=project_id,
+                user_id=user.id,
+                project_name=str(payload["project_name"]),
+                language="python",
+                status="importing",
+            )
+            db.add(project)
+            db.add(
+                ProjectMember(
+                    project_id=project_id,
+                    user_id=user.id,
+                    role_in_project="owner",
+                )
+            )
+            row.project_id = project_id
+            return project
+
+        def cancel_from_owner_session() -> None:
+            cancelling = Session()
+            try:
+                cancelling_owner = cancelling.get(User, owner.id)
+                project_import_service.cancel_import_task(
+                    cancelling,
+                    cancelling_owner,
+                    created["task_id"],
+                    reason="入库后立即取消",
+                )
+            finally:
+                cancelling.close()
+
+        def stage_files(db, _user, staged_project_id, *_args, **_kwargs):
+            db.add(
+                CodeFile(
+                    id=artifact_id,
+                    project_id=staged_project_id,
+                    file_name="main.py",
+                    file_path="main.py",
+                    language="python",
+                    size_bytes=12,
+                    line_count=1,
+                    version_no=1,
+                    content="print('ok')",
+                    status="active",
+                    is_binary=0,
+                    raw_size=12,
+                )
+            )
+            cancel_from_owner_session()
+            return artifact_id, "python", 1
+
+        def stage_audit_archive(db, staged_user, staged_project_id, **_kwargs):
+            db.add(
+                ProjectSourceArchive(
+                    id=artifact_id,
+                    project_id=staged_project_id,
+                    owner_id=staged_user.id,
+                    original_filename="source.zip",
+                    media_type="application/zip",
+                    archive_sha256="b" * 64,
+                    compressed_size=11,
+                    expanded_size=11,
+                    file_count=1,
+                    max_member_size=11,
+                    max_compression_ratio=1.0,
+                    storage_status="active",
+                    malware_status="clean",
+                    audit_status="not_started",
+                    threat_count=0,
+                    scan_summary_json="{}",
+                    archive_blob=b"placeholder",
+                )
+            )
+            cancel_from_owner_session()
+            return {"id": artifact_id, "file_count": 1}
+
+        monkeypatch.setattr(project_import_service, "_lease_heartbeat", no_background_heartbeat)
+        monkeypatch.setattr(project_import_service, "_ensure_import_project", stage_project)
+        monkeypatch.setattr(
+            project_import_service.project_source_service,
+            "download_remote_project_archive_to_temp",
+            fake_download,
+        )
+        monkeypatch.setattr(
+            project_import_service.project_source_service,
+            "read_archive_members",
+            lambda *_args, **_kwargs: [],
+        )
+        monkeypatch.setattr(
+            project_import_service.project_source_service,
+            "_strict_zip_members",
+            lambda *_args, **_kwargs: ([], {}),
+        )
+        monkeypatch.setattr(
+            project_import_service.code_file_service,
+            "_upload_archive",
+            stage_files,
+        )
+        monkeypatch.setattr(
+            project_import_service.project_source_service,
+            "ingest_source_archive_bytes",
+            stage_audit_archive,
+        )
+
+        with pytest.raises(ConflictError, match="取消|租约"):
+            project_import_service.execute_claimed_import(
+                worker,
+                claimed["id"],
+                lease_token=claimed["lease_token"],
+            )
+
+        observer.expire_all()
+        task = observer.get(ProjectImportTask, claimed["id"])
+        assert task.status == "cancelled"
+        assert task.project_id is None
+        assert observer.get(Project, project_id) is None
+        assert observer.query(ProjectMember).filter_by(project_id=project_id).count() == 0
+        assert observer.query(CodeFile).filter_by(project_id=project_id).count() == 0
+        assert observer.query(ProjectSourceArchive).filter_by(project_id=project_id).count() == 0
+    finally:
+        setup.close()
+        worker.close()
+        observer.close()
+        engine.dispose()
 
 
 def test_background_lease_heartbeat_repeats_until_stopped(monkeypatch) -> None:
