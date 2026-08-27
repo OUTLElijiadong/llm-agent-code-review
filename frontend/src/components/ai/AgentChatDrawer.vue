@@ -3718,15 +3718,18 @@ onMounted(() => {
   .quick-questions {
     position: static;
     flex: 0 0 auto;
-    flex-direction: row;
-    align-items: center;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     padding: 8px 12px;
-    overflow-x: auto;
-    scrollbar-width: none;
   }
-  .quick-questions::-webkit-scrollbar { display: none; }
-  .quick-question { flex: 0 0 auto; min-height: 40px; }
+  .quick-question {
+    width: 100%;
+    min-height: 40px;
+    padding-inline: 10px;
+    white-space: normal;
+  }
+  .quick-question:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .chat-body { padding: 12px; gap: 12px; }
   .close-btn { width: 40px; height: 40px; }
   .msg-row.assistant .msg-bubble { padding-right: 48px; }
