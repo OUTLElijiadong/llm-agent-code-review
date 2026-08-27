@@ -1,10 +1,13 @@
-"""Merge the review-result and remote-import migration branches."""
+"""Merge the review-result and remote-import migration branches.
+
+Revision IDs must fit Alembic's default ``version_num VARCHAR(32)`` column.
+"""
 
 from __future__ import annotations
 
 from typing import Sequence, Union
 
-revision: str = "042_merge_review_result_and_remote_import_heads"
+revision: str = "042_merge_review_import_heads"
 down_revision: Union[str, Sequence[str], None] = (
     "041_review_result_pipeline",
     "041a_remote_import_tasks",
