@@ -27,6 +27,7 @@ import { useUserStore } from '@/stores/user'
 import AdminCopilot from '@/components/admin/AdminCopilot.vue'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 
 interface AdminMenuItem {
   path: string
@@ -67,7 +68,10 @@ const menuItems: AdminMenuItem[] = [
 ]
 
 const visibleMenuItems = computed(() => (
-  menuItems.filter((item) => !item.superAdmin || userStore.isSuperAdmin())
+  menuItems.filter((item) => (
+    (!item.superAdmin || userStore.isSuperAdmin())
+    && isNavigationPathAllowed(router, item.path, userStore)
+  ))
 ))
 
 const activePath = computed(() => {
@@ -122,6 +126,8 @@ async function logout(): Promise<void> {
           type="button"
           class="admin-nav-item"
           :class="{ 'is-active': activePath === item.path }"
+          :data-route="item.path"
+          :aria-current="activePath === item.path ? 'page' : undefined"
           @click="go(item.path)"
         >
           <el-icon><component :is="item.icon" /></el-icon>
@@ -146,7 +152,11 @@ async function logout(): Promise<void> {
       </header>
 
       <main class="admin-content">
-        <router-view />
+        <router-view v-slot="{ Component, route: childRoute }">
+          <transition name="admin-route" mode="out-in">
+            <component :is="Component" :key="childRoute.fullPath" />
+          </transition>
+        </router-view>
       </main>
     </section>
     <AdminCopilot />
@@ -210,8 +220,9 @@ async function logout(): Promise<void> {
 }
 
 .admin-nav-item {
+  position: relative;
   width: 100%;
-  height: 38px;
+  min-height: 40px;
   border: 0;
   border-radius: 8px;
   display: flex;
@@ -223,12 +234,34 @@ async function logout(): Promise<void> {
   background: transparent;
   cursor: pointer;
   text-align: left;
+  transition: color var(--transition-fast), background-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.admin-nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, var(--brand-300), var(--accent-400));
+  transform: translateY(-50%);
+  transition: height 0.2s ease;
 }
 
 .admin-nav-item:hover,
 .admin-nav-item.is-active {
   color: #fff;
   background: rgba(91, 88, 232, 0.22);
+}
+
+.admin-nav-item:hover {
+  transform: translateX(2px);
+}
+
+.admin-nav-item.is-active::before {
+  height: 22px;
 }
 
 .admin-main {
@@ -245,9 +278,12 @@ async function logout(): Promise<void> {
   justify-content: space-between;
   gap: 20px;
   padding: 16px 28px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface-glass);
+  background: color-mix(in srgb, var(--surface-glass) 94%, transparent);
   border-bottom: 1px solid rgba(224, 227, 234, 0.88);
-  backdrop-filter: blur(16px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  backdrop-filter: blur(18px) saturate(1.1);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
 }
 
 .admin-kicker {
@@ -276,6 +312,21 @@ async function logout(): Promise<void> {
   overflow: auto;
 }
 
+.admin-route-enter-active,
+.admin-route-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.admin-route-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.admin-route-leave-to {
+  opacity: 0;
+  transform: translateY(-2px);
+}
+
 @media (max-width: 920px) {
   .admin-layout {
     flex-direction: column;
@@ -302,6 +353,21 @@ async function logout(): Promise<void> {
 
   .admin-content {
     padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-nav-item,
+  .admin-nav-item::before,
+  .admin-route-enter-active,
+  .admin-route-leave-active {
+    transition: none;
+  }
+
+  .admin-nav-item:hover,
+  .admin-route-enter-from,
+  .admin-route-leave-to {
+    transform: none;
   }
 }
 </style>

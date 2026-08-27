@@ -53,11 +53,21 @@ stateDiagram-v2
 - 同一用户、URL 和项目名的并发提交返回已有活动任务；进程启动时回收过期租约并续跑。
 - API 提交返回任务 ID，状态查询支持页面刷新恢复；旧同步调用保留兼容层。
 
+### 成本闸门
+
+- `SKILL_SCHEDULER_ENABLED=false` 和 `SKILL_EVENT_TRIGGER_ENABLED=false` 是默认值，防止周期或事件路径在缺省配置下调用模型。
+- 管理员显式开启后，`agent_cost_budget_service` 以 Agent 配置的日 token 预算串行化跨 worker admission；预算耗尽或锁不可用时 fail-closed，不进入编排器。
+- JARVIS 巡逻、健康检查、沙箱心跳和空会话归档保持确定性后台运行；模型诊断必须由管理员在小菱中明确发起。
+
 ## 前端设计
 
 - HTML 预览在用户点击同步阶段预开窗口；失败则使用带 `sandbox` 的页内预览，Blob URL 在关闭时释放。
 - 修复方案选择后等待 DOM 更新，再滚动详情 ref，设置 `scroll-margin-top` 和焦点；减少动画时即时滚动。
 - 空邮箱 trim 后不发送；视图切换增加 `aria-pressed` 和足够触控尺寸；Radio 从 `label` 值迁移为 `value`。
+- 菜单、顶栏搜索和 Agent 导航统一调用路由可见性函数；匹配通配兜底路由时视为未知目标，不把“无权限”或“页面不存在”暴露为可点击功能。
+- 可视化导航通过全局单次事件交给 `VirtualCursor`：优先定位带 `data-route` 的真实按钮并调用其 `click()`，缺少常驻入口时才调用已鉴权回调；事件所有权避免双跳。
+- 用户顶栏和管理顶栏使用带纯色降级的毛玻璃表面，用户顶栏提供活动下划线；用户端与管理端子路由使用短距离淡入过渡。
+- 仪表盘复用既有 `useCountUp` 数据滚动，卡片和图表只增强表面、阴影和错峰入场，稳定网格尺寸保持不变；所有动效支持 `prefers-reduced-motion`。
 
 ## 异常与回滚
 

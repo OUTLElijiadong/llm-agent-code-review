@@ -80,16 +80,41 @@ select {
 }
 
 .prism-surface {
-  background: var(--surface-1);
+  background: var(--surface-glass);
   border: var(--hairline);
   border-radius: 10px;
   box-shadow: var(--shadow-1);
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
 }
 
 .prism-surface-soft {
   background: var(--surface-2);
   border: var(--hairline);
   border-radius: 10px;
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+}
+
+/* 可复用玻璃表面：用于信息卡和工具面板，不改变组件尺寸与布局。 */
+.prism-glass,
+.prism-glass-card {
+  background: var(--surface-glass);
+  border: var(--hairline);
+  box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+}
+
+.prism-glass-card {
+  border-radius: 10px;
+  transition: transform var(--transition-base), border-color var(--transition-base), box-shadow var(--transition-base);
+}
+
+.prism-glass-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--brand-200);
+  box-shadow: var(--shadow-2);
 }
 
 .prism-icon-box {
@@ -408,7 +433,8 @@ select {
 
 /* 数字滚动跳变时由 JS 驱动,这里提供 tabular-nums 保证宽度稳定 */
 .stat-num,
-.stat .stat-num {
+.stat .stat-num,
+.prism-number {
   font-variant-numeric: tabular-nums;
 }
 
@@ -432,8 +458,12 @@ select {
 
 @media (prefers-reduced-motion: reduce) {
   .prism-rise,
-  .prism-stagger > * {
+  .prism-stagger > *,
+  .prism-glass-card {
     animation: none !important;
+  }
+  .prism-glass-card:hover {
+    transform: none;
   }
   .prism-shimmer::after {
     animation: none !important;

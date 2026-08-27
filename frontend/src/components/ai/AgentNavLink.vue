@@ -12,7 +12,8 @@ import { useRouter } from 'vue-router'
 import { TopRight } from '@element-plus/icons-vue'
 
 import { useUserStore } from '@/stores/user'
-import { isRouteAllowed } from '@/utils/agentNavigation'
+import { isNavigationPathAllowed } from '@/utils/agentNavigation'
+import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
 
 const props = defineProps<{
   href: string
@@ -37,12 +38,18 @@ const resolved = computed(() => {
 
 const allowed = computed(() => {
   if (!resolved.value) return false
-  return isRouteAllowed(resolved.value, userStore)
+  return isNavigationPathAllowed(router, resolved.value.fullPath, userStore)
 })
 
-function navigate(): void {
+function navigate(event: MouseEvent): void {
   if (!allowed.value || !resolved.value) return
-  void router.push(resolved.value.fullPath)
+  const fullPath = resolved.value.fullPath
+  requestXiaolingNavigation(
+    fullPath,
+    props.label,
+    () => { void router.push(fullPath) },
+    event.currentTarget as HTMLElement | null,
+  )
 }
 </script>
 
@@ -58,7 +65,6 @@ function navigate(): void {
     <span class="agent-nav-text">{{ label }}</span>
     <el-icon class="agent-nav-icon"><TopRight /></el-icon>
   </button>
-  <span v-else class="agent-nav-fallback">{{ label }}</span>
 </template>
 
 <style scoped>
@@ -100,7 +106,4 @@ function navigate(): void {
   font-size: 13px;
 }
 
-.agent-nav-fallback {
-  color: var(--color-text-secondary, #909399);
-}
 </style>

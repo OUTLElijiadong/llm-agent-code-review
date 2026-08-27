@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { useAgentActivityStore } from '@/stores/agentActivity'
+import {
+  XIAOLING_NAVIGATION_EVENT,
+  isSafeXiaolingRoute,
+  type XiaolingNavigationRequest,
+} from '@/utils/xiaolingNavigation'
 
 /**
  * 小菱「帮我操作」虚拟鼠标(真实定位版):
@@ -43,10 +48,14 @@ let startRaf = 0
 let navigated = false
 /** 上一个被加高亮类的目标元素,结束时移除 */
 let lastTargetEl: HTMLElement | null = null
+/** 导航确认按钮发出的单次可视化导航请求。 */
+let requestedNavigation: XiaolingNavigationRequest | null = null
+let requestedActivityKey = ''
 
 interface Candidate {
   el: HTMLElement
   route?: string
+  activate?: () => void
 }
 
 /** 从 targetHint 提取站内路由(/projects、/admin/users 等)。 */
@@ -104,17 +113,31 @@ function findTarget(): Candidate | null {
   const route = routeFromHint(hint)
 
   if (route && !onRoute(route)) {
-    const navButtons = [...document.querySelectorAll<HTMLElement>(
-      'aside nav button, .sidebar nav button, nav button, [class*=nav] button, [class*=menu] a, [class*=sidebar] a',
-    )]
+    const navButtons = [...document.querySelectorAll<HTMLElement>('[data-route]')]
     const targetLabel = routeLabel(route)
+    const exactHit = navButtons.find((btn) => btn.dataset.route === route)
+    if (exactHit) return { el: exactHit, route }
+
     const hit = navButtons.find((btn) => {
       const text = (btn.textContent || '').trim()
       if (!text) return false
-      if (btn.dataset.route === route) return true
       return Boolean(targetLabel) && text.includes(targetLabel as string)
     })
     if (hit) return { el: hit, route }
+
+    // 页面没有同路由菜单时，在用户点下的导航按钮上展示点击反馈，
+    // 再执行已经由 AgentNavLink 权限校验过的回调，避免递归触发 click。
+    if (
+      requestedNavigation
+      && routeFromHint(requestedNavigation.route) === route
+      && requestedNavigation.sourceElement?.isConnected
+    ) {
+      return {
+        el: requestedNavigation.sourceElement,
+        route,
+        activate: requestedNavigation.execute,
+      }
+    }
   }
 
   // 当前页内的行动点:先按 hint 中文词匹配,再兜底主操作按钮
@@ -179,19 +202,51 @@ function moveToTarget(): void {
             clickTimer = window.setTimeout(() => {
               if (navigated) return
               navigated = true
-              target.el.click()
+              if (target.activate) target.activate()
+              else target.el.click()
+              finishRequestedNavigation()
             }, 650)
           }
         }, 700)
       } else {
         point = fallbackPoint()
         targetBox.value = null
-        arriveTimer = window.setTimeout(() => { arrived.value = true }, 700)
+        arriveTimer = window.setTimeout(() => {
+          arrived.value = true
+          if (requestedNavigation) {
+            clickTimer = window.setTimeout(() => {
+              if (navigated || !requestedNavigation) return
+              navigated = true
+              requestedNavigation.execute()
+              finishRequestedNavigation()
+            }, 650)
+          }
+        }, 700)
       }
       x.value = point.x
       y.value = point.y
     })
   })
+}
+
+function finishRequestedNavigation(): void {
+  if (requestedActivityKey) store.complete(requestedActivityKey, 420)
+  requestedNavigation = null
+  requestedActivityKey = ''
+}
+
+/** 接收已通过组件权限校验的导航请求，并启动全局可视化点击。 */
+function handleNavigationRequest(event: Event): void {
+  const detail = (event as CustomEvent<XiaolingNavigationRequest>).detail
+  if (!detail || !isSafeXiaolingRoute(detail.route) || typeof detail.execute !== 'function') return
+  detail.handled = true
+  if (requestedActivityKey) store.end(requestedActivityKey)
+  requestedNavigation = detail
+  requestedActivityKey = store.begin(
+    `小菱正在打开${detail.label}…`,
+    `xiaoling-nav-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    `${detail.route} ${detail.label}`,
+  )
 }
 
 function clearHalo(): void {
@@ -200,8 +255,8 @@ function clearHalo(): void {
 }
 
 watch(
-  () => store.isActing,
-  (acting) => {
+  () => [store.isActing, store.current?.key] as const,
+  ([acting]) => {
     window.clearTimeout(arriveTimer)
     window.clearTimeout(clickTimer)
     window.clearTimeout(haloTimer)
@@ -219,11 +274,19 @@ watch(
   },
 )
 
+onMounted(() => {
+  window.addEventListener(XIAOLING_NAVIGATION_EVENT, handleNavigationRequest)
+})
+
 onBeforeUnmount(() => {
   window.clearTimeout(arriveTimer)
   window.clearTimeout(clickTimer)
   window.clearTimeout(haloTimer)
   window.cancelAnimationFrame(startRaf)
+  window.removeEventListener(XIAOLING_NAVIGATION_EVENT, handleNavigationRequest)
+  if (requestedActivityKey) store.end(requestedActivityKey)
+  requestedNavigation = null
+  requestedActivityKey = ''
   clearHalo()
 })
 </script>

@@ -215,6 +215,7 @@ def test_proactive_scheduler_uses_action_type(db: Any, monkeypatch: Any) -> None
             )
 
     monkeypatch.setattr("app.agents.orchestrator.Orchestrator", FakeOrchestrator)
+    monkeypatch.setattr(settings, "skill_scheduler_enabled", True)
     job = SimpleNamespace(
         id=1,
         job_code="proactive-test",
@@ -242,6 +243,7 @@ def test_self_improvement_scheduler_keeps_action_parameter(db: Any, monkeypatch:
             return SimpleNamespace(success=True, data={"effect": "no_op"}, duration_ms=1)
 
     monkeypatch.setattr("app.agents.orchestrator.Orchestrator", FakeOrchestrator)
+    monkeypatch.setattr(settings, "skill_scheduler_enabled", True)
     job = SimpleNamespace(
         id=2,
         job_code="evolve-test",

@@ -39,6 +39,7 @@ import {
   normalizeRole,
   type UserRole,
 } from '@/utils/roleHome'
+import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 
 interface MenuItem {
   path: string
@@ -114,11 +115,15 @@ const visibleMenuItems = computed(() => {
   // 数据权限仍由后端强制。
   return menuItems.filter((item) => (
     canRoleSeeNavigationItem(currentRole.value, item.roles)
+    && isNavigationPathAllowed(router, item.path, userStore)
   ))
 })
 
 const visibleAdminItems = computed(() => (
-  adminItems.filter((item) => !item.superAdmin || userStore.isSuperAdmin())
+  adminItems.filter((item) => (
+    (!item.superAdmin || userStore.isSuperAdmin())
+    && isNavigationPathAllowed(router, item.path, userStore)
+  ))
 ))
 
 const COLLAPSED_KEY = 'prism.sidebar.collapsed'
@@ -251,6 +256,7 @@ function go(item: MenuItem): void {
               :class="{ 'is-active': isActive(item.path) }"
               type="button"
               :aria-label="item.title"
+              :data-route="item.path"
               :aria-current="isActive(item.path) ? 'page' : undefined"
               @click="go(item)"
             >

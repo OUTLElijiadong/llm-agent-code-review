@@ -64,7 +64,9 @@ provide('openAgentChat', openAgentChat)
       <AppHeader @toggle-sidebar="toggleSidebar" />
       <main class="app-layout-main">
         <router-view v-slot="{ Component, route }">
-          <component :is="Component" :key="route.fullPath" />
+          <transition name="content-route" mode="out-in">
+            <component :is="Component" :key="route.fullPath" />
+          </transition>
         </router-view>
       </main>
     </div>
@@ -109,18 +111,19 @@ provide('openAgentChat', openAgentChat)
   display: none;
 }
 
-.page-fade-enter-active,
-.page-fade-leave-active {
+.content-route-enter-active,
+.content-route-leave-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
-.page-fade-enter-from {
+.content-route-enter-from {
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(6px);
 }
 
-.page-fade-leave-to {
+.content-route-leave-to {
   opacity: 0;
+  transform: translateY(-2px);
 }
 
 .sidebar-mask-fade-enter-active,
@@ -155,6 +158,18 @@ provide('openAgentChat', openAgentChat)
 @media (max-width: 420px) {
   .app-layout-main {
     padding: var(--layout-main-padding) 10px 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content-route-enter-active,
+  .content-route-leave-active {
+    transition: none;
+  }
+
+  .content-route-enter-from,
+  .content-route-leave-to {
+    transform: none;
   }
 }
 </style>

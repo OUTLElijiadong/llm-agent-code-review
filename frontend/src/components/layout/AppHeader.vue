@@ -11,6 +11,7 @@ import {
   normalizeRole,
   type UserRole,
 } from '@/utils/roleHome'
+import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,6 +27,7 @@ interface SearchItem {
   action?: 'agent'
   admin?: boolean
   roles?: UserRole[]
+  topNav?: boolean
 }
 
 const searchVisible = ref(false)
@@ -57,13 +59,14 @@ const currentRole = computed(() => normalizeRole(userStore.profile?.role))
 
 const searchItems = computed<SearchItem[]>(() => {
   const items: SearchItem[] = [
-    { title: '工作台', description: '查看审查任务、风险分布和最近活动', path: '/dashboard', roles: ['admin', 'user', 'reviewer'] },
-    { title: '项目管理', description: '管理项目、上传代码文件和编辑项目信息', path: '/projects', roles: ['user'] },
+    { title: '工作台', description: '查看审查任务、风险分布和最近活动', path: '/dashboard', roles: ['admin', 'user', 'reviewer'], topNav: true },
+    { title: '项目管理', description: '管理项目、上传代码文件和编辑项目信息', path: '/projects', roles: ['user'], topNav: true },
     { title: '代码中心', description: '按项目浏览、编辑和管理代码文件', path: '/code', roles: ['user'] },
     { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start', roles: ['user', 'reviewer'] },
-    { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'] },
+    { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'], topNav: true },
     { title: '审查规则', description: '配置代码规范、性能、安全等审查维度', path: '/rules', roles: ['user', 'reviewer'] },
-    { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['user', 'reviewer'] },
+    { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['user', 'reviewer'], topNav: true },
+    { title: 'Agent 工坊', description: '创建和测试个人 Agent 草稿', path: '/agent-studio', roles: ['user', 'reviewer'] },
     { title: '开发者论坛', description: '提问、分享经验和交流审查实践', path: '/forum', roles: ['admin', 'user', 'reviewer'] },
     { title: '个人知识库', description: '管理个人 RAG 文档、同步与检索', path: '/knowledge', roles: ['user', 'reviewer'] },
     { title: '个性化画像', description: '配置技术栈、目标和 AI 偏好', path: '/profile/personalization', roles: ['user', 'reviewer'] },
@@ -79,9 +82,12 @@ const searchItems = computed<SearchItem[]>(() => {
     if (item.admin && !isAdmin.value) return false
     if (!canRoleSeeNavigationItem(currentRole.value, item.roles)) return false
     if (item.path && !canRoleOpenPath(currentRole.value, item.path)) return false
+    if (item.path && !isNavigationPathAllowed(router, item.path, userStore)) return false
     return true
   })
 })
+
+const topNavItems = computed(() => searchItems.value.filter((item) => item.topNav && item.path))
 
 const filteredSearchItems = computed(() => {
   const keyword = searchKeyword.value.trim().toLowerCase()
@@ -131,6 +137,14 @@ function runSearchItem(item: SearchItem): void {
   if (item.path && item.path !== route.path) {
     router.push(item.path)
   }
+}
+
+function isTopNavActive(path: string): boolean {
+  return route.path === path || route.path.startsWith(`${path}/`)
+}
+
+function goTopNav(path: string): void {
+  if (route.path !== path) void router.push(path)
 }
 
 /**
@@ -202,6 +216,21 @@ onBeforeUnmount(() => {
         <span v-if="i < crumbs.length - 1" class="crumb-sep">/</span>
       </template>
     </div>
+
+    <nav class="header-nav" aria-label="快捷导航">
+      <button
+        v-for="item in topNavItems"
+        :key="item.path"
+        class="header-nav-item"
+        :class="{ 'is-active': isTopNavActive(item.path || '') }"
+        type="button"
+        :data-route="item.path"
+        :aria-current="isTopNavActive(item.path || '') ? 'page' : undefined"
+        @click="goTopNav(item.path || '')"
+      >
+        {{ item.title }}
+      </button>
+    </nav>
 
     <div class="header-right">
       <button class="search-trigger" type="button" aria-label="打开全局搜索" @click="openSearch">
@@ -285,12 +314,60 @@ onBeforeUnmount(() => {
   height: var(--header-height);
   padding: 0 24px;
   background: var(--surface-glass);
+  background: color-mix(in srgb, var(--surface-glass) 92%, transparent);
   border-bottom: var(--hairline);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
   flex-shrink: 0;
   min-width: 0;
+}
+
+.header-nav {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.header-nav-item {
+  position: relative;
+  min-width: 64px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.header-nav-item::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  right: 50%;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(90deg, var(--brand-500), var(--accent-500));
+  transition: left 0.2s ease, right 0.2s ease;
+}
+
+.header-nav-item:hover,
+.header-nav-item:focus-visible,
+.header-nav-item.is-active {
+  color: var(--brand-600);
+  background: rgba(91, 88, 232, 0.05);
+  outline: none;
+}
+
+.header-nav-item:hover::after,
+.header-nav-item:focus-visible::after,
+.header-nav-item.is-active::after {
+  left: 12px;
+  right: 12px;
 }
 
 /* 面包屑 ------------------------------- */
@@ -309,8 +386,8 @@ onBeforeUnmount(() => {
   display: none;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: var(--hairline);
   border-radius: 8px;
   background: var(--surface-1);
@@ -362,7 +439,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 36px;
+  height: 40px;
   min-width: 238px;
   padding: 0 10px 0 12px;
   border: var(--hairline);
@@ -404,7 +481,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 36px;
+  height: 40px;
   padding: 0 14px;
   border: 1px solid var(--brand-200);
   border-radius: 8px;
@@ -434,6 +511,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   cursor: pointer;
   padding: 4px 10px 4px 4px;
+  min-height: 40px;
   border-radius: 8px;
   transition: background var(--transition-fast), box-shadow var(--transition-fast);
 
@@ -546,6 +624,12 @@ onBeforeUnmount(() => {
   max-width: calc(100vw - 24px);
 }
 
+@media (max-width: 1280px) {
+  .header-nav {
+    display: none;
+  }
+}
+
 @media (max-width: 1100px) {
   .app-header {
     gap: 16px;
@@ -596,8 +680,8 @@ onBeforeUnmount(() => {
   }
 
   .search-trigger {
-    width: 34px;
-    min-width: 34px;
+    width: 40px;
+    min-width: 40px;
     padding: 0;
     justify-content: center;
   }
@@ -611,9 +695,17 @@ onBeforeUnmount(() => {
   }
 
   .agent-trigger {
-    width: 34px;
+    width: 40px;
+    min-width: 40px;
     padding: 0;
     justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header-nav-item,
+  .header-nav-item::after {
+    transition: none;
   }
 }
 

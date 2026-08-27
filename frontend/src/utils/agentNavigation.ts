@@ -87,8 +87,7 @@ export function isRouteAllowed(resolved: {
   if (!guardSource.token) return false
   if (meta.superAdmin && !guardSource.isSuperAdmin()) return false
   const isAdmin = guardSource.isAdmin()
-  if (meta.role && meta.role !== 'admin' && !isAdmin) return false
-  if (meta.role === 'admin' && !isAdmin) return false
+  if (meta.role && !isAdmin && !guardSource.hasRole(meta.role)) return false
   if (meta.roles?.length && !isAdmin && !meta.roles.some((role) => guardSource.hasRole(role))) return false
   if (
     meta.permissions?.length
@@ -96,6 +95,27 @@ export function isRouteAllowed(resolved: {
     && !meta.permissions.some((code) => guardSource.hasPermission(code))
   ) return false
   return true
+}
+
+/**
+ * 供菜单、搜索与 Agent 导航共用的站内路由可见性判定。
+ * 未注册路由、外部路径或当前用户守卫不能放行时一律不展示入口。
+ */
+export function isNavigationPathAllowed(
+  router: Pick<Router, 'resolve'>,
+  path: string,
+  guardSource: Parameters<typeof isRouteAllowed>[1],
+): boolean {
+  if (!path.startsWith('/') || path.startsWith('//')) return false
+  try {
+    const pathname = path.split(/[?#]/, 1)[0]
+    const resolved = router.resolve({ path: pathname })
+    if (!resolved.matched.length) return false
+    if (resolved.matched.some((record) => String(record.path ?? '').includes(':pathMatch'))) return false
+    return isRouteAllowed(resolved, guardSource)
+  } catch {
+    return false
+  }
 }
 
 /** 从应用路由表构建可引导的站内路由集合(含嵌套 children)。 */

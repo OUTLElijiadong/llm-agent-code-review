@@ -39,6 +39,7 @@ export const useAgentActivityStore = defineStore('agentActivity', () => {
     return items.length ? items[items.length - 1] : null
   })
   const count = computed(() => active.value.size)
+  const completionTimers = new Map<string, number>()
 
   /**
    * 标记一个页面操作开始。
@@ -63,6 +64,8 @@ export const useAgentActivityStore = defineStore('agentActivity', () => {
     if (!active.value.size) return
     const next = new Map(active.value)
     if (key && next.has(key)) {
+      window.clearTimeout(completionTimers.get(key))
+      completionTimers.delete(key)
       next.delete(key)
     } else {
       const lastKey = [...next.keys()].pop()
@@ -71,10 +74,22 @@ export const useAgentActivityStore = defineStore('agentActivity', () => {
     active.value = next
   }
 
+  /** 成功完成后延迟收起，让虚拟鼠标有时间抵达目标并显示点击反馈。 */
+  function complete(key: string, delayMs = 1650): void {
+    if (!active.value.has(key)) return
+    window.clearTimeout(completionTimers.get(key))
+    completionTimers.set(key, window.setTimeout(() => {
+      completionTimers.delete(key)
+      end(key)
+    }, Math.max(0, delayMs)))
+  }
+
   /** 清空全部活动(会话切换/登出时兜底)。 */
   function clear(): void {
+    for (const timer of completionTimers.values()) window.clearTimeout(timer)
+    completionTimers.clear()
     active.value = new Map()
   }
 
-  return { active, phase, isActing, current, count, begin, end, clear }
+  return { active, phase, isActing, current, count, begin, end, complete, clear }
 })

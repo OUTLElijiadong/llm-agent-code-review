@@ -39,7 +39,9 @@ import AgentTeamSidePanel from '@/components/ai/AgentTeamSidePanel.vue'
 import TaskCancelConfirm from '@/components/ai/TaskCancelConfirm.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import { renderMarkdown } from '@/utils/markdown'
-import { extractNavigateDirectives } from '@/utils/agentNavigation'
+import { extractNavigateDirectives, isNavigationPathAllowed } from '@/utils/agentNavigation'
+import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
+import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { streamResponses } from '@/utils/responsesStream'
 import {
@@ -215,6 +217,7 @@ async function handleAskMember({ teamId, name, address }: { teamId: number; name
   )
 }
 const router = useRouter()
+const userStore = useUserStore()
 /** 管理端同样点亮全局彩框/虚拟鼠标:小菱替管理员操作页面时的实况反馈。 */
 const activityStore = useAgentActivityStore()
 
@@ -761,9 +764,12 @@ async function scrollToBottom(): Promise<void> {
  * 导航前收起面板,让目标管理页完整呈现,模拟管理员真实操作路径。
  */
 function followNavigation(directive: AgentNavigateDirective): void {
-  if (!directive.route.startsWith('/')) return
-  // 仅站内跳转,不再收起面板——管理员可能还要参考对话内容继续操作。
-  void router.push(directive.route)
+  if (!isNavigationPathAllowed(router, directive.route, userStore)) return
+  requestXiaolingNavigation(
+    directive.route,
+    directive.label || '目标管理页',
+    () => { void router.push(directive.route) },
+  )
 }
 
 /**
@@ -1058,7 +1064,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
             || event.type === 'response.tool.rejected')
           && typeof event.call_id === 'string'
         ) {
-          activityStore.end(event.call_id)
+          if (event.type === 'response.tool.completed') activityStore.complete(event.call_id)
+          else activityStore.end(event.call_id)
         }
         if (!applyExistingTimelineToolEvent(event)) {
           applyResponseToolEvent(runToolCalls, event)

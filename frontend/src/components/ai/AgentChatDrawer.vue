@@ -26,7 +26,9 @@ import AgentTeamWindow from '@/components/ai/AgentTeamWindow.vue'
 import TaskCancelConfirm from '@/components/ai/TaskCancelConfirm.vue'
 import { isPageActionTool, toolRunningPhrase } from '@/utils/toolDisplay'
 import { useAgentActivityStore } from '@/stores/agentActivity'
-import { extractNavigateDirectives } from '@/utils/agentNavigation'
+import { extractNavigateDirectives, isNavigationPathAllowed } from '@/utils/agentNavigation'
+import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
+import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
 import type { AgentStatus } from '@/types/agent'
@@ -137,6 +139,7 @@ const props = defineProps<{ visible: boolean; prefill?: string }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean]; 'consumed-prefill': [] }>()
 
 const router = useRouter()
+const userStore = useUserStore()
 /** 全局「小菱工作中」活动信号:驱动彩框与虚拟鼠标。 */
 const activityStore = useAgentActivityStore()
 
@@ -1206,7 +1209,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
             || event.type === 'response.tool.rejected')
           && typeof event.call_id === 'string'
         ) {
-          activityStore.end(event.call_id)
+          if (event.type === 'response.tool.completed') activityStore.complete(event.call_id)
+          else activityStore.end(event.call_id)
         }
         if (!applyExistingTimelineToolEvent(event)) {
           applyResponseToolEvent(runToolCalls, event)
@@ -1688,9 +1692,12 @@ function planTotalMs(steps: PlanStep[]): number {
  * 导航前收起抽屉,让目标页面完整呈现,模拟用户真实浏览路径。
  */
 function followNavigation(directive: AgentNavigateDirective): void {
-  if (!directive.route.startsWith('/')) return
-  // 仅站内跳转,不再关闭悬浮窗——用户可能还要参考对话内容继续操作。
-  void router.push(directive.route)
+  if (!isNavigationPathAllowed(router, directive.route, userStore)) return
+  requestXiaolingNavigation(
+    directive.route,
+    directive.label || '目标页面',
+    () => { void router.push(directive.route) },
+  )
 }
 
 /**

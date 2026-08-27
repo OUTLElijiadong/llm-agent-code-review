@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard-page prism-page-shell">
     <!-- ============ 页头 ============ -->
-    <header class="page-head prism-page-head">
+    <header class="page-head prism-page-head prism-rise">
       <div>
         <h1 class="page-title font-display">仪表盘</h1>
         <p class="page-sub">
@@ -31,7 +31,7 @@
     <!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
     <el-alert
       v-if="showChangelog"
-      class="changelog-alert"
+      class="changelog-alert prism-rise"
       type="info"
       :closable="true"
       @close="dismissChangelog"
@@ -56,7 +56,7 @@
           </span>
           {{ card.label }}
         </div>
-        <div class="stat-num font-display">
+        <div class="stat-num prism-number font-display">
           {{ card.value }}<span class="stat-unit">{{ card.unit }}</span>
         </div>
         <div v-if="card.delta" class="stat-delta" :class="card.deltaDir">{{ card.delta }}</div>
@@ -73,12 +73,12 @@
     </section>
 
     <!-- ============ v2.1.1 安全态势卡 ============ -->
-    <section class="security-row">
+    <section class="security-row prism-rise" style="--rise-delay: 180ms">
       <SecurityPostureCard :days="timeRange" />
     </section>
 
     <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
-    <section class="chart-row two-col">
+    <section class="chart-row two-col prism-stagger">
       <article class="chart-card">
         <header class="chart-head">
           <div>
@@ -127,7 +127,7 @@
     </section>
 
     <!-- ============ 3 个分析图 ============ -->
-    <section class="chart-row three-col">
+    <section class="chart-row three-col prism-stagger">
       <article class="chart-card">
         <header class="chart-head">
           <h3 class="font-display">{{ timeRange }} 天审查任务趋势</h3>
@@ -702,7 +702,7 @@ onBeforeUnmount(() => {
 
 .stat {
   position: relative;
-  background: var(--surface-1);
+  background: var(--surface-glass);
   border: var(--hairline);
   border-radius: 10px;
   padding: 16px;
@@ -711,6 +711,8 @@ onBeforeUnmount(() => {
   gap: 8px;
   overflow: hidden;
   transition: all 0.2s ease;
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
 
   /* hover 时顶部掠过一记光谱细线,强化「棱镜」品牌感 */
   &::before {
@@ -879,11 +881,20 @@ onBeforeUnmount(() => {
 
 .chart-card {
   min-width: 0;
-  background: var(--surface-1);
+  background: var(--surface-glass);
   border: var(--hairline);
   border-radius: 10px;
   padding: 18px 20px;
   box-shadow: var(--shadow-1);
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+.chart-card:hover {
+  border-color: var(--brand-200);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
 }
 
 .chart-head {
@@ -935,6 +946,12 @@ onBeforeUnmount(() => {
 
   .legend-list {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-card:hover {
+    transform: none;
   }
 }
 

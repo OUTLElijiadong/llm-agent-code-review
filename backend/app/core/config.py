@@ -139,11 +139,13 @@ class Settings(BaseSettings):
     # 双层调度总开关: True=意图分类+LLM 规划调用链; False=回退单层 handler
     # 出问题时可设 False 快速降级,不影响主流程
     chat_double_layer_enabled: bool = True
-    # Skill 定时进化总开关(每日 03:00 跑 evolution,每小时跑 proactive_check)
-    # 关闭时不创建、注册或执行周期 Skill；不影响用户交互与独立事件触发开关。
-    skill_scheduler_enabled: bool = True
-    # Skill 事件触发总开关(订阅 event_bus 事件触发 Skill)
-    skill_event_trigger_enabled: bool = True
+    # Skill 定时进化总开关(每日 03:00 跑 evolution,每小时跑 proactive_check)。
+    # 默认关闭，避免部署后历史任务或缺省配置隐式消耗模型额度；管理员显式开启后
+    # 仍受每个 Agent 的日预算闸门保护。用户主动对话和手动 Skill 调用不受影响。
+    skill_scheduler_enabled: bool = False
+    # Skill 事件触发总开关(订阅 event_bus 事件触发 Skill)。事件触发同样可能调用模型，
+    # 因此默认关闭；需要自动学习时由管理员显式开启并配置预算。
+    skill_event_trigger_enabled: bool = False
     # Skill 触发全局并发上限(定时+事件共用,防雪崩)
     skill_trigger_max_concurrency: int = 3
     # Skill 事件触发去抖窗口(秒,同 key 不重复触发)

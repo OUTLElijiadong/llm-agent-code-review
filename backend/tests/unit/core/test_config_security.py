@@ -19,6 +19,14 @@ def test_deepseek_context_budget_defaults_to_one_million_tokens():
     assert configured.deepseek_compaction_keep_recent_tokens == 200_000
 
 
+def test_unattended_skill_triggers_are_disabled_by_default():
+    """周期和事件 Skill 不得在未显式配置时隐式消耗模型额度。"""
+    configured = Settings(_env_file=None)
+
+    assert configured.skill_scheduler_enabled is False
+    assert configured.skill_event_trigger_enabled is False
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
