@@ -304,8 +304,8 @@ class TestV3FieldsMerge:
             "gdpr": ["Art.32"],
         }
 
-    def test_hybrid_v3_fallback_to_static_when_llm_empty(self):
-        """hybrid 合并: LLM v3 字段为空时回退 static"""
+    def test_hybrid_v3_requires_vector_even_when_static_has_bare_score(self):
+        """hybrid 合并: 无有效向量的裸分数保持未评分。"""
         findings = [_make_finding(
             cvss_score=7.5,
             cvss_vector="",
@@ -320,7 +320,8 @@ class TestV3FieldsMerge:
         )]
         result = merge_findings_and_issues(findings, issues, file_id=1)
         assert len(result) == 1
-        assert result[0].cvss_score == 7.5
+        assert result[0].cvss_score is None
+        assert result[0].cvss_source == "unavailable"
         assert result[0].remediation == "static 修复"
         assert result[0].compliance_mapping == {"pci_dss": ["6.5.1"]}
 

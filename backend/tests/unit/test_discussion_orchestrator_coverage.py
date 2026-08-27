@@ -1077,7 +1077,8 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert len(rows) == 2
     assert rows[0].line_number == 0
     assert rows[0].title == ""
-    assert rows[1].end_line == 6
+    assert rows[1].line_number == 1
+    assert rows[1].end_line == 1
     assert rows[1].fixed_code == "check_permission()"
     assert rows[1].source == "llm"
     assert rows[1].source_details[0]["source"] == "llm:roundtable"

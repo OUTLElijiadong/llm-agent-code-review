@@ -452,10 +452,14 @@ def _attach_code_anchors(candidates: List[Issue], index: _AnchorIndex) -> List[I
 
 def _resolve_anchor(issue: Issue, index: _AnchorIndex) -> Optional[_CodeAnchor]:
     cwe = _normalize_cwe(issue.cwe)
+    evidence = _normalize_evidence(issue.evidence)
+    # 没有漏洞身份也没有源码证据的泛化问题（例如可维护性建议）不能
+    # 因文件里恰好只有一个安全 sink 就借用该 sink，继而被错误去重。
+    if not cwe and not evidence:
+        return None
     records = [record for record in index.records if not cwe or record.cwe == cwe]
     if not records:
         return None
-    evidence = _normalize_evidence(issue.evidence)
     if evidence:
         scored: list[tuple[int, int, _CodeAnchor]] = []
         for record in records:

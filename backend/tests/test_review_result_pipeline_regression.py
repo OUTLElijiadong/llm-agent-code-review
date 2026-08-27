@@ -430,6 +430,37 @@ def test_repeated_source_evidence_uses_unique_nearest_occurrence() -> None:
     assert len({item.source_anchor for item in merged}) == 2
 
 
+def test_generic_issue_without_evidence_does_not_borrow_security_anchor() -> None:
+    issues = [
+        _issue(
+            line=4,
+            evidence="return data",
+            source="llm:security",
+            title="越权风险",
+            cwe="CWE-639",
+        ),
+        Issue(
+            line_number=0,
+            issue_type="可维护性",
+            severity="中",
+            title="函数过长",
+            description="建议拆分职责",
+            source="llm:general",
+        ),
+    ]
+
+    merged = merge_findings_and_issues(
+        [],
+        issues,
+        file_id=107,
+        code="return data",
+        language="python",
+    )
+
+    assert len(merged) == 2
+    assert {item.issue_type for item in merged} == {"安全漏洞", "可维护性"}
+
+
 def test_cvss_requires_a_valid_vector_for_any_score() -> None:
     assert normalize_cvss(0.0, None) == (None, None, None, "unavailable")
     assert normalize_cvss(7.5, "not-a-vector") == (None, None, None, "unavailable")
