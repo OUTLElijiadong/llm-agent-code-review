@@ -239,7 +239,7 @@ onBeforeUnmount(() => {
         <span class="search-kbd font-mono">⌘K</span>
       </button>
 
-      <button class="agent-trigger" type="button" @click="openAgent">
+      <button class="agent-trigger" type="button" aria-label="打开小菱助手" title="打开小菱助手" @click="openAgent">
         <el-icon class="agent-icon"><MagicStick /></el-icon>
         <span>Agent</span>
       </button>

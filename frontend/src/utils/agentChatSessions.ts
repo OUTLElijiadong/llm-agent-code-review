@@ -58,6 +58,7 @@ export interface AgentChatSnapshot {
 
 const INDEX_PREFIX = 'prism-agent-sessions:'
 const SNAPSHOT_PREFIX = 'prism-agent-session-snapshot:'
+const DRAFT_PREFIX = 'prism-agent-session-draft:'
 const ACTIVE_PREFIX = 'prism-agent-active-session:'
 const LOGIN_FRESH_PREFIX = 'prism-agent-login-fresh:'
 const CHAT_SURFACES = ['user', 'admin'] as const
@@ -152,6 +153,28 @@ export function saveActiveAgentChatSession(storageKey: string, sessionId: string
 export function loadActiveAgentChatSession(storageKey: string): string {
   try {
     return window.localStorage.getItem(ACTIVE_PREFIX + storageKey) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** 保存某一会话尚未发送的输入；空白草稿直接删除。 */
+export function saveAgentChatDraft(sessionId: string, draft: string): void {
+  if (!sessionId) return
+  try {
+    const key = DRAFT_PREFIX + sessionId
+    if (draft.trim()) window.localStorage.setItem(key, draft)
+    else window.localStorage.removeItem(key)
+  } catch {
+    // 存储不可用时退化为当前组件生命周期内编辑，不阻断发送。
+  }
+}
+
+/** 恢复某一会话尚未发送的输入。 */
+export function loadAgentChatDraft(sessionId: string): string {
+  if (!sessionId) return ''
+  try {
+    return window.localStorage.getItem(DRAFT_PREFIX + sessionId) ?? ''
   } catch {
     return ''
   }
@@ -278,6 +301,7 @@ export function removeAgentChatSession(storageKey: string, sessionId: string): v
   writeIndex(storageKey, readIndex(storageKey).filter((item) => item.id !== sessionId))
   try {
     window.localStorage.removeItem(SNAPSHOT_PREFIX + sessionId)
+    window.localStorage.removeItem(DRAFT_PREFIX + sessionId)
     if (window.localStorage.getItem(ACTIVE_PREFIX + storageKey) === sessionId) {
       window.localStorage.removeItem(ACTIVE_PREFIX + storageKey)
     }

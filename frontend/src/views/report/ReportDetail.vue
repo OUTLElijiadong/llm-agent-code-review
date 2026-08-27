@@ -453,7 +453,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ArrowLeft, ArrowDown, Document, Download, Printer, View } from '@element-plus/icons-vue'
@@ -475,6 +475,7 @@ import { reviewTypeLabel } from '@/constants/reviewType'
 import { goBack } from '@/utils/navigation'
 import { renderMarkdown, stripMarkdown } from '@/utils/markdown'
 import { reviewRiskLevel, reviewScoreColor } from '@/utils/reviewScore'
+import { useCountUp } from '@/composables/useCountUp'
 
 const route = useRoute()
 const router = useRouter()
@@ -556,31 +557,8 @@ const score = computed(() => {
   const value = Number(stats.value.score ?? 0)
   return Number.isFinite(value) ? value : 0
 })
-const animatedScore = ref(0)
-
-function animateScore(target: number): void {
-  const duration = 1500 // 动画时长 (ms)
-  const startTime = performance.now()
-  const startVal = animatedScore.value
-
-  function step(now: number) {
-    const elapsed = now - startTime
-    const progress = Math.min(elapsed / duration, 1)
-    const easeProgress = progress * (2 - progress) // easeOutQuad
-    animatedScore.value = Math.round(startVal + (target - startVal) * easeProgress)
-
-    if (progress < 1) {
-      requestAnimationFrame(step)
-    }
-  }
-  requestAnimationFrame(step)
-}
-
-watch(score, (newVal) => {
-  if (typeof newVal === 'number' && !Number.isNaN(newVal)) {
-    animateScore(newVal)
-  }
-})
+const animatedScoreValue = useCountUp(score, 1500)
+const animatedScore = computed(() => Math.round(animatedScoreValue.value))
 const totalIssues  = computed(() => Number(stats.value.total_issues ?? 0))
 const severeCount  = computed(() => Number(stats.value.severe ?? 0))
 const highCount    = computed(() => Number(stats.value.high ?? 0))

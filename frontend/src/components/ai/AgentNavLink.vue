@@ -29,7 +29,7 @@ const userStore = useUserStore()
 const resolved = computed(() => {
   if (!props.href.startsWith('/') || props.href.startsWith('//')) return null
   try {
-    const match = router.resolve({ path: props.href })
+    const match = router.resolve(props.href)
     return match.matched.length ? match : null
   } catch {
     return null

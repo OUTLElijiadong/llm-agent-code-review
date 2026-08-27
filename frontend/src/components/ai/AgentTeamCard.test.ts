@@ -49,14 +49,16 @@ function mountCard() {
 }
 
 describe('AgentTeamCard keyboard interaction', () => {
-  it('团队卡片支持 Enter 和空格打开详情', async () => {
+  it('团队主按钮支持 Enter 和空格打开详情', async () => {
     const wrapper = mountCard()
     const card = wrapper.get('.team-card')
+    const openButton = wrapper.get('.team-card-open')
 
-    expect(card.attributes('role')).toBe('button')
-    expect(card.attributes('tabindex')).toBe('0')
-    await card.trigger('keydown.enter')
-    await card.trigger('keydown.space')
+    expect(card.attributes('role')).toBeUndefined()
+    expect(card.attributes('tabindex')).toBeUndefined()
+    expect(openButton.element.tagName).toBe('BUTTON')
+    await openButton.trigger('keydown.enter')
+    await openButton.trigger('keydown.space')
 
     expect(wrapper.emitted('open-panel')).toEqual([[7], [7]])
     wrapper.unmount()

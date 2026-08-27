@@ -44,6 +44,8 @@ it('enforces the administrator route allowlist', function testAdminRouteAllowlis
   expect(canAdminOpenPath('/knowledge')).toBe(true)
   expect(canAdminOpenPath('/profile/personalization')).toBe(true)
   expect(canAdminOpenPath('/agents/logs')).toBe(true)
+  expect(canAdminOpenPath('/sandboxes')).toBe(true)
+  expect(canAdminOpenPath('/agent-studio')).toBe(true)
   expect(canAdminOpenPath('/security')).toBe(true)
   expect(canAdminOpenPath('/forum/post/1')).toBe(true)
   expect(canAdminOpenPath('/support/tickets')).toBe(true)

@@ -71,5 +71,6 @@ describe('AppHeader navigation visibility', () => {
 
     expect(dashboard.classes()).toContain('is-active')
     expect(dashboard.attributes('aria-current')).toBe('page')
+    expect(wrapper.get('.agent-trigger').attributes('aria-label')).toBe('打开小菱助手')
   })
 })

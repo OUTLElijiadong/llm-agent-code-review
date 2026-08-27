@@ -1,39 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { ref } from 'vue'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
-import AgentChatDrawer from '@/components/ai/AgentChatDrawer.vue'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
 
-const agentVisible = ref(false)
-const agentPrefill = ref('')
 const sidebarVisible = ref(false)
-
-/**
- * 打开 Agent 助手抽屉
- * @returns void
- */
-function openAgentChat(): void {
-  agentVisible.value = true
-}
-
-/**
- * v2.0: 监听全局事件,允许其他视图(如 Agent 办公室)通过 dispatchEvent 唤起聊天
- * @returns void
- */
-function handleOpenChat(event: Event): void {
-  const detail = (event as CustomEvent<{ prefill?: string }>).detail
-  if (detail?.prefill) agentPrefill.value = detail.prefill
-  agentVisible.value = true
-}
-
-onMounted(() => {
-  window.addEventListener('prism:open-agent-chat', handleOpenChat as EventListener)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('prism:open-agent-chat', handleOpenChat as EventListener)
-})
 
 /**
  * 打开或关闭移动端侧边导航
@@ -51,7 +22,6 @@ function closeSidebar(): void {
   sidebarVisible.value = false
 }
 
-provide('openAgentChat', openAgentChat)
 </script>
 
 <template>
@@ -65,12 +35,11 @@ provide('openAgentChat', openAgentChat)
       <main class="app-layout-main">
         <router-view v-slot="{ Component, route }">
           <transition name="content-route" mode="out-in">
-            <component :is="Component" :key="route.fullPath" />
+            <component :is="Component" :key="route.path" />
           </transition>
         </router-view>
       </main>
     </div>
-    <AgentChatDrawer v-model:visible="agentVisible" :prefill="agentPrefill" @consumed-prefill="agentPrefill = ''" />
     <ProactivePageGuide surface="user" />
   </div>
 </template>

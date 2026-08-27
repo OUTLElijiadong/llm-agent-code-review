@@ -6,12 +6,14 @@ import {
   isPlaceholderAgentChatTitle,
   isPristineAgentChatSession,
   loadActiveAgentChatSession,
+  loadAgentChatDraft,
   loadAgentChatSnapshot,
   loadAgentChatSessions,
   mergeAgentChatSessions,
   markAgentChatLoginFreshStart,
   consumeAgentChatLoginFreshStart,
   saveActiveAgentChatSession,
+  saveAgentChatDraft,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
 } from './agentChatSessions'
@@ -147,6 +149,15 @@ describe('当前会话持久化', () => {
     expect(loadActiveAgentChatSession('user')).toBe('')
     saveActiveAgentChatSession('user', 'user-history')
     expect(loadActiveAgentChatSession('user')).toBe('user-history')
+  })
+
+  it('按会话保存未发送草稿,刷新后可恢复且空白会清除', () => {
+    expect(loadAgentChatDraft('user-draft')).toBe('')
+    saveAgentChatDraft('user-draft', '继续核验团队结果')
+    expect(loadAgentChatDraft('user-draft')).toBe('继续核验团队结果')
+
+    saveAgentChatDraft('user-draft', '   ')
+    expect(loadAgentChatDraft('user-draft')).toBe('')
   })
 })
 

@@ -31,9 +31,10 @@ vi.mock('@/api/agentTeams', () => ({
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 
 import AdminCopilot from './AdminCopilot.vue'
+import { useAgentActivityStore } from '@/stores/agentActivity'
 
 function flushSessionRestore(): Promise<void> {
   return new Promise((resolve) => {
@@ -44,9 +45,11 @@ function flushSessionRestore(): Promise<void> {
 }
 
 function mountCopilot(): VueWrapper {
+  const pinia = createPinia()
+  setActivePinia(pinia)
   return mount(AdminCopilot, {
     global: {
-      plugins: [createPinia()],
+      plugins: [pinia],
       stubs: {
         'el-icon': { template: '<span class="el-icon-stub"><slot /></span>' },
         ChatDotRound: true,
@@ -229,7 +232,7 @@ describe('AdminCopilot Responses stream', () => {
     await openCopilot(wrapper)
     await flushSessionRestore()
 
-    const card = wrapper.find('.team-card')
+    const card = wrapper.find('.team-card-open')
     expect(card.exists()).toBe(true)
     await card.trigger('click')
     await flushPromises()
@@ -257,6 +260,13 @@ describe('AdminCopilot Responses stream', () => {
     await wrapper.find('.session-new').trigger('click')
     await flushSessionRestore()
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('')
+
+    await wrapper.find('.session-current').trigger('click')
+    const previousSession = wrapper.findAll('.session-item').find((item) => !item.classes('is-active'))
+    expect(previousSession).toBeDefined()
+    await previousSession!.trigger('click')
+    await flushSessionRestore()
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toContain('团队 #88')
     wrapper.unmount()
   })
 
@@ -665,7 +675,9 @@ describe('AdminCopilot Responses stream', () => {
       tool_name: 'admin_execute_capability',
       arguments: { capability: 'report_templates.delete' },
     })
+    expect(useAgentActivityStore().isActing).toBe(true)
     emit(0, { type: 'response.completed', response: { id: 'run-unproven', status: 'completed' } })
+    expect(useAgentActivityStore().isActing).toBe(false)
     await finish(0)
 
     await expandTimeline(wrapper)

@@ -24,6 +24,7 @@ describe('VirtualCursor real navigation click', () => {
     target?.remove()
     wrapper = null
     target = null
+    window.history.replaceState({}, '', '/')
   })
 
   it('moves to a visible route button and triggers its real click', async () => {
@@ -95,5 +96,31 @@ describe('VirtualCursor real navigation click', () => {
       inline: 'nearest',
     })
     expect(navigate).toHaveBeenCalledOnce()
+  })
+
+  it('uses the clicked Agent link for same-page query navigation instead of an unrelated primary action', async () => {
+    window.history.replaceState({}, '', '/reviews?tab=all')
+    const navigate = vi.fn()
+    const main = document.createElement('main')
+    const unrelated = document.createElement('button')
+    unrelated.textContent = '创建任务'
+    main.appendChild(unrelated)
+    document.body.appendChild(main)
+    target = document.createElement('button')
+    target.textContent = '我的审查'
+    document.body.appendChild(target)
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+
+    requestXiaolingNavigation('/reviews?tab=mine#latest', '我的审查', navigate, target)
+    await flushPromises()
+    vi.advanceTimersByTime(800)
+    await flushPromises()
+
+    expect(target.classList.contains('xl-vcursor-target')).toBe(true)
+    expect(unrelated.classList.contains('xl-vcursor-target')).toBe(false)
+    vi.advanceTimersByTime(700)
+    await flushPromises()
+    expect(navigate).toHaveBeenCalledOnce()
+    main.remove()
   })
 })

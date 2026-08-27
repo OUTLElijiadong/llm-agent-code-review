@@ -79,7 +79,9 @@ import {
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import {
   autoTitleAgentChatSession,
+  loadAgentChatDraft,
   loadAgentChatSnapshot,
+  saveAgentChatDraft,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
 } from '@/utils/agentChatSessions'
@@ -328,6 +330,13 @@ function persistSnapshot(): void {
   })
 }
 
+function rememberCurrentDraft(): void {
+  if (!sessionId.value) return
+  saveAgentChatDraft(sessionId.value, inputText.value)
+}
+
+watch(inputText, (draft) => saveAgentChatDraft(sessionId.value, draft), { flush: 'sync' })
+
 /** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
   // 切换器重挂载等场景会重复发出当前会话的 select:避免中断正在运行的流;
@@ -348,6 +357,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
     return content.trim().length > 0 && content.trim() !== WELCOME_TEXT.trim()
   })
   if (hasRealContent || sessionRun.value?.status) persistSnapshot()
+  rememberCurrentDraft()
   if (wasBusy) switcherRef.value?.setBusy(sessionId.value, true)
   activeResponse?.abort()
   activeResponse = null
@@ -356,8 +366,8 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionPollStopped = false
   sessionSnapshotSignature = ''
   sessionId.value = nextSessionId
-  // 草稿属于上一会话;切换/新建时清空,避免成员追问或半成品指令误发到新会话。
-  inputText.value = ''
+  // 每个会话独立保留草稿；页面刷新或跨布局后切回仍可继续编辑。
+  inputText.value = loadAgentChatDraft(nextSessionId)
   sessionPollFailures = 0
   cancelPromptVisible.value = false
   sessionRun.value = null
@@ -366,6 +376,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   loading.value = false
   showTyping.value = false
   lastActiveToolName.value = ''
+  activityStore.clear()
   sessionRestoring.value = true
   messages.value = [welcomeEntry()]
   await scrollToBottom()
@@ -1135,6 +1146,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         lastActiveToolName.value = ''
         runningSinceMs.value = null
         sandboxProgress.value = ''
+        activityStore.clear()
         protocolError ||= eventErrorMessage(event)
         const terminalStatus = event.type === 'response.completed'
           ? 'completed'
@@ -1167,6 +1179,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     }
     return true
   } catch (error) {
+    activityStore.clear()
     if (!(error instanceof Error && error.name === 'AbortError')) {
       const text = requestErrorMessage(error)
       ElMessage.error(text)
@@ -1199,6 +1212,7 @@ async function cancelResponse(reason = ''): Promise<void> {
   }
   activeResponse?.abort()
   activeResponse = null
+  activityStore.clear()
   loading.value = false
   syncBusy()
   sessionPollStopped = true
@@ -1391,12 +1405,14 @@ function handleVisibilityChange(): void {
 }
 
 onBeforeUnmount(() => {
+  rememberCurrentDraft()
   if (elapsedTimer !== undefined) window.clearInterval(elapsedTimer)
   meshBridge.stop()
   persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
   activeResponse?.abort()
+  activityStore.clear()
   if (reconnectHintTimer !== undefined) window.clearTimeout(reconnectHintTimer)
   window.clearTimeout(copiedResetTimer)
   window.removeEventListener('keydown', handleKeydown)

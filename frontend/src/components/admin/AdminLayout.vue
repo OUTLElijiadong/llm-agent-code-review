@@ -24,7 +24,6 @@ import {
 } from '@element-plus/icons-vue'
 
 import { useUserStore } from '@/stores/user'
-import AdminCopilot from '@/components/admin/AdminCopilot.vue'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
@@ -154,12 +153,11 @@ async function logout(): Promise<void> {
       <main class="admin-content">
         <router-view v-slot="{ Component, route: childRoute }">
           <transition name="admin-route" mode="out-in">
-            <component :is="Component" :key="childRoute.fullPath" />
+            <component :is="Component" :key="childRoute.path" />
           </transition>
         </router-view>
       </main>
     </section>
-    <AdminCopilot />
     <ProactivePageGuide surface="admin" />
   </div>
 </template>

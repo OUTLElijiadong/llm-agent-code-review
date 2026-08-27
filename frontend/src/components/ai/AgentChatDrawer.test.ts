@@ -34,6 +34,7 @@ vi.mock('@/api/agentTeams', () => ({
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
 import AgentChatDrawer from './AgentChatDrawer.vue'
+import { useAgentActivityStore } from '@/stores/agentActivity'
 
 function mountDrawer(prefill?: string): VueWrapper {
   return mount(AgentChatDrawer, {
@@ -847,6 +848,21 @@ describe('AgentChatDrawer Responses stream', () => {
   })
 
   it('团队悬浮窗追问成员:点击后预填输入框', async () => {
+    window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
+      { id: 'user-test', title: '原团队对话', createdAt: Date.now() },
+    ]))
+    window.localStorage.setItem('prism-agent-active-session:user', 'user-test')
+    meshApi.list.mockImplementation(() => {
+      const sessions = JSON.parse(window.localStorage.getItem('prism-agent-sessions:user') || '[]') as Array<{ id: string; title: string }>
+      return Promise.resolve({
+        items: sessions.map((session) => ({
+          kind: 'session', session_id: session.id, surface: 'user', name: session.title,
+          last_seen_at: '2026-08-27T00:00:00Z',
+        })),
+        total: sessions.length,
+        by_kind: { session: sessions.length },
+      })
+    })
     teamApi.list.mockResolvedValue({
       items: [{
         team_id: 52, title: '只读核验', surface: 'user', session_id: 'user-test',
@@ -885,6 +901,13 @@ describe('AgentChatDrawer Responses stream', () => {
     await wrapper.find('.session-new').trigger('click')
     await settleAll()
     expect((wrapper.find('textarea.chat-input').element as HTMLTextAreaElement).value).toBe('')
+
+    await wrapper.find('.session-current').trigger('click')
+    const previousSession = wrapper.findAll('.session-item').find((item) => !item.classes('is-active'))
+    expect(previousSession).toBeDefined()
+    await previousSession!.trigger('click')
+    await settleAll()
+    expect((wrapper.find('textarea.chat-input').element as HTMLTextAreaElement).value).toContain('团队 #52')
   })
 
   it('网络错误留在消息流:错误卡片 + Toast,重试可恢复', async () => {
@@ -893,9 +916,18 @@ describe('AgentChatDrawer Responses stream', () => {
     void wrapper.find('.send-btn').trigger('click')
     await flushPromises()
 
+    emit(0, {
+      type: 'response.tool.started',
+      call_id: 'call-network-page-action',
+      tool_name: 'user_execute_capability',
+      arguments: { capability: 'projects.list', page: '/projects' },
+    })
+    expect(useAgentActivityStore().isActing).toBe(true)
+
     await failStream(0, new Error('网络连接中断'))
     // 等待 canSend 等计算属性完成重算(loading 复位),重试按钮才可点
     await settleAll()
+    expect(useAgentActivityStore().isActing).toBe(false)
 
     const errorCard = wrapper.find('.msg-error-card')
     expect(errorCard.exists()).toBe(true)

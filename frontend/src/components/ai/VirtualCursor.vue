@@ -61,8 +61,30 @@ interface Candidate {
 /** 从 targetHint 提取站内路由(/projects、/admin/users 等)。 */
 function routeFromHint(hint?: string | null): string {
   if (!hint) return ''
-  const m = hint.match(/(^|\s)(\/[a-z0-9\-_/]+)/i)
+  const m = hint.match(/(^|\s)(\/[a-z0-9][a-z0-9/_-]*(?:\?[a-z0-9%&=_.~-]+)?(?:#[a-z0-9%_.~-]+)?)/i)
   return m?.[2] ?? ''
+}
+
+function routePathname(route: string): string {
+  try {
+    return new URL(route, window.location.origin).pathname
+  } catch {
+    return route.split(/[?#]/, 1)[0]
+  }
+}
+
+function currentFullPath(): string {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`
+}
+
+function isExactCurrentRoute(route: string): boolean {
+  try {
+    const target = new URL(route, window.location.origin)
+    const targetFullPath = `${target.pathname}${target.search}${target.hash}`
+    return currentFullPath() === targetFullPath
+  } catch {
+    return false
+  }
 }
 
 /** 路由 → 侧边栏中文标签(与 router/菜单文案对齐)。 */
@@ -88,18 +110,20 @@ const ROUTE_LABELS: Array<[string, string]> = [
   ['/forum', '论坛'],
 ]
 function routeLabel(route: string): string {
-  const exact = ROUTE_LABELS.find(([prefix]) => route === prefix || route.startsWith(`${prefix}/`))
+  const pathname = routePathname(route)
+  const exact = ROUTE_LABELS.find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`))
   return exact?.[1] ?? ''
 }
 
 /** 当前是否已在目标路由(避免在同页反复找导航)。 */
 function onRoute(route: string): boolean {
+  const pathname = routePathname(route)
   const current = window.location.pathname
-  if (current === route || current.startsWith(`${route}/`)) return true
+  if (current === pathname || current.startsWith(`${pathname}/`)) return true
   // 管理端路由前缀更细: /admin/xxx 只精确匹配同前缀
-  if (route.startsWith('/admin/')) return current.startsWith(route)
+  if (pathname.startsWith('/admin/')) return current.startsWith(pathname)
   // 用户端列表/详情视为同区: /projects/5 视为在 /projects
-  const head = route.split('/').slice(0, 2).join('/')
+  const head = pathname.split('/').slice(0, 2).join('/')
   return current.startsWith(head)
 }
 
@@ -110,7 +134,24 @@ function onRoute(route: string): boolean {
  */
 function findTarget(): Candidate | null {
   const hint = store.current?.targetHint
-  const route = routeFromHint(hint)
+  const route = requestedNavigation?.route || routeFromHint(hint)
+
+  // 显式导航必须忠实执行用户刚点击的小菱入口。优先点当前页面上与目标
+  // 完全一致的真实导航按钮；查询参数、锚点和详情页没有对应菜单时，
+  // 就在原始小菱按钮上展示点击并调用已鉴权的导航回调，避免误点页面主操作。
+  if (requestedNavigation && route) {
+    const source = requestedNavigation.sourceElement
+    const targetPath = routePathname(route)
+    const routeHasState = route !== targetPath
+    const navButtons = [...document.querySelectorAll<HTMLElement>('[data-route]')]
+    const exactHit = !routeHasState
+      ? navButtons.find((btn) => btn.dataset.route === targetPath)
+      : undefined
+    if (exactHit && !isExactCurrentRoute(route)) return { el: exactHit, route }
+    if (source?.isConnected) {
+      return { el: source, route, activate: requestedNavigation.execute }
+    }
+  }
 
   if (route && !onRoute(route)) {
     const navButtons = [...document.querySelectorAll<HTMLElement>('[data-route]')]
@@ -129,7 +170,7 @@ function findTarget(): Candidate | null {
     // 再执行已经由 AgentNavLink 权限校验过的回调，避免递归触发 click。
     if (
       requestedNavigation
-      && routeFromHint(requestedNavigation.route) === route
+      && requestedNavigation.route === route
       && requestedNavigation.sourceElement?.isConnected
     ) {
       return {
@@ -176,7 +217,9 @@ function bringTargetIntoView(el: HTMLElement): void {
     || rect.right < margin
     || rect.left > window.innerWidth - margin
   if (!outsideViewport) return
-  el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
+  if (typeof el.scrollIntoView === 'function') {
+    el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
+  }
 }
 
 function fallbackPoint(): { x: number; y: number } {

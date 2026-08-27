@@ -16,12 +16,12 @@ const badgeLabel = computed(() => store.current?.label || '小菱正在帮你操
 
 <template>
   <Transition name="agent-activity-fade">
-    <div v-if="store.isActing" class="agent-activity-border" aria-hidden="true">
-      <span class="agent-activity-glow"></span>
-      <span class="agent-activity-edge edge-top"></span>
-      <span class="agent-activity-edge edge-right"></span>
-      <span class="agent-activity-edge edge-bottom"></span>
-      <span class="agent-activity-edge edge-left"></span>
+    <div v-if="store.isActing" class="agent-activity-border">
+      <span class="agent-activity-glow" aria-hidden="true"></span>
+      <span class="agent-activity-edge edge-top" aria-hidden="true"></span>
+      <span class="agent-activity-edge edge-right" aria-hidden="true"></span>
+      <span class="agent-activity-edge edge-bottom" aria-hidden="true"></span>
+      <span class="agent-activity-edge edge-left" aria-hidden="true"></span>
       <div class="agent-activity-badge" role="status" aria-live="polite">
         <PrismMascot :size="22" status="running" />
         <span class="agent-activity-badge-text">

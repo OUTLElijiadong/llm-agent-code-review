@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { Close, CircleCheck, Loading, WarningFilled } from "@element-plus/icons-vue"
 import AgentTeamMemberBadge from "./AgentTeamMemberBadge.vue"
 import AgentMemberWorkCard from "./AgentMemberWorkCard.vue"
@@ -19,9 +19,12 @@ const loading = ref(false)
 const error = ref("")
 const activeTab = ref<"overview" | "members" | "tasks" | "events">("overview")
 const now = ref(Date.now())
+const panelRef = ref<HTMLElement | null>(null)
+const closeButtonRef = ref<HTMLButtonElement | null>(null)
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let pollGeneration = 0
+let previousFocusedElement: HTMLElement | null = null
 
 function stopPolling(): void {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
@@ -70,7 +73,43 @@ function loadTeam(teamId: number | null): void {
 
 const isTerminal = computed(() => ["completed", "failed", "cancelled", "expired"].includes(team.value?.status ?? ""))
 
-watch(() => props.teamId, loadTeam, { immediate: true })
+function restorePreviousFocus(): void {
+  const target = previousFocusedElement
+  previousFocusedElement = null
+  if (target?.isConnected) target.focus()
+}
+
+function handlePanelKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    event.preventDefault()
+    emit("close")
+    return
+  }
+  if (event.key !== "Tab" || !panelRef.value) return
+  const focusable = [...panelRef.value.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )]
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+watch(() => props.teamId, (teamId, previousTeamId) => {
+  loadTeam(teamId)
+  if (teamId) {
+    if (!previousTeamId) previousFocusedElement = document.activeElement as HTMLElement | null
+    void nextTick(() => closeButtonRef.value?.focus())
+  } else if (previousTeamId) {
+    void nextTick(restorePreviousFocus)
+  }
+}, { immediate: true })
 watch(isTerminal, (t) => { if (t) stopPolling() })
 
 onMounted(() => {
@@ -81,6 +120,7 @@ onBeforeUnmount(() => {
   pollGeneration += 1
   stopPolling()
   if (clockTimer) clearInterval(clockTimer)
+  restorePreviousFocus()
 })
 
 const members = computed<AgentTeamMember[]>(() => team.value?.members ?? [])
@@ -130,14 +170,18 @@ function askMember(member: AgentTeamMember): void {
     <Transition name="panel-slide">
       <div v-if="teamId" class="team-side-panel-overlay" @click.self="emit('close')">
         <div
+          ref="panelRef"
           class="team-side-panel"
           role="dialog"
           aria-modal="true"
           :aria-label="team?.title || '子Agent团队详情'"
+          tabindex="-1"
+          @keydown="handlePanelKeydown"
         >
           <header class="panel-header">
             <h3 class="panel-title">{{ team?.title || "子Agent团队详情" }}</h3>
             <button
+              ref="closeButtonRef"
               class="panel-close"
               type="button"
               aria-label="关闭团队详情"
@@ -157,14 +201,20 @@ function askMember(member: AgentTeamMember): void {
               <span class="meta-duration">已运行 {{ workingDuration }}</span>
             </div>
 
-            <nav class="panel-tabs">
+            <nav class="panel-tabs" role="tablist" aria-label="团队详情视图">
               <button v-for="tab in ([{ key: 'overview', label: '概览' }, { key: 'members', label: '成员' }, { key: 'tasks', label: '任务' }, { key: 'events', label: '事件' }] as const)"
+                type="button"
                 :key="tab.key" class="tab-btn" :class="{ active: activeTab === tab.key }"
+                role="tab"
+                :id="`team-tab-${team.team_id}-${tab.key}`"
+                :aria-selected="activeTab === tab.key"
+                :aria-controls="`team-panel-${team.team_id}-${tab.key}`"
+                :tabindex="activeTab === tab.key ? 0 : -1"
                 @click="activeTab = tab.key">{{ tab.label }}</button>
             </nav>
 
             <div class="panel-body">
-              <div v-if="activeTab === 'overview'" class="tab-overview">
+              <div v-if="activeTab === 'overview'" :id="`team-panel-${team.team_id}-overview`" class="tab-overview" role="tabpanel" :aria-labelledby="`team-tab-${team.team_id}-overview`" tabindex="0">
                 <div v-if="team.objective" class="overview-section">
                   <div class="section-label">目标</div>
                   <p class="section-text">{{ team.objective }}</p>
@@ -188,7 +238,7 @@ function askMember(member: AgentTeamMember): void {
                 </div>
               </div>
 
-              <div v-if="activeTab === 'members'" class="tab-members">
+              <div v-if="activeTab === 'members'" :id="`team-panel-${team.team_id}-members`" class="tab-members" role="tabpanel" :aria-labelledby="`team-tab-${team.team_id}-members`" tabindex="0">
                 <AgentMemberWorkCard
                   v-for="m in members"
                   :key="m.member_id"
@@ -203,7 +253,7 @@ function askMember(member: AgentTeamMember): void {
                 <div v-if="!members.length" class="empty-tab">暂无成员数据</div>
               </div>
 
-              <div v-if="activeTab === 'tasks'" class="tab-tasks">
+              <div v-if="activeTab === 'tasks'" :id="`team-panel-${team.team_id}-tasks`" class="tab-tasks" role="tabpanel" :aria-labelledby="`team-tab-${team.team_id}-tasks`" tabindex="0">
                 <div v-for="(task, i) in tasks" :key="task.task_id" class="task-row">
                   <span class="task-idx">{{ i + 1 }}</span>
                   <span class="task-icon" :class="`icon-${taskStatusIcon(task.status)}`">
@@ -221,7 +271,7 @@ function askMember(member: AgentTeamMember): void {
                 <div v-if="!tasks.length" class="empty-tab">暂无任务数据</div>
               </div>
 
-              <div v-if="activeTab === 'events'" class="tab-events">
+              <div v-if="activeTab === 'events'" :id="`team-panel-${team.team_id}-events`" class="tab-events" role="tabpanel" :aria-labelledby="`team-tab-${team.team_id}-events`" tabindex="0">
                 <div v-for="e in events" :key="e.event_id" class="event-row">
                   <span class="event-time">{{ eventTime(e) }}</span>
                   <span class="event-type">{{ e.event_type }}</span>
@@ -247,7 +297,9 @@ function askMember(member: AgentTeamMember): void {
 }
 .team-side-panel {
   width: 400px; max-width: 90vw; height: 100vh;
-  background: #fff; box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  background: rgba(255,255,255,0.96); box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  border-left: 1px solid rgba(255,255,255,0.72);
+  backdrop-filter: blur(18px) saturate(1.08);
   display: flex; flex-direction: column; overflow: hidden;
 }
 .panel-slide-enter-active, .panel-slide-leave-active { transition: all 0.25s ease; }
@@ -313,4 +365,14 @@ function askMember(member: AgentTeamMember): void {
 .event-trans { color: #6b7280; }
 
 .empty-tab { padding: 24px; text-align: center; color: #9ca3af; font-size: 13px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-slide-enter-active,
+  .panel-slide-leave-active,
+  .progress-done,
+  .tab-btn {
+    transition: none;
+  }
+  .spin-icon { animation: none; }
+}
 </style>

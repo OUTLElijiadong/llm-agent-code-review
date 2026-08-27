@@ -3,7 +3,7 @@
  * 数字变化时从旧值平滑滚动到新值(cubic-out 缓动),
  * prefers-reduced-motion 时直接落地不滚动。
  */
-import { ref, watch, type Ref } from 'vue'
+import { onScopeDispose, ref, watch, type Ref } from 'vue'
 
 export function useCountUp(
   source: Ref<number>,
@@ -16,8 +16,14 @@ export function useCountUp(
     typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
+  const cancelPendingFrame = (): void => {
+    if (rafId === null) return
+    window.cancelAnimationFrame(rafId)
+    rafId = null
+  }
+
   watch(source, (to, from) => {
-    if (rafId !== null) cancelAnimationFrame(rafId)
+    cancelPendingFrame()
     if (reduceMotion() || !Number.isFinite(to) || !Number.isFinite(from)) {
       display.value = to
       return
@@ -30,10 +36,13 @@ export function useCountUp(
       const t = Math.min(1, (now - start) / duration)
       const eased = 1 - Math.pow(1 - t, 3)
       display.value = from + delta * eased
-      if (t < 1) rafId = requestAnimationFrame(tick)
+      if (t < 1) rafId = window.requestAnimationFrame(tick)
+      else rafId = null
     }
-    rafId = requestAnimationFrame(tick)
+    rafId = window.requestAnimationFrame(tick)
   })
+
+  onScopeDispose(cancelPendingFrame)
 
   return display
 }

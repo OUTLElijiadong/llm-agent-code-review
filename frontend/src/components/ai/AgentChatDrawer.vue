@@ -58,8 +58,10 @@ import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { buildAutoValidationPrompt } from '@/utils/autoValidation'
 import {
   autoTitleAgentChatSession,
+  loadAgentChatDraft,
   loadAgentChatSnapshot,
   saveActiveAgentChatSession,
+  saveAgentChatDraft,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
   type AgentChatSnapshotMessage,
@@ -375,6 +377,13 @@ function persistSnapshot(): void {
   })
 }
 
+function rememberCurrentDraft(): void {
+  if (!sessionId.value) return
+  saveAgentChatDraft(sessionId.value, inputText.value)
+}
+
+watch(inputText, (draft) => saveAgentChatDraft(sessionId.value, draft), { flush: 'sync' })
+
 /** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
   // 切换器重挂载等场景会重复发出当前会话的 select:避免中断正在运行的流;
@@ -393,6 +402,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
     return content.trim().length > 0 && content.trim() !== WELCOME_TEXT.trim()
   })
   if (hasRealContent || sessionRun.value?.status) persistSnapshot()
+  rememberCurrentDraft()
   activeResponse?.abort()
   activeResponse = null
   clearLiveTeamPoll()
@@ -402,8 +412,8 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionSnapshotSignature = ''
   sessionRestoreStarted = false
   sessionId.value = nextSessionId
-  // 草稿属于上一会话;切换/新建时清空,避免成员追问或半成品指令误发到新会话。
-  inputText.value = ''
+  // 每个会话独立保留草稿；页面刷新后切回仍可继续编辑。
+  inputText.value = loadAgentChatDraft(nextSessionId)
   sessionPollFailures = 0
   cancelPromptVisible.value = false
   sessionRun.value = null
@@ -1012,6 +1022,7 @@ async function cancelResponse(reason = ''): Promise<void> {
   }
   syncBusy()
   activeResponse?.abort()
+  activityStore.clear()
   const hint = reason.trim()
     ? `已停止任务（原因：${reason.trim()}），未执行剩余操作；如需继续可重新发起。`
     : '已停止任务，未执行剩余操作；如需继续可重新发起。'
@@ -1310,6 +1321,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     }
     return true
   } catch (error) {
+    activityStore.clear()
     if (error instanceof Error && error.name === 'AbortError') {
       // 用户主动「停止响应」:部分内容保留,留一张可重试的取消卡片。
       appendErrorCard('已停止本次回答,你可以点「重试」继续,或新建对话', true)
@@ -1939,6 +1951,7 @@ function handleVisibilityChange(): void {
 }
 
 onBeforeUnmount(() => {
+  rememberCurrentDraft()
   meshBridge.stop()
   persistSnapshot()
   sessionPollStopped = true

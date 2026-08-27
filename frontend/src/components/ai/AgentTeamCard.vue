@@ -163,30 +163,33 @@ function openPanel(): void {
 </script>
 
 <template>
-  <div
+  <article
     v-if="team"
     class="team-card"
     :class="`is-${team.status}`"
-    role="button"
-    tabindex="0"
-    :aria-label="`${teamCardLabel},${team.title || team.objective || '团队协作任务'}`"
-    @click="openPanel"
-    @keydown.enter.prevent="openPanel"
-    @keydown.space.prevent="openPanel"
   >
-    <div class="team-card-header">
-      <div class="team-card-icon">
-        <el-icon v-if="isRunning" :size="16"><Loading class="spin-icon" /></el-icon>
-        <el-icon v-else-if="team.status === 'completed'" :size="16" color="#4fb87a"><CircleCheck /></el-icon>
-        <el-icon v-else-if="team.status === 'failed'" :size="16" color="#dc4961"><WarningFilled /></el-icon>
-        <el-icon v-else :size="16" color="#9ba3b0"><Timer /></el-icon>
+    <button
+      type="button"
+      class="team-card-open"
+      :aria-label="`${teamCardLabel},${team.title || team.objective || '团队协作任务'},打开详情`"
+      @click="openPanel"
+      @keydown.enter.prevent="openPanel"
+      @keydown.space.prevent="openPanel"
+    >
+      <div class="team-card-header">
+        <div class="team-card-icon">
+          <el-icon v-if="isRunning" :size="16"><Loading class="spin-icon" /></el-icon>
+          <el-icon v-else-if="team.status === 'completed'" :size="16" color="#4fb87a"><CircleCheck /></el-icon>
+          <el-icon v-else-if="team.status === 'failed'" :size="16" color="#dc4961"><WarningFilled /></el-icon>
+          <el-icon v-else :size="16" color="#9ba3b0"><Timer /></el-icon>
+        </div>
+        <div class="team-card-info">
+          <span class="team-card-label">{{ teamCardLabel }}</span>
+          <span class="team-card-title">{{ team.title || team.objective || "团队协作任务" }}</span>
+        </div>
+        <span class="team-card-status" :class="`st-${team.status}`">{{ statusLabel }}</span>
       </div>
-      <div class="team-card-info">
-        <span class="team-card-label">{{ teamCardLabel }}</span>
-        <span class="team-card-title">{{ team.title || team.objective || "团队协作任务" }}</span>
-      </div>
-      <span class="team-card-status" :class="`st-${team.status}`">{{ statusLabel }}</span>
-    </div>
+    </button>
 
     <div v-if="members.length" class="team-card-members">
       <div v-for="member in members" :key="member.member_id" class="team-card-member">
@@ -223,7 +226,7 @@ function openPanel(): void {
     <div v-if="loading" class="team-card-loading">
       <span class="loading-dot" /><span class="loading-dot" /><span class="loading-dot" />
     </div>
-  </div>
+  </article>
 </template>
 
 <style scoped>
@@ -233,15 +236,24 @@ function openPanel(): void {
   border-radius: 10px;
   border: 1px solid #e5e7eb;
   background: #fafbfc;
-  cursor: pointer;
   transition: all 0.15s ease;
   max-width: 560px;
 }
 .team-card:hover { border-color: var(--brand-300, #8e88f5); background: var(--brand-50, #EFEEFE); }
-.team-card:focus-visible {
+.team-card-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.team-card-open:focus-visible {
   outline: 2px solid var(--brand-300, #8e88f5);
   outline-offset: 2px;
-  border-color: var(--brand-300, #8e88f5);
+  border-radius: 6px;
 }
 .team-card.is-running { border-left: 3px solid var(--brand-500, #5b58e8); }
 .team-card.is-completed { border-left: 3px solid var(--color-success, #4fb87a); }

@@ -84,4 +84,49 @@ describe('AgentTeamSidePanel', () => {
     expect(badge.classes()).not.toContain('is-interactive')
     wrapper.unmount()
   })
+
+  it('打开后聚焦关闭按钮,支持 Esc 关闭并在关闭后恢复触发点焦点', async () => {
+    teamApi.detail.mockReset().mockResolvedValue(team(54, '键盘可访问团队'))
+    const launcher = document.createElement('button')
+    launcher.textContent = '打开团队'
+    document.body.appendChild(launcher)
+    launcher.focus()
+    const wrapper = mount(AgentTeamSidePanel, {
+      props: { teamId: 54 },
+      attachTo: document.body,
+      global: { stubs: { Teleport: true, Transition: false, 'el-icon': true, Close: true } },
+    })
+    await flushPromises()
+
+    expect(document.activeElement).toBe(wrapper.get('.panel-close').element)
+    await wrapper.get('.team-side-panel').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.emitted('close')).toHaveLength(1)
+
+    await wrapper.setProps({ teamId: null })
+    await flushPromises()
+    expect(document.activeElement).toBe(launcher)
+    wrapper.unmount()
+    launcher.remove()
+  })
+
+  it('页签暴露标准 tab 语义并同步选中状态', async () => {
+    teamApi.detail.mockReset().mockResolvedValue(team(55, '页签语义团队'))
+    const wrapper = mount(AgentTeamSidePanel, {
+      props: { teamId: 55 },
+      global: { stubs: { Teleport: true, Transition: false, 'el-icon': true, Close: true } },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.panel-tabs').attributes('role')).toBe('tablist')
+    const tabs = wrapper.findAll('.tab-btn')
+    expect(tabs[0].attributes('role')).toBe('tab')
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(tabs[1].attributes('aria-selected')).toBe('false')
+
+    await tabs[1].trigger('click')
+    expect(tabs[0].attributes('aria-selected')).toBe('false')
+    expect(tabs[1].attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('.tab-members').attributes('role')).toBe('tabpanel')
+    wrapper.unmount()
+  })
 })

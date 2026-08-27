@@ -8,11 +8,14 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
-    resolve: ({ path }: { path: string }) => ({
-      fullPath: path,
+    resolve: (target: string | { path: string }) => {
+      const raw = typeof target === 'string' ? target : target.path
+      const fullPath = typeof target === 'string' ? raw : raw.split(/[?#]/, 1)[0]
+      return ({
+      fullPath,
       matched: [{}],
-      meta: { permissions: ['agent_asset:create'] },
-    }),
+      meta: raw.startsWith('/agent-studio') ? { permissions: ['agent_asset:create'] } : {},
+    })},
     push: harness.push,
   }),
 }))
@@ -49,5 +52,17 @@ describe('AgentNavLink permissions', () => {
     })
 
     expect(wrapper.get('button').text()).toContain('Agent 工坊')
+  })
+
+  it('preserves query parameters and anchors when navigating', async () => {
+    harness.permission = true
+    const wrapper = mount(AgentNavLink, {
+      props: { href: '/reviews?tab=mine#latest', label: '我的审查' },
+      global: { stubs: { 'el-icon': true } },
+    })
+
+    await wrapper.get('button').trigger('click')
+
+    expect(harness.push).toHaveBeenCalledWith('/reviews?tab=mine#latest')
   })
 })

@@ -275,7 +275,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 import { ArrowLeft, Lock, MagicStick, ZoomIn, ZoomOut, RefreshRight } from '@element-plus/icons-vue'
@@ -296,6 +296,7 @@ import { SEVERITY_OPTIONS, severityClass, severityDisplayLabel } from '@/constan
 import { DIM_META, normalizeDimKey, dimColor as resolveDimColor, dimLabel as resolveDimLabel } from '@/constants/dim'
 import { reviewTypeLabel } from '@/constants/reviewType'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { useCountUp } from '@/composables/useCountUp'
 
 const route = useRoute()
 const router = useRouter()
@@ -310,31 +311,12 @@ type TraceFileItem = Partial<TaskFileOut> & {
 const pageLoading = ref(true)
 const pageError = ref('')
 const task = ref<TaskDetailOut | null>(null)
-const animatedScore = ref(0)
-
-function animateScore(target: number): void {
-  const duration = 1200 // 动画时长 (ms)
-  const startTime = performance.now()
-  const startVal = animatedScore.value
-
-  function step(now: number) {
-    const elapsed = now - startTime
-    const progress = Math.min(elapsed / duration, 1)
-    const easeProgress = progress * (2 - progress) // easeOutQuad
-    animatedScore.value = Math.round(startVal + (target - startVal) * easeProgress)
-
-    if (progress < 1) {
-      requestAnimationFrame(step)
-    }
-  }
-  requestAnimationFrame(step)
-}
-
-watch(() => task.value?.score, (newVal) => {
-  if (typeof newVal === 'number') {
-    animateScore(newVal)
-  }
+const scoreTarget = computed(() => {
+  const value = Number(task.value?.score ?? 0)
+  return Number.isFinite(value) ? value : 0
 })
+const animatedScoreValue = useCountUp(scoreTarget, 1200)
+const animatedScore = computed(() => Math.round(animatedScoreValue.value))
 const issues = ref<IssueOut[]>([])
 const issueTotal = ref(0)
 const issuePage = ref(1)

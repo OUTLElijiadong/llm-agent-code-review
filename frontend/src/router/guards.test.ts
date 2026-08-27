@@ -123,18 +123,17 @@ describe('router guards', () => {
     expect(auth.user.clearSession).toHaveBeenCalledOnce()
   })
 
-  it('enforces legacy roles and keeps admins inside management or detail routes', async () => {
-    /** 验证管理员仅访问管理端与四类详情路由，普通用户仍受历史 role 限制。 */
+  it('enforces legacy roles while allowing admins to operate authenticated user pages', async () => {
+    /** 管理小菱需要跨管理端与用户端工作，管理员不应被二次重定向打断。 */
     const { before } = installHarness()
     auth.user.token = 'token'
     auth.user.profile = { id: 1, role: 'admin' }
     auth.user.isAdmin.mockReturnValue(true)
 
     expect(await before(route('/admin/users', { role: 'reviewer' }), route('/'))).toBe(true)
-    expect(await before(route('/projects'), route('/'))).toEqual({
-      path: '/admin/overview',
-      replace: true,
-    })
+    expect(await before(route('/projects'), route('/'))).toBe(true)
+    expect(await before(route('/sandboxes'), route('/'))).toBe(true)
+    expect(await before(route('/agent-studio'), route('/'))).toBe(true)
     expect(await before(route('/projects/1'), route('/'))).toBe(true)
     expect(await before(route('/reviews/2'), route('/'))).toBe(true)
     expect(await before(route('/code/3/file/4'), route('/'))).toBe(true)

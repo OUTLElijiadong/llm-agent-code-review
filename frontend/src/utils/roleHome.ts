@@ -49,7 +49,7 @@ export function getRoleHomePath(role?: string | null): string {
 // 仅允许已知站内路由前缀，避免把外部/未知路径当作登录后重定向目标。
 const ADMIN_ALLOWED_PREFIXES = [
   '/dashboard', '/projects', '/code', '/reviews', '/issues', '/reports',
-  '/agents', '/security', '/rules', '/forum', '/knowledge', '/support',
+  '/agents', '/sandboxes', '/agent-studio', '/security', '/rules', '/forum', '/knowledge', '/support',
   '/profile', '/admin',
 ]
 
