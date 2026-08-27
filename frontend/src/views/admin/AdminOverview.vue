@@ -121,7 +121,9 @@
             </div>
             <div class="a-meta">
               <span class="a-status" :class="a.status">{{ statusText(a.status) }}</span>
-              <span class="a-calls font-mono">{{ a.calls_today }} 次/今日</span>
+              <span class="a-calls font-mono" :title="formatAgentActivityUsage(a).title">
+                {{ formatAgentActivityUsage(a).label }}
+              </span>
             </div>
           </li>
           <li v-if="!agents.length" class="muted center">暂无 Agent 数据</li>
@@ -153,6 +155,7 @@ import {
 import { subscribeAgentEvents } from '@/utils/agentEventStream'
 import type { AgentEvent } from '@/types/agentEvent'
 import { useUserStore } from '@/stores/user'
+import { formatAgentActivityUsage } from '@/utils/agentActivityPresentation'
 
 echarts.use([GeoComponent, TooltipComponent, VisualMapComponent, ScatterChart, EffectScatterChart, CanvasRenderer])
 
@@ -436,7 +439,15 @@ onBeforeUnmount(() => {
   &.error { background: rgba(220,73,97,.12); color: #C92A4E; }
   &.disabled { background: var(--gray-100); color: var(--gray-400); }
 }
-.a-calls { font-size: 10.5px; color: var(--gray-400); }
+.a-calls {
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--gray-500);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
 
 /* 首载数字骨架:呼吸条替代闪零;整页轻降透明而非压灰遮罩 */
 .num-skeleton {

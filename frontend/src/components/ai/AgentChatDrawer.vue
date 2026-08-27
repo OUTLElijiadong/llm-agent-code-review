@@ -2060,13 +2060,13 @@ onMounted(() => {
 
           <div class="chat-body-region">
             <Transition name="mascot-float">
-              <div v-if="messages.length <= 1 && !showTyping" class="mascot-hero" aria-hidden="true">
+              <div v-if="messages.length <= 1 && !showTyping && !sessionRestoring" class="mascot-hero" aria-hidden="true">
                 <PrismMascot :size="120" :status="mascotStatus" />
               </div>
             </Transition>
 
             <Transition name="mascot-float">
-              <div v-if="messages.length <= 1 && !showTyping" class="quick-questions" aria-label="快捷问题">
+              <div v-if="messages.length <= 1 && !showTyping && !sessionRestoring" class="quick-questions" aria-label="快捷问题">
                 <button
                   v-for="question in QUICK_QUESTIONS"
                   :key="question"
@@ -3745,6 +3745,43 @@ onMounted(() => {
   .response-answer-submit { min-height: 40px; }
   .send-btn,
   .stop-btn { min-height: 40px; padding: 8px 22px; }
+  .upload-btn { min-height: 40px; }
+}
+
+/* 手机横屏/低高度窗口:隐藏装饰，把快捷操作放回文档流并保留完整输入区。 */
+@media (max-height: 520px) and (min-width: 521px) {
+  .chat-overlay,
+  .chat-fab { right: 12px; bottom: 12px; }
+  .chat-drawer {
+    inset: auto 12px 12px auto !important;
+    width: min(520px, calc(100vw - 24px));
+    height: calc(100dvh - 24px);
+  }
+  .panel-drag-handle { display: none; }
+  .mascot-hero { display: none; }
+  .quick-questions {
+    position: static;
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px 12px;
+  }
+  .quick-question {
+    width: 100%;
+    min-height: 40px;
+    padding-inline: 8px;
+    white-space: normal;
+  }
+  .close-btn,
+  .msg-copy-btn { width: 40px; height: 40px; }
+  .msg-copy-btn { opacity: 1; }
+  .msg-row.assistant .msg-bubble { padding-right: 48px; }
+  .msg-error-btn,
+  .response-control-actions button,
+  .response-answer-submit,
+  .send-btn,
+  .stop-btn,
   .upload-btn { min-height: 40px; }
 }
 </style>

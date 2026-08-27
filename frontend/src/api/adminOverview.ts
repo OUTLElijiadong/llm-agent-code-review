@@ -50,6 +50,12 @@ export interface AgentActivity {
   name: string
   status: 'idle' | 'thinking' | 'working' | 'blocked' | 'error' | 'disabled'
   calls_today: number
+  /** 真实模型调用次数；与不产生模型 Token 的本地工具调用分开。 */
+  model_calls_today?: number
+  /** 今日模型调用记录的 Token 总量。 */
+  model_tokens_today?: number
+  /** 本地工具/巡检调用次数，不等同于模型计费。 */
+  tool_calls_today?: number
   purpose: string
   is_enabled: number
   last_seen_at?: string | null

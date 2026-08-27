@@ -315,7 +315,7 @@ function statusClass(status: string): string {
   flex: none;
   margin-left: auto;
   padding: 3px 10px;
-  min-height: 24px;
+  min-height: 40px;
   border: 1px solid var(--brand-300, #8e88f5);
   border-radius: 999px;
   background: var(--brand-50, #EFEEFE);

@@ -331,6 +331,8 @@ describe('AgentChatDrawer Responses stream', () => {
     const wrapper = mountDrawer()
 
     expect(wrapper.find('.chat-input').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.quick-questions').exists()).toBe(false)
+    expect(wrapper.find('.mascot-hero').exists()).toBe(false)
     await wrapper.find('.chat-input').setValue('不应提前发送')
     await wrapper.find('.send-btn').trigger('click')
     expect(streams.start).not.toHaveBeenCalled()
@@ -338,6 +340,7 @@ describe('AgentChatDrawer Responses stream', () => {
     resolveSession({ surface: 'user', session_id: 'user-test', run: null, messages: [], pending: null })
     await flushPromises()
     expect(wrapper.find('.chat-input').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.quick-questions').exists()).toBe(true)
     wrapper.unmount()
   })
 

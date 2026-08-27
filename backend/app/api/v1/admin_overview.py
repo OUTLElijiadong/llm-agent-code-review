@@ -37,16 +37,21 @@ def _agent_activity(db: Session) -> list[dict]:
     today = now.date()
 
     profiles = db.query(AgentProfile).all()
-    # 今日各 agent 调用量: 工具网关日志 + 小菱 Responses 调用(AiCallLog,按 agent_label 归因)
-    today_rows = (
+    # 工具活动和模型调用必须分开统计。前者包含本地定时巡检，不产生模型
+    # Token 费用；合并成一个“今日调用”会让管理员误判真实模型消费。
+    tool_today_rows = (
         db.query(ToolCallLog.agent_code, func.count(ToolCallLog.id).label("cnt"))
         .filter(func.date(ToolCallLog.create_time) == today)
         .group_by(ToolCallLog.agent_code)
         .all()
     )
-    today_map = {r[0]: r[1] for r in today_rows}
+    tool_today_map = {r[0]: int(r[1] or 0) for r in tool_today_rows}
     ai_label_rows = (
-        db.query(AiCallLog.agent_label, func.count(AiCallLog.id).label("cnt"))
+        db.query(
+            AiCallLog.agent_label,
+            func.count(AiCallLog.id).label("cnt"),
+            func.coalesce(func.sum(AiCallLog.total_tokens), 0).label("tokens"),
+        )
         .filter(
             func.date(AiCallLog.create_time) == today,
             AiCallLog.agent_label.isnot(None),
@@ -54,8 +59,8 @@ def _agent_activity(db: Session) -> list[dict]:
         .group_by(AiCallLog.agent_label)
         .all()
     )
-    for label, cnt in ai_label_rows:
-        today_map[label] = today_map.get(label, 0) + cnt
+    model_today_map = {r[0]: int(r[1] or 0) for r in ai_label_rows}
+    model_token_map = {r[0]: int(r[2] or 0) for r in ai_label_rows}
     profiles_by_code = {profile.code: profile for profile in profiles}
     event_status_map = {
         "dispatch": "thinking",
@@ -98,7 +103,10 @@ def _agent_activity(db: Session) -> list[dict]:
 
     result = []
     for p in profiles:
-        calls = today_map.get(p.code, 0)
+        tool_calls = tool_today_map.get(p.code, 0)
+        model_calls = model_today_map.get(p.code, 0)
+        model_tokens = model_token_map.get(p.code, 0)
+        calls = tool_calls + model_calls
         db_status = getattr(p, "status", "idle") or "idle"
         latest_event = latest_events.get(p.code)
         latest_tool = latest_tools.get(p.code)
@@ -143,6 +151,9 @@ def _agent_activity(db: Session) -> list[dict]:
             "name": getattr(p, "name", p.code),
             "status": status,
             "calls_today": calls,
+            "model_calls_today": model_calls,
+            "model_tokens_today": model_tokens,
+            "tool_calls_today": tool_calls,
             "purpose": purpose,
             "is_enabled": getattr(p, "is_enabled", 1),
             "last_seen_at": last_seen_at,

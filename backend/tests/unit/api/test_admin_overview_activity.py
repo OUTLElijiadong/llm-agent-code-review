@@ -19,14 +19,32 @@ def test_agent_activity_today_calls_merge_tool_and_ai_logs(db) -> None:
         input_summary="", output_summary="",
     ))
     # 小菱 Responses 调用 2 次(AiCallLog)
-    db.add(AiCallLog(user_id=7, agent_label="chat_assistant", model_name="deepseek-v4-flash", status="success"))
-    db.add(AiCallLog(user_id=7, agent_label="chat_assistant", model_name="deepseek-v4-flash", status="success"))
+    db.add(AiCallLog(
+        user_id=7,
+        agent_label="chat_assistant",
+        model_name="deepseek-v4-flash",
+        status="success",
+        total_tokens=120,
+    ))
+    db.add(AiCallLog(
+        user_id=7,
+        agent_label="chat_assistant",
+        model_name="deepseek-v4-flash",
+        status="success",
+        total_tokens=180,
+    ))
     db.commit()
 
     rows = _agent_activity(db)
     by_code = {row["agent_code"]: row for row in rows}
     assert by_code["chat_assistant"]["calls_today"] == 3
+    assert by_code["chat_assistant"]["model_calls_today"] == 2
+    assert by_code["chat_assistant"]["model_tokens_today"] == 300
+    assert by_code["chat_assistant"]["tool_calls_today"] == 1
     assert by_code["manager"]["calls_today"] == 0
+    assert by_code["manager"]["model_calls_today"] == 0
+    assert by_code["manager"]["model_tokens_today"] == 0
+    assert by_code["manager"]["tool_calls_today"] == 0
 
 
 def test_agent_activity_excludes_old_ai_logs(db) -> None:

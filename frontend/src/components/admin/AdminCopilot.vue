@@ -1883,6 +1883,7 @@ input { font: inherit; }
 .copilot-panel.is-dragging .panel-drag-handle { cursor: grabbing; }
 .copilot-header {
   grid-area: header;
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -1918,7 +1919,7 @@ input { font: inherit; }
   0% { background-position: 100% 0; }
   100% { background-position: -100% 0; }
 }
-.copilot-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.copilot-identity { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .copilot-title-block { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .copilot-title-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .copilot-identity strong { display: block; font-size: 15px; line-height: 20px; }
@@ -1979,7 +1980,7 @@ input { font: inherit; }
   padding: 0 5px;
   border-radius: 3px;
 }
-.icon-button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; color: var(--agent-text-secondary); background: transparent; cursor: pointer; }
+.icon-button { flex: 0 0 auto; width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; color: var(--agent-text-secondary); background: transparent; cursor: pointer; }
 .icon-button:hover { color: var(--agent-text); background: #f2f3f5; }
 
 .copilot-hero {
@@ -2445,6 +2446,27 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   .icon-button,
   .send-button,
   .stop-button { width: 40px; height: 40px; }
+  .message-copy-btn { width: 40px; height: 40px; opacity: 1; }
+  .message-row.is-assistant .message-bubble { padding-right: 48px; }
+  .quick-question { min-height: 40px; }
+}
+
+/* 手机横屏/低高度窗口:按动态视口收敛高度，保持头部、消息区和输入区都可操作。 */
+@media (max-height: 520px) and (min-width: 521px) {
+  .admin-copilot { right: 12px; bottom: 12px; }
+  .copilot-panel {
+    inset: auto 12px 12px auto !important;
+    width: min(520px, calc(100vw - 24px));
+    height: calc(100dvh - 24px);
+    max-width: none;
+    max-height: none;
+  }
+  .panel-drag-handle { display: none; }
+  .icon-button,
+  .send-button,
+  .stop-button { width: 40px; height: 40px; }
+  .message-copy-btn { width: 40px; height: 40px; opacity: 1; }
+  .message-row.is-assistant .message-bubble { padding-right: 48px; }
   .quick-question { min-height: 40px; }
 }
 

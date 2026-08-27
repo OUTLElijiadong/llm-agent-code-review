@@ -431,7 +431,7 @@ async function cancelTeam(): Promise<void> {
   display: flex;
   flex-direction: column;
   width: min(440px, calc(100vw - 24px));
-  max-height: min(600px, calc(100vh - 48px));
+  max-height: min(600px, calc(100dvh - 48px));
   overflow: hidden;
   border: 1px solid var(--color-border-base);
   border-radius: var(--r-lg);
@@ -641,6 +641,9 @@ async function cancelTeam(): Promise<void> {
 /* ── 任务明细(默认折叠) ────────────────────── */
 .team-window-task-details { padding-top: var(--sp-2); }
 .team-window-task-details > summary {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
   cursor: pointer;
   color: var(--color-text-secondary);
   font-size: 11px;
@@ -700,11 +703,26 @@ async function cancelTeam(): Promise<void> {
 .team-window-leave-to { opacity: 0; transform: translateY(12px) scale(0.98); }
 
 @media (max-width: 520px) {
-  .agent-team-window { inset: auto 12px 12px 12px !important; width: auto; }
+  .agent-team-window { inset: auto 12px 12px 12px !important; width: auto; max-height: calc(100dvh - 24px); }
   /* 触控适配:关闭按钮加大到 40px */
   .team-window-drag { display: none; }
   .team-window-close { width: 40px; height: 40px; }
   .team-window-action { min-height: 40px; }
+  .team-window-progress-top { flex-wrap: wrap; }
+  .team-window-progress-mini { flex: 1 0 100%; margin-left: 0; white-space: normal; }
+}
+
+@media (max-height: 520px) and (min-width: 521px) {
+  .agent-team-window {
+    inset: auto 12px 12px auto !important;
+    width: min(520px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+  }
+  .team-window-drag { display: none; }
+  .team-window-close { width: 40px; height: 40px; }
+  .team-window-action { min-height: 40px; }
+  .team-window-progress-top { flex-wrap: wrap; }
+  .team-window-progress-mini { flex: 1 0 100%; margin-left: 0; white-space: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {
