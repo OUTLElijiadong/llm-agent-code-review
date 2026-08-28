@@ -935,6 +935,12 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 520px) {
+  /* Dashboard 的局部页头规则比全局响应式规则更具体，必须显式拉伸首列，
+     否则标题会按内容宽度贴到右侧，手机上看起来像被截断。 */
+  .page-head {
+    align-items: stretch;
+  }
+
   .chart-card {
     padding: 16px;
   }
