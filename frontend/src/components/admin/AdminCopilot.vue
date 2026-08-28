@@ -38,8 +38,11 @@ import AgentTeamCard from '@/components/ai/AgentTeamCard.vue'
 import AgentTeamSidePanel from '@/components/ai/AgentTeamSidePanel.vue'
 import TaskCancelConfirm from '@/components/ai/TaskCancelConfirm.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
-import { renderMarkdown } from '@/utils/markdown'
-import { extractAgentNavigations, isNavigationPathAllowed } from '@/utils/agentNavigation'
+import {
+  extractAgentNavigations,
+  isNavigationPathAllowed,
+  renderAuthorizedAgentMarkdown,
+} from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
 import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
@@ -781,7 +784,7 @@ function followNavigation(directive: AgentNavigateDirective): void {
   requestXiaolingNavigation(
     directive.route,
     directive.label || '目标管理页',
-    () => { void router.push(directive.route) },
+    () => router.push(directive.route),
   )
 }
 
@@ -1564,7 +1567,7 @@ onMounted(() => {
             <div
               v-if="entry.payload.type === 'text' && entry.payload.content && entry.role === 'assistant'"
               class="message-bubble markdown-body"
-              v-html="renderMarkdown(entry.payload.content)"
+              v-html="renderAuthorizedAgentMarkdown(entry.payload.content, router, userStore)"
             />
             <!-- 助手消息 hover 复制按钮(与用户端对齐) -->
             <button

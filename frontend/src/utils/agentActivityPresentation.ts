@@ -40,13 +40,13 @@ export function formatAgentActivityUsage(activity: AgentActivityUsageInput): Age
   const toolCalls = safeCount(activity.tool_calls_today)
   const label = [`模型 ${integerFormatter.format(modelCalls)}`]
   if (modelTokens > 0) label.push(`${compactTokens(modelTokens)} Token`)
-  if (toolCalls > 0) label.push(`巡检 ${integerFormatter.format(toolCalls)}`)
+  if (toolCalls > 0) label.push(`工具 ${integerFormatter.format(toolCalls)}`)
 
   return {
     label: label.join(' · '),
     title: (
       `今日模型调用 ${integerFormatter.format(modelCalls)} 次，共 ${integerFormatter.format(modelTokens)} Token；` +
-      `本地工具巡检 ${integerFormatter.format(toolCalls)} 次，不调用模型、不产生模型 Token 费用`
+      `本地工具调用 ${integerFormatter.format(toolCalls)} 次，不调用模型、不产生模型 Token 费用`
     ),
   }
 }

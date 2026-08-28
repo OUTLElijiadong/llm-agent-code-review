@@ -26,6 +26,10 @@ const x = ref(0)
 const y = ref(0)
 /** 到达目标后为 true,触发外圈涟漪高亮 */
 const arrived = ref(false)
+/** 到达目标并触发真实点击时为 true,播放按下反馈。 */
+const clicking = ref(false)
+/** 站内导航的最终结果,只在路由实际到达后显示成功。 */
+const navigationResult = ref<'success' | 'failure' | null>(null)
 /** 目标元素屏幕矩形,用于定位涟漪与聚焦光晕 */
 const targetBox = ref<{ left: number; top: number; width: number; height: number } | null>(null)
 const cursorStyle = computed(() => ({ transform: `translate3d(${x.value}px, ${y.value}px, 0)` }))
@@ -43,7 +47,10 @@ const haloStyle = computed(() => {
 let arriveTimer: number | undefined
 let clickTimer: number | undefined
 let haloTimer: number | undefined
+let clickStateTimer: number | undefined
 let startRaf = 0
+let targetRaf = 0
+let activitySequence = 0
 /** 已在本次活动中触发过导航,避免重复跳转 */
 let navigated = false
 /** 上一个被加高亮类的目标元素,结束时移除 */
@@ -55,7 +62,17 @@ let requestedActivityKey = ''
 interface Candidate {
   el: HTMLElement
   route?: string
-  activate?: () => void
+  activate?: () => unknown | Promise<unknown>
+}
+
+function isVisibleTarget(el: HTMLElement): boolean {
+  if (!el.isConnected || el.hidden || el.getAttribute('aria-hidden') === 'true') return false
+  if (el instanceof HTMLButtonElement && el.disabled) return false
+  if (el.getAttribute('aria-disabled') === 'true') return false
+  const style = window.getComputedStyle(el)
+  if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') return false
+  const rect = el.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
 }
 
 /** 从 targetHint 提取站内路由(/projects、/admin/users 等)。 */
@@ -144,17 +161,19 @@ function findTarget(): Candidate | null {
     const targetPath = routePathname(route)
     const routeHasState = route !== targetPath
     const navButtons = [...document.querySelectorAll<HTMLElement>('[data-route]')]
+      .filter(isVisibleTarget)
     const exactHit = !routeHasState
       ? navButtons.find((btn) => btn.dataset.route === targetPath)
       : undefined
     if (exactHit && !isExactCurrentRoute(route)) return { el: exactHit, route }
-    if (source?.isConnected) {
+    if (source && isVisibleTarget(source)) {
       return { el: source, route, activate: requestedNavigation.execute }
     }
   }
 
   if (route && !onRoute(route)) {
     const navButtons = [...document.querySelectorAll<HTMLElement>('[data-route]')]
+      .filter(isVisibleTarget)
     const targetLabel = routeLabel(route)
     const exactHit = navButtons.find((btn) => btn.dataset.route === route)
     if (exactHit) return { el: exactHit, route }
@@ -171,7 +190,8 @@ function findTarget(): Candidate | null {
     if (
       requestedNavigation
       && requestedNavigation.route === route
-      && requestedNavigation.sourceElement?.isConnected
+      && requestedNavigation.sourceElement
+      && isVisibleTarget(requestedNavigation.sourceElement)
     ) {
       return {
         el: requestedNavigation.sourceElement,
@@ -184,6 +204,7 @@ function findTarget(): Candidate | null {
   // 当前页内的行动点:先按 hint 中文词匹配,再兜底主操作按钮
   const actionWords = (hint?.match(/[一-龥]{2,6}/g) ?? []).filter((w) => !routeLabel(route) || !(hint ?? '').includes(w + '页'))
   const pageButtons = [...document.querySelectorAll<HTMLElement>('main button, .app-main button, [class*=content] button')]
+    .filter(isVisibleTarget)
   const byHint = pageButtons.find((btn) => {
     const text = (btn.textContent || '').trim()
     return Boolean(text) && actionWords.some((w) => w.length >= 2 && text.includes(w))
@@ -205,6 +226,41 @@ function centerOf(el: HTMLElement): { x: number; y: number; box: { left: number;
     x: rect.left + rect.width / 2,
     y: rect.top + rect.height / 2,
     box: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+  }
+}
+
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return Boolean(value && typeof (value as { then?: unknown }).then === 'function')
+}
+
+function waitForRoute(route: string, timeoutMs = 1200): Promise<boolean> {
+  if (isExactCurrentRoute(route)) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const startedAt = Date.now()
+    const check = () => {
+      if (isExactCurrentRoute(route)) {
+        resolve(true)
+        return
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        resolve(false)
+        return
+      }
+      window.setTimeout(check, 50)
+    }
+    window.setTimeout(check, 50)
+  })
+}
+
+async function activateTarget(target: Candidate, sequence: number): Promise<boolean> {
+  try {
+    const result = target.activate ? target.activate() : target.el.click()
+    if (isPromiseLike(result)) await result
+    if (sequence !== activitySequence) return false
+    if (!target.route) return true
+    return await waitForRoute(target.route)
+  } catch {
+    return false
   }
 }
 
@@ -235,16 +291,20 @@ function fallbackPoint(): { x: number; y: number } {
 }
 
 function moveToTarget(): void {
+  const sequence = activitySequence
   navigated = false
   clearHalo()
+  navigationResult.value = null
   // 先钉在右下角(无过渡),下一帧滑向真实目标
   x.value = window.innerWidth - 72
   y.value = window.innerHeight - 72
   startRaf = window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(() => {
+    targetRaf = window.requestAnimationFrame(() => {
+      if (sequence !== activitySequence) return
       const target = findTarget()
       let point: { x: number; y: number }
       if (target) {
+        if (!isVisibleTarget(target.el)) return
         bringTargetIntoView(target.el)
         const c = centerOf(target.el)
         point = { x: c.x, y: c.y }
@@ -256,11 +316,18 @@ function moveToTarget(): void {
           // 目标是其他页面的导航项:涟漪节奏后真实点击完成跳转
           if (target.route) {
             clickTimer = window.setTimeout(() => {
-              if (navigated) return
+              if (navigated || sequence !== activitySequence) return
               navigated = true
-              if (target.activate) target.activate()
-              else target.el.click()
-              finishRequestedNavigation()
+              clicking.value = true
+              void activateTarget(target, sequence).then((success) => {
+                if (sequence !== activitySequence) return
+                navigationResult.value = success ? 'success' : 'failure'
+                clicking.value = false
+                clickStateTimer = window.setTimeout(() => {
+                  clicking.value = false
+                }, 260)
+                finishRequestedNavigation(success)
+              })
             }, 650)
           }
         }, 700)
@@ -271,10 +338,23 @@ function moveToTarget(): void {
           arrived.value = true
           if (requestedNavigation) {
             clickTimer = window.setTimeout(() => {
-              if (navigated || !requestedNavigation) return
+              if (navigated || !requestedNavigation || sequence !== activitySequence) return
               navigated = true
-              requestedNavigation.execute()
-              finishRequestedNavigation()
+              clicking.value = true
+              const requested = requestedNavigation
+              void activateTarget({
+                el: requested.sourceElement || document.body,
+                route: requested.route,
+                activate: requested.execute,
+              }, sequence).then((success) => {
+                if (sequence !== activitySequence) return
+                navigationResult.value = success ? 'success' : 'failure'
+                clicking.value = false
+                clickStateTimer = window.setTimeout(() => {
+                  clicking.value = false
+                }, 260)
+                finishRequestedNavigation(success)
+              })
             }, 650)
           }
         }, 700)
@@ -285,8 +365,8 @@ function moveToTarget(): void {
   })
 }
 
-function finishRequestedNavigation(): void {
-  if (requestedActivityKey) store.complete(requestedActivityKey, 420)
+function finishRequestedNavigation(_success: boolean): void {
+  if (requestedActivityKey) store.complete(requestedActivityKey, 900)
   requestedNavigation = null
   requestedActivityKey = ''
 }
@@ -313,18 +393,26 @@ function clearHalo(): void {
 watch(
   () => [store.isActing, store.current?.key] as const,
   ([acting]) => {
+    activitySequence += 1
     window.clearTimeout(arriveTimer)
     window.clearTimeout(clickTimer)
     window.clearTimeout(haloTimer)
+    window.clearTimeout(clickStateTimer)
     window.cancelAnimationFrame(startRaf)
+    window.cancelAnimationFrame(targetRaf)
     if (acting) {
       arrived.value = false
+      clicking.value = false
+      navigationResult.value = null
       visible.value = true
       void nextTick(moveToTarget)
     } else {
       visible.value = false
       arrived.value = false
+      clicking.value = false
       targetBox.value = null
+      requestedNavigation = null
+      requestedActivityKey = ''
       haloTimer = window.setTimeout(clearHalo, 400)
     }
   },
@@ -338,9 +426,12 @@ onBeforeUnmount(() => {
   window.clearTimeout(arriveTimer)
   window.clearTimeout(clickTimer)
   window.clearTimeout(haloTimer)
+  window.clearTimeout(clickStateTimer)
   window.cancelAnimationFrame(startRaf)
+  window.cancelAnimationFrame(targetRaf)
   window.removeEventListener(XIAOLING_NAVIGATION_EVENT, handleNavigationRequest)
   if (requestedActivityKey) store.end(requestedActivityKey)
+  activitySequence += 1
   requestedNavigation = null
   requestedActivityKey = ''
   clearHalo()
@@ -352,9 +443,12 @@ onBeforeUnmount(() => {
     <div v-if="visible" class="virtual-cursor-layer" aria-hidden="true">
       <!-- 目标元素聚焦光晕(定位到真实元素矩形) -->
       <div v-if="arrived && targetBox" class="virtual-cursor-halo" :style="haloStyle"></div>
-      <div class="virtual-cursor" :class="{ 'is-arrived': arrived }" :style="cursorStyle">
+      <div class="virtual-cursor" :class="{ 'is-arrived': arrived, 'is-clicking': clicking }" :style="cursorStyle">
         <span v-if="arrived" class="virtual-cursor-ripple"></span>
         <span v-if="arrived" class="virtual-cursor-ripple is-delayed"></span>
+        <span v-if="clicking" class="virtual-cursor-click-label is-pending">点击中</span>
+        <span v-else-if="navigationResult === 'success'" class="virtual-cursor-click-label">已打开</span>
+        <span v-else-if="navigationResult === 'failure'" class="virtual-cursor-click-label is-failure">跳转失败</span>
         <svg class="virtual-cursor-icon" width="26" height="26" viewBox="0 0 26 26" fill="none">
           <defs>
             <linearGradient id="virtual-cursor-g" x1="3" y1="3" x2="23" y2="23" gradientUnits="userSpaceOnUse">
@@ -402,6 +496,36 @@ onBeforeUnmount(() => {
 /* 到达目标后的轻微悬停浮动 */
 .virtual-cursor.is-arrived .virtual-cursor-icon {
   animation: virtual-cursor-hover 1.6s ease-in-out infinite;
+}
+
+.virtual-cursor.is-clicking .virtual-cursor-icon {
+  animation: virtual-cursor-click 0.26s ease-out;
+}
+
+.virtual-cursor-click-label {
+  position: absolute;
+  left: 22px;
+  top: 22px;
+  padding: 3px 7px;
+  border: 1px solid rgba(91, 88, 232, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 4px 12px rgba(31, 35, 41, 0.16);
+  color: var(--brand-600, #5b58e8);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+  animation: virtual-cursor-click-label 0.26s ease-out both;
+}
+
+.virtual-cursor-click-label.is-pending {
+  border-color: rgba(194, 139, 44, 0.3);
+  color: #9a6810;
+}
+
+.virtual-cursor-click-label.is-failure {
+  border-color: rgba(201, 42, 78, 0.28);
+  color: #b4234d;
 }
 
 /* 目标元素聚焦光晕:贴住真实元素矩形,呼吸发亮 */
@@ -462,9 +586,21 @@ onBeforeUnmount(() => {
   50% { transform: translateY(-2px); }
 }
 
+@keyframes virtual-cursor-click {
+  0% { transform: scale(1); }
+  45% { transform: scale(0.78); }
+  100% { transform: scale(1); }
+}
+
+@keyframes virtual-cursor-click-label {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .virtual-cursor { transition: none; }
   .virtual-cursor.is-arrived .virtual-cursor-icon { animation: none; }
+  .virtual-cursor.is-clicking .virtual-cursor-icon { animation: none; }
   .virtual-cursor-ripple { animation: none; opacity: 0.35; transform: translate(-50%, -50%) scale(1.6); }
   .virtual-cursor-halo { animation: none; opacity: 0.6; }
 }

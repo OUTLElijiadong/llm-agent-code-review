@@ -59,3 +59,76 @@ def test_agent_activity_excludes_old_ai_logs(db) -> None:
     rows = _agent_activity(db)
     by_code = {row["agent_code"]: row for row in rows}
     assert by_code["manager"]["calls_today"] == 0
+
+
+def test_agent_activity_normalizes_discussion_labels_and_falls_back_to_component_tokens(db) -> None:
+    """圆桌画像名与注册 Agent code 不一致时，仍须计入真实消费。"""
+    db.add(AgentProfile(code="code_reviewer", name="代码审查员", is_enabled=1))
+    db.add(AgentProfile(code="security_sentinel", name="安全哨兵", is_enabled=1))
+    db.add(AiCallLog(
+        agent_label="general",
+        model_name="deepseek-v4-flash/discuss",
+        status="success",
+        total_tokens=None,
+        prompt_tokens=120,
+        completion_tokens=30,
+    ))
+    db.add(AiCallLog(
+        agent_label="security",
+        model_name="deepseek-v4-flash/discuss",
+        status="success",
+        total_tokens=10,
+        prompt_tokens=40,
+        completion_tokens=20,
+    ))
+    db.commit()
+
+    rows = _agent_activity(db)
+    by_code = {row["agent_code"]: row for row in rows}
+
+    assert by_code["code_reviewer"]["model_calls_today"] == 1
+    assert by_code["code_reviewer"]["model_tokens_today"] == 150
+    assert by_code["security_sentinel"]["model_calls_today"] == 1
+    # 组件 Token 大于错误/不完整的 total_tokens 时，按组件和计费。
+    assert by_code["security_sentinel"]["model_tokens_today"] == 60
+
+
+def test_agent_activity_exposes_legacy_unlabeled_model_calls_without_guessing_owner(db) -> None:
+    """旧日志没有 agent_label 时应显式标记未归因,不猜测某个 Agent。"""
+    db.add(AgentProfile(code="code_reviewer", name="代码审查员", is_enabled=1))
+    db.add(AiCallLog(
+        agent_label=None,
+        model_name="deepseek-v4-pro",
+        status="success",
+        total_tokens=None,
+        prompt_tokens=12,
+        completion_tokens=8,
+    ))
+    db.commit()
+
+    rows = _agent_activity(db)
+    by_code = {row["agent_code"]: row for row in rows}
+
+    assert by_code["code_reviewer"]["model_calls_today"] == 0
+    assert by_code["unattributed_model"]["model_calls_today"] == 1
+    assert by_code["unattributed_model"]["model_tokens_today"] == 20
+
+
+def test_agent_activity_attributes_multi_agent_logs_to_known_review_agents(db) -> None:
+    """multi-agent 日志应与 Agent 中心的历史归因口径一致。"""
+    db.add(AgentProfile(code="code_reviewer", name="代码审查员", is_enabled=1))
+    db.add(AgentProfile(code="security_sentinel", name="安全哨兵", is_enabled=1))
+    db.add(AiCallLog(
+        agent_label=None,
+        model_name="deepseek-v4-flash/multi-agent",
+        status="success",
+        total_tokens=80,
+    ))
+    db.commit()
+
+    rows = _agent_activity(db)
+    by_code = {row["agent_code"]: row for row in rows}
+
+    assert by_code["code_reviewer"]["model_calls_today"] == 1
+    assert by_code["security_sentinel"]["model_calls_today"] == 1
+    assert "unattributed_model" not in by_code

@@ -4,7 +4,7 @@ export const XIAOLING_NAVIGATION_EVENT = 'prism:xiaoling-navigate'
 export interface XiaolingNavigationRequest {
   route: string
   label: string
-  execute: () => void
+  execute: () => unknown | Promise<unknown>
   sourceElement?: HTMLElement | null
   handled: boolean
 }
@@ -27,7 +27,7 @@ export function isSafeXiaolingRoute(route: string): boolean {
 export function requestXiaolingNavigation(
   route: string,
   label: string,
-  execute: () => void,
+  execute: () => unknown | Promise<unknown>,
   sourceElement?: HTMLElement | null,
 ): boolean {
   if (!isSafeXiaolingRoute(route)) return false
@@ -39,6 +39,9 @@ export function requestXiaolingNavigation(
     handled: false,
   }
   window.dispatchEvent(new CustomEvent<XiaolingNavigationRequest>(XIAOLING_NAVIGATION_EVENT, { detail }))
-  if (!detail.handled) execute()
+  if (!detail.handled) {
+    // 无全局光标时也要吸收导航失败,不让路由 Promise 变成全局未处理异常。
+    void Promise.resolve(execute()).catch(() => undefined)
+  }
   return true
 }

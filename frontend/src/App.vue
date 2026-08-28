@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import AgentActivityBorder from '@/components/ai/AgentActivityBorder.vue'
@@ -16,9 +16,14 @@ const agentVisible = ref(false)
 const agentPrefill = ref('')
 let showTimer: number | undefined
 let hideTimer: number | undefined
+const canUseAgent = computed(() => (
+  Boolean(userStore.token && userStore.profile)
+  && userStore.hasPermission('agent:chat')
+))
 
 /** 全站唯一小菱入口；管理员始终唤起管理会话，普通成员唤起用户会话。 */
 function openAgentChat(prefill = ''): void {
+  if (!canUseAgent.value) return
   if (userStore.isAdmin()) {
     window.dispatchEvent(new CustomEvent('prism:open-admin-copilot', { detail: { prefill } }))
     return
@@ -91,9 +96,9 @@ onBeforeUnmount(() => {
   </router-view>
   <AgentActivityBorder />
   <VirtualCursor />
-  <AdminCopilot v-if="userStore.token && userStore.profile && userStore.isAdmin()" />
+  <AdminCopilot v-if="canUseAgent && userStore.isAdmin()" />
   <AgentChatDrawer
-    v-else-if="userStore.token && userStore.profile"
+    v-else-if="canUseAgent"
     v-model:visible="agentVisible"
     :prefill="agentPrefill"
     @consumed-prefill="agentPrefill = ''"

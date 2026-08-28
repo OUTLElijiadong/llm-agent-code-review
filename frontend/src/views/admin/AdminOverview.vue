@@ -13,9 +13,9 @@
     </header>
 
     <!-- 服务器状态 + 安全态势 -->
-    <div class="row-2" :class="{ 'single-column': !canViewServer }">
+    <div class="row-2 prism-stagger" :class="{ 'single-column': !canViewServer }">
       <!-- 服务器状态 -->
-      <section v-if="canViewServer" class="card">
+      <section v-if="canViewServer" class="card prism-glass-card">
         <header class="card-head">
           <h3><el-icon><Monitor /></el-icon>服务器状态</h3>
           <span class="uptime font-mono" v-if="system?.uptime_seconds">运行 {{ formatUptime(system.uptime_seconds) }}</span>
@@ -45,7 +45,7 @@
       </section>
 
       <!-- 安全态势 -->
-      <section class="card">
+      <section class="card prism-glass-card">
         <header class="card-head">
           <h3><el-icon><Aim /></el-icon>安全态势</h3>
           <span class="muted sm">基于应用日志</span>
@@ -88,9 +88,9 @@
     </div>
 
     <!-- 登录来源地图 + Agent 活跃 -->
-    <div class="row-2">
+    <div class="row-2 prism-stagger">
       <!-- 世界地图 -->
-      <section class="card map-card">
+      <section class="card map-card prism-glass-card">
         <header class="card-head">
           <h3><el-icon><MapLocation /></el-icon>登录来源分布</h3>
           <span class="muted sm">近30天成功登录 · {{ geoPoints.length }} 个来源</span>
@@ -101,7 +101,7 @@
       </section>
 
       <!-- Agent 活跃 -->
-      <section class="card">
+      <section class="card prism-glass-card">
         <header class="card-head">
           <h3><el-icon><Cpu /></el-icon>Agent 活跃状态</h3>
           <div class="live-status" :class="`live-${eventStreamStatus}`">
@@ -121,8 +121,18 @@
             </div>
             <div class="a-meta">
               <span class="a-status" :class="a.status">{{ statusText(a.status) }}</span>
-              <span class="a-calls font-mono" :title="formatAgentActivityUsage(a).title">
+              <button
+                type="button"
+                class="a-calls font-mono"
+                :title="formatAgentActivityUsage(a).title"
+                :aria-label="formatAgentActivityUsage(a).title"
+                :aria-expanded="expandedUsageCode === a.agent_code"
+                @click="toggleAgentUsage(a.agent_code)"
+              >
                 {{ formatAgentActivityUsage(a).label }}
+              </button>
+              <span v-if="expandedUsageCode === a.agent_code" class="a-usage-detail">
+                {{ formatAgentActivityUsage(a).title }}
               </span>
             </div>
           </li>
@@ -182,6 +192,7 @@ const posture = ref<SecurityPosture | null>(null)
 const geoPoints = ref<GeoPoint[]>([])
 const geoLoadFailed = ref(false)
 const agents = ref<AgentActivity[]>([])
+const expandedUsageCode = ref<string | null>(null)
 const mapRef = ref<HTMLElement | null>(null)
 let mapChart: echarts.EChartsType | null = null
 let timer: ReturnType<typeof setInterval> | null = null
@@ -212,6 +223,9 @@ function agentEmoji(a: AgentActivity): string {
   if (a.is_enabled === 0) return '⏸️'
   return '🤖'
 }
+function toggleAgentUsage(agentCode: string): void {
+  expandedUsageCode.value = expandedUsageCode.value === agentCode ? null : agentCode
+}
 function barClass(v?: number): string {
   const n = v || 0
   if (n >= 85) return 'danger'
@@ -241,6 +255,7 @@ function renderMap(): void {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'item',
+      appendTo: 'body',
       formatter: (p: { data?: { label?: string; value?: number[]; ip?: string } }) => {
         const d = p.data || {}
         return `<b>${d.label || ''}</b><br/>IP:${d.ip || ''}<br/>登录 ${d.value?.[2] ?? 0} 次`
@@ -355,9 +370,24 @@ onBeforeUnmount(() => {
 @media (max-width: 1100px) { .row-2 { grid-template-columns: 1fr; } }
 
 .card {
-  background: #fff; border: 1px solid var(--gray-200, #E5E8F0);
-  border-radius: 14px; padding: 18px 20px;
-  box-shadow: 0 2px 8px rgba(31,36,82,.04);
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-glass);
+  border: 1px solid rgba(224, 227, 234, 0.9);
+  border-radius: 10px;
+  padding: 18px 20px;
+  box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+}
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, var(--brand-300), var(--accent-400), transparent 82%);
+  opacity: 0.72;
+  pointer-events: none;
 }
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
   h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--gray-900); display: flex; align-items: center; gap: 7px; }
@@ -431,7 +461,14 @@ onBeforeUnmount(() => {
 .a-info { flex: 1; min-width: 0; }
 .a-name { font-size: 13.5px; font-weight: 600; color: var(--gray-900); }
 .a-purpose { font-size: 11.5px; color: var(--gray-500); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.a-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.a-meta {
+  display: flex;
+  flex: 0 1 min(44%, 220px);
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
 .a-status { font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600;
   &.working, &.thinking { background: rgba(91,88,232,.12); color: #4B48D8; }
   &.blocked { background: rgba(217,168,87,.14); color: #B9832F; }
@@ -440,13 +477,48 @@ onBeforeUnmount(() => {
   &.disabled { background: var(--gray-100); color: var(--gray-400); }
 }
 .a-calls {
-  max-width: 190px;
-  overflow: hidden;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  max-width: 100%;
+  min-width: 0;
   color: var(--gray-500);
   font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  text-align: right;
+  overflow-wrap: anywhere;
   cursor: help;
+}
+.a-calls:hover,
+.a-calls:focus-visible { color: var(--brand-600); }
+.a-calls:focus-visible { outline: 2px solid var(--brand-300); outline-offset: 2px; border-radius: 3px; }
+.a-usage-detail {
+  max-width: 100%;
+  color: var(--gray-600);
+  font-size: 10.5px;
+  line-height: 1.4;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .card { padding: 16px 14px; }
+  .card-head { align-items: flex-start; gap: 8px; }
+  .card-head h3 { min-width: 0; }
+  .live-status { white-space: normal; text-align: right; }
+  .agent-item { align-items: flex-start; flex-wrap: wrap; gap: 8px 10px; }
+  .a-info { flex: 1 1 calc(100% - 50px); }
+  .a-meta {
+    flex: 1 1 100%;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    margin-left: 48px;
+  }
+  .a-calls { text-align: left; }
+  .a-usage-detail { grid-column: 1 / -1; text-align: left; }
 }
 
 /* 首载数字骨架:呼吸条替代闪零;整页轻降透明而非压灰遮罩 */

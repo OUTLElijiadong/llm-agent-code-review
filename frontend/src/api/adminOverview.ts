@@ -54,7 +54,7 @@ export interface AgentActivity {
   model_calls_today?: number
   /** 今日模型调用记录的 Token 总量。 */
   model_tokens_today?: number
-  /** 本地工具/巡检调用次数，不等同于模型计费。 */
+  /** 本地工具调用次数，不等同于模型计费。 */
   tool_calls_today?: number
   purpose: string
   is_enabled: number

@@ -2,7 +2,7 @@
   <div class="rule-config-page">
     <div class="page-header">
       <h2>审查规则配置</h2>
-      <el-button type="primary" size="default" @click="onCreate">
+      <el-button v-if="canCreate" type="primary" size="default" @click="onCreate">
         <el-icon><Plus /></el-icon>新增规则
       </el-button>
     </div>
@@ -50,18 +50,22 @@
         <el-table-column prop="enabled" label="状态" width="80">
           <template #default="{ row }">
             <el-switch
+              v-if="canToggle(row)"
               v-model="row.enabled"
               :active-value="1"
               :inactive-value="0"
               size="small"
               @change="(val: string | number | boolean) => onToggle(row.id, val as number)"
             />
+            <el-tag v-else size="small" :type="row.enabled ? 'success' : 'info'">
+              {{ row.enabled ? '已启用' : '已停用' }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column v-if="canUpdate || canDelete" label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="!row.is_builtin"
+              v-if="canEdit(row)"
               link
               type="primary"
               size="small"
@@ -70,7 +74,7 @@
               编辑
             </el-button>
             <el-button
-              v-if="!row.is_builtin"
+              v-if="canRemove(row)"
               link
               type="danger"
               size="small"
@@ -153,7 +157,9 @@ import { getRules, toggleRule, createRule, updateRule, deleteRule } from '@/api/
 import type { RuleOut } from '@/types/rule'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { useUserStore } from '@/stores/user'
 
+const userStore = useUserStore()
 const loading = ref(false)
 const submitting = ref(false)
 const rules = ref<RuleOut[]>([])
@@ -162,6 +168,9 @@ const dialogVisible = ref(false)
 const isEditing = ref(false)
 const editingId = ref<number | null>(null)
 const formRef = ref<FormInstance>()
+const canCreate = computed(() => userStore.hasPermission('rule:create'))
+const canUpdate = computed(() => userStore.hasPermission('rule:update'))
+const canDelete = computed(() => userStore.hasPermission('rule:delete'))
 
 const form = reactive({
   rule_code: '',
@@ -237,6 +246,18 @@ function severityType(sev: string) {
   return map[sev] ?? 'primary'
 }
 
+function canToggle(row: RuleOut): boolean {
+  return canUpdate.value && (userStore.isAdmin() || !row.is_builtin)
+}
+
+function canEdit(row: RuleOut): boolean {
+  return canUpdate.value && !row.is_builtin
+}
+
+function canRemove(row: RuleOut): boolean {
+  return canDelete.value && !row.is_builtin
+}
+
 async function loadRules() {
   loading.value = true
   try {
@@ -247,6 +268,7 @@ async function loadRules() {
 }
 
 async function onToggle(ruleId: number, enabled: number) {
+  if (!canUpdate.value) return
   try {
     await toggleRule(ruleId, enabled)
     ElMessage.success(enabled ? '规则已启用' : '规则已禁用')
@@ -256,12 +278,14 @@ async function onToggle(ruleId: number, enabled: number) {
 }
 
 function onCreate() {
+  if (!canCreate.value) return
   isEditing.value = false
   editingId.value = null
   dialogVisible.value = true
 }
 
 function onEdit(row: RuleOut) {
+  if (!canEdit(row)) return
   isEditing.value = true
   editingId.value = row.id
   form.rule_code = row.rule_code
@@ -274,6 +298,7 @@ function onEdit(row: RuleOut) {
 }
 
 async function onDelete(ruleId: number) {
+  if (!canDelete.value) return
   try {
     await ElMessageBox.confirm('确定要删除此规则吗？', '确认删除', { type: 'warning' })
     await deleteRule(ruleId)
@@ -285,6 +310,7 @@ async function onDelete(ruleId: number) {
 }
 
 async function onSubmit() {
+  if (isEditing.value ? !canUpdate.value : !canCreate.value) return
   if (!formRef.value) return
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return

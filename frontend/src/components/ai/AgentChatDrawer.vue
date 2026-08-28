@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument, Upload, WarningFilled } from '@element-plus/icons-vue'
 
-import { renderMarkdown } from '@/utils/markdown'
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { cancelAgentResponseRun, getAgentResponseSession } from '@/api/agentResponses'
@@ -26,7 +25,11 @@ import AgentTeamWindow from '@/components/ai/AgentTeamWindow.vue'
 import TaskCancelConfirm from '@/components/ai/TaskCancelConfirm.vue'
 import { isPageActionTool, toolRunningPhrase } from '@/utils/toolDisplay'
 import { useAgentActivityStore } from '@/stores/agentActivity'
-import { extractAgentNavigations, isNavigationPathAllowed } from '@/utils/agentNavigation'
+import {
+  extractAgentNavigations,
+  isNavigationPathAllowed,
+  renderAuthorizedAgentMarkdown,
+} from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
 import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
@@ -1713,7 +1716,7 @@ function followNavigation(directive: AgentNavigateDirective): void {
   requestXiaolingNavigation(
     directive.route,
     directive.label || '目标页面',
-    () => { void router.push(directive.route) },
+    () => router.push(directive.route),
   )
 }
 
@@ -2228,7 +2231,7 @@ onMounted(() => {
                 <div
                   v-if="msg.role === 'assistant' && msg.content"
                   class="msg-content markdown-body"
-                  v-html="renderMarkdown(msg.content)"
+                  v-html="renderAuthorizedAgentMarkdown(msg.content, router, userStore)"
                 />
                 <div v-else-if="msg.role === 'user'" class="msg-content">{{ msg.content }}</div>
                 <!-- 助手消息 hover 显示复制按钮 -->

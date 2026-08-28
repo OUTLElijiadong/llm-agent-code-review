@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const harness = vi.hoisted(() => ({
   permission: true,
+  agentPermission: true,
+  role: 'user',
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -21,13 +23,13 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/stores/user', () => ({
   useUserStore: () => ({
-    profile: { id: 7, role: 'user' },
+    get profile() { return { id: 7, role: harness.role } },
     token: 'token',
     displayName: '普通成员',
     isAdmin: () => false,
     isSuperAdmin: () => false,
-    hasRole: (role: string) => role === 'user',
-    hasPermission: () => harness.permission,
+    hasRole: (role: string) => role === harness.role,
+    hasPermission: (code: string) => code === 'agent:chat' ? harness.agentPermission : harness.permission,
     logout: vi.fn(),
   }),
 }))
@@ -53,6 +55,8 @@ function mountHeader() {
 describe('AppHeader navigation visibility', () => {
   beforeEach(() => {
     harness.permission = true
+    harness.agentPermission = true
+    harness.role = 'user'
     harness.push.mockReset()
     harness.replace.mockReset()
   })
@@ -72,5 +76,20 @@ describe('AppHeader navigation visibility', () => {
     expect(dashboard.classes()).toContain('is-active')
     expect(dashboard.attributes('aria-current')).toBe('page')
     expect(wrapper.get('.agent-trigger').attributes('aria-label')).toBe('打开小菱助手')
+  })
+
+  it('缺少 agent:chat 时不显示小菱按钮和搜索入口', () => {
+    harness.agentPermission = false
+    const wrapper = mountHeader()
+
+    expect(wrapper.find('.agent-trigger').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Agent 助手')
+  })
+
+  it('审查员拥有项目权限时不被静态角色规则误隐藏', () => {
+    harness.role = 'reviewer'
+    const wrapper = mountHeader()
+
+    expect(wrapper.find('[data-route="/projects"]').exists()).toBe(true)
   })
 })

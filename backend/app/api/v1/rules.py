@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.permission_codes import PermissionCode
+from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import Resp
 from app.schemas.rule import RuleIn, RuleOut, RuleToggleIn, RuleUpdateIn
@@ -22,7 +23,10 @@ def _client_ip(request: Request) -> str:
 
 
 @router.get("", response_model=Resp[list[RuleOut]])
-def list_rules(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def list_rules(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission(PermissionCode.RULE_VIEW)),
+):
     """规则列表(含内置+当前用户自定义)"""
     rules = rule_service.list_rules(db, user.id)
     return Resp(data=[RuleOut.model_validate(r) for r in rules])
@@ -30,7 +34,8 @@ def list_rules(db: Session = Depends(get_db), user: User = Depends(get_current_u
 
 @router.post("/{rule_id}/toggle", response_model=Resp[None])
 def toggle_rule(rule_id: int, payload: RuleToggleIn, request: Request,
-                db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+                db: Session = Depends(get_db),
+                user: User = Depends(require_permission(PermissionCode.RULE_UPDATE))):
     """启用/禁用规则"""
     rule_service.toggle_rule(db, user, rule_id, payload.enabled)
     audit_service.log(
@@ -44,7 +49,7 @@ def toggle_rule(rule_id: int, payload: RuleToggleIn, request: Request,
 
 @router.post("", response_model=Resp[dict])
 def create_rule(payload: RuleIn, request: Request, db: Session = Depends(get_db),
-                user: User = Depends(get_current_user)):
+                user: User = Depends(require_permission(PermissionCode.RULE_CREATE))):
     """新增自定义规则"""
     rule = rule_service.create_rule(db, user.id, payload)
     audit_service.log(
@@ -58,7 +63,8 @@ def create_rule(payload: RuleIn, request: Request, db: Session = Depends(get_db)
 
 @router.put("/{rule_id}", response_model=Resp[None])
 def update_rule(rule_id: int, payload: RuleUpdateIn, request: Request,
-                db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+                db: Session = Depends(get_db),
+                user: User = Depends(require_permission(PermissionCode.RULE_UPDATE))):
     """更新自定义规则"""
     rule_service.update_rule(db, user, rule_id, payload)
     audit_service.log(
@@ -72,7 +78,7 @@ def update_rule(rule_id: int, payload: RuleUpdateIn, request: Request,
 
 @router.delete("/{rule_id}", response_model=Resp[None])
 def delete_rule(rule_id: int, request: Request, db: Session = Depends(get_db),
-                user: User = Depends(get_current_user)):
+                user: User = Depends(require_permission(PermissionCode.RULE_DELETE))):
     """删除自定义规则"""
     rule_service.delete_rule(db, user, rule_id)
     audit_service.log(

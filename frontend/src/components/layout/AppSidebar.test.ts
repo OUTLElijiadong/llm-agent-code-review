@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const harness = vi.hoisted(() => ({
   push: vi.fn(),
   permission: true,
+  role: 'user',
 }))
 
 vi.mock('vue-router', () => ({
@@ -12,18 +13,18 @@ vi.mock('vue-router', () => ({
     push: harness.push,
     resolve: ({ path }: { path: string }) => ({
       matched: [{}],
-      meta: path === '/agent-studio' ? { permissions: ['agent_asset:create'] } : {},
+      meta: ['/agent-studio', '/projects'].includes(path) ? { permissions: ['test:permission'] } : {},
     }),
   }),
 }))
 
 vi.mock('@/stores/user', () => ({
   useUserStore: () => ({
-    profile: { id: 7, role: 'user' },
+    get profile() { return { id: 7, role: harness.role } },
     token: 'token',
     isAdmin: () => false,
     isSuperAdmin: () => false,
-    hasRole: (role: string) => role === 'user',
+    hasRole: (role: string) => role === harness.role,
     hasPermission: () => harness.permission,
   }),
 }))
@@ -35,6 +36,7 @@ describe('AppSidebar ordinary member navigation', () => {
     window.localStorage.clear()
     harness.push.mockClear()
     harness.permission = true
+    harness.role = 'user'
   })
 
   function mountSidebar() {
@@ -60,6 +62,13 @@ describe('AppSidebar ordinary member navigation', () => {
 
     expect(wrapper.text()).not.toContain('Agent 工坊')
     expect(wrapper.find('[data-route="/agent-studio"]').exists()).toBe(false)
+  })
+
+  it('审查员有项目查看权限时显示项目入口', () => {
+    harness.role = 'reviewer'
+    const wrapper = mountSidebar()
+
+    expect(wrapper.find('[data-route="/projects"]').exists()).toBe(true)
   })
 
   it('shows v3.6 and persists the collapsed island state', async () => {

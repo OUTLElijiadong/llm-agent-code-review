@@ -4,9 +4,10 @@
 供管理员总览大屏一次拉取渲染。
 """
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.agents.event_bus import AgentEventBus
@@ -22,6 +23,53 @@ from app.services.geoip_service import locate_ip_cached
 from app.services.security_posture_service import security_posture
 
 router = APIRouter()
+
+
+# 讨论编排器使用的是审查画像名,治理中心使用注册 Agent code。两者必须
+# 在统计层统一,否则圆桌的 general/security/reliability 等调用会从大屏
+# 消失,让管理员误以为没有产生模型消费。
+_AGENT_LABEL_ALIASES: dict[str, str] = {
+    "general": "code_reviewer",
+    "reliability": "code_reviewer",
+    "performance": "code_reviewer",
+    "maintainability": "code_reviewer",
+    "security": "security_sentinel",
+}
+
+
+def _activity_agent_codes(
+    agent_label: Optional[str],
+    model_name: Optional[str],
+    profile_codes: set[str],
+) -> set[str]:
+    """把历史/圆桌调用日志归并到当前 Agent profile。
+
+    ``agent_label`` 是首选事实来源。旧日志可能没有 label,但把画像写入了
+    ``model_name`` 的 ``/xxx-agent`` 后缀,因此按后缀补归因。没有可靠标识
+    的原始调用留给“未归因模型调用”,不猜测为某个 Agent。
+    """
+    raw_label = str(agent_label or "").strip()
+    if raw_label:
+        if raw_label in profile_codes:
+            return {raw_label}
+        alias = _AGENT_LABEL_ALIASES.get(raw_label.lower())
+        if alias in profile_codes:
+            return {alias}
+
+    raw_model = str(model_name or "")
+    if raw_model.endswith("/multi-agent"):
+        return {
+            code for code in {"code_reviewer", "security_sentinel"}
+            if code in profile_codes
+        }
+    if "/" in raw_model and raw_model.rsplit("/", 1)[-1].endswith("-agent"):
+        suffix = raw_model.rsplit("/", 1)[-1][:-len("-agent")]
+        if suffix in profile_codes:
+            return {suffix}
+        alias = _AGENT_LABEL_ALIASES.get(suffix.lower())
+        if alias in profile_codes:
+            return {alias}
+    return set()
 
 
 def _agent_activity(db: Session) -> list[dict]:
@@ -46,22 +94,44 @@ def _agent_activity(db: Session) -> list[dict]:
         .all()
     )
     tool_today_map = {r[0]: int(r[1] or 0) for r in tool_today_rows}
+    component_total = (
+        func.coalesce(AiCallLog.prompt_tokens, 0)
+        + func.coalesce(AiCallLog.completion_tokens, 0)
+    )
+    logged_total = func.coalesce(AiCallLog.total_tokens, 0)
+    # 某些 Responses/失败日志没有 total_tokens,或 total_tokens 比组件值小。
+    # 采用预算服务相同的 max(total, prompt+completion) 口径,避免低报费用。
+    effective_total = case(
+        (logged_total >= component_total, logged_total),
+        else_=component_total,
+    )
     ai_label_rows = (
         db.query(
             AiCallLog.agent_label,
+            AiCallLog.model_name,
             func.count(AiCallLog.id).label("cnt"),
-            func.coalesce(func.sum(AiCallLog.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(effective_total), 0).label("tokens"),
         )
         .filter(
             func.date(AiCallLog.create_time) == today,
-            AiCallLog.agent_label.isnot(None),
+            or_(AiCallLog.agent_label.isnot(None), AiCallLog.model_name.isnot(None)),
         )
-        .group_by(AiCallLog.agent_label)
+        .group_by(AiCallLog.agent_label, AiCallLog.model_name)
         .all()
     )
-    model_today_map = {r[0]: int(r[1] or 0) for r in ai_label_rows}
-    model_token_map = {r[0]: int(r[2] or 0) for r in ai_label_rows}
     profiles_by_code = {profile.code: profile for profile in profiles}
+    model_today_map: dict[str, int] = {}
+    model_token_map: dict[str, int] = {}
+    unattributed_model_calls = 0
+    unattributed_model_tokens = 0
+    for label, model_name, count, tokens in ai_label_rows:
+        codes = _activity_agent_codes(label, model_name, set(profiles_by_code))
+        if not codes:
+            unattributed_model_calls += int(count or 0)
+            unattributed_model_tokens += int(tokens or 0)
+        for code in codes:
+            model_today_map[code] = model_today_map.get(code, 0) + int(count or 0)
+            model_token_map[code] = model_token_map.get(code, 0) + int(tokens or 0)
     event_status_map = {
         "dispatch": "thinking",
         "thinking": "thinking",
@@ -158,6 +228,20 @@ def _agent_activity(db: Session) -> list[dict]:
             "is_enabled": getattr(p, "is_enabled", 1),
             "last_seen_at": last_seen_at,
             "activity_source": activity_source,
+        })
+    if unattributed_model_calls:
+        result.append({
+            "agent_code": "unattributed_model",
+            "name": "未归因模型调用",
+            "status": "idle",
+            "calls_today": unattributed_model_calls,
+            "model_calls_today": unattributed_model_calls,
+            "model_tokens_today": unattributed_model_tokens,
+            "tool_calls_today": 0,
+            "purpose": "历史日志未记录 Agent 标识",
+            "is_enabled": 1,
+            "last_seen_at": None,
+            "activity_source": "none",
         })
     return sorted(result, key=lambda row: (row["status"] not in {"working", "thinking", "blocked"}, row["name"]))
 

@@ -30,6 +30,7 @@ from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
 from app.main import app
 from app.models.rbac import Menu, Permission, Role
+from app.models.review_rule import ReviewRule
 from app.models.user import User
 from app.services.admin_capability_registry import CAPABILITY_BY_CODE
 from app.services.admin_capability_service import AdminCapabilityError, execute_api
@@ -131,6 +132,10 @@ def seed(db: Session) -> Dict[str, Any]:
         ("issue:handle", "处理问题", "issue"),
         ("issue:batch", "批量处理问题", "issue"),
         ("file:view", "查看文件", "file"),
+        ("rule:view", "查看规则", "rule"),
+        ("rule:create", "创建规则", "rule"),
+        ("rule:update", "更新规则", "rule"),
+        ("rule:delete", "删除规则", "rule"),
     ]
     for idx, (code, name, module) in enumerate(perm_specs, start=100):
         p = Permission(
@@ -774,3 +779,78 @@ class TestBusinessRoutePermission:
         normal_client = client_factory(seed["normal"])
         response = normal_client.get("/api/agents")
         assert response.status_code == 200
+
+
+class TestRuleRoutePermission:
+    """规则页的查看与写操作必须分别受 RBAC 约束。"""
+
+    @staticmethod
+    def _grant(seed, client_factory, *codes: str):
+        admin_client = client_factory(seed["admin"])
+        admin_client.put(
+            "/api/rbac/roles/10/permissions",
+            json={"permission_ids": [seed["permissions"][code].id for code in codes]},
+        )
+        admin_client.post("/api/rbac/users/2/roles", json={"role_ids": [10]})
+        return client_factory(seed["normal"])
+
+    @staticmethod
+    def _payload(code: str = "custom_rule") -> dict:
+        return {
+            "rule_code": code,
+            "rule_name": "自定义规则",
+            "rule_type": "security",
+            "rule_content": "检查安全边界",
+        }
+
+    def test_rule_view_does_not_grant_create(self, db, seed, client_factory):
+        client = self._grant(seed, client_factory, "rule:view")
+
+        assert client.get("/api/rules").status_code == 200
+        _forbidden(client.post("/api/rules", json=self._payload()))
+
+    def test_rule_create_permission_is_required(self, db, seed, client_factory):
+        client = self._grant(seed, client_factory, "rule:create")
+
+        response = client.post("/api/rules", json=self._payload())
+        assert response.status_code == 200, response.text
+
+    def test_rule_update_permission_controls_toggle_and_edit(self, db, seed, client_factory):
+        rule = ReviewRule(
+            user_id=seed["normal"].id,
+            rule_code="owned_rule",
+            rule_name="原名称",
+            rule_type="security",
+            rule_content="检查",
+            language="*",
+            severity="中",
+            enabled=1,
+            is_builtin=0,
+            sort_order=1,
+        )
+        db.add(rule)
+        db.commit()
+        client = self._grant(seed, client_factory, "rule:update")
+
+        assert client.post(f"/api/rules/{rule.id}/toggle", json={"enabled": 0}).status_code == 200
+        assert client.put(f"/api/rules/{rule.id}", json={"rule_name": "新名称"}).status_code == 200
+        _forbidden(client.delete(f"/api/rules/{rule.id}"))
+
+    def test_rule_delete_permission_is_required(self, db, seed, client_factory):
+        rule = ReviewRule(
+            user_id=seed["normal"].id,
+            rule_code="deletable_rule",
+            rule_name="可删除规则",
+            rule_type="security",
+            rule_content="检查",
+            language="*",
+            severity="中",
+            enabled=1,
+            is_builtin=0,
+            sort_order=1,
+        )
+        db.add(rule)
+        db.commit()
+        client = self._grant(seed, client_factory, "rule:delete")
+
+        assert client.delete(f"/api/rules/{rule.id}").status_code == 200

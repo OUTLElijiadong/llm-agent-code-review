@@ -47,7 +47,7 @@ function navigate(event: MouseEvent): void {
   requestXiaolingNavigation(
     fullPath,
     props.label,
-    () => { void router.push(fullPath) },
+    () => router.push(fullPath),
     event.currentTarget as HTMLElement | null,
   )
 }

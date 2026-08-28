@@ -10,6 +10,7 @@
 import type { RouteMeta, Router, RouteRecordRaw } from 'vue-router'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { normalizeAgentText, transformOutsideCodeFences } from '@/utils/agentText'
+import { renderMarkdown } from '@/utils/markdown'
 
 const NAVIGATE_DIRECTIVE_RE = /<!--\s*PRISM_NAVIGATE\s*([\s\S]*?)\s*-->/g
 const MAX_DIRECTIVE_JSON_LENGTH = 2048
@@ -160,6 +161,24 @@ export function isNavigationPathAllowed(
   } catch {
     return false
   }
+}
+
+/**
+ * 渲染小菱正文中的 Markdown,并移除当前账号不能打开的站内链接。
+ * 外部链接保持原有展示规则,由 MarkdownIt/DOMPurify 负责安全处理。
+ */
+export function renderAuthorizedAgentMarkdown(
+  content: string,
+  router: Pick<Router, 'resolve'>,
+  guardSource: Parameters<typeof isRouteAllowed>[1],
+): string {
+  return renderMarkdown(content, {
+    linkAllowed: (href) => (
+      !href.startsWith('/')
+      || href.startsWith('//')
+      || isNavigationPathAllowed(router, href, guardSource)
+    ),
+  })
 }
 
 /** 从应用路由表构建可引导的站内路由集合(含嵌套 children)。 */

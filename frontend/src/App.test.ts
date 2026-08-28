@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const auth = vi.hoisted(() => ({
   token: 'token',
   profile: { id: 1, role: 'admin' } as { id: number; role: string } | null,
+  agentPermission: true,
 }))
 
 const router = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ vi.mock('@/stores/user', () => ({
     get token() { return auth.token },
     get profile() { return auth.profile },
     isAdmin: () => ['admin', 'super_admin'].includes(auth.profile?.role ?? ''),
+    hasPermission: (code: string) => code === 'agent:chat' && auth.agentPermission,
   }),
 }))
 
@@ -50,6 +52,7 @@ describe('全局小菱宿主', () => {
   beforeEach(() => {
     auth.token = 'token'
     auth.profile = { id: 1, role: 'admin' }
+    auth.agentPermission = true
     router.beforeEach.mockClear()
     router.afterEach.mockClear()
     router.onError.mockClear()
@@ -82,6 +85,18 @@ describe('全局小菱宿主', () => {
     await nextTick()
     expect(wrapper.get('.user-agent-stub').attributes('data-visible')).toBe('true')
     expect(wrapper.get('.user-agent-stub').attributes('data-prefill')).toBe('分析代码')
+    wrapper.unmount()
+  })
+
+  it('缺少 agent:chat 权限时不挂载小菱也不响应唤起事件', async () => {
+    auth.profile = { id: 8, role: 'user' }
+    auth.agentPermission = false
+    const wrapper = mountApp()
+
+    expect(wrapper.find('.user-agent-stub').exists()).toBe(false)
+    window.dispatchEvent(new CustomEvent('prism:open-agent-chat', { detail: { prefill: '越权唤起' } }))
+    await nextTick()
+    expect(wrapper.find('.user-agent-stub').exists()).toBe(false)
     wrapper.unmount()
   })
 })

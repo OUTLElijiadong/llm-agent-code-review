@@ -34,11 +34,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
-import {
-  canRoleSeeNavigationItem,
-  normalizeRole,
-  type UserRole,
-} from '@/utils/roleHome'
+import type { UserRole } from '@/utils/roleHome'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 
 interface MenuItem {
@@ -104,19 +100,14 @@ const adminItems: MenuItem[] = [
 ]
 
 const isAdmin = computed(() => userStore.isAdmin())
-const currentRole = computed(() => normalizeRole(userStore.profile?.role))
 
 const visibleMenuItems = computed(() => {
   // 管理员只做管理内容工作:不显示用户端功能菜单(工作台/代码沙箱/论坛等),
   // 侧边栏仅保留"管理"菜单;普通用户按 roles 显示。
   if (isAdmin.value) return []
-  // 主菜单统一按静态 roles 分角色显示。后端 RBAC 菜单种子的 path 与前端路由
-  // 不一致(如 /review vs /reviews、缺 /forum),做交集会误删论坛等入口;
-  // 数据权限仍由后端强制。
-  return menuItems.filter((item) => (
-    canRoleSeeNavigationItem(currentRole.value, item.roles)
-    && isNavigationPathAllowed(router, item.path, userStore)
-  ))
+  // 可见性与路由守卫共用实时 RBAC 判定。不再叠加静态角色白名单,
+  // 避免审查员被授予 project:view 后仍看不到项目入口。
+  return menuItems.filter((item) => isNavigationPathAllowed(router, item.path, userStore))
 })
 
 const visibleAdminItems = computed(() => (

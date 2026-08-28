@@ -3,15 +3,15 @@ import { describe, expect, it } from 'vitest'
 import { formatAgentActivityUsage } from './agentActivityPresentation'
 
 describe('formatAgentActivityUsage', () => {
-  it('明确区分模型调用和不计模型 Token 的本地巡检', () => {
+  it('明确区分模型调用和不计模型 Token 的本地工具活动', () => {
     expect(formatAgentActivityUsage({
       calls_today: 1651,
       model_calls_today: 0,
       model_tokens_today: 0,
       tool_calls_today: 1651,
     })).toEqual({
-      label: '模型 0 · 巡检 1,651',
-      title: '今日模型调用 0 次，共 0 Token；本地工具巡检 1,651 次，不调用模型、不产生模型 Token 费用',
+      label: '模型 0 · 工具 1,651',
+      title: '今日模型调用 0 次，共 0 Token；本地工具调用 1,651 次，不调用模型、不产生模型 Token 费用',
     })
   })
 
@@ -22,8 +22,8 @@ describe('formatAgentActivityUsage', () => {
       model_tokens_today: 168_042,
       tool_calls_today: 2,
     })).toEqual({
-      label: '模型 7 · 168K Token · 巡检 2',
-      title: '今日模型调用 7 次，共 168,042 Token；本地工具巡检 2 次，不调用模型、不产生模型 Token 费用',
+      label: '模型 7 · 168K Token · 工具 2',
+      title: '今日模型调用 7 次，共 168,042 Token；本地工具调用 2 次，不调用模型、不产生模型 Token 费用',
     })
   })
 

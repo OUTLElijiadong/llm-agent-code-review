@@ -5,12 +5,7 @@ import { ArrowDown, SwitchButton, UserFilled, Search, MagicStick, Menu } from '@
 
 import { useUserStore } from '@/stores/user'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import {
-  canRoleOpenPath,
-  canRoleSeeNavigationItem,
-  normalizeRole,
-  type UserRole,
-} from '@/utils/roleHome'
+import type { UserRole } from '@/utils/roleHome'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 
 const route = useRoute()
@@ -55,7 +50,7 @@ const roleLabel = computed(() => {
 })
 
 const isAdmin = computed(() => userStore.isAdmin())
-const currentRole = computed(() => normalizeRole(userStore.profile?.role))
+const canUseAgent = computed(() => userStore.hasPermission('agent:chat'))
 
 const searchItems = computed<SearchItem[]>(() => {
   const items: SearchItem[] = [
@@ -80,8 +75,7 @@ const searchItems = computed<SearchItem[]>(() => {
   ]
   return items.filter((item) => {
     if (item.admin && !isAdmin.value) return false
-    if (!canRoleSeeNavigationItem(currentRole.value, item.roles)) return false
-    if (item.path && !canRoleOpenPath(currentRole.value, item.path)) return false
+    if (item.action === 'agent' && !canUseAgent.value) return false
     if (item.path && !isNavigationPathAllowed(router, item.path, userStore)) return false
     return true
   })
@@ -191,6 +185,7 @@ function goChangePassword(): void {
  * @returns void
  */
 function openAgent(): void {
+  if (!canUseAgent.value) return
   openAgentChat()
 }
 
@@ -239,7 +234,7 @@ onBeforeUnmount(() => {
         <span class="search-kbd font-mono">⌘K</span>
       </button>
 
-      <button class="agent-trigger" type="button" aria-label="打开小菱助手" title="打开小菱助手" @click="openAgent">
+      <button v-if="canUseAgent" class="agent-trigger" type="button" aria-label="打开小菱助手" title="打开小菱助手" @click="openAgent">
         <el-icon class="agent-icon"><MagicStick /></el-icon>
         <span>Agent</span>
       </button>

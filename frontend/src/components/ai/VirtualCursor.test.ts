@@ -36,7 +36,57 @@ describe('VirtualCursor real navigation click', () => {
       x: 20, y: 30, left: 20, top: 30, right: 140, bottom: 70,
       width: 120, height: 40, toJSON: () => ({}),
     })
-    target.addEventListener('click', navigate)
+    target.addEventListener('click', () => {
+      navigate()
+      window.history.pushState({}, '', '/reports')
+    })
+    document.body.appendChild(target)
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+
+    requestXiaolingNavigation('/reports', '审查报告', vi.fn())
+    await flushPromises()
+    vi.advanceTimersByTime(1360)
+    await flushPromises()
+
+    expect(navigate).toHaveBeenCalledOnce()
+    expect(wrapper.find('.virtual-cursor-click-label').text()).toBe('已打开')
+    expect(wrapper.find('.virtual-cursor').exists()).toBe(true)
+  })
+
+  it('uses the authorized callback once when no page navigation element exists', async () => {
+    const navigate = vi.fn()
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+
+    requestXiaolingNavigation('/reviews/42', '审查详情', () => {
+      navigate()
+      window.history.pushState({}, '', '/reviews/42')
+    })
+    await flushPromises()
+    vi.advanceTimersByTime(1400)
+    await flushPromises()
+
+    expect(navigate).toHaveBeenCalledOnce()
+  })
+
+  it('skips a hidden matching route button and clicks the visible one', async () => {
+    const hidden = document.createElement('button')
+    hidden.dataset.route = '/reports'
+    hidden.style.display = 'none'
+    const hiddenClick = vi.fn()
+    hidden.addEventListener('click', hiddenClick)
+    document.body.appendChild(hidden)
+
+    const visibleClick = vi.fn()
+    target = document.createElement('button')
+    target.dataset.route = '/reports'
+    target.getBoundingClientRect = () => ({
+      x: 30, y: 40, left: 30, top: 40, right: 150, bottom: 80,
+      width: 120, height: 40, toJSON: () => ({}),
+    })
+    target.addEventListener('click', () => {
+      visibleClick()
+      window.history.pushState({}, '', '/reports')
+    })
     document.body.appendChild(target)
     wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
 
@@ -45,20 +95,22 @@ describe('VirtualCursor real navigation click', () => {
     vi.advanceTimersByTime(1400)
     await flushPromises()
 
-    expect(navigate).toHaveBeenCalledOnce()
-    expect(wrapper.find('.virtual-cursor').exists()).toBe(true)
+    expect(hiddenClick).not.toHaveBeenCalled()
+    expect(visibleClick).toHaveBeenCalledOnce()
+    hidden.remove()
   })
 
-  it('uses the authorized callback once when no page navigation element exists', async () => {
-    const navigate = vi.fn()
+  it('shows a failure state when the authorized navigation callback rejects', async () => {
     wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
 
-    requestXiaolingNavigation('/reviews/42', '审查详情', navigate)
+    requestXiaolingNavigation('/reviews/42', '审查详情', async () => {
+      throw new Error('navigation failed')
+    })
     await flushPromises()
     vi.advanceTimersByTime(1400)
     await flushPromises()
 
-    expect(navigate).toHaveBeenCalledOnce()
+    expect(wrapper.find('.virtual-cursor-click-label').text()).toBe('跳转失败')
   })
 
   it('scrolls an offscreen route button into view before the visible click', async () => {
@@ -108,6 +160,10 @@ describe('VirtualCursor real navigation click', () => {
     document.body.appendChild(main)
     target = document.createElement('button')
     target.textContent = '我的审查'
+    target.getBoundingClientRect = () => ({
+      x: 30, y: 40, left: 30, top: 40, right: 150, bottom: 80,
+      width: 120, height: 40, toJSON: () => ({}),
+    })
     document.body.appendChild(target)
     wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
 

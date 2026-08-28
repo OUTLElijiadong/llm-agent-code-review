@@ -192,3 +192,15 @@ it('renders safe Markdown and strips formatting for plain-text summaries', funct
   expect(renderMarkdown(undefined as unknown as string)).toBe('')
   expect(stripMarkdown(undefined as unknown as string)).toBe('')
 })
+
+/** 验证无权限的站内 Markdown 入口不会渲染,代码围栏内容保持原样。 */
+it('filters unauthorized in-app Markdown links at token level', function testAuthorizedMarkdownLinks(): void {
+  const html = renderMarkdown(
+    '[可见](/projects) [不可见](/admin/users)\n```md\n[代码示例](/admin/users)\n```',
+    { linkAllowed: (href) => href === '/projects' },
+  )
+  expect(html).toContain('href="/projects"')
+  expect(html).not.toContain('不可见')
+  expect(html).toContain('/admin/users')
+  expect(html).toContain('代码示例')
+})
