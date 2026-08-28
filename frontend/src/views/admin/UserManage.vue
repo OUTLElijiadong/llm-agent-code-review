@@ -89,7 +89,7 @@
         <el-form-item label="角色">
           <el-select v-model="selectedRole" placeholder="选择角色" style="width: 100%">
             <el-option label="普通用户(可管理自己的项目)" value="user" />
-            <el-option label="审查员(可审查,不管理项目)" value="reviewer" />
+            <el-option label="审查员(可审查,项目操作受权限约束)" value="reviewer" />
             <el-option label="管理员(程序内管理权限)" value="admin" />
           </el-select>
         </el-form-item>
@@ -106,7 +106,7 @@
           type="warning"
           :closable="false"
           show-icon
-          title="该用户创建的项目会保留(仍归其所有),但审查员侧重审查,不再显示「项目管理」入口;如需管理项目请改回普通用户"
+          title="该用户创建的项目会保留(仍归其所有);审查员侧重审查,项目入口和操作按实时权限点与项目成员范围显示"
         />
         <el-alert
           v-else

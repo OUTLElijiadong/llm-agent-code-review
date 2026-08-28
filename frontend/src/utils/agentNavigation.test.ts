@@ -105,6 +105,7 @@ describe('local navigation cost guard', () => {
         ],
       },
       { path: '/projects', meta: { title: '项目管理', permissions: ['project:view'] } },
+      { path: '/reviews', meta: { title: '审查记录', permissions: ['review:view'] } },
     ],
   }
 
@@ -117,6 +118,8 @@ describe('local navigation cost guard', () => {
           ? { title: '系统操作审计', role: 'admin' }
           : path === '/admin/users'
             ? { title: '用户管理', role: 'admin', permissions: ['user:view'] }
+            : path === '/reviews'
+              ? { title: '审查记录', permissions: ['review:view'] }
             : { title: '项目管理', permissions: ['project:view'] },
       }),
     }
@@ -157,5 +160,22 @@ describe('local navigation cost guard', () => {
     )
 
     expect(result).toEqual({ kind: 'forbidden' })
+  })
+
+  it('把侧边栏显示名“审查任务”解析为已有审查记录路由', () => {
+    const result = resolveLocalNavigationRequest(
+      '打开审查任务页面',
+      routerFor('/reviews') as never,
+      guard(true),
+    )
+
+    expect(result).toEqual({
+      kind: 'navigate',
+      directive: {
+        action: 'navigate',
+        route: '/reviews',
+        label: '审查记录',
+      },
+    })
   })
 })

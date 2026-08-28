@@ -32,7 +32,7 @@ const LOCAL_NAVIGATION_ALIASES: Record<string, string[]> = {
   '/admin/mcp-workers': ['节点'],
   '/projects': ['项目'],
   '/code': ['代码'],
-  '/reviews': ['审查'],
+  '/reviews': ['审查任务', '审查'],
   '/issues': ['问题'],
   '/reports': ['报告'],
   '/security': ['安全'],
