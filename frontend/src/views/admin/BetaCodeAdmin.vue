@@ -226,11 +226,13 @@ onMounted(loadCodes)
 </template>
 
 <style scoped lang="scss">
-.beta-code-page { display: grid; gap: 20px; }
+.beta-code-page { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 20px; }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .page-header h2 { margin: 0; font-size: 24px; color: var(--gray-900); }
 .page-header p { margin: 6px 0 0; color: var(--gray-500); }
 .generator { padding: 20px 22px 4px; border: 1px solid var(--gray-200); border-radius: 8px; background: #fff; }
+.generator,
+.code-list { min-width: 0; }
 .generator-title { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-weight: 650; }
 .label-field { flex: 1; min-width: 240px; }
 .label-field :deep(.el-form-item__content) { width: 100%; }
