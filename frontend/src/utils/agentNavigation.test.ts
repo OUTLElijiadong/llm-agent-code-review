@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { extractAgentNavigations, isNavigationPathAllowed } from './agentNavigation'
+import {
+  extractAgentNavigations,
+  isNavigationPathAllowed,
+  resolveLocalNavigationRequest,
+} from './agentNavigation'
 
 function guard(permission: boolean) {
   return {
@@ -87,5 +91,71 @@ describe('navigation fallback extraction', () => {
     )
 
     expect(result.directives).toEqual([])
+  })
+})
+
+describe('local navigation cost guard', () => {
+  const routeOptions = {
+    routes: [
+      {
+        path: '/admin',
+        children: [
+          { path: 'audit', meta: { title: '系统操作审计', role: 'admin' } },
+          { path: 'users', meta: { title: '用户管理', role: 'admin', permissions: ['user:view'] } },
+        ],
+      },
+      { path: '/projects', meta: { title: '项目管理', permissions: ['project:view'] } },
+    ],
+  }
+
+  function routerFor(path: string) {
+    return {
+      options: routeOptions,
+      resolve: () => ({
+        matched: [{ path }],
+        meta: path === '/admin/audit'
+          ? { title: '系统操作审计', role: 'admin' }
+          : path === '/admin/users'
+            ? { title: '用户管理', role: 'admin', permissions: ['user:view'] }
+            : { title: '项目管理', permissions: ['project:view'] },
+      }),
+    }
+  }
+
+  it('resolves an explicit navigation request without requiring a model round', () => {
+    const result = resolveLocalNavigationRequest(
+      '请只执行页面导航：打开系统操作审计页面。不要查询、修改、删除或执行任何运维操作。',
+      routerFor('/admin/audit') as never,
+      { ...guard(true), isAdmin: () => true },
+    )
+
+    expect(result).toEqual({
+      kind: 'navigate',
+      directive: {
+        action: 'navigate',
+        route: '/admin/audit',
+        label: '系统操作审计',
+      },
+    })
+  })
+
+  it('does not intercept a request that combines navigation with an operation', () => {
+    const result = resolveLocalNavigationRequest(
+      '打开系统操作审计页面并检查最近的高风险操作',
+      routerFor('/admin/audit') as never,
+      { ...guard(true), isAdmin: () => true },
+    )
+
+    expect(result).toBeNull()
+  })
+
+  it('returns a non-action result for an unauthorized target so no hidden link is rendered', () => {
+    const result = resolveLocalNavigationRequest(
+      '打开用户管理页面',
+      routerFor('/admin/users') as never,
+      guard(false),
+    )
+
+    expect(result).toEqual({ kind: 'forbidden' })
   })
 })

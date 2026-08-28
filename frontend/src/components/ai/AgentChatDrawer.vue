@@ -28,6 +28,7 @@ import { useAgentActivityStore } from '@/stores/agentActivity'
 import {
   extractAgentNavigations,
   isNavigationPathAllowed,
+  resolveLocalNavigationRequest,
   renderAuthorizedAgentMarkdown,
 } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
@@ -1589,6 +1590,35 @@ async function sendMessage(): Promise<void> {
 
   await nextTick()
   scrollToBottom()
+
+  // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
+  // 权限仍由路由守卫裁决,实际跳转交给全局虚拟鼠标完成。
+  const localNavigation = router
+    ? resolveLocalNavigationRequest(text, router, userStore)
+    : null
+  if (localNavigation) {
+    const directive = localNavigation.directive
+    messages.value.push({
+      id: messageId(),
+      role: 'assistant',
+      content: localNavigation.kind === 'navigate' && directive
+        ? `我已按你的要求打开「${directive.label || '目标页面'}」。`
+        : '当前账号没有权限打开这个页面。',
+      time: dayjs().format('HH:mm'),
+    })
+    persistSnapshot()
+    await nextTick()
+    scrollToBottom()
+    if (localNavigation.kind === 'navigate' && directive) {
+      requestXiaolingNavigation(
+        directive.route,
+        directive.label || '目标页面',
+        () => router.push(directive.route),
+      )
+    }
+    return
+  }
+
   await runResponse({
     action: 'start',
     surface: 'user',

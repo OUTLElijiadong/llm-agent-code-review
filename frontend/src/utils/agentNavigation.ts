@@ -14,8 +14,99 @@ import { renderMarkdown } from '@/utils/markdown'
 
 const NAVIGATE_DIRECTIVE_RE = /<!--\s*PRISM_NAVIGATE\s*([\s\S]*?)\s*-->/g
 const MAX_DIRECTIVE_JSON_LENGTH = 2048
+const MAX_LOCAL_NAVIGATION_TEXT_LENGTH = 180
 const KNOWN_ROUTE_RE = /\/[a-z0-9][a-z0-9/_-]*(?:\?[a-z0-9%&=_.~-]+)?(?:#[a-z0-9%_.~-]+)?/gi
 const NAVIGATION_CUE_RE = /路由|页面|导航|前往|进入|打开|带(?:我|你)去/
+const LOCAL_NAVIGATION_PREFIX_RE = /^(?:小菱)?(?:请帮我|请|帮我|麻烦|可以)?(?:只(?:执行|做)?页面导航|仅(?:执行|做)?页面导航|页面导航)?(?:打开|前往|进入|跳转到|导航到|带我去|把我带到|去)(?:一下)?$/
+
+/** 常用简称只作为已有静态路由标题的别名,不新增可访问路径。 */
+const LOCAL_NAVIGATION_ALIASES: Record<string, string[]> = {
+  '/admin/overview': ['总览', '管理总览'],
+  '/admin/approvals': ['审批'],
+  '/admin/observability': ['监控', '告警'],
+  '/admin/users': ['用户'],
+  '/admin/audit': ['审计', '系统审计'],
+  '/admin/jobs': ['调度'],
+  '/admin/rollback': ['回滚'],
+  '/admin/ai-logs': ['调用日志'],
+  '/admin/mcp-workers': ['节点'],
+  '/projects': ['项目'],
+  '/code': ['代码'],
+  '/reviews': ['审查'],
+  '/issues': ['问题'],
+  '/reports': ['报告'],
+  '/security': ['安全'],
+  '/sandboxes': ['沙箱'],
+  '/agents': ['Agent'],
+  '/knowledge': ['知识'],
+  '/profile': ['个人中心'],
+}
+
+export interface LocalNavigationResult {
+  kind: 'navigate' | 'forbidden'
+  directive?: AgentNavigateDirective
+}
+
+function compactNavigationText(value: string): string {
+  return value
+    .replace(/[\s\u200b\uFEFF]/g, '')
+    .replace(/[，,。.!！?？:：;；、"“”‘’`~～（）()【】[\]<>]/g, '')
+}
+
+function isSafeLocalNavigationTail(value: string): boolean {
+  const tail = value
+    .replace(/^(?:页面|页|界面|菜单)/, '')
+    .replace(/^(?:即可|就行|就好|吧)+/, '')
+  // “不要查询/修改/执行……”是对本地导航的明确边界说明,不代表要执行这些动作。
+  if (/^(?:不要|无需|不需要|不用)/.test(tail)) return true
+  return tail === '' || /^(?:一下)*(?:完成后(?:回复|告诉我|返回)?(?:已打开|打开成功|完成)?)?$/.test(tail)
+}
+
+function localNavigationTargets(router: Pick<Router, 'options'>): Array<{ route: string; label: string; matchLabel: string }> {
+  const table = buildRouteTable(router as Router)
+  const targets: Array<{ route: string; label: string; matchLabel: string }> = []
+  for (const [route, label] of table.entries()) {
+    if (!label) continue
+    targets.push({ route, label, matchLabel: label })
+    for (const alias of LOCAL_NAVIGATION_ALIASES[route] ?? []) {
+      targets.push({ route, label, matchLabel: alias })
+    }
+  }
+  return targets.sort((left, right) => right.matchLabel.length - left.matchLabel.length)
+}
+
+/**
+ * 识别“只打开一个页面”的确定性请求。
+ * 这类请求不需要调用模型,直接复用当前路由守卫并交给虚拟鼠标执行,
+ * 避免一次纯导航产生多轮付费 Responses 调用。
+ */
+export function resolveLocalNavigationRequest(
+  content: string,
+  router: Pick<Router, 'options' | 'resolve'>,
+  guardSource: Parameters<typeof isRouteAllowed>[1],
+): LocalNavigationResult | null {
+  if (!content || content.length > MAX_LOCAL_NAVIGATION_TEXT_LENGTH) return null
+  const compact = compactNavigationText(content)
+  if (!compact) return null
+
+  const seenRoutes = new Set<string>()
+  for (const target of localNavigationTargets(router)) {
+    if (seenRoutes.has(target.route)) continue
+    const matchLabel = compactNavigationText(target.matchLabel)
+    const start = compact.indexOf(matchLabel)
+    if (start < 0) continue
+    const prefix = compact.slice(0, start)
+    const tail = compact.slice(start + matchLabel.length)
+    if (!LOCAL_NAVIGATION_PREFIX_RE.test(prefix) || !isSafeLocalNavigationTail(tail)) continue
+    seenRoutes.add(target.route)
+    if (!isNavigationPathAllowed(router, target.route, guardSource)) return { kind: 'forbidden' }
+    return {
+      kind: 'navigate',
+      directive: { action: 'navigate', route: target.route, label: target.label },
+    }
+  }
+  return null
+}
 
 function flattenRoutes(routes: readonly RouteRecordRaw[], prefix: string): RouteRecordRaw[] {
   const out: RouteRecordRaw[] = []

@@ -41,6 +41,7 @@ import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import {
   extractAgentNavigations,
   isNavigationPathAllowed,
+  resolveLocalNavigationRequest,
   renderAuthorizedAgentMarkdown,
 } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
@@ -1245,6 +1246,30 @@ async function sendMessage(): Promise<void> {
     switcherRef.value?.reload?.()
   }
   await scrollToBottom()
+
+  // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
+  // 仍复用同一权限守卫,并交给全局虚拟鼠标执行真实点击和路由跳转。
+  const localNavigation = router
+    ? resolveLocalNavigationRequest(content, router, userStore)
+    : null
+  if (localNavigation) {
+    const directive = localNavigation.directive
+    const message = localNavigation.kind === 'navigate' && directive
+      ? `我已按你的要求打开「${directive.label || '目标管理页'}」。`
+      : '当前账号没有权限打开这个页面。'
+    messages.value.push(assistantEntry({ type: 'text', content: message, status: 'completed' }))
+    persistSnapshot()
+    await scrollToBottom()
+    if (localNavigation.kind === 'navigate' && directive) {
+      requestXiaolingNavigation(
+        directive.route,
+        directive.label || '目标管理页',
+        () => router.push(directive.route),
+      )
+    }
+    return
+  }
+
   await runResponse({
     action: 'start',
     surface: 'admin',
