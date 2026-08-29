@@ -141,6 +141,13 @@ def _get_http_client(pool_key: tuple[str, str]) -> tuple[httpx.Client, bool]:
         return client, True
 
 
+def _clamp_max_tokens(max_tokens: Optional[int]) -> int:
+    """输出上限钳制: 默认 4096, 最高 8192(DeepSeek chat 系安全上限)。"""
+    if max_tokens is None:
+        return 4096
+    return max(128, min(8192, int(max_tokens)))
+
+
 class DeepSeekAgent:
     """API 统一调用封装 — 支持用户自定义配置"""
 
@@ -173,6 +180,7 @@ class DeepSeekAgent:
 
     def _build_request(
         self, system_prompt: str, user_prompt: str, json_mode: bool = True,
+        max_tokens: Optional[int] = None,
     ) -> tuple:
         url = f"{self.base_url}/chat/completions"
         headers = {
@@ -186,7 +194,7 @@ class DeepSeekAgent:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.2,
-            "max_tokens": 4096,
+            "max_tokens": _clamp_max_tokens(max_tokens),
         }
         # response_format=json_object 会强制模型输出 JSON; 讨论发言需要自然语言,
         # 此时必须关闭, 否则 DeepSeek 返回空内容(或因提示缺少 "json" 而 400)。
@@ -255,7 +263,7 @@ class DeepSeekAgent:
         if temperature is not None:
             payload["temperature"] = max(0.0, min(1.0, float(temperature)))
         if max_tokens is not None:
-            payload["max_tokens"] = max(128, min(4096, int(max_tokens)))
+            payload["max_tokens"] = max(128, min(8192, int(max_tokens)))
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -317,6 +325,7 @@ class DeepSeekAgent:
         file_id: Optional[int] = None,
         chunk_index: Optional[int] = None,
         agent_label: Optional[str] = None,
+        max_tokens: Optional[int] = None,
     ) -> tuple:
         """调用 DeepSeek Chat API + 写 AiCallLog"""
         model_tag = (
@@ -324,7 +333,9 @@ class DeepSeekAgent:
             if agent_label and agent_label != "general"
             else self.model
         )
-        url, headers, payload = self._build_request(system_prompt, user_prompt)
+        url, headers, payload = self._build_request(
+            system_prompt, user_prompt, max_tokens=max_tokens,
+        )
 
         attempt = 0
         last_err: Optional[Exception] = None
