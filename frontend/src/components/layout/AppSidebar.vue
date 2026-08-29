@@ -71,6 +71,7 @@ const menuItems: MenuItem[] = [
   { path: '/projects',  title: '项目管理',   icon: FolderOpened,     roles: ['user'] },
   { path: '/code',      title: '代码中心',   icon: Document,         roles: ['user'] },
   { path: '/reviews',   title: '审查任务',   icon: DocumentChecked,  roles: ['user', 'reviewer'] },
+  { path: '/pentests',  title: '渗透测试',   icon: Aim,              roles: ['user', 'reviewer'] },
   { path: '/issues',    title: '问题追踪',   icon: Warning,          roles: ['user', 'reviewer'] },
   { path: '/reports',   title: '审查报告',   icon: DataBoard,        roles: ['user', 'reviewer'] },
   { path: '/agents',    title: 'Agent 中心', icon: Cpu,              roles: ['admin', 'user', 'reviewer'] },

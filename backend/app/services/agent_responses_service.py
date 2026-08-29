@@ -34,6 +34,7 @@ from app.agents.tool_contracts import (
     validate_fixed_tool_arguments,
 )
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.core.observability import observe_event
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
@@ -182,6 +183,11 @@ _SECURITY_SCAN_FIXED_TOOLS = frozenset({
     "audit_security_for_task",
     "audit_security_for_project",
 })
+_PENTEST_FIXED_TOOLS = frozenset({
+    "create_pentest_engagement",
+    "start_pentest_engagement",
+    "get_pentest_status",
+})
 _WRITE_TOOLS = {
     "create_project",
     "update_project",
@@ -199,6 +205,7 @@ _WRITE_TOOLS = {
     "admin_decide_agent_release",
     "admin_execute_operation",
     "save_knowledge_note",
+    "start_pentest_engagement",
 }
 _DANGER_TOOLS = {
     "delete_project",
@@ -626,6 +633,11 @@ class PrismToolExecutor:
             self._user.id,
             PermissionCode.SECURITY_SCAN,
         )
+        can_pentest = legacy_admin or rbac_service.check_permission(
+            self._db,
+            self._user.id,
+            PermissionCode.PENTEST_VIEW,
+        )
         can_configure_agents = self._has_permission(PermissionCode.AGENT_CONFIGURE)
         for name in get_fixed_tool_names():
             if name.startswith(_ADMIN_TOOL_PREFIX) and not is_admin:
@@ -633,6 +645,10 @@ class PrismToolExecutor:
             if name in _SUPER_ADMIN_FIXED_TOOLS and not self._is_super_admin:
                 continue
             if name == "trigger_evolution" and not can_configure_agents:
+                continue
+            if name in _SECURITY_SCAN_FIXED_TOOLS and not can_scan_security:
+                continue
+            if name in _PENTEST_FIXED_TOOLS and not can_pentest:
                 continue
             if name in _SECURITY_SCAN_FIXED_TOOLS and not can_scan_security:
                 continue
@@ -880,6 +896,25 @@ class PrismToolExecutor:
 
         if call.name == "get_roundtable_discussion":
             return await self._execute_once(call, lambda: self._get_roundtable_discussion(call))
+
+        if call.name == "create_pentest_engagement":
+            return await self._execute_once(call, lambda: self._create_pentest_engagement(call))
+
+        if call.name == "get_pentest_status":
+            return await self._execute_once(call, lambda: self._get_pentest_status(call))
+
+        # start_pentest_engagement 是写工具: 走与圆桌启动相同的内联审批门,
+        # 不能放在通用 _WRITE_TOOLS 审批门之前(否则 _WRITE_TOOLS 成员资格失效)。
+        if call.name == "start_pentest_engagement":
+            if not approved:
+                return self._approval(
+                    call,
+                    danger=False,
+                    operation="启动渗透测试",
+                    impact="将以当前登录用户身份启动七阶段渗透测试流水线(消耗模型调用, 可能发起沙箱探测)",
+                )
+            self._mark_approval(call, approve=True)
+            return await self._execute_once(call, lambda: self._start_pentest_engagement(call))
 
         if call.name in {"start_roundtable_discussion", "control_roundtable_discussion"}:
             if not approved:
@@ -1234,6 +1269,115 @@ class PrismToolExecutor:
             "open_url": f"/agents?{open_query}",
         })
         return ToolExecutionResult.success(data)
+
+    def _create_pentest_engagement(self, call: ToolCall) -> ToolExecutionResult:
+        """小菱安排渗透测试: 只创建草稿, 授权确认必须由用户在前端完成。"""
+
+        from app.services import pentest_service
+
+        if not rbac_service.check_permission(
+            self._db, self._user.id, PermissionCode.PENTEST_START,
+        ):
+            return ToolExecutionResult.failure("当前账户没有发起渗透测试的权限(pentest:start)")
+        try:
+            data = pentest_service.create_engagement(
+                self._db,
+                self._user,
+                {
+                    "project_id": int(call.arguments["project_id"]),
+                    "target_type": str(call.arguments.get("target_type") or "web"),
+                    "task_name": str(call.arguments.get("task_name") or ""),
+                    "notes": str(call.arguments.get("notes") or ""),
+                },
+            )
+        except pentest_service.PentestError as exc:
+            return ToolExecutionResult.failure(str(exc))
+        except AppError as exc:
+            return ToolExecutionResult.failure(str(exc))
+        return ToolExecutionResult.success(
+            {
+                "engagement_public_id": data["public_id"],
+                "status": data["status"],
+                "target_type_label": data["target_type_label"],
+                "authorize_url": "/pentests",
+                "rules_version": pentest_service.PENTEST_RULES_VERSION,
+                "message": (
+                    "委托草稿已创建。请在『渗透测试』页面完成授权规则签署与时间窗设定后启动;"
+                    "未完成授权前不会执行任何主动测试动作。"
+                ),
+            }
+        )
+
+    def _start_pentest_engagement(self, call: ToolCall) -> ToolExecutionResult:
+        """启动已授权委托;授权门未通过时返回授权入口而不是绕过。"""
+
+        from app.services import pentest_service
+
+        if not rbac_service.check_permission(
+            self._db, self._user.id, PermissionCode.PENTEST_START,
+        ):
+            return ToolExecutionResult.failure("当前账户没有启动渗透测试的权限(pentest:start)")
+        public_id = str(call.arguments.get("engagement_public_id") or "")
+        try:
+            data = pentest_service.start_engagement(self._db, self._user, public_id)
+        except pentest_service.PentestError as exc:
+            return ToolExecutionResult.failure(str(exc))
+        except AppError as exc:
+            return ToolExecutionResult.failure(str(exc))
+        return ToolExecutionResult.success(
+            {
+                "engagement_public_id": data["public_id"],
+                "status": data["status"],
+                "phases": ["情报收集", "威胁建模", "漏洞探测", "受控验证", "后渗透推演", "报告输出"],
+                "message": "七阶段流水线已启动, 可用 get_pentest_status 跟踪进度。",
+            }
+        )
+
+    def _get_pentest_status(self, call: ToolCall) -> ToolExecutionResult:
+        """按委托或项目查询渗透测试进度摘要。"""
+
+        from app.models.pentest import PentestEngagement
+        from app.services import pentest_service
+
+        if not rbac_service.check_permission(
+            self._db, self._user.id, PermissionCode.PENTEST_VIEW,
+        ):
+            return ToolExecutionResult.failure("当前账户没有查看渗透测试的权限(pentest:view)")
+        public_id = str(call.arguments.get("engagement_public_id") or "")
+        project_id = call.arguments.get("project_id")
+        query = self._db.query(PentestEngagement).filter(PentestEngagement.user_id == int(self._user.id))
+        if not public_id and project_id is None:
+            return ToolExecutionResult.failure("请提供 engagement_public_id 或 project_id")
+        if public_id:
+            query = query.filter(PentestEngagement.public_id == public_id)
+        else:
+            query = query.filter(PentestEngagement.project_id == int(project_id))
+        row = query.order_by(PentestEngagement.id.desc()).first()
+        if row is None:
+            return ToolExecutionResult.failure("未找到对应渗透测试委托")
+        try:
+            detail = pentest_service.get_engagement_detail(self._db, self._user, row.public_id)
+        except pentest_service.PentestError as exc:
+            return ToolExecutionResult.failure(str(exc))
+        return ToolExecutionResult.success(
+            {
+                "engagement_public_id": detail["public_id"],
+                "status": detail["status"],
+                "target_type_label": detail["target_type_label"],
+                "phases": [
+                    {
+                        "phase_label": phase["phase_label"],
+                        "status": phase["status"],
+                        "summary": phase["summary"],
+                        "line_count": len(phase.get("lines") or []),
+                    }
+                    for phase in detail.get("phases") or []
+                ],
+                "finding_total": len(detail.get("findings") or []),
+                "summary": detail.get("summary") or {},
+                "report_task_id": detail.get("report_task_id"),
+            }
+        )
 
     def _get_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
         """按会话归属返回圆桌状态与已产生的发言。"""

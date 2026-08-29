@@ -129,6 +129,13 @@ class Settings(BaseSettings):
     agent_team_task_lease_seconds: int = Field(default=300, ge=1, le=3600)
     agent_team_dispatch_interval_seconds: int = Field(default=2, ge=1, le=60)
     agent_team_default_max_attempts: int = Field(default=3, ge=1, le=10)
+    # 授权渗透测试七阶段流水线;探测类动作全部走既有沙箱单槽,
+    # 这里只约束 LLM 推演线的并发上限与阶段产物尺寸。
+    pentest_enabled: bool = True
+    pentest_max_parallel_lines: int = Field(default=2, ge=1, le=4)
+    pentest_max_hypotheses: int = Field(default=6, ge=1, le=12)
+    pentest_max_window_hours: int = Field(default=24, ge=1, le=168)
+    pentest_line_output_max_chars: int = Field(default=12000, ge=2000, le=60000)
     agent_knowledge_fetch_timeout: int = 15
     agent_knowledge_fetch_max_bytes: int = 1024 * 1024
     agent_knowledge_allow_private_urls: bool = False

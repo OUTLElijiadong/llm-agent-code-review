@@ -44,6 +44,9 @@ EXPECTED_FIXED_TOOL_NAMES = [
     "audit_security_for_task",
     "audit_security_for_project",
     "run_full_project_validation",
+    "create_pentest_engagement",
+    "start_pentest_engagement",
+    "get_pentest_status",
     "run_project_tests",
     "deploy_project_sandbox",
     "close_sandbox",
@@ -162,7 +165,7 @@ def test_fixed_tool_registry_has_stable_unique_names() -> None:
     """固定工具注册表应成为唯一名称来源且不含重复项。"""
     names = get_fixed_tool_names()
 
-    assert len(names) == 50
+    assert len(names) == 53  # 50 + 3 个渗透测试工具
     assert len(names) == len(set(names))
     assert names == EXPECTED_FIXED_TOOL_NAMES
     assert names[0] == "list_agents"

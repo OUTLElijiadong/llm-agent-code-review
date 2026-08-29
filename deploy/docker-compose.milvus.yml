@@ -1,0 +1,81 @@
+# Milvus standalone 演示 profile(本地/论文演示用,默认不启动,不接入生产)
+#
+# 启动: docker compose -f deploy/docker-compose.milvus.yml --profile milvus up -d
+# 访问: attu 管理台 http://localhost:3001 (用户 minioadmin/minioadmin)
+# 结论与设计见 docs/Milvus向量库评估与设计.md —— 生产暂不接入,切换条件见该文档第 2 节。
+services:
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.16
+    profiles: ["milvus"]
+    container_name: milvus-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+    volumes:
+      - milvus-etcd:/etcd
+    command: etcd -advertise-client-urls=http://milvus-etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    restart: unless-stopped
+    mem_limit: 512m
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: ["milvus"]
+    container_name: milvus-minio
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - milvus-minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    mem_limit: 768m
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.5.6
+    profiles: ["milvus"]
+    container_name: milvus-standalone
+    depends_on:
+      - milvus-etcd
+      - milvus-minio
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+    volumes:
+      - milvus-data:/var/lib/milvus
+    command: ["milvus", "run", "standalone"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 5
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    restart: unless-stopped
+    mem_limit: 2048m
+
+  # 可视化管理台(collection/partition/segment/索引一目了然,论文演示友好)
+  milvus-attu:
+    image: zilliz/attu:v2.5
+    profiles: ["milvus"]
+    container_name: milvus-attu
+    depends_on:
+      - milvus-standalone
+    environment:
+      MILVUS_URL: milvus-standalone:19530
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+    mem_limit: 256m
+
+volumes:
+  milvus-etcd:
+  milvus-minio:
+  milvus-data:

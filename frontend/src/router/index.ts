@@ -55,6 +55,24 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '发起审查', permissions: ['review:start'] },
       },
       {
+        path: 'pentests',
+        name: 'PentestList',
+        component: () => import('@/views/pentest/PentestList.vue'),
+        meta: { title: '渗透测试', permissions: ['pentest:view'] },
+      },
+      {
+        path: 'pentests/start',
+        name: 'PentestStart',
+        component: () => import('@/views/pentest/PentestStart.vue'),
+        meta: { title: '发起渗透测试', permissions: ['pentest:start'] },
+      },
+      {
+        path: 'pentests/:publicId',
+        name: 'PentestDetail',
+        component: () => import('@/views/pentest/PentestDetail.vue'),
+        meta: { title: '渗透测试详情', permissions: ['pentest:view'] },
+      },
+      {
         path: 'rules',
         name: 'RuleConfig',
         component: () => import('@/views/rule/RuleConfig.vue'),

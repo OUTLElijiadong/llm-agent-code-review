@@ -23,6 +23,7 @@ _MODEL_MODULES = (
     "app.models.code_file",
     "app.models.code_version",
     "app.models.custom_agent",
+    "app.models.pentest",
     "app.models.project",
     "app.models.project_import_task",
     "app.models.project_source_archive",

@@ -22,6 +22,8 @@ export const REVIEW_TYPE_LABELS: Record<string, string> = {
   performance: '性能审查',
   full: '全面审查',
   discuss: '圆桌讨论',
+  sandbox_test: '沙箱黑白盒测试',
+  pentest: '渗透测试',
 }
 
 /**

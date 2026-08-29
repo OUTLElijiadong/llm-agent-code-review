@@ -31,6 +31,7 @@ from app.api.v1 import (
     llm_config,
     maintenance,
     mcp_governance,
+    pentest,
     project_members,
     projects,
     rbac,
@@ -83,3 +84,5 @@ api_router.include_router(admin_agent_releases.router, prefix="/admin/agent-rele
 api_router.include_router(beta_invites.router, prefix="/admin/beta-codes", tags=["内测码管理"])
 # RBAC 权限管理(角色/权限/菜单/数据范围,全部要求管理员身份)
 api_router.include_router(rbac.router, prefix="/rbac", tags=["RBAC权限管理"])
+# 授权渗透测试(七阶段流水线, 创建/授权/启动/进度/取消)
+api_router.include_router(pentest.router, prefix="/pentest", tags=["渗透测试"])

@@ -835,8 +835,8 @@ class TestPermissionCodes:
     """权限点常量定义测试"""
 
     def test_all_permission_codes_count(self):
-        """ALL_PERMISSION_CODES 应包含 56 个权限点"""
-        assert len(ALL_PERMISSION_CODES) == 56
+        """ALL_PERMISSION_CODES 应包含 59 个权限点(56+渗透测试 3 项)"""
+        assert len(ALL_PERMISSION_CODES) == 59
 
     def test_permission_code_values_unique(self):
         """所有权限编码应唯一"""

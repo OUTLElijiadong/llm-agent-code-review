@@ -245,6 +245,34 @@ class FullProjectValidationArguments(FixedToolArguments):
     )
 
 
+class CreatePentestEngagementArguments(FixedToolArguments):
+    """创建授权渗透测试委托(draft)的参数。
+
+    只创建草稿;授权确认必须由用户在前端完成(授权门红线)。
+    """
+
+    project_id: int = Field(gt=0, description="项目 ID")
+    target_type: Literal["web", "mobile", "internal", "host", "iot", "api", "wireless"] = Field(
+        default="web",
+        description="目标类型;内网/无线为纯推演档位,移动/IoT为静态分析档位",
+    )
+    task_name: str = Field(default="", max_length=100, description="任务名称")
+    notes: str = Field(default="", max_length=2000, description="范围补充说明(授权依据/资产归属等)")
+
+
+class StartPentestEngagementArguments(FixedToolArguments):
+    """启动已授权渗透测试委托的参数(仅 authorized 状态可用)。"""
+
+    engagement_public_id: str = Field(max_length=64, description="委托 public_id(pt- 开头)")
+
+
+class GetPentestStatusArguments(FixedToolArguments):
+    """查询渗透测试委托进度的参数。"""
+
+    engagement_public_id: str = Field(default="", max_length=64, description="委托 public_id")
+    project_id: Optional[int] = Field(default=None, description="可选项目 ID, 取该项目最近一条委托")
+
+
 class DeployProjectSandboxArguments(FixedToolArguments):
     """部署持续沙箱的固定参数。"""
 
@@ -624,6 +652,25 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
         "run_full_project_validation",
         "上传完成后自动调用组合沙箱，完成部署核验、受控补全、完整运行、白盒/黑盒测试和多 Agent 证据报告",
         FullProjectValidationArguments,
+        True,
+    ),
+    FixedToolContract(
+        "create_pentest_engagement",
+        "创建授权渗透测试委托草稿(七阶段: 前期交互/情报收集/威胁建模/漏洞探测/受控验证/后渗透推演/报告)。"
+        "仅创建草稿;用户必须在前端『渗透测试』页完成规则签署与时间窗授权后才能启动",
+        CreatePentestEngagementArguments,
+        True,
+    ),
+    FixedToolContract(
+        "start_pentest_engagement",
+        "启动一条已在前端完成授权确认的渗透测试委托;未授权委托会被拒绝并返回授权入口",
+        StartPentestEngagementArguments,
+        True,
+    ),
+    FixedToolContract(
+        "get_pentest_status",
+        "查询渗透测试委托的阶段进度、推演线与发现统计;可按委托 ID 或项目查询",
+        GetPentestStatusArguments,
         True,
     ),
     FixedToolContract(

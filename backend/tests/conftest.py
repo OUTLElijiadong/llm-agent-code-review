@@ -59,6 +59,12 @@ from app.models.code_file import CodeFile  # noqa: F401,E402
 from app.models.code_version import CodeVersion  # noqa: F401,E402
 from app.models.eval_case import EvalCase  # noqa: F401,E402
 from app.models.evolution_proposal import EvolutionProposal  # noqa: F401,E402
+from app.models.pentest import (  # noqa: F401,E402 -- 授权渗透测试域
+    PentestEngagement,
+    PentestFinding,
+    PentestLineRun,
+    PentestPhaseRun,
+)
 from app.models.project import Project  # noqa: F401,E402
 from app.models.project_import_task import ProjectImportTask  # noqa: F401,E402
 from app.models.project_member import ProjectMember  # noqa: F401,E402  -- v2.4

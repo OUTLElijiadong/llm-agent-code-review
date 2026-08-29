@@ -106,6 +106,11 @@ class PermissionCode:
     SERVER_OPS_EXECUTE = "server_ops:execute"  # 执行需要批准的运维变更
     SERVER_OPS_CRITICAL = "server_ops:critical"  # 执行完全权限高危变更
 
+    # === pentest 模块(3): 授权渗透测试 ===
+    PENTEST_VIEW = "pentest:view"  # 查看渗透测试委托与发现
+    PENTEST_START = "pentest:start"  # 发起并授权渗透测试
+    PENTEST_MANAGE = "pentest:manage"  # 管控全部用户的渗透测试委托
+
 
 # 模块 → 权限编码列表的映射,便于按模块批量校验或前端渲染
 PERMISSIONS_BY_MODULE: dict[str, list[str]] = {
@@ -186,6 +191,11 @@ PERMISSIONS_BY_MODULE: dict[str, list[str]] = {
         PermissionCode.SERVER_OPS_VIEW,
         PermissionCode.SERVER_OPS_EXECUTE,
         PermissionCode.SERVER_OPS_CRITICAL,
+    ],
+    "pentest": [
+        PermissionCode.PENTEST_VIEW,
+        PermissionCode.PENTEST_START,
+        PermissionCode.PENTEST_MANAGE,
     ],
 }
 
