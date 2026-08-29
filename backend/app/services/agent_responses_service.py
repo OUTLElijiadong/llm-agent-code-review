@@ -1633,6 +1633,22 @@ class PrismToolExecutor:
             "arguments": _redact_event_value(self._persisted_arguments(call)),
             **extra,
         }
+        # 同步广播到全局 AgentEventBus: Agent 中心工位卡因此能看到小菱
+        # 「正在工作」;事件按 user_id 隔离,只推给运行所属用户。
+        if event_type == "response.tool.started":
+            try:
+                from app.agents.event_bus import emit_event
+                from app.agents.events import AgentEventType
+
+                emit_event(
+                    AgentEventType.PROGRESS,
+                    "chat_assistant",
+                    self._run_id,
+                    message=f"小菱正在执行工具: {call.name}",
+                    user_id=int(self._user.id),
+                )
+            except Exception:  # noqa: BLE001 - 状态广播失败不影响工具执行
+                logger.debug("小菱工具事件广播失败", call_name=call.name)
         await _emit(self._event_sink, event)
 
     async def _emit_tool_result(

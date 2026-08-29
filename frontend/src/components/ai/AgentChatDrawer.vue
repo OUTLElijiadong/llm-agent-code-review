@@ -1308,8 +1308,16 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         )
         finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
-        // 导航不再自动跳转:PRISM_NAVIGATE 已由 AgentNavLink 渲染为「前往页面」按钮,
-        // 是否跳转交给用户点击确认,且跳转不关闭悬浮窗。
+        // 导航自动执行:回复正常结束后,虚拟鼠标滑向界面上的目标入口、
+        // 模拟真实点击并跳转页面(用户可见「小菱点的是这里」)。
+        // 「前往页面」按钮保留为降级入口(reduced-motion/光标未挂载时仍可手动点击);
+        // 失败/取消的回复不自动跳转;跳转不关闭悬浮窗。
+        if (event.type === 'response.completed' && !protocolError && textTarget?.navigations?.length) {
+          const directive = textTarget.navigations.find(
+            (item) => isNavigationPathAllowed(router, item.route, userStore),
+          )
+          if (directive) followNavigation(directive)
+        }
       }
       void nextTick().then(scrollToBottom)
     },

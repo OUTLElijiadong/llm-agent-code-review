@@ -1,6 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Plugin } from 'vue'
 
 const streams = vi.hoisted(() => ({
   start: vi.fn(),
@@ -36,10 +37,11 @@ vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages
 import AgentChatDrawer from './AgentChatDrawer.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 
-function mountDrawer(prefill?: string): VueWrapper {
+function mountDrawer(prefill?: string, extraPlugins: Plugin[] = []): VueWrapper {
   return mount(AgentChatDrawer, {
     props: { visible: true, prefill },
     global: {
+      plugins: extraPlugins,
       stubs: {
         Teleport: true,
         Transition: false,
@@ -143,8 +145,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-async function mountReadyDrawer(prefill?: string): Promise<VueWrapper> {
-  const wrapper = mountDrawer(prefill)
+async function mountReadyDrawer(prefill?: string, extraPlugins: Plugin[] = []): Promise<VueWrapper> {
+  const wrapper = mountDrawer(prefill, extraPlugins)
   await flushPromises()
   return wrapper
 }
@@ -562,7 +564,7 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(1)
   })
 
-  it('导航指令完成后渲染为确认按钮,不自动跳转', async () => {
+  it('导航指令完成后渲染为确认按钮(无路由测试环境不自动跳转)', async () => {
     const wrapper = await mountReadyDrawer()
     await wrapper.find('.chat-input').setValue('帮我看看审查记录')
     void wrapper.find('.send-btn').trigger('click')
@@ -576,7 +578,7 @@ describe('AgentChatDrawer Responses stream', () => {
     emit(0, { type: 'response.completed', response: { id: 'run-nav' } })
     await finish(0)
 
-    // 不自动跳转:悬浮窗不关闭、router 未被调用(组件内无 router mock,跳转会报错),
+    // 测试环境未装路由: 守卫返回 false, 不自动跳转(悬浮窗不关闭),
     // 指令被剥离正文并渲染为导航确认按钮
     expect(wrapper.emitted('update:visible')).toBeFalsy()
     expect(wrapper.find('.nav-directives').exists()).toBe(true)
@@ -584,6 +586,41 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(navText).toContain('查看审查记录')
     // 正文里不残留 PRISM_NAVIGATE 指令
     expect(wrapper.find('.msg-row.assistant .markdown-body').text()).not.toContain('PRISM_NAVIGATE')
+    wrapper.unmount()
+  })
+
+  it('回复正常结束后自动触发虚拟鼠标导航(小菱模拟点击跳转页面)', async () => {
+    // 装真实 memory 路由: 守卫放行 /reviews, 自动跟随会经虚拟鼠标导航事件
+    // 兜底执行 router.push(VirtualCursor 未挂载时 requestXiaolingNavigation 直接执行回调)
+    const { createRouter, createMemoryHistory } = await import('vue-router')
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { template: '<div />' } },
+        { path: '/reviews', component: { template: '<div />' } },
+      ],
+    })
+    const pushSpy = vi.spyOn(router, 'push').mockResolvedValue(undefined)
+    // 导航守卫要求已登录: 给真实 user store 注入 token
+    const { useUserStore } = await import('@/stores/user')
+    useUserStore().token = 'test-token'
+    const wrapper = await mountReadyDrawer(undefined, [router])
+    await wrapper.find('.chat-input').setValue('带我去看审查记录')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    emit(0, {
+      type: 'response.output_text.delta',
+      delta: '好的,正在为你打开审查记录。\n\n<!--PRISM_NAVIGATE {"action":"navigate","route":"/reviews","label":"查看审查记录"}-->',
+    })
+    await flushPromises()
+    emit(0, { type: 'response.completed', response: { id: 'run-auto-nav' } })
+    await finish(0)
+    await settleAll()
+
+    // 虚拟鼠标导航已触发并完成跳转; 悬浮窗保持打开(跳转不关窗)
+    expect(pushSpy).toHaveBeenCalledWith('/reviews')
+    expect(wrapper.emitted('update:visible')).toBeFalsy()
     wrapper.unmount()
   })
 

@@ -910,6 +910,22 @@ async def stream_agent_response(
                     mesh_message_id = active_row.mesh_message_id if active_row is not None else ""
 
                 try:
+                    # 运行级状态广播: Agent 中心工位卡实时显示「小菱正在工作」。
+                    # 事件走全局 AgentEventBus, 按 user_id 隔离; 广播失败不影响运行。
+                    if payload.action in {"start", "resume", "approve"}:
+                        try:
+                            from app.agents.event_bus import emit_event
+                            from app.agents.events import AgentEventType
+
+                            emit_event(
+                                AgentEventType.DISPATCH,
+                                "chat_assistant",
+                                run_id,
+                                message="小菱开始处理请求",
+                                user_id=int(run_user.id),
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
                     if payload.action == "start":
                         result = await service.start(messages, run_id=run_id, event_sink=sink)
                     elif payload.action == "cancel":
@@ -923,6 +939,29 @@ async def stream_agent_response(
                             confirmation=payload.confirmation,
                             event_sink=sink,
                         )
+                    if payload.action in {"start", "resume", "approve"}:
+                        try:
+                            from app.agents.event_bus import emit_event
+                            from app.agents.events import AgentEventType
+
+                            if result.status == "completed":
+                                terminal_event = AgentEventType.COMPLETE
+                                terminal_message = "小菱已完成本轮任务"
+                            elif result.status == "failed":
+                                terminal_event = AgentEventType.FAILED
+                                terminal_message = "小菱本轮任务失败"
+                            else:
+                                terminal_event = AgentEventType.PROGRESS
+                                terminal_message = "小菱等待用户确认中"
+                            emit_event(
+                                terminal_event,
+                                "chat_assistant",
+                                run_id,
+                                message=terminal_message,
+                                user_id=int(run_user.id),
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
                     if mesh_message_id:
                         response_row = (
                             run_db.query(AgentResponseRun)
@@ -948,6 +987,20 @@ async def stream_agent_response(
                             )
                     return result
                 except Exception as exc:
+                    if payload.action in {"start", "resume", "approve"}:
+                        try:
+                            from app.agents.event_bus import emit_event
+                            from app.agents.events import AgentEventType
+
+                            emit_event(
+                                AgentEventType.FAILED,
+                                "chat_assistant",
+                                run_id,
+                                message=f"小菱运行异常: {str(exc)[:120]}",
+                                user_id=int(run_user.id),
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
                     if mesh_message_id:
                         try:
                             agent_mesh_service.finish_message_run(
