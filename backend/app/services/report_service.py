@@ -292,4 +292,18 @@ def delete_report(db: Session, user: User, task_id: int) -> None:
     if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无权限删除此报告", code=40300)
     task.status = "deleted"
+    # 渗透报告删除联动: 清空委托的 report_task_id, 防止详情页"查看报告"跳 404
+    if task.review_type == "pentest":
+        try:
+            from app.models.pentest import PentestEngagement
+
+            engagement = (
+                db.query(PentestEngagement)
+                .filter(PentestEngagement.report_task_id == int(task_id))
+                .first()
+            )
+            if engagement is not None:
+                engagement.report_task_id = None
+        except Exception:  # noqa: BLE001 - 联动失败不阻断报告删除
+            pass
     db.commit()

@@ -1297,6 +1297,20 @@ class PrismToolExecutor:
             return ToolExecutionResult.failure(str(exc))
         except AppError as exc:
             return ToolExecutionResult.failure(str(exc))
+        # 审计留痕与 REST 路径同源(agent 工具不能绕过审计链)
+        try:
+            from app.services import audit_service
+
+            audit_service.log(
+                self._db,
+                self._user,
+                "pentest_create",
+                target_type="pentest_engagement",
+                target_id=str(data["public_id"]),
+                detail=f"小菱创建渗透测试委托({data.get('target_type_label', '')})",
+            )
+        except Exception:  # noqa: BLE001 - 审计失败不影响工具结果
+            logger.debug("pentest_create 审计落库失败")
         return ToolExecutionResult.success(
             {
                 "engagement_public_id": data["public_id"],
@@ -1327,6 +1341,20 @@ class PrismToolExecutor:
             return ToolExecutionResult.failure(str(exc))
         except AppError as exc:
             return ToolExecutionResult.failure(str(exc))
+        # 审计留痕与 REST 路径同源(agent 工具不能绕过审计链)
+        try:
+            from app.services import audit_service
+
+            audit_service.log(
+                self._db,
+                self._user,
+                "pentest_start",
+                target_type="pentest_engagement",
+                target_id=str(data["public_id"]),
+                detail="小菱启动七阶段渗透测试流水线",
+            )
+        except Exception:  # noqa: BLE001 - 审计失败不影响工具结果
+            logger.debug("pentest_start 审计落库失败")
         return ToolExecutionResult.success(
             {
                 "engagement_public_id": data["public_id"],

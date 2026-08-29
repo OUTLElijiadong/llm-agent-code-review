@@ -132,10 +132,14 @@ class Settings(BaseSettings):
     # 授权渗透测试七阶段流水线;探测类动作全部走既有沙箱单槽,
     # 这里只约束 LLM 推演线的并发上限与阶段产物尺寸。
     pentest_enabled: bool = True
-    pentest_max_parallel_lines: int = Field(default=2, ge=1, le=4)
+    pentest_max_parallel_lines: int = Field(default=4, ge=1, le=4)
     pentest_max_hypotheses: int = Field(default=6, ge=1, le=12)
     pentest_max_window_hours: int = Field(default=24, ge=1, le=168)
     pentest_line_output_max_chars: int = Field(default=12000, ge=2000, le=60000)
+    # 沙箱探测死线(秒): 轮询 3s 一拍, 达死线仍非终态即回收环境降级继续
+    pentest_probe_wait_seconds: int = Field(default=480, ge=60, le=1800)
+    # 单条推演线墙钟上限(秒): 含 LLM 重试在内, 超时线标失败不拖死阶段
+    pentest_line_timeout: int = Field(default=420, ge=60, le=3600)
     agent_knowledge_fetch_timeout: int = 15
     agent_knowledge_fetch_max_bytes: int = 1024 * 1024
     agent_knowledge_allow_private_urls: bool = False

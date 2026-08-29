@@ -133,6 +133,19 @@ async def lifespan(app: FastAPI):
                 _jarvis_cleanup["messages"],
                 _jarvis_cleanup["runs"],
             )
+        # 渗透流水线是进程内线程: 重启后 running 委托必为孤儿, 须转 failed 可重跑
+        try:
+            from app.services import pentest_service as _pentest_service
+
+            _pentest_swept = _pentest_service.sweep_stale_engagements(_sweep_db)
+            if _pentest_swept:
+                from loguru import logger as _logger
+
+                _logger.warning("[startup] 清扫 {} 个重启遗留的 running 渗透委托", _pentest_swept)
+        except Exception:  # noqa: BLE001 - 清扫失败不阻断启动(下次重启再试)
+            from loguru import logger as _logger
+
+            _logger.exception("[startup] 渗透委托清扫失败(不阻断启动)")
     finally:
         _sweep_db.close()
 
