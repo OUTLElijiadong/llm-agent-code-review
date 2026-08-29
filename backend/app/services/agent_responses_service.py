@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import inspect
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -103,6 +104,8 @@ from app.services.user_capability_registry import (
     execution_tool_schema as user_execution_tool_schema,
 )
 from app.utils.api_resolver import ApiConfig, resolve_api_config
+
+logger = logging.getLogger(__name__)
 
 EventSink = Callable[[Mapping[str, Any]], Optional[Awaitable[None]]]
 SessionValidator = Callable[[], bool]
