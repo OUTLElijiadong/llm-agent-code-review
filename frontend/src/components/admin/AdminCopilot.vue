@@ -154,6 +154,11 @@ const ASSISTANT_NAME = '小菱 · 管理副驾驶'
 const MASCOT_NAME = '小菱'
 const WELCOME_TEXT = `你好,我是${MASCOT_NAME},Prism 的管理副驾驶!我可以帮你巡查系统态势、审批运维操作、生成平台报表。点击「+」可开新对话,多个任务并行处理。`
 const LEGACY_SESSION_KEY = 'prism-admin-copilot-session'
+const PANEL_POSITION_KEY = 'prism-floating-chat-position:admin'
+const COMPACT_DESKTOP_MIN_WIDTH = 1100
+const COMPACT_DESKTOP_MAX_WIDTH = 1366
+const COMPACT_DESKTOP_MIN_HEIGHT = 520
+const COMPACT_DESKTOP_ACTION_GUTTER = 360
 
 const visible = ref(false)
 const loading = ref(false)
@@ -184,6 +189,47 @@ const unreadAlerts = ref(0)
 const messageArea = ref<HTMLElement | null>(null)
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('admin')
 const expandedTables = ref<Set<string>>(new Set())
+
+function compactDesktopAnchor(panel: HTMLElement): { left: number; top: number } | null {
+  if (
+    window.innerWidth < COMPACT_DESKTOP_MIN_WIDTH
+    || window.innerWidth > COMPACT_DESKTOP_MAX_WIDTH
+    || window.innerHeight <= COMPACT_DESKTOP_MIN_HEIGHT
+  ) return null
+  const panelWidth = panel.offsetWidth || 400
+  const panelHeight = panel.offsetHeight || 620
+  return {
+    left: Math.max(12, window.innerWidth - panelWidth - COMPACT_DESKTOP_ACTION_GUTTER),
+    top: Math.max(12, window.innerHeight - panelHeight - 24),
+  }
+}
+
+function restorePanelPosition(): void {
+  const panel = panelRef.value
+  if (!panel) return
+  const compactAnchor = compactDesktopAnchor(panel)
+  let hasSavedPosition = false
+  try {
+    hasSavedPosition = window.localStorage.getItem(PANEL_POSITION_KEY) !== null
+  } catch { /* 存储不可用时回退到原始停靠逻辑 */ }
+
+  if (compactAnchor && !hasSavedPosition) {
+    try {
+      // 借用现有浮窗坐标入口注入一次性默认点，不把自动停靠写成用户偏好。
+      window.localStorage.setItem(PANEL_POSITION_KEY, JSON.stringify(compactAnchor))
+      restoreOrAnchor()
+      window.localStorage.removeItem(PANEL_POSITION_KEY)
+      return
+    } catch { /* 交给原有位置算法 */ }
+  }
+
+  restoreOrAnchor()
+}
+
+function handlePanelViewportResize(): void {
+  if (!visible.value) return
+  restorePanelPosition()
+}
 
 const messages = ref<ChatEntry[]>([])
 const sessionRun = ref<AgentResponseSession['run']>(null)
@@ -930,7 +976,7 @@ async function openPanel(): Promise<void> {
   visible.value = true
   unreadAlerts.value = 0
   await nextTick()
-  restoreOrAnchor()
+  restorePanelPosition()
   switcherRef.value?.ensureFreshOnOpen()
   await scrollToBottom()
 }
@@ -1446,6 +1492,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
+  window.removeEventListener('resize', handlePanelViewportResize)
   window.removeEventListener('prism:open-admin-copilot', handleExternalOpen)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
@@ -1465,6 +1512,7 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
+  window.addEventListener('resize', handlePanelViewportResize)
   window.addEventListener('prism:open-admin-copilot', handleExternalOpen)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })

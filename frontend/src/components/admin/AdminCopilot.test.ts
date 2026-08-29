@@ -878,3 +878,115 @@ describe('AdminCopilot 历史bug回归(本PR补齐项)', () => {
     wrapper.unmount()
   })
 })
+
+describe('AdminCopilot 窄桌面布局回归', () => {
+  function setViewport(width: number, height: number): () => void {
+    const previousWidth = window.innerWidth
+    const previousHeight = window.innerHeight
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: height })
+    return () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: previousWidth })
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: previousHeight })
+    }
+  }
+
+  function mockPanelSize(width: number, height: number): () => void {
+    const widthSpy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('copilot-panel') ? width : 0
+      })
+    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('copilot-panel') ? height : 0
+      })
+    return () => {
+      widthSpy.mockRestore()
+      heightSpy.mockRestore()
+    }
+  }
+
+  it('1280x800 默认展开时不覆盖用户管理表格右侧操作区', async () => {
+    const restoreViewport = setViewport(1280, 800)
+    const restorePanelSize = mockPanelSize(400, 620)
+    const wrapper = mountCopilot()
+
+    try {
+      await openCopilot(wrapper)
+      await flushSessionRestore()
+
+      const panel = wrapper.find<HTMLElement>('.copilot-panel').element
+      const panelLeft = Number.parseFloat(panel.style.left)
+      const panelRight = panelLeft + panel.offsetWidth
+      // 1280px 线上实测中，用户表格首个右侧操作按钮从 x=933 开始。
+      // 浮层不与该命中区相交，elementFromPoint 才会命中表格按钮。
+      expect(panelRight).toBeLessThanOrEqual(933)
+      expect(window.localStorage.getItem('prism-floating-chat-position:admin')).toBeNull()
+    } finally {
+      wrapper.unmount()
+      restorePanelSize()
+      restoreViewport()
+    }
+  })
+
+  it('1280x800 安全停靠后仍可拖动并保存位置', async () => {
+    const restoreViewport = setViewport(1280, 800)
+    const restorePanelSize = mockPanelSize(400, 620)
+    const wrapper = mountCopilot()
+
+    try {
+      await openCopilot(wrapper)
+      await flushSessionRestore()
+      const panel = wrapper.find<HTMLElement>('.copilot-panel')
+      const handle = wrapper.find<HTMLElement>('.panel-drag-handle')
+      const initialLeft = Number.parseFloat(panel.element.style.left)
+
+      await handle.trigger('pointerdown', {
+        button: 0,
+        clientX: initialLeft + 12,
+        clientY: 180,
+        pointerId: 1,
+      })
+      await panel.trigger('pointermove', {
+        clientX: initialLeft - 68,
+        clientY: 180,
+        pointerId: 1,
+      })
+      await panel.trigger('pointerup', { pointerId: 1 })
+
+      expect(Number.parseFloat(panel.element.style.left)).toBe(initialLeft - 80)
+      expect(window.localStorage.getItem('prism-floating-chat-position:admin')).toContain(`"left":${initialLeft - 80}`)
+    } finally {
+      wrapper.unmount()
+      restorePanelSize()
+      restoreViewport()
+    }
+  })
+
+  it('520px 以下仍由移动端 inset 布局接管且禁止拖动', async () => {
+    const restoreViewport = setViewport(390, 844)
+    const restorePanelSize = mockPanelSize(366, 620)
+    const wrapper = mountCopilot()
+
+    try {
+      await openCopilot(wrapper)
+      await flushSessionRestore()
+      const panel = wrapper.find<HTMLElement>('.copilot-panel')
+
+      expect(panel.element.style.left).toBe('')
+      await wrapper.find('.panel-drag-handle').trigger('pointerdown', {
+        button: 0,
+        clientX: 24,
+        clientY: 24,
+        pointerId: 1,
+      })
+      await panel.trigger('pointermove', { clientX: 100, clientY: 100, pointerId: 1 })
+      expect(panel.classes()).not.toContain('is-dragging')
+      expect(panel.element.style.left).toBe('')
+    } finally {
+      wrapper.unmount()
+      restorePanelSize()
+      restoreViewport()
+    }
+  })
+})
