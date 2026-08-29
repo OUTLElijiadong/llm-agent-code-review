@@ -7,6 +7,7 @@ import type { SecurityDashboardSummaryOut } from '@/types/security'
 const mocks = vi.hoisted(() => ({
   getDashboard: vi.fn(),
   routerPush: vi.fn(),
+  permissions: new Set<string>(),
 }))
 
 vi.mock('@/api/security', () => ({
@@ -15,6 +16,12 @@ vi.mock('@/api/security', () => ({
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: mocks.routerPush }),
+}))
+
+vi.mock('@/stores/user', () => ({
+  useUserStore: () => ({
+    hasPermission: (code: string) => mocks.permissions.has(code),
+  }),
 }))
 
 import SecurityPostureCard from './SecurityPostureCard.vue'
@@ -92,6 +99,11 @@ function deferred<T>(): {
 function resetComponentMocks(): void {
   mocks.getDashboard.mockReset()
   mocks.routerPush.mockReset()
+  mocks.permissions.clear()
+  mocks.permissions.add('project:view')
+  mocks.permissions.add('project:create')
+  mocks.permissions.add('security:scan')
+  mocks.permissions.add('security:view')
 }
 
 beforeEach(resetComponentMocks)
@@ -149,6 +161,37 @@ describe('SecurityPostureCard', () => {
     expect(wrapper.find('.state-empty').text()).toContain('3 个项目还没做过安全审计')
     await wrapper.find('.state-empty button').trigger('click')
     expect(mocks.routerPush).toHaveBeenCalledWith('/projects')
+  })
+
+  it('hides unavailable project and scan actions for a read-only account', async () => {
+    mocks.permissions.clear()
+    mocks.getDashboard.mockResolvedValueOnce({
+      ...baseSummary,
+      project_count: 0,
+      scanned_project_count: 0,
+      avg_risk_score: null,
+      owasp_hotspots: [],
+      top_risky_projects: [],
+      trend: [],
+    })
+    const emptyWrapper = mountCard()
+    await flushPromises()
+    expect(emptyWrapper.find('.state-empty button').exists()).toBe(false)
+    emptyWrapper.unmount()
+
+    mocks.getDashboard.mockResolvedValueOnce({
+      ...baseSummary,
+      project_count: 2,
+      scanned_project_count: 0,
+      avg_risk_score: null,
+      owasp_hotspots: [],
+      top_risky_projects: [],
+      trend: [],
+    })
+    const unscannedWrapper = mountCard()
+    await flushPromises()
+    expect(unscannedWrapper.find('.state-empty button').exists()).toBe(false)
+    unscannedWrapper.unmount()
   })
 
   it('shows a recoverable error and retries successfully', async () => {

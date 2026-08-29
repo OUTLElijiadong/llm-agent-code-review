@@ -66,7 +66,7 @@
       <template v-else-if="fileDetail">
         <div class="editor-toolbar">
           <span class="toolbar-lang">{{ fileDetail.language }}</span>
-          <el-button type="primary" size="small" :loading="saving" @click="handleSave">
+          <el-button v-if="canEdit" type="primary" size="small" :loading="saving" @click="handleSave">
             保存 (Ctrl+S)
           </el-button>
         </div>
@@ -74,6 +74,7 @@
           v-model="codeContent"
           :language="editorLang"
           :height="'calc(100vh - 180px)'"
+          :readonly="!canEdit"
         />
       </template>
       <EmptyState v-else-if="!loading" description="文件不存在或已删除" />
@@ -101,9 +102,12 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import { getDetail, update, downloadBinary } from '@/api/codeFile'
 import type { CodeFileDetailOut } from '@/types/project'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const canEdit = computed(() => userStore.hasPermission('file:edit'))
 
 const fileId = Number(route.params.fileId)
 
@@ -206,7 +210,7 @@ async function fetchDetail(): Promise<void> {
  * 保存文件(仅文本文件可调用)
  */
 async function handleSave(): Promise<void> {
-  if (saving.value || !fileDetail.value || isBinary.value) return
+  if (!canEdit.value || saving.value || !fileDetail.value || isBinary.value) return
   saving.value = true
   try {
     const result = await update(fileId, { content: codeContent.value })
@@ -249,7 +253,7 @@ async function handleDownload(): Promise<void> {
 function onKeydown(e: KeyboardEvent): void {
   if ((e.metaKey || e.ctrlKey) && e.key === 's') {
     e.preventDefault()
-    if (!isBinary.value) handleSave()
+    if (canEdit.value && !isBinary.value) handleSave()
   }
 }
 

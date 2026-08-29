@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ArrowRight, FolderOpened, Lock } from '@element-plus/icons-vue'
 import { getSecurityDashboard } from '@/api/security'
 import type { SecurityDashboardSummaryOut, TrendPointOut } from '@/types/security'
+import { useUserStore } from '@/stores/user'
 
 interface Props {
   days?: number
@@ -14,9 +15,14 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const router = useRouter()
+const userStore = useUserStore()
 const loading = ref(false)
 const data = ref<SecurityDashboardSummaryOut | null>(null)
 const error = ref('')
+const canViewSecurity = computed(() => userStore.hasPermission('security:view'))
+const canViewProjects = computed(() => userStore.hasPermission('project:view'))
+const canCreateProject = computed(() => userStore.hasPermission('project:create'))
+const canScan = computed(() => userStore.hasPermission('security:scan'))
 
 const scoreColor = computed(() => {
   const s = data.value?.avg_risk_score
@@ -126,6 +132,7 @@ async function loadDashboard(): Promise<void> {
  * @returns 无返回值
  */
 function gotoSecurityCenter(): void {
+  if (!canViewSecurity.value) return
   router.push('/security')
 }
 
@@ -134,6 +141,7 @@ function gotoSecurityCenter(): void {
  * @returns 无返回值
  */
 function gotoProject(projectId: number): void {
+  if (!canViewProjects.value) return
   router.push(`/projects/${projectId}`)
 }
 
@@ -141,6 +149,7 @@ function gotoProject(projectId: number): void {
  * @returns 无返回值
  */
 function gotoCreateProject(): void {
+  if (!canCreateProject.value || !canViewProjects.value) return
   router.push('/projects')
 }
 
@@ -148,6 +157,7 @@ function gotoCreateProject(): void {
  * @returns 无返回值
  */
 function gotoProjectList(): void {
+  if (!canScan.value || !canViewProjects.value) return
   router.push('/projects')
 }
 
@@ -162,7 +172,7 @@ onMounted(loadDashboard)
         <h3 class="font-display">项目安全态势</h3>
         <span class="head-range font-mono">近 {{ days }} 天</span>
       </div>
-      <a class="card-link" @click="gotoSecurityCenter">
+      <a v-if="canViewSecurity" class="card-link" @click="gotoSecurityCenter">
         安全中心 <el-icon><ArrowRight /></el-icon>
       </a>
     </header>
@@ -179,7 +189,7 @@ onMounted(loadDashboard)
         <el-icon><FolderOpened /></el-icon>
       </div>
       <div class="empty-text">还没有项目可分析</div>
-      <el-button size="small" type="primary" @click="gotoCreateProject">
+      <el-button v-if="canCreateProject && canViewProjects" size="small" type="primary" @click="gotoCreateProject">
         去创建项目
       </el-button>
     </div>
@@ -192,7 +202,7 @@ onMounted(loadDashboard)
       <div class="empty-text">
         你有 <b>{{ data?.project_count }}</b> 个项目还没做过安全审计
       </div>
-      <el-button size="small" type="primary" :icon="Lock" @click="gotoProjectList">
+      <el-button v-if="canScan && canViewProjects" size="small" type="primary" :icon="Lock" @click="gotoProjectList">
         开始扫描
       </el-button>
     </div>
@@ -284,8 +294,9 @@ onMounted(loadDashboard)
             v-for="p in data.top_risky_projects"
             :key="p.project_id"
             class="risky-item"
-            tabindex="0"
-            role="button"
+            :class="{ interactive: canViewProjects }"
+            :tabindex="canViewProjects ? 0 : undefined"
+            :role="canViewProjects ? 'button' : undefined"
             @click="gotoProject(p.project_id)"
             @keyup.enter="gotoProject(p.project_id)"
           >
@@ -570,12 +581,15 @@ onMounted(loadDashboard)
   padding: 8px 10px;
   background: rgba(255, 255, 255, 0.6);
   border-radius: 6px;
-  cursor: pointer;
   transition: all 0.15s ease;
   outline: none;
 
-  &:hover,
-  &:focus {
+  &.interactive {
+    cursor: pointer;
+  }
+
+  &.interactive:hover,
+  &.interactive:focus {
     background: #fff;
     box-shadow: 0 1px 4px rgba(220, 73, 97, 0.18);
   }

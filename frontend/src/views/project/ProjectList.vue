@@ -35,7 +35,13 @@
           :icon="Connection"
           @click="remoteVisible = true"
         >远程导入</el-button>
-        <el-button type="primary" :icon="Plus" @click="handleCreate">新建项目</el-button>
+        <el-button
+          v-if="canCreateProject"
+          data-testid="create-project-button"
+          type="primary"
+          :icon="Plus"
+          @click="handleCreate"
+        >新建项目</el-button>
       </div>
     </header>
 
@@ -186,8 +192,8 @@
           </tr>
           <tr v-if="!loading && projects.length === 0">
             <td colspan="9">
-              <EmptyState description="还没有项目，点击右上角新建一个吧">
-                <el-button type="primary" @click="handleCreate">+ 新建项目</el-button>
+              <EmptyState :description="canCreateProject ? '还没有项目，点击右上角新建一个吧' : '还没有可查看的项目'">
+                <el-button v-if="canCreateProject" type="primary" @click="handleCreate">+ 新建项目</el-button>
               </EmptyState>
             </td>
           </tr>
@@ -272,7 +278,7 @@
 
       <div v-if="!loading && projects.length === 0" class="card-empty">
         <EmptyState description="还没有项目">
-          <el-button type="primary" @click="handleCreate">+ 新建项目</el-button>
+          <el-button v-if="canCreateProject" type="primary" @click="handleCreate">+ 新建项目</el-button>
         </EmptyState>
       </div>
     </section>
@@ -355,6 +361,9 @@ import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const router = useRouter()
 const userStore = useUserStore()
+const canCreateProject = computed(() => userStore.hasPermission('project:create'))
+const canUpdateProject = computed(() => userStore.hasPermission('project:update'))
+const canDeleteProject = computed(() => userStore.hasPermission('project:delete'))
 
 const view = ref<'table' | 'card'>('table')
 
@@ -856,12 +865,14 @@ function handleReset(): void {
 }
 
 function handleCreate(): void {
+  if (!canCreateProject.value) return
   formMode.value = 'create'
   editingProject.value = null
   formVisible.value = true
 }
 
 function handleEdit(row: ProjectOut): void {
+  if (!canUpdateProject.value || !row.can_update) return
   formMode.value = 'edit'
   editingProject.value = row
   formVisible.value = true
@@ -872,6 +883,7 @@ function handleView(row: ProjectOut): void {
 }
 
 async function handleDelete(id: number): Promise<void> {
+  if (!canDeleteProject.value) return
   if (!await confirmDanger({ target: '删除该项目' })) return
   try {
     await deleteProject(id)
@@ -914,6 +926,7 @@ async function submitRemoteImport(): Promise<void> {
 
 async function onFormSubmit(data: { project_name: string; description?: string; language?: string; files?: File[] }): Promise<void> {
   if (formMode.value === 'create') {
+    if (!canCreateProject.value) return
     const { files, ...projectData } = data
     const result = await createProject(projectData)
     ElMessage.success('项目创建成功')
@@ -934,6 +947,7 @@ async function onFormSubmit(data: { project_name: string; description?: string; 
       }
     }
   } else if (editingProject.value) {
+    if (!canUpdateProject.value || !editingProject.value.can_update) return
     await updateProject(editingProject.value.id, data)
     ElMessage.success('项目更新成功')
   }

@@ -55,7 +55,7 @@
           @input="reloadDebounced"
           @change="reload"
         />
-        <el-button type="primary" :disabled="!selected.length" @click="onBatchMarkFixed">
+        <el-button v-if="canBatchIssues" type="primary" :disabled="!selected.length" @click="onBatchMarkFixed">
           批量标记已修复 ({{ selected.length }})
         </el-button>
       </div>
@@ -69,7 +69,7 @@
         empty-text="暂无问题"
         @selection-change="onSelectionChange"
       >
-        <el-table-column type="selection" width="50" />
+        <el-table-column v-if="canBatchIssues" type="selection" width="50" />
         <el-table-column prop="project_name" label="项目" width="160" show-overflow-tooltip />
         <el-table-column prop="file_name" label="文件" width="180" show-overflow-tooltip />
         <el-table-column prop="line_number" label="行号" width="80" align="center" />
@@ -92,7 +92,7 @@
         <el-table-column label="操作" width="220" align="center" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="onJump(row)">查看任务</el-button>
-            <el-dropdown trigger="click" @command="(s: string) => onSetStatus(row, s)">
+            <el-dropdown v-if="canHandleIssues" trigger="click" @command="(s: string) => onSetStatus(row, s)">
               <el-button link type="primary">改状态<el-icon><ArrowDown /></el-icon></el-button>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -122,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ArrowDown } from '@element-plus/icons-vue'
@@ -134,8 +134,12 @@ import { severityClass, severityDisplayLabel } from '@/constants/severity'
 import { dimLabel } from '@/constants/dim'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+const canHandleIssues = computed(() => userStore.hasPermission('issue:handle'))
+const canBatchIssues = computed(() => userStore.hasPermission('issue:batch'))
 
 const loading = ref(false)
 const rows = ref<IssueListItemOut[]>([])
@@ -226,10 +230,12 @@ function reloadDebounced(): void {
 }
 
 function onSelectionChange(rows: IssueListItemOut[]): void {
+  if (!canBatchIssues.value) return
   selected.value = rows
 }
 
 async function onSetStatus(row: IssueListItemOut, status: string): Promise<void> {
+  if (!canHandleIssues.value) return
   try {
     await updateStatus(row.id, { status })
     ElMessage.success('状态已更新')
@@ -244,6 +250,7 @@ async function onSetStatus(row: IssueListItemOut, status: string): Promise<void>
 }
 
 async function onBatchMarkFixed(): Promise<void> {
+  if (!canBatchIssues.value) return
   if (!selected.value.length) return
   try {
     // 二次确认,避免误点一次批量改几十条状态

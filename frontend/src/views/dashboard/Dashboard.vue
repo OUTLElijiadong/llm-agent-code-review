@@ -16,8 +16,8 @@
           <el-option label="近 30 天" :value="30" />
           <el-option label="近 90 天" :value="90" />
         </el-select>
-        <el-button @click="onWeeklyReport">导出周报</el-button>
-        <el-button type="primary" @click="onNewReview">+ 新建审查</el-button>
+        <el-button v-if="canExportWeeklyReport" @click="onWeeklyReport">导出周报</el-button>
+        <el-button v-if="canStartReview" type="primary" @click="onNewReview">+ 新建审查</el-button>
       </div>
     </header>
 
@@ -42,7 +42,7 @@
       <div class="changelog-body">
         四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 +
         <b>真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。
-        <router-link to="/projects" class="changelog-link">去发起全链路审计 →</router-link>
+        <router-link v-if="canStartReview && canViewProjects" to="/projects" class="changelog-link">去发起全链路审计 →</router-link>
       </div>
     </el-alert>
 
@@ -73,7 +73,7 @@
     </section>
 
     <!-- ============ v2.1.1 安全态势卡 ============ -->
-    <section class="security-row prism-rise" style="--rise-delay: 180ms">
+    <section v-if="canViewSecurity" class="security-row prism-rise" style="--rise-delay: 180ms">
       <SecurityPostureCard :days="timeRange" />
     </section>
 
@@ -196,8 +196,17 @@ import {
 } from '@/api/dashboard'
 import type { RiskItem, IssueTypeItem, ScoreTrendItem, FrequencyItem, SummaryOut, RecentTaskOut } from '@/types/dashboard'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+const canStartReview = computed(() => userStore.hasPermission('review:start'))
+const canViewProjects = computed(() => userStore.hasPermission('project:view'))
+const canViewSecurity = computed(() => userStore.hasPermission('security:view'))
+const canExportWeeklyReport = computed(() => (
+  userStore.hasPermission('report:export:html')
+  || userStore.hasPermission('report:export:pdf')
+))
 const timeRange = ref(30)
 const loading = ref(true)
 
@@ -520,6 +529,7 @@ async function loadCharts() {
 }
 
 function onWeeklyReport() {
+  if (!canExportWeeklyReport.value) return
   const s = summary.value
   const esc = (v: unknown) => String(v ?? '').replace(/[&<>]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c))
@@ -577,6 +587,7 @@ function onWeeklyReport() {
 }
 
 function onNewReview() {
+  if (!canStartReview.value) return
   router.push('/reviews/start')
 }
 

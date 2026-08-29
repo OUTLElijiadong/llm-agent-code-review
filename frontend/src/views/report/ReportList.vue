@@ -45,8 +45,8 @@
         <template #empty>
           <EmptyState
             :description="hasFilter ? '该项目还没有审查报告' : '暂无审查报告'"
-            :action-text="hasFilter ? '' : '去启动审查'"
-            :action-to="hasFilter ? '' : '/reviews/start'"
+            :action-text="hasFilter || !canStartReview ? '' : '去启动审查'"
+            :action-to="hasFilter || !canStartReview ? '' : '/reviews/start'"
           />
         </template>
         <el-table-column prop="task_name" label="任务名称" min-width="160">
@@ -94,10 +94,10 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item :command="'export:json'">导出 JSON</el-dropdown-item>
-                  <el-dropdown-item :command="'export:html'">导出 HTML</el-dropdown-item>
-                  <el-dropdown-item :command="'export:pdf'">导出 PDF</el-dropdown-item>
-                  <el-dropdown-item :command="'export:word'">导出 Word</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('json')" :command="'export:json'">导出 JSON</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('html')" :command="'export:html'">导出 HTML</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('pdf')" :command="'export:pdf'">导出 PDF</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('word')" :command="'export:word'">导出 Word</el-dropdown-item>
                   <el-dropdown-item :command="'delete'" divided>
                     <span class="danger-item">删除报告</span>
                   </el-dropdown-item>
@@ -135,8 +135,10 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import type { ProjectOut } from '@/types/project'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { confirmDanger } from '@/composables/useDangerConfirm'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const reports = ref<ReportListItem[]>([])
@@ -148,9 +150,14 @@ const filterProjectId = ref<number | null>(null)
 
 /** 空态文案依据:是否筛选了项目。 */
 const hasFilter = computed(() => Boolean(filterProjectId.value))
+const canStartReview = computed(() => userStore.hasPermission('review:start'))
 const dateRange = ref<[string, string] | null>(null)
 /** 当前正在导出的任务 ID(用于导出按钮 loading 态),null 表示无操作 */
 const exportingTaskId = ref<number | null>(null)
+
+function canExport(format: ReportFormat): boolean {
+  return userStore.hasPermission(`report:export:${format}`)
+}
 
 function scoreClass(score: number) {
   if (score >= 80) return 'score-high'
@@ -223,6 +230,7 @@ function downloadBlob(blob: Blob, filename: string): void {
  * @param format - 导出格式 json/html/pdf/word
  */
 async function handleExport(row: ReportListItem, format: ReportFormat): Promise<void> {
+  if (!canExport(format)) return
   exportingTaskId.value = row.task_id
   try {
     const blob = await exportReport(row.task_id, format, 'detailed')

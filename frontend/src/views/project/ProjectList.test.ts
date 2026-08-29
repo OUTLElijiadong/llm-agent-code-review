@@ -1,7 +1,7 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const permissionState = vi.hoisted(() => ({ allowed: false }))
+const permissionState = vi.hoisted(() => ({ importAllowed: false, createAllowed: false }))
 const routerState = vi.hoisted(() => ({ push: vi.fn() }))
 const projectApi = vi.hoisted(() => ({
   getProjects: vi.fn(),
@@ -15,7 +15,11 @@ const projectApi = vi.hoisted(() => ({
 
 vi.mock('@/stores/user', () => ({
   useUserStore: () => ({
-    hasPermission: (code: string) => code === 'project:import' && permissionState.allowed,
+    hasPermission: (code: string) => {
+      if (code === 'project:import') return permissionState.importAllowed
+      if (code === 'project:create') return permissionState.createAllowed
+      return false
+    },
   }),
 }))
 vi.mock('vue-router', () => ({ useRouter: () => routerState }))
@@ -60,7 +64,8 @@ function mountProjectList() {
 }
 
 beforeEach(() => {
-  permissionState.allowed = false
+  permissionState.importAllowed = false
+  permissionState.createAllowed = false
   routerState.push.mockReset()
   projectApi.queueRemoteProjectImport.mockReset()
   projectApi.getRemoteProjectImport.mockReset()
@@ -79,11 +84,32 @@ describe('ProjectList remote import permission', () => {
   })
 
   it('向具备 project:import 权限的普通用户显示远程导入', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     const wrapper = mountProjectList()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="remote-import-button"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('ProjectList create permission', () => {
+  it('缺少 project:create 时隐藏创建入口且处理器不打开表单', async () => {
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="create-project-button"]').exists()).toBe(false)
+    ;(wrapper.vm as any).handleCreate()
+    expect((wrapper.vm as any).formVisible).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('具备 project:create 时显示创建入口', async () => {
+    permissionState.createAllowed = true
+    const wrapper = mountProjectList()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="create-project-button"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })
@@ -143,7 +169,7 @@ function pendingImport(overrides: Record<string, unknown> = {}) {
 
 describe('ProjectList 远程导入异步任务', () => {
   it('运行中显示取消按钮并防止重复取消请求', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     projectApi.queueRemoteProjectImport.mockResolvedValue(remoteTask({ status: 'downloading' }))
     let resolveCancel!: (value: unknown) => void
     projectApi.cancelRemoteProjectImport.mockReturnValue(new Promise((resolve) => {
@@ -184,7 +210,7 @@ describe('ProjectList 远程导入异步任务', () => {
   })
 
   it('提交时携带幂等键，轮询完成后刷新项目并跳转', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     vi.useFakeTimers()
     projectApi.queueRemoteProjectImport.mockResolvedValue(remoteTask())
     projectApi.getRemoteProjectImport
@@ -232,7 +258,7 @@ describe('ProjectList 远程导入异步任务', () => {
   })
 
   it('刷新后从 localStorage 恢复任务，网络错误时保留待恢复记录', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     vi.useFakeTimers()
     window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
     projectApi.getRemoteProjectImport.mockRejectedValue(new Error('网络暂时不可用'))
@@ -251,7 +277,7 @@ describe('ProjectList 远程导入异步任务', () => {
   })
 
   it('服务端 5xx/429 错误仍保留待恢复记录', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
     projectApi.getRemoteProjectImport.mockRejectedValue({ code: 50201, message: '上游服务暂不可用' })
 
@@ -264,7 +290,7 @@ describe('ProjectList 远程导入异步任务', () => {
   })
 
   it('明确的任务不存在错误清理记录并保留失败原因', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
     projectApi.getRemoteProjectImport.mockRejectedValue({ code: 40400, message: '远程导入任务不存在' })
 
@@ -277,7 +303,7 @@ describe('ProjectList 远程导入异步任务', () => {
   })
 
   it('刷新时若提交响应丢失，会用原幂等键重新排队而不是创建重复任务', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     vi.useFakeTimers()
     window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport({ taskId: null })))
     projectApi.queueRemoteProjectImport.mockResolvedValue(remoteTask())
@@ -306,7 +332,7 @@ describe('ProjectList 远程导入异步任务', () => {
   })
 
   it('队列请求网络失败时不删除幂等任务，且显示可读提示', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     projectApi.queueRemoteProjectImport.mockRejectedValue(new Error('连接服务器失败'))
 
     const wrapper = mountProjectList()
@@ -330,7 +356,7 @@ describe('ProjectList 远程导入异步任务', () => {
   })
 
   it('任务失败时保留可读原因并清理已结束的恢复记录', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     vi.useFakeTimers()
     projectApi.queueRemoteProjectImport.mockResolvedValue(remoteTask())
     projectApi.getRemoteProjectImport.mockResolvedValue(remoteTask({
@@ -360,7 +386,7 @@ describe('ProjectList 远程导入异步任务', () => {
   })
 
   it('成功响应缺少项目编号时保留恢复记录并显示可操作原因', async () => {
-    permissionState.allowed = true
+    permissionState.importAllowed = true
     window.localStorage.setItem('prism:remote-import-task', JSON.stringify(pendingImport()))
     projectApi.getRemoteProjectImport.mockResolvedValue(remoteTask({
       status: 'succeeded',

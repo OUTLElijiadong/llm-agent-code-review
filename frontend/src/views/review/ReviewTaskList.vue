@@ -2,7 +2,7 @@
   <div class="review-task-list-page">
     <div class="page-header">
       <h2>审查任务列表</h2>
-      <el-button type="primary" @click="$router.push('/reviews/start')">
+      <el-button v-if="canStartReview" type="primary" @click="startReview">
         <el-icon><Plus /></el-icon>启动审查
       </el-button>
     </div>
@@ -65,11 +65,11 @@
         <template #empty>
           <EmptyState
             :description="hasFilter ? '当前筛选条件下没有审查任务,试试放宽条件' : '还没有审查任务'"
-            :action-text="hasFilter ? '' : '启动第一个审查'"
-            :action-to="hasFilter ? '' : '/reviews/start'"
+            :action-text="hasFilter || !canStartReview ? '' : '启动第一个审查'"
+            :action-to="hasFilter || !canStartReview ? '' : '/reviews/start'"
           />
         </template>
-        <el-table-column type="selection" width="44" />
+        <el-table-column v-if="canCancelReview" type="selection" width="44" />
         <el-table-column prop="task_name" label="任务名称" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.task_name || `审查 #${row.id}` }}
@@ -102,7 +102,7 @@
             {{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column v-if="canCancelReview" label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'running'"
@@ -116,7 +116,7 @@
         </el-table-column>
       </el-table>
 
-      <div v-if="selectedRows.length" class="batch-bar">
+      <div v-if="canCancelReview && selectedRows.length" class="batch-bar">
         <span class="batch-info">已选 {{ selectedRows.length }} 项</span>
         <el-button
           size="small"
@@ -164,8 +164,10 @@ import type { ProjectOut } from '@/types/project'
 import { reviewTypeLabel } from '@/constants/reviewType'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { confirmDanger } from '@/composables/useDangerConfirm'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const tableRef = ref()
 
 const loading = ref(false)
@@ -180,6 +182,13 @@ const dateRange = ref<[string, string] | null>(null)
 
 /** 空态文案依据:是否有筛选条件(区分「没有任务」与「筛选无结果」)。 */
 const hasFilter = computed(() => Boolean(filterStatus.value || filterProjectId.value || dateRange.value))
+const canStartReview = computed(() => userStore.hasPermission('review:start'))
+const canCancelReview = computed(() => userStore.hasPermission('review:cancel'))
+
+function startReview(): void {
+  if (!canStartReview.value) return
+  router.push('/reviews/start')
+}
 
 const statusLabels: Record<string, string> = {
   pending: '待处理',
@@ -268,6 +277,7 @@ function onRowClick(row: TaskOut) {
 }
 
 async function handleDelete(row: TaskOut) {
+  if (!canCancelReview.value) return
   const ok = await confirmDanger({ target: `删除任务「${row.task_name || `审查 #${row.id}`}」` })
   if (!ok) return
   try {
@@ -280,6 +290,7 @@ async function handleDelete(row: TaskOut) {
 }
 
 async function handleCancel(row: TaskOut) {
+  if (!canCancelReview.value) return
   const ok = await confirmDanger({
     target: `停止任务「${row.task_name || `审查 #${row.id}`}」`,
     consequence: '已处理的部分将保留',
@@ -303,6 +314,7 @@ const batchDeleting = ref(false)
 const selectedRunning = computed(() => selectedRows.value.filter((t) => t.status === 'running'))
 
 function onSelectionChange(rows: TaskOut[]) {
+  if (!canCancelReview.value) return
   selectedRows.value = rows
 }
 
@@ -311,6 +323,7 @@ function clearSelection() {
 }
 
 async function handleBatchStop() {
+  if (!canCancelReview.value) return
   const targets = selectedRunning.value
   if (!targets.length) return
   const ok = await confirmDanger({
@@ -338,6 +351,7 @@ async function handleBatchStop() {
 }
 
 async function handleBatchDelete() {
+  if (!canCancelReview.value) return
   const targets = selectedRows.value
   if (!targets.length) return
   const ok = await confirmDanger({ target: `删除选中的 ${targets.length} 个任务` })

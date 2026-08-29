@@ -27,6 +27,9 @@ const securityScanVisible = ref(false)
 
 const secretCount = computed(() => checklist.value?.secret_patterns.length ?? 0)
 const staticCount = computed(() => checklist.value?.static_rules.length ?? 0)
+const canScan = computed(() => userStore.hasPermission('security:scan'))
+const canViewProjects = computed(() => userStore.hasPermission('project:view'))
+const canCreateProject = computed(() => userStore.hasPermission('project:create'))
 
 const scoreColor = computed(() => {
   const s = dashboardData.value?.avg_risk_score
@@ -86,20 +89,17 @@ async function loadDashboardSummary(): Promise<void> {
 }
 
 function gotoProjects(): void {
-  // 无项目管理权限的角色(如 reviewer)访问 /projects 会 403,引导到审查任务页
-  if (userStore.isAdmin() || userStore.hasPermission('project:view')) {
-    router.push('/projects')
-  } else {
-    ElMessage.warning('当前角色无项目管理权限,已为你跳转到审查任务')
-    router.push('/reviews')
-  }
+  if (!canViewProjects.value) return
+  router.push('/projects')
 }
 
 function openAllProjectScan(): void {
+  if (!canScan.value) return
   securityScanVisible.value = true
 }
 
 function jumpAndCloseDetail(): void {
+  if (!canScan.value || !canViewProjects.value) return
   detailVisible.value = false
   router.push('/projects')
 }
@@ -125,11 +125,11 @@ onMounted(() => {
           覆盖代码审查中的网络安全维度
         </p>
       </div>
-      <div class="page-actions">
+      <div v-if="canScan" class="page-actions">
         <el-button type="primary" :icon="Lock" @click="openAllProjectScan">
           全量扫描
         </el-button>
-        <el-button :icon="ArrowRight" @click="gotoProjects">
+        <el-button v-if="canViewProjects" :icon="ArrowRight" @click="gotoProjects">
           单项目扫描
         </el-button>
       </div>
@@ -157,13 +157,13 @@ onMounted(() => {
         <div v-if="hasProjectData && !hasScannedData" class="overview-hint">
           <div class="hint-icon">🛡</div>
           <div class="hint-text">
-            你有 <b>{{ dashboardData.project_count }}</b> 个项目还未进行安全审计,
-            点击「立即扫描」开始分析。
+            你有 <b>{{ dashboardData.project_count }}</b> 个项目还未进行安全审计。
+            <template v-if="canScan">点击「立即扫描」开始分析。</template>
           </div>
-          <el-button size="small" type="primary" :icon="Lock" @click="openAllProjectScan">
+          <el-button v-if="canScan" size="small" type="primary" :icon="Lock" @click="openAllProjectScan">
             全量扫描
           </el-button>
-          <el-button size="small" :icon="ArrowRight" @click="gotoProjects">
+          <el-button v-if="canScan && canViewProjects" size="small" :icon="ArrowRight" @click="gotoProjects">
             单项目扫描
           </el-button>
         </div>
@@ -171,8 +171,8 @@ onMounted(() => {
         <!-- 无项目 -->
         <div v-else-if="!hasProjectData" class="overview-hint">
           <div class="hint-icon">📁</div>
-          <div class="hint-text">还没有项目,创建项目后可进行安全审计。</div>
-          <el-button size="small" type="primary" @click="gotoProjects">
+          <div class="hint-text">还没有项目可分析。</div>
+          <el-button v-if="canCreateProject && canViewProjects" size="small" type="primary" @click="gotoProjects">
             创建项目
           </el-button>
         </div>
@@ -358,7 +358,7 @@ onMounted(() => {
     </section>
 
     <!-- ========== 用法指引 ========== -->
-    <section class="block usage">
+    <section v-if="canScan" class="block usage">
       <h3 class="block-title">我能帮你做什么</h3>
       <ul class="usage-list">
         <li>
@@ -466,7 +466,7 @@ onMounted(() => {
 
       <template #footer>
         <el-button @click="detailVisible = false">关闭</el-button>
-        <el-button type="primary" :icon="Lock" @click="jumpAndCloseDetail">
+        <el-button v-if="canScan && canViewProjects" type="primary" :icon="Lock" @click="jumpAndCloseDetail">
           🛡 扫描我的项目
         </el-button>
       </template>
