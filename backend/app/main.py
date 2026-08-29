@@ -156,6 +156,12 @@ async def lifespan(app: FastAPI):
     start_agent_governance_scheduler()
     start_jarvis_patrol()
     start_project_import_dispatcher()
+    from app.services.pentest_service import (
+        start_pentest_retention_sweeper,
+        stop_pentest_retention_sweeper,
+    )
+
+    start_pentest_retention_sweeper()
     from app.services.background_task_recovery import start_agent_run_recovery
     from app.services.review_service import resume_interrupted_tasks
     from app.services.sandbox_service import resume_interrupted_environments
@@ -172,6 +178,7 @@ async def lifespan(app: FastAPI):
         stop_agent_governance_scheduler()
         stop_jarvis_patrol()
         stop_project_import_dispatcher()
+        stop_pentest_retention_sweeper()
 
 
 app = FastAPI(

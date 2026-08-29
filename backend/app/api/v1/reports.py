@@ -271,6 +271,12 @@ def _require_report_export_permission(
     return user
 
 
+def _report_file_stem(task) -> str:
+    """导出文件名前缀: 渗透测试报告与普通审查报告区分命名。"""
+    prefix = "pentest_report" if getattr(task, "review_type", "") == "pentest" else "review_report"
+    return f"{prefix}_{task.id}"
+
+
 @router.get("/tasks/{task_id}/export")
 def export_report(
     task_id: int,
@@ -302,7 +308,7 @@ def export_report(
         return _build_download_response(
             json_str.encode("utf-8"),
             "application/json",
-            f"review_report_{task_id}.json",
+            f"{_report_file_stem(task)}.json",
         )
 
     if format == "html":
@@ -311,7 +317,7 @@ def export_report(
         return _build_download_response(
             html_str.encode("utf-8"),
             "text/html",
-            f"review_report_{task_id}.html",
+            f"{_report_file_stem(task)}.html",
         )
 
     if format == "pdf":
@@ -319,7 +325,7 @@ def export_report(
         return _build_download_response(
             pdf_bytes,
             "application/pdf",
-            f"review_report_{task_id}.pdf",
+            f"{_report_file_stem(task)}.pdf",
         )
 
     if format == "word":
@@ -327,7 +333,7 @@ def export_report(
         return _build_download_response(
             word_bytes,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            f"review_report_{task_id}.docx",
+            f"{_report_file_stem(task)}.docx",
         )
 
     # 理论上不会到达

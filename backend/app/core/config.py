@@ -140,6 +140,8 @@ class Settings(BaseSettings):
     pentest_probe_wait_seconds: int = Field(default=480, ge=60, le=1800)
     # 单条推演线墙钟上限(秒): 含 LLM 重试在内, 超时线标失败不拖死阶段
     pentest_line_timeout: int = Field(default=420, ge=60, le=3600)
+    # 渗透委托留存期(天): 终态委托超期由后台任务自动清理(含发现/报告), 0=关闭
+    pentest_retention_days: int = Field(default=90, ge=0, le=3650)
     agent_knowledge_fetch_timeout: int = 15
     agent_knowledge_fetch_max_bytes: int = 1024 * 1024
     agent_knowledge_allow_private_urls: bool = False
