@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from typing import List, Tuple
 
 from loguru import logger
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.services import system_config_service
+from app.services.system_config_service import get_embedding_config
 from app.utils.api_resolver import validate_ai_base_url
 from app.utils.public_http import pin_public_http_url
 
@@ -182,7 +184,7 @@ _REEMBED_MAX_BATCH_BYTES = 512 * 1024  # 单批字节预算(Tei/网关 413 防�
 _REEMBED_MAX_PIECE_BYTES = 256 * 1024  # 单条切片截断上限
 
 
-def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int) -> None:
+def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int, expected_tag: str = "") -> None:
     """按 id 游标分批重建单域切片向量并即时提交。
 
     批同时受条数与字节预算约束: 大切片(如长代码段)按字节提前切批,
@@ -190,13 +192,11 @@ def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int)
     """
     last_id = 0
     while True:
-        remaining = (
-            db.query(model)
-            .filter(model.id > last_id)
-            .order_by(model.id.asc())
-            .limit(batch_size)
-            .all()
-        )
+        query = db.query(model).filter(model.id > last_id)
+        if expected_tag:
+            # 增量模式: 只重建标签与当前配置不符的行(瞬态失败重跑快速收敛)
+            query = query.filter(model.embed_model != expected_tag)
+        remaining = query.order_by(model.id.asc()).limit(batch_size).all()
         if not remaining:
             break
         batch_bytes = 0
@@ -215,12 +215,22 @@ def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int)
                 piece = piece[: _REEMBED_MAX_PIECE_BYTES // 3]
             pieces.append(piece)
         remote_on = is_remote_enabled(db)
-        try:
-            vectors, tag = embed_texts(db, pieces)
-        except Exception:  # noqa: BLE001 — 单批失败降级哈希, 不中断整体
+        vectors = None
+        tag = ""
+        # 嵌入端点高负载下存在瞬态超时, 失败批重试后再降级
+        for attempt in range(3):
+            try:
+                vectors, tag = embed_texts(db, pieces)
+                if not remote_on or tag != FALLBACK_TAG:
+                    break
+            except Exception:  # noqa: BLE001
+                vectors = None
+            logger.warning(f"[embedding.reembed] {label} 批次第 {attempt + 1} 次失败, 重试 (last_id={last_id})")
+            time.sleep(2)
+        if vectors is None or (remote_on and tag == FALLBACK_TAG):
             vectors = [_hash_embed(p, settings.embedding_dim) for p in pieces]
             tag = FALLBACK_TAG
-            logger.warning(f"[embedding.reembed] {label} 批次嵌入异常已降级哈希 (last_id={last_id})")
+            logger.warning(f"[embedding.reembed] {label} 批次多次失败已降级哈希 (last_id={last_id})")
         if remote_on and tag == FALLBACK_TAG:
             # 远端已启用却拿到哈希向量 = embed_texts 内部静默降级(如 413), 显式计数披露
             stats["failed_batches"] += 1
@@ -243,6 +253,9 @@ def reembed_all_stores(db: Session, batch_size: int = 64) -> dict:
     from app.models.knowledge_chunk import KnowledgeChunk
 
     stats = {"kb_chunks": 0, "agent_chunks": 0, "failed_batches": 0}
-    _reembed_model(db, KnowledgeChunk, "kb_chunks", stats, batch_size)
-    _reembed_model(db, AgentKnowledgeChunk, "agent_chunks", stats, batch_size)
+    expected_tag = ""
+    if is_remote_enabled(db):
+        expected_tag = f"api:{get_embedding_config(db)['model']}"
+    _reembed_model(db, KnowledgeChunk, "kb_chunks", stats, batch_size, expected_tag)
+    _reembed_model(db, AgentKnowledgeChunk, "agent_chunks", stats, batch_size, expected_tag)
     return stats
