@@ -178,28 +178,53 @@ def parse_vector(raw) -> List[float]:
         return []
 
 
+_REEMBED_MAX_BATCH_BYTES = 512 * 1024  # 单批字节预算(Tei/网关 413 防护)
+_REEMBED_MAX_PIECE_BYTES = 256 * 1024  # 单条切片截断上限
+
+
 def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int) -> None:
-    """按 id 游标分批重建单域切片向量并即时提交。"""
+    """按 id 游标分批重建单域切片向量并即时提交。
+
+    批同时受条数与字节预算约束: 大切片(如长代码段)按字节提前切批,
+    避免一次请求超过嵌入端点负载上限(413)导致整批降级。
+    """
     last_id = 0
     while True:
-        rows = (
+        remaining = (
             db.query(model)
             .filter(model.id > last_id)
             .order_by(model.id.asc())
             .limit(batch_size)
             .all()
         )
-        if not rows:
+        if not remaining:
             break
+        batch_bytes = 0
+        rows = []
+        for row in remaining:
+            piece_bytes = len((row.content or "").encode("utf-8"))
+            if rows and batch_bytes + piece_bytes > _REEMBED_MAX_BATCH_BYTES:
+                break
+            rows.append(row)
+            batch_bytes += piece_bytes
         last_id = int(rows[-1].id)
-        pieces = [str(row.content or "") for row in rows]
+        pieces = []
+        for row in rows:
+            piece = str(row.content or "")
+            if len(piece.encode("utf-8")) > _REEMBED_MAX_PIECE_BYTES:
+                piece = piece[: _REEMBED_MAX_PIECE_BYTES // 3]
+            pieces.append(piece)
+        remote_on = is_remote_enabled(db)
         try:
             vectors, tag = embed_texts(db, pieces)
         except Exception:  # noqa: BLE001 — 单批失败降级哈希, 不中断整体
             vectors = [_hash_embed(p, settings.embedding_dim) for p in pieces]
             tag = FALLBACK_TAG
+            logger.warning(f"[embedding.reembed] {label} 批次嵌入异常已降级哈希 (last_id={last_id})")
+        if remote_on and tag == FALLBACK_TAG:
+            # 远端已启用却拿到哈希向量 = embed_texts 内部静默降级(如 413), 显式计数披露
             stats["failed_batches"] += 1
-            logger.warning(f"[embedding.reembed] {label} 批次嵌入失败已降级哈希 (last_id={last_id})")
+            logger.warning(f"[embedding.reembed] {label} 批次被嵌入端点拒绝, 已降级哈希 (last_id={last_id})")
         for row, vec in zip(rows, vectors):
             row.embedding = json.dumps(vec)
             row.embed_model = tag
