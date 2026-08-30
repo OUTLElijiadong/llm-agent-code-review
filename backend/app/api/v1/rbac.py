@@ -48,7 +48,7 @@ from app.schemas.rbac import (
     RoleUpdateIn,
     UserRoleAssignIn,
 )
-from app.services import rbac_service
+from app.services import audit_service, rbac_service
 
 router = APIRouter()
 
@@ -167,6 +167,11 @@ def assign_user_roles(
         Resp[None]: 操作结果,data 为 None
     """
     rbac_service.assign_roles_to_user(db, user_id, payload.role_ids, actor=current)
+    audit_service.log(
+        db, current, "rbac.user_roles_assign",
+        target_type="user", target_id=str(user_id),
+        detail=f"覆盖式分配角色 role_ids={payload.role_ids}",
+    )
     return Resp(data=None)
 
 
@@ -337,6 +342,11 @@ def create_role(
         Resp[RoleOut]: 新建的角色信息(含权限编码列表)
     """
     role = rbac_service.create_role(db, payload, actor=current)
+    audit_service.log(
+        db, current, "rbac.role_create",
+        target_type="role", target_id=str(role.id),
+        detail=f"创建角色 {role.code}({role.name})",
+    )
     perms = rbac_service.get_role_permissions(db, role.id)
     return Resp(data=_role_to_out(role, [p.code for p in perms]))
 
@@ -363,6 +373,11 @@ def update_role(
         Resp[RoleOut]: 更新后的角色信息(含权限编码列表)
     """
     role = rbac_service.update_role(db, role_id, payload, actor=current)
+    audit_service.log(
+        db, current, "rbac.role_update",
+        target_type="role", target_id=str(role_id),
+        detail=f"更新角色 {role.code}: {payload.model_dump(exclude_unset=True)}"[:400],
+    )
     perms = rbac_service.get_role_permissions(db, role.id)
     return Resp(data=_role_to_out(role, [p.code for p in perms]))
 
@@ -371,7 +386,7 @@ def update_role(
 def delete_role(
     role_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current: User = Depends(require_admin),
 ):
     """删除角色
 
@@ -402,6 +417,11 @@ def delete_role(
     db.query(DataScope).filter(DataScope.role_id == role_id).delete()
     db.delete(role)
     db.commit()
+    audit_service.log(
+        db, current, "rbac.role_delete",
+        target_type="role", target_id=str(role_id),
+        detail=f"删除角色 {role.code}({role.name})及其权限/用户/数据域关联",
+    )
     return Resp(data=None)
 
 
@@ -451,6 +471,11 @@ def assign_role_permissions(
         Resp[None]: 操作结果,data 为 None
     """
     rbac_service.assign_permissions_to_role(db, role_id, payload.permission_ids, actor=current)
+    audit_service.log(
+        db, current, "rbac.role_permissions_assign",
+        target_type="role", target_id=str(role_id),
+        detail=f"覆盖式分配权限 permission_ids={payload.permission_ids}",
+    )
     return Resp(data=None)
 
 
@@ -482,6 +507,11 @@ def update_role_data_scope(
         project_ids=payload.project_ids,
     )
     scope = rbac_service.update_data_scope(db, role_id, scope_in, actor=current)
+    audit_service.log(
+        db, current, "rbac.role_data_scope_update",
+        target_type="role", target_id=str(role_id),
+        detail=f"更新数据域 scope_type={scope.scope_type}",
+    )
     return Resp(data=DataScopeOut.model_validate(scope))
 
 

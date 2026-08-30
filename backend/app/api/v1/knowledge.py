@@ -24,7 +24,7 @@ from app.schemas.knowledge import (
     SearchIn,
     SyncResultOut,
 )
-from app.services import knowledge_service, system_config_service
+from app.services import audit_service, knowledge_service, system_config_service
 
 router = APIRouter()
 
@@ -92,7 +92,14 @@ def reembed_all(db: Session = Depends(get_db),
     """按当前嵌入配置重建全部存量切片向量(个人 KB + Agent 知识库, 唯一超管)。"""
     from app.services import embedding_service
 
-    return Resp(data=embedding_service.reembed_all_stores(db))
+    stats = embedding_service.reembed_all_stores(db)
+    audit_service.log(
+        db, admin, "embedding_reembed_all",
+        target_type="system_config", target_id="embedding",
+        detail=f"重建存量向量 kb={stats.get('kb_chunks')} agent={stats.get('agent_chunks')}"
+               f" 失败批={stats.get('failed_batches')}",
+    )
+    return Resp(data=stats)
 
 
 @router.put("/embedding-config", response_model=Resp[EmbeddingConfigOut])
@@ -102,4 +109,10 @@ def update_embedding_config(payload: EmbeddingConfigIn, db: Session = Depends(ge
     data = system_config_service.update_embedding_config(
         db, base_url=payload.base_url, api_key=payload.api_key,
         model=payload.model, enabled=payload.enabled)
+    audit_service.log(
+        db, admin, "embedding_config_update",
+        target_type="system_config", target_id="embedding",
+        detail=f"嵌入配置更新 base_url={payload.base_url} model={payload.model}"
+               f" key={'已更新' if payload.api_key else '未变'} enabled={payload.enabled}",
+    )
     return Resp(data=EmbeddingConfigOut(**data))

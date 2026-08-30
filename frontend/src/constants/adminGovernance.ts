@@ -143,3 +143,68 @@ export function policyResourceText(value: string | null | undefined): string {
   }
   return raw
 }
+
+/** 工具调用日志: 工具编码 → 中文 */
+export const TOOL_CODE_LABELS: Record<string, string> = {
+  shell: '命令执行', ops_execute: '运维操作', admin_execute_operation: '服务器运维操作',
+  knowledge_read: '读取知识', knowledge_write: '写入知识', shell_exec: '执行命令',
+}
+
+export function toolCodeText(code: string | null | undefined): string {
+  const raw = String(code || '').trim()
+  if (!raw) return '—'
+  return TOOL_CODE_LABELS[raw] || policyActionText(raw)
+}
+
+/** 知识来源类型 → 中文 */
+export const SOURCE_TYPE_LABELS: Record<string, string> = {
+  manual: '手动录入', inline: '内联', url: '链接', official: '官方文档',
+  docs: '官方文档', github: 'GitHub', project: '项目',
+}
+
+export function sourceTypeText(value: string | null | undefined): string {
+  const raw = String(value || '').trim()
+  return SOURCE_TYPE_LABELS[raw] || raw || '—'
+}
+
+/** 记忆类型 → 中文 */
+export const MEMORY_TYPE_LABELS: Record<string, string> = {
+  long_term: '长期记忆', short_term: '短期记忆', reflection: '反思',
+}
+
+export function memoryTypeText(value: string | null | undefined): string {
+  const raw = String(value || '').trim()
+  return MEMORY_TYPE_LABELS[raw] || raw || '—'
+}
+
+/** Agent 分类 → 中文 */
+export const CATEGORY_LABELS: Record<string, string> = {
+  meta: '主控', frontline: '前台', governance: '治理', operations: '运维',
+  security: '安全', knowledge: '知识', quality: '质量', general: '通用',
+}
+
+export function categoryText(value: string | null | undefined): string {
+  const raw = String(value || '').trim()
+  return CATEGORY_LABELS[raw] || raw || '—'
+}
+
+/** 产物类型 → 中文(版本回退) */
+export const ARTIFACT_TYPE_LABELS: Record<string, string> = {
+  policy: '策略', prompt: '提示词', skill: '技能', knowledge: '知识', code: '代码',
+}
+
+export function artifactTypeText(value: string | null | undefined): string {
+  const raw = String(value || '').trim()
+  return ARTIFACT_TYPE_LABELS[raw] || raw || '—'
+}
+
+/** 决策/处理方式 → 中文(allow/deny/escalate 等) */
+const DECISION_LABELS: Record<string, string> = {
+  allow: '允许', deny: '阻断', deny_all: '全部阻断', escalate: '升级审批',
+  permitted: '允许', forbidden: '阻断', ask: '询问后执行',
+}
+
+export function decisionText(value: string | null | undefined): string {
+  const raw = String(value || '').trim()
+  return DECISION_LABELS[raw] || raw || '—'
+}

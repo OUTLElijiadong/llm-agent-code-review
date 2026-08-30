@@ -68,6 +68,7 @@ class PermissionCode:
     REPORT_EXPORT_WORD = "report:export:word"  # 导出 Word 格式报告
     REPORT_EXPORT_JSON = "report:export:json"  # 导出 JSON 格式报告
     REPORT_EXPORT_HTML = "report:export:html"  # 导出 HTML 格式报告
+    REPORT_TEMPLATE_MANAGE = "report:template_manage"  # 报告模板增删改
 
     # === agent 模块(14): Agent 中心与 Agent 工坊 ===
     AGENT_VIEW = "agent:view"  # 查看 Agent 信息

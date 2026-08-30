@@ -11,7 +11,7 @@ from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
 from app.schemas.review import IssueOut, ReviewStartIn, TaskDetailOut, TaskOut
-from app.services import review_service
+from app.services import audit_service, review_service
 
 router = APIRouter()
 
@@ -75,6 +75,11 @@ def delete_task(task_id: int, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """删除审查任务"""
     review_service.delete_task(db, user, task_id)
+    audit_service.log(
+        db, user, "review_task_delete",
+        target_type="review_task", target_id=str(task_id),
+        detail="删除审查任务",
+    )
     return Resp(data=None)
 
 

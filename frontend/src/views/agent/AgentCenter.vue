@@ -83,7 +83,7 @@
                   type="info"
                   style="margin-right: 6px"
                 >
-                  {{ code }}
+                  {{ agentCodeText(code) }}
                 </el-tag>
               </el-descriptions-item>
             </el-descriptions>
@@ -245,6 +245,7 @@ import {
 import { triggerEvolution } from '@/api/evolution'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { agentCodeText } from '@/constants/adminGovernance'
 import type {
   AgentRuntimeOut,
   AgentRuntimeSummaryOut,
@@ -616,6 +617,7 @@ function initDiscussionFromRoute() {
     }
   }
 }
+
 </script>
 
 <style scoped lang="scss">

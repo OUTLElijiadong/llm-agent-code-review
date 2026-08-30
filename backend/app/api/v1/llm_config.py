@@ -13,7 +13,7 @@ from app.models.user import User
 from app.schemas.api_config import ApiConfigTestIn, ApiConfigTestOut
 from app.schemas.common import Resp
 from app.schemas.llm_config import LlmConfigIn, LlmConfigOut, LlmTestIn
-from app.services import api_config_service, system_config_service
+from app.services import api_config_service, audit_service, system_config_service
 
 router = APIRouter()
 
@@ -31,6 +31,12 @@ def update_config(payload: LlmConfigIn, db: Session = Depends(get_db),
     data = system_config_service.update_llm_config(
         db, provider=payload.provider, base_url=payload.base_url,
         model=payload.model, api_key=payload.api_key, active=payload.active)
+    audit_service.log(
+        db, admin, "llm_config_update",
+        target_type="system_config", target_id="llm",
+        detail=f"全局LLM配置更新 provider={payload.provider} model={payload.model}"
+               f" key={'已更新' if payload.api_key else '未变'} active={payload.active}",
+    )
     return Resp(data=LlmConfigOut(**data))
 
 

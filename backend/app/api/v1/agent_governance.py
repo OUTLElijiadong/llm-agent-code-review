@@ -54,6 +54,7 @@ from app.services import (
     agent_knowledge_service,
     agent_memory_service,
     approval_service,
+    audit_service,
     observability_service,
     policy_engine,
     reward_service,
@@ -176,6 +177,11 @@ def create_agent_memory(
         weight=payload.weight,
         source_ref=payload.source_ref,
     )
+    audit_service.log(
+        db, _, "governance.agent_memory_create",
+        target_type="agent_memory", target_id=str(row.id),
+        detail=f"写入Agent记忆 {row.agent_code}/{row.memory_type}",
+    )
     return Resp(data=AgentMemoryOut.model_validate(row))
 
 
@@ -221,6 +227,11 @@ def create_agent_knowledge_doc(
         risk_level=payload.risk_level,
         confidence=payload.confidence,
     )
+    audit_service.log(
+        db, _, "governance.knowledge_doc_create",
+        target_type="agent_knowledge_doc", target_id=str(row.id),
+        detail=f"写入Agent知识 {row.title[:60]}",
+    )
     return Resp(data=AgentKnowledgeDocOut.model_validate(row))
 
 
@@ -241,6 +252,11 @@ def activate_agent_knowledge_doc(
         Resp[AgentKnowledgeDocOut]: 激活后的知识文档。
     """
     row = agent_knowledge_service.activate_document(db, doc_id)
+    audit_service.log(
+        db, _, "governance.knowledge_doc_activate",
+        target_type="agent_knowledge_doc", target_id=str(doc_id),
+        detail="激活Agent知识文档",
+    )
     return Resp(data=AgentKnowledgeDocOut.model_validate(row))
 
 
@@ -449,6 +465,11 @@ def upsert_policy(
         snapshot=snapshot,
         status="stable",
     )
+    audit_service.log(
+        db, _, "governance.policy_upsert",
+        target_type="policy_rule", target_id=str(row.id),
+        detail=f"保存策略 {row.rule_code}: {row.subject}/{row.action} -> {row.effect}",
+    )
     return Resp(data=PolicyRuleOut.model_validate(row))
 
 
@@ -531,7 +552,7 @@ def upsert_tool_permission(
     payload: AgentToolPermissionUpsertIn,
     permission_id: int = Query(0),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current: User = Depends(require_admin),
 ):
     """创建或更新 Agent 工具权限。
 
@@ -556,6 +577,11 @@ def upsert_tool_permission(
     row.note = payload.note
     db.commit()
     db.refresh(row)
+    audit_service.log(
+        db, current, "governance.tool_permission_upsert",
+        target_type="agent_tool_permission", target_id=str(row.id),
+        detail=f"工具权限 {row.agent_code}/{row.tool_code} -> {row.permission} 启用={row.enabled}",
+    )
     return Resp(data=AgentToolPermissionOut.model_validate(row))
 
 
@@ -595,6 +621,11 @@ def update_job(
         Resp[AgentJobOut]: 更新后的任务。
     """
     row = scheduler_service.update_job(db, job_id, payload.model_dump(exclude_none=True), actor=actor)
+    audit_service.log(
+        db, actor, "governance.job_update",
+        target_type="agent_job", target_id=str(job_id),
+        detail=f"更新调度任务 {payload.model_dump(exclude_none=True)}"[:300],
+    )
     return Resp(data=AgentJobOut.model_validate(row))
 
 
@@ -611,6 +642,11 @@ def run_job(job_id: int, db: Session = Depends(get_db), actor: User = Depends(re
         Resp[dict]: 调度运行结果。
     """
     row = scheduler_service.run_job(db, job_id, actor=actor)
+    audit_service.log(
+        db, actor, "governance.job_run",
+        target_type="agent_job", target_id=str(job_id),
+        detail=f"手动运行调度任务 run_id={row.id}",
+    )
     return Resp(data={
         "id": row.id,
         "job_id": row.job_id,
@@ -866,6 +902,11 @@ def rollback_version(version_id: int, db: Session = Depends(get_db), _: User = D
         Resp[dict]: 回滚后的版本。
     """
     row = rollback_service.rollback_version(db, version_id)
+    audit_service.log(
+        db, _, "governance.rollback_version",
+        target_type="artifact_version", target_id=str(version_id),
+        detail=f"回滚版本 {row.agent_code}/{row.artifact_type} 到 {row.version}",
+    )
     return Resp(data=_version_to_dict(row))
 
 

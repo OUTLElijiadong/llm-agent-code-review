@@ -20,7 +20,7 @@ from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.common import Resp
 from app.schemas.project_member import MemberAddIn, MemberOut, MemberRoleUpdateIn
-from app.services import project_member_service
+from app.services import audit_service, project_member_service
 
 router = APIRouter()
 
@@ -71,6 +71,11 @@ def add_member(
         role=payload.role_in_project,
         operator=user,
     )
+    audit_service.log(
+        db, user, "project_member_add",
+        target_type="project", target_id=f"{project_id}:user:{payload.user_id}",
+        detail=f"添加项目成员 user_id={payload.user_id} 角色={payload.role_in_project}",
+    )
     # 复用 list_members 拼装用户基本信息
     rows = project_member_service.list_members(db, project_id)
     for r in rows:
@@ -110,6 +115,11 @@ def update_member_role(
         new_role=payload.role_in_project,
         operator=user,
     )
+    audit_service.log(
+        db, user, "project_member_role_update",
+        target_type="project", target_id=f"{project_id}:user:{user_id}",
+        detail=f"修改项目成员角色为 {payload.role_in_project}",
+    )
     return Resp(data=None)
 
 
@@ -133,5 +143,10 @@ def remove_member(
         project_id=project_id,
         user_id=user_id,
         operator=user,
+    )
+    audit_service.log(
+        db, user, "project_member_remove",
+        target_type="project", target_id=f"{project_id}:user:{user_id}",
+        detail="移除项目成员",
     )
     return Resp(data=None)

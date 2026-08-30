@@ -1255,6 +1255,16 @@ class PrismToolExecutor:
             risk_level="medium",
             confidence=float(call.arguments.get("confidence") or 0.8),
         )
+        try:
+            from app.services import audit_service
+
+            audit_service.log(
+                self._db, self._user, "agent_tool.knowledge_note_save",
+                target_type="agent_knowledge_doc", target_id=str(getattr(row, "id", "")),
+                detail="小菱侧写入知识笔记(经审批)",
+            )
+        except Exception:  # noqa: BLE001 - 审计失败不影响工具结果
+            logger.debug("knowledge_note_save 审计落库失败")
         return ToolExecutionResult.success({
             "doc_id": row.id,
             "title": row.title,

@@ -185,7 +185,7 @@ def get_project(project_id: int, db: Session = Depends(get_db),
 
 
 @router.delete("/{project_id}/source-revisions/{revision_id}",
-                dependencies=[Depends(require_permission(PermissionCode.PROJECT_VIEW))],
+                dependencies=[Depends(require_permission(PermissionCode.PROJECT_DELETE))],
                 status_code=200)
 def delete_source_revision(project_id: int, revision_id: int,
                            db: Session = Depends(get_db),
@@ -323,4 +323,9 @@ def delete_project(project_id: int, db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
     """删除项目(软删除)"""
     project_service.delete_project(db, user, project_id)
+    audit_service.log(
+        db, user, "project_delete",
+        target_type="project", target_id=str(project_id),
+        detail="删除项目(软删, 含审查历史入口)",
+    )
     return Resp(data=None)

@@ -46,7 +46,7 @@ from app.models.user import User
 from app.schemas.common import PageOut, Resp
 from app.schemas.report import ReportDetailOut, ReportListItem
 from app.schemas.report_template import ReportTemplateIn, ReportTemplateOut, ReportTemplateUpdate
-from app.services import report_service, report_template_service
+from app.services import audit_service, report_service, report_template_service
 from app.services.rbac_service import check_permission
 from app.services.report_exporter import (
     export_to_html,
@@ -346,7 +346,7 @@ def export_report(
 def list_templates(
     template_type: Optional[str] = Query(default=None, pattern="^(simple|detailed|compliance|custom)$"),
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("report:template_manage")),
+    user: User = Depends(require_permission(PermissionCode.REPORT_TEMPLATE_MANAGE)),
 ):
     """列出全部报告模板(可按类型筛选)。
 
@@ -366,7 +366,7 @@ def list_templates(
 def create_template(
     payload: ReportTemplateIn,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("report:template_manage")),
+    user: User = Depends(require_permission(PermissionCode.REPORT_TEMPLATE_MANAGE)),
 ):
     """创建自定义报告模板。
 
@@ -379,6 +379,11 @@ def create_template(
         Resp[ReportTemplateOut]: 已创建的模板对象。
     """
     template = report_template_service.create_template(db, payload, creator_id=user.id)
+    audit_service.log(
+        db, user, "report_template_create",
+        target_type="report_template", target_id=str(template.id),
+        detail=f"创建报告模板 {template.name}",
+    )
     return Resp(data=ReportTemplateOut.model_validate(template))
 
 
@@ -387,7 +392,7 @@ def update_template(
     template_id: int,
     payload: ReportTemplateUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("report:template_manage")),
+    user: User = Depends(require_permission(PermissionCode.REPORT_TEMPLATE_MANAGE)),
 ):
     """更新报告模板(内置模板亦可修改内容,但 is_builtin 不可变)。
 
@@ -404,6 +409,11 @@ def update_template(
         NotFoundError: 模板不存在(404)。
     """
     template = report_template_service.update_template(db, template_id, payload)
+    audit_service.log(
+        db, user, "report_template_update",
+        target_type="report_template", target_id=str(template_id),
+        detail=f"更新报告模板 {template.name}",
+    )
     return Resp(data=ReportTemplateOut.model_validate(template))
 
 
@@ -411,7 +421,7 @@ def update_template(
 def delete_template(
     template_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission("report:template_manage")),
+    user: User = Depends(require_permission(PermissionCode.REPORT_TEMPLATE_MANAGE)),
 ):
     """删除报告模板(系统内置模板不可删除,返回 400)。
 
@@ -428,6 +438,11 @@ def delete_template(
     """
     try:
         report_template_service.delete_template(db, template_id)
+        audit_service.log(
+            db, user, "report_template_delete",
+            target_type="report_template", target_id=str(template_id),
+            detail="删除报告模板",
+        )
     except ValueError as e:
         # 内置模板不可删除,返回 400(而非全局 500)
         return Response(
@@ -445,6 +460,11 @@ def delete_report(task_id: int, db: Session = Depends(get_db),
                   user: User = Depends(get_current_user)):
     """删除报告"""
     report_service.delete_report(db, user, task_id)
+    audit_service.log(
+        db, user, "report_delete",
+        target_type="review_task", target_id=str(task_id),
+        detail="删除审查报告(软删任务)",
+    )
     return Resp(data=None)
 
 

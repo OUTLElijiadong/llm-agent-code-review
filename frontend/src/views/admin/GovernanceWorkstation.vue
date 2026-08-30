@@ -180,11 +180,17 @@ const pageSubtitle = computed(() => {
 
 import {
   agentCodeText,
+  artifactTypeText,
+  categoryText,
+  decisionText,
   jobCodeText,
   jobTypeText,
+  memoryTypeText,
   policyActionText,
   policyResourceText,
   policySubjectText,
+  sourceTypeText,
+  toolCodeText,
 } from '@/constants/adminGovernance'
 
 function statusText(value: string | number | null | undefined): string {
@@ -634,7 +640,9 @@ onMounted(loadData)
                 <EmptyState compact description="暂无 Agent 记录" />
               </template>
             <el-table-column prop="name" label="Agent(智能体)" min-width="140" />
-            <el-table-column prop="category" label="分类" width="110" />
+            <el-table-column label="分类" width="110">
+            <template #default="{ row }"><span :title="row.category">{ categoryText(row.category) }</span></template>
+          </el-table-column>
             <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small">{{ statusText(row.status) }}</el-tag></template></el-table-column>
             <el-table-column prop="priority" label="优先级" width="90" />
           </el-table>
@@ -660,12 +668,14 @@ onMounted(loadData)
           </template>
         <el-table-column prop="name" label="Agent(智能体)" min-width="150" />
         <el-table-column prop="code" label="内部编码" min-width="140" />
-        <el-table-column prop="category" label="分类" width="120" />
+        <el-table-column label="分类" width="120">
+            <template #default="{ row }"><span :title="row.category">{ categoryText(row.category) }</span></template>
+          </el-table-column>
         <el-table-column label="职责边界" min-width="260" show-overflow-tooltip>
           <template #default="{ row }">{{ agentBoundaryText(row) }}</template>
         </el-table-column>
         <el-table-column label="Skill(技能)" min-width="220">
-          <template #default="{ row }">{{ row.skills.join(', ') }}</template>
+          <template #default="{ row }"><span :title="row.skills.join(', ')">{{ row.skills.map((s: string) => toolCodeText(s)).join('、') }}</span></template>
         </el-table-column>
         <el-table-column prop="priority" label="优先级" width="90" />
         <el-table-column prop="auto_approval_threshold" label="审批阈值" width="100" />
@@ -680,8 +690,12 @@ onMounted(loadData)
             <EmptyState compact description="无待审批事项" />
           </template>
         <el-table-column prop="title" label="审批事项" min-width="220" />
-        <el-table-column prop="agent_code" label="Agent(智能体)" width="120" />
-        <el-table-column prop="action" label="动作" min-width="150" />
+        <el-table-column label="Agent(智能体)" width="120">
+            <template #default="{ row }"><span :title="row.agent_code">{ agentCodeText(row.agent_code) }</span></template>
+          </el-table-column>
+        <el-table-column label="动作" min-width="150">
+            <template #default="{ row }"><span :title="row.action">{ policyActionText(row.action) }</span></template>
+          </el-table-column>
         <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="row.risk_level === 'high' ? 'danger' : 'warning'">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
         <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
         <el-table-column label="操作" width="150">
@@ -816,11 +830,19 @@ onMounted(loadData)
           <template #empty>
             <EmptyState compact description="暂无工具授权" />
           </template>
-          <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
-          <el-table-column prop="tool_code" label="工具" width="130" />
-          <el-table-column prop="permission" label="权限" width="110" />
-          <el-table-column prop="risk_level" label="风险" width="90" />
-          <el-table-column prop="enabled" label="启用" width="80" />
+          <el-table-column label="Agent(智能体)" width="130">
+            <template #default="{ row }"><span :title="row.agent_code">{ agentCodeText(row.agent_code) }</span></template>
+          </el-table-column>
+          <el-table-column label="工具" width="130">
+            <template #default="{ row }"><span :title="row.tool_code">{ toolCodeText(row.tool_code) }</span></template>
+          </el-table-column>
+          <el-table-column label="权限" width="110">
+            <template #default="{ row }"><span :title="row.permission">{ decisionText(row.permission) }</span></template>
+          </el-table-column>
+          <el-table-column label="风险" width="90">
+            <template #default="{ row }"><span :title="row.risk_level">{ riskText(row.risk_level) }</span></template>
+          </el-table-column>
+          <el-table-column label="启用" width="80"><template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template></el-table-column>
           <el-table-column prop="note" label="备注" min-width="180" show-overflow-tooltip />
         </el-table>
       </div>
@@ -830,12 +852,24 @@ onMounted(loadData)
           <template #empty>
             <EmptyState compact description="暂无工具注册" />
           </template>
-          <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
-          <el-table-column prop="tool_code" label="工具" width="130" />
-          <el-table-column prop="action" label="动作" min-width="160" />
-          <el-table-column prop="decision" label="决策" width="90" />
-          <el-table-column prop="status" label="状态" width="100" />
-          <el-table-column prop="risk_level" label="风险" width="90" />
+          <el-table-column label="Agent(智能体)" width="130">
+            <template #default="{ row }"><span :title="row.agent_code">{ agentCodeText(row.agent_code) }</span></template>
+          </el-table-column>
+          <el-table-column label="工具" width="130">
+            <template #default="{ row }"><span :title="row.tool_code">{ toolCodeText(row.tool_code) }</span></template>
+          </el-table-column>
+          <el-table-column label="动作" min-width="150">
+            <template #default="{ row }"><span :title="row.action">{ policyActionText(row.action) }</span></template>
+          </el-table-column>
+          <el-table-column label="决策" width="90">
+            <template #default="{ row }"><span :title="row.decision">{ decisionText(row.decision) }</span></template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }"><span :title="row.status">{ statusText(row.status) }</span></template>
+          </el-table-column>
+          <el-table-column label="风险" width="90">
+            <template #default="{ row }"><span :title="row.risk_level">{ riskText(row.risk_level) }</span></template>
+          </el-table-column>
           <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
         </el-table>
       </div>
@@ -915,9 +949,11 @@ onMounted(loadData)
           <template #empty>
             <EmptyState compact description="暂无知识源" />
           </template>
-          <el-table-column prop="source_type" label="类型" width="100" />
+          <el-table-column label="类型" width="100">
+            <template #default="{ row }"><span :title="row.source_type">{ sourceTypeText(row.source_type) }</span></template>
+          </el-table-column>
           <el-table-column prop="source_uri" label="来源" min-width="240" show-overflow-tooltip />
-          <el-table-column prop="whitelist" label="白名单" width="90" />
+          <el-table-column label="白名单" width="90"><template #default="{ row }">{{ row.whitelist ? '白名单' : '需审核' }}</template></el-table-column>
           <el-table-column prop="enabled" label="启用" width="80" />
         </el-table>
       </div>
@@ -929,7 +965,9 @@ onMounted(loadData)
                 <EmptyState compact description="该 Agent 暂无记忆" />
               </template>
             <el-table-column prop="title" label="标题" min-width="180" />
-            <el-table-column prop="memory_type" label="类型" width="110" />
+            <el-table-column label="类型" width="110">
+            <template #default="{ row }"><span :title="row.memory_type">{ memoryTypeText(row.memory_type) }</span></template>
+          </el-table-column>
             <el-table-column prop="weight" label="权重" width="90" />
           </el-table>
         </div>
@@ -940,9 +978,13 @@ onMounted(loadData)
                 <EmptyState compact description="该 Agent 暂无知识条目" />
               </template>
             <el-table-column prop="title" label="标题" min-width="180" />
-            <el-table-column prop="source_type" label="来源" width="100" />
+            <el-table-column label="来源" width="100">
+            <template #default="{ row }"><span :title="row.source_type">{ sourceTypeText(row.source_type) }</span></template>
+          </el-table-column>
             <el-table-column prop="risk_level" label="风险" width="90" />
-            <el-table-column prop="status" label="状态" width="130" />
+            <el-table-column label="状态" width="130">
+            <template #default="{ row }"><span :title="row.status">{ statusText(row.status) }</span></template>
+          </el-table-column>
             <el-table-column prop="chunk_count" label="切片" width="80" />
             <el-table-column label="操作" width="90">
               <template #default="{ row }">
@@ -1061,7 +1103,9 @@ onMounted(loadData)
           <template #empty>
             <EmptyState compact description="暂无激励事件" />
           </template>
-          <el-table-column prop="agent_code" label="Agent(智能体)" width="140" />
+          <el-table-column label="Agent(智能体)" width="140">
+            <template #default="{ row }"><span :title="row.agent_code">{ agentCodeText(row.agent_code) }</span></template>
+          </el-table-column>
           <el-table-column label="类型" width="100"><template #default="{ row }">{{ row.event_type === 'reward' ? '奖励' : '惩罚' }}</template></el-table-column>
           <el-table-column prop="score" label="分数" width="90" />
           <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
@@ -1099,7 +1143,9 @@ onMounted(loadData)
             <EmptyState compact description="暂无版本产物" />
           </template>
           <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
-          <el-table-column prop="artifact_type" label="类型" width="110" />
+          <el-table-column label="类型" width="110">
+            <template #default="{ row }"><span :title="row.artifact_type">{ artifactTypeText(row.artifact_type) }</span></template>
+          </el-table-column>
           <el-table-column prop="version" label="版本" min-width="160" />
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="90">

@@ -13,7 +13,7 @@ from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamArchiveIn, AgentTeamCancelIn, AgentTeamCreateIn, AgentTeamRetryIn
 from app.schemas.common import Resp
-from app.services import agent_team_service
+from app.services import agent_team_service, audit_service
 
 router = APIRouter()
 
@@ -35,7 +35,13 @@ def create_team(
     user: User = Depends(get_current_user),
 ) -> Resp[dict]:
     try:
-        return Resp(data=agent_team_service.create_team(db, user, payload))
+        team = agent_team_service.create_team(db, user, payload)
+        audit_service.log(
+            db, user, "agent_team_create",
+            target_type="agent_team", target_id=str(team.get("id", "")),
+            detail=f"创建多Agent团队: {str(payload.objective)[:80]}",
+        )
+        return Resp(data=team)
     except agent_team_service.AgentTeamError as exc:
         _raise_team_error(exc)
         raise AssertionError("unreachable")
@@ -149,7 +155,13 @@ def cancel_team(
     user: User = Depends(get_current_user),
 ) -> Resp[dict]:
     try:
-        return Resp(data=agent_team_service.cancel_team(db, user, team_id, reason=payload.reason))
+        data = agent_team_service.cancel_team(db, user, team_id, reason=payload.reason)
+        audit_service.log(
+            db, user, "agent_team_cancel",
+            target_type="agent_team", target_id=str(team_id),
+            detail=f"取消团队: {payload.reason}",
+        )
+        return Resp(data=data)
     except agent_team_service.AgentTeamError as exc:
         _raise_team_error(exc)
         raise AssertionError("unreachable")
@@ -174,6 +186,11 @@ def retry_team(
                 strategy_changes=payload.strategy_changes,
             )
         )
+        audit_service.log(
+            db, user, "agent_team_retry",
+            target_type="agent_team", target_id=str(team_id),
+            detail=f"重试团队任务 {payload.task_keys}",
+        )
     except agent_team_service.AgentTeamError as exc:
         _raise_team_error(exc)
         raise AssertionError("unreachable")
@@ -191,7 +208,13 @@ def archive_team(
     user: User = Depends(get_current_user),
 ) -> Resp[dict]:
     try:
-        return Resp(data=agent_team_service.archive_team(db, user, team_id, reason=payload.reason))
+        data = agent_team_service.archive_team(db, user, team_id, reason=payload.reason)
+        audit_service.log(
+            db, user, "agent_team_archive",
+            target_type="agent_team", target_id=str(team_id),
+            detail=f"归档团队: {payload.reason}",
+        )
+        return Resp(data=data)
     except agent_team_service.AgentTeamError as exc:
         _raise_team_error(exc)
         raise AssertionError("unreachable")
