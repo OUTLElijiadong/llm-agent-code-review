@@ -86,6 +86,15 @@ def get_embedding_config(db: Session = Depends(get_db), admin: User = Depends(re
     return Resp(data=EmbeddingConfigOut(**system_config_service.get_embedding_config_public(db)))
 
 
+@router.post("/embedding-config/reembed", response_model=Resp[dict])
+def reembed_all(db: Session = Depends(get_db),
+                admin: User = Depends(require_super_admin)):
+    """按当前嵌入配置重建全部存量切片向量(个人 KB + Agent 知识库, 唯一超管)。"""
+    from app.services import embedding_service
+
+    return Resp(data=embedding_service.reembed_all_stores(db))
+
+
 @router.put("/embedding-config", response_model=Resp[EmbeddingConfigOut])
 def update_embedding_config(payload: EmbeddingConfigIn, db: Session = Depends(get_db),
                             admin: User = Depends(require_super_admin)):

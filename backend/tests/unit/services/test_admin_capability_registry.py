@@ -106,6 +106,7 @@ FRONTEND_API_CAPABILITY = {
     "agent:listSkillRecords": "skills.records.list",
     "knowledge:getEmbeddingConfig": "embedding.config.get",
     "knowledge:updateEmbeddingConfig": "embedding.config.update",
+    "knowledge:reembedAll": "embedding.config.reembed",
     "llmConfig:getLlmConfig": "llm.config.get",
     "llmConfig:updateLlmConfig": "llm.config.update",
     "llmConfig:testLlmConfig": "llm.config.test",
@@ -178,8 +179,8 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
-    # 122 = b4d301a 完整 118 项 + 服务器线安全监控 4 项(observability.security.*)
-    assert len(ADMIN_CAPABILITIES) == 123
+    # 124 = 123 项 + 嵌入配置重建(embedding.config.reembed)
+    assert len(ADMIN_CAPABILITIES) == 124
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)

@@ -89,6 +89,29 @@ services:
     networks:
       - code_review_net
 
+  # 本地嵌入服务(TEI, OpenAI 兼容 /v1/embeddings): 供 RAG 语义向量,
+  # 仅容器内网可达, 无需外部 Key; 不需要时可不启动(平台自动降级哈希向量)。
+  embedding:
+    image: ${EMBEDDING_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu}
+    container_name: cr_embedding
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    environment:
+      # 模型走国内镜像源下载(HuggingFace 直连不可达)
+      - HF_ENDPOINT=${EMBEDDING_HF_ENDPOINT:-https://hf-mirror.com}
+    command: ["--model-id", "${EMBEDDING_MODEL_ID:-BAAI/bge-small-zh-v1.5}", "--auto-truncate"]
+    volumes:
+      - embedding_model_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    networks:
+      - code_review_net
+
   backend:
     image: prism-backend:${BACKEND_RELEASE:-local}
     build:
@@ -195,6 +218,7 @@ services:
 
 volumes:
   mysql_data:
+  embedding_model_cache:
   clamav_data:
   frontend_assets:
 

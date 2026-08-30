@@ -178,6 +178,15 @@ const pageSubtitle = computed(() => {
   return subtitles[props.mode]
 })
 
+import {
+  agentCodeText,
+  jobCodeText,
+  jobTypeText,
+  policyActionText,
+  policyResourceText,
+  policySubjectText,
+} from '@/constants/adminGovernance'
+
 function statusText(value: string | number | null | undefined): string {
   const labels: Record<string, string> = {
     active: '生效', idle: '空闲', working: '运行中', disabled: '已停用', error: '异常',
@@ -731,8 +740,21 @@ onMounted(loadData)
             <EmptyState compact description="暂无策略配置" />
           </template>
           <el-table-column prop="name" label="规则" min-width="180" />
-          <el-table-column prop="subject" label="主体" width="130" />
-          <el-table-column prop="action" label="动作" width="140" />
+          <el-table-column label="主体" width="130">
+            <template #default="{ row }">
+              <span :title="row.subject">{{ policySubjectText(row.subject) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="动作" width="140">
+            <template #default="{ row }">
+              <span :title="row.action">{{ policyActionText(row.action) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="资源" width="130">
+            <template #default="{ row }">
+              <span :title="row.resource">{{ policyResourceText(row.resource) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="处理方式" width="110"><template #default="{ row }">{{ statusText(row.effect) }}</template></el-table-column>
           <el-table-column label="风险" width="100"><template #default="{ row }">{{ riskText(row.risk_level) }}</template></el-table-column>
           <el-table-column label="状态" width="80"><template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template></el-table-column>
@@ -744,8 +766,16 @@ onMounted(loadData)
           <template #empty>
             <EmptyState compact description="暂无策略决策记录" />
           </template>
-          <el-table-column prop="subject" label="主体" width="150" />
-          <el-table-column prop="action" label="动作" min-width="160" />
+          <el-table-column label="主体" width="150">
+            <template #default="{ row }">
+              <span :title="row.subject">{{ policySubjectText(row.subject) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="动作" min-width="160">
+            <template #default="{ row }">
+              <span :title="row.action">{{ policyActionText(row.action) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="决策" width="110"><template #default="{ row }">{{ statusText(row.decision) }}</template></el-table-column>
           <el-table-column label="风险" width="100"><template #default="{ row }">{{ riskText(row.risk_level) }}</template></el-table-column>
           <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
@@ -931,9 +961,21 @@ onMounted(loadData)
           <template #empty>
             <EmptyState compact description="暂无调度任务,点上方「新建」创建" />
           </template>
-        <el-table-column prop="job_code" label="任务" min-width="220" />
-        <el-table-column prop="job_type" label="类型" width="110" />
-        <el-table-column prop="agent_code" label="Agent(智能体)" width="150" />
+        <el-table-column label="任务" min-width="220">
+          <template #default="{ row }">
+            <span :title="row.job_code">{{ jobCodeText(row.job_code) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="110">
+          <template #default="{ row }">
+            <span :title="row.job_type">{{ jobTypeText(row.job_type) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="Agent(智能体)" width="150">
+          <template #default="{ row }">
+            <span :title="row.agent_code">{{ agentCodeText(row.agent_code) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="计划" width="190">
           <template #default="{ row }">
             <el-input v-if="jobEdit[row.id]" v-model="jobEdit[row.id].schedule" size="small" placeholder="如 0 3 * * * (每天 3 点)" :class="{ 'is-cron-invalid': scheduleInvalid(row.id) }" />

@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     embedding_model: str = ""
     embedding_dim: int = 256  # 本地降级向量维度
     embedding_timeout: int = 30
+    # 允许嵌入端点指向私网/容器内网(默认关闭保持 SSRF 防护):
+    # 仅在部署了本地嵌入服务(如 compose 内 TEI)时由环境变量显式开启。
+    embedding_allow_private_endpoint: bool = False
 
     agent_governance_scheduler_enabled: bool = True
     agent_mesh_dispatcher_enabled: bool = True

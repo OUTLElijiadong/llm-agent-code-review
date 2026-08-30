@@ -828,6 +828,15 @@ _cap(
         "server_ops:execute",
     ),
     _cap(
+        "embedding.config.reembed",
+        "/admin/embedding",
+        "按当前配置重建全部存量切片向量",
+        "POST",
+        "/api/knowledge/embedding-config/reembed",
+        CRITICAL,
+        "server_ops:execute",
+    ),
+    _cap(
         "llm.config.get",
         "/admin/llm",
         "查询脱敏的全局 LLM 配置",

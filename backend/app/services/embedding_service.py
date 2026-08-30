@@ -65,31 +65,62 @@ def _l2_normalize(vec: List[float]) -> List[float]:
 def _api_embed(texts: List[str], cfg: dict) -> List[List[float]]:
     import httpx
 
-    base_url = validate_ai_base_url(
-        cfg["base_url"],
-        resolve_host=True,
-        allow_private=False,
-    )
-    target = pin_public_http_url(f"{base_url}/embeddings")
+    base_url = str(cfg["base_url"]).rstrip("/")
+    if settings.embedding_allow_private_endpoint and _is_private_url(base_url):
+        # 本地嵌入服务(如 compose 内 TEI)直连: 配置仅唯一超管可写且
+        # 开关由部署显式开启, 内网直连不经过公网 SSRF 校验与出网固定。
+        request_url = f"{base_url}/embeddings"
+        extra_headers: dict = {}
+        extensions = {}
+    else:
+        base_url = validate_ai_base_url(
+            cfg["base_url"],
+            resolve_host=True,
+            allow_private=False,
+        )
+        target = pin_public_http_url(f"{base_url}/embeddings")
+        request_url = target.request_url
+        extra_headers = {"Host": target.host_header}
+        extensions = target.request_extensions
     headers = {
         "Authorization": f"Bearer {cfg['api_key']}",
         "Content-Type": "application/json",
-        "Host": target.host_header,
+        **extra_headers,
     }
     out: List[List[float]] = []
     batch = 32
     with httpx.Client(timeout=settings.embedding_timeout, trust_env=False) as client:
         for i in range(0, len(texts), batch):
             chunk = texts[i:i + batch]
-            resp = client.post(target.request_url, headers=headers, json={
+            resp = client.post(request_url, headers=headers, json={
                 "model": cfg["model"], "input": chunk,
-            }, extensions=target.request_extensions)
+            }, extensions=extensions)
             resp.raise_for_status()
             body = resp.json()
             # 按 index 排序,保证与输入顺序一致
             items = sorted(body["data"], key=lambda d: d.get("index", 0))
             out.extend([_l2_normalize([float(x) for x in it["embedding"]]) for it in items])
     return out
+
+
+def _is_private_url(url: str) -> bool:
+    """判定是否私网/容器内网端点(127./10./172.16-31./192.168./localhost/主机名)。"""
+    import ipaddress
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host == "localhost" or not host.startswith(("http",)) and "." not in host and ":" not in host:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback
+    except ValueError:
+        return False
 
 
 # ──────────────────────────────────────────────────────────
@@ -145,3 +176,48 @@ def parse_vector(raw) -> List[float]:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int) -> None:
+    """按 id 游标分批重建单域切片向量并即时提交。"""
+    last_id = 0
+    while True:
+        rows = (
+            db.query(model)
+            .filter(model.id > last_id)
+            .order_by(model.id.asc())
+            .limit(batch_size)
+            .all()
+        )
+        if not rows:
+            break
+        last_id = int(rows[-1].id)
+        pieces = [str(row.content or "") for row in rows]
+        try:
+            vectors, tag = embed_texts(db, pieces)
+        except Exception:  # noqa: BLE001 — 单批失败降级哈希, 不中断整体
+            vectors = [_hash_embed(p, settings.embedding_dim) for p in pieces]
+            tag = FALLBACK_TAG
+            stats["failed_batches"] += 1
+            logger.warning(f"[embedding.reembed] {label} 批次嵌入失败已降级哈希 (last_id={last_id})")
+        for row, vec in zip(rows, vectors):
+            row.embedding = json.dumps(vec)
+            row.embed_model = tag
+        db.commit()
+        stats[label] += len(rows)
+        logger.info(f"[embedding.reembed] {label} 重建至 id={last_id} (累计 {stats[label]})")
+
+
+def reembed_all_stores(db: Session, batch_size: int = 64) -> dict:
+    """按当前嵌入配置重建两域存量切片向量(个人 KB + Agent 知识库)。
+
+    切换嵌入模型/端点后, 存量向量维度不一致会在检索中被判不可比(cosine=-1),
+    该入口供管理员一键重建; 幂等全量重嵌, 单批失败降级哈希并计数不中断。
+    """
+    from app.models.agent_governance import AgentKnowledgeChunk
+    from app.models.knowledge_chunk import KnowledgeChunk
+
+    stats = {"kb_chunks": 0, "agent_chunks": 0, "failed_batches": 0}
+    _reembed_model(db, KnowledgeChunk, "kb_chunks", stats, batch_size)
+    _reembed_model(db, AgentKnowledgeChunk, "agent_chunks", stats, batch_size)
+    return stats

@@ -72,6 +72,11 @@ export function getKbStats(): Promise<KbStats> {
   return get<KbStats>('/knowledge/stats')
 }
 
+/** 一键重建全部存量切片向量(个人KB+Agent知识库, 唯一超管) */
+export function reembedAll() {
+  return post<Record<string, number>>('/knowledge/embedding-config/reembed', {})
+}
+
 /** 获取 embedding 配置 (管理员) */
 export function getEmbeddingConfig(): Promise<EmbeddingConfig> {
   return get<EmbeddingConfig>('/knowledge/embedding-config')
