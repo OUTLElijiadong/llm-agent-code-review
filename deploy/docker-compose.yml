@@ -100,7 +100,8 @@ services:
     cpus: 1.0
     environment:
       - HF_ENDPOINT=${EMBEDDING_HF_ENDPOINT:-https://hf-mirror.com}
-    command: ["--model-id", "${EMBEDDING_MODEL_ID:-BAAI/bge-small-zh-v1.5}"]
+    # 优先用卷内离线模型(国内拉取 HF 模型不可达时由运维预置); 也可改回 HF 仓库 id
+    command: ["--model-id", "${EMBEDDING_MODEL_ID:-/data/models/bge-small-zh-v1.5}"]
     volumes:
       - embedding_model_cache:/data
     healthcheck:
