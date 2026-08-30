@@ -101,7 +101,7 @@ services:
     environment:
       - HF_ENDPOINT=${EMBEDDING_HF_ENDPOINT:-https://hf-mirror.com}
     # 优先用卷内离线模型(国内拉取 HF 模型不可达时由运维预置); 也可改回 HF 仓库 id
-    command: ["--model-id", "${EMBEDDING_MODEL_ID:-/data/models/bge-small-zh-v1.5}"]
+    command: ["--model-id", "${EMBEDDING_MODEL_ID:-/data/models/bge-small-zh-v1.5}", "--auto-truncate"]
     volumes:
       - embedding_model_cache:/data
 # TEI 为 distroless 镜像(无 shell/wget), 健康由平台调用层兜底(嵌入失败自动降级)
