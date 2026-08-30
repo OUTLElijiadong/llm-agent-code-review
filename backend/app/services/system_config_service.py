@@ -64,11 +64,15 @@ def get_embedding_config(db: Session) -> dict:
             pass
 
     if enabled:
-        try:
-            base_url = validate_ai_base_url(base_url, resolve_host=True, allow_private=False)
-        except ValidationError as exc:
-            logger.warning(f"[system_config] embedding 端点已安全停用: {exc.message}")
-            enabled = False
+        if settings.embedding_allow_private_endpoint and _is_private_embedding_url(base_url):
+            # 本地嵌入服务(如 compose 内 TEI): 部署显式开启开关时读取不再被安全停用
+            pass
+        else:
+            try:
+                base_url = validate_ai_base_url(base_url, resolve_host=True, allow_private=False)
+            except ValidationError as exc:
+                logger.warning(f"[system_config] embedding 端点已安全停用: {exc.message}")
+                enabled = False
 
     return {"base_url": base_url, "api_key": api_key, "model": model, "enabled": enabled}
 
@@ -82,6 +86,26 @@ def get_embedding_config_public(db: Session) -> dict:
         "enabled": cfg["enabled"],
         "api_key_set": bool(cfg["api_key"]),
     }
+
+
+def _is_private_embedding_url(url: str) -> bool:
+    """与 embedding_service._is_private_url 同语义(避免循环导入的本地实现)。"""
+    import ipaddress
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host == "localhost" or ("." not in host and ":" not in host):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback
+    except ValueError:
+        return False
 
 
 def update_embedding_config(
@@ -105,11 +129,13 @@ def update_embedding_config(
 
     if base_url is not None:
         value = base_url.strip()
-        data["base_url"] = (
-            validate_ai_base_url(value, resolve_host=True, allow_private=False)
-            if value
-            else ""
-        )
+        if not value:
+            data["base_url"] = ""
+        elif settings.embedding_allow_private_endpoint and _is_private_embedding_url(value):
+            # 本地嵌入服务(如 compose 内 TEI): 开关由部署显式开启时放行私网端点
+            data["base_url"] = value
+        else:
+            data["base_url"] = validate_ai_base_url(value, resolve_host=True, allow_private=False)
     if model is not None:
         data["model"] = model.strip()
     if api_key is not None:

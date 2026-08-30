@@ -120,3 +120,23 @@ def test_reembed_all_stores_rebuilds_both_domains(db, monkeypatch):
     assert kb.embed_model == "api:test-model"
     agent = db.query(AgentKnowledgeChunk).one()
     assert agent.embed_model == "api:test-model"
+
+
+def test_update_embedding_config_private_endpoint_gate(db, monkeypatch):
+    """保存配置的私网放行: 开关开才允许内网端点, 默认仍拒绝(SSRF 防护)。"""
+    from app.core.exceptions import ValidationError as _VE
+    from app.services import system_config_service as scs
+
+    monkeypatch.setattr(scs.settings, "embedding_allow_private_endpoint", False)
+    with pytest.raises(_VE):
+        scs.update_embedding_config(db, base_url="http://embedding:80/v1")
+
+    monkeypatch.setattr(scs.settings, "embedding_allow_private_endpoint", True)
+    data = scs.update_embedding_config(
+        db, base_url="http://embedding:80/v1", api_key="local-tei",
+        model="BAAI/bge-small-zh-v1.5", enabled=True,
+    )
+    assert data["enabled"] is True
+    # 开启开关后公网端点仍走常规校验(非法值拒绝)
+    with pytest.raises(_VE):
+        scs.update_embedding_config(db, base_url="ht!tp://bad url")
