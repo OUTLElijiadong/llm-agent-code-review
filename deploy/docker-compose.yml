@@ -100,7 +100,7 @@ services:
     cpus: 1.0
     environment:
       - HF_ENDPOINT=${EMBEDDING_HF_ENDPOINT:-https://hf-mirror.com}
-    command: ["--model-id", "${EMBEDDING_MODEL_ID:-BAAI/bge-small-zh-v1.5}", "--auto-truncate"]
+    command: ["--model-id", "${EMBEDDING_MODEL_ID:-BAAI/bge-small-zh-v1.5}"]
     volumes:
       - embedding_model_cache:/data
     healthcheck:
