@@ -317,6 +317,17 @@ _NON_TERMINAL_RUN_STATUSES = {
 }
 
 
+def surface_agent_identity(surface: str) -> tuple[str, str]:
+    """控制面/体验面身份分离(单一事实源)。
+
+    管理端 = 贾维斯(manager, 全局运维); 成员端 = 小菱(chat_assistant)。
+    AgentEventBus 事件归属、状态文案统一取这里, 防止管理端运行被记到小菱名下。
+    """
+    if surface == "admin":
+        return "manager", "贾维斯"
+    return "chat_assistant", "小菱"
+
+
 def _is_admin_actor(db: Session, user: User) -> bool:
     """兼容旧角色字段，并保留新版 RBAC 管理员绑定。"""
 
@@ -901,14 +912,26 @@ class PrismToolExecutor:
             return await self._execute_once(call, lambda: self._get_roundtable_discussion(call))
 
         if call.name == "create_pentest_engagement":
+            if self._surface == "admin":
+                return ToolExecutionResult.failure(
+                    "渗透测试是成员侧业务, 由小菱编排; 请在成员端或渗透测试页面操作"
+                )
             return await self._execute_once(call, lambda: self._create_pentest_engagement(call))
 
         if call.name == "get_pentest_status":
+            if self._surface == "admin":
+                return ToolExecutionResult.failure(
+                    "渗透测试是成员侧业务, 请在成员端查询进度"
+                )
             return await self._execute_once(call, lambda: self._get_pentest_status(call))
 
         # start_pentest_engagement 是写工具: 走与圆桌启动相同的内联审批门,
         # 不能放在通用 _WRITE_TOOLS 审批门之前(否则 _WRITE_TOOLS 成员资格失效)。
         if call.name == "start_pentest_engagement":
+            if self._surface == "admin":
+                return ToolExecutionResult.failure(
+                    "渗透测试是成员侧业务, 由小菱编排; 请在成员端启动"
+                )
             if not approved:
                 return self._approval(
                     call,
@@ -1198,7 +1221,7 @@ class PrismToolExecutor:
         )
 
     def _knowledge_agent_code(self) -> str:
-        return "manager" if self._surface == "admin" else "chat_assistant"
+        return surface_agent_identity(self._surface)[0]
 
     def _recall_knowledge(self, call: ToolCall) -> ToolExecutionResult:
         """检索小菱的 RAG 知识笔记本(用户私有知识 + 当前 Agent 知识)。"""
@@ -1664,22 +1687,24 @@ class PrismToolExecutor:
             "arguments": _redact_event_value(self._persisted_arguments(call)),
             **extra,
         }
-        # 同步广播到全局 AgentEventBus: Agent 中心工位卡因此能看到小菱
-        # 「正在工作」;事件按 user_id 隔离,只推给运行所属用户。
+        # 同步广播到全局 AgentEventBus: Agent 中心工位卡因此能看到助手
+        # 「正在工作」; 按 surface 归属身份(管理端=贾维斯/manager, 成员端=小菱),
+        # 事件按 user_id 隔离,只推给运行所属用户。
         if event_type == "response.tool.started":
             try:
                 from app.agents.event_bus import emit_event
                 from app.agents.events import AgentEventType
 
+                agent_code, agent_display = surface_agent_identity(self._surface)
                 emit_event(
                     AgentEventType.PROGRESS,
-                    "chat_assistant",
+                    agent_code,
                     self._run_id,
-                    message=f"小菱正在执行工具: {call.name}",
+                    message=f"{agent_display}正在执行工具: {call.name}",
                     user_id=int(self._user.id),
                 )
             except Exception:  # noqa: BLE001 - 状态广播失败不影响工具执行
-                logger.debug("小菱工具事件广播失败", call_name=call.name)
+                logger.debug("助手工具事件广播失败", call_name=call.name)
         await _emit(self._event_sink, event)
 
     async def _emit_tool_result(
@@ -1715,7 +1740,7 @@ class PrismToolExecutor:
             return str(call.arguments.get("agent_code") or "custom_agent")
         if call.name in self._skill_bindings:
             return self._skill_bindings[call.name].split(".", 1)[0]
-        return "manager" if self._surface == "admin" else "chat_assistant"
+        return surface_agent_identity(self._surface)[0]
 
     async def _execute_once(
         self,
@@ -1875,7 +1900,7 @@ class PrismToolExecutor:
             }
             row = ApprovalItem(
                 title=f"Responses Agent 请求执行 {operation or call.name}",
-                agent_code="manager" if self._surface == "admin" else "chat_assistant",
+                agent_code=surface_agent_identity(self._surface)[0],
                 action=f"responses.{call.name}",
                 resource=f"response_run:{self._run_id}",
                 risk_level="critical" if danger else "high",
@@ -2699,21 +2724,28 @@ def _to_int(value: Any) -> Optional[int]:
 
 def _instructions(surface: str, user: Optional[User] = None, is_super_admin: bool = False) -> str:
     if surface == "admin":
-        identity = "Prism 管理员 Agent「小菱」"
+        # 控制面/体验面分离(参照 Microsoft Copilot Control System 模式):
+        # 管理端是独立的「贾维斯」全局运维身份, 与普通成员的小菱彻底分开;
+        # 定位是全局运维(态势/健康/审批/治理/服务器), 不承担代码审计叙事。
+        identity = "Prism 全局运维 Agent「贾维斯」"
         capability_instruction = (
             "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
             "再调用 admin_execute_capability；不得猜测能力编码或参数。"
             "收到来自 agent:monitor 的 status.update「JARVIS 运维简报」时,只依据简报 evidence 中的真实证据汇报:"
             "先给结论与优先级排序,再建议只读核验动作和需要管理员点击批准的处置动作;"
             "绝不未经批准自动执行写操作,也不要声称已修复或已处理。"
+            "你是全局运维身份: 用户提到代码审查、安全审计、渗透测试等成员侧业务时,"
+            "说明这些由成员侧的小菱负责,引导用户到对应业务页面或切换成员账号,"
+            "不要主动替管理员发起项目安全审计。"
         )
         role_behavior = (
-            "批量处理与批量分析是你的核心能力：处理“所有/批量/全部/这些”类请求时，"
+            "全局运维是你的核心职责：系统态势巡查(服务健康/安全态势/威胁信号/数据库健康)、"
+            "用户与项目治理(账号/项目/Agent 发布审批, 审批前先查完整详情并展示修改前后内容、"
+            "依赖、测试证据和风险)、平台运营数据聚合(统计、趋势、分布要聚合多来源只读能力后给结论表格)。"
+            "批量处理与批量分析同样是核心能力：处理“所有/批量/全部/这些”类请求时，"
             "先用列表类能力查清完整候选(注意翻页,page_size 取大值并核对总数),"
             "再用 ask_user 展示统计口径与候选数量供确认,然后逐条或分页执行；"
-            "完成后汇报成功/失败/跳过条数与原因。批量分析类请求(如统计、趋势、分布)"
-            "要聚合多来源只读能力的数据后给出结论表格。"
-            "管理员处理 Agent 发布审批前必须先查询完整详情，展示修改前后内容、依赖、测试证据和风险，再申请执行决策。"
+            "完成后汇报成功/失败/跳过条数与原因。"
             "服务器运维(仅超级管理员可用)：实时获取服务器信息(状态/磁盘/进程/日志/证书)时，"
             "直接用 admin_execute_operation 的只读动作现查"
             "(status/host_inventory/journal_query/read_text_file/certificate_status)，不得编造；"
@@ -2721,11 +2753,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "(开放端口=operation add + target_type port + value 端口号，关闭用 remove)；"
             "重启服务用 restart_service，装/卸软件包用 package_action，"
             "改防火墙/服务/账号等写操作都会自动等待用户批准，批准后系统会把结果交还给你。"
-            "用户直接发送 GitHub 公开仓库网址(https://github.com/{owner}/{repo} 或 /tree/<分支>)时："
-            "调用 queue_remote_project_import(url=原始网址, project_name=仓库名, audit_mode=true) 创建可恢复导入任务；"
-            "queued/running 只报告真实 task_id 和进度，不要忙轮询或声称已完成；后续查询使用 get_remote_project_import。"
-            "任务 succeeded 后才调用 audit_security_for_project(project_id=返回的 project_id, scan_mode='static_full') "
-            "执行整包安全审计，并基于工具返回的真实结果汇报；不要伪造下载或审计结果。"
+            "管理员需要导入 GitHub 公开仓库时可以用 queue_remote_project_import 创建导入任务"
+            "(queued/running 只报告真实 task_id 和进度,后续查询使用 get_remote_project_import),"
+            "但导入后的安全审计属于成员侧业务,引导到项目页由小菱侧流程完成,你不代跑审计。"
         )
     else:
         identity = "Prism 代码审查 Agent「棱镜小助·小菱」"

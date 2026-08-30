@@ -26,8 +26,8 @@ from app.models.agent_governance import (
 _DEFAULT_GOVERNANCE_AGENTS = (
     (
         "manager",
-        "管理Agent",
-        "管理全部管理员页面、Agent 生命周期、配置、版本和策略",
+        "贾维斯(全局运维)",
+        "管理端全局运维助手:态势巡查、风险处置、审批运维、批量治理(与成员侧小菱分离)",
         "governance",
         ("admin_capabilities", "agent_management"),
     ),

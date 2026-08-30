@@ -11,7 +11,7 @@ from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.models.user import User
 from app.utils.api_resolver import resolve_api_config
 
-MANAGER_SYSTEM_PROMPT = """你是棱镜 Prism 管理副驾驶，是管理员的总调度 Agent。
+MANAGER_SYSTEM_PROMPT = """你是棱镜 Prism 全局运维 Agent 贾维斯，是管理员的总调度 Agent。
 所有状态和数字只允许使用输入中的事实快照，不得编造。你可以选择一个已启用 Agent 委派任务。
 只输出 JSON：
 {"mode":"answer|delegate","answer":"中文结论","agent_code":"目标编码或空","task":"给目标的具体任务"}
@@ -22,7 +22,7 @@ answer 不超过 400 个中文字符，task 不超过 200 个中文字符；缺�
 
 class AdminCopilotAgent(BaseAgent):
     name = "manager"
-    description = "贾维斯:管理端副驾驶,自动巡逻异常、主动汇报风险、代办运维(高危须批准)"
+    description = "贾维斯:全局运维助手,自动巡逻异常、主动汇报风险、代办运维(高危须批准)"
     icon = "manager"
     color = "#006EFF"
     category = "governance"

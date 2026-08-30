@@ -14,11 +14,15 @@ import type { ResponseToolCall, ResponseToolCallStatus } from '@/utils/responses
  * - 页面操作类显示「正在帮你操作」+ 彩点,呼应全屏彩框/虚拟鼠标
  * - 进行中的步骤高亮呼吸,完成的收成对勾,失败的给原因
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   calls: ResponseToolCall[]
   /** 审计四阶段进度(DeepAudit 式角色叙事:侦察员→分析师→验证员→汇报员)。 */
   auditPhases?: Array<{ phase: string; label: string; message: string }>
-}>()
+  /** 助手称谓: 成员端小菱 / 管理端贾维斯(角色分离, 默认小菱)。 */
+  subject?: string
+}>(), {
+  subject: '小菱',
+})
 
 const STATUS_NOTES: Record<ResponseToolCallStatus, string> = {
   streaming: '正在准备这个操作…',
@@ -108,7 +112,7 @@ function summaryText(): string {
 <template>
   <section v-if="steps.length || auditPhases?.length" class="xl-steps" aria-label="小菱工作步骤">
     <header class="xl-steps-head">
-      <span class="xl-steps-title">小菱的工作</span>
+      <span class="xl-steps-title">{{ subject }}的工作</span>
       <span v-if="ragActive" class="xl-steps-rag" role="status">
         <i class="xl-rag-pulse" aria-hidden="true"></i>检索知识库中…
       </span>

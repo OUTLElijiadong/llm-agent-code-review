@@ -450,7 +450,7 @@ def test_agent_governance_sync_profiles_creates_governance_agents(db):
     manager = next(row for row in rows if row.code == "manager")
     data = agent_governance_service.profile_to_dict(db, manager)
 
-    assert manager.name == "管理Agent"
+    assert manager.name == "贾维斯(全局运维)"
     boundary = data["config_json"]["governance_boundary"]
     assert "admin_execute_capability" in boundary["allowed_tools"]
     assert "admin_execute_capability" not in boundary["approval_tools"]

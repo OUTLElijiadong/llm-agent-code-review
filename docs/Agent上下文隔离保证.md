@@ -32,3 +32,20 @@
 3. LLM 调用无隐式跨线历史(每次独立请求);
 4. 为输入生成指纹(sha256)落库,便于事后审计"这条线当时看到了什么";
 5. 写一条并发金丝雀测试:两条线各带唯一标记,断言双方提示词/产物互不包含对方标记。
+
+
+## 双面身份分离(2026-08-30)
+
+参照 Microsoft Copilot Control System「控制面/体验面分离」模式, 管理端与成员端助手彻底分开:
+
+| 维度 | 成员端(体验面) | 管理端(控制面) |
+| --- | --- | --- |
+| 身份 | 小菱(chat_assistant) | 贾维斯(manager, 全局运维) |
+| 定位 | 代码审查/审计/渗透等成员业务的带路人 | 系统态势/风险处置/审批运维/批量治理 |
+| 人设提示词 | `_instructions("user")` | `_instructions("admin")`(不含成员侧审计指令) |
+| EventBus 事件归属 | agent=chat_assistant | agent=manager |
+| 工具时间线称谓 | 小菱的工作/小菱正在… | 贾维斯的工作/贾维斯正在… |
+
+单一事实源: `agent_responses_service.surface_agent_identity(surface)`(事件归属/审批 agent_code/知识笔记本归属统一取它)。
+网关层隔离(不只靠人设): 渗透三工具(create/start/get_status)在 admin surface 直接拒绝; 审计属成员业务由小菱侧承担。
+回归: `tests/unit/services/test_surface_persona_separation.py`(事件误归属/人设混用/工具越面三类复现)。
