@@ -104,12 +104,7 @@ services:
     command: ["--model-id", "${EMBEDDING_MODEL_ID:-/data/models/bge-small-zh-v1.5}"]
     volumes:
       - embedding_model_cache:/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 120s
+# TEI 为 distroless 镜像(无 shell/wget), 健康由平台调用层兜底(嵌入失败自动降级)
     networks:
       - code_review_net
 
