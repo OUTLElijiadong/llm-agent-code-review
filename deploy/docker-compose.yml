@@ -93,7 +93,7 @@ services:
   # 仅容器内网可达, 无需外部 Key; ghcr 国内不可达, 镜像经本机拉取后
   # docker save/load 交付; 模型经 hf-mirror 下载到卷缓存。
   embedding:
-    image: ${EMBEDDING_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-sha-26faa40}
+    image: ${EMBEDDING_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.3}
     container_name: cr_embedding
     restart: unless-stopped
     mem_limit: 768m
