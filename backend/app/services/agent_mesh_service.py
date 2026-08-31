@@ -436,13 +436,25 @@ def _custom_agents(db: Session, user: User) -> list[dict[str, Any]]:
 _TEAM_GOVERNED_CODES = frozenset({"sandbox_deployer", "test_verifier", "operations"})
 
 
-def list_agents(db: Session, user: User) -> dict[str, Any]:
-    """列出全部内置契约、可调用自定义 Agent 和同账户会话。"""
+# 成员面隐藏的纯治理 Agent 契约(与 /api/agents/runtime 的 USER_HIDDEN_BUILTIN
+# 口径对齐, 另加 monitor: 其全平台指标仅管理员可读, 成员端可见只会诱导无效组队)。
+_USER_SURFACE_HIDDEN_CODES = frozenset({
+    "manager", "operations", "evolution", "orchestrator", "monitor",
+})
+
+
+def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
+    """列出全部内置契约、可调用自定义 Agent 和同账户会话。
+
+    surface="user" 时隐藏纯治理契约(控制面/体验面分离, 与运行时可见性同口径)。
+    """
     from app.services.agent_mesh_dispatcher import dispatch_state
 
     runtime_codes = _runtime_codes()
     items: list[dict[str, Any]] = []
     for code, contract in CONTRACTS.items():
+        if surface == "user" and code in _USER_SURFACE_HIDDEN_CODES:
+            continue
         kind = "runtime" if code in runtime_codes or contract.execution_mode in {
             "runtime", "runtime_service", "protected_runtime",
         } else "service"

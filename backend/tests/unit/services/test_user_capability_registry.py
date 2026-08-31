@@ -580,6 +580,8 @@ async def test_unique_super_admin_can_read_and_control_other_users_roundtable(
         mcp_provider=EmptyMcp(),
     )
 
+    # 控制面/体验面分离(2026-08-31): 圆桌是成员侧业务, 管理面(贾维斯)不再执行,
+    # 引导到成员端小菱; 唯一超管的治理旁路保留在成员面(user surface)。
     status = await executor.execute(
         ToolCall("call-super-read", "get_roundtable_discussion", {"session_id": "disc_super_admin_control"}, "{}")
     )
@@ -589,9 +591,24 @@ async def test_unique_super_admin_can_read_and_control_other_users_roundtable(
         {"session_id": "disc_super_admin_control", "action": "stop"},
         "{}",
     )
-    assert status.status == "success"
-    assert (await executor.execute(control)).status == "approval_required"
-    assert (await executor.execute(control, approved=True)).status == "success"
+    assert status.status == "error"
+    assert "成员侧" in (status.error or "")
+    assert (await executor.execute(control, approved=True)).status == "error"
+    assert controls == []
+
+    member_executor = PrismToolExecutor(
+        db,
+        super_admin_user,
+        surface="user",
+        run_id="run-super-roundtable-user",
+        mcp_provider=EmptyMcp(),
+    )
+    read_again = await member_executor.execute(
+        ToolCall("call-super-read2", "get_roundtable_discussion", {"session_id": "disc_super_admin_control"}, "{}")
+    )
+    assert read_again.status == "success"
+    assert (await member_executor.execute(control)).status == "approval_required"
+    assert (await member_executor.execute(control, approved=True)).status == "success"
     assert controls == ["stop"]
     DiscussionBus._instance = None
 

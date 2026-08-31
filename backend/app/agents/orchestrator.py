@@ -754,11 +754,15 @@ class Orchestrator(BaseAgent):
         return self.chat_agent.execute(messages, ctx)
 
     def list_agents(self, ctx: Optional[AgentContext] = None) -> dict:
-        """列出 Agent 契约、已发布自定义 Agent 与同账户会话。"""
+        """列出 Agent 契约、已发布自定义 Agent 与同账户会话。
+
+        成员面(surface=user)隐藏纯治理契约, 与运行时可见性同口径。
+        """
         if self._db is not None and self._user is not None:
             from app.services import agent_mesh_service
 
-            return agent_mesh_service.list_agents(self._db, self._user)
+            surface = str((ctx.extra or {}).get("surface") or "") if ctx is not None else ""
+            return agent_mesh_service.list_agents(self._db, self._user, surface=surface)
         return self._registry.list()
 
     def send_message(

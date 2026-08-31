@@ -38,7 +38,7 @@ def create_team(
         team = agent_team_service.create_team(db, user, payload)
         audit_service.log(
             db, user, "agent_team_create",
-            target_type="agent_team", target_id=str(team.get("id", "")),
+            target_type="agent_team", target_id=str(team.get("team_id", "")),
             detail=f"创建多Agent团队: {str(payload.objective)[:80]}",
         )
         return Resp(data=team)

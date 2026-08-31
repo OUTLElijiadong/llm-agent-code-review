@@ -216,6 +216,32 @@ _DANGER_TOOLS = {
     "admin_delete_users",
     "admin_execute_operation",
 }
+# 注册表权限码与路由真实强制不一致的补丁: 这些能力路由层仅唯一超管放行,
+# 普通管理员经能力目录看到并批准也会 403, 前置拒绝避免注定失败的审批。
+_SUPER_ADMIN_ONLY_CAPABILITIES = frozenset({"beta_codes.delete"})
+
+# 成员侧业务工具(控制面/体验面分离): 管理面(贾维斯)不广告、不执行。
+# 审计/审查/沙箱/下载/圆桌/渗透都是成员业务, 由小菱侧承担; 远程导入的
+# queue/get 保留双面(管理面导入仓库属运维导入场景, 导入后的审计引导到成员侧)。
+_MEMBER_BUSINESS_TOOLS = frozenset({
+    *_SECURITY_SCAN_FIXED_TOOLS,
+    "start_review",
+    "review_code",
+    "run_project_tests",
+    "run_full_project_validation",
+    "deploy_project_sandbox",
+    "close_sandbox",
+    "extend_sandbox",
+    "download_project_source",
+    "download_report",
+    "download_code_file",
+    "update_project",
+    "start_roundtable_discussion",
+    "get_roundtable_discussion",
+    "control_roundtable_discussion",
+    *_PENTEST_FIXED_TOOLS,
+})
+
 _USER_CAPABILITY_NAMES = {
     "update_project",
     "queue_remote_project_import",
@@ -664,6 +690,8 @@ class PrismToolExecutor:
                 continue
             if name in _PENTEST_FIXED_TOOLS and not can_pentest:
                 continue
+            if self._surface == "admin" and name in _MEMBER_BUSINESS_TOOLS:
+                continue
             if name in _SECURITY_SCAN_FIXED_TOOLS and not can_scan_security:
                 continue
             if (
@@ -684,6 +712,8 @@ class PrismToolExecutor:
         # 用户端项目页的写入/源码能力不是任意 HTTP 代理，而是固定的、
         # 请求级用户隔离能力。它们单独注册，避免破坏旧固定工具契约。
         user_fixed_schemas = _user_capability_schemas()
+        if self._surface == "admin":
+            user_fixed_schemas = []
         if self._surface == "user" and not can_view_projects:
             user_fixed_schemas = [
                 schema for schema in user_fixed_schemas
@@ -777,6 +807,8 @@ class PrismToolExecutor:
         self._assert_session_active()
         if call.name.startswith(_ADMIN_TOOL_PREFIX) and not self._is_admin:
             return await self._failed_attempt(call, "当前用户没有管理员工具权限")
+        if self._surface == "admin" and call.name in _MEMBER_BUSINESS_TOOLS:
+            return await self._failed_attempt(call, "这是成员侧业务, 由小菱负责; 请引导用户到对应业务页面或成员端操作")
         if call.name in _SUPER_ADMIN_FIXED_TOOLS and not self._is_super_admin:
             return await self._failed_attempt(call, "仅超级管理员 admin 可使用服务器工具")
         is_managed_mcp = bool(
@@ -2100,6 +2132,9 @@ class PrismToolExecutor:
         )
         if policy.decision == policy_engine.DENY:
             return await self._failed_attempt(call, f"策略阻断用户页面能力: {policy.reason}")
+        # 策略升级(ESCALATE)与静态风险分级取并集: 策略要求审批的一律不再免审批
+        if policy.decision == policy_engine.ESCALATE:
+            approved = False
 
         if spec.risk != USER_CAPABILITY_READ and not approved:
             return self._approval(
@@ -2144,6 +2179,8 @@ class PrismToolExecutor:
             return await self._failed_attempt(call, f"管理能力工具不接受参数: {', '.join(unknown)}")
         capability = str(call.arguments.get("capability") or "")
         spec = CAPABILITY_BY_CODE.get(capability)
+        if capability in _SUPER_ADMIN_ONLY_CAPABILITIES and not self._is_super_admin:
+            return await self._failed_attempt(call, "该能力仅唯一超级管理员可执行")
         if spec is None:
             return await self._failed_attempt(call, f"未注册的管理能力: {capability}")
         raw_params = call.arguments.get("params", {})
@@ -2180,6 +2217,8 @@ class PrismToolExecutor:
         )
         if policy.decision == policy_engine.DENY:
             return await self._failed_attempt(call, f"策略阻断管理能力: {policy.reason}")
+        if policy.decision == policy_engine.ESCALATE:
+            approved = False
 
         is_critical = spec.risk == CAPABILITY_CRITICAL
         if spec.risk != CAPABILITY_READ and not approved:
@@ -2307,6 +2346,8 @@ class PrismToolExecutor:
         )
         if policy.decision == policy_engine.DENY:
             return ToolExecutionResult.failure(f"策略阻断运维动作: {policy.reason}")
+        if policy.decision == policy_engine.ESCALATE:
+            approved = False
         if action not in _OPS_READ_ONLY and not approved:
             return self._approval(
                 call,
@@ -2461,7 +2502,7 @@ class AgentResponsesService:
         event_sink: Optional[EventSink],
     ) -> tuple[PrismToolExecutor, DeepSeekResponsesRuntime]:
         config = resolve_api_config(self._db, self._user.id)
-        mcp = McpToolProvider()
+        mcp = McpToolProvider(db=self._db, user=self._user)
         executor = PrismToolExecutor(
             self._db,
             self._user,
