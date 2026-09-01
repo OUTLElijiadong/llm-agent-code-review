@@ -10,7 +10,7 @@ from app.core.exceptions import ValidationError
 from app.models.system_config import SystemConfig
 from app.schemas.llm_config import LlmTestIn
 from app.services import system_config_service
-from app.utils.api_resolver import resolve_api_config
+from app.utils.api_resolver import mask_api_key, resolve_api_config
 
 
 def test_global_runtime_options_round_trip(db, monkeypatch):
@@ -74,6 +74,36 @@ def test_corrupt_runtime_values_are_safely_defaulted(db):
     assert cfg["temperature"] == settings.deepseek_temperature
 
 
+def test_public_config_shows_effective_system_default_when_saved_override_is_unusable(
+    db,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-system-secret")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.deepseek.example")
+    monkeypatch.setattr(settings, "deepseek_model", "deepseek-system")
+    db.add(SystemConfig(
+        config_key=system_config_service.LLM_KEY,
+        config_value=json.dumps({
+            "provider": "custom",
+            "base_url": "https://old.example.com/v1",
+            "model": "old-model",
+            "api_key_enc": "unreadable-ciphertext",
+            "active": False,
+        }),
+    ))
+    db.commit()
+
+    public = system_config_service.get_llm_config_public(db)
+
+    assert public["provider"] == "deepseek"
+    assert public["base_url"] == "https://api.deepseek.example"
+    assert public["model"] == "deepseek-system"
+    assert public["api_key_masked"] == mask_api_key("sk-system-secret")
+    assert public["is_set"] is True
+    assert public["source"] == "default"
+    assert public["fallback_reason"] == "credential_unavailable"
+
+
 def test_update_can_recover_from_legacy_non_object_json(db, monkeypatch):
     row = SystemConfig(
         config_key=system_config_service.LLM_KEY,
@@ -134,3 +164,49 @@ def test_draft_can_reuse_stored_key_for_the_same_normalized_endpoint(db, monkeyp
     )
 
     assert draft["api_key"] == "sk-saved-secret"
+
+
+def test_draft_uses_system_default_when_saved_override_is_inactive_and_unusable(
+    db,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-system-secret")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.deepseek.example")
+    monkeypatch.setattr(settings, "deepseek_model", "deepseek-system")
+    monkeypatch.setattr(
+        system_config_service,
+        "get_llm_config",
+        lambda _db: {
+            "provider": "custom",
+            "base_url": "https://old.example.com/v1",
+            "model": "old-model",
+            "api_key": "",
+            "active": False,
+            "timeout_seconds": 90,
+            "max_retries": 4,
+            "temperature": 1.0,
+        },
+    )
+
+    draft = _resolve_draft(LlmTestIn(), db)
+
+    assert draft["provider"] == "deepseek"
+    assert draft["base_url"] == "https://api.deepseek.example"
+    assert draft["model"] == "deepseek-system"
+    assert draft["api_key"] == "sk-system-secret"
+    assert draft["timeout_seconds"] == settings.deepseek_timeout
+    assert draft["max_retries"] == settings.deepseek_max_retries
+    assert draft["temperature"] == settings.deepseek_temperature
+
+
+def test_draft_never_reuses_system_key_for_custom_endpoint(db, monkeypatch):
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-system-secret")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.deepseek.example")
+    monkeypatch.setattr(system_config_service, "get_llm_config", lambda _db: None)
+
+    draft = _resolve_draft(
+        LlmTestIn(base_url="https://custom.example.com/v1", model="custom-model"),
+        db,
+    )
+
+    assert draft["api_key"] == ""

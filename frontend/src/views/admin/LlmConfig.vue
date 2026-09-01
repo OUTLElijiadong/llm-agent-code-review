@@ -48,11 +48,18 @@ const form = reactive({
 
 const statusLabel = computed(() => {
   if (cfg.value?.source === 'global') return `已启用全局配置 · ${cfg.value.model}`
-  return '使用系统默认配置'
+  if (cfg.value?.is_set) return `已配置 · 系统默认 · ${cfg.value.model}`
+  return '系统默认配置未就绪'
 })
 
 const statusType = computed<AlertType>(() => (
-  cfg.value?.source === 'global' ? 'success' : 'info'
+  cfg.value?.is_set ? 'success' : 'warning'
+))
+
+const canRestoreDefault = computed(() => (
+  cfg.value?.source === 'global'
+  || ['credential_unavailable', 'incomplete_config', 'invalid_config']
+    .includes(cfg.value?.fallback_reason || '')
 ))
 
 const fallbackLabel = computed(() => {
@@ -188,7 +195,7 @@ async function test(): Promise<void> {
 }
 
 function canReuseStoredKey(): boolean {
-  if (!cfg.value?.is_set) return false
+  if (cfg.value?.source !== 'global' || !cfg.value.is_set) return false
   return endpointIdentity(form.base_url) === endpointIdentity(cfg.value.base_url)
 }
 
@@ -339,9 +346,11 @@ onMounted(load)
               show-password
               maxlength="512"
               autocomplete="new-password"
-              :placeholder="cfg?.is_set
+              :placeholder="cfg?.source === 'global' && cfg?.is_set
                 ? `已配置 ${cfg.api_key_masked}，留空保持不变`
-                : '填写该端点的 API Key'"
+                : cfg?.is_set
+                  ? `系统默认已配置 ${cfg.api_key_masked}，测试时无需重复填写`
+                  : '填写该端点的 API Key'"
             />
           </el-form-item>
 
@@ -437,7 +446,7 @@ onMounted(load)
             测试连接
           </el-button>
           <el-button
-            v-if="cfg?.is_set || cfg?.source === 'global'"
+            v-if="canRestoreDefault"
             :icon="Refresh"
             :loading="restoring"
             :disabled="saving || testing || fetchingModels"

@@ -265,33 +265,51 @@ def get_llm_config(db: Session) -> Optional[dict]:
     }
 
 
+def _system_llm_config_public(fallback_reason: str) -> dict:
+    """返回当前真正生效的系统默认配置，且仅回显密钥掩码。"""
+    from app.utils.api_resolver import mask_api_key
+
+    api_key = settings.deepseek_api_key.strip()
+    return {
+        "provider": "deepseek",
+        "base_url": settings.deepseek_base_url,
+        "model": settings.deepseek_model,
+        "active": False,
+        "api_key_masked": mask_api_key(api_key) if api_key else "",
+        "is_set": bool(api_key),
+        "source": "default",
+        "fallback_reason": fallback_reason,
+        "timeout_seconds": settings.deepseek_timeout,
+        "max_retries": settings.deepseek_max_retries,
+        "temperature": settings.deepseek_temperature,
+    }
+
+
 def get_llm_config_public(db: Session) -> dict:
-    """供管理员前端展示的脱敏 LLM 配置"""
+    """供管理员前端展示当前生效的脱敏 LLM 配置。"""
+    raw = _get_raw(db, LLM_KEY)
     cfg = get_llm_config(db)
     if not cfg:
-        raw = _get_raw(db, LLM_KEY)
-        return {
-            "provider": "deepseek",
-            "base_url": settings.deepseek_base_url,
-            "model": settings.deepseek_model,
-            "active": False, "api_key_masked": "", "is_set": False,
-            "source": "default",
-            "fallback_reason": "invalid_config" if raw else "not_configured",
-            "timeout_seconds": settings.deepseek_timeout,
-            "max_retries": settings.deepseek_max_retries,
-            "temperature": settings.deepseek_temperature,
-        }
+        return _system_llm_config_public("invalid_config" if raw else "not_configured")
+
     from app.utils.api_resolver import mask_api_key
+
     has_key = bool(cfg["api_key"])
     effective = bool(cfg["active"] and has_key and cfg["base_url"] and cfg["model"])
-    if effective:
-        fallback_reason = ""
-    elif not cfg["active"]:
-        fallback_reason = "inactive"
-    elif not has_key:
-        fallback_reason = "credential_unavailable"
-    else:
-        fallback_reason = "incomplete_config"
+    if not effective:
+        try:
+            stored = json.loads(raw) if raw else {}
+        except (json.JSONDecodeError, TypeError):
+            stored = {}
+        encrypted_key_present = isinstance(stored, dict) and bool(stored.get("api_key_enc"))
+        if encrypted_key_present and not has_key:
+            reason = "credential_unavailable"
+        elif not cfg["active"]:
+            reason = "inactive"
+        else:
+            reason = "incomplete_config"
+        return _system_llm_config_public(reason)
+
     return {
         "provider": cfg["provider"],
         "base_url": cfg["base_url"],
@@ -299,8 +317,8 @@ def get_llm_config_public(db: Session) -> dict:
         "active": cfg["active"],
         "api_key_masked": mask_api_key(cfg["api_key"]) if has_key else "",
         "is_set": has_key,
-        "source": "global" if effective else "default",
-        "fallback_reason": fallback_reason,
+        "source": "global",
+        "fallback_reason": "",
         "timeout_seconds": cfg["timeout_seconds"],
         "max_retries": cfg["max_retries"],
         "temperature": cfg["temperature"],

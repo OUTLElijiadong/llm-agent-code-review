@@ -38,7 +38,7 @@ def _endpoint_identity(value: str) -> str:
 def _resolve_draft(payload: LlmTestIn, db: Session) -> dict:
     """合并未保存表单与持久配置，禁止把旧 Key 发送到新端点。"""
     stored = system_config_service.get_llm_config(db)
-    source = stored or {
+    system = {
         "provider": "deepseek",
         "base_url": settings.deepseek_base_url,
         "model": settings.deepseek_model,
@@ -47,11 +47,25 @@ def _resolve_draft(payload: LlmTestIn, db: Session) -> dict:
         "max_retries": settings.deepseek_max_retries,
         "temperature": settings.deepseek_temperature,
     }
+    stored_effective = bool(
+        stored
+        and stored.get("active")
+        and stored.get("api_key")
+        and stored.get("base_url")
+        and stored.get("model")
+    )
+    source = stored if stored_effective else system
     base_url = payload.base_url if payload.base_url is not None else source.get("base_url", "")
     if payload.api_key is not None:
         api_key = payload.api_key.strip()
-    elif _endpoint_identity(base_url) == _endpoint_identity(source.get("base_url", "")):
-        api_key = source.get("api_key", "")
+    elif (
+        stored
+        and stored.get("api_key")
+        and _endpoint_identity(base_url) == _endpoint_identity(stored.get("base_url", ""))
+    ):
+        api_key = stored["api_key"]
+    elif _endpoint_identity(base_url) == _endpoint_identity(system["base_url"]):
+        api_key = system["api_key"]
     else:
         api_key = ""
     return {
