@@ -109,6 +109,35 @@ def test_confirmation_count_uses_unique_real_sources_not_model_declared_count() 
     assert {d["source"] for d in result.issues[0]["source_details"]} == {"llm:security"}
 
 
+def test_risk_score_weights_each_real_source_only_once() -> None:
+    _, security_claims = _claim("security", severity="严重", confidence=0.8)
+    _, reliability_claims = _claim("reliability", severity="低", confidence=0.8)
+    baseline = aggregate_agent_findings(
+        {
+            "security": security_claims,
+            "reliability": reliability_claims,
+        },
+        {"security": "安全审查代理", "reliability": "可靠性代理"},
+        code=CODE,
+        file_name="runner.py",
+        chunk_id="chunk-0",
+    ).issues[0]
+    duplicated = aggregate_agent_findings(
+        {
+            "security": [dict(security_claims[0]) for _ in range(10)],
+            "reliability": reliability_claims,
+        },
+        {"security": "安全审查代理", "reliability": "可靠性代理"},
+        code=CODE,
+        file_name="runner.py",
+        chunk_id="chunk-0",
+    ).issues[0]
+
+    assert baseline["confirmation_count"] == duplicated["confirmation_count"] == 2
+    assert baseline["risk_score"] == 62.5
+    assert duplicated["risk_score"] == baseline["risk_score"]
+
+
 def test_every_claim_is_accounted_for_and_output_is_order_stable() -> None:
     pairs = [
         _claim("security", severity="高", confidence=0.82),

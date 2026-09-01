@@ -67,3 +67,21 @@ def test_syntax_error_uses_visible_lexical_fallback() -> None:
 
     assert index.mode == "lexical"
     assert index.diagnostics
+
+
+def test_source_over_60000_chars_is_fully_covered_by_bounded_chunks() -> None:
+    source = "".join(
+        f"def handler_{index}(value):\n    payload = {'x' * 900!r}\n"
+        f"    return sink_{index}(value, payload)\n\n"
+        for index in range(80)
+    )
+    assert len(source) > 60_000
+
+    chunks = chunk_code_with_context(source, "python", threshold=6_000)
+
+    assert len(chunks) > 1
+    assert max(len(chunk.text) for chunk in chunks) <= 6_000
+    assert "".join(chunk.text for chunk in chunks) == source
+    assert chunks[0].start_line == 0
+    assert chunks[-1].end_line == len(source.splitlines())
+    assert all(chunk.context_fingerprint for chunk in chunks)

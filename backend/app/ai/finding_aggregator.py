@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 AGGREGATION_VERSION = "finding-aggregation-v1"
-RISK_SCORING_VERSION = "claim-risk-v1"
+RISK_SCORING_VERSION = "claim-risk-v2"
 
 _SCORES = {"严重": 100.0, "高": 75.0, "中": 50.0, "低": 25.0}
 _RANKS = {"低": 1, "中": 2, "高": 3, "严重": 4}
@@ -504,7 +504,19 @@ def _aggregate_cluster(cluster: list[dict[str, Any]], *, file_name: str, chunk_i
     )
     real_sources: dict[tuple[str, str], dict[str, Any]] = {}
     for item in ordered:
-        detail = {
+        source_key = (item["agent_code"], item["source"])
+        previous = real_sources.get(source_key)
+        current_rank = (item["confidence"]["calibrated"], item["claim_id"])
+        previous_rank = (
+            (previous["confidence"]["calibrated"], previous["claim_id"])
+            if previous
+            else None
+        )
+        if previous_rank is None or current_rank > previous_rank:
+            real_sources[source_key] = item
+    source_claims = [real_sources[key] for key in sorted(real_sources)]
+    source_details = [
+        {
             "source": item["source"],
             "agent_code": item["agent_code"],
             "agent_name": item["agent_name"],
@@ -516,15 +528,13 @@ def _aggregate_cluster(cluster: list[dict[str, Any]], *, file_name: str, chunk_i
             "title": item["title"],
             "claim_id": item["claim_id"],
         }
-        source_key = (item["agent_code"], item["source"])
-        previous = real_sources.get(source_key)
-        current_rank = (detail["confidence"], detail["claim_id"])
-        previous_rank = (previous["confidence"], previous["claim_id"]) if previous else None
-        if previous_rank is None or current_rank > previous_rank:
-            real_sources[source_key] = detail
-    source_details = [real_sources[key] for key in sorted(real_sources)]
-    weighted_total = sum(item["severity"]["score"] * item["confidence"]["calibrated"] for item in ordered)
-    weight = sum(item["confidence"]["calibrated"] for item in ordered)
+        for item in source_claims
+    ]
+    weighted_total = sum(
+        item["severity"]["score"] * item["confidence"]["calibrated"]
+        for item in source_claims
+    )
+    weight = sum(item["confidence"]["calibrated"] for item in source_claims)
     risk_score = round(weighted_total / weight, 2) if weight else canonical["severity"]["score"]
     fingerprint_seed = "|".join((
         file_name,

@@ -1003,6 +1003,46 @@ def test_adaptive_split_stops_when_shared_request_budget_is_exhausted(monkeypatc
     assert "".join(part.text for leaf, _chunk in result.leaves for part in leaf) == file.content
 
 
+def test_large_file_chunk_failure_preserves_other_chunk_findings(monkeypatch):
+    agent = SecuritySentinelAgent()
+    content = "".join(
+        f"value_{index} = {'x' * 300!r}\n"
+        for index in range(300)
+    )
+    assert len(content) > 60_000
+    file = _make_file(content=content, file_name="large.py")
+    audited_chunks = []
+
+    def audit_chunk(*, code, **_kwargs):
+        audited_chunks.append(code)
+        if len(audited_chunks) == 2:
+            return None
+        if len(audited_chunks) == 1:
+            return {
+                "findings": [{
+                    "title": "保留的发现",
+                    "severity": "中",
+                    "line_start": 1,
+                    "line_end": 1,
+                    "evidence": code.splitlines()[0],
+                    "confidence": 0.8,
+                }],
+                "entry_points": [],
+                "dangerous_sinks": [],
+            }
+        return {"findings": [], "entry_points": [], "dangerous_sinks": []}
+
+    monkeypatch.setattr(agent, "_llm_audit_chunk", audit_chunk)
+
+    result = agent._llm_audit_collect(file, ctx=None, scan_depth="normal")
+
+    assert len(audited_chunks) > 2
+    assert result.success is False
+    assert result.failure_kind == "partial_coverage"
+    assert "1/" in result.error
+    assert [finding["title"] for finding in result.findings] == ["保留的发现"]
+
+
 def test_quarantined_scan_success_persists_result_bound_to_original_zip_sha(db, monkeypatch):
     owner, project, archive_row, raw = _persist_quarantined_project(
         db,
