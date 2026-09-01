@@ -105,9 +105,34 @@ describe('LlmConfig recoverable interactions', () => {
       max_retries: 2,
       temperature: 0.2,
     }))
+    expect(llmApi.fetchLlmModels.mock.calls[0][0].api_key).toBeUndefined()
+    expect(llmApi.fetchLlmModels.mock.calls[0][0].api_key).not.toBe(config.api_key_masked)
     expect(vm.form.model).toBe('manual-model')
     expect(vm.operation.type).toBe('warning')
     expect(vm.operation.description).toBe('确认后继续测试')
+    wrapper.unmount()
+  })
+
+  it('停用的历史覆盖仍可恢复系统默认并清除旧 Key', async () => {
+    const inactive = {
+      ...config,
+      active: false,
+      source: 'default',
+      fallback_reason: 'inactive',
+    }
+    llmApi.getLlmConfig.mockResolvedValueOnce(inactive)
+    llmApi.updateLlmConfig.mockResolvedValueOnce({
+      ...inactive,
+      fallback_reason: '',
+    })
+    const wrapper = mountConfig()
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.canRestoreDefault).toBe(true)
+    await vm.restoreDefault()
+
+    expect(llmApi.updateLlmConfig).toHaveBeenCalledWith({ active: false, api_key: '' })
     wrapper.unmount()
   })
 

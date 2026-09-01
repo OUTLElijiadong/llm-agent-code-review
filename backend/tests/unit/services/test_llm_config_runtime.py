@@ -155,6 +155,7 @@ def test_draft_can_reuse_stored_key_for_the_same_normalized_endpoint(db, monkeyp
             "base_url": "https://api.example.com/v1/",
             "model": "saved-model",
             "api_key": "sk-saved-secret",
+            "active": True,
         },
     )
 
@@ -164,6 +165,57 @@ def test_draft_can_reuse_stored_key_for_the_same_normalized_endpoint(db, monkeyp
     )
 
     assert draft["api_key"] == "sk-saved-secret"
+
+
+def test_draft_ignores_inactive_stored_key_even_when_endpoint_matches_system(
+    db,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-system-secret")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.example.com/v1")
+    monkeypatch.setattr(settings, "deepseek_model", "deepseek-system")
+    monkeypatch.setattr(
+        system_config_service,
+        "get_llm_config",
+        lambda _db: {
+            "provider": "custom",
+            "base_url": "https://api.example.com/v1/chat/completions",
+            "model": "old-model",
+            "api_key": "sk-inactive-old",
+            "active": False,
+        },
+    )
+
+    draft = _resolve_draft(LlmTestIn(), db)
+
+    assert draft["provider"] == "deepseek"
+    assert draft["model"] == "deepseek-system"
+    assert draft["api_key"] == "sk-system-secret"
+
+
+def test_draft_ignores_incomplete_stored_key_even_when_endpoint_matches(
+    db,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-system-secret")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.example.com/v1")
+    monkeypatch.setattr(settings, "deepseek_model", "deepseek-system")
+    monkeypatch.setattr(
+        system_config_service,
+        "get_llm_config",
+        lambda _db: {
+            "provider": "custom",
+            "base_url": "https://api.example.com/v1",
+            "model": "",
+            "api_key": "sk-incomplete-old",
+            "active": True,
+        },
+    )
+
+    draft = _resolve_draft(LlmTestIn(), db)
+
+    assert draft["model"] == "deepseek-system"
+    assert draft["api_key"] == "sk-system-secret"
 
 
 def test_draft_uses_system_default_when_saved_override_is_inactive_and_unusable(

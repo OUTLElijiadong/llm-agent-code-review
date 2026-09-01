@@ -58,13 +58,14 @@ const statusType = computed<AlertType>(() => (
 
 const canRestoreDefault = computed(() => (
   cfg.value?.source === 'global'
-  || ['credential_unavailable', 'incomplete_config', 'invalid_config']
+  || ['credential_unavailable', 'inactive', 'incomplete_config', 'invalid_config']
     .includes(cfg.value?.fallback_reason || '')
 ))
 
 const fallbackLabel = computed(() => {
   switch (cfg.value?.fallback_reason) {
     case 'credential_unavailable': return '已保存配置的凭据不可用，运行时已回退系统默认'
+    case 'inactive': return '全局覆盖已停用，当前使用系统默认配置'
     case 'incomplete_config': return '已保存配置不完整，运行时已回退系统默认'
     case 'invalid_config': return '历史配置无法解析，运行时已回退系统默认'
     default: return ''

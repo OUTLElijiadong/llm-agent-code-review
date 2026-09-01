@@ -60,6 +60,7 @@ def _resolve_draft(payload: LlmTestIn, db: Session) -> dict:
         api_key = payload.api_key.strip()
     elif (
         stored
+        and stored_effective
         and stored.get("api_key")
         and _endpoint_identity(base_url) == _endpoint_identity(stored.get("base_url", ""))
     ):
