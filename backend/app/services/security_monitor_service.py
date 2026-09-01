@@ -588,11 +588,15 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
         )
     results: dict[str, Any] = {}
     errors: list[dict[str, Any]] = []
+    completed_actions: list[str] = []
+    failed_actions: list[str] = []
     for action, params in actions:
         try:
             results[action] = _call_action(db, action, params)
+            completed_actions.append(action)
         except Exception as exc:  # noqa: BLE001 - 单动作失败不中断整体巡检
             errors.append({"action": action, "error": str(exc)})
+            failed_actions.append(action)
             results[action] = {"ok": False, "error": str(exc)}
 
     created_alerts: list[dict[str, Any]] = []
@@ -600,12 +604,28 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
         created_alerts = _evaluate(db, results)
     except Exception as exc:  # noqa: BLE001 - 评估失败不阻断返回摘要
         errors.append({"action": "evaluate", "error": str(exc)})
+        failed_actions.append("evaluate")
+
+    # “部分失败”可以继续下一轮并保留人工复核入口；全部数据源失败则必须
+    # 在运行记录中如实标成失败，避免把安全监控盲区伪装成无风险。
+    partial_failure = bool(errors) and bool(completed_actions)
+    fatal_failure = bool(errors) and not completed_actions
 
     return {
         "success": not errors,
+        "can_continue": bool(completed_actions),
+        "partial_failure": partial_failure,
+        "fatal_failure": fatal_failure,
+        "completed_actions": completed_actions,
+        "failed_actions": failed_actions,
         "created_alerts": created_alerts,
         "actions": results,
         "errors": errors,
+        **(
+            {"error": "安全监控所有数据源均不可用，请人工核验执行器和日志"}
+            if fatal_failure
+            else {}
+        ),
         "job_id": job.id if job is not None else None,
     }
 

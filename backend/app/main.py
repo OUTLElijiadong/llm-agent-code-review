@@ -121,6 +121,24 @@ async def lifespan(app: FastAPI):
     try:
         _swept = sweep_stale_active_runs(_sweep_db)
         _jarvis_cleanup = agent_mesh_service.sweep_blocked_jarvis_messages(_sweep_db)
+        # 调度任务没有独立 worker 心跳；在新进程尚未启动 APScheduler 前，
+        # 超过保守租约的 running 记录必然属于旧进程。收敛失败不阻断启动，
+        # 后续健康巡检仍会把近期卡住记录交给人工处理。
+        try:
+            from app.services import scheduler_service as _scheduler_service
+
+            _recovered_job_runs = _scheduler_service.reconcile_stale_job_runs(_sweep_db)
+            if _recovered_job_runs:
+                from loguru import logger as _logger
+
+                _logger.warning(
+                    "[startup] 清扫 {} 个旧进程遗留的调度运行，可由管理员重新运行",
+                    len(_recovered_job_runs),
+                )
+        except Exception:  # noqa: BLE001 - 清扫失败不阻断启动(下次启动再试)
+            from loguru import logger as _logger
+
+            _logger.exception("[startup] 调度运行清扫失败(不阻断启动)")
         if _swept:
             from loguru import logger as _logger
 

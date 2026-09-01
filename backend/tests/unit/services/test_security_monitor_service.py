@@ -359,10 +359,45 @@ def test_single_action_failure_does_not_break_whole(db, super_admin_user, monkey
     result = security_monitor_service.run_security_monitor(db)
 
     assert result["success"] is False
+    assert result["can_continue"] is True
+    assert result["partial_failure"] is True
+    assert result["fatal_failure"] is False
+    assert "nginx_attack_events" in result["failed_actions"]
+    assert "ssh_login_events" in result["completed_actions"]
     assert any(item["action"] == "nginx_attack_events" for item in result["errors"])
     # SSH 告警仍被创建
     assert len(result["created_alerts"]) == 1
     assert db.query(AgentAlert).filter(AgentAlert.fingerprint == "login:8.8.8.8:root").count() == 1
+
+
+def test_all_security_sources_failure_requires_human_recovery(
+    db, super_admin_user, monkeypatch, emitted,
+):
+    """全部采集器不可用时必须暴露安全监控盲区，不能标为可继续。"""
+    action_names = {
+        "ssh_login_events",
+        "flytrap_attack_events",
+        "nginx_attack_events",
+        "backup_audit",
+        "db_threat_signals",
+        "db_health",
+        "status",
+    }
+    monkeypatch.setattr(
+        ops_service,
+        "execute",
+        _fake_execute({}, fail_actions=action_names),
+    )
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert result["success"] is False
+    assert result["can_continue"] is False
+    assert result["partial_failure"] is False
+    assert result["fatal_failure"] is True
+    assert result["completed_actions"] == []
+    assert set(result["failed_actions"]) == action_names
+    assert "人工核验" in result["error"]
 
 
 def test_query_security_status_aggregates(db, monkeypatch):

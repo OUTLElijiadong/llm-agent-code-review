@@ -335,6 +335,283 @@ def test_unhealthy_ops_result_marks_job_run_failed(db: Any, monkeypatch: Any) ->
     assert run.error == "AI 自动运维巡检检测到不健康状态"
 
 
+def test_security_monitor_partial_failure_does_not_block_scheduler(db: Any, monkeypatch: Any) -> None:
+    """安全监控单项采集失败保留在结果中，但不阻断后续调度。"""
+    job = AgentJob(
+        job_code="security-monitor-failure",
+        job_type="security_monitor",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    db.add(job)
+    db.commit()
+    monkeypatch.setattr(
+        scheduler_service,
+        "_execute_job",
+        lambda _db, _job: {
+            "success": False,
+            "partial_failure": True,
+            "errors": [{"action": "nginx_attack_events", "error": "暂时不可用"}],
+        },
+    )
+
+    run = scheduler_service.run_job(db, job.id, system_scheduled=True)
+
+    assert run.status == "success"
+    assert run.error is None
+    assert json.loads(run.result_json)["errors"][0]["action"] == "nginx_attack_events"
+
+
+def test_security_monitor_total_failure_is_persisted_as_failed(db: Any, monkeypatch: Any) -> None:
+    """所有安全数据源都失败时不能伪装成成功。"""
+    job = AgentJob(
+        job_code="security-monitor-total-failure",
+        job_type="security_monitor",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    db.add(job)
+    db.commit()
+    monkeypatch.setattr(
+        scheduler_service,
+        "_execute_job",
+        lambda _db, _job: {
+            "success": False,
+            "fatal_failure": True,
+            "error": "安全监控所有数据源均不可用",
+            "errors": [{"action": "status", "error": "执行器不可用"}],
+        },
+    )
+
+    run = scheduler_service.run_job(db, job.id, system_scheduled=True)
+
+    assert run.status == "failed"
+    assert "所有数据源" in (run.error or "")
+
+
+def test_failed_skill_result_is_persisted_as_failed(db: Any, monkeypatch: Any) -> None:
+    """非安全监控任务的真实失败仍应在运行记录中可见。"""
+    job = AgentJob(
+        job_code="skill-failure-visible",
+        job_type="skill_proactive",
+        agent_code="code_reviewer",
+        schedule="hourly@*:00",
+        status="enabled",
+    )
+    db.add(job)
+    db.commit()
+    monkeypatch.setattr(settings, "skill_scheduler_enabled", True)
+    monkeypatch.setattr(
+        scheduler_service,
+        "_execute_job",
+        lambda _db, _job: {"success": False, "error": "模型暂时不可用"},
+    )
+
+    run = scheduler_service.run_job(db, job.id, system_scheduled=True)
+
+    assert run.status == "failed"
+    assert run.error == "模型暂时不可用"
+
+
+def test_reconcile_stale_scheduler_runs_closes_only_old_orphans(db: Any) -> None:
+    """旧进程遗留的调度运行可收敛，最近运行不能被误伤。"""
+    now = datetime.now(timezone.utc)
+    job = AgentJob(
+        job_code="orphan-recovery",
+        job_type="archive_empty_sessions",
+        agent_code="monitor",
+        schedule="interval@30m",
+        status="enabled",
+    )
+    db.add(job)
+    db.flush()
+    stale = AgentJobRun(
+        job_id=job.id,
+        status="running",
+        started_at=now - timedelta(hours=8),
+        result_json=json.dumps({"started_by": "old-worker"}),
+    )
+    recent = AgentJobRun(
+        job_id=job.id,
+        status="running",
+        started_at=now - timedelta(minutes=5),
+    )
+    db.add_all([stale, recent])
+    db.commit()
+
+    recovered_ids = scheduler_service.reconcile_stale_job_runs(
+        db,
+        now=now,
+        max_age_minutes=360,
+    )
+
+    assert recovered_ids == [stale.id]
+    assert stale.status == "failed"
+    assert stale.finished_at == now
+    assert "管理员重新运行" in (stale.error or "")
+    recovery = json.loads(stale.result_json)
+    assert recovery["recovered"] is True
+    assert recovery["recovery_reason"] == "orphaned_scheduler_run"
+    assert recent.status == "running"
+    assert scheduler_service.reconcile_stale_job_runs(db, now=now, max_age_minutes=360) == []
+
+
+def test_stuck_scheduler_runs_are_degraded_but_can_continue(db: Any) -> None:
+    """卡住记录需要人工处理，但不能把整个业务判成不可继续。"""
+    now = datetime.now(timezone.utc)
+    current = AgentJob(
+        job_code="current-health",
+        job_type="ops_health_check",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    other = AgentJob(
+        job_code="stuck-job",
+        job_type="archive_empty_sessions",
+        agent_code="monitor",
+        schedule="interval@30m",
+        status="enabled",
+    )
+    db.add_all([
+        current,
+        other,
+        AiCallLog(
+            model_name="deepseek-chat",
+            agent_label="manager",
+            status="success",
+            response="ok",
+            create_time=now,
+        ),
+    ])
+    db.flush()
+    db.add(AgentJobRun(
+        job_id=other.id,
+        status="running",
+        started_at=now - timedelta(hours=1),
+    ))
+    db.commit()
+
+    health = scheduler_service._collect_application_health(db, current.id)
+
+    assert health["ok"] is False
+    assert health["can_continue"] is True
+    assert health["status"] == "degraded"
+    assert health["task_queue"]["stuck_runs"] == 1
+    assert health["task_queue"]["actions"][0]["code"] == "review_stuck_scheduler_runs"
+
+
+def test_application_degradation_keeps_ops_health_running(db: Any, monkeypatch: Any) -> None:
+    """应用侧可恢复降级也要留下人工动作，而不是把巡检变成失败。"""
+
+    class FakeOperationsAgent:
+        name = "operations"
+
+        def execute_action(self, *_args: Any, action: str, **_kwargs: Any) -> Any:
+            if action == "status":
+                checks = {
+                    "status": "ok",
+                    "can_continue": True,
+                    "checks": {"backup": {"ok": True, "status": "ok"}},
+                }
+                return SimpleNamespace(
+                    success=True,
+                    data={"id": 201, "status": "success", "result": {"ok": True, "result": {"checks": checks}}},
+                )
+            return SimpleNamespace(
+                success=True,
+                data={"id": 202, "status": "success", "result": {"ok": True, "result": {"valid_for_30_days": True}}},
+            )
+
+    job = AgentJob(
+        job_code="ops-health-application-degraded",
+        job_type="ops_health_check",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    db.add(job)
+    db.commit()
+    monkeypatch.setattr("app.agents.operations_agent.OperationsAgent", FakeOperationsAgent)
+    monkeypatch.setattr(
+        scheduler_service,
+        "_collect_application_health",
+        lambda *_args: {
+            "ok": False,
+            "can_continue": True,
+            "status": "degraded",
+            "task_queue": {
+                "actions": [{
+                    "code": "review_stuck_scheduler_runs",
+                    "label": "查看卡住的自动任务",
+                    "requires_human": True,
+                }],
+            },
+        },
+    )
+
+    result = scheduler_service._execute_ops_health_check(db, job)
+
+    assert result["success"] is True
+    assert result["status"] == "degraded"
+    assert result["can_continue"] is True
+    assert result["recommended_actions"][0]["code"] == "review_stuck_scheduler_runs"
+
+
+def test_recovered_scheduler_failure_is_visible_without_blocking_health(db: Any) -> None:
+    """已自动收敛的孤儿记录保留在人可读的恢复清单中，不再重复阻断巡检。"""
+    now = datetime.now(timezone.utc)
+    current = AgentJob(
+        job_code="current-health-recovered",
+        job_type="ops_health_check",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    other = AgentJob(
+        job_code="recovered-job",
+        job_type="archive_empty_sessions",
+        agent_code="monitor",
+        schedule="interval@30m",
+        status="enabled",
+    )
+    db.add_all([
+        current,
+        other,
+        AiCallLog(
+            model_name="deepseek-chat",
+            agent_label="manager",
+            status="success",
+            response="ok",
+            create_time=now,
+        ),
+    ])
+    db.flush()
+    db.add(AgentJobRun(
+        job_id=other.id,
+        status="failed",
+        started_at=now - timedelta(hours=8),
+        finished_at=now,
+        result_json=json.dumps({
+            "recovered": True,
+            "recovery_reason": "orphaned_scheduler_run",
+        }),
+        error="调度进程中断导致运行遗留，已自动回收；可由管理员重新运行",
+    ))
+    db.commit()
+
+    health = scheduler_service._collect_application_health(db, current.id)
+
+    assert health["ok"] is False
+    assert health["can_continue"] is True
+    assert health["status"] == "degraded"
+    assert health["task_queue"]["failed_jobs"] == []
+    assert health["task_queue"]["recovered_jobs"] == [other.job_code]
+    assert health["task_queue"]["actions"][0]["code"] == "review_recovered_scheduler_runs"
+
+
 def test_degraded_ops_health_warns_but_does_not_fail_the_job(db: Any, monkeypatch: Any) -> None:
     """可继续的资源压力应该交给人处置，不应堵死定时任务。"""
 

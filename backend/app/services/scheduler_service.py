@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from sqlalchemy import func, or_
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -52,6 +53,11 @@ _SKILL_PROACTIVE_AGENTS = _SKILL_EVOLUTION_AGENTS
 
 _SKILL_JOB_TYPES = frozenset({"skill_evolution", "skill_proactive"})
 
+# 调度运行没有独立的 worker 心跳；服务重启后，超过这个时长仍为 running
+# 的记录可以确定是旧进程遗留。运行中的短期记录仍交给健康检查和人工处置，
+# 避免误收正在执行的长任务。
+_ORPHAN_SCHEDULER_RUN_MAX_AGE_MINUTES = 360
+
 
 def _utcnow() -> datetime:
     """获取 UTC 当前时间。
@@ -76,6 +82,74 @@ def can_access_restricted_jobs(db: Session, actor: Optional[User]) -> bool:
     from app.services.rbac_service import is_super_admin_user
 
     return is_super_admin_user(db, actor.id)
+
+
+def _is_recovered_scheduler_run(run: AgentJobRun) -> bool:
+    """判断失败记录是否由孤儿运行收敛产生。"""
+    if run.status != "failed":
+        return False
+    try:
+        payload = json.loads(run.result_json or "{}")
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and payload.get("recovered") is True
+        and payload.get("recovery_reason") == "orphaned_scheduler_run"
+    )
+
+
+def reconcile_stale_job_runs(
+    db: Session,
+    *,
+    now: Optional[datetime] = None,
+    max_age_minutes: int = _ORPHAN_SCHEDULER_RUN_MAX_AGE_MINUTES,
+) -> list[int]:
+    """收敛确定属于旧进程的调度运行记录。
+
+    只处理 ``running`` 且已经超过保守租约的记录；近期运行不触碰，留给
+    健康检查显示为 ``degraded``。每条记录保留原结果（若可解析），并写入
+    可供管理员查看和手动重跑的恢复标记。函数可重复调用且不会重复改写。
+    """
+    current_time = now or _utcnow()
+    age_minutes = max(1, int(max_age_minutes))
+    cutoff = current_time - timedelta(minutes=age_minutes)
+    rows = (
+        db.query(AgentJobRun)
+        .filter(
+            AgentJobRun.status == "running",
+            AgentJobRun.started_at.isnot(None),
+            AgentJobRun.started_at < cutoff,
+        )
+        .order_by(AgentJobRun.id.asc())
+        .all()
+    )
+    if not rows:
+        return []
+
+    recovered_ids: list[int] = []
+    for run in rows:
+        raw_result = run.result_json
+        try:
+            payload = json.loads(raw_result or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {"previous_result": str(raw_result)[:4000]}
+        payload["recovered"] = True
+        payload["recovery_reason"] = "orphaned_scheduler_run"
+        payload["recovered_at"] = current_time.isoformat()
+        run.status = "failed"
+        run.finished_at = current_time
+        run.error = "调度进程中断导致运行遗留，已自动回收；可由管理员重新运行"
+        run.result_json = json.dumps(payload, ensure_ascii=False, default=str)
+        recovered_ids.append(int(run.id))
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return recovered_ids
 
 
 def ensure_default_jobs(db: Session) -> list[AgentJob]:
@@ -256,19 +330,25 @@ def run_job(
     db.refresh(run)
     try:
         result = _execute_job(db, job)
+        # 真实失败均需落入运行记录；安全监控只有在“部分数据源可用”时
+        # 例外地继续调度，并把失败源留在 result.errors 供人工复核。
+        result_failed = isinstance(result, dict) and result.get("success") is False
+        if job.job_type == "security_monitor" and isinstance(result, dict):
+            result_failed = result_failed and not bool(result.get("partial_failure"))
+        budget_blocked = isinstance(result, dict) and result.get("budget_blocked") is True
         run.status = (
             "failed"
-            if (
-                (job.job_type == "ops_health_check" and result.get("success") is False)
-                or result.get("budget_blocked") is True
-            )
+            if result_failed or budget_blocked
             else "success"
         )
         run.result_json = json.dumps(result, ensure_ascii=False, default=str)
-        if result.get("budget_blocked") is True:
+        if budget_blocked:
             run.error = str(result.get("error") or "Agent 当日自动任务 token 预算已用尽")
         elif run.status == "failed":
-            run.error = "AI 自动运维巡检检测到不健康状态"
+            if job.job_type == "ops_health_check":
+                run.error = "AI 自动运维巡检检测到不健康状态"
+            else:
+                run.error = str(result.get("error") or "调度任务返回失败")[:1000]
         run.finished_at = _utcnow()
         job.last_run_at = run.finished_at
     except Exception as exc:  # noqa: BLE001 - 调度失败需落库
@@ -576,32 +656,60 @@ def _collect_application_health(db: Session, current_job_id: int) -> Dict[str, A
     if latest_model:
         model_state = "healthy" if latest_model.status == "success" else "error"
 
-    stuck_runs = (
+    stuck_run_rows = (
         db.query(AgentJobRun)
         .filter(
             AgentJobRun.status == "running",
             AgentJobRun.started_at < stuck_cutoff,
             AgentJobRun.job_id != current_job_id,
         )
-        .count()
+        .order_by(AgentJobRun.id.asc())
+        .all()
     )
+    stuck_runs = len(stuck_run_rows)
+    stuck_run_details = [
+        {
+            "run_id": int(run.id),
+            "job_id": int(run.job_id),
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+        }
+        for run in stuck_run_rows
+    ]
     enabled_jobs = db.query(AgentJob).filter(AgentJob.status == "enabled").all()
     failed_jobs: list[str] = []
     failed_evolution_jobs: list[str] = []
+    recovered_jobs: list[str] = []
     for scheduled_job in enabled_jobs:
         if scheduled_job.id == current_job_id:
             continue
         cutoff = evolution_cutoff if scheduled_job.job_type in {"evolution", "skill_evolution"} else run_cutoff
         latest_run = (
             db.query(AgentJobRun)
-            .filter(AgentJobRun.job_id == scheduled_job.id, AgentJobRun.started_at >= cutoff)
-            .order_by(AgentJobRun.started_at.desc(), AgentJobRun.id.desc())
+            .filter(
+                AgentJobRun.job_id == scheduled_job.id,
+                or_(
+                    AgentJobRun.started_at >= cutoff,
+                    # 启动清扫保留原 started_at；用 finished_at 让刚收敛的
+                    # 记录在近期健康结果里可见，便于管理员决定是否重跑。
+                    (
+                        AgentJobRun.finished_at.isnot(None)
+                        & (AgentJobRun.finished_at >= cutoff)
+                    ),
+                ),
+            )
+            .order_by(
+                func.coalesce(AgentJobRun.finished_at, AgentJobRun.started_at).desc(),
+                AgentJobRun.id.desc(),
+            )
             .first()
         )
         if latest_run and latest_run.status == "failed":
-            failed_jobs.append(scheduled_job.job_code)
-            if scheduled_job.job_type in {"evolution", "skill_evolution"}:
-                failed_evolution_jobs.append(scheduled_job.job_code)
+            if _is_recovered_scheduler_run(latest_run):
+                recovered_jobs.append(scheduled_job.job_code)
+            else:
+                failed_jobs.append(scheduled_job.job_code)
+                if scheduled_job.job_type in {"evolution", "skill_evolution"}:
+                    failed_evolution_jobs.append(scheduled_job.job_code)
 
     error_agents = [
         code for (code,) in db.query(AgentProfile.code).filter(
@@ -609,9 +717,31 @@ def _collect_application_health(db: Session, current_job_id: int) -> Dict[str, A
             AgentProfile.status == "error",
         ).all()
     ]
-    ok = model_state != "error" and stuck_runs == 0 and not failed_jobs and not error_agents
+    can_continue = model_state != "error" and not failed_jobs and not error_agents
+    attention_required = bool(stuck_runs or recovered_jobs)
+    ok = can_continue and not attention_required
+    status = "ok" if ok else ("degraded" if can_continue else "error")
+    actions: list[dict[str, Any]] = []
+    if stuck_run_details:
+        actions.append({
+            "code": "review_stuck_scheduler_runs",
+            "label": "查看卡住的自动任务",
+            "message": "有自动任务超过 30 分钟没有结束，请核对任务详情后由管理员决定重跑或停止。",
+            "requires_human": True,
+            "run_ids": [item["run_id"] for item in stuck_run_details],
+        })
+    if recovered_jobs:
+        actions.append({
+            "code": "review_recovered_scheduler_runs",
+            "label": "复核已中断的自动任务",
+            "message": "服务重启时已收敛中断任务，请管理员查看运行记录并决定是否重新运行。",
+            "requires_human": True,
+            "job_codes": recovered_jobs,
+        })
     return {
         "ok": ok,
+        "can_continue": can_continue,
+        "status": status,
         "model_api": {
             "state": model_state,
             "latest_call_id": latest_model.id if latest_model else None,
@@ -620,7 +750,13 @@ def _collect_application_health(db: Session, current_job_id: int) -> Dict[str, A
             "latest_status": latest_model.status if latest_model else None,
             "latest_at": latest_model.create_time.isoformat() if latest_model else None,
         },
-        "task_queue": {"stuck_runs": stuck_runs, "failed_jobs": failed_jobs},
+        "task_queue": {
+            "stuck_runs": stuck_runs,
+            "stuck_run_details": stuck_run_details,
+            "failed_jobs": failed_jobs,
+            "recovered_jobs": recovered_jobs,
+            "actions": actions,
+        },
         "agents": {"error_count": len(error_agents), "error_agents": error_agents},
         "evolution": {
             "enabled_jobs": sum(1 for item in enabled_jobs if item.job_type in {"evolution", "skill_evolution"}),
@@ -650,8 +786,14 @@ def _execute_security_monitor(db: Session, job: AgentJob) -> Dict[str, Any]:
     result = security_monitor_service.run_security_monitor(db, job=job)
     return {
         "success": bool(result.get("success")),
+        "can_continue": bool(result.get("can_continue", result.get("success"))),
+        "partial_failure": bool(result.get("partial_failure")),
+        "fatal_failure": bool(result.get("fatal_failure")),
+        "completed_actions": result.get("completed_actions") or [],
+        "failed_actions": result.get("failed_actions") or [],
         "created_alerts": result.get("created_alerts") or [],
         "errors": result.get("errors") or [],
+        "error": result.get("error"),
         "job_id": job.id,
     }
 
@@ -746,19 +888,30 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
     application = _collect_application_health(db, job.id)
     health_status = str(checks.get("status") or "error")
     host_can_continue = bool(checks.get("can_continue", health_status == "ok"))
+    application_ok = bool(application.get("ok"))
+    application_can_continue = bool(application.get("can_continue", application_ok))
+    application_status = str(
+        application.get("status") or ("ok" if application_ok else "error")
+    )
     operational = bool(
         result.success
         and host_can_continue
         and certificate_ok
-        and application.get("ok")
+        and application_can_continue
     )
-    healthy = health_status == "ok" and operational
-    degraded = health_status == "degraded" and operational
+    if not operational or health_status not in {"ok", "degraded"}:
+        effective_status = "error"
+    elif health_status == "degraded" or application_status == "degraded" or not application_ok:
+        effective_status = "degraded"
+    else:
+        effective_status = "ok"
+    healthy = effective_status == "ok"
+    degraded = effective_status == "degraded"
     summary: Dict[str, Any] = {
         # 调度器只将真正不可继续的状态记为失败；degraded 保留告警
         # 和人工动作，但不堵死后续巡检。
         "success": operational,
-        "status": health_status if operational else "error",
+        "status": effective_status,
         "can_continue": operational,
         "execution_id": data.get("id"),
         "certificate_execution_id": certificate_data.get("id"),
@@ -881,6 +1034,14 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
             elif str(item).strip():
                 # 兼容旧执行器只返回人类可读字符串的版本。
                 recommended_actions.append(str(item))
+        application_actions = (
+            application.get("task_queue", {}).get("actions", [])
+            if isinstance(application.get("task_queue"), dict)
+            else []
+        )
+        for item in application_actions:
+            if isinstance(item, dict) and item:
+                recommended_actions.append(item)
         summary.update({
             "requires_attention": True,
             "recommended_actions": recommended_actions,
