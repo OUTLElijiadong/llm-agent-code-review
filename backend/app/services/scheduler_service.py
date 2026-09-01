@@ -791,6 +791,8 @@ def _execute_security_monitor(db: Session, job: AgentJob) -> Dict[str, Any]:
         "fatal_failure": bool(result.get("fatal_failure")),
         "completed_actions": result.get("completed_actions") or [],
         "failed_actions": result.get("failed_actions") or [],
+        "degraded_actions": result.get("degraded_actions") or [],
+        "human_actions": result.get("human_actions") or [],
         "created_alerts": result.get("created_alerts") or [],
         "errors": result.get("errors") or [],
         "error": result.get("error"),

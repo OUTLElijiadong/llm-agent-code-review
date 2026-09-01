@@ -370,6 +370,101 @@ def test_single_action_failure_does_not_break_whole(db, super_admin_user, monkey
     assert db.query(AgentAlert).filter(AgentAlert.fingerprint == "login:8.8.8.8:root").count() == 1
 
 
+def test_flytrap_upstream_degradation_keeps_local_data_and_notifies_admin(
+    db, super_admin_user, monkeypatch, emitted,
+):
+    """上游同步异常应保留本地攻击数据，并作为可继续降级通知管理员。"""
+    payloads = {
+        "ssh_login_events": _ssh_payload(),
+        "flytrap_attack_events": {
+            "ok": True,
+            "degraded": True,
+            "can_continue": True,
+            "reason": "FlyTrap 上游同步异常，本地蜜罐和持久队列继续工作",
+            "total": 12,
+            "by_ip": [{"value": "203.0.113.9", "count": 12}],
+            "recent": [],
+            "health": {
+                "status": "degraded",
+                "issues": [{"code": "flytrap_sync_error", "message": "同步周期超时"}],
+            },
+            "human_actions": [{
+                "code": "flytrap_upstream_recovery",
+                "label": "检查 FlyTrap 上游连通性",
+                "message": "核对上游服务、防火墙和网络路由，恢复后确认同步成功日志。",
+                "requires_human": True,
+            }],
+        },
+        "nginx_attack_events": {"total": 0, "by_ip": [], "by_detail": [], "recent": []},
+        "backup_audit": {"sql_gz_count": 0, "sql_gz_bytes": 0, "other_bytes": 0, "recent": [], "newest": None},
+        "status": {"checks": {"disk": {"used_percent": 40}}},
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert result["success"] is False
+    assert result["can_continue"] is True
+    assert result["partial_failure"] is True
+    assert result["fatal_failure"] is False
+    assert "flytrap_attack_events" in result["completed_actions"]
+    assert "flytrap_attack_events" in result["degraded_actions"]
+    assert "flytrap_attack_events" not in result["failed_actions"]
+    assert result["human_actions"][0]["code"] == "flytrap_upstream_recovery"
+    assert any(item["action"] == "flytrap_attack_events" and item["degraded"] for item in result["errors"])
+    assert db.query(AgentAlert).filter(
+        AgentAlert.fingerprint == "integration:flytrap_upstream",
+        AgentAlert.status == "open",
+    ).count() == 1
+    assert db.query(AgentAlert).filter(AgentAlert.fingerprint == "attack:203.0.113.9").count() == 1
+    assert any(event[1]["payload"]["category"] == "integration" for event in emitted)
+
+
+def test_flytrap_upstream_recovery_resolves_integration_alert(
+    db, super_admin_user, monkeypatch, emitted,
+):
+    """同步恢复后应自动关闭同一告警，避免人工处理入口永久悬挂。"""
+    degraded_payload = {
+        "ssh_login_events": _ssh_payload(),
+        "flytrap_attack_events": {
+            "ok": True,
+            "degraded": True,
+            "reason": "FlyTrap 上游同步异常",
+            "total": 0,
+            "by_ip": [],
+            "recent": [],
+            "health": {"status": "degraded", "issues": [{"code": "flytrap_sync_error"}]},
+            "human_actions": [{"code": "flytrap_upstream_recovery", "requires_human": True}],
+        },
+        "nginx_attack_events": {"total": 0, "by_ip": [], "by_detail": [], "recent": []},
+        "backup_audit": {"sql_gz_count": 0, "sql_gz_bytes": 0, "other_bytes": 0, "recent": [], "newest": None},
+        "status": {"checks": {"disk": {"used_percent": 40}}},
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(degraded_payload))
+    security_monitor_service.run_security_monitor(db)
+
+    healthy_payload = dict(degraded_payload)
+    healthy_payload["flytrap_attack_events"] = {
+        "ok": True,
+        "degraded": False,
+        "total": 0,
+        "by_ip": [],
+        "recent": [],
+        "health": {"status": "ok", "issues": []},
+        "human_actions": [],
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(healthy_payload))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert result["success"] is True
+    alert = db.query(AgentAlert).filter(
+        AgentAlert.fingerprint == "integration:flytrap_upstream",
+    ).one()
+    assert alert.status == "resolved"
+    assert alert.resolved_at is not None
+
+
 def test_all_security_sources_failure_requires_human_recovery(
     db, super_admin_user, monkeypatch, emitted,
 ):

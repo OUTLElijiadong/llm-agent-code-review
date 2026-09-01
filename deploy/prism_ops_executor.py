@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import pwd
@@ -360,6 +361,23 @@ def _journal_query(params: dict[str, Any]) -> dict[str, Any]:
 MAX_SINCE_HOURS = 720
 MAX_EVENT_LIMIT = 5000
 SSH_FOCUS_VALUES = {"all", "accepted", "failed"}
+FLYTRAP_HEALTH_WINDOW_MINUTES = 10
+FLYTRAP_AGENT_ERROR_MARKERS = (
+    "Heartbeat 调用失败",
+    "Reporter 持久队列发送失败",
+    "ConfigSync FetchConfig 失败",
+    "Agent token 续签失败",
+)
+FLYTRAP_SYNC_ERROR_MARKERS = ("同步周期异常",)
+FLYTRAP_SYNC_SUCCESS_MARKERS = (
+    "登录成功",
+    "增量事件:",
+    "节点同步:",
+    "告警同步:",
+    "IOC 同步:",
+    "攻击者同步:",
+    "小时聚合重算:",
+)
 
 
 def _since_hours_arg(params: dict[str, Any], default: int = 24) -> int:
@@ -422,7 +440,18 @@ def parse_flytrap_log(lines: list[str]) -> list[dict[str, Any]]:
         if not isinstance(payload, dict):
             continue
         remote = str(payload.get("remote") or "")
-        ip = remote.rsplit(":", 1)[0] if ":" in remote else remote
+        if remote.startswith("[") and "]" in remote:
+            ip = remote[1:remote.index("]")]
+        elif remote.count(":") == 1:
+            ip = remote.rsplit(":", 1)[0]
+        else:
+            ip = remote
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            # Agent 的心跳、上报重试和配置同步日志同样是 JSON；没有
+            # 可验证远端 IP 的运维日志不能伪装成攻击事件。
+            continue
         events.append({
             "time": payload.get("time") or "",
             "username": payload.get("username") or "",
@@ -430,6 +459,70 @@ def parse_flytrap_log(lines: list[str]) -> list[dict[str, Any]]:
             "message": str(payload.get("message") or "")[:500],
         })
     return events
+
+
+def _latest_flytrap_sync_signal(lines: list[str]) -> str:
+    """按日志顺序返回最近一次同步结果（ok/error/unknown）。"""
+    signal = "unknown"
+    for raw in lines:
+        line = str(raw)
+        if any(marker in line for marker in FLYTRAP_SYNC_ERROR_MARKERS):
+            signal = "error"
+        elif any(marker in line for marker in FLYTRAP_SYNC_SUCCESS_MARKERS):
+            signal = "ok"
+    return signal
+
+
+def summarize_flytrap_health(
+    *,
+    agent_active: bool,
+    sync_active: bool,
+    agent_lines: list[str],
+    sync_lines: list[str],
+    source_errors: list[str] | None = None,
+) -> dict[str, Any]:
+    """汇总 FlyTrap 本地采集和上游同步健康，不把上游故障当作阻断项。"""
+    issues: list[dict[str, str]] = []
+    agent_upstream_error = any(
+        marker in line
+        for line in agent_lines
+        for marker in FLYTRAP_AGENT_ERROR_MARKERS
+    )
+    sync_signal = _latest_flytrap_sync_signal(sync_lines)
+
+    if not agent_active:
+        issues.append({"code": "flytrap_agent_inactive", "message": "FlyTrap 本地蜜罐进程未运行"})
+    elif agent_upstream_error:
+        issues.append({
+            "code": "flytrap_agent_upstream_error",
+            "message": "FlyTrap 心跳或事件上报在最近窗口内失败，本地持久队列继续保留事件",
+        })
+    if not sync_active:
+        issues.append({"code": "flytrap_sync_inactive", "message": "FlyTrap 数据同步进程未运行"})
+    elif sync_signal == "error":
+        issues.append({"code": "flytrap_sync_error", "message": "FlyTrap 最近一次上游同步失败"})
+    elif sync_signal == "unknown":
+        issues.append({
+            "code": "flytrap_sync_stale",
+            "message": f"最近 {FLYTRAP_HEALTH_WINDOW_MINUTES} 分钟未发现 FlyTrap 同步成功记录",
+        })
+    for source in source_errors or []:
+        issues.append({
+            "code": "flytrap_health_source_error",
+            "message": f"无法读取 FlyTrap {source} 健康信号",
+        })
+
+    degraded = bool(issues)
+    return {
+        "ok": not degraded,
+        "status": "degraded" if degraded else "ok",
+        "can_continue": True,
+        "requires_human": degraded,
+        "window_minutes": FLYTRAP_HEALTH_WINDOW_MINUTES,
+        "agent": {"active": agent_active, "upstream_error": agent_upstream_error},
+        "sync": {"active": sync_active, "latest_signal": sync_signal},
+        "issues": issues,
+    }
 
 
 def parse_nginx_log(lines: list[str]) -> list[dict[str, Any]]:
@@ -489,9 +582,56 @@ def _ssh_login_events(params: dict[str, Any]) -> dict[str, Any]:
 
 def _flytrap_attack_events(params: dict[str, Any]) -> dict[str, Any]:
     since_hours, limit = _since_hours_arg(params), _event_limit_arg(params, default=1000)
-    result = run(["journalctl", "-u", "flytrap-agent", "--since", f"{since_hours} hours ago", "--no-pager", "--output=short-iso", "-n", "30000"], timeout=90, allow_failure=True)
+    result = run(["journalctl", "-u", "flytrap-agent", "--since", f"{since_hours} hours ago", "--no-pager", "--output=cat", "-n", "30000"], timeout=90, allow_failure=True)
     events = parse_flytrap_log(result["stdout"].splitlines())
-    return {"ok": result["exit_code"] == 0, "since_hours": since_hours, "total": len(events), "by_ip": _aggregate(events, "ip"), "by_username": _aggregate(events, "username"), "recent": events[-min(limit, 300):], "source_exit_code": result["exit_code"], "source_error": result["stderr"][:400] if result["exit_code"] else "", "stdout_capped": len(result["stdout"]) >= 100_000}
+    agent_status = run(["systemctl", "is-active", "flytrap-agent.service"], timeout=20, allow_failure=True)
+    sync_status = run(["systemctl", "is-active", "flytrap-sync.service"], timeout=20, allow_failure=True)
+    recent_since = f"{FLYTRAP_HEALTH_WINDOW_MINUTES} minutes ago"
+    agent_health_log = run([
+        "journalctl", "-u", "flytrap-agent.service", "--since", recent_since,
+        "--no-pager", "--output=cat", "-n", "5000",
+    ], timeout=60, allow_failure=True)
+    sync_health_log = run([
+        "journalctl", "-u", "flytrap-sync.service", "--since", recent_since,
+        "--no-pager", "--output=cat", "-n", "2000",
+    ], timeout=60, allow_failure=True)
+    health_source_errors = []
+    if agent_health_log["exit_code"] != 0:
+        health_source_errors.append("agent 日志")
+    if sync_health_log["exit_code"] != 0:
+        health_source_errors.append("sync 日志")
+    health = summarize_flytrap_health(
+        agent_active=agent_status["exit_code"] == 0 and agent_status["stdout"].strip() == "active",
+        sync_active=sync_status["exit_code"] == 0 and sync_status["stdout"].strip() == "active",
+        agent_lines=agent_health_log["stdout"].splitlines(),
+        sync_lines=sync_health_log["stdout"].splitlines(),
+        source_errors=health_source_errors,
+    )
+    degraded = health["status"] == "degraded"
+    human_actions = []
+    if degraded:
+        human_actions.append({
+            "code": "flytrap_upstream_recovery",
+            "label": "检查 FlyTrap 上游连通性",
+            "message": "核对上游服务、防火墙和网络路由；本地蜜罐与持久队列可继续工作，恢复后确认同步成功日志。",
+            "requires_human": True,
+        })
+    return {
+        "ok": result["exit_code"] == 0,
+        "degraded": degraded,
+        "can_continue": result["exit_code"] == 0,
+        "reason": "；".join(item["message"] for item in health["issues"]),
+        "health": health,
+        "human_actions": human_actions,
+        "since_hours": since_hours,
+        "total": len(events),
+        "by_ip": _aggregate(events, "ip"),
+        "by_username": _aggregate(events, "username"),
+        "recent": events[-min(limit, 300):],
+        "source_exit_code": result["exit_code"],
+        "source_error": result["stderr"][:400] if result["exit_code"] else "",
+        "stdout_capped": len(result["stdout"]) >= 100_000,
+    }
 
 
 def _nginx_attack_events(params: dict[str, Any]) -> dict[str, Any]:

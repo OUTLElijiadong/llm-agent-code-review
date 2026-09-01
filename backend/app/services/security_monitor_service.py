@@ -281,6 +281,41 @@ def _evaluate_ssh(db: Session, ssh: dict[str, Any], created: list[dict[str, Any]
 
 def _evaluate_flytrap(db: Session, flytrap: dict[str, Any], created: list[dict[str, Any]]) -> None:
     """蜜罐规则：同 IP 触碰次数达到阈值触发 warning。"""
+    health_fingerprint = "integration:flytrap_upstream"
+    if flytrap.get("degraded") is True:
+        health = flytrap.get("health") if isinstance(flytrap.get("health"), dict) else {}
+        actions = flytrap.get("human_actions") if isinstance(flytrap.get("human_actions"), list) else []
+        _record_alert(
+            db,
+            created,
+            category="integration",
+            severity="warning",
+            fingerprint=health_fingerprint,
+            title="FlyTrap 上游同步降级",
+            suggestion=(
+                "核对上游服务、防火墙和网络路由；本地蜜罐与持久队列可继续工作，"
+                "恢复后确认同步成功日志"
+            ),
+            detail={"health": health, "human_actions": actions},
+        )
+    elif flytrap.get("ok") is True:
+        existing = db.query(AgentAlert).filter(
+            AgentAlert.status == "open",
+            AgentAlert.fingerprint == health_fingerprint,
+        ).first()
+        if existing is not None:
+            admin = _find_admin(db)
+            observability_service.resolve_alert(
+                db,
+                existing.id,
+                admin.id if admin else 0,
+                note=json.dumps({
+                    "resolution": "FlyTrap 上游同步已恢复",
+                    "health": flytrap.get("health") or {},
+                    "resolved_at": _utcnow_iso(),
+                }, ensure_ascii=False, default=str),
+            )
+
     flytrap_threshold = settings.security_flytrap_threshold
     for agg in flytrap.get("by_ip") or []:
         if not isinstance(agg, dict):
@@ -590,10 +625,38 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     completed_actions: list[str] = []
     failed_actions: list[str] = []
+    degraded_actions: list[str] = []
+    human_actions: list[dict[str, Any]] = []
     for action, params in actions:
         try:
-            results[action] = _call_action(db, action, params)
+            payload = _call_action(db, action, params)
+            results[action] = payload
             completed_actions.append(action)
+            if payload.get("degraded") is True:
+                degraded_actions.append(action)
+                action_human_actions = (
+                    payload.get("human_actions")
+                    if isinstance(payload.get("human_actions"), list)
+                    else []
+                )
+                for item in action_human_actions:
+                    if isinstance(item, dict) and item not in human_actions:
+                        human_actions.append(item)
+                next_action = next(
+                    (
+                        str(item.get("message") or item.get("label") or "")
+                        for item in action_human_actions
+                        if isinstance(item, dict)
+                    ),
+                    "请人工检查该数据源并在恢复后重新运行巡检",
+                )
+                errors.append({
+                    "action": action,
+                    "error": str(payload.get("reason") or f"动作 {action} 处于降级状态"),
+                    "degraded": True,
+                    "retryable": True,
+                    "next_action": next_action,
+                })
         except Exception as exc:  # noqa: BLE001 - 单动作失败不中断整体巡检
             errors.append({"action": action, "error": str(exc)})
             failed_actions.append(action)
@@ -618,6 +681,8 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
         "fatal_failure": fatal_failure,
         "completed_actions": completed_actions,
         "failed_actions": failed_actions,
+        "degraded_actions": degraded_actions,
+        "human_actions": human_actions,
         "created_alerts": created_alerts,
         "actions": results,
         "errors": errors,
@@ -682,6 +747,9 @@ def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
         "attacks": {
             "flytrap_total": int(flytrap.get("total") or 0),
             "flytrap_top_ips": flytrap.get("by_ip") or [],
+            "flytrap_degraded": bool(flytrap.get("degraded")),
+            "flytrap_health": flytrap.get("health") or {},
+            "flytrap_human_actions": flytrap.get("human_actions") or [],
             "nginx_total": int(nginx.get("total") or 0),
             "nginx_top_ips": nginx.get("by_ip") or [],
         },

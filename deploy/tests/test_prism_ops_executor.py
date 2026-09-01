@@ -136,6 +136,70 @@ def test_parse_security_sources_and_keep_collection_failure_visible(monkeypatch)
     assert "journal unavailable" in result["source_error"]
 
 
+def test_flytrap_parser_ignores_operational_json_without_remote_source() -> None:
+    events = executor.parse_flytrap_log([
+        json.dumps({
+            "time": "2026-09-01T14:00:00+08:00",
+            "remote": "203.0.113.9:52222",
+            "username": "root",
+            "message": "SSH honeypot login",
+        }),
+        json.dumps({
+            "time": "2026-09-01T14:00:01+08:00",
+            "message": "Heartbeat 调用失败，进入退避",
+            "error": "connection timed out",
+        }),
+        json.dumps({
+            "time": "2026-09-01T14:00:02+08:00",
+            "remote": "not-an-ip:1234",
+            "message": "malformed source",
+        }),
+    ])
+
+    assert events == [{
+        "time": "2026-09-01T14:00:00+08:00",
+        "username": "root",
+        "ip": "203.0.113.9",
+        "message": "SSH honeypot login",
+    }]
+
+
+def test_flytrap_health_marks_upstream_timeout_as_non_blocking_degradation() -> None:
+    health = executor.summarize_flytrap_health(
+        agent_active=True,
+        sync_active=True,
+        agent_lines=["Heartbeat 调用失败，进入退避: connection timed out"],
+        sync_lines=[
+            "2026-09-01 13:58:00 INFO 节点同步: 2 个",
+            "2026-09-01 14:00:00 ERROR 同步周期异常: timed out",
+        ],
+    )
+
+    assert health["status"] == "degraded"
+    assert health["can_continue"] is True
+    assert health["requires_human"] is True
+    assert {item["code"] for item in health["issues"]} == {
+        "flytrap_agent_upstream_error",
+        "flytrap_sync_error",
+    }
+
+
+def test_flytrap_health_accepts_newer_sync_success_and_active_services() -> None:
+    health = executor.summarize_flytrap_health(
+        agent_active=True,
+        sync_active=True,
+        agent_lines=[],
+        sync_lines=[
+            "2026-09-01 13:58:00 ERROR 同步周期异常: timed out",
+            "2026-09-01 14:00:00 INFO 节点同步: 2 个",
+        ],
+    )
+
+    assert health["status"] == "ok"
+    assert health["issues"] == []
+    assert health["requires_human"] is False
+
+
 def test_database_signal_parser_redacts_and_avoids_normal_update_false_positive() -> None:
     result = executor.parse_db_general_log([
         {"user_host": "root@localhost", "argument": "DROP TABLE users", "event_time": "now"},
