@@ -862,6 +862,14 @@ _cap(
         WRITE,
         "server_ops:execute",
     ),
+    _cap(
+        "llm.config.models",
+        "/admin/llm",
+        "拉取全局 LLM 端点可用模型",
+        "POST",
+        "/api/admin/llm/models",
+        permission="server_ops:view",
+    ),
     # MCP 与受控沙箱节点。所有能力均由 API 的 require_super_admin 再次强制校验；
     # 注册表仅向管理 Agent 暴露稳定能力码和 OpenAPI 参数契约。
     _cap(

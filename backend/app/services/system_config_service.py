@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.exceptions import ValidationError
 from app.models.system_config import SystemConfig
-from app.utils.api_resolver import validate_ai_base_url
+from app.utils.api_resolver import normalize_ai_base_url, validate_ai_base_url
 
 # 配置键常量
 EMBEDDING_KEY = "embedding"
@@ -32,7 +32,11 @@ def _set_raw(db: Session, key: str, value: str) -> None:
         row.config_value = value
     else:
         db.add(SystemConfig(config_key=key, config_value=value))
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 def get_embedding_config(db: Session) -> dict:
@@ -150,6 +154,43 @@ def update_embedding_config(
 # ──────────────────────────────────────────────────────────
 # 全局大模型(LLM)提供商配置 — 管理员可在 DeepSeek 与自定义 OpenAI 兼容端点间切换
 # ──────────────────────────────────────────────────────────
+def _runtime_number(value, default, minimum, maximum, cast):
+    """读取历史 JSON 中的运行参数，坏值回退默认而不是中断服务。"""
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        parsed = cast(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return parsed if minimum <= parsed <= maximum else default
+
+
+def _llm_runtime_options(data: dict) -> dict:
+    return {
+        "timeout_seconds": _runtime_number(
+            data.get("timeout_seconds"), settings.deepseek_timeout, 5, 600, int,
+        ),
+        "max_retries": _runtime_number(
+            data.get("max_retries"), settings.deepseek_max_retries, 0, 5, int,
+        ),
+        "temperature": _runtime_number(
+            data.get("temperature"), settings.deepseek_temperature, 0, 2, float,
+        ),
+    }
+
+
+def _validated_runtime_option(name: str, value, minimum, maximum, cast):
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        parsed = cast(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValidationError(f"{name} 必须是有效数字", code=40001) from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValidationError(f"{name} 必须在 {minimum} 到 {maximum} 之间", code=40001)
+    return parsed
+
+
 def _persist_llm_security_change(db: Session, data: dict, action: str) -> bool:
     """持久化全局 LLM Key 的轮换或失效结果。
 
@@ -178,7 +219,7 @@ def get_llm_config(db: Session) -> Optional[dict]:
 
     Returns:
         dict | None: { provider, base_url, model, api_key, active };
-        未配置或缺字段时返回 None,调用方应回退系统默认 DeepSeek。
+        未配置或 JSON 不是对象时返回 None；缺字段由调用方判定是否生效。
     """
     raw = _get_raw(db, LLM_KEY)
     if not raw:
@@ -186,6 +227,8 @@ def get_llm_config(db: Session) -> Optional[dict]:
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
         return None
 
     api_key = ""
@@ -218,6 +261,7 @@ def get_llm_config(db: Session) -> Optional[dict]:
         "model": (data.get("model") or "").strip(),
         "api_key": api_key,
         "active": active,
+        **_llm_runtime_options(data),
     }
 
 
@@ -225,14 +269,29 @@ def get_llm_config_public(db: Session) -> dict:
     """供管理员前端展示的脱敏 LLM 配置"""
     cfg = get_llm_config(db)
     if not cfg:
+        raw = _get_raw(db, LLM_KEY)
         return {
-            "provider": "deepseek", "base_url": "", "model": "",
+            "provider": "deepseek",
+            "base_url": settings.deepseek_base_url,
+            "model": settings.deepseek_model,
             "active": False, "api_key_masked": "", "is_set": False,
             "source": "default",
+            "fallback_reason": "invalid_config" if raw else "not_configured",
+            "timeout_seconds": settings.deepseek_timeout,
+            "max_retries": settings.deepseek_max_retries,
+            "temperature": settings.deepseek_temperature,
         }
     from app.utils.api_resolver import mask_api_key
     has_key = bool(cfg["api_key"])
     effective = bool(cfg["active"] and has_key and cfg["base_url"] and cfg["model"])
+    if effective:
+        fallback_reason = ""
+    elif not cfg["active"]:
+        fallback_reason = "inactive"
+    elif not has_key:
+        fallback_reason = "credential_unavailable"
+    else:
+        fallback_reason = "incomplete_config"
     return {
         "provider": cfg["provider"],
         "base_url": cfg["base_url"],
@@ -241,6 +300,10 @@ def get_llm_config_public(db: Session) -> dict:
         "api_key_masked": mask_api_key(cfg["api_key"]) if has_key else "",
         "is_set": has_key,
         "source": "global" if effective else "default",
+        "fallback_reason": fallback_reason,
+        "timeout_seconds": cfg["timeout_seconds"],
+        "max_retries": cfg["max_retries"],
+        "temperature": cfg["temperature"],
     }
 
 
@@ -251,6 +314,9 @@ def update_llm_config(
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     active: Optional[bool] = None,
+    timeout_seconds: Optional[int] = None,
+    max_retries: Optional[int] = None,
+    temperature: Optional[float] = None,
 ) -> dict:
     """更新全局 LLM 配置(管理员)
 
@@ -260,16 +326,19 @@ def update_llm_config(
     data = {}
     if existing:
         try:
-            data = json.loads(existing)
+            parsed = json.loads(existing)
+            data = parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
             data = {}
 
     if provider is not None:
+        if provider not in {"deepseek", "openai", "custom"}:
+            raise ValidationError("不支持的 LLM 提供商", code=40001)
         data["provider"] = provider
     if base_url is not None:
         value = base_url.strip()
         data["base_url"] = (
-            validate_ai_base_url(value, resolve_host=True, allow_private=False)
+            normalize_ai_base_url(value, resolve_host=True, allow_private=False)
             if value
             else ""
         )
@@ -283,6 +352,24 @@ def update_llm_config(
             data["api_key_enc"] = ""
     if active is not None:
         data["active"] = bool(active)
+    if timeout_seconds is not None:
+        data["timeout_seconds"] = _validated_runtime_option(
+            "超时时间", timeout_seconds, 5, 600, int,
+        )
+    if max_retries is not None:
+        data["max_retries"] = _validated_runtime_option(
+            "最大重试次数", max_retries, 0, 5, int,
+        )
+    if temperature is not None:
+        data["temperature"] = _validated_runtime_option(
+            "温度系数", temperature, 0, 2, float,
+        )
 
-    _set_raw(db, LLM_KEY, json.dumps(data, ensure_ascii=False))
+    try:
+        _set_raw(db, LLM_KEY, json.dumps(data, ensure_ascii=False))
+    except Exception as exc:
+        logger.warning(
+            f"[system_config] 全局 LLM 配置提交失败(error_type={type(exc).__name__})",
+        )
+        raise
     return get_llm_config_public(db)

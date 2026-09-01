@@ -150,6 +150,15 @@ class Orchestrator(BaseAgent):
             self.chat_agent._base_url = api_config.base_url.rstrip("/")
             self.chat_agent._api_key = api_config.api_key
             self.chat_agent._model = api_config.model
+            timeout_seconds = getattr(api_config, "timeout_seconds", None)
+            max_retries = getattr(api_config, "max_retries", None)
+            temperature = getattr(api_config, "temperature", None)
+            if timeout_seconds is not None:
+                self.chat_agent._timeout = timeout_seconds
+            if max_retries is not None:
+                self.chat_agent._max_retries = max_retries
+            if temperature is not None:
+                self.chat_agent._temperature = temperature
             logger.info(
                 f"[Orchestrator] API 配置已注入: "
                 f"source={api_config.source} model={api_config.model}"

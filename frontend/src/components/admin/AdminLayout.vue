@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Bell,
@@ -38,6 +38,7 @@ interface AdminMenuItem {
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const contentRef = ref<HTMLElement | null>(null)
 
 const menuItems: AdminMenuItem[] = [
   { path: '/admin/overview', title: '总览大屏', icon: Histogram },
@@ -86,8 +87,20 @@ const activePath = computed(() => {
  * @returns void
  */
 function go(path: string): void {
-  if (route.path !== path) router.push(path)
+  if (route.path === path) {
+    contentRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+  router.push(path)
 }
+
+watch(
+  () => route.fullPath,
+  async () => {
+    await nextTick()
+    contentRef.value?.scrollTo({ top: 0, behavior: 'auto' })
+  },
+)
 
 /**
  * 退出当前账号并回到登录页。
@@ -150,7 +163,7 @@ async function logout(): Promise<void> {
         </div>
       </header>
 
-      <main class="admin-content">
+      <main ref="contentRef" class="admin-content">
         <router-view v-slot="{ Component, route: childRoute }">
           <transition name="admin-route" mode="out-in">
             <component :is="Component" :key="childRoute.path" />
@@ -165,8 +178,10 @@ async function logout(): Promise<void> {
 <style scoped lang="scss">
 .admin-layout {
   display: flex;
+  height: 100dvh;
   min-height: 100dvh;
   width: 100%;
+  overflow: hidden;
   background: #F5F7FB;
   color: var(--gray-900);
 }
@@ -174,7 +189,9 @@ async function logout(): Promise<void> {
 .admin-sidebar {
   width: 252px;
   flex: 0 0 252px;
-  min-height: 100dvh;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--side-bg);
@@ -213,7 +230,10 @@ async function logout(): Promise<void> {
 
 .admin-nav {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 12px 10px 18px;
 }
 
@@ -265,11 +285,15 @@ async function logout(): Promise<void> {
 .admin-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .admin-header {
+  flex: 0 0 auto;
   min-height: 72px;
   display: flex;
   align-items: center;
@@ -306,8 +330,13 @@ async function logout(): Promise<void> {
 .admin-content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   padding: 24px 28px 36px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
 }
 
 .admin-route-enter-active,
@@ -328,18 +357,24 @@ async function logout(): Promise<void> {
 @media (max-width: 920px) {
   .admin-layout {
     flex-direction: column;
+    height: 100dvh;
   }
 
   .admin-sidebar {
     width: 100%;
+    height: auto;
     min-height: auto;
     flex-basis: auto;
+    flex-shrink: 0;
   }
 
   .admin-nav {
     display: flex;
+    flex: 0 0 auto;
     gap: 6px;
     overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-gutter: auto;
     padding: 10px;
   }
 

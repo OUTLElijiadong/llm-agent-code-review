@@ -145,7 +145,9 @@ cd /opt/code-review/deploy
 ./verify-backup.sh /secure/backups/code_review_YYYYMMDD_HHMMSS.sql.gz
 ```
 
-脚本会创建随机临时数据库、导入备份、验证表数和 Alembic revision，随后自动删除临时库，不覆盖生产数据库。
+脚本默认只在独立 `cr_testdb` 容器内创建随机临时库，导入备份后对账表数和 Alembic revision，随后删除临时库。它会比对容器 ID 并明确拒绝 `cr_mysql`/生产 MySQL；主机可用内存或验证容器上限低于 `VERIFY_MIN_HOST_AVAILABLE_MB`（默认 1536 MiB）时直接停止，不对生产业务施加恢复压力。验证库异常重启时，脚本会在 `VERIFY_CLEANUP_TIMEOUT_SECONDS` 内重试清理，清理失败会使验证失败。
+
+`cr_testdb` 必须拥有自己的数据卷、只用于测试/验证，并在容器内通过 `MYSQL_ROOT_PASSWORD` 提供管理账号。自定义容器名可写入受保护的 `deploy/.env` 中；无论如何配置，目标与 Compose `mysql` 容器 ID 相同时都会失败关闭。
 
 ### 6.3 生产数据库恢复
 

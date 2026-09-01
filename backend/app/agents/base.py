@@ -135,11 +135,26 @@ class BaseAgent:
             AgentResult
         """
         # 解析最终使用的 API 配置：传入 > 实例默认
-        from app.utils.api_resolver import validate_ai_base_url
+        from app.utils.api_resolver import normalize_ai_base_url
 
-        base_url = validate_ai_base_url(api_config.base_url if api_config else self._base_url)
+        base_url = normalize_ai_base_url(api_config.base_url if api_config else self._base_url)
         api_key = api_config.api_key if api_config else self._api_key
         model = api_config.model if api_config else self._model
+        timeout = (
+            api_config.timeout_seconds
+            if api_config and api_config.timeout_seconds is not None
+            else self._timeout
+        )
+        max_retries = (
+            api_config.max_retries
+            if api_config and api_config.max_retries is not None
+            else self._max_retries
+        )
+        temperature = (
+            api_config.temperature
+            if api_config and api_config.temperature is not None
+            else self._temperature
+        )
 
         from app.agents.events import AgentEventType
         self._emit(AgentEventType.THINKING, ctx,
@@ -153,7 +168,7 @@ class BaseAgent:
         payload = {
             "model": model,
             "messages": messages,
-            "temperature": self._temperature,
+            "temperature": temperature,
             "max_tokens": self._max_tokens,
         }
         if input_truncated:
@@ -171,7 +186,7 @@ class BaseAgent:
         last_failure_kind = "upstream_error"
         last_finish_reason = ""
         attempts_used = 0
-        for attempt in range(self._max_retries + 1):
+        for attempt in range(max_retries + 1):
             if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
                 last_error = "模型调用超过语义审计全局时限"
                 last_failure_kind = "semantic_budget_exhausted"
@@ -185,7 +200,7 @@ class BaseAgent:
             retryable = True
             try:
                 target = pin_public_http_url(f"{base_url}/chat/completions")
-                request_timeout = float(self._timeout)
+                request_timeout = float(timeout)
                 if deadline_monotonic is not None:
                     request_timeout = min(
                         request_timeout,
@@ -333,7 +348,7 @@ class BaseAgent:
                 retryable = False
 
             logger.warning(f"[{self.name}] 第 {attempt+1} 次尝试失败: {last_error}")
-            if retryable and attempt < self._max_retries:
+            if retryable and attempt < max_retries:
                 retry_delay = float(2 ** (attempt + 1))
                 if deadline_monotonic is not None:
                     remaining = deadline_monotonic - time.monotonic()

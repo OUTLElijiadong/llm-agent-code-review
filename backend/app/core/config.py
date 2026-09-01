@@ -66,8 +66,9 @@ class Settings(BaseSettings):
     deepseek_orchestrator_model: str = "deepseek-v4-pro"
     # pro 模型返回“模型不可用”时,允许在同一轮自动回退到 flash;关闭则直接失败。
     deepseek_orchestrator_fallback_to_flash: bool = True
-    deepseek_timeout: int = 60
-    deepseek_max_retries: int = 2
+    deepseek_timeout: int = Field(default=60, ge=5, le=600)
+    deepseek_max_retries: int = Field(default=2, ge=0, le=5)
+    deepseek_temperature: float = Field(default=0.2, ge=0, le=2)
     deepseek_chunk_threshold: int = 32000
     # 完整沙箱需要跨越排队、部署、测试和报告阶段；工具轮数过低会在沙箱
     # 已成功时提前把 Responses 会话标记为 max_rounds_exceeded。

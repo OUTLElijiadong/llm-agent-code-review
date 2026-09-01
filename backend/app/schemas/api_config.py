@@ -29,10 +29,13 @@ class ApiConfigSaveIn(BaseModel):
 
 class ApiConfigTestIn(BaseModel):
     """测试连接请求（key 不存储）"""
-    provider: str = Field(default="deepseek")
-    api_key: str = Field(..., min_length=1, max_length=256)
+    provider: str = Field(default="deepseek", pattern="^(deepseek|openai|custom)$")
+    api_key: str = Field(..., min_length=1, max_length=512)
     base_url: str = Field(default="https://api.deepseek.com", max_length=512)
     model: str = Field(default="deepseek-v4-flash", max_length=128)
+    timeout_seconds: int = Field(default=60, ge=5, le=600)
+    max_retries: int = Field(default=2, ge=0, le=5)
+    temperature: float = Field(default=0.2, ge=0, le=2)
 
 
 class ApiConfigTestOut(BaseModel):
@@ -41,3 +44,6 @@ class ApiConfigTestOut(BaseModel):
     message: str
     model: str = ""
     duration_ms: int = 0
+    attempts: int = 0
+    retryable: bool = False
+    next_action: str = ""

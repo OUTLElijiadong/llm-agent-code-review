@@ -161,20 +161,30 @@ class DeepSeekAgent:
         api_config: Optional["ApiConfig"] = None,
     ):
         # 用户自定义配置优先
-        from app.utils.api_resolver import validate_ai_base_url
+        from app.utils.api_resolver import normalize_ai_base_url
 
         if api_config:
-            self.base_url = validate_ai_base_url(api_config.base_url)
+            self.base_url = normalize_ai_base_url(api_config.base_url)
             self.api_key = api_config.api_key
             self.model = api_config.model
         else:
-            self.base_url = validate_ai_base_url(base_url or settings.deepseek_base_url)
+            self.base_url = normalize_ai_base_url(base_url or settings.deepseek_base_url)
             self.api_key = api_key or settings.deepseek_api_key
             self.model = model or settings.deepseek_model
 
         self.api_config = api_config  # 保留引用, 供协程/线程下游使用
-        self.timeout = timeout or settings.deepseek_timeout
-        self.max_retries = max_retries if max_retries is not None else settings.deepseek_max_retries
+        config_timeout = api_config.timeout_seconds if api_config and api_config.timeout_seconds is not None else None
+        config_retries = api_config.max_retries if api_config and api_config.max_retries is not None else None
+        config_temperature = api_config.temperature if api_config and api_config.temperature is not None else None
+        self.timeout = timeout if timeout is not None else config_timeout or settings.deepseek_timeout
+        self.max_retries = (
+            max_retries
+            if max_retries is not None
+            else config_retries if config_retries is not None else settings.deepseek_max_retries
+        )
+        self.temperature = (
+            config_temperature if config_temperature is not None else settings.deepseek_temperature
+        )
 
     # ── 公共 HTTP 请求构造 (chat / call_raw 共用) ──
 
@@ -193,7 +203,7 @@ class DeepSeekAgent:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.2,
+            "temperature": getattr(self, "temperature", settings.deepseek_temperature),
             "max_tokens": _clamp_max_tokens(max_tokens),
         }
         # response_format=json_object 会强制模型输出 JSON; 讨论发言需要自然语言,
@@ -261,7 +271,7 @@ class DeepSeekAgent:
             system_prompt, user_prompt, json_mode=json_mode,
         )
         if temperature is not None:
-            payload["temperature"] = max(0.0, min(1.0, float(temperature)))
+            payload["temperature"] = max(0.0, min(2.0, float(temperature)))
         if max_tokens is not None:
             payload["max_tokens"] = max(128, min(8192, int(max_tokens)))
 

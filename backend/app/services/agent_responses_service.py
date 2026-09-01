@@ -600,7 +600,8 @@ class NativeResponsesTransport:
             "Content-Type": "application/json",
             "Accept-Encoding": "identity",
         }
-        timeout = httpx.Timeout(float(settings.deepseek_timeout), read=float(settings.deepseek_timeout))
+        timeout_seconds = self._config.timeout_seconds or settings.deepseek_timeout
+        timeout = httpx.Timeout(float(timeout_seconds), read=float(timeout_seconds))
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             async with client.stream("POST", url, headers=headers, json=dict(payload)) as response:
                 if response.status_code >= 400:

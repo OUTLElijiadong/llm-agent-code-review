@@ -110,6 +110,7 @@ FRONTEND_API_CAPABILITY = {
     "llmConfig:getLlmConfig": "llm.config.get",
     "llmConfig:updateLlmConfig": "llm.config.update",
     "llmConfig:testLlmConfig": "llm.config.test",
+    "llmConfig:fetchLlmModels": "llm.config.models",
     "mcpGovernance:listMcpServers": "mcp.servers.list",
     "mcpGovernance:seedRecommendedMcpServers": "mcp.servers.seed_recommended",
     "mcpGovernance:createMcpServer": "mcp.servers.create",
@@ -179,8 +180,8 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
-    # 124 = 123 项 + 嵌入配置重建(embedding.config.reembed)
-    assert len(ADMIN_CAPABILITIES) == 124
+    # 125 = 124 项 + 嵌入配置重建(embedding.config.reembed)
+    assert len(ADMIN_CAPABILITIES) == 125
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
@@ -209,6 +210,7 @@ def test_discovery_returns_exact_page_contracts() -> None:
         "llm.config.get",
         "llm.config.update",
         "llm.config.test",
+        "llm.config.models",
     }
     update = next(row for row in rows if row["capability"] == "llm.config.update")
     assert "api_key" in update["parameters"]["properties"]

@@ -18,7 +18,7 @@ import ipaddress
 import socket
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from cryptography.fernet import Fernet, InvalidToken
 from loguru import logger
@@ -293,6 +293,32 @@ def validate_ai_base_url(
     return url
 
 
+def normalize_ai_base_url(
+    base_url: str,
+    *,
+    resolve_host: bool = False,
+    allow_private: Optional[bool] = None,
+) -> str:
+    """规范化 OpenAI-compatible Base URL，避免重复拼接末端资源路径。
+
+    管理员经常会从文档复制完整的 ``/models``、``/chat/completions``
+    或 ``/responses`` 地址。运行时需要的是资源路径之前的 Base URL。
+    """
+    safe_url = validate_ai_base_url(
+        base_url,
+        resolve_host=resolve_host,
+        allow_private=allow_private,
+    )
+    parsed = urlparse(safe_url)
+    path = parsed.path.rstrip("/")
+    lower_path = path.casefold()
+    for suffix in ("/chat/completions", "/models", "/responses"):
+        if lower_path.endswith(suffix):
+            path = path[: -len(suffix)].rstrip("/")
+            break
+    return urlunparse(parsed._replace(path=path)).rstrip("/")
+
+
 # ── 解析结果 ────────────────────────────────────────────
 
 @dataclass
@@ -302,7 +328,10 @@ class ApiConfig:
     base_url: str
     model: str
     provider: str = "deepseek"
-    source: str = "system"  # "system" | "user"
+    source: str = "system"  # "system" | "user" | "global"
+    timeout_seconds: Optional[int] = None
+    max_retries: Optional[int] = None
+    temperature: Optional[float] = None
 
 
 def _commit_api_key_security_change(db: Session, action: str) -> bool:
@@ -372,7 +401,7 @@ def resolve_api_config(
                         key = ""
                 if key:
                     try:
-                        base_url = validate_ai_base_url(
+                        base_url = normalize_ai_base_url(
                             row.base_url,
                             resolve_host=settings.enforce_ai_base_url_dns_check,
                             allow_private=False,
@@ -386,7 +415,7 @@ def resolve_api_config(
                     if not base_url:
                         return ApiConfig(
                             api_key=settings.deepseek_api_key,
-                            base_url=validate_ai_base_url(
+                            base_url=normalize_ai_base_url(
                                 settings.deepseek_base_url,
                                 resolve_host=settings.enforce_ai_base_url_dns_check,
                                 allow_private=False,
@@ -416,7 +445,7 @@ def resolve_api_config(
             and gcfg.get("base_url")
             and gcfg.get("model")
         ):
-            base_url = validate_ai_base_url(
+            base_url = normalize_ai_base_url(
                 gcfg["base_url"],
                 resolve_host=settings.enforce_ai_base_url_dns_check,
                 allow_private=False,
@@ -427,6 +456,9 @@ def resolve_api_config(
                 model=gcfg["model"],
                 provider=gcfg.get("provider", "custom"),
                 source="global",
+                timeout_seconds=gcfg.get("timeout_seconds"),
+                max_retries=gcfg.get("max_retries"),
+                temperature=gcfg.get("temperature"),
             )
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[api_resolver] 全局 LLM 配置解析失败，回退系统默认: {e}")
@@ -434,7 +466,7 @@ def resolve_api_config(
     # 回退系统默认
     return ApiConfig(
         api_key=settings.deepseek_api_key,
-        base_url=validate_ai_base_url(
+        base_url=normalize_ai_base_url(
             settings.deepseek_base_url,
             resolve_host=settings.enforce_ai_base_url_dns_check,
             allow_private=False,

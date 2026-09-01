@@ -241,12 +241,41 @@ case "${1:-}" in
   inspect)
     last=""
     for last in "$@"; do :; done
-    case "$last" in
-      cid-*) printf '%s\n' 'healthy' ;;
-      cr_backend) printf '%s\n' 'sha256:running-backend' ;;
-      cr_frontend) printf '%s\n' 'sha256:running-frontend' ;;
-      *) printf '%s\n' 'unknown' ;;
+    case "$*" in
+      *'{{.Id}}'*)
+        case "$last" in
+          cr_mysql) printf '%s\n' 'cid-mysql' ;;
+          cr_testdb) printf '%s\n' 'cid-cr_testdb' ;;
+          *) printf 'cid-%s\n' "$last" ;;
+        esac
+        ;;
+      *'{{.State.Running}}'*) printf '%s\n' 'true' ;;
+      *'{{.HostConfig.Memory}}'*) printf '%s\n' '0' ;;
+      *)
+        case "$last" in
+          cid-*) printf '%s\n' 'healthy' ;;
+          cr_backend) printf '%s\n' 'sha256:running-backend' ;;
+          cr_frontend) printf '%s\n' 'sha256:running-frontend' ;;
+          *) printf '%s\n' 'unknown' ;;
+        esac
+        ;;
     esac
+    ;;
+  exec)
+    if [[ "${FAKE_DOCKER_SCENARIO:-}" == "verify_missing_024" ]]; then
+      case "$*" in
+        *'table_name='*'project_source_archive'*) printf '%s\n' '0' ;;
+        *'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='*)
+          printf '%s\n' '25'
+          ;;
+        *'SELECT version_num FROM alembic_version'*) printf '%s\n' '024' ;;
+        *'SELECT 1'*) printf '%s\n' '1' ;;
+        *'CREATE DATABASE'*|*'DROP DATABASE'*) ;;
+        *) cat >/dev/null ;;
+      esac
+    else
+      cat >/dev/null
+    fi
     ;;
   image)
     case "${2:-}" in
@@ -832,6 +861,7 @@ ENV
   mkdir "$lock_dir"
   if env PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" \
     DEPLOY_ENV_FILE="$env_file" MAINTENANCE_LOCK_DIR="$lock_dir" \
+    VERIFY_MIN_HOST_AVAILABLE_MB=0 \
     ./verify-backup.sh "$backup_file" > "$output_file" 2>&1; then
     printf 'verify-backup 未拒绝已占用的共享维护锁\n' >&2
     exit 1
@@ -841,6 +871,7 @@ ENV
 
   if env PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" \
     DEPLOY_ENV_FILE="$env_file" MAINTENANCE_LOCK_DIR="$lock_dir" \
+    VERIFY_MIN_HOST_AVAILABLE_MB=0 \
     ./verify-backup.sh "$backup_file" > "$output_file" 2>&1; then
     printf 'verify-backup 未拒绝缺少 checksum 的备份\n' >&2
     exit 1
@@ -855,6 +886,7 @@ ENV
   printf '%s  %s\n' "$checksum" "$(basename "$backup_file")" > "$checksum_file"
   if env PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" \
     DEPLOY_ENV_FILE="$env_file" MAINTENANCE_LOCK_DIR="$lock_dir" \
+    VERIFY_MIN_HOST_AVAILABLE_MB=0 \
     ./verify-backup.sh "$backup_file" > "$output_file" 2>&1; then
     printf 'verify-backup 未拒绝缺少 meta 的备份\n' >&2
     exit 1
@@ -878,8 +910,22 @@ sha256=$checksum
 file=$(basename "$backup_file")
 META
   if env PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" \
+    DEPLOY_ENV_FILE="$env_file" MAINTENANCE_LOCK_DIR="$lock_dir" \
+    VERIFY_DB_CONTAINER=cr_mysql VERIFY_MIN_HOST_AVAILABLE_MB=0 \
+    ./verify-backup.sh "$backup_file" > "$output_file" 2>&1; then
+    printf 'verify-backup 未拒绝生产 MySQL 恢复目标\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" '拒绝在生产 MySQL 容器中执行备份恢复验证'
+  [[ ! -e "$lock_dir" ]] || {
+    printf 'verify-backup 生产库拒绝后未释放维护锁\n' >&2
+    exit 1
+  }
+
+  if env PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" \
     FAKE_DOCKER_SCENARIO=verify_missing_024 DEPLOY_ENV_FILE="$env_file" \
     MAINTENANCE_LOCK_DIR="$lock_dir" VERIFY_MIN_TABLES=20 \
+    VERIFY_MIN_HOST_AVAILABLE_MB=0 \
     ./verify-backup.sh "$backup_file" > "$output_file" 2>&1; then
     printf 'verify-backup 未拒绝 revision 024 缺少隔离归档表\n' >&2
     exit 1
@@ -887,6 +933,8 @@ META
   assert_contains "$output_file" '024 及以上备份缺少隔离源码归档表'
   assert_contains "$docker_log" 'CREATE DATABASE'
   assert_contains "$docker_log" 'DROP DATABASE'
+  assert_contains "$docker_log" 'exec cr_testdb'
+  assert_not_contains "$docker_log" 'compose exec -T mysql'
   [[ ! -e "$lock_dir" ]] || {
     printf 'verify-backup 024 缺表失败后未释放维护锁\n' >&2
     exit 1
