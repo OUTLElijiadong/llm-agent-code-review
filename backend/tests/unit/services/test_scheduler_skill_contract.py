@@ -56,6 +56,33 @@ def test_disabled_skill_scheduler_does_not_register_existing_skill_job(
     assert calls == []
 
 
+def test_scheduler_registers_second_interval_job() -> None:
+    from app.services import agent_scheduler_runtime
+
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    class FakeScheduler:
+        def add_job(self, *args: Any, **kwargs: Any) -> None:
+            calls.append((args, kwargs))
+
+    job = SimpleNamespace(
+        id=8,
+        job_code="sandbox_heartbeat",
+        job_type="sandbox_heartbeat",
+        status="enabled",
+        schedule="interval@30s",
+    )
+
+    registered = agent_scheduler_runtime._register_job_to_scheduler(FakeScheduler(), job)
+
+    assert registered is True
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[1] == "interval"
+    assert kwargs["seconds"] == 30
+    assert "minutes" not in kwargs
+
+
 def test_disabled_skill_scheduler_skips_existing_system_job(
     db: Any,
     monkeypatch: Any,

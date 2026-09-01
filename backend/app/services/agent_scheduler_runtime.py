@@ -4,7 +4,7 @@
 
 v3.0 AgentSkill 升级新增:
 - _parse_hourly_schedule(): 解析 ``hourly@*:MM`` 格式的每小时调度表达式
-- start_agent_governance_scheduler() 同时处理 daily 与 hourly 两种 schedule
+- start_agent_governance_scheduler() 处理 daily、hourly 及分钟/秒级 interval schedule
 - 同时启动 Skill 事件触发后台 task(由 event_bus.start_skill_event_subscriber 提供)
 """
 from __future__ import annotations
@@ -88,6 +88,21 @@ def _parse_interval_schedule(schedule: str) -> Optional[int]:
     return minutes if 1 <= minutes <= 1440 else None
 
 
+def _parse_interval_seconds_schedule(schedule: str) -> Optional[int]:
+    """解析 ``interval@Ns``，返回秒数。"""
+    prefix = "interval@"
+    if not schedule or not schedule.startswith(prefix):
+        return None
+    value = schedule[len(prefix):].strip().lower()
+    if not value.endswith("s"):
+        return None
+    try:
+        seconds = int(value[:-1])
+    except ValueError:
+        return None
+    return seconds if 1 <= seconds <= 86400 else None
+
+
 def _run_scheduled_job(job_id: int) -> None:
     """执行一次后台调度任务并记录日志。
 
@@ -108,7 +123,7 @@ def _run_scheduled_job(job_id: int) -> None:
 
 
 def _register_job_to_scheduler(scheduler, job) -> bool:
-    """将单个 AgentJob 注册到 APScheduler(v3.0 抽出, 支持 daily 与 hourly 两种 schedule)
+    """将单个 AgentJob 注册到 APScheduler，支持 daily、hourly 与 interval。
 
     Args:
         scheduler: APScheduler 实例
@@ -172,6 +187,20 @@ def _register_job_to_scheduler(scheduler, job) -> bool:
         )
         return True
 
+    interval_seconds = _parse_interval_seconds_schedule(job.schedule)
+    if interval_seconds is not None:
+        scheduler.add_job(
+            _run_scheduled_job,
+            "interval",
+            id=f"agent-governance-{job.id}",
+            args=[job.id],
+            seconds=interval_seconds,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        return True
+
     logger.warning(
         "[agent-governance-scheduler] unsupported schedule job_code={} schedule={}",
         job.job_code,
@@ -184,7 +213,7 @@ def start_agent_governance_scheduler() -> None:
     """启动 Agent 治理后台调度器(含 v3.0 Skill 调度 + 事件触发订阅)
 
     流程:
-        1. 启动 APScheduler 后台调度器(daily + hourly)
+        1. 启动 APScheduler 后台调度器(daily + hourly + interval)
         2. 注册所有 enabled 的 AgentJob(包括 v3.0 的 skill_evolution / skill_proactive)
         3. 启动 Skill 事件触发后台 task(event_bus.start_skill_event_subscriber)
 
