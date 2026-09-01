@@ -42,7 +42,7 @@ class CodeReviewerAgent(BaseAgent):
         )
         super().__init__(
             system_prompt=compose_system_prompt(self.name, system_prompt),
-            temperature=0.2,
+            temperature=0.0,
             max_tokens=4096,
         )
 
@@ -93,6 +93,7 @@ class CodeReviewerAgent(BaseAgent):
         line_offset: int = 0,
         experience_section: str = "",
         agent_section: str = "",
+        context_section: str = "",
         api_config=None,
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
@@ -126,6 +127,7 @@ class CodeReviewerAgent(BaseAgent):
                 line_offset=line_offset,
                 agent_section=agent_section,
                 experience_section=experience_section,
+                context_section=context_section,
             )
         except Exception as e:
             logger.warning(f"[code_reviewer] build_prompt 失败: {e}")

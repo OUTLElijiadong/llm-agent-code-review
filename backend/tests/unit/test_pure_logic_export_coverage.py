@@ -79,19 +79,22 @@ def test_chunk_code_uses_function_boundaries_and_preserves_file_header():
 
 
 def test_chunk_code_falls_back_to_fixed_line_windows():
-    """未知语言或无函数边界时应按 200 行窗口稳定切分。
+    """未知语言仍须无损切分，并严格遵守上下文阈值。
 
     Returns:
         None: 断言 450 行兜底分片和空行列表辅助函数。
     """
     content = "".join(f"line {index}\n" for index in range(450))
     chunks = code_chunker.chunk_code(content, "plaintext", threshold=10)
-    assert [chunk.end_line - chunk.start_line for chunk in chunks] == [200, 200, 50]
-    assert (chunks[0].start_line, chunks[-1].end_line) == (0, 450)
     assert "".join(chunk.text for chunk in chunks) == content
+    assert all(len(chunk.text) <= 10 for chunk in chunks)
+    assert chunks[0].start_line == 0
+    assert chunks[-1].end_line == 450
 
-    no_boundaries = code_chunker.chunk_code("value = 1\n" * 250, "python", threshold=10)
-    assert len(no_boundaries) == 2
+    no_boundary_content = "value = 1\n" * 250
+    no_boundaries = code_chunker.chunk_code(no_boundary_content, "python", threshold=10)
+    assert "".join(chunk.text for chunk in no_boundaries) == no_boundary_content
+    assert all(len(chunk.text) <= 10 for chunk in no_boundaries)
     assert code_chunker._split_by_lines([], lines_per_chunk=200) == []
 
 

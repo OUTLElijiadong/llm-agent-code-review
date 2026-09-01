@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     openapi_enabled: bool = True
     app_release: str = "dev"
-    app_version: str = "3.7.4"
+    app_version: str = "3.8.0"
     # 注册验证码开关:生产默认开(dev/test 可关以便自动化测试)
     register_captcha_enabled: bool = True
     # 内测注册: 开启后注册必须携带管理员生成的一次性内测码。
@@ -232,6 +232,8 @@ class Settings(BaseSettings):
     security_ssh_allowlist_cidrs: List[str] = []
     security_failed_login_threshold: int = 20
     security_failed_login_window_hours: int = 1
+    # FlyTrap 已退役；默认不再采集、评估或生成上游恢复告警。
+    security_flytrap_enabled: bool = False
     security_flytrap_threshold: int = 10
     security_flytrap_window_hours: int = 1
     security_backup_max_age_hours: int = 30

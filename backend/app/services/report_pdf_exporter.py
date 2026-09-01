@@ -460,6 +460,15 @@ def _build_issue_section(
             styles["normal"],
         ))
 
+    if issue.get("aggregation_version"):
+        trust_parts = [f"version={issue.get('aggregation_version')}"]
+        trust_parts.append(f"risk_score={issue.get('risk_score') if issue.get('risk_score') is not None else '-'}")
+        trust_parts.append(f"evidence_quality={issue.get('evidence_quality') or '-'}")
+        trust_parts.append(f"conflict={issue.get('conflict_status') or '-'}")
+        trust_parts.append(f"human_review={issue.get('human_review_status') or '-'}")
+        elements.append(Paragraph("<b>可信聚合:</b>", styles["normal"]))
+        elements.append(Paragraph(escape(" | ".join(trust_parts)), styles["code"]))
+
     status_parts = [f"status={issue.get('status') or '-'}"]
     status_parts.append(f"handled_by={issue.get('handled_by') or '-'}")
     status_parts.append(f"handled_at={issue.get('handled_at') or '-'}")

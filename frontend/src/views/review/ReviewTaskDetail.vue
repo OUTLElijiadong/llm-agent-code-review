@@ -115,6 +115,26 @@
       </div>
     </header>
 
+    <section v-if="task?.aggregation_summary?.aggregated" class="trust-strip" aria-label="可信聚合状态">
+      <span class="trust-title">可信聚合</span>
+      <span>已归一 {{ task.aggregation_summary.aggregated }}</span>
+      <span>多源确认 {{ task.aggregation_summary.independently_confirmed }}</span>
+      <span :class="{ attention: task.aggregation_summary.unresolved_conflicts > 0 }">
+        冲突 {{ task.aggregation_summary.unresolved_conflicts }}
+      </span>
+      <span :class="{ attention: task.aggregation_summary.insufficient_evidence > 0 }">
+        证据不足 {{ task.aggregation_summary.insufficient_evidence }}
+      </span>
+      <el-button
+        v-if="task.aggregation_summary.pending_human_review > 0"
+        type="warning"
+        link
+        @click="showPendingReviews"
+      >
+        待人工复核 {{ task.aggregation_summary.pending_human_review }}
+      </el-button>
+    </section>
+
     <AiPromptModal
       v-model="aiPromptVisible"
       source="task"
@@ -269,6 +289,7 @@
     <IssueDetailDrawer
       v-model="drawerVisible"
       :issue="selectedIssue"
+      @reviewed="onIssueReviewed"
     />
     </template>
   </div>
@@ -590,6 +611,19 @@ function onIssueClick(issue: IssueOut) {
   drawerVisible.value = true
 }
 
+function showPendingReviews(): void {
+  filter.value.status = 'pending_review'
+  issuePage.value = 1
+  doLoadIssues()
+}
+
+async function onIssueReviewed(updated: IssueOut): Promise<void> {
+  selectedIssue.value = updated
+  const index = issues.value.findIndex((item) => item.id === updated.id)
+  if (index >= 0) issues.value.splice(index, 1, updated)
+  await Promise.all([loadTaskDetail(true), doLoadIssues(true)])
+}
+
 /**
  * 切换严重度筛选条件，并使用后端认可的中文枚举值请求数据
  * @param value - 后端严重度枚举值
@@ -682,6 +716,29 @@ onUnmounted(() => {
   border: 1px solid var(--gray-100);
   border-radius: 12px;
   box-shadow: var(--shadow-1);
+}
+
+.trust-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  min-height: 38px;
+  padding: 6px 16px;
+  border-left: 3px solid var(--brand-500);
+  background: #fff;
+  color: var(--gray-600);
+  font-size: 12px;
+
+  .trust-title {
+    color: var(--gray-900);
+    font-weight: 600;
+  }
+
+  .attention {
+    color: var(--el-color-warning-dark-2);
+    font-weight: 600;
+  }
 }
 
 .back-btn {

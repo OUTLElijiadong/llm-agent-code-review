@@ -134,6 +134,7 @@ def run_gate(
     proposal,
     reviewer: Optional[Callable] = None,
     eval_cases: Optional[list] = None,
+    stability_runs: int = 3,
 ) -> dict:
     """在黄金集上复跑并判定提案是否「不退化」
 
@@ -143,6 +144,7 @@ def run_gate(
         reviewer: callable(code, language, rules) -> list[issue dict];
             默认走真实 LLM,测试可注入离线实现。
         eval_cases: 指定用例(默认取所有 enabled 的 eval_case)
+        stability_runs: 每套规则对同一用例重复次数，范围 2-5。
 
     Returns:
         dict: 评分明细 + passed 布尔
@@ -154,6 +156,7 @@ def run_gate(
                 "detail": "无可用黄金集,按红线不允许 promote"}
 
     reviewer = reviewer or _default_reviewer(db)
+    stability_runs = max(2, min(5, int(stability_runs or 3)))
     baseline_rules = db.query(ReviewRule).filter(ReviewRule.enabled == 1).all()
     try:
         payload = json.loads(proposal.payload) if proposal.payload else {}
@@ -163,17 +166,49 @@ def run_gate(
 
     recall_before = recall_after = 0.0
     noise_before = noise_after = 0
+    stability_ok = True
     per_case = []
     for case in eval_cases:
         expected = _load_expected(case)
         lang = case.language or "*"
-        before = score_case(reviewer(case.code, lang, baseline_rules), expected)
-        after = score_case(reviewer(case.code, lang, after_rules), expected)
+        try:
+            before_outputs = [
+                reviewer(case.code, lang, baseline_rules)
+                for _ in range(stability_runs)
+            ]
+            after_outputs = [
+                reviewer(case.code, lang, after_rules)
+                for _ in range(stability_runs)
+            ]
+        except Exception as exc:
+            logger.warning("[eval_gate] 黄金集调用失败: %s", exc)
+            return {
+                "passed": False,
+                "reason": "review_failed",
+                "detail": str(exc)[:500],
+                "stability_runs": stability_runs,
+                "stability_ok": False,
+            }
+        before_scores = [score_case(output, expected) for output in before_outputs]
+        after_scores = [score_case(output, expected) for output in after_outputs]
+        before = _conservative_score(before_scores)
+        after = _conservative_score(after_scores)
+        before_stable = len({_review_signature(output) for output in before_outputs}) == 1
+        after_stable = len({_review_signature(output) for output in after_outputs}) == 1
+        stability_ok = stability_ok and before_stable and after_stable
         recall_before += before["recall"]
         recall_after += after["recall"]
         noise_before += before["noise"]
         noise_after += after["noise"]
-        per_case.append({"case": case.name, "before": before, "after": after})
+        per_case.append({
+            "case": case.name,
+            "before": before,
+            "after": after,
+            "before_runs": before_scores,
+            "after_runs": after_scores,
+            "before_stable": before_stable,
+            "after_stable": after_stable,
+        })
 
     n = len(eval_cases)
     recall_before /= n
@@ -184,7 +219,7 @@ def run_gate(
     recall_ok = recall_after >= recall_before - _RECALL_EPS
     detection_changing = proposal.proposal_type in _DETECTION_CHANGING
     noise_ok = (noise_after <= noise_before + noise_tolerance) if detection_changing else True
-    passed = recall_ok and noise_ok
+    passed = recall_ok and noise_ok and stability_ok
     result = {
         "passed": bool(passed),
         "cases": n,
@@ -196,6 +231,8 @@ def run_gate(
         "noise_tolerance": noise_tolerance,
         "noise_checked": detection_changing,
         "noise_ok": noise_ok,
+        "stability_runs": stability_runs,
+        "stability_ok": stability_ok,
         "per_case": per_case,
     }
     logger.info(
@@ -204,6 +241,32 @@ def run_gate(
         f"noise {noise_before}→{noise_after} passed={passed}",
     )
     return result
+
+
+def _review_signature(produced: list[dict]) -> str:
+    """构造与返回顺序无关的稳定输出签名。"""
+    normalized = sorted(
+        (
+            str(item.get("issue_type") or "").strip(),
+            str(item.get("title") or "").strip(),
+            str(item.get("description") or "").strip(),
+        )
+        for item in (produced or [])
+        if isinstance(item, dict)
+    )
+    return json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+
+
+def _conservative_score(scores: list[dict]) -> dict:
+    """重复结果使用最低召回、最高噪声，避免偶然好结果放行。"""
+    first = scores[0]
+    return {
+        "matched": min(item["matched"] for item in scores),
+        "expected_total": first["expected_total"],
+        "produced_total": max(item["produced_total"] for item in scores),
+        "noise": max(item["noise"] for item in scores),
+        "recall": min(item["recall"] for item in scores),
+    }
 
 
 def _load_expected(case: EvalCase) -> list[dict]:
@@ -242,7 +305,7 @@ def _default_reviewer(db: Session) -> Callable:
                 for it in parsed.issues
             ]
         except Exception as e:
-            logger.warning(f"[eval_gate] reviewer 调用失败,按空结果处理: {e}")
-            return []
+            logger.warning(f"[eval_gate] reviewer 调用失败: {e}")
+            raise RuntimeError(f"黄金集模型调用失败: {e}") from e
 
     return _review

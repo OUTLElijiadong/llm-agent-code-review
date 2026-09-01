@@ -12,8 +12,14 @@ from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
-from app.schemas.review import IssueBatchStatusIn, IssueListItemOut, IssueOut, IssueStatusIn
-from app.services import issue_service
+from app.schemas.review import (
+    IssueBatchStatusIn,
+    IssueListItemOut,
+    IssueOut,
+    IssueReviewDecisionIn,
+    IssueStatusIn,
+)
+from app.services import audit_service, issue_service
 
 router = APIRouter()
 
@@ -55,6 +61,29 @@ def update_status(issue_id: int, payload: IssueStatusIn,
     """更新问题状态(单条)"""
     issue_service.update_status(db, user, issue_id, payload.status)
     return Resp(data=None)
+
+
+@router.put("/{issue_id}/review-decision", response_model=Resp[IssueOut],
+            dependencies=[Depends(require_permission(PermissionCode.ISSUE_HANDLE))])
+def review_decision(
+    issue_id: int,
+    payload: IssueReviewDecisionIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """人工接受、驳回聚合结论，或要求补充证据。"""
+    issue = issue_service.review_decision(
+        db, user, issue_id, payload.decision, payload.note or "",
+    )
+    audit_service.log(
+        db,
+        user,
+        "issue_review_decision",
+        target_type="review_issue",
+        target_id=str(issue_id),
+        detail=f"decision={payload.decision}; note={(payload.note or '')[:300]}",
+    )
+    return Resp(data=IssueOut.model_validate(issue))
 
 
 @router.post("/batch-status", response_model=Resp[None],

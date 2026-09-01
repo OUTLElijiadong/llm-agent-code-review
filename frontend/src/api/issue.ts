@@ -6,6 +6,7 @@ import type {
   IssueQuery,
   IssueUpdateStatusIn,
   IssueBatchUpdateStatusIn,
+  IssueReviewDecisionIn,
 } from '@/types/review'
 
 /**
@@ -43,4 +44,9 @@ export function updateStatus(id: number, body: IssueUpdateStatusIn): Promise<voi
  */
 export function batchUpdateStatus(body: IssueBatchUpdateStatusIn): Promise<void> {
   return post<void>('/issues/batch-status', body)
+}
+
+/** 对多智能体聚合争议做人工裁决。 */
+export function reviewDecision(id: number, body: IssueReviewDecisionIn): Promise<IssueOut> {
+  return put<IssueOut>(`/issues/${id}/review-decision`, body)
 }

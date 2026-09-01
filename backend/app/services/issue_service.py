@@ -7,7 +7,7 @@ v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
     - reviewer 可见同项目的问题,非成员返回 404(防枚举)
 """
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
@@ -192,6 +192,12 @@ def list_issues(
                 "compliance_mapping": issue.compliance_mapping,
                 "remediation": issue.remediation,
                 "static_rule_hits": issue.static_rule_hits,
+                "aggregation_version": issue.aggregation_version,
+                "evidence_quality": issue.evidence_quality,
+                "conflict_status": issue.conflict_status,
+                "human_review_status": issue.human_review_status,
+                "risk_score": issue.risk_score,
+                "aggregation_json": issue.aggregation_json,
                 # R2 修复:补齐处理人/处理时间/更新时间,与 IssueOut schema 对齐
                 "handled_by": issue.handled_by,
                 "handled_at": issue.handled_at,
@@ -212,3 +218,48 @@ def batch_update_status(db: Session, user: User, ids: list[int], status: str) ->
     """
     for issue_id in ids:
         update_status(db, user, issue_id, status)
+
+
+def review_decision(
+    db: Session,
+    user: User,
+    issue_id: int,
+    decision: str,
+    note: str = "",
+) -> ReviewIssue:
+    """记录人工对聚合争议的裁决，保留机器原始声明。"""
+    issue = db.get(ReviewIssue, issue_id)
+    if not issue:
+        raise NotFoundError("问题不存在", code=40400)
+    task = db.get(ReviewTask, issue.task_id)
+    if not task or task.status == "deleted":
+        raise NotFoundError("问题不存在", code=40400)
+    require_project_access(db, task.project_id, user, need_write=True)
+
+    now = datetime.now(timezone.utc)
+    aggregation: dict[str, Any] = dict(issue.aggregation_json or {})
+    history = aggregation.get("human_review_history")
+    if not isinstance(history, list):
+        history = []
+    history.append({
+        "decision": decision,
+        "note": (note or "")[:1000],
+        "reviewer_id": user.id,
+        "reviewer_name": user.username,
+        "reviewed_at": now.isoformat(),
+    })
+    aggregation["human_review_history"] = history[-50:]
+    aggregation["human_review"] = history[-1]
+    issue.aggregation_json = aggregation
+    issue.human_review_status = decision
+    issue.conflict_status = "resolved" if decision in {"accepted", "rejected"} else "unresolved"
+    issue.status = {
+        "accepted": "unfixed",
+        "rejected": "ignored",
+        "evidence_requested": "pending_review",
+    }[decision]
+    issue.handled_by = user.id
+    issue.handled_at = now
+    db.commit()
+    db.refresh(issue)
+    return issue

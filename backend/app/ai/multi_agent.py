@@ -29,7 +29,7 @@ class ReviewAgentProfile:
     is_custom: bool = False
     release_id: int = 0
     version_id: int = 0
-    temperature: float = 0.2
+    temperature: float = 0.0
     max_tokens: int = 4096
 
 

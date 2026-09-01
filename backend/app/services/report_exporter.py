@@ -63,6 +63,8 @@ _ISSUE_FIELDS: tuple = (
     "confidence", "source", "source_details", "confirmation_count", "finding_fingerprint",
     "cvss_score", "cvss_vector", "cvss_version", "cvss_source",
     "compliance_mapping", "remediation", "static_rule_hits",
+    "aggregation_version", "evidence_quality", "conflict_status",
+    "human_review_status", "risk_score", "aggregation_json",
 )
 # Task 已知字段列表(用于 ORM → dict 转换,与 ReviewTask ORM 对齐)
 _TASK_FIELDS: tuple = (
@@ -374,6 +376,13 @@ def _build_report_context(
     # CWE 计数
     cwe_count: Dict[str, int] = {}
     fixed_count = 0
+    aggregation_summary = {
+        "aggregated": 0,
+        "independently_confirmed": 0,
+        "pending_human_review": 0,
+        "unresolved_conflicts": 0,
+        "insufficient_evidence": 0,
+    }
     for item in normalized_issues:
         severity = item.get("severity")
         if severity in severity_count:
@@ -387,6 +396,16 @@ def _build_report_context(
             cwe_count[cwe] = cwe_count.get(cwe, 0) + 1
         if item.get("status") == "fixed":
             fixed_count += 1
+        if item.get("aggregation_version"):
+            aggregation_summary["aggregated"] += 1
+        if int(item.get("confirmation_count") or 0) >= 2:
+            aggregation_summary["independently_confirmed"] += 1
+        if item.get("human_review_status") in {"pending", "evidence_requested"}:
+            aggregation_summary["pending_human_review"] += 1
+        if item.get("conflict_status") == "unresolved":
+            aggregation_summary["unresolved_conflicts"] += 1
+        if item.get("evidence_quality") == "unsupported":
+            aggregation_summary["insufficient_evidence"] += 1
 
     compliance_summary = _build_compliance_summary(normalized_issues)
     top_vulnerabilities = _build_top_vulnerabilities(normalized_issues, top_n=10)
@@ -422,6 +441,7 @@ def _build_report_context(
         "score_version": score_version,
         "score_breakdown": score_breakdown,
         "risk_level": score_breakdown["risk_level"],
+        "aggregation_summary": aggregation_summary,
     }
 
     return {

@@ -182,7 +182,7 @@ def _format_experience(experiences) -> str:
 
 def build_prompt(*, language: str, file_name: str, code: str,
                  rules: list, line_offset: int = 0, agent_section: str = "",
-                 experience_section: str = "") -> Tuple[str, str]:
+                 experience_section: str = "", context_section: str = "") -> Tuple[str, str]:
     """构建审查用的System和User Prompt
 
     Args:
@@ -193,6 +193,7 @@ def build_prompt(*, language: str, file_name: str, code: str,
         line_offset: 行号偏移(分片时使用)
         agent_section: 当前审查代理画像说明
         experience_section: 历史经验参考段落(自进化注入,可空)
+        context_section: 全文件符号、继承与调用图摘要
 
     Returns:
         tuple[str, str]: (system_prompt, user_prompt)
@@ -205,6 +206,7 @@ def build_prompt(*, language: str, file_name: str, code: str,
         .replace("{rules_section}", _format_rules(rules, language))
         .replace("{experience_section}", experience_section)
         .replace("{agent_section}", agent_section)
+        .replace("{context_section}", context_section or "(无可用符号索引;跨分片结论应降低置信度)")
         .replace("{language}", language or "plaintext")
         .replace("{file_name}", file_name)
         .replace("{line_offset}", str(line_offset))

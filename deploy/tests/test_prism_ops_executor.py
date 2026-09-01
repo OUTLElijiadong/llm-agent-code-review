@@ -200,6 +200,34 @@ def test_flytrap_health_accepts_newer_sync_success_and_active_services() -> None
     assert health["requires_human"] is False
 
 
+def test_retired_flytrap_returns_without_touching_host(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setenv("PRISM_FLYTRAP_ENABLED", "false")
+    monkeypatch.setattr(
+        executor,
+        "run",
+        lambda command, **_kwargs: calls.append(command) or {"exit_code": 0, "stdout": "", "stderr": ""},
+    )
+
+    result = executor._flytrap_attack_events({"since_hours": 24, "limit": 100})
+
+    assert result == {
+        "ok": True,
+        "enabled": False,
+        "status": "retired",
+        "degraded": False,
+        "can_continue": True,
+        "reason": "FlyTrap 集成已退役",
+        "human_actions": [],
+        "since_hours": 24,
+        "total": 0,
+        "by_ip": [],
+        "by_username": [],
+        "recent": [],
+    }
+    assert calls == []
+
+
 def test_database_signal_parser_redacts_and_avoids_normal_update_false_positive() -> None:
     result = executor.parse_db_general_log([
         {"user_host": "root@localhost", "argument": "DROP TABLE users", "event_time": "now"},

@@ -279,9 +279,44 @@ def _evaluate_ssh(db: Session, ssh: dict[str, Any], created: list[dict[str, Any]
         )
 
 
+def _retired_flytrap_payload(since_hours: int) -> dict[str, Any]:
+    """返回可向后兼容的退役态，不把已关停组件计为故障。"""
+    return {
+        "ok": True,
+        "enabled": False,
+        "status": "retired",
+        "degraded": False,
+        "can_continue": True,
+        "reason": "FlyTrap 集成已退役",
+        "human_actions": [],
+        "since_hours": since_hours,
+        "total": 0,
+        "by_ip": [],
+        "by_username": [],
+        "recent": [],
+    }
+
+
 def _evaluate_flytrap(db: Session, flytrap: dict[str, Any], created: list[dict[str, Any]]) -> None:
     """蜜罐规则：同 IP 触碰次数达到阈值触发 warning。"""
     health_fingerprint = "integration:flytrap_upstream"
+    if flytrap.get("status") == "retired" or flytrap.get("enabled") is False:
+        existing = db.query(AgentAlert).filter(
+            AgentAlert.status == "open",
+            AgentAlert.fingerprint == health_fingerprint,
+        ).first()
+        if existing is not None:
+            admin = _find_admin(db)
+            observability_service.resolve_alert(
+                db,
+                existing.id,
+                admin.id if admin else 0,
+                note=json.dumps({
+                    "resolution": "FlyTrap 集成已按退役计划停用",
+                    "resolved_at": _utcnow_iso(),
+                }, ensure_ascii=False),
+            )
+        return
     if flytrap.get("degraded") is True:
         health = flytrap.get("health") if isinstance(flytrap.get("health"), dict) else {}
         actions = flytrap.get("human_actions") if isinstance(flytrap.get("human_actions"), list) else []
@@ -607,7 +642,6 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
     attack_window = settings.security_flytrap_window_hours
     actions = [
         ("ssh_login_events", {"since_hours": ssh_window, "limit": 2000, "focus": "all"}),
-        ("flytrap_attack_events", {"since_hours": attack_window, "limit": 2000}),
         ("nginx_attack_events", {"since_hours": attack_window, "limit": 2000}),
         ("backup_audit", {}),
         ("db_health", {}),
@@ -621,7 +655,11 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
                 {"since_hours": settings.security_db_window_hours, "limit": settings.security_db_sample_limit},
             ),
         )
-    results: dict[str, Any] = {}
+    if settings.security_flytrap_enabled:
+        actions.insert(1, ("flytrap_attack_events", {"since_hours": attack_window, "limit": 2000}))
+    results: dict[str, Any] = {
+        "flytrap_attack_events": _retired_flytrap_payload(attack_window)
+    } if not settings.security_flytrap_enabled else {}
     errors: list[dict[str, Any]] = []
     completed_actions: list[str] = []
     failed_actions: list[str] = []
@@ -707,15 +745,18 @@ def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
     """
     actions = [
         ("ssh_login_events", {"since_hours": since_hours, "limit": 2000, "focus": "all"}),
-        ("flytrap_attack_events", {"since_hours": since_hours, "limit": 2000}),
         ("nginx_attack_events", {"since_hours": since_hours, "limit": 2000}),
         ("backup_audit", {}),
     ]
+    if settings.security_flytrap_enabled:
+        actions.insert(1, ("flytrap_attack_events", {"since_hours": since_hours, "limit": 2000}))
     if settings.security_db_monitor_enabled:
         actions.append(
             ("db_threat_signals", {"since_hours": since_hours, "limit": settings.security_db_sample_limit})
         )
-    results: dict[str, Any] = {}
+    results: dict[str, Any] = {
+        "flytrap_attack_events": _retired_flytrap_payload(since_hours)
+    } if not settings.security_flytrap_enabled else {}
     errors: list[dict[str, Any]] = []
     for action, params in actions:
         try:
@@ -745,6 +786,10 @@ def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
             "failed_top_ips": ssh.get("failed_by_ip") or [],
         },
         "attacks": {
+            "flytrap_enabled": bool(settings.security_flytrap_enabled),
+            "flytrap_status": str(
+                flytrap.get("status") or ("active" if settings.security_flytrap_enabled else "retired")
+            ),
             "flytrap_total": int(flytrap.get("total") or 0),
             "flytrap_top_ips": flytrap.get("by_ip") or [],
             "flytrap_degraded": bool(flytrap.get("degraded")),

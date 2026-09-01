@@ -135,3 +135,30 @@ def test_run_gate_new_rule_fails_on_large_noise(db, mk_rule):
     res = eval_gate.run_gate(db, p, reviewer=reviewer)
     assert res["noise_checked"] is True
     assert res["passed"] is False
+
+
+def test_run_gate_blocks_nondeterministic_reviewer_output(db, mk_rule):
+    """同一输入重复结果不一致时，不能把偶然命中当成可发布改进。"""
+    _case(db)
+    mk_rule(db, rule_code="security")
+    p = EvolutionProposal(
+        proposal_type="new_rule",
+        title="波动规则",
+        payload=json.dumps({"rule_code": "extra", "rule_content": "y"}),
+    )
+    db.add(p)
+    db.commit()
+    call_count = 0
+
+    def reviewer(code, lang, rules):
+        nonlocal call_count
+        call_count += 1
+        if call_count % 2:
+            return [{"issue_type": "安全漏洞", "title": "SQL注入", "description": "拼接"}]
+        return []
+
+    res = eval_gate.run_gate(db, p, reviewer=reviewer, stability_runs=3)
+
+    assert res["stability_runs"] == 3
+    assert res["stability_ok"] is False
+    assert res["passed"] is False

@@ -31,6 +31,7 @@ function mountDrawer(issue: IssueOut) {
         },
         'el-tag': { template: '<span><slot /></span>' },
         'el-button': { template: '<button><slot /></button>' },
+        'el-input': { template: '<textarea />' },
         SeverityTag: true,
         AiPromptModal: true,
       },
@@ -64,5 +65,32 @@ describe('IssueDetailDrawer CVSS 可信展示', () => {
     expect(wrapper.text()).toContain('9.8')
     expect(wrapper.text()).toContain(vector)
     expect(wrapper.text()).not.toContain('未评分')
+  })
+})
+
+describe('IssueDetailDrawer 可信聚合展示', () => {
+  it('展示真实来源、冲突和人工复核入口', () => {
+    const wrapper = mountDrawer({
+      ...baseIssue,
+      status: 'pending_review',
+      confidence: 0.72,
+      confirmation_count: 2,
+      aggregation_version: 'finding-aggregation-v1',
+      evidence_quality: 'inferred',
+      conflict_status: 'unresolved',
+      human_review_status: 'pending',
+      risk_score: 73.5,
+      source_details: [
+        { source: 'llm:security', agent_name: '安全审查员', severity: '高', confidence: 0.72 },
+        { source: 'llm:reliability', agent_name: '可靠性审查员', severity: '中', confidence: 0.65 },
+      ],
+    })
+
+    expect(wrapper.text()).toContain('可信聚合')
+    expect(wrapper.text()).toContain('真实来源')
+    expect(wrapper.text()).toContain('安全审查员')
+    expect(wrapper.text()).toContain('待复核')
+    expect(wrapper.text()).toContain('接受结论')
+    expect(wrapper.text()).toContain('要求补充证据')
   })
 })

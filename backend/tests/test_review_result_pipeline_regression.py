@@ -161,7 +161,7 @@ def test_n_way_merge_is_stable_for_every_input_order() -> None:
     assert all(output == outputs[0] for output in outputs[1:])
 
 
-def test_n_way_merge_preserves_declared_confirmation_count() -> None:
+def test_n_way_merge_recomputes_declared_confirmation_count_from_provenance() -> None:
     issue = _issue(
         line=12,
         evidence="pickle.loads(payload)",
@@ -181,7 +181,7 @@ def test_n_way_merge_preserves_declared_confirmation_count() -> None:
     merged = merge_findings_and_issues([], [issue], file_id=24)
 
     assert len(merged) == 1
-    assert merged[0].confirmation_count == 4
+    assert merged[0].confirmation_count == 1
 
 
 def test_real_pickle_fixture_clusters_same_sink_with_multiple_phrasings() -> None:
@@ -597,7 +597,7 @@ def test_collaborative_conversion_keeps_cvss_pair() -> None:
     assert finding.cvss_source == "vector"
 
 
-def test_collaborative_conversion_normalizes_severity_and_expands_sources() -> None:
+def test_collaborative_conversion_does_not_fabricate_declared_sources() -> None:
     finding = _final_issue_to_finding({
         "line_number": 12,
         "issue_type": "安全漏洞",
@@ -611,12 +611,10 @@ def test_collaborative_conversion_normalizes_severity_and_expands_sources() -> N
     })
 
     assert finding.severity == "严重"
-    assert finding.confirmation_count == 3
-    assert len(finding.source_details) == 3
+    assert finding.confirmation_count == 1
+    assert len(finding.source_details) == 1
     assert {detail["source"] for detail in finding.source_details} == {
         "security_reviewer",
-        "llm_collab:2",
-        "llm_collab:3",
     }
 
 

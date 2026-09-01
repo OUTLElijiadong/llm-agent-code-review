@@ -176,6 +176,13 @@
       <div class="field"><span class="field-label">发现来源:</span>{{ issue.source or "-" }} · 确认数: {{ issue.confirmation_count or 0 }}</div>
       <div class="field"><span class="field-label">问题指纹:</span><code>{{ issue.finding_fingerprint or "-" }}</code></div>
       {% if issue.source_details %}<div class="field"><span class="field-label">来源明细:</span><code>{{ issue.source_details }}</code></div>{% endif %}
+      {% if issue.aggregation_version %}
+      <div class="field"><span class="field-label">可信聚合:</span>
+        {{ issue.aggregation_version }} · 风险分 {{ issue.risk_score if issue.risk_score is not none else "-" }} ·
+        证据 {{ issue.evidence_quality or "-" }} · 冲突 {{ issue.conflict_status or "-" }} ·
+        人工复核 {{ issue.human_review_status or "-" }}
+      </div>
+      {% endif %}
       <div class="field"><span class="field-label">处理状态:</span>{{ issue.status or "-" }} · 处理人: {{ issue.handled_by or "-" }} · 处理时间: {{ issue.handled_at or "-" }} · 更新时间: {{ issue.update_time or "-" }}</div>
 
       <div class="field">

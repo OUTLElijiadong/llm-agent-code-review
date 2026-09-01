@@ -99,6 +99,12 @@ def finding_to_issue(finding: Finding) -> Issue:
         source_anchor=finding.source_anchor or "",
         column_start=finding.column_start,
         column_end=finding.column_end,
+        aggregation_version=finding.aggregation_version,
+        evidence_quality=finding.evidence_quality,
+        conflict_status=finding.conflict_status,
+        human_review_status=finding.human_review_status,
+        risk_score=finding.risk_score,
+        aggregation=dict(finding.aggregation or {}),
     )
 
 
@@ -136,6 +142,12 @@ def _copy_issue(issue: Issue) -> Issue:
         source_anchor=issue.source_anchor or "",
         column_start=issue.column_start,
         column_end=issue.column_end,
+        aggregation_version=issue.aggregation_version,
+        evidence_quality=issue.evidence_quality,
+        conflict_status=issue.conflict_status,
+        human_review_status=issue.human_review_status,
+        risk_score=issue.risk_score,
+        aggregation=dict(issue.aggregation or {}),
     )
 
 
@@ -589,16 +601,15 @@ def _match_score(left: Issue, right: Issue) -> float:
 
 
 def _merge_cluster(cluster: List[Issue], file_id: int, anchor_index: "_AnchorIndex") -> Issue:
-    canonical = max(cluster, key=_content_quality_key)
+    # 严重度和置信度必须来自同一个真实声明，不能分别取最大值后拼成
+    # 无任何引擎/智能体实际主张过的组合。
+    canonical = max(cluster, key=_canonical_claim_key)
     static_candidates = [item for item in cluster if _source_family(item.source) in {"static", "regex"}]
     line_source = max(static_candidates, key=_content_quality_key) if static_candidates else canonical
 
     details = _merge_source_details(cluster)
     cvss_score, cvss_vector, cvss_version, cvss_source = _select_cvss(cluster)
-    severity = max(
-        (normalize_severity(item.severity) for item in cluster),
-        key=lambda value: _SEVERITY_RANK.get(value, 0),
-    )
+    severity = normalize_severity(canonical.severity)
     references = _unique_strings(value for item in cluster for value in (item.references or []))
     compliance = _merge_compliance(item.compliance_mapping for item in cluster)
     source = _aggregate_source(item.source for item in cluster)
@@ -638,7 +649,7 @@ def _merge_cluster(cluster: List[Issue], file_id: int, anchor_index: "_AnchorInd
         evidence=evidence,
         exploit_scenario=_longest_text(item.exploit_scenario for item in cluster) or "",
         references=references,
-        confidence=max(float(item.confidence or 0.0) for item in cluster),
+        confidence=canonical.confidence,
         cvss_score=cvss_score,
         cvss_vector=cvss_vector,
         cvss_version=cvss_version,
@@ -652,14 +663,17 @@ def _merge_cluster(cluster: List[Issue], file_id: int, anchor_index: "_AnchorInd
             if _source_family(item.source) in {"static", "regex"}
         ),
         source_details=details,
-        confirmation_count=max(
-            len(details),
-            *(max(1, int(item.confirmation_count or 1)) for item in cluster),
-        ),
+        confirmation_count=max(1, len({str(item.get("source") or "") for item in details})),
         finding_fingerprint=fingerprint,
         source_anchor=source_anchor,
         column_start=column_start,
         column_end=column_end,
+        aggregation_version=_longest_text(item.aggregation_version for item in cluster) or "",
+        evidence_quality=canonical.evidence_quality or "",
+        conflict_status=_cluster_conflict_status(cluster),
+        human_review_status=_cluster_human_review_status(cluster),
+        risk_score=canonical.risk_score,
+        aggregation=_cluster_aggregation(cluster),
     )
 
 
@@ -690,6 +704,11 @@ def _merge_source_details(cluster: List[Issue]) -> List[dict]:
                 "line_number": line_number,
                 "title": str(raw.get("title") or "")[:200],
             }
+            for key in (
+                "agent_code", "agent_name", "severity", "evidence_quality", "claim_id",
+            ):
+                if raw.get(key) is not None:
+                    detail[key] = raw.get(key)
             if raw.get("source_anchor") or issue.source_anchor:
                 detail["source_anchor"] = str(
                     raw.get("source_anchor") or issue.source_anchor or ""
@@ -709,6 +728,57 @@ def _merge_source_details(cluster: List[Issue]) -> List[dict]:
             float(item.get("confidence") or 0.0),
         ),
     )
+
+
+def _canonical_claim_key(issue: Issue) -> tuple:
+    """选择一条完整声明，让严重度与置信度保持同源。"""
+    evidence_rank = {
+        "unsupported": 0,
+        "inferred": 1,
+        "direct": 2,
+        "verified": 3,
+    }.get(issue.evidence_quality or "", 2 if issue.evidence else 1)
+    return (
+        evidence_rank,
+        float(issue.confidence or 0.0),
+        len(issue.evidence or ""),
+        _content_quality_key(issue),
+    )
+
+
+def _cluster_conflict_status(cluster: List[Issue]) -> str:
+    if any(item.conflict_status == "unresolved" for item in cluster):
+        return "unresolved"
+    ranks = {_SEVERITY_RANK.get(normalize_severity(item.severity), 0) for item in cluster}
+    cwes = {_normalize_cwe(item.cwe) for item in cluster if _normalize_cwe(item.cwe)}
+    if (ranks and max(ranks) - min(ranks) >= 2) or len(cwes) > 1:
+        return "unresolved"
+    return "resolved" if any(item.conflict_status == "resolved" for item in cluster) else "none"
+
+
+def _cluster_human_review_status(cluster: List[Issue]) -> str:
+    statuses = {item.human_review_status for item in cluster if item.human_review_status}
+    if "pending" in statuses or _cluster_conflict_status(cluster) == "unresolved":
+        return "pending"
+    for status in ("evidence_requested", "accepted", "rejected"):
+        if status in statuses:
+            return status
+    return "not_required"
+
+
+def _cluster_aggregation(cluster: List[Issue]) -> dict:
+    candidates = [dict(item.aggregation) for item in cluster if item.aggregation]
+    if not candidates:
+        return {}
+    # 保留已有的版本化裁决快照，附加后处理的真实来源数。
+    selected = max(candidates, key=lambda item: (len(item.get("claims") or []), len(str(item))))
+    selected["post_merge_source_count"] = len({
+        str(detail.get("source") or "")
+        for issue in cluster
+        for detail in (issue.source_details or [{"source": issue.source}])
+        if isinstance(detail, dict)
+    })
+    return selected
 
 
 def _select_cvss(cluster: List[Issue]) -> tuple[Optional[float], Optional[str], Optional[str], str]:

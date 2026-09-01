@@ -5,10 +5,9 @@
 v2.2(2026-06-25): Agent 集成 + 双引擎漏洞识别
     - 引擎1: 静态规则前置过滤(正则秘钥 + 静态语义规则,确定性命中,无 LLM 调用)
     - 引擎2: LLM 深度审查(通过 BaseAgent.call() 调用真实 Agent,统一事件总线/AiCallLog)
-    - 多 Agent 协同审查保留三阶段流水线(并行感知 → 交叉复审 → 共识统合)
+    - 多 Agent 独立感知后执行版本化、可审计的确定性证据聚合
 """
 import concurrent.futures
-import json as json_lib
 import threading
 import time
 import uuid
@@ -16,20 +15,18 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from loguru import logger
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, BaseAgent
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEvent, AgentEventType
 from app.agents.registry import AgentRegistry
-from app.ai.code_chunker import chunk_code
+from app.ai.code_chunker import chunk_code_with_context
 from app.ai.cvss import normalize_cvss
 from app.ai.deepseek_agent import DeepSeekAgent
+from app.ai.finding_aggregator import aggregate_agent_findings_safely
 from app.ai.multi_agent import (
-    COLLAB_CONSENSUS_SYSTEM,
-    COLLAB_CONSENSUS_USER,
-    COLLAB_CROSS_REVIEW_SYSTEM,
-    COLLAB_CROSS_REVIEW_USER,
     ReviewAgentProfile,
     build_agent_summary,
     format_agent_section,
@@ -360,7 +357,7 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
         # 使用解析后的 API 配置(用户自定义 > 管理员全局配置 > 系统默认 DeepSeek)
         from app.utils.api_resolver import resolve_api_config
         api_config = resolve_api_config(db, user.id)
-        # 协同审查仍需 DeepSeekAgent(三阶段流水线需要 system_prompt/user_prompt 灵活传入)
+        # 保留共享实例参数兼容既有内部调用；各独立代理会创建隔离客户端。
         collab_agent = DeepSeekAgent(api_config=api_config)
         files = (
             db.query(CodeFile)
@@ -429,7 +426,7 @@ def _finding_to_review_issue(task_id: int, code_file: CodeFile, finding: Finding
         description=finding.description,
         suggestion=finding.suggestion,
         fixed_code=finding.fixed_code,
-        status="unfixed",
+        status="pending_review" if finding.human_review_status == "pending" else "unfixed",
         # v2 新增漏洞元数据字段
         owasp=finding.owasp,
         cwe=finding.cwe,
@@ -449,6 +446,12 @@ def _finding_to_review_issue(task_id: int, code_file: CodeFile, finding: Finding
         source_details=finding.source_details if finding.source_details else None,
         confirmation_count=finding.confirmation_count,
         finding_fingerprint=finding.finding_fingerprint or None,
+        aggregation_version=finding.aggregation_version or None,
+        evidence_quality=finding.evidence_quality or None,
+        conflict_status=finding.conflict_status or None,
+        human_review_status=finding.human_review_status or None,
+        risk_score=finding.risk_score,
+        aggregation_json=finding.aggregation or None,
     )
 
 
@@ -482,7 +485,7 @@ def _issue_to_review_issue(task_id: int, code_file: CodeFile, issue: Issue) -> R
         description=issue.description,
         suggestion=issue.suggestion,
         fixed_code=issue.fixed_code,
-        status="unfixed",
+        status="pending_review" if issue.human_review_status == "pending" else "unfixed",
         # v2 漏洞元数据
         owasp=issue.owasp,
         cwe=issue.cwe,
@@ -502,6 +505,12 @@ def _issue_to_review_issue(task_id: int, code_file: CodeFile, issue: Issue) -> R
         source_details=issue.source_details if issue.source_details else None,
         confirmation_count=issue.confirmation_count,
         finding_fingerprint=issue.finding_fingerprint or None,
+        aggregation_version=issue.aggregation_version or None,
+        evidence_quality=issue.evidence_quality or None,
+        conflict_status=issue.conflict_status or None,
+        human_review_status=issue.human_review_status or None,
+        risk_score=issue.risk_score,
+        aggregation_json=issue.aggregation or None,
     )
 
 
@@ -631,7 +640,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
             → 生成 List[Finding](确定性命中,无 LLM 调用)
       引擎2(LLM 深度审查):
         - 单代理模式(quick/standard):分片 → 通过 BaseAgent.call() 调用真实 Agent
-        - 多代理模式(security/performance/full):分片 → 三阶段协同流水线
+        - 多代理模式(security/performance/full):分片 → 独立分析 → 确定性证据聚合
             → 生成 List[Finding]
       合并去重:静态 Findings + LLM Findings(转 Issue)→ issue_merger 合并去重
             → List[Issue](source=static/llm/hybrid, static_rule_hits 已填充)
@@ -639,7 +648,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
 
     Args:
         db: 数据库会话
-        collab_agent: 协同审查用的 DeepSeekAgent(三阶段流水线需要 system/user prompt 灵活传入)
+        collab_agent: 兼容既有内部调用的共享 DeepSeekAgent。
         api_config: 用户解析后的 API 配置(用户自定义 > 管理员全局 > 系统默认)
         task: 当前审查任务
         code_file: 待审查代码文件 ORM 对象
@@ -671,8 +680,11 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
 
     # ===== 引擎2:LLM 深度审查(分片 + 多代理协同)=====
     llm_findings: List[Finding] = []
-    chunks = chunk_code(code_file.content, code_file.language,
-                        threshold=settings.deepseek_chunk_threshold)
+    chunks = chunk_code_with_context(
+        code_file.content,
+        code_file.language,
+        threshold=settings.deepseek_chunk_threshold,
+    )
     # 自定义 Agent 也必须进入协同执行器；即使内置画像被治理停用，单个自定义
     # Agent 仍应获得一次独立调用，而不是被静态 Agent 注册表路径吞掉。
     use_collab = len(profiles) >= 2 or any(profile.is_custom for profile in profiles)
@@ -795,6 +807,7 @@ def _review_chunk_sequential(
                     file_name=code_file.file_name,
                     line_offset=chunk.start_line,
                     experience_section=experience_section,
+                    context_section=getattr(chunk, "context", ""),
                     api_config=api_config,
                     ctx=ctx,
                 )
@@ -807,6 +820,7 @@ def _review_chunk_sequential(
                     line_offset=chunk.start_line,
                     experience_section=experience_section,
                     agent_section=format_agent_section(profile),
+                    context_section=getattr(chunk, "context", ""),
                     api_config=api_config,
                     ctx=ctx,
                 )
@@ -955,7 +969,7 @@ def _log_sequential_call(
         logger.debug(f"[review] 补写 AiCallLog 失败(agent={agent_label}): {e}")
 
 
-# ═══════════════ 多 Agent 协同三阶段 ═══════════════
+# ═══════════════ 多 Agent 独立分析与确定性聚合 ═══════════════
 
 def _review_chunk_collaborative(
     db: Session, shared_agent: DeepSeekAgent, api_config, task: ReviewTask,
@@ -963,11 +977,7 @@ def _review_chunk_collaborative(
     profiles: tuple[ReviewAgentProfile, ...], chunk_idx: int,
     chunk, experience_section: str = "",
 ) -> List[Finding]:
-    """多 Agent 协同审查 — 三阶段流水线
-
-    阶段1: 并行感知 — ThreadPoolExecutor 并行调用各 Agent(v2.2: agent_label 使用真实 Agent name)
-    阶段2: 交叉复审 — 首席架构师对比合并发现
-    阶段3: 共识统合 — 仲裁官输出最终问题清单
+    """多 Agent 协同审查：并行独立感知后执行确定性证据聚合。
 
     v2.2 改造:
     - agent_label 从 profile.code 改为真实 Agent name(_PROFILE_TO_AGENT_CODE 映射)
@@ -976,7 +986,7 @@ def _review_chunk_collaborative(
 
     Args:
         db: 数据库会话
-        shared_agent: 共享 DeepSeekAgent(阶段2/3 用,主线程同步调用)
+        shared_agent: 兼容既有内部调用的共享 DeepSeekAgent。
         api_config: 用户解析后的 API 配置
         task: 当前审查任务
         code_file: 待审查代码文件
@@ -1014,7 +1024,7 @@ def _review_chunk_collaborative(
             future = pool.submit(
                 _call_single_agent,
                 profile, chunk.text, language, file_name, rules, line_offset,
-                experience_section,
+                experience_section, getattr(chunk, "context", ""),
                 api_config,
             )
             future_map[future] = profile
@@ -1046,7 +1056,7 @@ def _review_chunk_collaborative(
                         "evidence": getattr(it, "evidence", "") or "",
                         "exploit_scenario": getattr(it, "exploit_scenario", "") or "",
                         "references": list(getattr(it, "references", []) or []),
-                        "confidence": float(getattr(it, "confidence", 0.8) or 0.8),
+                        "confidence": getattr(it, "confidence", None),
                         "cvss_score": getattr(it, "cvss_score", None),
                         "cvss_vector": getattr(it, "cvss_vector", None),
                         "remediation": getattr(it, "remediation", "") or "",
@@ -1054,6 +1064,14 @@ def _review_chunk_collaborative(
                     }
                     for it in parsed.issues
                 ]
+                if parsed.diagnostics:
+                    logger.warning(
+                        "[collab] agent=%s chunk=%s isolated_invalid=%s diagnostics=%s",
+                        profile.code,
+                        chunk_idx,
+                        parsed.invalid_issue_count,
+                        [item.code for item in parsed.diagnostics],
+                    )
                 _emit_review_event(AgentEventType.PROGRESS, task, user,
                                    f"[{profile.name}] 发现 {len(parsed.issues)} 个问题",
                                    agent_code=target)
@@ -1109,91 +1127,47 @@ def _review_chunk_collaborative(
                                agent_code=target)
         return []
 
-    # ===== 阶段2: 交叉复审 =====
-    _emit_review_event(AgentEventType.THINKING, task, user,
-                       "首席架构师 Agent 开始交叉复审各代理发现",
-                       agent_code="orchestrator")
-
-    findings_text = _build_findings_text(agent_findings, agent_names)
-    cross_prompt = COLLAB_CROSS_REVIEW_USER.format(
-        language=language,
+    # ===== 阶段2: 确定性证据聚合 =====
+    # 原流程再调用两次 LLM 做交叉复审和结论统合，会丢声明、造来源并引入新波动。
+    # 现在用版本化映射、证据校验和冲突规则一次完成，争议项保留给人工。
+    _emit_review_event(
+        AgentEventType.THINKING,
+        task,
+        user,
+        "编排器正在执行版本化证据聚合与冲突消解",
+        agent_code="orchestrator",
+    )
+    aggregated = aggregate_agent_findings_safely(
+        agent_findings,
+        agent_names,
+        code=code_file.content or chunk.text,
         file_name=file_name,
-        line_offset=line_offset,
-        agent_findings=findings_text,
+        chunk_id=f"task:{task.id}:file:{code_file.id}:chunk:{chunk_idx}",
     )
-
-    try:
-        cross_raw, _ = shared_agent.chat(
-            system_prompt=COLLAB_CROSS_REVIEW_SYSTEM,
-            user_prompt=cross_prompt,
-            task_id=task.id,
-            user_id=user.id,
-            file_id=code_file.id,
-            chunk_index=chunk_idx * 100 + 90,
-            db=db,
-            agent_label="cross_review",
+    final_issues = aggregated.issues
+    if aggregated.diagnostics:
+        logger.warning(
+            "[collab] %s chunk=%s isolated_invalid=%s diagnostics=%s",
+            file_name,
+            chunk_idx,
+            aggregated.coverage.get("invalid_input_count", 0),
+            aggregated.diagnostics[:10],
         )
-        cross_data = json_lib.loads(cross_raw)
-        cross_review = cross_data.get("cross_review", [])
-        cross_summary = cross_data.get("summary", {})
-        logger.info(
-            f"[collab] 阶段2完成 confirmed={cross_summary.get('confirmed',0)} "
-            f"escalated={cross_summary.get('escalated',0)} "
-            f"merged={cross_summary.get('merged',0)} "
-            f"disputed={cross_summary.get('disputed',0)}",
-        )
-    except Exception as e:
-        logger.warning(f"交叉复审失败,降级为直接合并: {e}")
-        cross_review = _fallback_cross_review(agent_findings, agent_names)
-        cross_summary = {"confirmed": len(cross_review), "disputed": 0,
-                         "escalated": 0, "merged": 0}
-
-    # ===== 阶段3: 共识统合 =====
-    _emit_review_event(AgentEventType.THINKING, task, user,
-                       "仲裁官 Agent 开始共识统合",
-                       agent_code="orchestrator")
-
-    consensus_prompt = COLLAB_CONSENSUS_USER.format(
-        cross_review_json=json_lib.dumps(
-            {"cross_review": cross_review, "summary": cross_summary},
-            ensure_ascii=False, indent=2,
-        ),
-    )
-
-    try:
-        cons_raw, _ = shared_agent.chat(
-            system_prompt=COLLAB_CONSENSUS_SYSTEM,
-            user_prompt=consensus_prompt,
-            task_id=task.id,
-            user_id=user.id,
-            file_id=code_file.id,
-            chunk_index=chunk_idx * 100 + 95,
-            db=db,
-            agent_label="consensus",
-        )
-        cons_data = json_lib.loads(cons_raw)
-        final_issues = cons_data.get("issues", [])
-        discarded = cons_data.get("discarded", [])
-        logger.info(
-            f"[collab] 阶段3完成 final={len(final_issues)} "
-            f"discarded={len(discarded)}",
-        )
-    except Exception as e:
-        logger.warning(f"共识统合失败,降级为直接使用交叉复审结果: {e}")
-        final_issues = _fallback_consensus(cross_review)
 
     # 事件广播: 通知各 Agent 协同完成
     for profile in profiles:
         target = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
         _emit_review_event(AgentEventType.COMPLETE, task, user,
                            f"[{profile.name}] 协同审查完成,"
-                           f"最终确认 {len(final_issues)} 个问题",
+                           f"聚合 {len(final_issues)} 个问题,"
+                           f"待人工复核 {aggregated.summary.get('pending_human_review_count', 0)} 个",
                            agent_code=target)
 
     elapsed = int((time.time() - t0) * 1000)
     logger.info(
-        f"[collab] {file_name} chunk={chunk_idx} 三阶段完成 "
-        f"raw={total_raw} → cross={len(cross_review)} → final={len(final_issues)} "
+        f"[collab] {file_name} chunk={chunk_idx} 确定性聚合完成 "
+        f"raw={total_raw} → final={len(final_issues)} "
+        f"conflicts={aggregated.summary.get('conflict_count', 0)} "
         f"elapsed={elapsed}ms",
     )
     # v2.2: 将最终问题列表转换为 List[Finding](统一数据结构,便于入库)
@@ -1201,10 +1175,10 @@ def _review_chunk_collaborative(
 
 
 def _final_issue_to_finding(item: dict) -> Finding:
-    """将多代理协同最终问题(dict)转换为 Finding(用于统一入库)
+    """将确定性聚合问题转换为 Finding，供统一入库。
 
     Args:
-        item: 阶段3 共识统合返回的问题 dict,字段对齐 COLLAB_CONSENSUS_USER 输出 schema
+        item: finding-aggregation-v1 输出的问题字典。
 
     Returns:
         Finding: 标准化漏洞发现
@@ -1214,9 +1188,9 @@ def _final_issue_to_finding(item: dict) -> Finding:
         item.get("cvss_vector"),
     )
     try:
-        confidence = max(0.0, min(1.0, float(item.get("confidence", 0.8))))
+        confidence = max(0.0, min(1.0, float(item.get("confidence", 0.5))))
     except (TypeError, ValueError):
-        confidence = 0.8
+        confidence = 0.5
 
     source_details = _collaborative_source_details(item, confidence)
     compliance_mapping = item.get("compliance_mapping")
@@ -1238,7 +1212,7 @@ def _final_issue_to_finding(item: dict) -> Finding:
         exploit_scenario=item.get("exploit_scenario", "") or "",
         references=item.get("references", []) if isinstance(item.get("references"), list) else [],
         confidence=confidence,
-        source="llm_collab",
+        source=str(item.get("source") or "llm_collab")[:16],
         cvss_score=cvss_score,
         cvss_vector=cvss_vector,
         cvss_version=cvss_version,
@@ -1247,21 +1221,19 @@ def _final_issue_to_finding(item: dict) -> Finding:
         remediation=item.get("remediation", "") or "",
         static_rule_hits=0,
         source_details=source_details,
-        confirmation_count=max(
-            len(source_details),
-            _safe_positive_int(item.get("confirmation_count")),
-            _safe_positive_int(item.get("cross_agent_count")),
-            1,
-        ),
+        confirmation_count=max(1, len({detail.get("source") for detail in source_details})),
+        finding_fingerprint=str(item.get("finding_fingerprint") or "")[:64],
+        source_anchor=str(item.get("source_anchor") or "")[:300],
+        aggregation_version=str(item.get("aggregation_version") or "")[:32],
+        evidence_quality=str(item.get("evidence_quality") or "")[:20],
+        conflict_status=str(item.get("conflict_status") or "none")[:20],
+        human_review_status=str(item.get("human_review_status") or "not_required")[:24],
+        risk_score=(float(item["risk_score"]) if item.get("risk_score") is not None else None),
+        aggregation=dict(item.get("aggregation") or {}) if isinstance(item.get("aggregation"), dict) else {},
     )
 
 
 def _collaborative_source_details(item: dict, confidence: float) -> list[dict]:
-    target_count = max(
-        _safe_positive_int(item.get("confirmation_count")),
-        _safe_positive_int(item.get("cross_agent_count")),
-        1,
-    )
     raw_details = item.get("source_details")
     if isinstance(raw_details, list):
         details = [dict(detail) for detail in raw_details if isinstance(detail, dict)]
@@ -1271,18 +1243,20 @@ def _collaborative_source_details(item: dict, confidence: float) -> list[dict]:
     names = item.get("cross_agent_names")
     if isinstance(names, list):
         for name in names:
-            if len(details) >= target_count:
-                break
             details.append(_collaborative_source_detail(item, confidence, name))
 
-    while len(details) < target_count:
-        ordinal = len(details) + 1
-        source = item.get("source") or "llm_collab"
-        if ordinal > 1:
-            source = f"{source}:{ordinal}"
-        details.append(_collaborative_source_detail(item, confidence, source))
-
-    return details
+    if not details:
+        details.append(_collaborative_source_detail(
+            item, confidence, item.get("source") or "llm_collab",
+        ))
+    by_source: dict[str, dict] = {}
+    for detail in details:
+        source = str(detail.get("source") or "")[:80]
+        if not source:
+            continue
+        detail["source"] = source
+        by_source.setdefault(source, detail)
+    return [by_source[source] for source in sorted(by_source)]
 
 
 def _collaborative_source_detail(
@@ -1299,13 +1273,6 @@ def _collaborative_source_detail(
     }
 
 
-def _safe_positive_int(value: object) -> int:
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
 # ═══════════════ 协同辅助函数 ═══════════════
 
 def _call_single_agent(
@@ -1316,6 +1283,7 @@ def _call_single_agent(
     rules: list,
     line_offset: int,
     experience_section: str = "",
+    context_section: str = "",
     api_config = None,
 ) -> tuple:
     """单次代理并行调用 — 通过 DeepSeekAgent.call_raw() 统一入口
@@ -1349,6 +1317,7 @@ def _call_single_agent(
         line_offset=line_offset,
         agent_section=format_agent_section(profile),
         experience_section=experience_section,
+        context_section=context_section,
     )
     if profile.is_custom and profile.system_prompt:
         system_prompt = (
@@ -1366,106 +1335,6 @@ def _call_single_agent(
         temperature=profile.temperature,
         max_tokens=profile.max_tokens,
     )
-
-
-def _build_findings_text(
-    findings: dict[str, list[dict]],
-    names: dict[str, str],
-) -> str:
-    """把各代理发现格式化为 LLM 可读文本"""
-    parts: list[str] = []
-    for code, items in findings.items():
-        name = names.get(code, code)
-        parts.append(f"### {name} ({code}) — 发现 {len(items)} 条")
-        if not items:
-            parts.append("  (未发现严重问题)")
-            continue
-        for i, it in enumerate(items, 1):
-            lines = (
-                f"L{it.get('line_start',0)}-L{it.get('line_end',0)}"
-                if it.get("line_end") and it["line_end"] != it.get("line_start")
-                else f"L{it.get('line_start',0)}"
-            )
-            parts.append(
-                f"  [{i}] [{it.get('severity','中')}] {it.get('title','')}\n"
-                f"      位置={lines} 类型={it.get('issue_type','')}\n"
-                f"      描述={it.get('description','')[:120]}\n"
-                f"      证据={it.get('evidence','')[:200]}\n"
-                f"      来源={it.get('source', f'llm:{code}')} "
-                f"置信度={it.get('confidence', 0.8)} "
-                f"CVSS={it.get('cvss_score')} {it.get('cvss_vector') or ''}",
-            )
-        parts.append("")
-    return "\n".join(parts)
-
-
-def _fallback_cross_review(
-    findings: dict[str, list[dict]],
-    names: dict[str, str],
-) -> list[dict]:
-    """降级方案: 交叉复审 LLM 失败时,直接按规则合并"""
-    results: list[dict] = []
-    for code, items in findings.items():
-        name = names.get(code, code)
-        for it in items:
-            title = it.get("title", "")
-            results.append({
-                "verdict": "confirmed",
-                "original_titles": [title],
-                "final_title": title,
-                "category": it.get("issue_type", ""),
-                "explanation": f"来自{name}的独立发现(交叉复审降级)",
-                "severity": it.get("severity", "中"),
-                "severity_reason": "",
-                "line_start": it.get("line_start", 0),
-                "line_end": it.get("line_end"),
-                "confidence": it.get("confidence", 0.8),
-                "owasp": it.get("owasp", ""),
-                "cwe": it.get("cwe", ""),
-                "evidence": it.get("evidence", ""),
-                "exploit_scenario": it.get("exploit_scenario", ""),
-                "references": it.get("references", []),
-                "cvss_score": it.get("cvss_score"),
-                "cvss_vector": it.get("cvss_vector"),
-                "remediation": it.get("remediation", ""),
-                "source_details": [{
-                    "source": it.get("source", f"llm:{code}"),
-                    "confidence": it.get("confidence", 0.8),
-                    "evidence": it.get("evidence", ""),
-                    "line_number": it.get("line_start", 0),
-                    "title": title,
-                }],
-            })
-    return results
-
-
-def _fallback_consensus(cross_review: list[dict]) -> list[dict]:
-    """降级方案: 共识统合 LLM 失败时,直接使用交叉复审结果"""
-    return [
-        {
-            "issue_type": cr.get("category", ""),
-            "severity": cr.get("severity", "中"),
-            "title": cr.get("final_title", ""),
-            "line_number": cr.get("line_start", 0),
-            "end_line": cr.get("line_end"),
-            "description": cr.get("explanation", ""),
-            "suggestion": "",
-            "fixed_code": "",
-            "confidence": cr.get("confidence", 0.8),
-            "cross_agent_count": len(cr.get("original_titles", [])),
-            "cross_agent_names": [],
-            "owasp": cr.get("owasp", ""),
-            "cwe": cr.get("cwe", ""),
-            "evidence": cr.get("evidence", ""),
-            "exploit_scenario": cr.get("exploit_scenario", ""),
-            "references": cr.get("references", []),
-            "cvss_score": cr.get("cvss_score"),
-            "cvss_vector": cr.get("cvss_vector"),
-            "remediation": cr.get("remediation", ""),
-            "source_details": cr.get("source_details", []),
-        }
-        for cr in cross_review
-    ]
 
 
 def _absolute_line(line_number: Optional[int], chunk_start_line: int) -> int:
@@ -1605,7 +1474,35 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "error_message": task.error_message,
         "files": _task_file_summaries(db, task.id),
         "agent_releases": _task_agent_release_summaries(db, task.id),
+        "aggregation_summary": _task_aggregation_summary(db, task.id),
     }
+
+
+def _task_aggregation_summary(db: Session, task_id: int) -> dict[str, int]:
+    """一次查询汇总聚合覆盖、冲突和人工复核队列。"""
+    row = db.query(
+        func.coalesce(func.sum(case((ReviewIssue.aggregation_version.isnot(None), 1), else_=0)), 0),
+        func.coalesce(func.sum(case((ReviewIssue.confirmation_count >= 2, 1), else_=0)), 0),
+        func.coalesce(
+            func.sum(
+                case(
+                    (ReviewIssue.human_review_status.in_(("pending", "evidence_requested")), 1),
+                    else_=0,
+                )
+            ),
+            0,
+        ),
+        func.coalesce(func.sum(case((ReviewIssue.conflict_status == "unresolved", 1), else_=0)), 0),
+        func.coalesce(func.sum(case((ReviewIssue.evidence_quality == "unsupported", 1), else_=0)), 0),
+    ).filter(ReviewIssue.task_id == task_id).one()
+    keys = (
+        "aggregated",
+        "independently_confirmed",
+        "pending_human_review",
+        "unresolved_conflicts",
+        "insufficient_evidence",
+    )
+    return {key: int(value or 0) for key, value in zip(keys, row)}
 
 
 def _task_agent_release_summaries(db: Session, task_id: int) -> list[dict]:

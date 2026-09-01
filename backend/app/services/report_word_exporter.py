@@ -400,6 +400,21 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
             size=9,
         )
 
+    if issue.get("aggregation_version"):
+        trust_para = doc.add_paragraph()
+        _add_run(trust_para, "可信聚合: ", bold=True, size=10)
+        _add_run(
+            trust_para,
+            "版本: {0} | 风险分: {1} | 证据等级: {2} | 冲突: {3} | 人工复核: {4}".format(
+                issue.get("aggregation_version") or "-",
+                issue.get("risk_score") if issue.get("risk_score") is not None else "-",
+                issue.get("evidence_quality") or "-",
+                issue.get("conflict_status") or "-",
+                issue.get("human_review_status") or "-",
+            ),
+            size=9,
+        )
+
     status_para = doc.add_paragraph()
     _add_run(status_para, "处理状态: ", bold=True, size=10)
     _add_run(

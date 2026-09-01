@@ -582,6 +582,21 @@ def _ssh_login_events(params: dict[str, Any]) -> dict[str, Any]:
 
 def _flytrap_attack_events(params: dict[str, Any]) -> dict[str, Any]:
     since_hours, limit = _since_hours_arg(params), _event_limit_arg(params, default=1000)
+    if os.environ.get("PRISM_FLYTRAP_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        return {
+            "ok": True,
+            "enabled": False,
+            "status": "retired",
+            "degraded": False,
+            "can_continue": True,
+            "reason": "FlyTrap 集成已退役",
+            "human_actions": [],
+            "since_hours": since_hours,
+            "total": 0,
+            "by_ip": [],
+            "by_username": [],
+            "recent": [],
+        }
     result = run(["journalctl", "-u", "flytrap-agent", "--since", f"{since_hours} hours ago", "--no-pager", "--output=cat", "-n", "30000"], timeout=90, allow_failure=True)
     events = parse_flytrap_log(result["stdout"].splitlines())
     agent_status = run(["systemctl", "is-active", "flytrap-agent.service"], timeout=20, allow_failure=True)

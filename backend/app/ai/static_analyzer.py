@@ -283,6 +283,12 @@ class Finding:
     source_anchor: str = ""
     column_start: Optional[int] = None
     column_end: Optional[int] = None
+    aggregation_version: str = ""
+    evidence_quality: str = ""
+    conflict_status: str = "none"
+    human_review_status: str = "not_required"
+    risk_score: Optional[float] = None
+    aggregation: Dict[str, object] = field(default_factory=dict)
 
 
 def scan(*, content: str, file_name: str, language: Optional[str] = None) -> List[Finding]:

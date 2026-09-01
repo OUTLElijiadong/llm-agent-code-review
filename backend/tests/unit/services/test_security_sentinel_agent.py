@@ -347,7 +347,7 @@ def test_dedup_findings_is_order_independent_and_preserves_provenance():
     }
 
 
-def test_dedup_findings_preserves_declared_confirmation_count():
+def test_dedup_findings_recomputes_declared_confirmation_count_from_provenance():
     agent = SecuritySentinelAgent()
     finding = {
         "file_path": "app.py",
@@ -371,7 +371,7 @@ def test_dedup_findings_preserves_declared_confirmation_count():
 
     merged = agent._dedup_findings([finding])
 
-    assert merged[0]["confirmation_count"] == 4
+    assert merged[0]["confirmation_count"] == 1
 
 
 def test_adversarial_verify_counts_only_explicit_verdicts(monkeypatch):

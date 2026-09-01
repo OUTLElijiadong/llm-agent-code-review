@@ -47,6 +47,13 @@ _SEVERITY_ALIASES = {
     "informational": "低",
     "低危": "低",
     "低": "低",
+    "p0": "严重",
+    "p1": "高",
+    "p2": "中",
+    "p3": "低",
+    "p4": "低",
+    "error": "严重",
+    "note": "低",
 }
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
@@ -97,7 +104,8 @@ class Issue:
     evidence: str = ""
     exploit_scenario: str = ""
     references: List[str] = field(default_factory=list)
-    confidence: float = 0.8
+    # 缺失值保持未知，避免把模型未声明的确定性伪造为 0.8。
+    confidence: Optional[float] = None
     # v3 新增 CVSS / 合规映射 / 修复方案字段
     cvss_score: Optional[float] = None
     cvss_vector: Optional[str] = None
@@ -115,6 +123,12 @@ class Issue:
     source_anchor: str = ""
     column_start: Optional[int] = None
     column_end: Optional[int] = None
+    aggregation_version: str = ""
+    evidence_quality: str = ""
+    conflict_status: str = "none"
+    human_review_status: str = "not_required"
+    risk_score: Optional[float] = None
+    aggregation: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -123,6 +137,18 @@ class ReviewResult:
     summary: str = ""
     score: int = 0
     issues: List[Issue] = field(default_factory=list)
+    diagnostics: List["ParseDiagnostic"] = field(default_factory=list)
+    input_issue_count: int = 0
+    invalid_issue_count: int = 0
+
+
+@dataclass(frozen=True)
+class ParseDiagnostic:
+    """单个问题条目的可恢复解析诊断。"""
+
+    code: str
+    message: str
+    index: int
 
 
 def _strip_fence(text: str) -> str:
@@ -157,7 +183,7 @@ def _coerce_int(v, default: int = 0) -> int:
         return default
 
 
-def _coerce_float(v, default: float = 0.8) -> float:
+def _coerce_float(v, default: Optional[float] = None) -> Optional[float]:
     """安全转换为浮点数
 
     Args:
@@ -165,7 +191,7 @@ def _coerce_float(v, default: float = 0.8) -> float:
         default: 转换失败时的默认值
 
     Returns:
-        float: 转换后的浮点数
+        Optional[float]: 转换后的浮点数
     """
     try:
         return float(v)
@@ -332,9 +358,9 @@ def _normalize_issue(raw: dict) -> Issue:
     evidence = str(raw.get("evidence") or "")
     exploit_scenario = str(raw.get("exploit_scenario") or "")
     references = _coerce_references(raw.get("references"))
-    confidence = _coerce_float(raw.get("confidence"), 0.8)
-    # 限制 confidence 在 [0, 1] 范围
-    confidence = max(0.0, min(1.0, confidence))
+    confidence = _coerce_float(raw.get("confidence"), None)
+    if confidence is not None:
+        confidence = max(0.0, min(1.0, confidence))
 
     # 解析 v3 新增字段
     cvss_score, cvss_vector, cvss_version, cvss_source = normalize_cvss(
@@ -403,12 +429,55 @@ def parse(text: str) -> ReviewResult:
     if not isinstance(data, dict):
         raise ResultParseError("AI 返回不是 JSON 对象")
 
-    issues_raw = data.get("issues") or []
+    issues_raw = data.get("issues")
     if not isinstance(issues_raw, list):
-        issues_raw = []
+        raise ResultParseError("AI 返回的 issues 必须是数组")
+
+    issues: List[Issue] = []
+    diagnostics: List[ParseDiagnostic] = []
+    for index, raw in enumerate(issues_raw):
+        if not isinstance(raw, dict):
+            diagnostics.append(ParseDiagnostic(
+                code="issue_not_object",
+                message="问题条目必须是 JSON 对象",
+                index=index,
+            ))
+            continue
+        if not any(str(raw.get(key) or "").strip() for key in ("title", "description", "evidence")):
+            diagnostics.append(ParseDiagnostic(
+                code="issue_missing_identity",
+                message="问题条目缺少 title、description 或 evidence",
+                index=index,
+            ))
+            continue
+        raw_severity = str(raw.get("severity") or "").strip()
+        if raw_severity and raw_severity.lower() not in _SEVERITY_ALIASES and raw_severity not in ALLOWED_SEVERITY:
+            diagnostics.append(ParseDiagnostic(
+                code="issue_invalid_severity",
+                message=f"无法识别的严重度: {raw_severity[:40]}",
+                index=index,
+            ))
+            # v1 旧调用可能仅提供 description，没有标题和结构化严重度。
+            # 为保证主流程可继续，仅对这类旧格式使用中等级回退，同时保留诊断。
+            if (
+                not str(raw.get("title") or "").strip()
+                and not str(raw.get("evidence") or "").strip()
+                and str(raw.get("issue_type") or "") == "其他"
+            ):
+                legacy_raw = dict(raw)
+                legacy_raw["severity"] = "中"
+                issues.append(_normalize_issue(legacy_raw))
+            continue
+        issues.append(_normalize_issue(raw))
+
+    if issues_raw and not issues:
+        raise ResultParseError("AI 返回的 issues 全部为无效条目")
 
     return ReviewResult(
         summary=str(data.get("summary") or "")[:2000],
         score=max(0, min(100, _coerce_int(data.get("score"), 0))),
-        issues=[_normalize_issue(it) for it in issues_raw if isinstance(it, dict)],
+        issues=issues,
+        diagnostics=diagnostics,
+        input_issue_count=len(issues_raw),
+        invalid_issue_count=len(diagnostics),
     )

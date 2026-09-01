@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.agents.contracts import compose_system_prompt
 from app.agents.events import AgentEventType
-from app.ai.code_chunker import chunk_code
+from app.ai.code_chunker import chunk_code_with_context
 from app.ai.result_parser import normalize_severity
 from app.ai.scoring import compute_score_breakdown
 from app.ai.security_patterns import list_patterns, scan_secrets
@@ -183,7 +183,7 @@ class SecuritySentinelAgent(BaseAgent):
     def __init__(self):
         super().__init__(
             system_prompt=compose_system_prompt(self.name, SYSTEM_PROMPT),
-            temperature=0.1,
+            temperature=0.0,
             max_tokens=settings.security_semantic_max_output_tokens,
         )
         self._db: Optional[Session] = None
@@ -222,6 +222,7 @@ class SecuritySentinelAgent(BaseAgent):
         file_name: str,
         line_offset: int = 0,
         experience_section: str = "",
+        context_section: str = "",
         api_config=None,
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
@@ -245,7 +246,9 @@ class SecuritySentinelAgent(BaseAgent):
                          失败时 success=False,error 字段含错误信息
         """
         # 1. 复用 _build_audit_prompt 生成安全审查 prompt
-        user_msg = self._build_audit_prompt(code, language, file_name, line_offset)
+        user_msg = self._build_audit_prompt(
+            code, language, file_name, line_offset, context_section=context_section,
+        )
 
         # 2. 通过 BaseAgent.call_json 调用 LLM(自动 emit 事件、重试)
         result = self.call_json(user_msg, ctx=ctx, api_config=api_config)
@@ -262,9 +265,15 @@ class SecuritySentinelAgent(BaseAgent):
             )
 
         # 3. 解析 findings 数组,转换为 Finding 列表
-        raw_findings = result.data.get("findings") or []
+        raw_findings = result.data.get("findings")
         if not isinstance(raw_findings, list):
-            raw_findings = []
+            return AgentResult(
+                success=False,
+                error="[security_sentinel] findings 必须是数组",
+                model=result.model,
+                duration_ms=result.duration_ms,
+                tokens=result.tokens,
+            )
 
         findings: List[Finding] = []
         # 构造一个临时 CodeFile-like 对象供 _normalize_finding 使用
@@ -2248,17 +2257,14 @@ class SecuritySentinelAgent(BaseAgent):
         if not file.content:
             return out
 
-        # 大文件保护
-        if len(file.content) > 60000:
-            logger.warning(
-                f"[security_sentinel] 文件 {file.file_name} 过大({len(file.content)} chars),"
-                f"跳过 LLM 审查,仅依赖正则。"
-            )
-            return out
-
         threshold = 8000 if scan_depth == "deep" else 6000
-        chunks = chunk_code(file.content, file.language or "plaintext", threshold=threshold)
+        chunks = chunk_code_with_context(
+            file.content,
+            file.language or "plaintext",
+            threshold=threshold,
+        )
         file_path = file.file_path or file.file_name
+        failed_chunks = 0
         for chunk in chunks:
             parsed = self._llm_audit_chunk(
                 code=chunk.text,
@@ -2266,8 +2272,10 @@ class SecuritySentinelAgent(BaseAgent):
                 file_path=file_path,
                 line_offset=chunk.start_line,
                 ctx=ctx,
+                context_section=chunk.context,
             )
             if not parsed:
+                failed_chunks += 1
                 continue
             for raw in parsed.get("findings") or []:
                 normalized = self._normalize_finding(
@@ -2288,6 +2296,10 @@ class SecuritySentinelAgent(BaseAgent):
                     if sk_line:
                         sk["line"] = sk_line + chunk.start_line
                     out.dangerous_sinks.append(sk)
+        if failed_chunks:
+            out.success = False
+            out.failure_kind = "partial_coverage"
+            out.error = f"{failed_chunks}/{len(chunks)} 个分片审查失败，已保留其他分片结果"
         return out
 
     def _project_audit_batches(
@@ -2845,9 +2857,12 @@ class SecuritySentinelAgent(BaseAgent):
 
     def _llm_audit_chunk(self, code: str, language: str, file_path: str,
                         line_offset: int,
-                        ctx: Optional[AgentContext]) -> Optional[dict]:
+                        ctx: Optional[AgentContext],
+                        context_section: str = "") -> Optional[dict]:
         """单分片 LLM 审查 → 已解析 dict;失败返回 None 不中断流程"""
-        user_msg = self._build_audit_prompt(code, language, file_path, line_offset)
+        user_msg = self._build_audit_prompt(
+            code, language, file_path, line_offset, context_section=context_section,
+        )
         result = self.call_json(user_msg, ctx=ctx)
         if not result.success:
             logger.warning(f"[security_sentinel] LLM 调用失败: {result.error}")
@@ -2858,7 +2873,8 @@ class SecuritySentinelAgent(BaseAgent):
         return result.data
 
     def _build_audit_prompt(self, code: str, language: str,
-                            file_path: str, line_offset: int) -> str:
+                            file_path: str, line_offset: int,
+                            context_section: str = "") -> str:
         return (
             "请对以下代码做系统化网络安全审查,尽量把每一类真实存在的风险都找全,"
             "宁可多给低置信度线索,也不要漏报。\n\n"
@@ -2908,6 +2924,8 @@ class SecuritySentinelAgent(BaseAgent):
             f"- 文件: {file_path}\n"
             f"- 语言: {language}\n"
             f"- 行号偏移: {line_offset}\n\n"
+            "## 跨分片符号上下文(只用于路径连接，evidence 仍须来自代码原文)\n"
+            f"{context_section or '(符号索引不可用，跨分片结论须降低置信度)'}\n\n"
             f"## 代码内容\n"
             f"```{language}\n{code}\n```"
         )
@@ -3338,11 +3356,11 @@ class SecuritySentinelAgent(BaseAgent):
             str(item.get("title") or ""),
         ))
         merged["source_details"] = details
-        merged["confirmation_count"] = max(
-            len(details),
-            len(cluster),
-            *(self._coerce_int(item.get("confirmation_count"), 1) for item in cluster),
-        )
+        # confirmation_count is derived from retained provenance, never from a
+        # model-declared count that cannot be audited independently.
+        merged["confirmation_count"] = max(1, len({
+            str(item.get("source") or "") for item in details
+        }))
         merged["sources"] = sorted({
             str(item.get("source") or "llm") for item in details
         })

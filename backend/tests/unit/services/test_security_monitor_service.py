@@ -94,6 +94,8 @@ def _patch_emit(monkeypatch, emitted):
         emitted.append((args, kwargs))
 
     monkeypatch.setattr(security_monitor_service, "emit_event", _capture)
+    # 历史规则测试显式验证启用态；生产默认已退役。
+    monkeypatch.setattr(settings, "security_flytrap_enabled", True)
     return emitted
 
 
@@ -463,6 +465,58 @@ def test_flytrap_upstream_recovery_resolves_integration_alert(
     ).one()
     assert alert.status == "resolved"
     assert alert.resolved_at is not None
+
+
+def test_retired_flytrap_is_not_scheduled_or_counted_as_degradation(
+    db, super_admin_user, monkeypatch, emitted,
+):
+    payloads = {
+        "ssh_login_events": _ssh_payload(),
+        "nginx_attack_events": {"total": 0, "by_ip": [], "by_detail": [], "recent": []},
+        "backup_audit": {"sql_gz_count": 1, "sql_gz_bytes": 10, "other_bytes": 0, "recent": []},
+        "status": {"checks": {"disk": {"used_percent": 40}}},
+    }
+    calls: list[str] = []
+
+    def execute(action: str, params=None, **_kwargs):
+        calls.append(action)
+        return payloads.get(action, {"ok": True})
+
+    monkeypatch.setattr(security_monitor_service.settings, "security_flytrap_enabled", False)
+    monkeypatch.setattr(ops_service, "execute", execute)
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert "flytrap_attack_events" not in calls
+    assert result["actions"]["flytrap_attack_events"]["status"] == "retired"
+    assert "flytrap_attack_events" not in result["degraded_actions"]
+    assert not result["human_actions"]
+    assert db.query(AgentAlert).filter(
+        AgentAlert.fingerprint == "integration:flytrap_upstream",
+        AgentAlert.status == "open",
+    ).count() == 0
+
+
+def test_security_status_exposes_retired_flytrap_without_executor_call(db, monkeypatch):
+    calls: list[str] = []
+
+    def execute(action: str, params=None, **_kwargs):
+        calls.append(action)
+        return {
+            "ssh_login_events": _ssh_payload(),
+            "nginx_attack_events": {"total": 0, "by_ip": []},
+            "backup_audit": {},
+        }.get(action, {"ok": True})
+
+    monkeypatch.setattr(security_monitor_service.settings, "security_flytrap_enabled", False)
+    monkeypatch.setattr(ops_service, "execute", execute)
+
+    status = security_monitor_service.query_security_status(db, since_hours=24)
+
+    assert "flytrap_attack_events" not in calls
+    assert status["attacks"]["flytrap_enabled"] is False
+    assert status["attacks"]["flytrap_status"] == "retired"
+    assert status["attacks"]["flytrap_degraded"] is False
 
 
 def test_all_security_sources_failure_requires_human_recovery(

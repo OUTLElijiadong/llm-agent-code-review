@@ -51,6 +51,16 @@ class TaskFileOut(BaseModel):
     version_no: int
 
 
+class AggregationSummaryOut(BaseModel):
+    """任务内可信聚合和人工复核状态汇总。"""
+
+    aggregated: int = 0
+    independently_confirmed: int = 0
+    pending_human_review: int = 0
+    unresolved_conflicts: int = 0
+    insufficient_evidence: int = 0
+
+
 class TaskDetailOut(BaseModel):
     """审查任务详情
 
@@ -83,6 +93,7 @@ class TaskDetailOut(BaseModel):
     error_message: Optional[str] = None
     files: list[TaskFileOut] = Field(default_factory=list)
     agent_releases: list[dict[str, Any]] = Field(default_factory=list)
+    aggregation_summary: AggregationSummaryOut = Field(default_factory=AggregationSummaryOut)
 
     model_config = {"from_attributes": True}
 
@@ -142,6 +153,12 @@ class IssueOut(BaseModel):
     compliance_mapping: Optional[dict] = None
     remediation: Optional[str] = None
     static_rule_hits: int = 0
+    aggregation_version: Optional[str] = None
+    evidence_quality: Optional[str] = None
+    conflict_status: Optional[str] = None
+    human_review_status: Optional[str] = None
+    risk_score: Optional[float] = None
+    aggregation_json: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 
@@ -176,6 +193,12 @@ class IssueOut(BaseModel):
         parsed = parse_json_value(value)
         return parsed if isinstance(parsed, dict) else None
 
+    @field_validator("aggregation_json", mode="before")
+    @classmethod
+    def parse_aggregation_json(cls, value: Any) -> Optional[dict]:
+        parsed = parse_json_value(value)
+        return parsed if isinstance(parsed, dict) else None
+
 
 class IssueListItemOut(IssueOut):
     """问题列表项: 在 IssueOut 基础上冗余 project / task 信息,便于跨任务表格展示"""
@@ -188,6 +211,13 @@ class IssueStatusIn(BaseModel):
     """更新问题状态请求体"""
     status: str = Field(pattern="^(unfixed|fixed|ignored|pending_review)$")
     note: Optional[str] = Field(default=None, max_length=500)
+
+
+class IssueReviewDecisionIn(BaseModel):
+    """人工对聚合争议的明确裁决。"""
+
+    decision: str = Field(pattern="^(accepted|rejected|evidence_requested)$")
+    note: Optional[str] = Field(default=None, max_length=1000)
 
 
 class IssueBatchStatusIn(BaseModel):

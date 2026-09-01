@@ -55,6 +55,26 @@ export interface IssueOut {
   exploit_scenario?: string
   /** v3: 漏洞证据代码片段 */
   evidence?: string
+  /** finding-aggregation-v1 可审计聚合元数据 */
+  aggregation_version?: string | null
+  evidence_quality?: 'verified' | 'direct' | 'inferred' | 'unsupported' | string | null
+  conflict_status?: 'none' | 'unresolved' | 'resolved' | string | null
+  human_review_status?: 'not_required' | 'pending' | 'accepted' | 'rejected' | 'evidence_requested' | string | null
+  risk_score?: number | null
+  confidence?: number | null
+  confirmation_count?: number
+  source_details?: Array<{
+    source: string
+    agent_code?: string
+    agent_name?: string
+    confidence?: number
+    severity?: string
+    evidence_quality?: string
+    title?: string
+    evidence?: string
+    claim_id?: string
+  }>
+  aggregation_json?: Record<string, unknown> | null
 }
 
 export interface IssueListItemOut extends IssueOut {
@@ -124,6 +144,13 @@ export interface TaskDetailOut {
   end_time?: string
   create_time: string
   files: TaskFileOut[]
+  aggregation_summary: {
+    aggregated: number
+    independently_confirmed: number
+    pending_human_review: number
+    unresolved_conflicts: number
+    insufficient_evidence: number
+  }
   agent_releases: Array<{
     release_id: number
     agent_code: string
@@ -165,4 +192,9 @@ export interface IssueUpdateStatusIn {
 export interface IssueBatchUpdateStatusIn {
   ids: number[]
   status: string
+}
+
+export interface IssueReviewDecisionIn {
+  decision: 'accepted' | 'rejected' | 'evidence_requested'
+  note?: string
 }

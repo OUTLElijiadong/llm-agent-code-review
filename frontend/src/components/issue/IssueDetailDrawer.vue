@@ -1,5 +1,5 @@
 <template>
-  <el-drawer v-model="visible" :title="title" size="560px" direction="rtl" @close="onClose">
+  <el-drawer v-model="visible" :title="title" size="min(560px, 100vw)" direction="rtl" @close="onClose">
     <template v-if="issue">
       <div class="drawer-section">
         <div class="drawer-label">基本信息</div>
@@ -24,6 +24,45 @@
             <el-tag size="small" type="warning" effect="plain">{{ issue.static_rule_hits }} 次</el-tag>
           </el-descriptions-item>
         </el-descriptions>
+      </div>
+
+      <div v-if="hasAggregation" class="drawer-section">
+        <div class="drawer-label">可信聚合</div>
+        <el-descriptions :column="2" border size="small">
+          <el-descriptions-item label="聚合版本">{{ issue.aggregation_version || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="真实来源">{{ issue.confirmation_count ?? issue.source_details?.length ?? 1 }} 个</el-descriptions-item>
+          <el-descriptions-item label="置信度">{{ formatConfidence(issue.confidence) }}</el-descriptions-item>
+          <el-descriptions-item label="证据等级">{{ evidenceQualityLabel(issue.evidence_quality) }}</el-descriptions-item>
+          <el-descriptions-item label="风险分">{{ formatRiskScore(issue.risk_score) }}</el-descriptions-item>
+          <el-descriptions-item label="冲突状态">
+            <el-tag :type="issue.conflict_status === 'unresolved' ? 'warning' : 'success'" size="small">
+              {{ conflictLabel(issue.conflict_status) }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+        <div v-if="issue.source_details?.length" class="claim-list">
+          <div v-for="claim in issue.source_details" :key="claim.claim_id || claim.source" class="claim-row">
+            <span>{{ claim.agent_name || claim.source }}</span>
+            <span>{{ claim.severity || '-' }} / {{ formatConfidence(claim.confidence) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="needsHumanReview" class="drawer-section review-panel">
+        <div class="drawer-label">人工复核</div>
+        <el-input
+          v-model="reviewNote"
+          type="textarea"
+          :rows="3"
+          maxlength="1000"
+          show-word-limit
+          placeholder="可选：记录接受、驳回或补充证据的依据"
+        />
+        <div class="review-actions">
+          <el-button type="success" :loading="reviewing" @click="submitReview('accepted')">接受结论</el-button>
+          <el-button type="danger" plain :loading="reviewing" @click="submitReview('rejected')">驳回结论</el-button>
+          <el-button type="warning" plain :loading="reviewing" @click="submitReview('evidence_requested')">要求补充证据</el-button>
+        </div>
       </div>
 
       <div class="drawer-section">
@@ -153,12 +192,14 @@
  *  - 新增 漏洞证据代码片段(evidence,使用 <pre><code> 高亮显示)
  *  - 字段缺失时不显示对应区块,避免空白
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
 import { MagicStick } from '@element-plus/icons-vue'
 import SeverityTag from './SeverityTag.vue'
 import AiPromptModal from './AiPromptModal.vue'
 import type { IssueOut, ComplianceMapping } from '@/types/review'
+import { reviewDecision } from '@/api/issue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -167,6 +208,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
+  (e: 'reviewed', value: IssueOut): void
 }>()
 
 const visible = computed({
@@ -175,6 +217,20 @@ const visible = computed({
 })
 
 const title = computed(() => props.issue?.title ?? '问题详情')
+const reviewNote = ref('')
+const reviewing = ref(false)
+const hasAggregation = computed(() => Boolean(
+  props.issue?.aggregation_version
+  || props.issue?.source_details?.length
+  || props.issue?.conflict_status === 'unresolved',
+))
+const needsHumanReview = computed(() => (
+  props.issue?.human_review_status === 'pending'
+  || props.issue?.human_review_status === 'evidence_requested'
+  || props.issue?.conflict_status === 'unresolved'
+))
+
+watch(() => props.issue?.id, () => { reviewNote.value = '' })
 
 /** 仅信任后端标记为有效 v3.1 向量派生的分数。 */
 const verifiedCvssScore = computed<number | null>(() => {
@@ -272,6 +328,37 @@ function statusType(status: string): string {
  */
 function sourceLabel(source: string): string {
   return sourceLabels[source] ?? source
+}
+
+function formatConfidence(value?: number | null): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '未声明'
+}
+
+function formatRiskScore(value?: number | null): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(1) : '-'
+}
+
+function evidenceQualityLabel(value?: string | null): string {
+  return ({ verified: '源码已核验', direct: '直接证据', inferred: '路径推断', unsupported: '证据不足' } as Record<string, string>)[value || ''] || '未评估'
+}
+
+function conflictLabel(value?: string | null): string {
+  return ({ unresolved: '待复核', resolved: '已解决', none: '无冲突' } as Record<string, string>)[value || 'none'] || value || '无冲突'
+}
+
+async function submitReview(decision: 'accepted' | 'rejected' | 'evidence_requested'): Promise<void> {
+  if (!props.issue || reviewing.value) return
+  reviewing.value = true
+  try {
+    const updated = await reviewDecision(props.issue.id, { decision, note: reviewNote.value.trim() || undefined })
+    ElMessage.success({ accepted: '已接受聚合结论', rejected: '已驳回聚合结论', evidence_requested: '已记录补充证据要求' }[decision])
+    emit('reviewed', updated)
+    reviewNote.value = ''
+  } catch {
+    ElMessage.error('复核决定保存失败，问题仍保持待复核，可稍后重试')
+  } finally {
+    reviewing.value = false
+  }
 }
 
 /**
@@ -446,5 +533,30 @@ function onClose(): void {
 .text-muted {
   color: var(--el-text-color-placeholder);
   font-size: 12px;
+}
+
+.claim-list {
+  margin-top: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.claim-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+
+  &:last-child { border-bottom: 0; }
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+
+  :deep(.el-button + .el-button) { margin-left: 0; }
 }
 </style>

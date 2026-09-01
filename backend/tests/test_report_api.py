@@ -148,6 +148,13 @@ def _seed_review_task(db_session, user_id: int = 1) -> int:
             "confidence": 0.95,
             "source": "llm",
             "cvss_score": 9.1,
+            "confirmation_count": 2,
+            "aggregation_version": "finding-aggregation-v1",
+            "evidence_quality": "direct",
+            "conflict_status": "unresolved",
+            "human_review_status": "pending",
+            "risk_score": 91.0,
+            "aggregation_json": {"claims": [{"claim_id": "report-claim-1"}]},
         },
         {
             "task_id": task.id,
@@ -299,6 +306,14 @@ def test_generate_json_report_success(admin_client):
     assert "issues" in payload
     assert "statistics" in payload
     assert payload["statistics"]["total_issues"] == 3
+    assert payload["statistics"]["aggregation_summary"] == {
+        "aggregated": 1,
+        "independently_confirmed": 1,
+        "pending_human_review": 1,
+        "unresolved_conflicts": 1,
+        "insufficient_evidence": 0,
+    }
+    assert payload["issues"][0]["aggregation_json"]["claims"][0]["claim_id"] == "report-claim-1"
 
 
 def test_generate_html_report_success(admin_client):
@@ -314,6 +329,8 @@ def test_generate_html_report_success(admin_client):
     html = response.text
     assert "<!DOCTYPE html>" in html
     assert "SQL注入审查" in html or "SQL 注入漏洞" in html
+    assert "finding-aggregation-v1" in html
+    assert "人工复核 pending" in html
 
 
 def test_generate_pdf_report_success(admin_client):
