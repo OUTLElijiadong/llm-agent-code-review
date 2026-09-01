@@ -49,9 +49,9 @@
 - Alembic：`046_finding_aggregation (head)`。
 - `review_issue` 六个新增字段全部存在：`aggregation_version`、`evidence_quality`、`conflict_status`、`human_review_status`、`risk_score`、`aggregation_json`。
 - 生产 OpenAPI 模型中存在 `PUT /api/issues/{issue_id}/review-decision`。
-- 后端、前端、MySQL、Redis、ClamAV 均为 healthy；Embedding 服务 running；六个容器重启次数全部为 0。
+- 后端、前端、MySQL、Redis、ClamAV 均为 healthy；Embedding 服务 running。受控清理前的额外备份隔离恢复触发 MySQL 内存上限，MySQL 自动重启 1 次；其他五个容器重启数仍为 0。
 - 公网 `/healthz`、`/readyz` 和首页分别返回正常状态、正常状态和 HTTP 200，健康响应中的版本与提交一致。
-- 发布后精确日志检查没有后端 `ERROR/CRITICAL/Traceback`，没有前端 error/5xx；Nginx 配置检查通过。
+- 初始发布后至额外备份恢复校验前，精确日志检查没有后端 `ERROR/CRITICAL/Traceback`，没有前端 error/5xx；Nginx 配置检查通过。
 - 生产库在 3.8.0 窗口期间的已聚合记录数为 0，无需对业务数据做追溯重算。
 - 在生产容器内执行同源重复复现：基线与重复 10 次后风险分均为 `62.5`，`confirmation_count=2`，`risk_scoring_version=claim-risk-v2`。
 
@@ -70,6 +70,18 @@
 ```bash
 systemctl enable --now flytrap-agent.service flytrap-sync.service flytrap-agent-cert-renew.timer
 ```
+
+## 受控清理验收
+
+- 执行命令：`deploy/cleanup.sh --apply`，退出码 `0`。
+- 清理前 dry-run 列出 199 个旧发布镜像标签、2 项按 168 小时阈值执行的镜像/构建缓存 prune，不删除发布状态文件。
+- 实际释放 `9,972,244,480` 字节，即 `9.29 GiB`；根盘从 89% 降至 84%，可用空间约 31 GB。
+- Docker 镜像数从 239 降至 67，构建缓存条目从 483 降至 364；阈值内的近期缓存和受保护镜像保留。
+- 当前 `c8a80228f48b949daabe4520c880a8994540c08b` 和上一版 `46a718aeae12431627993ecd285bc1774350206f` 的前后端四个镜像全部存在，运行容器仍引用当前版本。
+- 审计目录：`/opt/code-review/backups/controlled-cleanup-20260901T145933Z`，包含清理前后镜像清单、dry-run、apply 日志、发布账本快照和 `SHA256SUMS`；全部哈希复验通过。
+- 清理后 `ops-check.sh` 返回 `status=ok / can_continue=true / blocking_checks=[]`，数据库 89 张表且 `user`、`review_task`、`review_issue`、`agent_job_run` 快速检查全部为 `OK`。
+- 额外验证创建的 `prism_verify_20260901145022_12237` 临时库已精确删除；2026-08-19 的历史临时库未纳入本次授权，保持未动。
+- OOM 期间为 `2026-09-01T14:51:14Z` 至 `14:51:39Z`；后端在数据库恢复前共出现 120 个 MySQL `Connection refused` Traceback。`14:51:40Z` 之后后端错误/Traceback/5xx 和前端严重日志/5xx 均为 0。
 
 ## FlyTrap 生产验收
 
@@ -96,4 +108,5 @@ systemctl enable --now flytrap-agent.service flytrap-sync.service flytrap-agent-
 - Python 使用 AST 关系索引；非 Python 语言当前使用保守词法索引并明确标记降级，不把词法结果宣称为完整语义分析。
 - 真值评测降低模型波动带来的发布风险，但不能把概率模型变成形式化验证器。
 - FlyTrap 历史数据、程序目录、unit 文件、证书和队列均未删除，满足审计和回滚需要。
-- 独立运维检查将磁盘 89% 标记为可继续的降级项（告警线 85%、阻断线 95%）；核心交付不受阻断，但清理或扩容需要人工选择，见 TODO。
+- 磁盘风险已通过受控清理从 89% 降至 84%，最终运维巡检不再降级；但仅低于 85% 告警线 1 个百分点，仍需保留容量监控。
+- 额外隔离恢复暴露了生产 MySQL 900 MiB 内存上限不足以安全承载全量临时恢复；自动重启后崩溃恢复、关键表、迁移、日志和公网验收均通过，验证架构改造列入非阻断 TODO。
