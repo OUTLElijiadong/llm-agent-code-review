@@ -409,6 +409,21 @@ SCRIPT
   chmod +x "$target"
 }
 
+# 写入可预测的 df 命令替身，覆盖资源告警与临界分支。
+# 参数: $1 目标可执行文件路径。
+# 返回: 写入和 chmod 成功时返回 0。
+write_fake_df() {
+  local target="$1"
+  cat > "$target" <<'SCRIPT'
+#!/usr/bin/env bash
+set -eu
+percent="${FAKE_DF_PERCENT:-50}"
+printf '%s\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on'
+printf '/dev/test 100 50 50 %s%% /\n' "$percent"
+SCRIPT
+  chmod +x "$target"
+}
+
 # 执行 ops-check 的全绿和参数错误模拟。
 # 参数: $1 fake bin 目录；$2 测试根目录。
 # 返回: 所有断言通过时返回 0。
@@ -444,6 +459,7 @@ ENV
   : > "$workspace/docker-ops.log"
   PATH="$fake_bin:$PATH" \
     FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
+    FAKE_DF_PERCENT=50 \
     DEPLOY_ENV_FILE="$env_file" \
     BACKUP_DIR="$backup_dir" \
     BACKUP_MAX_AGE_HOURS=48 \
@@ -468,6 +484,86 @@ assert payload["checks"]["https"]["http_redirect_code"] == "308"
 assert payload["checks"]["alembic"]["current"] == "009"
 assert payload["checks"]["alembic"]["head"] == "009"
 assert payload["checks"]["backup"]["file"] == "code_review_20990101_000000.sql.gz"
+assert payload["can_continue"] is True
+assert payload["checks"]["disk"]["status"] == "ok"
+PY
+
+  PATH="$fake_bin:$PATH" \
+    FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
+    FAKE_DF_PERCENT=87 \
+    DEPLOY_ENV_FILE="$env_file" \
+    BACKUP_DIR="$backup_dir" \
+    BACKUP_MAX_AGE_HOURS=48 \
+    OPS_DISK_MAX_PERCENT=85 \
+    OPS_DISK_CRITICAL_PERCENT=95 \
+    OPS_MEMORY_MAX_PERCENT=100 \
+    OPS_MEMORY_CRITICAL_PERCENT=100 \
+    OPS_HTTPS_REQUIRED=FALSE \
+    ./ops-check.sh > "$workspace/ops-resource-degraded.json"
+  python3 - "$workspace/ops-resource-degraded.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    payload = json.load(source)
+assert payload["status"] == "degraded"
+assert payload["can_continue"] is True
+assert payload["checks"]["disk"]["ok"] is False
+assert payload["checks"]["disk"]["status"] == "degraded"
+assert any(item["code"] == "disk_cleanup_review" for item in payload["actions"])
+PY
+
+  PATH="$fake_bin:$PATH" \
+    FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
+    FAKE_DF_PERCENT=85 \
+    DEPLOY_ENV_FILE="$env_file" \
+    BACKUP_DIR="$backup_dir" \
+    BACKUP_MAX_AGE_HOURS=48 \
+    OPS_DISK_MAX_PERCENT=85 \
+    OPS_DISK_CRITICAL_PERCENT=95 \
+    OPS_MEMORY_MAX_PERCENT=100 \
+    OPS_MEMORY_CRITICAL_PERCENT=100 \
+    OPS_HTTPS_REQUIRED=FALSE \
+    ./ops-check.sh > "$workspace/ops-resource-warning-boundary.json"
+  python3 - "$workspace/ops-resource-warning-boundary.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    payload = json.load(source)
+assert payload["status"] == "degraded"
+assert payload["can_continue"] is True
+assert payload["checks"]["disk"]["status"] == "degraded"
+PY
+
+  set +e
+  PATH="$fake_bin:$PATH" \
+    FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
+    FAKE_DF_PERCENT=95 \
+    DEPLOY_ENV_FILE="$env_file" \
+    BACKUP_DIR="$backup_dir" \
+    BACKUP_MAX_AGE_HOURS=48 \
+    OPS_DISK_MAX_PERCENT=85 \
+    OPS_DISK_CRITICAL_PERCENT=95 \
+    OPS_MEMORY_MAX_PERCENT=100 \
+    OPS_MEMORY_CRITICAL_PERCENT=100 \
+    OPS_HTTPS_REQUIRED=FALSE \
+    ./ops-check.sh > "$workspace/ops-resource-critical.json"
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -eq 1 ]] || {
+    printf 'ops-check 临界磁盘退出码错误: %s\n' "$exit_code" >&2
+    exit 1
+  }
+  python3 - "$workspace/ops-resource-critical.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    payload = json.load(source)
+assert payload["status"] == "error"
+assert payload["can_continue"] is False
+assert payload["checks"]["disk"]["status"] == "error"
 PY
 
   set +e
@@ -917,6 +1013,135 @@ SCRIPT
   }
 }
 
+# 注入应用切换后的冒烟失败，验证 deploy 显式失败路径必定进入应用回滚。
+# 参数: $1 测试根目录。
+# 返回: 回滚被调用、pending 被保留且锁释放时返回 0。
+run_deploy_failure_rollback_simulation() {
+  local workspace="$1/deploy-failure"
+  local repo="$workspace/repo"
+  local fake_bin="$workspace/bin"
+  local state_dir="$workspace/release-state"
+  local lock_dir="$workspace/.maintenance.lock"
+  local backup_file="$workspace/pre-deploy.sql.gz"
+  local docker_log="$workspace/docker.log"
+  local rollback_log="$workspace/rollback.log"
+  local output_file="$workspace/output.log"
+  local release_sha
+  local exit_code
+
+  mkdir -p "$repo/deploy/lib" "$repo/backend" "$fake_bin" "$state_dir"
+  cp deploy.sh "$repo/deploy/deploy.sh"
+  cp lib/common.sh "$repo/deploy/lib/common.sh"
+  printf '%s\n' '3.7.0' > "$repo/VERSION"
+  printf '%s\n' 'test database' > "$repo/backend/GeoLite2-City.mmdb"
+  write_strong_database_test_env "$repo/deploy/.env"
+  printf 'GEOLITE_DB_HOST_PATH=%s\n' "$repo/backend/GeoLite2-City.mmdb" >> "$repo/deploy/.env"
+  printf '%s\n' 'services: {}' > "$repo/deploy/docker-compose.yml"
+  printf '%s\n' 'backup' | gzip -c > "$backup_file"
+
+  cat > "$repo/deploy/backup.sh" <<SCRIPT
+#!/usr/bin/env bash
+printf '%s\n' '$backup_file'
+SCRIPT
+  cat > "$repo/deploy/verify-backup.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  cat > "$repo/deploy/sync-frontend-assets.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  cat > "$repo/deploy/rollback.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FAKE_ROLLBACK_LOG:?}"
+exit 0
+SCRIPT
+  chmod +x "$repo/deploy/"*.sh
+
+  cat > "$fake_bin/docker" <<'SCRIPT'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >> "${FAKE_DOCKER_LOG:?}"
+if [[ "${1:-}" == "compose" ]]; then
+  shift
+  if [[ "${1:-}" == "--env-file" ]]; then
+    env_file="$2"
+    shift 2
+    if [[ "${1:-}" == "config" && "${2:-}" == "--environment" ]]; then
+      awk '/^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)=/ {print}' "$env_file"
+    fi
+    exit 0
+  fi
+  case "${1:-}" in
+    version|build|up) exit 0 ;;
+    ps) [[ "${2:-}" == "-q" ]] && printf 'cid-%s\n' "${3:-unknown}" ;;
+    exec)
+      case "$*" in
+        *'SELECT version_num FROM alembic_version'*) printf '%s\n' '045' ;;
+      esac
+      ;;
+    run)
+      case "$*" in
+        *'alembic heads'*) printf '%s\n' '045 (head)' ;;
+        *'alembic current'*) printf '%s\n' '045' ;;
+      esac
+      ;;
+  esac
+  exit 0
+fi
+case "${1:-}" in
+  inspect) printf '%s\n' 'healthy' ;;
+  image) exit 0 ;;
+  run) exit 0 ;;
+esac
+SCRIPT
+  cat > "$fake_bin/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+# 应用已切换后让 backend 冒烟失败，触发自动回滚。
+exit 22
+SCRIPT
+  chmod +x "$fake_bin/docker" "$fake_bin/curl"
+
+  git -C "$repo" init -q
+  git -C "$repo" add VERSION backend deploy
+  git -C "$repo" -c user.name=PrismTest -c user.email=prism@example.test commit -qm init
+  release_sha="$(git -C "$repo" rev-parse HEAD)"
+  cat > "$state_dir/current.env" <<STATE
+RELEASE_SHA=$release_sha
+BACKEND_RELEASE=previous-backend
+FRONTEND_RELEASE=previous-frontend
+TARGET=all
+BACKUP_FILE=none
+ALEMBIC_REVISION=045
+STATE
+
+  : > "$docker_log"
+  : > "$rollback_log"
+  set +e
+  env PATH="$fake_bin:$PATH" DEPLOY_ENV_FILE=.env RELEASE_STATE_DIR="$state_dir" \
+    MAINTENANCE_LOCK_DIR="$lock_dir" FAKE_DOCKER_LOG="$docker_log" \
+    FAKE_ROLLBACK_LOG="$rollback_log" BACKEND_HEALTH_TIMEOUT=1 \
+    "$repo/deploy/deploy.sh" all --revision "$release_sha" > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" == "1" ]] || {
+    printf 'deploy 故障注入退出码错误: %s\n' "$exit_code" >&2
+    exit 1
+  }
+  assert_contains "$output_file" 'Backend 冒烟失败'
+  assert_contains "$output_file" '应用自动回滚完成'
+  assert_contains "$rollback_log" '--from-deploy-failure'
+  [[ -f "$state_dir/pending.env" ]] || {
+    printf 'deploy 失败后未保留 pending 状态\n' >&2
+    exit 1
+  }
+  [[ ! -e "$lock_dir" ]] || {
+    printf 'deploy 自动回滚后未释放维护锁\n' >&2
+    exit 1
+  }
+}
+
 # 验证沙箱镜像固化脚本默认不写入，--apply 才原子更新五个 digest。
 # 参数: $1 fake bin 目录；$2 测试根目录。
 # 返回: dry-run 与 apply 语义正确时返回 0。
@@ -1055,7 +1280,7 @@ assert_contains deploy.sh 'assert_alembic_at_head'
 assert_contains deploy.sh 'backup.sh --reason pre_deploy'
 assert_contains deploy.sh 'smoke_backend'
 assert_contains deploy.sh "smoke_https \"\$desired_backend\""
-assert_contains deploy.sh "3.6 版本必须使用 all 发布"
+assert_contains deploy.sh "当前生产版本必须使用 all 发布"
 assert_contains deploy.sh 'rollback.sh'
 assert_not_contains deploy.sh 'reset --hard'
 assert_not_contains deploy.sh 'docker image prune'
@@ -1171,10 +1396,12 @@ fake_bin="$test_root/bin"
 mkdir -p "$fake_bin"
 write_fake_docker "$fake_bin/docker"
 write_fake_curl "$fake_bin/curl"
+write_fake_df "$fake_bin/df"
 run_database_credential_validation "$test_root"
 run_backup_archive_drift_simulation "$fake_bin" "$test_root"
 run_verify_backup_guard_simulation "$fake_bin" "$test_root"
 run_restore_failure_simulation "$test_root"
+run_deploy_failure_rollback_simulation "$test_root"
 run_ops_check_simulation "$fake_bin" "$test_root"
 run_cleanup_simulation "$fake_bin" "$test_root"
 run_sandbox_pin_simulation "$fake_bin" "$test_root"

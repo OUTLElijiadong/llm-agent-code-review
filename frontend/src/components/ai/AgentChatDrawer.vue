@@ -59,6 +59,7 @@ import {
   settleAgentMeshTimeline,
 } from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
+import { actionableError } from '@/composables/withFeedback'
 import { buildAutoValidationPrompt } from '@/utils/autoValidation'
 import {
   autoTitleAgentChatSession,
@@ -117,11 +118,12 @@ interface ChatMessage {
   content: string
   time: string
   /** 错误卡片:失败后留在消息流里,带「重试」与「新建对话」 */
-  errorCard?: { retryable: boolean }
+  errorCard?: { retryable: boolean; nextAction?: string; requestId?: string }
   runId?: string
   trace_id?: string
   steps?: StepBubble[]
   clarify?: ClarifyPayload
+  clarifyError?: { message: string; expired: boolean; nextAction?: string; requestId?: string }
   /** v3.0 双层调度调用链(空表示未触发双层调度) */
   planSteps?: PlanStep[]
   approval?: ResponseApprovalRequiredEvent & {
@@ -777,8 +779,13 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       agentTeamError.value = ''
       return
     }
-    const details = await Promise.all(listed.items.map((item) => getAgentTeam(item.team_id)))
+    const settled = await Promise.allSettled(listed.items.map((item) => getAgentTeam(item.team_id)))
     if (!isCurrent()) return
+    const details = settled
+      .filter((result): result is PromiseFulfilledResult<AgentTeamDetail> => result.status === 'fulfilled')
+      .map((result) => result.value)
+    const failedCount = settled.length - details.length
+    if (!details.length && failedCount) throw new Error('团队详情暂时无法同步')
     agentTeams.value = details
     cachedAgentTeams.value = details
     const unanchored = details.filter((team) => !anchoredTeamIds.value.has(team.team_id))
@@ -807,7 +814,7 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       }
       anchor.teamIds = [...new Set([...(anchor.teamIds ?? []), ...unanchored.map((team) => team.team_id)])]
     }
-    agentTeamError.value = ''
+    agentTeamError.value = failedCount ? `${failedCount} 个团队状态暂时未同步，已保留其余结果` : ''
   } catch {
     if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
   } finally {
@@ -922,18 +929,18 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
   return ''
 }
 
-function requestErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : '小菱这次没连上,请再试一次'
-}
-
 /** 错误留在消息流:失败/取消不再只是 Toast,追加一张带重试/新建对话的错误卡片。 */
-function appendErrorCard(content: string, retryable: boolean): void {
+function appendErrorCard(
+  content: string,
+  retryable: boolean,
+  metadata: { nextAction?: string; requestId?: string } = {},
+): void {
   messages.value.push({
     id: messageId(),
     role: 'error',
     content,
     time: dayjs().format('HH:mm'),
-    errorCard: { retryable },
+    errorCard: { retryable, ...metadata },
   })
   void nextTick().then(scrollToBottom)
 }
@@ -955,7 +962,11 @@ async function retryLastAction(): Promise<void> {
   }
   if (kind === 'approval') {
     const target = [...messages.value].reverse().find((message) => message.approval?.status === 'pending')
-    if (target?.approval) await decideApproval(target, { action: 'approve', confirmation: target.approval.danger ? '确认执行' : '' })
+    if (target?.approval) {
+      ElMessage.warning('审批不会自动重放，请在原审批卡中重新确认')
+      await nextTick()
+      scrollToBottom()
+    }
     return
   }
   const target = [...messages.value].reverse().find((message) => message.inputRequest?.status === 'pending')
@@ -1019,8 +1030,18 @@ async function cancelResponse(reason = ''): Promise<void> {
   if (runId && sessionId.value) {
     try {
       await cancelAgentResponseRun('user', sessionId.value, runId, reason)
-    } catch {
-      // 取消请求失败时仍断开本地流,后续轮询以服务端状态为准。
+    } catch (error) {
+      const info = actionableError(error, '停止请求未确认')
+      const content = info.message.includes('停止请求未确认')
+        ? info.message
+        : `停止请求未确认：${info.message}`
+      ElMessage.error(content)
+      appendErrorCard(content, false, {
+        nextAction: info.nextAction || '当前任务仍在运行，可再次点击“停止响应”，或等待状态同步',
+        requestId: info.requestId,
+      })
+      scheduleSessionPoll()
+      return
     }
     if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: 'cancelled' }
   }
@@ -1339,9 +1360,12 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       appendErrorCard('已停止本次回答,你可以点「重试」继续,或新建对话', true)
       return false
     }
-    const text = requestErrorMessage(error)
-    ElMessage.error(text)
-    appendErrorCard(text, true)
+    const info = actionableError(error, '小菱这次没连上,请再试一次')
+    ElMessage.error(info.message)
+    appendErrorCard(info.message, info.retryable, {
+      nextAction: info.nextAction,
+      requestId: info.requestId,
+    })
     if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
     return false
   } finally {
@@ -1529,6 +1553,7 @@ async function submitClarify(message: ChatMessage): Promise<void> {
     return
   }
   loading.value = true
+  message.clarifyError = undefined
   try {
     const res = await post<{ content: string; clarify?: ClarifyPayload; model?: string }>(
       '/agents/clarify',
@@ -1546,13 +1571,36 @@ async function submitClarify(message: ChatMessage): Promise<void> {
     if (res.clarify) {
       ensureClarifyAnswers(res.clarify.clarify_id, res.clarify.questions)
     }
-  } catch {
-    ElMessage.error('提交追问失败,请重试')
+  } catch (error) {
+    const info = actionableError(error, '提交追问失败,请重试')
+    message.clarifyError = {
+      message: info.message,
+      expired: info.code === 41001,
+      nextAction: info.nextAction,
+      requestId: info.requestId,
+    }
   } finally {
     loading.value = false
     await nextTick()
     scrollToBottom()
   }
+}
+
+/** 追问失效后恢复原始问题到输入框，必须由用户确认后重新发送。 */
+async function restartExpiredClarify(message: ChatMessage): Promise<void> {
+  const index = messages.value.indexOf(message)
+  const original = messages.value
+    .slice(0, index >= 0 ? index : messages.value.length)
+    .reverse()
+    .find((item) => item.role === 'user' && item.content.trim())
+  const clarifyId = message.clarify?.clarify_id
+  if (clarifyId) delete clarifyCustomProjectInputs.value[clarifyId]
+  message.clarify = undefined
+  message.clarifyError = undefined
+  inputText.value = original?.content ?? ''
+  await nextTick()
+  chatInputRef.value?.focus()
+  chatInputRef.value?.setSelectionRange(0, inputText.value.length)
 }
 
 const STATUS_BY_TYPE: Record<AgentEvent['type'], AgentStatus> = {
@@ -2248,6 +2296,8 @@ onMounted(() => {
                     <span>这次没有完成</span>
                   </div>
                   <p class="msg-error-text">{{ msg.content }}</p>
+                  <p v-if="msg.errorCard?.nextAction" class="msg-error-next">{{ msg.errorCard.nextAction }}</p>
+                  <p v-if="msg.errorCard?.requestId" class="msg-error-request">请求编号：{{ msg.errorCard.requestId }}</p>
                   <div class="msg-error-actions">
                     <button
                       v-if="msg.errorCard?.retryable"
@@ -2346,11 +2396,18 @@ onMounted(() => {
                     </el-icon>
                     <span>{{ confirmationQuestion(msg) ? '请确认本次操作' : '请补充以下信息,我再继续执行' }}</span>
                   </header>
-                  <div
-                    v-for="q in msg.clarify.questions"
-                    :key="q.key"
-                    class="clarify-field"
-                  >
+                  <div v-if="msg.clarifyError" class="clarify-recovery" role="status">
+                    <strong>{{ msg.clarifyError.expired ? '这次追问已失效' : '提交没有完成' }}</strong>
+                    <span>{{ msg.clarifyError.message }}</span>
+                    <small v-if="msg.clarifyError.nextAction">{{ msg.clarifyError.nextAction }}</small>
+                    <small v-if="msg.clarifyError.requestId">请求编号：{{ msg.clarifyError.requestId }}</small>
+                  </div>
+                  <template v-if="!msg.clarifyError?.expired">
+                    <div
+                      v-for="q in msg.clarify.questions"
+                      :key="q.key"
+                      class="clarify-field"
+                    >
                     <label class="clarify-label">
                       {{ q.label }}
                       <span v-if="q.hint" class="clarify-hint">{{ q.hint }}</span>
@@ -2433,9 +2490,18 @@ onMounted(() => {
                         :value="opt.value"
                       />
                     </el-select>
-                  </div>
+                    </div>
+                  </template>
                   <footer class="clarify-foot">
-                    <template v-if="confirmationQuestion(msg)">
+                    <el-button
+                      v-if="msg.clarifyError?.expired"
+                      size="small"
+                      type="primary"
+                      @click="restartExpiredClarify(msg)"
+                    >
+                      重新提问
+                    </el-button>
+                    <template v-else-if="confirmationQuestion(msg)">
                       <el-button
                         size="small"
                         :disabled="loading"
@@ -3054,6 +3120,15 @@ onMounted(() => {
   word-break: break-word;
 }
 
+.msg-error-next,
+.msg-error-request {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .msg-error-actions {
   display: flex;
   gap: 8px;
@@ -3484,6 +3559,23 @@ onMounted(() => {
 
 .clarify-icon {
   font-size: 14px;
+}
+
+.clarify-recovery {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border-left: 3px solid #D54941;
+  background: #FFF6F5;
+  color: #7A271A;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.clarify-recovery small {
+  color: var(--gray-600);
+  overflow-wrap: anywhere;
 }
 
 .clarify-field {

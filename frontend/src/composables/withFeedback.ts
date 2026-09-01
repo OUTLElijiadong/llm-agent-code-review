@@ -10,19 +10,56 @@ import { ElMessage } from 'element-plus/es/components/message/index'
  * 应尽量只在确实没有反馈时补一条,避免重复打扰。
  */
 
+export interface ActionableError {
+  message: string
+  code?: number
+  requestId?: string
+  retryable: boolean
+  nextAction?: string
+}
+
+/** 把 Axios、业务信封或原生 Error 归一为面向用户的恢复信息。 */
+export function actionableError(error: unknown, fallback = '操作失败,请重试'): ActionableError {
+  const root = error && typeof error === 'object' ? error as Record<string, unknown> : undefined
+  const response = root?.response && typeof root.response === 'object'
+    ? root.response as Record<string, unknown>
+    : undefined
+  const payload = response?.data && typeof response.data === 'object'
+    ? response.data as Record<string, unknown>
+    : root
+  const headers = response?.headers && typeof response.headers === 'object'
+    ? response.headers as Record<string, unknown>
+    : undefined
+  const payloadMessage = payload?.message
+  const rootMessage = root?.message
+  const message = typeof payloadMessage === 'string' && payloadMessage.trim()
+    ? payloadMessage
+    : typeof rootMessage === 'string' && rootMessage.trim()
+      ? rootMessage
+      : typeof error === 'string' && error.trim()
+        ? error
+        : fallback
+  const code = typeof payload?.code === 'number' ? payload.code : undefined
+  const bodyRequestId = payload?.request_id
+  const headerRequestId = headers?.['x-request-id'] ?? headers?.['X-Request-Id']
+  const requestId = typeof bodyRequestId === 'string' && bodyRequestId.trim()
+    ? bodyRequestId
+    : typeof headerRequestId === 'string' && headerRequestId.trim()
+      ? headerRequestId
+      : undefined
+  // 收到响应但缺少明确契约时，不能把可能已落地的副作用当成可安全重放。
+  const retryable = typeof payload?.retryable === 'boolean'
+    ? payload.retryable
+    : !response && error instanceof Error
+  const nextAction = typeof payload?.next_action === 'string' && payload.next_action.trim()
+    ? payload.next_action
+    : undefined
+  return { message, code, requestId, retryable, nextAction }
+}
+
 /** 从异常对象提取可读信息(优先后端 message,再 Error.message,最后兜底)。 */
 export function readableError(error: unknown, fallback = '操作失败,请重试'): string {
-  if (error && typeof error === 'object') {
-    const anyErr = error as Record<string, unknown>
-    const respMsg = (anyErr.response as Record<string, unknown> | undefined)?.data
-    if (respMsg && typeof respMsg === 'object') {
-      const msg = (respMsg as Record<string, unknown>).message
-      if (typeof msg === 'string' && msg.trim()) return msg
-    }
-    if (typeof anyErr.message === 'string' && anyErr.message.trim()) return anyErr.message
-  }
-  if (typeof error === 'string' && error.trim()) return error
-  return fallback
+  return actionableError(error, fallback).message
 }
 
 /**

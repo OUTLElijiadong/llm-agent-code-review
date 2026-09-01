@@ -8,6 +8,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
+// These helpers are consumed by Vue templates; keep the narrow suppression because
+// typescript-eslint cannot reliably see bindings in every scoped table slot.
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   activateAgentKnowledgeDoc,
   approveItem,
@@ -192,6 +195,7 @@ import {
   sourceTypeText,
   toolCodeText,
 } from '@/constants/adminGovernance'
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
 function statusText(value: string | number | null | undefined): string {
   const labels: Record<string, string> = {

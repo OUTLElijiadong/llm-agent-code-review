@@ -11,7 +11,7 @@ import pytest
 
 from app.core.config import settings
 from app.core.exceptions import ForbiddenError
-from app.models.agent_governance import AgentJob, AgentJobRun, AgentProfile
+from app.models.agent_governance import AgentAlert, AgentJob, AgentJobRun, AgentProfile
 from app.models.ai_call_log import AiCallLog
 from app.models.rbac import Role, UserRole
 from app.models.user import User
@@ -333,6 +333,76 @@ def test_unhealthy_ops_result_marks_job_run_failed(db: Any, monkeypatch: Any) ->
 
     assert run.status == "failed"
     assert run.error == "AI 自动运维巡检检测到不健康状态"
+
+
+def test_degraded_ops_health_warns_but_does_not_fail_the_job(db: Any, monkeypatch: Any) -> None:
+    """可继续的资源压力应该交给人处置，不应堵死定时任务。"""
+
+    class FakeOperationsAgent:
+        name = "operations"
+
+        def execute_action(self, *_args: Any, action: str, **_kwargs: Any) -> Any:
+            if action == "status":
+                checks = {
+                    "status": "degraded",
+                    "can_continue": True,
+                    "summary": "磁盘使用率偏高，请人工审阅。",
+                    "actions": [{
+                        "code": "disk_cleanup_review",
+                        "label": "审阅磁盘清理",
+                        "message": "清理前先审阅可回收文件",
+                        "requires_human": True,
+                    }],
+                    "checks": {
+                        "backup": {"ok": True, "status": "ok"},
+                        "containers": {"services": {"backend": "healthy"}},
+                    },
+                }
+                return SimpleNamespace(
+                    success=True,
+                    data={
+                        "id": 101,
+                        "status": "success",
+                        "result": {"ok": True, "result": {"checks": checks}},
+                    },
+                )
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "id": 102,
+                    "status": "success",
+                    "result": {"ok": True, "result": {"valid_for_30_days": True}},
+                },
+            )
+
+        def diagnose(self, *_args: Any, **_kwargs: Any) -> Any:
+            raise AssertionError("可继续的降级状态不应隐式调用模型诊断")
+
+    job = AgentJob(
+        job_code="ops-health-degraded",
+        job_type="ops_health_check",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    db.add(job)
+    db.commit()
+    monkeypatch.setattr("app.agents.operations_agent.OperationsAgent", FakeOperationsAgent)
+    monkeypatch.setattr(scheduler_service, "_collect_application_health", lambda *_args: {"ok": True})
+
+    result = scheduler_service._execute_ops_health_check(db, job)
+
+    assert result["success"] is True
+    assert result["status"] == "degraded"
+    assert result["requires_attention"] is True
+    assert result["recommended_actions"] == [{
+        "code": "disk_cleanup_review",
+        "label": "审阅磁盘清理",
+        "message": "清理前先审阅可回收文件",
+        "requires_human": True,
+    }]
+    alert = db.query(AgentAlert).filter_by(title="AI 自动运维巡检异常").one()
+    assert alert.severity == "warning"
 
 
 def test_unhealthy_ops_skips_background_model_diagnosis_by_default(db: Any, monkeypatch: Any) -> None:

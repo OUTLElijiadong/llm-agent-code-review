@@ -9,11 +9,23 @@ class AppError(Exception):
 
     code: int = 50000
     http_status: int = 500
+    retryable: bool = False
+    next_action: str = "请根据提示修正后重试"
 
-    def __init__(self, message: str, *, code: Optional[int] = None, detail: Any = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: Optional[int] = None,
+        detail: Any = None,
+        retryable: Optional[bool] = None,
+        next_action: Optional[str] = None,
+    ):
         self.message = message
         self.code = code or self.code
         self.detail = detail
+        self.retryable = self.retryable if retryable is None else bool(retryable)
+        self.next_action = next_action or self.next_action
 
     def __str__(self) -> str:
         """异常跨任务/SSE 边界时保留可操作的业务原因。"""
@@ -25,6 +37,7 @@ class AuthError(AppError):
 
     code = 40100
     http_status = 401
+    next_action = "请重新登录后再试"
 
 
 class ForbiddenError(AppError):
@@ -32,6 +45,7 @@ class ForbiddenError(AppError):
 
     code = 40300
     http_status = 403
+    next_action = "请联系管理员确认权限"
 
 
 class PermissionError(ForbiddenError):
@@ -57,6 +71,7 @@ class NotFoundError(AppError):
 
     code = 40400
     http_status = 404
+    next_action = "请刷新页面后重新选择"
 
 
 class ConflictError(AppError):
@@ -64,6 +79,7 @@ class ConflictError(AppError):
 
     code = 40901
     http_status = 409
+    next_action = "请刷新当前状态后再决定是否重试"
 
 
 class ValidationError(AppError):
@@ -71,6 +87,7 @@ class ValidationError(AppError):
 
     code = 40001
     http_status = 400
+    next_action = "请检查输入后重新提交"
 
 
 class BadRequestError(ValidationError):
@@ -88,6 +105,8 @@ class ExternalServiceError(AppError):
 
     code = 50201
     http_status = 502
+    retryable = True
+    next_action = "请稍后重试；若持续失败，请提供请求编号给管理员"
 
 
 class ServiceUnavailableError(AppError):
@@ -95,6 +114,8 @@ class ServiceUnavailableError(AppError):
 
     code = 50301
     http_status = 503
+    retryable = True
+    next_action = "请稍后重试；若持续失败，请提供请求编号给管理员"
 
 
 class TooManyRequestsError(AppError):
@@ -102,6 +123,8 @@ class TooManyRequestsError(AppError):
 
     code = 42900
     http_status = 429
+    retryable = True
+    next_action = "请按提示等待后重试"
 
     def __init__(
         self,

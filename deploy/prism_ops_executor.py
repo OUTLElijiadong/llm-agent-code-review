@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
@@ -29,7 +30,14 @@ TOKEN = os.environ.get("OPS_EXECUTOR_TOKEN", "")
 AUDIT_LOG = Path(os.environ.get("OPS_EXECUTOR_AUDIT_LOG", "/var/log/prism-ops/executions.jsonl"))
 FILE_BACKUP_DIR = Path(os.environ.get("OPS_FILE_BACKUP_DIR", "/var/lib/prism-ops/file-backups"))
 LEDGER_DIR = Path(os.environ.get("OPS_EXECUTOR_LEDGER_DIR", "/var/lib/prism-ops/execution-ledger"))
+LEDGER_LOCK = threading.RLock()
+MUTATION_LOCK = threading.Lock()
 SERVICES = {"backend", "frontend", "mysql", "redis", "clamav"}
+READ_ONLY_ACTIONS = {
+    "status", "certificate_status", "host_inventory", "list_directory", "read_text_file",
+    "journal_query", "ssh_login_events", "flytrap_attack_events", "nginx_attack_events",
+    "backup_audit", "db_threat_signals", "db_health", "ip_attribution",
+}
 MAX_TEXT_BYTES = 256 * 1024
 MAX_DIRECTORY_ENTRIES = 500
 UNIT_NAME = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
@@ -75,6 +83,13 @@ ACTION_PARAM_KEYS = {
     "firewall_action": {"operation", "target_type", "value", "zone"},
     "account_action": {"operation", "username", "shell", "remove_home"},
     "ssh_authorized_key_action": {"operation", "username", "public_key", "fingerprint"},
+    "ssh_login_events": {"since_hours", "limit", "focus"},
+    "flytrap_attack_events": {"since_hours", "limit"},
+    "nginx_attack_events": {"since_hours", "limit"},
+    "backup_audit": set(),
+    "db_threat_signals": {"since_hours", "limit"},
+    "db_health": set(),
+    "ip_attribution": {"ip"},
 }
 
 
@@ -108,7 +123,14 @@ def execute(action: str, params: dict[str, Any], request_id: str = "") -> dict[s
             checks = json.loads(result["stdout"])
         except json.JSONDecodeError as exc:
             raise RuntimeError("ops-check 未返回有效 JSON") from exc
-        return {"checks": checks, "command_exit": result["exit_code"]}
+        health_status = str(checks.get("status") or "error")
+        return {
+            "checks": checks,
+            "command_exit": result["exit_code"],
+            "health_status": health_status,
+            "can_continue": bool(checks.get("can_continue")),
+            "summary": str(checks.get("summary") or ""),
+        }
     if action == "certificate_status":
         domain = _read_env("APP_DOMAIN")
         cert = DEPLOY_DIR / "certbot" / "conf" / "live" / domain / "fullchain.pem"
@@ -189,6 +211,20 @@ def execute(action: str, params: dict[str, Any], request_id: str = "") -> dict[s
         return _account_action(params)
     if action == "ssh_authorized_key_action":
         return _ssh_authorized_key_action(params, request_id=request_id)
+    if action == "ssh_login_events":
+        return _ssh_login_events(params)
+    if action == "flytrap_attack_events":
+        return _flytrap_attack_events(params)
+    if action == "nginx_attack_events":
+        return _nginx_attack_events(params)
+    if action == "backup_audit":
+        return _backup_audit()
+    if action == "db_threat_signals":
+        return _db_threat_signals(params)
+    if action == "db_health":
+        return _db_health()
+    if action == "ip_attribution":
+        return _ip_attribution(params)
     raise ValueError("动作不在白名单")
 
 
@@ -319,6 +355,357 @@ def _journal_query(params: dict[str, Any]) -> dict[str, Any]:
     return run([
         "journalctl", "-u", unit, "--since", since, "--no-pager", "--output=short-iso", "-n", str(lines),
     ], timeout=60, allow_failure=True)
+
+
+MAX_SINCE_HOURS = 720
+MAX_EVENT_LIMIT = 5000
+SSH_FOCUS_VALUES = {"all", "accepted", "failed"}
+
+
+def _since_hours_arg(params: dict[str, Any], default: int = 24) -> int:
+    try:
+        since_hours = int(params.get("since_hours")) if params.get("since_hours") is not None else default
+    except (TypeError, ValueError) as exc:
+        raise ValueError("since_hours 必须是整数") from exc
+    if since_hours < 1 or since_hours > MAX_SINCE_HOURS:
+        raise ValueError(f"since_hours 必须在 1 到 {MAX_SINCE_HOURS} 之间")
+    return since_hours
+
+
+def _event_limit_arg(params: dict[str, Any], default: int = 1000) -> int:
+    try:
+        limit = int(params.get("limit")) if params.get("limit") is not None else default
+    except (TypeError, ValueError) as exc:
+        raise ValueError("limit 必须是整数") from exc
+    if limit < 1 or limit > MAX_EVENT_LIMIT:
+        raise ValueError(f"limit 必须在 1 到 {MAX_EVENT_LIMIT} 之间")
+    return limit
+
+
+def parse_ssh_log(lines: list[str]) -> dict[str, Any]:
+    accepted_pattern = re.compile(
+        r"Accepted (publickey|password|keyboard-interactive) for (\S+) from "
+        r"([0-9a-fA-F:.]+) port \d+ ssh2(?::?\s*(.*))?$"
+    )
+    failed_pattern = re.compile(
+        r"Failed password for (?:invalid user )?(\S+) from ([0-9a-fA-F:.]+) port \d+"
+    )
+    invalid_pattern = re.compile(r"Invalid user (\S+) from ([0-9a-fA-F:.]+) port \d+")
+    accepted: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for raw in lines:
+        line = str(raw).rstrip("\n")
+        match = accepted_pattern.search(line)
+        if match:
+            accepted.append({"method": match.group(1), "user": match.group(2), "ip": match.group(3), "detail": match.group(4) or ""})
+            continue
+        match = failed_pattern.search(line)
+        if match:
+            failed.append({"user": match.group(1), "ip": match.group(2), "detail": "failed_password"})
+            continue
+        match = invalid_pattern.search(line)
+        if match:
+            failed.append({"user": match.group(1), "ip": match.group(2), "detail": "invalid_user"})
+    return {"accepted": accepted, "failed": failed}
+
+
+def parse_flytrap_log(lines: list[str]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for raw in lines:
+        line = str(raw).strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        remote = str(payload.get("remote") or "")
+        ip = remote.rsplit(":", 1)[0] if ":" in remote else remote
+        events.append({
+            "time": payload.get("time") or "",
+            "username": payload.get("username") or "",
+            "ip": ip,
+            "message": str(payload.get("message") or "")[:500],
+        })
+    return events
+
+
+def parse_nginx_log(lines: list[str]) -> list[dict[str, Any]]:
+    access_pattern = re.compile(r'^([^\s]+) - - \[[^\]]+\] "([^"]*)" (\d{3})')
+    events: list[dict[str, Any]] = []
+    for raw in lines:
+        match = access_pattern.match(str(raw).strip())
+        if not match:
+            continue
+        ip, request, status = match.groups()
+        method = request.split(" ", 1)[0] if request else ""
+        if method == "CONNECT":
+            detail = "proxy_connect"
+        elif method.startswith("\\x") or not method.isalpha():
+            detail = "tls_gibberish"
+        elif status in {"400", "403", "444"}:
+            detail = f"http_{status}"
+        else:
+            continue
+        events.append({"ip": ip, "method": method, "path": request[:200], "status": status, "detail": detail})
+    return events
+
+
+def _aggregate(events: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for event in events:
+        value = str(event.get(key) or "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    return [{"value": value, "count": count} for value, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)][:30]
+
+
+def _ssh_login_events(params: dict[str, Any]) -> dict[str, Any]:
+    since_hours = _since_hours_arg(params)
+    limit = _event_limit_arg(params, default=1000)
+    focus = str(params.get("focus") or "all")
+    if focus not in SSH_FOCUS_VALUES:
+        raise ValueError("focus 必须是 all/accepted/failed")
+    result = run(["journalctl", "-u", "sshd", "--since", f"{since_hours} hours ago", "--no-pager", "--output=short-iso", "-n", "20000"], timeout=90, allow_failure=True)
+    parsed = parse_ssh_log(result["stdout"].splitlines())
+    accepted, failed = parsed["accepted"], parsed["failed"]
+    selected = ([*accepted] if focus in {"all", "accepted"} else []) + ([*failed] if focus in {"all", "failed"} else [])
+    return {
+        "ok": result["exit_code"] == 0,
+        "since_hours": since_hours,
+        "focus": focus,
+        "accepted_total": len(accepted),
+        "failed_total": len(failed),
+        "accepted_by_ip": _aggregate(accepted, "ip"),
+        "accepted_by_detail": _aggregate(accepted, "detail"),
+        "failed_by_ip": _aggregate(failed, "ip"),
+        "recent": selected[-min(limit, 200):],
+        "source_exit_code": result["exit_code"],
+        "source_error": result["stderr"][:400] if result["exit_code"] else "",
+        "stdout_capped": len(result["stdout"]) >= 100_000,
+    }
+
+
+def _flytrap_attack_events(params: dict[str, Any]) -> dict[str, Any]:
+    since_hours, limit = _since_hours_arg(params), _event_limit_arg(params, default=1000)
+    result = run(["journalctl", "-u", "flytrap-agent", "--since", f"{since_hours} hours ago", "--no-pager", "--output=short-iso", "-n", "30000"], timeout=90, allow_failure=True)
+    events = parse_flytrap_log(result["stdout"].splitlines())
+    return {"ok": result["exit_code"] == 0, "since_hours": since_hours, "total": len(events), "by_ip": _aggregate(events, "ip"), "by_username": _aggregate(events, "username"), "recent": events[-min(limit, 300):], "source_exit_code": result["exit_code"], "source_error": result["stderr"][:400] if result["exit_code"] else "", "stdout_capped": len(result["stdout"]) >= 100_000}
+
+
+def _nginx_attack_events(params: dict[str, Any]) -> dict[str, Any]:
+    since_hours, limit = _since_hours_arg(params), _event_limit_arg(params, default=1000)
+    result = run(["docker", "logs", "--since", f"{since_hours}h", "-n", "30000", "cr_frontend"], timeout=90, allow_failure=True)
+    events = parse_nginx_log(result["stdout"].splitlines())
+    return {"ok": result["exit_code"] == 0, "since_hours": since_hours, "total": len(events), "by_ip": _aggregate(events, "ip"), "by_detail": _aggregate(events, "detail"), "recent": events[-min(limit, 300):], "source_exit_code": result["exit_code"], "source_error": result["stderr"][:400] if result["exit_code"] else "", "stdout_capped": len(result["stdout"]) >= 100_000}
+
+
+def _backup_audit() -> dict[str, Any]:
+    if not BACKUP_DIR.is_dir():
+        return {"ok": False, "error": "备份目录不存在", "dir": str(BACKUP_DIR)}
+    now = datetime.now(timezone.utc)
+    rows: list[dict[str, Any]] = []
+    total_gzip_bytes = 0
+    for path in BACKUP_DIR.glob("*.sql.gz"):
+        try:
+            if not path.is_file() or path.is_symlink():
+                continue
+            modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            size = path.stat().st_size
+            total_gzip_bytes += size
+            rows.append({"name": path.name, "size": size, "age_hours": round((now - modified).total_seconds() / 3600, 2), "has_sha256": path.with_name(path.name + ".sha256").is_file(), "has_meta": path.with_name(path.name + ".meta").is_file(), "modified_at": modified.isoformat()})
+        except OSError:
+            continue
+    rows.sort(key=lambda item: item["modified_at"], reverse=True)
+    other_bytes = 0
+    other_count = 0
+    try:
+        children = list(BACKUP_DIR.iterdir())
+    except OSError:
+        children = []
+    for path in children:
+        if path.name.endswith((".sql.gz", ".sha256", ".meta")):
+            continue
+        try:
+            if path.is_file():
+                other_bytes += path.stat().st_size
+                other_count += 1
+            elif path.is_dir() and not path.is_symlink():
+                other_bytes += sum(item.stat().st_size for item in path.rglob("*") if item.is_file() and not item.is_symlink())
+                other_count += 1
+        except OSError:
+            continue
+    return {"ok": True, "dir": str(BACKUP_DIR), "sql_gz_count": len(rows), "sql_gz_bytes": total_gzip_bytes, "other_entries_count": other_count, "other_bytes": other_bytes, "older_than_14_days": sum(1 for row in rows if row["age_hours"] > 24 * 14), "newest": rows[0] if rows else None, "oldest": rows[-1] if rows else None, "recent": rows[:100]}
+
+
+DB_SQL_MAX_LEN = 160
+_DB_DESTRUCTIVE_RE = re.compile(
+    r"\b(drop\s+table|drop\s+database|truncate\s+table|delete\s+from|"
+    r"alter\s+table|rename\s+table|grant\b|revoke\b|"
+    r"create\s+user|drop\s+user|set\s+password)\b"
+)
+_DB_DUMP_RE = re.compile(r"\b(select\s+.+\s+into\s+(out|dump)file|load_file\s*\()\b")
+_DB_ERROR_RE = re.compile(r"\b(access\s+denied|error\s+\d{3,5}|you have an error)\b")
+_DB_SQL_REDACT_RE = re.compile(r"('[^']*'|\"[^\"]*\"|\b\d{4,}\b)")
+
+
+def _normalize_db_sql(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()[:DB_SQL_MAX_LEN]
+
+
+def _redact_db_sql(text: str) -> str:
+    return _DB_SQL_REDACT_RE.sub("?", text)
+
+
+def parse_db_general_log(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    categories: dict[str, list[dict[str, Any]]] = {"destructive": [], "dump_exfil": [], "error": []}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = _normalize_db_sql(row.get("argument"))
+        if not raw:
+            continue
+        sample = {
+            "user_host": str(row.get("user_host") or "")[:128],
+            "sql": _redact_db_sql(raw),
+            "event_time": str(row.get("event_time") or ""),
+        }
+        lowered = raw.lower()
+        if _DB_DUMP_RE.search(lowered):
+            categories["dump_exfil"].append(sample)
+        elif _DB_DESTRUCTIVE_RE.search(lowered):
+            categories["destructive"].append(sample)
+        elif _DB_ERROR_RE.search(lowered):
+            categories["error"].append(sample)
+
+    def aggregate(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for item in items:
+            value = str(item.get(key) or "")
+            counts[value] = counts.get(value, 0) + 1
+        return [{"value": value, "count": count} for value, count in sorted(counts.items(), key=lambda pair: pair[1], reverse=True)][:20]
+
+    return {
+        "destructive_total": len(categories["destructive"]),
+        "dump_exfil_total": len(categories["dump_exfil"]),
+        "error_total": len(categories["error"]),
+        "destructive_by_user": aggregate(categories["destructive"], "user_host"),
+        "dump_exfil_by_user": aggregate(categories["dump_exfil"], "user_host"),
+        "error_by_user": aggregate(categories["error"], "user_host"),
+        "samples": {name: values[-20:] for name, values in categories.items()},
+    }
+
+
+def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
+    since_hours = _since_hours_arg(params)
+    limit = _event_limit_arg(params, default=4000)
+    sql = (
+        "SELECT user_host, argument, event_time FROM mysql.general_log "
+        f"WHERE event_time >= DATE_SUB(NOW(), INTERVAL {since_hours} HOUR) "
+        f"AND command_type IN ('Query','Execute') ORDER BY event_time DESC LIMIT {limit}"
+    )
+    result = run([
+        "docker", "exec", "cr_mysql", "sh", "-ec",
+        'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql --protocol=TCP -h 127.0.0.1 '
+        '-uroot --batch --skip-column-names --raw -e "$1"',
+        "sh", sql,
+    ], timeout=90, allow_failure=True)
+    if result["exit_code"] != 0:
+        return {
+            "ok": False,
+            "since_hours": since_hours,
+            "reason": "general_log 未开启或暂时不可读",
+            "source_exit_code": result["exit_code"],
+            "source_error": result["stderr"][:400],
+        }
+    rows: list[dict[str, Any]] = []
+    for line in result["stdout"].splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        rows.append({
+            "user_host": parts[0],
+            "argument": "\t".join(parts[1:-1]),
+            "event_time": parts[-1],
+        })
+    parsed = parse_db_general_log(rows)
+    parsed.update({"ok": True, "since_hours": since_hours, "sampled_rows": len(rows), "stdout_capped": len(result["stdout"]) >= 100_000})
+    return parsed
+
+
+_DB_RESTART_RE = re.compile(r"/usr/sbin/mysqld: ready for connections", re.IGNORECASE)
+_DB_RECOVERY_RE = re.compile(
+    r"(InnoDB: (Starting crash recovery|Doing recovery|Database was not shutdown normally)|"
+    r"Starting crash recovery|crash recovery|forcing InnoDB Recovery)",
+    re.IGNORECASE,
+)
+
+
+def parse_db_error_log(lines: list[str]) -> dict[str, Any]:
+    restarts: list[str] = []
+    recovery: list[str] = []
+    for line in lines:
+        text = str(line or "")
+        if _DB_RESTART_RE.search(text):
+            restarts.append(text.strip()[:200])
+        if _DB_RECOVERY_RE.search(text):
+            recovery.append(text.strip()[:200])
+    return {
+        "restart_count": len(restarts),
+        "recovery_detected": bool(recovery),
+        "restart_lines": restarts[-10:],
+        "recovery_lines": recovery[-10:],
+    }
+
+
+def _db_health() -> dict[str, Any]:
+    restart_count = run(["docker", "inspect", "cr_mysql", "--format", "{{.RestartCount}}"], timeout=30, allow_failure=True)
+    memory = run(["docker", "stats", "cr_mysql", "--no-stream", "--format", "{{.MemUsage}}"], timeout=30, allow_failure=True)
+    logs = run(["docker", "logs", "cr_mysql", "--since", "24h"], timeout=60, allow_failure=True)
+    combined = (logs.get("stdout") or "") + "\n" + (logs.get("stderr") or "")
+    parsed = parse_db_error_log(combined.splitlines())
+    failures = [item for item in (restart_count, memory, logs) if item.get("exit_code") != 0]
+    parsed.update({
+        "ok": not failures,
+        "container_restart_count": restart_count.get("stdout", "").strip(),
+        "mem_usage": memory.get("stdout", "").strip(),
+        "source_errors": [str(item.get("stderr") or item.get("stdout") or "采集失败")[:300] for item in failures],
+    })
+    return parsed
+
+
+def _threat_intel_base() -> str:
+    try:
+        value = _read_env("THREAT_INTEL_BASE_URL")
+    except RuntimeError:
+        return "http://ip-api.com/json"
+    if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)*", value):
+        raise ValueError("THREAT_INTEL_BASE_URL 不合法")
+    return value.rstrip("/")
+
+
+def _ip_attribution(params: dict[str, Any]) -> dict[str, Any]:
+    import ipaddress
+
+    ip = str(params.get("ip") or "")
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError as exc:
+        raise ValueError("ip 不是合法地址") from exc
+    url = f"{_threat_intel_base()}/{ip}?fields=status,message,country,regionName,city,isp,org,as,query"
+    result = run(["curl", "-fsS", "--max-time", "15", url], timeout=20, allow_failure=True)
+    try:
+        data = json.loads(result["stdout"])
+    except json.JSONDecodeError:
+        data = {"error": "无法解析情报响应"}
+    return {
+        "ok": result["exit_code"] == 0 and isinstance(data, dict) and data.get("status") != "fail",
+        "ip": ip,
+        "attribution": data,
+        "source_exit_code": result["exit_code"],
+        "source_error": result["stderr"][:400] if result["exit_code"] else "",
+    }
 
 
 def _systemd_unit_action(params: dict[str, Any]) -> dict[str, Any]:
@@ -788,6 +1175,18 @@ def _wait_service(service: str) -> None:
     raise RuntimeError(f"服务 {service} 重启后未恢复健康")
 
 
+def _execute_with_concurrency_policy(
+    action: str,
+    params: dict[str, Any],
+    request_id: str,
+) -> dict[str, Any]:
+    """读巡检可并发，有副作用的宿主机动作必须串行。"""
+    if action in READ_ONLY_ACTIONS:
+        return execute(action, params, request_id=request_id)
+    with MUTATION_LOCK:
+        return execute(action, params, request_id=request_id)
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         try:
@@ -808,40 +1207,63 @@ class Handler(BaseHTTPRequestHandler):
             if not REQUEST_ID.fullmatch(request_id):
                 raise ValueError("request_id 不合法")
             digest = _request_digest(action, params)
-            recorded = _read_ledger(request_id)
-            if recorded is not None:
-                if not hmac.compare_digest(str(recorded.get("request_digest") or ""), digest):
-                    self._json(409, {"ok": False, "error": "request_id 已绑定其他运维请求"})
+            with LEDGER_LOCK:
+                recorded = _read_ledger(request_id)
+                if recorded is not None:
+                    if not hmac.compare_digest(str(recorded.get("request_digest") or ""), digest):
+                        self._json(409, {"ok": False, "error": "request_id 已绑定其他运维请求"})
+                        return
+                    status_value = str(recorded.get("status") or "")
+                    if status_value == "success":
+                        response = dict(recorded.get("response") or {})
+                        response["duplicate"] = True
+                        self._json(200, response)
+                        return
+                    if status_value == "failed":
+                        self._json(
+                            400,
+                            {"ok": False, "error": str(recorded.get("error") or "运维动作已失败"), "duplicate": True},
+                        )
+                        return
+                    recovery = "请核对宿主机审计与实际状态后，使用新的 request_id 再决定是否执行"
+                    self._json(409, {
+                        "ok": False,
+                        "error": "动作已开始但结果未确认，已禁止自动重试",
+                        "duplicate": True,
+                        "retryable": False,
+                        "next_action": recovery,
+                    })
                     return
-                status_value = str(recorded.get("status") or "")
-                if status_value == "success":
-                    response = dict(recorded.get("response") or {})
-                    response["duplicate"] = True
-                    self._json(200, response)
-                    return
-                if status_value == "failed":
-                    self._json(
-                        400,
-                        {"ok": False, "error": str(recorded.get("error") or "运维动作已失败"), "duplicate": True},
-                    )
-                    return
-                self._json(409, {"ok": False, "error": "动作已开始但结果未确认，已禁止自动重试", "duplicate": True})
-                return
-            _write_ledger(
-                request_id,
-                {
-                    "request_id": request_id,
-                    "request_digest": digest,
-                    "action": action,
-                    "params": _audit_params(action, params),
-                    "status": "running",
-                    "started_at": datetime.now(timezone.utc).isoformat(),
-                },
-            )
+                _write_ledger(
+                    request_id,
+                    {
+                        "request_id": request_id,
+                        "request_digest": digest,
+                        "action": action,
+                        "params": _audit_params(action, params),
+                        "status": "running",
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
             started = time.monotonic()
             try:
-                result = execute(action, params, request_id=request_id)
-                response = {"ok": True, "action": action, "result": result, "duplicate": False}
+                result = _execute_with_concurrency_policy(action, params, request_id)
+                semantic_ok = not (
+                    action == "status"
+                    and (result.get("health_status") == "error" or not result.get("can_continue"))
+                )
+                response = {
+                    "ok": semantic_ok,
+                    "action": action,
+                    "result": result,
+                    "duplicate": False,
+                }
+                if not semantic_ok:
+                    response.update({
+                        "error": result.get("summary") or "生产关键检查未通过",
+                        "retryable": False,
+                        "next_action": "请先按巡检动作建议完成人工处置，再重新检查",
+                    })
                 _write_ledger(
                     request_id,
                     {
@@ -901,8 +1323,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
 
-class UnixHTTPServer(socketserver.UnixStreamServer):
+class UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     allow_reuse_address = True
+    daemon_threads = True
 
 
 def main() -> None:

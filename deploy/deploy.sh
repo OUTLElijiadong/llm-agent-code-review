@@ -59,7 +59,7 @@ target_sha="$(resolve_git_revision "$repo_dir" "$revision")" || fatal "无法解
 head_sha="$(current_git_sha "$repo_dir")"
 [[ "$target_sha" == "$head_sha" ]] || fatal "revision=$target_sha 与当前 HEAD=$head_sha 不一致；请先安全 checkout 精确提交"
 [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || fatal "目标 SHA 格式非法"
-[[ "$target" == "all" ]] || fatal "3.6 版本必须使用 all 发布，禁止单独发布 backend/frontend 造成版本漂移"
+[[ "$target" == "all" ]] || fatal "当前生产版本必须使用 all 发布，禁止单独发布 backend/frontend 造成版本漂移"
 
 release_dir="${RELEASE_STATE_DIR:-.releases}"
 current_state="$release_dir/current.env"
@@ -73,23 +73,41 @@ acquire_directory_lock "$lock_dir"
 trap 'release_directory_lock "$lock_dir"' EXIT
 
 rollback_ready=0
+deployment_mutated=0
 
 # 发布异常时尝试切回上一应用镜像，并保留原始失败状态码。
-# 参数: ERR trap 自动传入失败状态。
+# 参数: $1 原始错误码；$2 失败摘要。
 # 返回: 以原始失败状态退出。
-on_deploy_error() {
-  local rc=$?
+finish_deploy_failure() {
+  local rc="$1"
+  local reason="$2"
   trap - ERR
-  log_warn "发布事务失败(rc=$rc, target=$target, sha=$target_sha)"
-  if [[ "$rollback_ready" == "1" && -f "$previous_state" ]]; then
+  log_warn "发布事务失败(rc=$rc, target=$target, sha=$target_sha): $reason"
+  if [[ "$deployment_mutated" == "1" && "$rollback_ready" == "1" && -f "$previous_state" ]]; then
     log_warn "开始应用层自动回滚；数据库不会自动 downgrade/restore"
     if ! ./rollback.sh "$target" --confirm ROLLBACK_APPLICATION --from-deploy-failure; then
       log_warn "应用自动回滚失败，请保持维护窗口并人工检查 current/previous/pending 状态"
+    else
+      log_info "应用自动回滚完成；请核对数据库兼容性与公网冒烟结果"
     fi
+  elif [[ "$deployment_mutated" != "1" ]]; then
+    log_warn "应用尚未切换，跳过回滚；pending 状态保留供人工核对"
   else
     log_warn "尚无可验证的上一镜像，未执行自动回滚"
   fi
   exit "$rc"
+}
+
+# 显式处理 `command || fatal` 场景。ERR trap 不会覆盖 OR 列表右侧的
+# fatal，因此所有应用切换后的显式失败都必须从这里进入回滚事务。
+deploy_fatal() {
+  finish_deploy_failure 1 "$*"
+}
+
+# 参数: ERR trap 自动传入失败状态。
+on_deploy_error() {
+  local rc=$?
+  finish_deploy_failure "$rc" "未捕获命令失败"
 }
 trap on_deploy_error ERR
 
@@ -169,9 +187,10 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
   if [[ -f "$geolite_host" ]]; then
     chmod 644 "$geolite_host" 2>/dev/null || log_warn "无法调整 GeoLite2 权限: $geolite_host"
   fi
+  deployment_mutated=1
   compose up -d --no-deps backend
-  wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || fatal "Backend 未恢复健康"
-  smoke_backend "$target_sha" || fatal "Backend 冒烟失败"
+  wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || deploy_fatal "Backend 未恢复健康"
+  smoke_backend "$target_sha" || deploy_fatal "Backend 冒烟失败"
 fi
 
 if [[ "$target" == "frontend" ]]; then
@@ -179,14 +198,15 @@ if [[ "$target" == "frontend" ]]; then
 fi
 if [[ "$target" == "all" || "$target" == "frontend" ]]; then
   compose build frontend
+  deployment_mutated=1
   compose up -d --no-deps frontend
   # assets 是命名卷挂载，必须把新镜像 dist 同步进卷，否则 index.html 引用的
   # 新哈希文件 404 导致页面空白。
-  ./sync-frontend-assets.sh "$desired_frontend" || fatal "前端 assets 卷同步失败"
-  wait_for_service_health frontend "${FRONTEND_HEALTH_TIMEOUT:-120}" || fatal "Frontend 未恢复健康"
+  ./sync-frontend-assets.sh "$desired_frontend" || deploy_fatal "前端 assets 卷同步失败"
+  wait_for_service_health frontend "${FRONTEND_HEALTH_TIMEOUT:-120}" || deploy_fatal "Frontend 未恢复健康"
 fi
 
-smoke_https "$desired_backend" || fatal "HTTPS/同源冒烟失败"
+smoke_https "$desired_backend" || deploy_fatal "HTTPS/同源冒烟失败"
 alembic_revision="$(current_alembic_revision)"
 write_release_state \
   "$current_state" "$target_sha" "$desired_backend" "$desired_frontend" \

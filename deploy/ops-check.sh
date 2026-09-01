@@ -14,11 +14,13 @@ usage() {
 用法: ./ops-check.sh
 
 只读检查 Compose 配置、容器健康、磁盘、内存、备份、Alembic 与 HTTPS。
-stdout 仅输出 JSON；任一必需检查失败时退出码为 1。
+stdout 仅输出 JSON；ok/degraded 退出码为 0，阻断性 error 退出码为 1。
 
 可选环境变量:
   OPS_DISK_MAX_PERCENT       磁盘使用率上限，默认 85
+  OPS_DISK_CRITICAL_PERCENT  磁盘临界使用率，默认 95
   OPS_MEMORY_MAX_PERCENT     内存使用率上限，默认 90
+  OPS_MEMORY_CRITICAL_PERCENT 内存临界使用率，默认 98
   BACKUP_MAX_AGE_HOURS       最近备份最大年龄，默认 30
   BACKUP_DIR                 备份目录，默认 ../backups
   OPS_HTTPS_REQUIRED         是否要求 HTTPS，默认 true
@@ -44,7 +46,7 @@ json_escape() {
 # 返回: 始终返回 0。
 emit_preflight_failure() {
   local message="$1"
-  printf '{"schema_version":1,"status":"error","checked_at_utc":"%s","checks":{"preflight":{"ok":false,"message":"%s"}}}\n' \
+  printf '{"schema_version":1,"status":"error","can_continue":false,"summary":"巡检预检失败，不能继续","actions":[{"code":"ops_check_repair","label":"修复巡检预检","requires_human":true}],"checked_at_utc":"%s","checks":{"preflight":{"ok":false,"status":"error","message":"%s"}}}\n' \
     "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$(json_escape "$message")"
 }
 
@@ -54,6 +56,21 @@ emit_preflight_failure() {
 valid_percent() {
   local value="$1"
   [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 0 && value <= 100 ))
+}
+
+# 将资源使用量映射为 ok/degraded/error 三态。
+# 参数: $1 使用率；$2 告警阈值；$3 临界阈值。
+# 返回: stdout 输出状态字符串。
+resource_status() {
+  local used="$1" warning="$2" critical="$3"
+  # 达到阈值即进入对应状态，避免 85%/95% 边界被误判为更安全的级别。
+  if [[ ! "$used" =~ ^[0-9]+$ ]] || (( used >= critical )); then
+    printf 'error\n'
+  elif (( used >= warning )); then
+    printf 'degraded\n'
+  else
+    printf 'ok\n'
+  fi
 }
 
 # 获取文件修改时间的 Unix 秒，兼容 GNU/BSD stat。
@@ -154,10 +171,27 @@ fi
 env_file="${DEPLOY_ENV_FILE:-.env}"
 disk_threshold="${OPS_DISK_MAX_PERCENT:-85}"
 memory_threshold="${OPS_MEMORY_MAX_PERCENT:-90}"
+if [[ -n "${OPS_DISK_CRITICAL_PERCENT:-}" ]]; then
+  disk_critical_threshold="$OPS_DISK_CRITICAL_PERCENT"
+elif [[ "$disk_threshold" =~ ^[0-9]+$ ]] && (( disk_threshold > 95 )); then
+  disk_critical_threshold="$disk_threshold"
+else
+  disk_critical_threshold=95
+fi
+if [[ -n "${OPS_MEMORY_CRITICAL_PERCENT:-}" ]]; then
+  memory_critical_threshold="$OPS_MEMORY_CRITICAL_PERCENT"
+elif [[ "$memory_threshold" =~ ^[0-9]+$ ]] && (( memory_threshold > 98 )); then
+  memory_critical_threshold="$memory_threshold"
+else
+  memory_critical_threshold=98
+fi
 backup_max_age="${BACKUP_MAX_AGE_HOURS:-30}"
 backup_dir="${BACKUP_DIR:-../backups}"
 https_required="${OPS_HTTPS_REQUIRED:-true}"
-if ! valid_percent "$disk_threshold" || ! valid_percent "$memory_threshold" \
+if ! valid_percent "$disk_threshold" || ! valid_percent "$disk_critical_threshold" \
+  || ! valid_percent "$memory_threshold" || ! valid_percent "$memory_critical_threshold" \
+  || (( disk_critical_threshold < disk_threshold )) \
+  || (( memory_critical_threshold < memory_threshold )) \
   || [[ ! "$backup_max_age" =~ ^[0-9]+$ ]]; then
   emit_preflight_failure "巡检阈值格式非法"
   exit 1
@@ -183,17 +217,15 @@ for service in mysql redis clamav backend frontend; do
 done
 
 disk_used="$(df -P .. | awk 'NR==2 { value=$5; gsub(/%/, "", value); print value }' || true)"
-disk_ok=false
-if [[ "$disk_used" =~ ^[0-9]+$ ]] && (( disk_used <= disk_threshold )); then
-  disk_ok=true
-fi
 [[ "$disk_used" =~ ^[0-9]+$ ]] || disk_used=-1
+disk_status="$(resource_status "$disk_used" "$disk_threshold" "$disk_critical_threshold")"
+disk_ok=false
+[[ "$disk_status" == "ok" ]] && disk_ok=true
 
 memory_used="$(memory_used_percent)"
+memory_status="$(resource_status "$memory_used" "$memory_threshold" "$memory_critical_threshold")"
 memory_ok=false
-if [[ "$memory_used" =~ ^-?[0-9]+$ ]] && (( memory_used >= 0 && memory_used <= memory_threshold )); then
-  memory_ok=true
-fi
+[[ "$memory_status" == "ok" ]] && memory_ok=true
 
 latest_backup="$(latest_file_by_mtime "$backup_dir" 'code_review_*.sql.gz' || true)"
 backup_ok=false
@@ -234,6 +266,8 @@ if [[ "$alembic_head_count" == "1" && "$alembic_current" != "unknown" \
   && -n "$alembic_head" && "$alembic_current" == "$alembic_head" ]]; then
   alembic_ok=true
 fi
+alembic_status="ok"
+[[ "$alembic_ok" == "true" ]] || alembic_status="error"
 
 https_ok=false
 https_mode="required"
@@ -263,31 +297,84 @@ else
   fi
 fi
 
-overall_ok=true
-for check_value in "$containers_ok" "$disk_ok" "$memory_ok" "$backup_ok" "$alembic_ok" "$https_ok"; do
-  if [[ "$check_value" != "true" ]]; then
-    overall_ok=false
-  fi
-done
+containers_status="ok"
+[[ "$containers_ok" == "true" ]] || containers_status="error"
+backup_status="ok"
+[[ "$backup_ok" == "true" ]] || backup_status="error"
+https_status="ok"
+[[ "$https_ok" == "true" ]] || https_status="error"
+
+actions_json=""
+blocking_checks_json=""
+add_action() {
+  local code="$1" label="$2" message="$3" requires_human="$4"
+  [[ -z "$actions_json" ]] || actions_json+=","
+  actions_json+="{\"code\":\"$(json_escape "$code")\",\"label\":\"$(json_escape "$label")\",\"message\":\"$(json_escape "$message")\",\"requires_human\":$requires_human}"
+}
+add_blocking_check() {
+  [[ -z "$blocking_checks_json" ]] || blocking_checks_json+=","
+  blocking_checks_json+="\"$(json_escape "$1")\""
+}
+
+if [[ "$disk_status" == "degraded" ]]; then
+  add_action "disk_cleanup_review" "审阅磁盘清理" "磁盘使用率 ${disk_used}% 已达到或超过告警阈值 ${disk_threshold}%，请先执行 cleanup.sh dry-run 并由人确认。" true
+elif [[ "$disk_status" == "error" ]]; then
+  add_action "disk_emergency_capacity" "人工处置磁盘" "磁盘使用率 ${disk_used}% 已达到临界阈值 ${disk_critical_threshold}%，禁止继续发布或写入。" true
+  add_blocking_check disk
+fi
+if [[ "$memory_status" == "degraded" ]]; then
+  add_action "memory_pressure_review" "审阅内存压力" "内存使用率 ${memory_used}% 已达到或超过告警阈值 ${memory_threshold}%，请检查异常任务或扩容。" true
+elif [[ "$memory_status" == "error" ]]; then
+  add_action "memory_emergency_capacity" "人工处置内存" "内存使用率 ${memory_used}% 已达到临界阈值 ${memory_critical_threshold}%，禁止继续高负载操作。" true
+  add_blocking_check memory
+fi
+if [[ "$containers_status" == "error" ]]; then
+  add_blocking_check containers
+  add_action "containers_recovery" "恢复关键容器" "至少一个关键容器未处于 healthy/running，请由值班人员检查日志后恢复。" true
+fi
+if [[ "$backup_status" == "error" ]]; then
+  add_blocking_check backup
+  add_action "backup_recovery" "修复备份链路" "最近备份不存在、过期或校验失败，禁止继续发布并先完成可验证备份。" true
+fi
+if [[ "$alembic_status" == "error" ]]; then
+  add_blocking_check alembic
+  add_action "alembic_reconcile" "修复数据库迁移" "数据库当前版本与唯一 head 不一致，禁止继续业务迁移或发布。" true
+fi
+if [[ "$https_status" == "error" ]]; then
+  add_blocking_check https
+  add_action "https_recovery" "恢复 HTTPS" "公网 HTTPS 或健康检查失败，请先恢复入口再继续发布。" true
+fi
+
 status="ok"
 exit_code=0
-if [[ "$overall_ok" != "true" ]]; then
+can_continue=true
+if [[ -n "$blocking_checks_json" ]]; then
   status="error"
+  can_continue=false
   exit_code=1
+elif [[ "$disk_status" == "degraded" || "$memory_status" == "degraded" ]]; then
+  status="degraded"
 fi
+summary="全部生产关键检查通过"
+[[ "$status" == "degraded" ]] && summary="关键服务可继续，但存在需要人工处理的降级项"
+[[ "$status" == "error" ]] && summary="存在阻断性生产故障，已停止自动继续"
 
 cat <<JSON
 {
   "schema_version": 1,
   "status": "$status",
+  "can_continue": $can_continue,
+  "summary": "$(json_escape "$summary")",
+  "actions": [$actions_json],
+  "blocking_checks": [$blocking_checks_json],
   "checked_at_utc": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
   "checks": {
-    "containers": {"ok": $containers_ok, "services": {$services_json}},
-    "disk": {"ok": $disk_ok, "used_percent": $disk_used, "max_percent": $disk_threshold},
-    "memory": {"ok": $memory_ok, "used_percent": $memory_used, "max_percent": $memory_threshold},
-    "backup": {"ok": $backup_ok, "file": "$(json_escape "$backup_name")", "age_hours": $backup_age_hours, "max_age_hours": $backup_max_age, "gzip_ok": $backup_gzip_ok, "checksum_ok": $backup_checksum_ok},
-    "alembic": {"ok": $alembic_ok, "current": "$(json_escape "$alembic_current")", "head": "$(json_escape "$alembic_head")"},
-    "https": {"ok": $https_ok, "mode": "$https_mode", "http_redirect_code": "$(json_escape "$http_redirect_code")", "health": "$https_health"}
+    "containers": {"ok": $containers_ok, "status": "$containers_status", "services": {$services_json}},
+    "disk": {"ok": $disk_ok, "status": "$disk_status", "used_percent": $disk_used, "max_percent": $disk_threshold, "critical_percent": $disk_critical_threshold},
+    "memory": {"ok": $memory_ok, "status": "$memory_status", "used_percent": $memory_used, "max_percent": $memory_threshold, "critical_percent": $memory_critical_threshold},
+    "backup": {"ok": $backup_ok, "status": "$backup_status", "file": "$(json_escape "$backup_name")", "age_hours": $backup_age_hours, "max_age_hours": $backup_max_age, "gzip_ok": $backup_gzip_ok, "checksum_ok": $backup_checksum_ok},
+    "alembic": {"ok": $alembic_ok, "status": "$alembic_status", "current": "$(json_escape "$alembic_current")", "head": "$(json_escape "$alembic_head")"},
+    "https": {"ok": $https_ok, "status": "$https_status", "mode": "$https_mode", "http_redirect_code": "$(json_escape "$http_redirect_code")", "health": "$https_health"}
   }
 }
 JSON

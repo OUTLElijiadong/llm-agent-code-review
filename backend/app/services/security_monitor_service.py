@@ -73,6 +73,12 @@ def _call_action(db: Session, action: str, params: Optional[dict[str, Any]] = No
     payload = executor_response.get("result") if isinstance(executor_response.get("result"), dict) else {}
     if execution.get("status") != "success" or not executor_response.get("ok") or not isinstance(payload, dict):
         raise RuntimeError(execution.get("error") or f"动作 {action} 执行失败")
+    # general_log 未开启是 db_threat_signals 的可观测降级，不影响其他
+    # 安全源。其他采集器明确返回 ok=false 时必须记入本轮 errors，
+    # 不能把空数据当成“没有风险”。
+    if action != "db_threat_signals" and payload.get("ok") is False:
+        reason = payload.get("source_error") or payload.get("reason") or payload.get("error")
+        raise RuntimeError(str(reason or f"动作 {action} 数据源不可用"))
     return payload
 
 

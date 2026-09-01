@@ -286,12 +286,16 @@ def submit_clarification(
     user: User = Depends(get_current_user),
 ):
     """用户回填 Clarify 追问的答案后,合并 payload 继续执行原 intent"""
-    pending = ClarifyStore.instance().pop(payload.clarify_id)
+    store = ClarifyStore.instance()
+    pending = store.peek(payload.clarify_id)
     if pending is None:
         return Resp(code=41001, message="追问已过期或不存在,请重新提问", data={})
     owner_user_id = pending.get("user_id")
     if owner_user_id is not None and owner_user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise ForbiddenError("无权回填此追问", code=40300)
+    reserved = store.reserve(payload.clarify_id, expected_data=pending)
+    if reserved is None:
+        return Resp(code=40901, message="追问正在处理中，请稍后查看结果", data={})
     intent_name = pending["intent"]
     answers = payload.answers or {}
     question_keys = pending.get("question_keys")
@@ -300,12 +304,19 @@ def submit_clarification(
         answers = {key: value for key, value in answers.items() if key in allowed}
     merged = {**pending.get("payload", {}), **answers}
 
-    orch = get_request_orchestrator(db, user=user)
-    ctx = AgentContext(user_id=user.id, extra={})
-    result = orch.chat_agent.dispatch_with_payload(intent_name, merged, ctx)
-    if not result.success:
-        from app.ai.exceptions import AiServiceError
-        raise AiServiceError(result.error or "执行失败", code=50202)
+    try:
+        orch = get_request_orchestrator(db, user=user)
+        ctx = AgentContext(user_id=user.id, extra={})
+        result = orch.chat_agent.dispatch_with_payload(intent_name, merged, ctx)
+        if not result.success:
+            from app.ai.exceptions import AiServiceError
+            raise AiServiceError(result.error or "执行失败", code=50202)
+    except Exception:
+        store.release(payload.clarify_id, reserved)
+        raise
+    if not store.consume(payload.clarify_id, reserved):
+        # 派发已经成功但条目被并发请求处理，禁止重复执行；当前结果仍可安全返回。
+        return Resp(code=40901, message="追问已由其他请求处理，请刷新查看最新结果", data={})
     if isinstance(result.data, dict):
         return Resp(data={
             "content": result.data.get("content", ""),

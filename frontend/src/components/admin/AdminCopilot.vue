@@ -81,6 +81,7 @@ import {
   settleAgentMeshTimeline,
 } from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
+import { actionableError } from '@/composables/withFeedback'
 import {
   autoTitleAgentChatSession,
   loadAgentChatDraft,
@@ -464,8 +465,18 @@ function assistantEntry(payload: AdminCopilotMessage): ChatEntry {
 }
 
 /** 错误留在消息流:失败/停止时追加带操作入口的错误卡片,Toast 之外留痕。 */
-function appendErrorCard(content: string): void {
-  messages.value.push(assistantEntry({ type: 'error', content, collapsed: false }))
+function appendErrorCard(
+  content: string,
+  metadata: { retryable?: boolean; nextAction?: string; requestId?: string } = {},
+): void {
+  messages.value.push(assistantEntry({
+    type: 'error',
+    content,
+    collapsed: false,
+    retryable: metadata.retryable,
+    next_action: metadata.nextAction,
+    request_id: metadata.requestId,
+  }))
   if (!visible.value) unreadAlerts.value += 1
   void scrollToBottom()
 }
@@ -516,10 +527,15 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       agentTeamError.value = ''
       return
     }
-    const details = await Promise.all(listed.items.map((item) => getAgentTeam(item.team_id)))
+    const settled = await Promise.allSettled(listed.items.map((item) => getAgentTeam(item.team_id)))
     if (!isCurrent()) return
+    const details = settled
+      .filter((result): result is PromiseFulfilledResult<AgentTeamDetail> => result.status === 'fulfilled')
+      .map((result) => result.value)
+    const failedCount = settled.length - details.length
+    if (!details.length && failedCount) throw new Error('团队详情暂时无法同步')
     agentTeams.value = details
-    agentTeamError.value = ''
+    agentTeamError.value = failedCount ? `${failedCount} 个团队状态暂时未同步，已保留其余结果` : ''
   } catch {
     if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
   } finally {
@@ -811,10 +827,6 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
     if (typeof message === 'string') return message
   }
   return ''
-}
-
-function requestErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : 'Agent 请求失败'
 }
 
 async function scrollToBottom(): Promise<void> {
@@ -1231,9 +1243,13 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   } catch (error) {
     activityStore.clear()
     if (!(error instanceof Error && error.name === 'AbortError')) {
-      const text = requestErrorMessage(error)
-      ElMessage.error(text)
-      appendErrorCard(text)
+      const info = actionableError(error, 'Agent 请求失败')
+      ElMessage.error(info.message)
+      appendErrorCard(info.message, {
+        retryable: info.retryable,
+        nextAction: info.nextAction,
+        requestId: info.requestId,
+      })
       if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
     } else {
       appendErrorCard('已停止本次回答,可点「重试运行」继续,或新建对话')
@@ -1255,8 +1271,19 @@ async function cancelResponse(reason = ''): Promise<void> {
   if (runId && sessionId.value) {
     try {
       await cancelAgentResponseRun('admin', sessionId.value, runId, reason)
-    } catch {
-      // 取消请求失败时仍断开本地流，后续轮询以服务端状态为准。
+    } catch (error) {
+      const info = actionableError(error, '停止请求未确认')
+      const content = info.message.includes('停止请求未确认')
+        ? info.message
+        : `停止请求未确认：${info.message}`
+      ElMessage.error(content)
+      appendErrorCard(content, {
+        retryable: false,
+        nextAction: info.nextAction || '当前任务仍在运行，可再次点击取消，或等待状态同步',
+        requestId: info.requestId,
+      })
+      scheduleSessionPoll()
+      return
     }
     if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: 'cancelled' }
   }
@@ -1724,8 +1751,11 @@ onMounted(() => {
                 <span>这次没有完成</span>
               </div>
               <p class="copilot-error-text">{{ entry.payload.content }}</p>
+              <p v-if="entry.payload.next_action" class="copilot-error-next">{{ entry.payload.next_action }}</p>
+              <p v-if="entry.payload.request_id" class="copilot-error-request">请求编号：{{ entry.payload.request_id }}</p>
               <div class="copilot-error-actions">
                 <button
+                  v-if="entry.payload.retryable !== false"
                   class="copilot-error-btn is-retry"
                   type="button"
                   :disabled="!canRetryRun"
@@ -2307,6 +2337,14 @@ input { font: inherit; }
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.copilot-error-next,
+.copilot-error-request {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary, #7b8290);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .copilot-error-actions {
   display: flex;

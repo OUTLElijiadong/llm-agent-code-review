@@ -10,6 +10,8 @@ export interface Resp<T = unknown> {
   data: T | null
   request_id?: string
   detail?: unknown
+  retryable?: boolean
+  next_action?: string
 }
 
 declare global {

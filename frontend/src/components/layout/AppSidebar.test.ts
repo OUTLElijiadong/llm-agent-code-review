@@ -30,6 +30,7 @@ vi.mock('@/stores/user', () => ({
 }))
 
 import AppSidebar from './AppSidebar.vue'
+import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
 
 describe('AppSidebar ordinary member navigation', () => {
   beforeEach(() => {
@@ -71,9 +72,9 @@ describe('AppSidebar ordinary member navigation', () => {
     expect(wrapper.find('[data-route="/projects"]').exists()).toBe(true)
   })
 
-  it('shows v3.6 and persists the collapsed island state', async () => {
+  it('shows the current release and persists the collapsed island state', async () => {
     const wrapper = mountSidebar()
-    expect(wrapper.text()).toContain('v3.6 · PRISM')
+    expect(wrapper.text()).toContain(`${APP_DISPLAY_VERSION} · PRISM`)
 
     await wrapper.get('.sidebar-toggle').trigger('click')
 

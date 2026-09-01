@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -87,3 +89,114 @@ def test_audit_never_persists_file_content_or_public_key() -> None:
     serialized = json.dumps(key_params)
     assert public_key not in serialized
     assert key_params["fingerprint"].startswith("SHA256:")
+
+
+def test_status_preserves_degraded_semantics(monkeypatch) -> None:
+    payload = {
+        "status": "degraded",
+        "can_continue": True,
+        "summary": "磁盘压力需要人工审阅",
+        "checks": {"disk": {"status": "degraded", "ok": False}},
+    }
+    monkeypatch.setattr(
+        executor,
+        "run",
+        lambda *_args, **_kwargs: {"exit_code": 0, "stdout": json.dumps(payload), "stderr": ""},
+    )
+
+    result = executor.execute("status", {}, request_id="request-status-01")
+
+    assert result["health_status"] == "degraded"
+    assert result["can_continue"] is True
+    assert result["checks"]["checks"]["disk"]["status"] == "degraded"
+
+
+def test_parse_security_sources_and_keep_collection_failure_visible(monkeypatch) -> None:
+    ssh = executor.parse_ssh_log([
+        "Accepted publickey for root from 10.0.0.2 port 1000 ssh2: ED25519 SHA256:test",
+        "Failed password for invalid user admin from 10.0.0.3 port 1001 ssh2",
+    ])
+    assert ssh["accepted"][0]["ip"] == "10.0.0.2"
+    assert ssh["failed"][0]["detail"] == "failed_password"
+
+    nginx = executor.parse_nginx_log([
+        '10.0.0.4 - - [01/Sep/2026:00:00:00 +0000] "CONNECT example.com:443 HTTP/1.1" 400 0',
+        '10.0.0.5 - - [01/Sep/2026:00:00:01 +0000] "GET / HTTP/1.1" 200 10',
+    ])
+    assert [item["detail"] for item in nginx] == ["proxy_connect"]
+
+    monkeypatch.setattr(
+        executor,
+        "run",
+        lambda *_args, **_kwargs: {"exit_code": 1, "stdout": "", "stderr": "journal unavailable"},
+    )
+    result = executor._ssh_login_events({"since_hours": 1, "limit": 10})
+    assert result["ok"] is False
+    assert result["source_exit_code"] == 1
+    assert "journal unavailable" in result["source_error"]
+
+
+def test_database_signal_parser_redacts_and_avoids_normal_update_false_positive() -> None:
+    result = executor.parse_db_general_log([
+        {"user_host": "root@localhost", "argument": "DROP TABLE users", "event_time": "now"},
+        {"user_host": "app@backend", "argument": "UPDATE jobs SET error='none' WHERE id=12345", "event_time": "now"},
+        {"user_host": "app@backend", "argument": "Access denied for user 'app'", "event_time": "now"},
+        {"user_host": "root@localhost", "argument": "SELECT * FROM users INTO OUTFILE '/tmp/users.sql'", "event_time": "now"},
+    ])
+
+    assert result["destructive_total"] == 1
+    assert result["error_total"] == 1
+    assert result["dump_exfil_total"] == 1
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert "/tmp/users.sql" not in serialized
+    assert "12345" not in serialized
+
+
+def test_security_action_contract_is_in_sync_with_backend_scheduler() -> None:
+    expected = {
+        "ssh_login_events",
+        "flytrap_attack_events",
+        "nginx_attack_events",
+        "backup_audit",
+        "db_threat_signals",
+        "db_health",
+        "ip_attribution",
+    }
+    assert expected <= executor.ACTION_PARAM_KEYS.keys()
+    assert expected <= executor.READ_ONLY_ACTIONS
+
+
+def test_executor_server_handles_independent_requests_concurrently() -> None:
+    assert issubclass(executor.UnixHTTPServer, executor.socketserver.ThreadingMixIn)
+    assert executor.UnixHTTPServer.daemon_threads is True
+
+
+def test_mutating_actions_are_serialized_while_reads_remain_available(monkeypatch) -> None:
+    active = 0
+    peak = 0
+    gate = threading.Lock()
+
+    def fake_execute(*_args, **_kwargs):
+        nonlocal active, peak
+        with gate:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.02)
+        with gate:
+            active -= 1
+        return {"ok": True}
+
+    monkeypatch.setattr(executor, "execute", fake_execute)
+    workers = [
+        threading.Thread(
+            target=executor._execute_with_concurrency_policy,
+            args=("restart_service", {"service": "backend"}, f"request-serial-{index}"),
+        )
+        for index in range(3)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+
+    assert peak == 1

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
-from app.models.agent_governance import ApprovalItem
+from app.core.exceptions import ConflictError
+from app.models.admin_chat import OpsExecution
+from app.models.agent_governance import ApprovalItem, ToolCallLog
 from app.models.agent_response_run import AgentToolExecution
 from app.services import agent_responses_service as responses_module
 from app.services import ops_service, policy_engine
@@ -295,6 +298,69 @@ def test_ops_service_final_guard_rejects_ordinary_admin(db, admin_user, monkeypa
     monkeypatch.setattr(ops_service, "_call_executor", lambda *_args, **_kwargs: {"ok": True})
     with pytest.raises(PermissionError, match="超级管理员"):
         ops_service.execute(db, admin_user, action="status")
+
+
+def test_ops_request_id_cannot_be_rebound_to_other_action(db, monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_executor(action, _params, _request_id):
+        calls.append(action)
+        return {"ok": True, "action": action, "result": {}}
+
+    monkeypatch.setattr(ops_service, "_call_executor", fake_executor)
+    ops_service.execute(
+        db,
+        None,
+        action="status",
+        source="scheduler",
+        request_id="ops-fixed-request-01",
+    )
+
+    with pytest.raises(ConflictError, match="已绑定其他运维请求"):
+        ops_service.execute(
+            db,
+            None,
+            action="certificate_status",
+            source="scheduler",
+            request_id="ops-fixed-request-01",
+        )
+    assert calls == ["status"]
+
+
+def test_running_ops_receipt_reconciles_from_executor_ledger(db, monkeypatch) -> None:
+    row = OpsExecution(
+        request_id="ops-reconcile-request-01",
+        action="status",
+        risk_level="low",
+        status="running",
+        params_json="{}",
+        started_at=datetime.now(timezone.utc),
+    )
+    db.add(row)
+    db.commit()
+    monkeypatch.setattr(
+        ops_service,
+        "_call_executor",
+        lambda action, params, request_id: {
+            "ok": True,
+            "action": action,
+            "result": {"health_status": "degraded", "can_continue": True},
+            "duplicate": True,
+        },
+    )
+
+    result = ops_service.execute(
+        db,
+        None,
+        action="status",
+        source="scheduler",
+        request_id="ops-reconcile-request-01",
+    )
+
+    assert result["status"] == "success"
+    assert result["duplicate"] is True
+    assert result["result"]["result"]["health_status"] == "degraded"
+    assert db.query(ToolCallLog).filter_by(copilot_request_id="ops-reconcile-request-01").count() == 1
 
 
 @pytest.mark.asyncio

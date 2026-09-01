@@ -518,6 +518,24 @@ def test_db_general_log_disabled_no_alert(db, super_admin_user, monkeypatch, emi
     assert db.query(AgentAlert).filter(AgentAlert.category == "db_threat").count() == 0
 
 
+def test_collector_source_failure_is_reported_without_blocking_other_sources(
+    db, super_admin_user, monkeypatch, emitted,
+):
+    payloads = _base_payloads()
+    payloads["ssh_login_events"] = {
+        "ok": False,
+        "source_exit_code": 1,
+        "source_error": "journal unavailable",
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert result["success"] is False
+    assert result["errors"] == [{"action": "ssh_login_events", "error": "journal unavailable"}]
+    assert result["actions"]["backup_audit"] == payloads["backup_audit"]
+
+
 def test_db_monitor_disabled_skips_action(db, super_admin_user, monkeypatch, emitted):
     """security_db_monitor_enabled=False 时不调用 db_threat_signals 动作。"""
     monkeypatch.setattr(settings, "security_db_monitor_enabled", False)

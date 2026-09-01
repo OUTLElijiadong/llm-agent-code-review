@@ -7,6 +7,7 @@ const streams = vi.hoisted(() => ({
     body: Record<string, unknown>
     onEvent: (event: unknown) => void
     resolve: () => void
+    aborted: boolean
   }>,
 }))
 
@@ -106,8 +107,16 @@ beforeEach(() => {
     const controller = new AbortController()
     let resolve = (): void => undefined
     const done = new Promise<void>((doneResolve) => { resolve = doneResolve })
-    streams.records.push({ body, onEvent: options.onEvent, resolve })
-    return { abort: () => controller.abort(), signal: controller.signal, done }
+    const record = { body, onEvent: options.onEvent, resolve, aborted: false }
+    streams.records.push(record)
+    return {
+      abort: () => {
+        record.aborted = true
+        controller.abort()
+      },
+      signal: controller.signal,
+      done,
+    }
   })
 })
 
@@ -116,6 +125,35 @@ afterEach(() => {
 })
 
 describe('AdminCopilot Responses stream', () => {
+  it('停止请求失败时保持服务端运行并给出同步提示', async () => {
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    await wrapper.find('textarea').setValue('继续执行生产检查')
+    void wrapper.find('.send-button').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-admin-active', model: 'deepseek-v4-pro' } })
+    await flushPromises()
+    sessionApi.cancel.mockRejectedValueOnce({
+      message: '执行器连接中断', request_id: 'trace-admin-cancel', retryable: true,
+    })
+
+    await wrapper.find('.stop-button').trigger('click')
+    await flushPromises()
+    const confirm = document.querySelector('.cancel-confirm-stop') as HTMLButtonElement | null
+    expect(confirm).not.toBeNull()
+    confirm!.click()
+    await flushPromises()
+
+    expect(streams.records[0].aborted).toBe(false)
+    expect(wrapper.find('.stop-button').exists()).toBe(true)
+    expect(messages.error).toHaveBeenCalledWith('停止请求未确认：执行器连接中断')
+    expect(wrapper.find('.copilot-error-card').text()).toContain('停止请求未确认')
+    expect(wrapper.find('.copilot-error-card').text()).toContain('trace-admin-cancel')
+    expect(wrapper.text()).not.toContain('已停止任务，未执行剩余操作')
+    wrapper.unmount()
+  })
+
   it('创建团队后主响应结束也持续展示真实子 Agent 协作城市', async () => {
     teamApi.detail.mockResolvedValue({
       team_id: 88, title: '管理端实时协作', surface: 'admin', session_id: 'admin-test', status: 'running',

@@ -30,6 +30,9 @@ export interface AdminCopilotMessage {
   rows?: Array<Record<string, unknown>>
   total?: number
   collapsed?: boolean
+  retryable?: boolean
+  next_action?: string
+  request_id?: string
   message_id?: number
   user_message_id?: number
 }

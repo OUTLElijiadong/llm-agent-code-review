@@ -16,7 +16,7 @@ import inspect
 import json
 import math
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import (
     Any,
     AsyncIterable,
@@ -327,6 +327,9 @@ class InMemoryCheckpointStore:
 
     async def save(self, checkpoint: RunCheckpoint) -> None:
         async with self._lock:
+            current = self._items.get(checkpoint.run_id)
+            if current is not None and current.get("status") == CANCELLED and checkpoint.status != CANCELLED:
+                return
             self._items[checkpoint.run_id] = checkpoint.to_dict()
 
     async def load(self, run_id: str) -> Optional[RunCheckpoint]:
@@ -657,6 +660,24 @@ class DeepSeekResponsesRuntime:
         event = self._cancel_events.get(run_id)
         return bool(event and event.is_set())
 
+    async def _refresh_cancelled_checkpoint(
+        self,
+        checkpoint: RunCheckpoint,
+    ) -> Optional[RuntimeResult]:
+        """从持久化检查点刷新跨请求取消状态。
+
+        ``cancel`` 可能由另一 HTTP 请求、另一进程或另一 Runtime 实例发起，
+        因此不能只依赖当前对象内存中的 asyncio.Event。每个模型/工具边界
+        都重新读取数据库；已开始的外部操作允许自然结束，但之后不得再启动
+        任何调用，也不得用旧状态覆盖 cancelled 终态。
+        """
+        latest = await self._store.load(checkpoint.run_id)
+        if latest is None:
+            raise RunNotFoundError(f"运行 {checkpoint.run_id} 不存在或检查点已失效")
+        if latest.status == CANCELLED:
+            return self._result(latest)
+        return None
+
     async def _mark_cancelled(self, checkpoint: RunCheckpoint, *, reason: str = "") -> RuntimeResult:
         """把检查点收敛为用户取消终态；旧执行者不得再覆盖该结果。"""
         checkpoint.status = CANCELLED
@@ -677,6 +698,9 @@ class DeepSeekResponsesRuntime:
     async def _drive(self, checkpoint: RunCheckpoint) -> RuntimeResult:
         events: List[Mapping[str, Any]] = []
         while True:
+            persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
+            if persisted_cancelled is not None:
+                return persisted_cancelled
             if self._cancel_requested(checkpoint.run_id):
                 return await self._mark_cancelled(
                     checkpoint,
@@ -684,7 +708,10 @@ class DeepSeekResponsesRuntime:
                 )
             recovered = await self._recover_interrupted_completed_calls(checkpoint)
             if recovered is not None:
-                return self._result(checkpoint, events=events + list(recovered.events))
+                return replace(
+                    recovered,
+                    events=tuple(copy.deepcopy(events)) + recovered.events,
+                )
             if checkpoint.rounds >= self._max_rounds:
                 checkpoint.status = MAX_ROUNDS_EXCEEDED
                 checkpoint.error = f"模型工具循环超过最大轮数 {self._max_rounds}"
@@ -781,6 +808,12 @@ class DeepSeekResponsesRuntime:
                     await self._store.save(checkpoint)
                     return self._result(checkpoint, events=events)
 
+            # 模型调用期间可能由另一请求完成取消。先核对持久终态，再处理
+            # 模型输出，避免继续进入工具或用 completed/failed 覆盖 cancelled。
+            persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
+            if persisted_cancelled is not None:
+                return persisted_cancelled
+
             events.extend(turn_events)
             checkpoint.last_response = copy.deepcopy(dict(response))
             output_items = [
@@ -818,7 +851,12 @@ class DeepSeekResponsesRuntime:
                 await self._store.save(checkpoint)
                 paused = await self._process_calls(checkpoint, calls)
                 if paused:
-                    return self._result(checkpoint, events=events + list(paused.events))
+                    # _process_calls 可能返回另一请求写入的最新取消终态。
+                    # 不能再用旧 checkpoint 重建结果，否则调用方会误见 running。
+                    return replace(
+                        paused,
+                        events=tuple(copy.deepcopy(events)) + paused.events,
+                    )
                 continue
 
             candidate_text = _extract_output_text(output_items)
@@ -903,6 +941,9 @@ class DeepSeekResponsesRuntime:
         calls: Sequence[ToolCall],
     ) -> Optional[RuntimeResult]:
         for index, call in enumerate(calls):
+            persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
+            if persisted_cancelled is not None:
+                return persisted_cancelled
             remaining = list(calls[index + 1 :])
             if call.parse_error:
                 checkpoint.transcript.append(
@@ -969,6 +1010,11 @@ class DeepSeekResponsesRuntime:
                 return self._result(checkpoint, events=[event])
 
             execution = await self._execute_tool(call, approved=False)
+            # 已经开始的工具无法安全强停；执行结束后必须先承认并发取消，
+            # 且不得继续写回旧检查点或启动同一轮剩余工具。
+            persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
+            if persisted_cancelled is not None:
+                return persisted_cancelled
             if _is_approval_required(execution.status):
                 checkpoint.status = WAITING_APPROVAL
                 checkpoint.pending = PendingAction(

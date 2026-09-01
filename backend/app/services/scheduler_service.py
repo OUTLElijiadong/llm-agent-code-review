@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -743,14 +744,22 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
     )
     certificate_ok = certificate_result.success and bool(certificate_payload.get("valid_for_30_days"))
     application = _collect_application_health(db, job.id)
-    healthy = (
-        str(checks.get("status") or "error") == "ok"
-        and result.success
+    health_status = str(checks.get("status") or "error")
+    host_can_continue = bool(checks.get("can_continue", health_status == "ok"))
+    operational = bool(
+        result.success
+        and host_can_continue
         and certificate_ok
-        and bool(application.get("ok"))
+        and application.get("ok")
     )
+    healthy = health_status == "ok" and operational
+    degraded = health_status == "degraded" and operational
     summary: Dict[str, Any] = {
-        "success": healthy,
+        # 调度器只将真正不可继续的状态记为失败；degraded 保留告警
+        # 和人工动作，但不堵死后续巡检。
+        "success": operational,
+        "status": health_status if operational else "error",
+        "can_continue": operational,
         "execution_id": data.get("id"),
         "certificate_execution_id": certificate_data.get("id"),
         "checks": checks,
@@ -760,11 +769,24 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
         },
         "application": application,
     }
-    legacy_cards = db.query(AdminChatMessage).filter(
-        AdminChatMessage.agent_code == "operations",
-        AdminChatMessage.message_type.in_(["confirm", "danger_confirm"]),
-        AdminChatMessage.action_status == "pending",
-    ).all()
+    # 旧确认协议表在滚动升级或新环境中可能尚未创建；清理它是兼容性
+    # 收尾动作，不能让主巡检因此变成失败。真正的健康检查结果仍按上面
+    # 的关键依赖判定，并把跳过原因留在结果里供人核对。
+    legacy_cards = []
+    try:
+        legacy_cards = db.query(AdminChatMessage).filter(
+            AdminChatMessage.agent_code == "operations",
+            AdminChatMessage.message_type.in_(["confirm", "danger_confirm"]),
+            AdminChatMessage.action_status == "pending",
+        ).all()
+    except (OperationalError, ProgrammingError) as exc:
+        db.rollback()
+        summary["legacy_confirmation_cleanup"] = {
+            "status": "degraded",
+            "message": "旧确认协议表暂不可用，已跳过清理，不影响当前巡检",
+        }
+        from loguru import logger
+        logger.warning(f"[scheduler_service] legacy confirmation cleanup skipped: {exc}")
     for message in legacy_cards:
         try:
             message_payload = json.loads(message.payload_json or "{}")
@@ -835,18 +857,38 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
         "application": application,
         "failed_services": failed_services,
     }
+    alert_severity = "warning" if degraded else "high"
     if not existing_alert:
         existing_alert = observability_service.create_alert(
             db,
             alert_type="ops_health",
-            severity="high",
+            severity=alert_severity,
             title=alert_title,
             detail=alert_detail,
         )
     else:
-        existing_alert.severity = "high"
+        existing_alert.severity = alert_severity
         existing_alert.detail_json = json.dumps(alert_detail, ensure_ascii=False, default=str)
         db.commit()
+
+    if degraded:
+        actions = checks.get("actions") if isinstance(checks.get("actions"), list) else []
+        recommended_actions = []
+        for item in actions:
+            if isinstance(item, dict):
+                if item:
+                    recommended_actions.append(item)
+            elif str(item).strip():
+                # 兼容旧执行器只返回人类可读字符串的版本。
+                recommended_actions.append(str(item))
+        summary.update({
+            "requires_attention": True,
+            "recommended_actions": recommended_actions,
+            "diagnosis_skipped": True,
+            "diagnosis": "当前为可继续的降级状态，已保留警告和人工处置建议，未触发自动重启。",
+            "alert_id": existing_alert.id,
+        })
+        return summary
 
     if settings.ops_health_diagnosis_enabled:
         from app.services import agent_cost_budget_service

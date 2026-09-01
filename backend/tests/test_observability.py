@@ -86,6 +86,60 @@ def test_unhandled_error_uses_validated_request_id() -> None:
     assert response.json()["request_id"] != "bad\nvalue"
 
 
+def test_production_app_error_keeps_actionable_metadata_without_detail(monkeypatch) -> None:
+    """生产错误应可追踪、可恢复，但不得回显内部 detail。"""
+    from app.core.config import settings
+    from app.core.error_handlers import register_handlers
+    from app.core.exceptions import ServiceUnavailableError
+
+    monkeypatch.setattr(settings, "app_env", "prod")
+    app = FastAPI()
+    register_handlers(app)
+    app.add_middleware(RequestContextMiddleware)
+
+    @app.get("/temporarily-unavailable")
+    def temporarily_unavailable() -> None:
+        raise ServiceUnavailableError("模型服务暂时不可用", detail={"provider": "secret"})
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/temporarily-unavailable",
+        headers={"X-Request-Id": "trace-production-123456"},
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": 50301,
+        "message": "模型服务暂时不可用",
+        "request_id": "trace-production-123456",
+        "retryable": True,
+        "next_action": "请稍后重试；若持续失败，请提供请求编号给管理员",
+    }
+    assert response.headers["X-Request-Id"] == "trace-production-123456"
+
+
+def test_production_unhandled_error_is_not_auto_retryable(monkeypatch) -> None:
+    """未知 500 的副作用状态不确定，不能诱导客户端盲目自动重放。"""
+    from app.core.config import settings
+    from app.core.error_handlers import register_handlers
+
+    monkeypatch.setattr(settings, "app_env", "prod")
+    app = FastAPI()
+    register_handlers(app)
+    app.add_middleware(RequestContextMiddleware)
+
+    @app.get("/unknown")
+    def unknown() -> None:
+        raise RuntimeError("internal secret")
+
+    response = TestClient(app, raise_server_exceptions=False).get("/unknown")
+    body = response.json()
+    assert response.status_code == 500
+    assert body["retryable"] is False
+    assert body["next_action"] == "请先刷新状态；若仍失败，请提供请求编号给管理员"
+    assert body["request_id"] == response.headers["X-Request-Id"]
+    assert "detail" not in body
+    assert "internal secret" not in response.text
+
+
 def test_healthz_exposes_version_and_release(monkeypatch) -> None:
     """存活端点应返回当前语义版本和不可变 release 标识。"""
     from app import main

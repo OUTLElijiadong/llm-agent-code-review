@@ -18,9 +18,10 @@ const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
+const responseApi = vi.hoisted(() => ({ cancel: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
-vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get }))
+vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get, cancelAgentResponseRun: responseApi.cancel }))
 vi.mock('@/api/agentMesh', () => ({
   heartbeatAgentMesh: meshApi.heartbeat,
   pullAgentMeshInbox: meshApi.inbox,
@@ -139,6 +140,7 @@ beforeEach(() => {
       done,
     }
   })
+  responseApi.cancel.mockReset().mockResolvedValue({ status: 'cancelled' })
 })
 
 afterEach(() => {
@@ -158,6 +160,34 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
 }
 
 describe('AgentChatDrawer Responses stream', () => {
+  it('服务端拒绝停止时不把本地运行误标记为已取消', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('继续处理')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-active', model: 'deepseek-v4-pro' } })
+    responseApi.cancel.mockRejectedValueOnce({
+      code: 50301,
+      message: '取消服务暂时不可用',
+      request_id: 'trace-cancel-1',
+      retryable: true,
+      next_action: '稍后再次停止',
+    })
+
+    await wrapper.find('.stop-btn').trigger('click')
+    await settleAll()
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await settleAll()
+
+    expect(streams.records[0].aborted).toBe(false)
+    expect(messages.error).toHaveBeenCalledWith('停止请求未确认：取消服务暂时不可用')
+    expect(wrapper.find('.stop-btn').exists()).toBe(true)
+    expect(wrapper.find('.msg-error-card').text()).toContain('停止请求未确认')
+    expect(wrapper.find('.msg-error-card').text()).toContain('稍后再次停止')
+    expect(wrapper.find('.msg-error-card').text()).toContain('trace-cancel-1')
+    expect(wrapper.text()).not.toContain('已停止任务，未执行剩余操作')
+    wrapper.unmount()
+  })
   it('labels a fresh Xiaoling conversation with the Pro orchestrator model', async () => {
     const wrapper = await mountReadyDrawer()
 

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.agents.event_bus import emit_event
 from app.agents.events import AgentEventType
 from app.core.config import settings
+from app.core.exceptions import ConflictError
 from app.models.admin_chat import OpsExecution
 from app.models.agent_governance import ToolCallLog
 from app.models.user import User
@@ -227,6 +228,90 @@ ACTION_DESCRIPTIONS = {
 }
 
 
+class OpsExecutorError(RuntimeError):
+    """宿主机执行器返回的结构化失败。"""
+
+    def __init__(self, message: str, *, status_code: int, payload: dict[str, Any]):
+        super().__init__(message)
+        self.status_code = status_code
+        self.payload = payload
+
+    @property
+    def outcome_known(self) -> bool:
+        """除冲突/服务端异常外，4xx 表示执行器已确认动作未成功。"""
+        return 400 <= self.status_code < 500 and self.status_code != 409
+
+
+def _request_params_json(action: str, params: dict[str, Any]) -> str:
+    return json.dumps(_audit_params(action, params), ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _assert_existing_request_matches(row: OpsExecution, action: str, params: dict[str, Any]) -> None:
+    try:
+        recorded_params = json.loads(row.params_json or "{}")
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ConflictError("request_id 对应的运维审计已损坏，禁止重新绑定") from exc
+    if row.action != action or recorded_params != _audit_params(action, params):
+        raise ConflictError("request_id 已绑定其他运维请求，禁止重新使用")
+
+
+def _uncertain_execution(row: OpsExecution, error: str, *, duplicate: bool) -> dict[str, Any]:
+    result = _execution_dict(row, duplicate=duplicate)
+    result.update({
+        "error": error[:4000],
+        "retryable": False,
+        "next_action": "动作结果尚未确认；请使用同一请求编号重试查询，禁止新建编号盲目重放",
+    })
+    return result
+
+
+def _finalize_execution(
+    db: Session,
+    row: OpsExecution,
+    actor: Optional[User],
+    *,
+    source: str,
+    result: dict[str, Any],
+    duration_ms: int,
+    duplicate: bool,
+) -> dict[str, Any]:
+    row.status = "success" if result.get("ok") else "failed"
+    row.result_json = json.dumps(_redact_value(result), ensure_ascii=False, default=str)[:200_000]
+    row.error = None if result.get("ok") else str(result.get("error") or "执行器返回失败")[:4000]
+    row.duration_ms = max(0, int(duration_ms))
+    row.finished_at = datetime.now(timezone.utc)
+
+    existing_call = db.query(ToolCallLog).filter(ToolCallLog.copilot_request_id == row.request_id).first()
+    if existing_call is None:
+        db.add(ToolCallLog(
+            agent_code="operations",
+            tool_code=f"ops.{row.action}",
+            action=f"operations.{row.action}",
+            resource="production",
+            status=row.status,
+            risk_level=row.risk_level,
+            decision="automatic" if actor is None or row.action in AUTO_ACTIONS else "confirmed",
+            input_summary=f"source={source}; params={row.params_json[:1000]}",
+            output_summary=json.dumps(_redact_value(result), ensure_ascii=False, default=str)[:4000],
+            error=row.error,
+            duration_ms=row.duration_ms,
+            copilot_request_id=row.request_id,
+        ))
+        audit_service.log(
+            db,
+            actor,
+            f"admin_copilot.ops.{row.action}",
+            target_type="production_ops",
+            target_id=row.request_id,
+            detail=f"运维动作 {row.action}：{row.status}；source={source}",
+            status=row.status,
+            commit=False,
+        )
+    db.commit()
+    db.refresh(row)
+    return _execution_dict(row, duplicate=duplicate)
+
+
 def execute(
     db: Session,
     actor: Optional[User],
@@ -253,7 +338,49 @@ def execute(
     request_id = request_id or uuid.uuid4().hex
     existing = db.query(OpsExecution).filter(OpsExecution.request_id == request_id).first()
     if existing:
-        return _execution_dict(existing, duplicate=True)
+        _assert_existing_request_matches(existing, action, safe_params)
+        if existing.status != "running":
+            return _execution_dict(existing, duplicate=True)
+
+        # API 进程可能在宿主机动作完成后、数据库回执落盘前中断。同一
+        # request_id 重送给执行器只会读取幂等账本，不会重复副作用。
+        try:
+            recovered = _call_executor(action, safe_params, request_id)
+        except OpsExecutorError as exc:
+            if not exc.outcome_known:
+                return _uncertain_execution(existing, str(exc), duplicate=True)
+            recovered = {"ok": False, "action": action, "error": str(exc), "executor": exc.payload}
+        except Exception as exc:  # noqa: BLE001 - 网络结果未知时保持 running，禁止盲目重放
+            return _uncertain_execution(existing, str(exc), duplicate=True)
+
+        # 并发恢复者在这里串行确认，避免重复写 ToolCallLog/AuditLog。
+        locked = (
+            db.query(OpsExecution)
+            .filter(OpsExecution.request_id == request_id)
+            .with_for_update()
+            .first()
+        )
+        if locked is None:
+            raise RuntimeError("运维执行记录在恢复期间消失")
+        if locked.status != "running":
+            return _execution_dict(locked, duplicate=True)
+        reconciled = _finalize_execution(
+            db,
+            locked,
+            actor,
+            source=source,
+            result=recovered,
+            duration_ms=locked.duration_ms or 0,
+            duplicate=True,
+        )
+        _emit(
+            AgentEventType.COMPLETE if locked.status == "success" else AgentEventType.FAILED,
+            f"trc_ops_{request_id[:16]}",
+            actor,
+            action,
+            "运维动作回执已恢复" if locked.status == "success" else "运维动作已确认失败",
+        )
+        return reconciled
 
     risk = ACTION_RISKS[action]
     started = datetime.now(timezone.utc)
@@ -264,7 +391,7 @@ def execute(
         action=action,
         risk_level=risk,
         status="running",
-        params_json=json.dumps(_audit_params(action, safe_params), ensure_ascii=False, sort_keys=True, default=str),
+        params_json=_request_params_json(action, safe_params),
         started_at=started,
     )
     db.add(row)
@@ -274,7 +401,17 @@ def execute(
         db.rollback()
         existing = db.query(OpsExecution).filter(OpsExecution.request_id == request_id).first()
         if existing:
-            return _execution_dict(existing, duplicate=True)
+            # 与常规幂等分支走同一套参数绑定和未知结果对账，
+            # 不把并发插入冲突误报成“仍在执行”。
+            return execute(
+                db,
+                actor,
+                action=action,
+                params=safe_params,
+                request_id=request_id,
+                session_db_id=session_db_id,
+                source=source,
+            )
         raise
     db.refresh(row)
 
@@ -284,48 +421,35 @@ def execute(
     t0 = time.monotonic()
     try:
         result = _call_executor(action, safe_params, request_id)
-        row.status = "success" if result.get("ok") else "failed"
-        row.result_json = json.dumps(_redact_value(result), ensure_ascii=False, default=str)[:200_000]
-        if not result.get("ok"):
-            row.error = str(result.get("error") or "执行器返回失败")[:4000]
+    except OpsExecutorError as exc:
+        if exc.outcome_known:
+            result = {"ok": False, "action": action, "error": str(exc), "executor": exc.payload}
+        else:
+            row.error = str(exc)[:4000]
+            row.result_json = json.dumps(_redact_value(exc.payload), ensure_ascii=False, default=str)[:200_000]
+            row.duration_ms = int((time.monotonic() - t0) * 1000)
+            db.commit()
+            return _uncertain_execution(row, str(exc), duplicate=False)
     except Exception as exc:  # noqa: BLE001 - 必须落盘失败证据
-        result = {"ok": False, "action": action, "error": str(exc)}
-        row.status = "failed"
         row.error = str(exc)[:4000]
-        row.result_json = json.dumps(_redact_value(result), ensure_ascii=False, default=str)
-    row.duration_ms = int((time.monotonic() - t0) * 1000)
-    row.finished_at = datetime.now(timezone.utc)
+        row.result_json = json.dumps(
+            _redact_value({"ok": False, "action": action, "error": str(exc)}),
+            ensure_ascii=False,
+            default=str,
+        )
+        row.duration_ms = int((time.monotonic() - t0) * 1000)
+        db.commit()
+        return _uncertain_execution(row, str(exc), duplicate=False)
 
-    call = ToolCallLog(
-        agent_code="operations",
-        tool_code=f"ops.{action}",
-        action=f"operations.{action}",
-        resource="production",
-        status=row.status,
-        risk_level=risk,
-        decision="automatic" if action in AUTO_ACTIONS else "confirmed",
-        input_summary=(
-            f"source={source}; params="
-            f"{json.dumps(_audit_params(action, safe_params), ensure_ascii=False, default=str)[:1000]}"
-        ),
-        output_summary=json.dumps(_redact_value(result), ensure_ascii=False, default=str)[:4000],
-        error=row.error,
-        duration_ms=row.duration_ms,
-        copilot_request_id=request_id,
-    )
-    db.add(call)
-    audit_service.log(
+    execution = _finalize_execution(
         db,
+        row,
         actor,
-        f"admin_copilot.ops.{action}",
-        target_type="production_ops",
-        target_id=request_id,
-        detail=f"运维动作 {action}：{row.status}；source={source}",
-        status=row.status,
-        commit=False,
+        source=source,
+        result=result,
+        duration_ms=int((time.monotonic() - t0) * 1000),
+        duplicate=False,
     )
-    db.commit()
-    db.refresh(row)
     _emit(
         AgentEventType.COMPLETE if row.status == "success" else AgentEventType.FAILED,
         trace_id,
@@ -333,7 +457,7 @@ def execute(
         action,
         "运维动作完成" if row.status == "success" else "运维动作失败",
     )
-    return _execution_dict(row, duplicate=False)
+    return execution
 
 
 def validate_action_params(action: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -413,7 +537,11 @@ def _call_executor(action: str, params: dict[str, Any], request_id: str) -> dict
     except ValueError as exc:
         raise RuntimeError(f"运维执行器返回非 JSON（HTTP {response.status_code}）") from exc
     if response.status_code >= 400:
-        raise RuntimeError(str(payload.get("error") or f"运维执行器 HTTP {response.status_code}"))
+        raise OpsExecutorError(
+            str(payload.get("error") or f"运维执行器 HTTP {response.status_code}"),
+            status_code=response.status_code,
+            payload=payload if isinstance(payload, dict) else {},
+        )
     return payload
 
 
@@ -434,7 +562,7 @@ def _execution_dict(row: OpsExecution, *, duplicate: bool) -> dict[str, Any]:
         result = json.loads(row.result_json or "{}")
     except (TypeError, json.JSONDecodeError):
         result = {}
-    return {
+    payload = {
         "id": row.id,
         "request_id": row.request_id,
         "action": row.action,
@@ -445,3 +573,9 @@ def _execution_dict(row: OpsExecution, *, duplicate: bool) -> dict[str, Any]:
         "duration_ms": row.duration_ms,
         "duplicate": duplicate,
     }
+    if row.status == "running":
+        payload.update({
+            "retryable": False,
+            "next_action": "动作结果尚未确认；请使用同一请求编号查询，禁止新建编号盲目重放",
+        })
+    return payload

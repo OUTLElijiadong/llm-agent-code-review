@@ -76,6 +76,22 @@ class RecordingExecutor:
         return ToolExecutionResult.success({"tool": call.name, "args": call.arguments})
 
 
+class CrossRuntimeCancelExecutor(RecordingExecutor):
+    """在第一个工具完成后让另一个 Runtime 请求取消，验证持久状态优先。"""
+
+    def __init__(self, store: InMemoryCheckpointStore) -> None:
+        super().__init__()
+        self.store = store
+        self.cancel_runtime: DeepSeekResponsesRuntime | None = None
+
+    async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+        self.calls.append((call, approved))
+        if len(self.calls) == 1:
+            assert self.cancel_runtime is not None
+            await self.cancel_runtime.cancel("run-cross-runtime-cancel", reason="人工停止")
+        return ToolExecutionResult.success({"tool": call.name})
+
+
 def _runtime(
     transport: ScriptedTransport,
     executor: Any,
@@ -1196,6 +1212,40 @@ async def test_cancel_wins_over_approval_pause_write_back() -> None:
     assert checkpoint.pending is None
     assert checkpoint.cancel_reason == "用户要求立即停止"
     assert "已停止任务" in checkpoint.output_text
+
+
+@pytest.mark.asyncio
+async def test_cross_runtime_cancel_blocks_remaining_tool_calls() -> None:
+    """另一个 HTTP 请求取消后，旧驱动不得继续执行同一响应中的后续工具。"""
+    store = InMemoryCheckpointStore()
+    transport = ScriptedTransport([
+        _function_response(
+            ("call_first", "read_status", {}),
+            ("call_second", "write_side_effect", {}),
+        ),
+        _message_response("不应到达"),
+    ])
+    executor = CrossRuntimeCancelExecutor(store)
+    driver = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=executor,
+        checkpoint_store=store,
+        stream=False,
+    )
+    canceller = DeepSeekResponsesRuntime(
+        transport=ScriptedTransport([]),
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=store,
+        stream=False,
+    )
+    executor.cancel_runtime = canceller
+
+    result = await driver.start("执行", run_id="run-cross-runtime-cancel")
+
+    assert result.status == "cancelled"
+    assert [call.call_id for call, _ in executor.calls] == ["call_first"]
+    checkpoint = await canceller.get_checkpoint("run-cross-runtime-cancel")
+    assert checkpoint.status == "cancelled"
 
 
 def test_checkpoint_round_trips_cancel_reason() -> None:

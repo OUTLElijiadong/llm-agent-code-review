@@ -377,6 +377,28 @@ def test_submit_clarification_rejects_non_owner(clarify_store: ClarifyStore) -> 
         )
 
     assert exc.value.code == 40300
+    assert clarify_store.peek("clarify-1") is not None
+
+
+def test_submit_clarification_dispatch_failure_keeps_pending_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    clarify_store: ClarifyStore,
+) -> None:
+    """派发失败不能消费追问，下一次请求仍可恢复。"""
+    clarify_store.put("clarify-retry", {"user_id": 7, "intent": "review", "payload": {}})
+    failing = FakeChatAgent(AgentResult(success=False, error="暂时不可用"))
+    monkeypatch.setattr(
+        module,
+        "get_request_orchestrator",
+        MagicMock(return_value=SimpleNamespace(chat_agent=failing)),
+    )
+    with pytest.raises(AiServiceError):
+        module.submit_clarification(
+            module.ClarifyAnswers(clarify_id="clarify-retry", answers={}),
+            db=object(),
+            user=SimpleNamespace(id=7, role="member"),
+        )
+    assert clarify_store.peek("clarify-retry") is not None
 
 
 def test_submit_clarification_merges_payload_and_returns_dict_result(
