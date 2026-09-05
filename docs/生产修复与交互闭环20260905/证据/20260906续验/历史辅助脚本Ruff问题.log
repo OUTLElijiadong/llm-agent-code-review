@@ -1,0 +1,1682 @@
+I001 [*] Import block is un-sorted or un-formatted
+  --> backend/_qa_crosscheck.py:2:1
+   |
+ 1 |   """QA: 全站 API 聚合 ↔ 数据库直查 交叉核对(临时脚本)"""
+ 2 | / import os
+ 3 | | import httpx
+ 4 | | from sqlalchemy import func
+ 5 | |
+ 6 | | from app.core.database import SessionLocal
+ 7 | | from app.models.ai_call_log import AiCallLog
+ 8 | | from app.models.audit_log import AuditLog
+ 9 | | from app.models.code_file import CodeFile
+10 | | from app.models.project import Project
+11 | | from app.models.review_issue import ReviewIssue
+12 | | from app.models.review_task import ReviewTask
+13 | | from app.models.user import User
+   | |________________________________^
+14 |
+15 |   BASE = "http://localhost:8000"
+   |
+help: Organize imports
+
+F401 [*] `typing.Union` imported but unused
+  --> backend/audit_data.py:17:54
+   |
+15 | import sys
+16 | from datetime import datetime
+17 | from typing import Any, Dict, List, Optional, Tuple, Union
+   |                                                      ^^^^^
+18 |
+19 | import httpx
+   |
+help: Remove unused import: `typing.Union`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> backend/init_sqlite.py:7:1
+   |
+ 5 |   sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ 6 |
+ 7 | / from app.core.database import Base, engine, SessionLocal
+ 8 | |
+ 9 | | # 必须显式导入所有 Model 才能让 Base.metadata.create_all 识别并创建对应的表
+10 | | from app.models.user import User
+11 | | from app.models.project import Project
+12 | | from app.models.code_file import CodeFile
+13 | | from app.models.code_version import CodeVersion
+14 | | from app.models.review_rule import ReviewRule
+15 | | from app.models.review_task import ReviewTask
+16 | | from app.models.review_task_file import ReviewTaskFile
+17 | | from app.models.review_issue import ReviewIssue
+18 | | from app.models.ai_call_log import AiCallLog
+19 | | from app.models.review_report import ReviewReport
+20 | | from app.models.audit_log import AuditLog
+21 | | # Agent 自进化 (v3.0) 新增表
+22 | | from app.models.review_experience import ReviewExperience
+23 | | from app.models.evolution_proposal import EvolutionProposal
+24 | | from app.models.eval_case import EvalCase
+25 | | # v3.1: 用户自定义 API 配置
+26 | | from app.models.api_config import UserApiConfig
+27 | | # v2.4: 维修工单 / 用户反馈 / 开发者论坛 / 用户画像 / 个人知识库(RAG) / 系统配置
+28 | | from app.models.maintenance_ticket import MaintenanceTicket
+29 | | from app.models.user_feedback import UserFeedback
+30 | | from app.models.forum_post import ForumPost
+31 | | from app.models.forum_reply import ForumReply
+32 | | from app.models.user_profile import UserProfile
+33 | | from app.models.knowledge_doc import KnowledgeDoc
+34 | | from app.models.knowledge_chunk import KnowledgeChunk
+35 | | from app.models.system_config import SystemConfig
+   | |_________________________________________________^
+36 |
+37 |   def main():
+   |
+help: Organize imports
+
+F401 [*] `app.models.project.Project` imported but unused
+  --> backend/init_sqlite.py:11:32
+   |
+ 9 | # 必须显式导入所有 Model 才能让 Base.metadata.create_all 识别并创建对应的表
+10 | from app.models.user import User
+11 | from app.models.project import Project
+   |                                ^^^^^^^
+12 | from app.models.code_file import CodeFile
+13 | from app.models.code_version import CodeVersion
+   |
+help: Remove unused import: `app.models.project.Project`
+
+F401 [*] `app.models.code_file.CodeFile` imported but unused
+  --> backend/init_sqlite.py:12:34
+   |
+10 | from app.models.user import User
+11 | from app.models.project import Project
+12 | from app.models.code_file import CodeFile
+   |                                  ^^^^^^^^
+13 | from app.models.code_version import CodeVersion
+14 | from app.models.review_rule import ReviewRule
+   |
+help: Remove unused import: `app.models.code_file.CodeFile`
+
+F401 [*] `app.models.code_version.CodeVersion` imported but unused
+  --> backend/init_sqlite.py:13:37
+   |
+11 | from app.models.project import Project
+12 | from app.models.code_file import CodeFile
+13 | from app.models.code_version import CodeVersion
+   |                                     ^^^^^^^^^^^
+14 | from app.models.review_rule import ReviewRule
+15 | from app.models.review_task import ReviewTask
+   |
+help: Remove unused import: `app.models.code_version.CodeVersion`
+
+F401 [*] `app.models.review_task.ReviewTask` imported but unused
+  --> backend/init_sqlite.py:15:36
+   |
+13 | from app.models.code_version import CodeVersion
+14 | from app.models.review_rule import ReviewRule
+15 | from app.models.review_task import ReviewTask
+   |                                    ^^^^^^^^^^
+16 | from app.models.review_task_file import ReviewTaskFile
+17 | from app.models.review_issue import ReviewIssue
+   |
+help: Remove unused import: `app.models.review_task.ReviewTask`
+
+F401 [*] `app.models.review_task_file.ReviewTaskFile` imported but unused
+  --> backend/init_sqlite.py:16:41
+   |
+14 | from app.models.review_rule import ReviewRule
+15 | from app.models.review_task import ReviewTask
+16 | from app.models.review_task_file import ReviewTaskFile
+   |                                         ^^^^^^^^^^^^^^
+17 | from app.models.review_issue import ReviewIssue
+18 | from app.models.ai_call_log import AiCallLog
+   |
+help: Remove unused import: `app.models.review_task_file.ReviewTaskFile`
+
+F401 [*] `app.models.review_issue.ReviewIssue` imported but unused
+  --> backend/init_sqlite.py:17:37
+   |
+15 | from app.models.review_task import ReviewTask
+16 | from app.models.review_task_file import ReviewTaskFile
+17 | from app.models.review_issue import ReviewIssue
+   |                                     ^^^^^^^^^^^
+18 | from app.models.ai_call_log import AiCallLog
+19 | from app.models.review_report import ReviewReport
+   |
+help: Remove unused import: `app.models.review_issue.ReviewIssue`
+
+F401 [*] `app.models.ai_call_log.AiCallLog` imported but unused
+  --> backend/init_sqlite.py:18:36
+   |
+16 | from app.models.review_task_file import ReviewTaskFile
+17 | from app.models.review_issue import ReviewIssue
+18 | from app.models.ai_call_log import AiCallLog
+   |                                    ^^^^^^^^^
+19 | from app.models.review_report import ReviewReport
+20 | from app.models.audit_log import AuditLog
+   |
+help: Remove unused import: `app.models.ai_call_log.AiCallLog`
+
+F401 [*] `app.models.review_report.ReviewReport` imported but unused
+  --> backend/init_sqlite.py:19:38
+   |
+17 | from app.models.review_issue import ReviewIssue
+18 | from app.models.ai_call_log import AiCallLog
+19 | from app.models.review_report import ReviewReport
+   |                                      ^^^^^^^^^^^^
+20 | from app.models.audit_log import AuditLog
+21 | # Agent 自进化 (v3.0) 新增表
+   |
+help: Remove unused import: `app.models.review_report.ReviewReport`
+
+F401 [*] `app.models.audit_log.AuditLog` imported but unused
+  --> backend/init_sqlite.py:20:34
+   |
+18 | from app.models.ai_call_log import AiCallLog
+19 | from app.models.review_report import ReviewReport
+20 | from app.models.audit_log import AuditLog
+   |                                  ^^^^^^^^
+21 | # Agent 自进化 (v3.0) 新增表
+22 | from app.models.review_experience import ReviewExperience
+   |
+help: Remove unused import: `app.models.audit_log.AuditLog`
+
+F401 [*] `app.models.review_experience.ReviewExperience` imported but unused
+  --> backend/init_sqlite.py:22:42
+   |
+20 | from app.models.audit_log import AuditLog
+21 | # Agent 自进化 (v3.0) 新增表
+22 | from app.models.review_experience import ReviewExperience
+   |                                          ^^^^^^^^^^^^^^^^
+23 | from app.models.evolution_proposal import EvolutionProposal
+24 | from app.models.eval_case import EvalCase
+   |
+help: Remove unused import: `app.models.review_experience.ReviewExperience`
+
+F401 [*] `app.models.evolution_proposal.EvolutionProposal` imported but unused
+  --> backend/init_sqlite.py:23:43
+   |
+21 | # Agent 自进化 (v3.0) 新增表
+22 | from app.models.review_experience import ReviewExperience
+23 | from app.models.evolution_proposal import EvolutionProposal
+   |                                           ^^^^^^^^^^^^^^^^^
+24 | from app.models.eval_case import EvalCase
+25 | # v3.1: 用户自定义 API 配置
+   |
+help: Remove unused import: `app.models.evolution_proposal.EvolutionProposal`
+
+F401 [*] `app.models.eval_case.EvalCase` imported but unused
+  --> backend/init_sqlite.py:24:34
+   |
+22 | from app.models.review_experience import ReviewExperience
+23 | from app.models.evolution_proposal import EvolutionProposal
+24 | from app.models.eval_case import EvalCase
+   |                                  ^^^^^^^^
+25 | # v3.1: 用户自定义 API 配置
+26 | from app.models.api_config import UserApiConfig
+   |
+help: Remove unused import: `app.models.eval_case.EvalCase`
+
+F401 [*] `app.models.api_config.UserApiConfig` imported but unused
+  --> backend/init_sqlite.py:26:35
+   |
+24 | from app.models.eval_case import EvalCase
+25 | # v3.1: 用户自定义 API 配置
+26 | from app.models.api_config import UserApiConfig
+   |                                   ^^^^^^^^^^^^^
+27 | # v2.4: 维修工单 / 用户反馈 / 开发者论坛 / 用户画像 / 个人知识库(RAG) / 系统配置
+28 | from app.models.maintenance_ticket import MaintenanceTicket
+   |
+help: Remove unused import: `app.models.api_config.UserApiConfig`
+
+F401 [*] `app.models.maintenance_ticket.MaintenanceTicket` imported but unused
+  --> backend/init_sqlite.py:28:43
+   |
+26 | from app.models.api_config import UserApiConfig
+27 | # v2.4: 维修工单 / 用户反馈 / 开发者论坛 / 用户画像 / 个人知识库(RAG) / 系统配置
+28 | from app.models.maintenance_ticket import MaintenanceTicket
+   |                                           ^^^^^^^^^^^^^^^^^
+29 | from app.models.user_feedback import UserFeedback
+30 | from app.models.forum_post import ForumPost
+   |
+help: Remove unused import: `app.models.maintenance_ticket.MaintenanceTicket`
+
+F401 [*] `app.models.user_feedback.UserFeedback` imported but unused
+  --> backend/init_sqlite.py:29:38
+   |
+27 | # v2.4: 维修工单 / 用户反馈 / 开发者论坛 / 用户画像 / 个人知识库(RAG) / 系统配置
+28 | from app.models.maintenance_ticket import MaintenanceTicket
+29 | from app.models.user_feedback import UserFeedback
+   |                                      ^^^^^^^^^^^^
+30 | from app.models.forum_post import ForumPost
+31 | from app.models.forum_reply import ForumReply
+   |
+help: Remove unused import: `app.models.user_feedback.UserFeedback`
+
+F401 [*] `app.models.forum_post.ForumPost` imported but unused
+  --> backend/init_sqlite.py:30:35
+   |
+28 | from app.models.maintenance_ticket import MaintenanceTicket
+29 | from app.models.user_feedback import UserFeedback
+30 | from app.models.forum_post import ForumPost
+   |                                   ^^^^^^^^^
+31 | from app.models.forum_reply import ForumReply
+32 | from app.models.user_profile import UserProfile
+   |
+help: Remove unused import: `app.models.forum_post.ForumPost`
+
+F401 [*] `app.models.forum_reply.ForumReply` imported but unused
+  --> backend/init_sqlite.py:31:36
+   |
+29 | from app.models.user_feedback import UserFeedback
+30 | from app.models.forum_post import ForumPost
+31 | from app.models.forum_reply import ForumReply
+   |                                    ^^^^^^^^^^
+32 | from app.models.user_profile import UserProfile
+33 | from app.models.knowledge_doc import KnowledgeDoc
+   |
+help: Remove unused import: `app.models.forum_reply.ForumReply`
+
+F401 [*] `app.models.user_profile.UserProfile` imported but unused
+  --> backend/init_sqlite.py:32:37
+   |
+30 | from app.models.forum_post import ForumPost
+31 | from app.models.forum_reply import ForumReply
+32 | from app.models.user_profile import UserProfile
+   |                                     ^^^^^^^^^^^
+33 | from app.models.knowledge_doc import KnowledgeDoc
+34 | from app.models.knowledge_chunk import KnowledgeChunk
+   |
+help: Remove unused import: `app.models.user_profile.UserProfile`
+
+F401 [*] `app.models.knowledge_doc.KnowledgeDoc` imported but unused
+  --> backend/init_sqlite.py:33:38
+   |
+31 | from app.models.forum_reply import ForumReply
+32 | from app.models.user_profile import UserProfile
+33 | from app.models.knowledge_doc import KnowledgeDoc
+   |                                      ^^^^^^^^^^^^
+34 | from app.models.knowledge_chunk import KnowledgeChunk
+35 | from app.models.system_config import SystemConfig
+   |
+help: Remove unused import: `app.models.knowledge_doc.KnowledgeDoc`
+
+F401 [*] `app.models.knowledge_chunk.KnowledgeChunk` imported but unused
+  --> backend/init_sqlite.py:34:40
+   |
+32 | from app.models.user_profile import UserProfile
+33 | from app.models.knowledge_doc import KnowledgeDoc
+34 | from app.models.knowledge_chunk import KnowledgeChunk
+   |                                        ^^^^^^^^^^^^^^
+35 | from app.models.system_config import SystemConfig
+   |
+help: Remove unused import: `app.models.knowledge_chunk.KnowledgeChunk`
+
+F401 [*] `app.models.system_config.SystemConfig` imported but unused
+  --> backend/init_sqlite.py:35:38
+   |
+33 | from app.models.knowledge_doc import KnowledgeDoc
+34 | from app.models.knowledge_chunk import KnowledgeChunk
+35 | from app.models.system_config import SystemConfig
+   |                                      ^^^^^^^^^^^^
+36 |
+37 | def main():
+   |
+help: Remove unused import: `app.models.system_config.SystemConfig`
+
+E501 Line too long (151 > 120)
+  --> backend/init_sqlite.py:73:91
+   |
+71 | …
+72 | …
+73 | …格、命名约定是否符合语言惯例;长行、重复空白、冗余分号等。', 1, 1, 1),
+   |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+74 | …定义引用、循环边界错误、数组越界、类型混淆、错用API等可能在运行时出错的问题。',                       1, 1, 2),
+75 | …令注入、XSS、不安全反序列化、硬编码密钥、明文密码、弱加密、路径穿越等安全问题。',                  1, 1, 3),
+   |
+
+E501 Line too long (189 > 120)
+  --> backend/init_sqlite.py:74:92
+   |
+72 | …
+73 | …重复空白、冗余分号等。', 1, 1, 1),
+74 | …型混淆、错用API等可能在运行时出错的问题。',                       1, 1, 2),
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+75 | …码密钥、明文密码、弱加密、路径穿越等安全问题。',                  1, 1, 3),
+76 | …拷贝、未使用合适的数据结构等性能问题。',                        1, 1, 4),
+   |
+
+E501 Line too long (188 > 120)
+  --> backend/init_sqlite.py:75:93
+   |
+73 | …重复空白、冗余分号等。', 1, 1, 1),
+74 | …型混淆、错用API等可能在运行时出错的问题。',                       1, 1, 2),
+75 | …码密钥、明文密码、弱加密、路径穿越等安全问题。',                  1, 1, 3),
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+76 | …拷贝、未使用合适的数据结构等性能问题。',                        1, 1, 4),
+77 | …是否缺少必要的资源释放(with/try-finally)。',                    1, 1, 5),
+   |
+
+E501 Line too long (189 > 120)
+  --> backend/init_sqlite.py:76:91
+   |
+74 | …型混淆、错用API等可能在运行时出错的问题。',                       1, 1, 2),
+75 | …码密钥、明文密码、弱加密、路径穿越等安全问题。',                  1, 1, 3),
+76 | …拷贝、未使用合适的数据结构等性能问题。',                        1, 1, 4),
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+77 | …是否缺少必要的资源释放(with/try-finally)。',                    1, 1, 5),
+78 | …ke_case/camelCase/PascalCase),是否避免缩写歧义。',           1, 1, 6),
+   |
+
+E501 Line too long (184 > 120)
+  --> backend/init_sqlite.py:77:94
+   |
+75 | …硬编码密钥、明文密码、弱加密、路径穿越等安全问题。',                  1, 1, 3),
+76 | …重复拷贝、未使用合适的数据结构等性能问题。',                        1, 1, 4),
+77 | …常、是否缺少必要的资源释放(with/try-finally)。',                    1, 1, 5),
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+78 | …nake_case/camelCase/PascalCase),是否避免缩写歧义。',           1, 1, 6),
+79 | …数字、重复代码等影响维护的问题。',                                    1, 1, 7),
+   |
+
+E501 Line too long (185 > 120)
+  --> backend/init_sqlite.py:78:94
+   |
+76 | …重复拷贝、未使用合适的数据结构等性能问题。',                        1, 1, 4),
+77 | …常、是否缺少必要的资源释放(with/try-finally)。',                    1, 1, 5),
+78 | …nake_case/camelCase/PascalCase),是否避免缩写歧义。',           1, 1, 6),
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+79 | …数字、重复代码等影响维护的问题。',                                    1, 1, 7),
+80 | …、关键算法无说明、注释与代码不一致等。',                                  1, 1, 8)
+   |
+
+E501 Line too long (191 > 120)
+  --> backend/init_sqlite.py:79:91
+   |
+77 | …否缺少必要的资源释放(with/try-finally)。',                    1, 1, 5),
+78 | …e_case/camelCase/PascalCase),是否避免缩写歧义。',           1, 1, 6),
+79 | …重复代码等影响维护的问题。',                                    1, 1, 7),
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+80 | …算法无说明、注释与代码不一致等。',                                  1, 1, 8)
+81 | …
+   |
+
+E501 Line too long (185 > 120)
+  --> backend/init_sqlite.py:80:96
+   |
+78 | …ake_case/camelCase/PascalCase),是否避免缩写歧义。',           1, 1, 6),
+79 | …字、重复代码等影响维护的问题。',                                    1, 1, 7),
+80 | …关键算法无说明、注释与代码不一致等。',                                  1, 1, 8)
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+81 | …
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> backend/reconcile_indexes.py:16:1
+   |
+14 |       DB_HOST=sqlite DB_NAME=foo python reconcile_indexes.py
+15 |   """
+16 | / import init_sqlite  # noqa: F401  导入以触发全部 ORM 模型注册到 Base.metadata
+17 | | from sqlalchemy import inspect, text
+18 | |
+19 | | from app.core.database import Base, engine
+   | |__________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (191 > 120)
+  --> backend/seed_rules.py:15:98
+   |
+13 | …
+14 | …
+15 | …接,要求使用参数化查询或ORM的安全API。动态表名/列名必须使用白名单校验。', '*', '严重'),
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+16 | …L上下文时是否正确转义。HTML输出使用实体编码,JS使用\\xHH编码,URL使用encodeURIComponent。前端框架使用v-text而非v-html。', '*', '严重'),
+17 | …os.system/subprocess/os.exec/exec)。必须使用数组形式传参并对每个参数进行白名单校验。', '*', '严重'),
+   |
+
+E501 Line too long (233 > 120)
+  --> backend/seed_rules.py:16:101
+   |
+14 | …
+15 | …动态表名/列名必须使用白名单校验。', '*', '严重'),
+16 | …编码,JS使用\\xHH编码,URL使用encodeURIComponent。前端框架使用v-text而非v-html。', '*', '严重'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+17 | …s.exec/exec)。必须使用数组形式传参并对每个参数进行白名单校验。', '*', '严重'),
+18 | …名+过期时间,禁止硬编码密钥。', '*', '严重'),
+   |
+
+E501 Line too long (211 > 120)
+  --> backend/seed_rules.py:17:99
+   |
+15 | …询或ORM的安全API。动态表名/列名必须使用白名单校验。', '*', '严重'),
+16 | …义。HTML输出使用实体编码,JS使用\\xHH编码,URL使用encodeURIComponent。前端框架使用v-text而非v-html。', '*', '严重'),
+17 | …subprocess/os.exec/exec)。必须使用数组形式传参并对每个参数进行白名单校验。', '*', '严重'),
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+18 | …端执行。JWT需要验证签名+过期时间,禁止硬编码密钥。', '*', '严重'),
+19 | …/私钥/AccessKey等敏感凭证。密钥必须从环境变量或配置中心读取,不在日志中打印。', '*', '严重'),
+   |
+
+E501 Line too long (196 > 120)
+  --> backend/seed_rules.py:18:95
+   |
+16 | …文时是否正确转义。HTML输出使用实体编码,JS使用\\xHH编码,URL使用encodeURIComponent。前端框架使用v-text而非v-html。', '*', '严重'),
+17 | …system/subprocess/os.exec/exec)。必须使用数组形式传参并对每个参数进行白名单校验。', '*', '严重'),
+18 | …校验是否在服务端执行。JWT需要验证签名+过期时间,禁止硬编码密钥。', '*', '严重'),
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+19 | …y/Token/私钥/AccessKey等敏感凭证。密钥必须从环境变量或配置中心读取,不在日志中打印。', '*', '严重'),
+20 | …yaml.load等不安全反序列化。Python使用yaml.safe_load,Java避免ObjectInputStream接受外部数据。', '*', '高'),
+   |
+
+E501 Line too long (211 > 120)
+  --> backend/seed_rules.py:19:101
+   |
+17 | …subprocess/os.exec/exec)。必须使用数组形式传参并对每个参数进行白名单校验。', '*', '严重'),
+18 | …端执行。JWT需要验证签名+过期时间,禁止硬编码密钥。', '*', '严重'),
+19 | …/私钥/AccessKey等敏感凭证。密钥必须从环境变量或配置中心读取,不在日志中打印。', '*', '严重'),
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+20 | …ad等不安全反序列化。Python使用yaml.safe_load,Java避免ObjectInputStream接受外部数据。', '*', '高'),
+21 | …意文件读取。使用os.path.realpath校验规范化路径在允许目录内。', '*', '高'),
+   |
+
+E501 Line too long (211 > 120)
+  --> backend/seed_rules.py:20:105
+   |
+18 | …执行。JWT需要验证签名+过期时间,禁止硬编码密钥。', '*', '严重'),
+19 | …私钥/AccessKey等敏感凭证。密钥必须从环境变量或配置中心读取,不在日志中打印。', '*', '严重'),
+20 | …d等不安全反序列化。Python使用yaml.safe_load,Java避免ObjectInputStream接受外部数据。', '*', '高'),
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+21 | …文件读取。使用os.path.realpath校验规范化路径在允许目录内。', '*', '高'),
+22 | …否关闭(verify=False)。生产环境禁止关闭证书验证。敏感数据传输必须加密。', '*', '高'),
+   |
+
+E501 Line too long (205 > 120)
+  --> backend/seed_rules.py:21:94
+   |
+19 | …ken/私钥/AccessKey等敏感凭证。密钥必须从环境变量或配置中心读取,不在日志中打印。', '*', '严重'),
+20 | ….load等不安全反序列化。Python使用yaml.safe_load,Java避免ObjectInputStream接受外部数据。', '*', '高'),
+21 | …导致任意文件读取。使用os.path.realpath校验规范化路径在允许目录内。', '*', '高'),
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+22 | …书验证是否关闭(verify=False)。生产环境禁止关闭证书验证。敏感数据传输必须加密。', '*', '高'),
+   |
+
+E501 Line too long (202 > 120)
+  --> backend/seed_rules.py:22:102
+   |
+20 | …l.load等不安全反序列化。Python使用yaml.safe_load,Java避免ObjectInputStream接受外部数据。', '*', '高'),
+21 | …能导致任意文件读取。使用os.path.realpath校验规范化路径在允许目录内。', '*', '高'),
+22 | …证书验证是否关闭(verify=False)。生产环境禁止关闭证书验证。敏感数据传输必须加密。', '*', '高'),
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+23 | …
+24 | …
+   |
+
+E501 Line too long (225 > 120)
+  --> backend/seed_rules.py:25:97
+   |
+24 | …
+25 | …在使用前必须验证is not None。使用Optional Chaining(?.)或空值合并运算符(??)。', '*', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+26 | …字符串/零值的边界情况是否处理。索引是否为负或超界。', '*', '高'),
+27 | …int)。数值溢出检查。时间戳精度(秒/毫秒)一致性。', '*', '高'),
+   |
+
+E501 Line too long (201 > 120)
+  --> backend/seed_rules.py:26:98
+   |
+24 | …
+25 | …ptional类型的字段在使用前必须验证is not None。使用Optional Chaining(?.)或空值合并运算符(??)。', '*', '高'),
+26 | …-one错误。空集合/空字符串/零值的边界情况是否处理。索引是否为负或超界。', '*', '高'),
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+27 | …→float,long→int)。数值溢出检查。时间戳精度(秒/毫秒)一致性。', '*', '高'),
+28 | …溯爆炸)。正则是否使用了^和$边界。email/URL正则是否过于宽松。', '*', '中'),
+   |
+
+E501 Line too long (194 > 120)
+  --> backend/seed_rules.py:27:94
+   |
+25 | …空。Optional类型的字段在使用前必须验证is not None。使用Optional Chaining(?.)或空值合并运算符(??)。', '*', '高'),
+26 | …-by-one错误。空集合/空字符串/零值的边界情况是否处理。索引是否为负或超界。', '*', '高'),
+27 | …int→float,long→int)。数值溢出检查。时间戳精度(秒/毫秒)一致性。', '*', '高'),
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+28 | …词/回溯爆炸)。正则是否使用了^和$边界。email/URL正则是否过于宽松。', '*', '中'),
+29 | …False/条件互斥)、永远不会抛出的except、永远为空的循环体、return后的代码。', '*', '低'),
+   |
+
+E501 Line too long (190 > 120)
+  --> backend/seed_rules.py:28:97
+   |
+26 | …ff-by-one错误。空集合/空字符串/零值的边界情况是否处理。索引是否为负或超界。', '*', '高'),
+27 | …失(int→float,long→int)。数值溢出检查。时间戳精度(秒/毫秒)一致性。', '*', '高'),
+28 | …套量词/回溯爆炸)。正则是否使用了^和$边界。email/URL正则是否过于宽松。', '*', '中'),
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+29 | …f False/条件互斥)、永远不会抛出的except、永远为空的循环体、return后的代码。', '*', '低'),
+   |
+
+E501 Line too long (202 > 120)
+  --> backend/seed_rules.py:29:97
+   |
+27 | …float,long→int)。数值溢出检查。时间戳精度(秒/毫秒)一致性。', '*', '高'),
+28 | …爆炸)。正则是否使用了^和$边界。email/URL正则是否过于宽松。', '*', '中'),
+29 | …e/条件互斥)、永远不会抛出的except、永远为空的循环体、return后的代码。', '*', '低'),
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+30 | …
+31 | …
+   |
+
+E501 Line too long (242 > 120)
+  --> backend/seed_rules.py:32:98
+   |
+31 | …
+32 | …r loading/join/batch API)一次性获取关联数据。ORM中使用selectinload或joinedload。', '*', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+33 | …存cache/Redis/CDN)。避免在循环内重复执行不变的查询。', '*', '中'),
+34 | …表推导式/生成器替代显式循环累加。排序前检查数据是否已有序。', '*', '中'),
+   |
+
+E501 Line too long (227 > 120)
+  --> backend/seed_rules.py:33:94
+   |
+31 | …
+32 | …查询(eager loading/join/batch API)一次性获取关联数据。ORM中使用selectinload或joinedload。', '*', '高'),
+33 | …的缓存策略(内存cache/Redis/CDN)。避免在循环内重复执行不变的查询。', '*', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+34 | …性搜索。使用列表推导式/生成器替代显式循环累加。排序前检查数据是否已有序。', '*', '中'),
+   |
+
+E501 Line too long (227 > 120)
+  --> backend/seed_rules.py:34:97
+   |
+32 | …量查询(eager loading/join/batch API)一次性获取关联数据。ORM中使用selectinload或joinedload。', '*', '高'),
+33 | …理的缓存策略(内存cache/Redis/CDN)。避免在循环内重复执行不变的查询。', '*', '中'),
+34 | …线性搜索。使用列表推导式/生成器替代显式循环累加。排序前检查数据是否已有序。', '*', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+35 | …
+36 | …
+   |
+
+E501 Line too long (230 > 120)
+  --> backend/seed_rules.py:37:108
+   |
+36 | …
+37 | …ass,导致异常被完全吞掉。至少应记录日志。明确捕获预期的异常类型,未预期的异常应向上传播或告警。', '*', '高'),
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+38 | …th/try-with-resources确保释放。Python使用with语句,Java使用try-with-resources。', '*', '高'),
+39 | …避,避免雪崩。幂等操作可安全重试,非幂等操作需确认。', '*', '中'),
+   |
+
+E501 Line too long (233 > 120)
+  --> backend/seed_rules.py:38:95
+   |
+36 | …
+37 | …ss,导致异常被完全吞掉。至少应记录日志。明确捕获预期的异常类型,未预期的异常应向上传播或告警。', '*', '高'),
+38 | …h/try-with-resources确保释放。Python使用with语句,Java使用try-with-resources。', '*', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+39 | …,避免雪崩。幂等操作可安全重试,非幂等操作需确认。', '*', '中'),
+40 | …用户侧返回通用错误信息,详细错误仅记录服务端日志。', '*', '中'),
+   |
+
+E501 Line too long (219 > 120)
+  --> backend/seed_rules.py:39:93
+   |
+37 | …ion后pass,导致异常被完全吞掉。至少应记录日志。明确捕获预期的异常类型,未预期的异常应向上传播或告警。', '*', '高'),
+38 | …或使用with/try-with-resources确保释放。Python使用with语句,Java使用try-with-resources。', '*', '高'),
+39 | …应带指数退避,避免雪崩。幂等操作可安全重试,非幂等操作需确认。', '*', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+40 | …数据库结构。用户侧返回通用错误信息,详细错误仅记录服务端日志。', '*', '中'),
+   |
+
+E501 Line too long (210 > 120)
+  --> backend/seed_rules.py:40:97
+   |
+38 | …ally中或使用with/try-with-resources确保释放。Python使用with语句,Java使用try-with-resources。', '*', '高'),
+39 | …重试。重试应带指数退避,避免雪崩。幂等操作可安全重试,非幂等操作需确认。', '*', '中'),
+40 | …栈/路径/数据库结构。用户侧返回通用错误信息,详细错误仅记录服务端日志。', '*', '中'),
+ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+41 | …
+42 | …
+   |
+
+E501 Line too long (213 > 120)
+  --> backend/seed_rules.py:43:97
+   |
+42 | …
+43 | …数应拆分为职责单一的小函数。每个函数只做一件事,提升可读性和可测试性。', '*', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+44 | …函数/工具类/混入(Mixin)。相似结构的代码考虑使用配置驱动。', '*', '中'),
+45 | …0/404)或字符串(如URL/文件路径)。应提取为命名常量或配置项。', '*', '中'),
+   |
+
+E501 Line too long (204 > 120)
+  --> backend/seed_rules.py:44:96
+   |
+42 | …
+43 | …释)。长函数应拆分为职责单一的小函数。每个函数只做一件事,提升可读性和可测试性。', '*', '中'),
+44 | …抽取为公共函数/工具类/混入(Mixin)。相似结构的代码考虑使用配置驱动。', '*', '中'),
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+45 | …/86400/404)或字符串(如URL/文件路径)。应提取为命名常量或配置项。', '*', '中'),
+46 | …hile)。使用卫语句(Guard Clause)提前return减少缩进。表达式中循环嵌套不超过2层。', '*', '低'),
+   |
+
+E501 Line too long (202 > 120)
+  --> backend/seed_rules.py:45:93
+   |
+43 | …注释)。长函数应拆分为职责单一的小函数。每个函数只做一件事,提升可读性和可测试性。', '*', '中'),
+44 | …应抽取为公共函数/工具类/混入(Mixin)。相似结构的代码考虑使用配置驱动。', '*', '中'),
+45 | …0/86400/404)或字符串(如URL/文件路径)。应提取为命名常量或配置项。', '*', '中'),
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+46 | …while)。使用卫语句(Guard Clause)提前return减少缩进。表达式中循环嵌套不超过2层。', '*', '低'),
+   |
+
+E501 Line too long (210 > 120)
+  --> backend/seed_rules.py:46:99
+   |
+44 | …公共函数/工具类/混入(Mixin)。相似结构的代码考虑使用配置驱动。', '*', '中'),
+45 | …400/404)或字符串(如URL/文件路径)。应提取为命名常量或配置项。', '*', '中'),
+46 | …e)。使用卫语句(Guard Clause)提前return减少缩进。表达式中循环嵌套不超过2层。', '*', '低'),
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+47 | …
+48 | …
+   |
+
+E501 Line too long (216 > 120)
+  --> backend/seed_rules.py:49:95
+   |
+48 | …
+49 | …ror或跳过元素。使用列表推导式生成新列表,或遍历list(container)的副本。', 'python', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+50 | …,每次调用共享同一对象会导致意外行为。默认参数使用None,函数体内判断is None再初始化。', 'python', '高'),
+51 | …有闭包共享最终值。使用functools.partial或默认参数(i=i)冻结当前值。', 'python', '中'),
+   |
+
+E501 Line too long (229 > 120)
+  --> backend/seed_rules.py:50:96
+   |
+48 | …
+49 | …元素。使用列表推导式生成新列表,或遍历list(container)的副本。', 'python', '高'),
+50 | …享同一对象会导致意外行为。默认参数使用None,函数体内判断is None再初始化。', 'python', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+51 | …终值。使用functools.partial或默认参数(i=i)冻结当前值。', 'python', '中'),
+52 | …用返回值传递状态,或封装为类属性。模块级全局变量应考虑线程安全。', 'python', '中'),
+   |
+
+E501 Line too long (215 > 120)
+  --> backend/seed_rules.py:51:98
+   |
+49 | …ror或跳过元素。使用列表推导式生成新列表,或遍历list(container)的副本。', 'python', '高'),
+50 | …,每次调用共享同一对象会导致意外行为。默认参数使用None,函数体内判断is None再初始化。', 'python', '高'),
+51 | …有闭包共享最终值。使用functools.partial或默认参数(i=i)冻结当前值。', 'python', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+52 | …变量。优先使用返回值传递状态,或封装为类属性。模块级全局变量应考虑线程安全。', 'python', '中'),
+53 | …显著提升IDE提示和代码审查效率。推荐使用typing模块的List/Dict/Optional等泛型。', 'python', '低'),
+   |
+
+E501 Line too long (217 > 120)
+  --> backend/seed_rules.py:52:102
+   |
+50 | …每次调用共享同一对象会导致意外行为。默认参数使用None,函数体内判断is None再初始化。', 'python', '高'),
+51 | …闭包共享最终值。使用functools.partial或默认参数(i=i)冻结当前值。', 'python', '中'),
+52 | …量。优先使用返回值传递状态,或封装为类属性。模块级全局变量应考虑线程安全。', 'python', '中'),
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+53 | …著提升IDE提示和代码审查效率。推荐使用typing模块的List/Dict/Optional等泛型。', 'python', '低'),
+54 | …降。复杂的推导式改用传统for循环,或拆分为多步中间变量。', 'python', '低'),
+   |
+
+E501 Line too long (231 > 120)
+  --> backend/seed_rules.py:53:95
+   |
+51 | …值。使用functools.partial或默认参数(i=i)冻结当前值。', 'python', '中'),
+52 | …返回值传递状态,或封装为类属性。模块级全局变量应考虑线程安全。', 'python', '中'),
+53 | …提示和代码审查效率。推荐使用typing模块的List/Dict/Optional等泛型。', 'python', '低'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+54 | …导式改用传统for循环,或拆分为多步中间变量。', 'python', '低'),
+55 | …类应实现__enter__/__exit__以支持with。', 'python', '高'),
+   |
+
+E501 Line too long (216 > 120)
+  --> backend/seed_rules.py:54:92
+   |
+52 | …变量。优先使用返回值传递状态,或封装为类属性。模块级全局变量应考虑线程安全。', 'python', '中'),
+53 | …显著提升IDE提示和代码审查效率。推荐使用typing模块的List/Dict/Optional等泛型。', 'python', '低'),
+54 | …下降。复杂的推导式改用传统for循环,或拆分为多步中间变量。', 'python', '低'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+55 | …漏。自定义资源类应实现__enter__/__exit__以支持with。', 'python', '高'),
+56 | …染当前命名空间且难以追踪来源。显式导入需要的名称,或使用import module as m的别名方式。', 'python', '中'),
+   |
+
+E501 Line too long (205 > 120)
+  --> backend/seed_rules.py:55:96
+   |
+53 | …。类型注解显著提升IDE提示和代码审查效率。推荐使用typing模块的List/Dict/Optional等泛型。', 'python', '低'),
+54 | …导致可读性下降。复杂的推导式改用传统for循环,或拆分为多步中间变量。', 'python', '低'),
+55 | …导致资源泄漏。自定义资源类应实现__enter__/__exit__以支持with。', 'python', '高'),
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+56 | … *,会污染当前命名空间且难以追踪来源。显式导入需要的名称,或使用import module as m的别名方式。', 'python', '中'),
+57 | …eading.Lock保护临界区,或使用queue.Queue在线程间安全传递数据。', 'python', '高'),
+   |
+
+E501 Line too long (225 > 120)
+  --> backend/seed_rules.py:56:103
+   |
+54 | …的推导式改用传统for循环,或拆分为多步中间变量。', 'python', '低'),
+55 | …资源类应实现__enter__/__exit__以支持with。', 'python', '高'),
+56 | …空间且难以追踪来源。显式导入需要的名称,或使用import module as m的别名方式。', 'python', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+57 | …k保护临界区,或使用queue.Queue在线程间安全传递数据。', 'python', '高'),
+58 | …eep/requests.get),导致事件循环阻塞。使用asyncio.sleep和aiohttp。', 'python', '高'),
+   |
+
+E501 Line too long (205 > 120)
+  --> backend/seed_rules.py:57:94
+   |
+55 | …,导致资源泄漏。自定义资源类应实现__enter__/__exit__以支持with。', 'python', '高'),
+56 | …t *,会污染当前命名空间且难以追踪来源。显式导入需要的名称,或使用import module as m的别名方式。', 'python', '中'),
+57 | …reading.Lock保护临界区,或使用queue.Queue在线程间安全传递数据。', 'python', '高'),
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+58 | …塞方法(time.sleep/requests.get),导致事件循环阻塞。使用asyncio.sleep和aiohttp。', 'python', '高'),
+59 | …即使日志级别不匹配仍会执行格式化。使用%s占位符延迟格式化: logger.debug("%s", var)。', 'python', '中'),
+   |
+
+E501 Line too long (210 > 120)
+  --> backend/seed_rules.py:58:101
+   |
+56 | …,会污染当前命名空间且难以追踪来源。显式导入需要的名称,或使用import module as m的别名方式。', 'python', '中'),
+57 | …ding.Lock保护临界区,或使用queue.Queue在线程间安全传递数据。', 'python', '高'),
+58 | …(time.sleep/requests.get),导致事件循环阻塞。使用asyncio.sleep和aiohttp。', 'python', '高'),
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+59 | …志级别不匹配仍会执行格式化。使用%s占位符延迟格式化: logger.debug("%s", var)。', 'python', '中'),
+60 | …节省约40-50%内存。对于数据容器类强烈建议添加__slots__。', 'python', '低'),
+   |
+
+E501 Line too long (215 > 120)
+  --> backend/seed_rules.py:59:101
+   |
+57 | …g.Lock保护临界区,或使用queue.Queue在线程间安全传递数据。', 'python', '高'),
+58 | …me.sleep/requests.get),导致事件循环阻塞。使用asyncio.sleep和aiohttp。', 'python', '高'),
+59 | …不匹配仍会执行格式化。使用%s占位符延迟格式化: logger.debug("%s", var)。', 'python', '中'),
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+60 | …40-50%内存。对于数据容器类强烈建议添加__slots__。', 'python', '低'),
+61 | …存溢出。使用生成器(yield)或迭代器延迟计算。', 'python', '中'),
+   |
+
+E501 Line too long (195 > 120)
+  --> backend/seed_rules.py:60:100
+   |
+58 | …了同步阻塞方法(time.sleep/requests.get),导致事件循环阻塞。使用asyncio.sleep和aiohttp。', 'python', '高'),
+59 | …ing,即使日志级别不匹配仍会执行格式化。使用%s占位符延迟格式化: logger.debug("%s", var)。', 'python', '中'),
+60 | …ots__,可节省约40-50%内存。对于数据容器类强烈建议添加__slots__。', 'python', '低'),
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+61 | …完整列表,可能导致内存溢出。使用生成器(yield)或迭代器延迟计算。', 'python', '中'),
+62 | …过于宽泛,可能意外捕获SystemExit/KeyboardInterrupt。预计的异常明确类型如ValueError/KeyError。', 'python', '中'),
+   |
+
+E501 Line too long (195 > 120)
+  --> backend/seed_rules.py:61:96
+   |
+59 | …ring,即使日志级别不匹配仍会执行格式化。使用%s占位符延迟格式化: logger.debug("%s", var)。', 'python', '中'),
+60 | …lots__,可节省约40-50%内存。对于数据容器类强烈建议添加__slots__。', 'python', '低'),
+61 | …回完整列表,可能导致内存溢出。使用生成器(yield)或迭代器延迟计算。', 'python', '中'),
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+62 | …否过于宽泛,可能意外捕获SystemExit/KeyboardInterrupt。预计的异常明确类型如ValueError/KeyError。', 'python', '中'),
+63 | …默认值(列表/字典),所有实例共享该对象。应在__init__中为每个实例单独初始化。', 'python', '高'),
+   |
+
+E501 Line too long (216 > 120)
+  --> backend/seed_rules.py:62:101
+   |
+60 | …40-50%内存。对于数据容器类强烈建议添加__slots__。', 'python', '低'),
+61 | …存溢出。使用生成器(yield)或迭代器延迟计算。', 'python', '中'),
+62 | …获SystemExit/KeyboardInterrupt。预计的异常明确类型如ValueError/KeyError。', 'python', '中'),
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+63 | …所有实例共享该对象。应在__init__中为每个实例单独初始化。', 'python', '高'),
+64 | ….. WHERE name=" + user_input)等字符串拼接。必须使用参数化查询:cursor.execute("... WHERE name=%s", (name,))。', 'python', '严重'),
+   |
+
+E501 Line too long (210 > 120)
+  --> backend/seed_rules.py:63:94
+   |
+61 | …导致内存溢出。使用生成器(yield)或迭代器延迟计算。', 'python', '中'),
+62 | …意外捕获SystemExit/KeyboardInterrupt。预计的异常明确类型如ValueError/KeyError。', 'python', '中'),
+63 | …典),所有实例共享该对象。应在__init__中为每个实例单独初始化。', 'python', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+64 | …T ... WHERE name=" + user_input)等字符串拼接。必须使用参数化查询:cursor.execute("... WHERE name=%s", (name,))。', 'python', '严重'),
+65 | …pickle可执行任意代码,绝不用于网络数据/用户上传。使用json/msgpack/protobuf等安全序列化格式。', 'python', '严重'),
+   |
+
+E501 Line too long (240 > 120)
+  --> backend/seed_rules.py:64:112
+   |
+62 | …KeyboardInterrupt。预计的异常明确类型如ValueError/KeyError。', 'python', '中'),
+63 | …__init__中为每个实例单独初始化。', 'python', '高'),
+64 | …e=" + user_input)等字符串拼接。必须使用参数化查询:cursor.execute("... WHERE name=%s", (name,))。', 'python', '严重'),
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+65 | …不用于网络数据/用户上传。使用json/msgpack/protobuf等安全序列化格式。', 'python', '严重'),
+66 | …。eval可执行任意代码,极度危险。必须使用时需要严格的AST白名单过滤,优先使用ast.literal_eval。', 'python', '严重'),
+   |
+
+E501 Line too long (230 > 120)
+  --> backend/seed_rules.py:65:102
+   |
+63 | …对象。应在__init__中为每个实例单独初始化。', 'python', '高'),
+64 | …E name=" + user_input)等字符串拼接。必须使用参数化查询:cursor.execute("... WHERE name=%s", (name,))。', 'python', '严重'),
+65 | …意代码,绝不用于网络数据/用户上传。使用json/msgpack/protobuf等安全序列化格式。', 'python', '严重'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+66 | …可控字符串。eval可执行任意代码,极度危险。必须使用时需要严格的AST白名单过滤,优先使用ast.literal_eval。', 'python', '严重'),
+67 | …户输入。必须使用shell=False并传参列表: subprocess.run(["cmd", arg], shell=False)。', 'python', '严重'),
+   |
+
+E501 Line too long (247 > 120)
+  --> backend/seed_rules.py:66:108
+   |
+64 | …" + user_input)等字符串拼接。必须使用参数化查询:cursor.execute("... WHERE name=%s", (name,))。', 'python', '严重'),
+65 | …于网络数据/用户上传。使用json/msgpack/protobuf等安全序列化格式。', 'python', '严重'),
+66 | …val可执行任意代码,极度危险。必须使用时需要严格的AST白名单过滤,优先使用ast.literal_eval。', 'python', '严重'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+67 | …用shell=False并传参列表: subprocess.run(["cmd", arg], shell=False)。', 'python', '严重'),
+68 | …t.toml。依赖应锁定版本号,区分生产与开发依赖。建议使用虚拟环境隔离。', 'python', '中'),
+   |
+
+E501 Line too long (229 > 120)
+  --> backend/seed_rules.py:67:107
+   |
+65 | …任意代码,绝不用于网络数据/用户上传。使用json/msgpack/protobuf等安全序列化格式。', 'python', '严重'),
+66 | …户可控字符串。eval可执行任意代码,极度危险。必须使用时需要严格的AST白名单过滤,优先使用ast.literal_eval。', 'python', '严重'),
+67 | …用户输入。必须使用shell=False并传参列表: subprocess.run(["cmd", arg], shell=False)。', 'python', '严重'),
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+68 | …pyproject.toml。依赖应锁定版本号,区分生产与开发依赖。建议使用虚拟环境隔离。', 'python', '中'),
+69 | …日志应使用logging并设置合适的level(DEBUG/INFO/WARNING/ERROR)。', 'python', '低'),
+   |
+
+E501 Line too long (219 > 120)
+  --> backend/seed_rules.py:68:104
+   |
+66 | …()执行用户可控字符串。eval可执行任意代码,极度危险。必须使用时需要严格的AST白名单过滤,优先使用ast.literal_eval。', 'python', '严重'),
+67 | …ue且拼接用户输入。必须使用shell=False并传参列表: subprocess.run(["cmd", arg], shell=False)。', 'python', '严重'),
+68 | …file/pyproject.toml。依赖应锁定版本号,区分生产与开发依赖。建议使用虚拟环境隔离。', 'python', '中'),
+   |  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+69 | …ng模块。日志应使用logging并设置合适的level(DEBUG/INFO/WARNING/ERROR)。', 'python', '低'),
+70 | …= "__main__":保护,导致被import时也会执行。将执行逻辑放入main()函数中。', 'python', '低'),
+   |
+
+E501 Line too long (210 > 120)
+  --> backend/seed_rules.py:69:103
+   |
+67 | …l=True且拼接用户输入。必须使用shell=False并传参列表: subprocess.run(["cmd", arg], shell=False)。', 'python', '严重'),
+68 | …/Pipfile/pyproject.toml。依赖应锁定版本号,区分生产与开发依赖。建议使用虚拟环境隔离。', 'python', '中'),
+69 | …ogging模块。日志应使用logging并设置合适的level(DEBUG/INFO/WARNING/ERROR)。', 'python', '低'),
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+70 | …__ == "__main__":保护,导致被import时也会执行。将执行逻辑放入main()函数中。', 'python', '低'),
+   |
+
+E501 Line too long (211 > 120)
+  --> backend/seed_rules.py:70:102
+   |
+68 | …/Pipfile/pyproject.toml。依赖应锁定版本号,区分生产与开发依赖。建议使用虚拟环境隔离。', 'python', '中'),
+69 | …ogging模块。日志应使用logging并设置合适的level(DEBUG/INFO/WARNING/ERROR)。', 'python', '低'),
+70 | …__ == "__main__":保护,导致被import时也会执行。将执行逻辑放入main()函数中。', 'python', '低'),
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+71 | …
+72 | …
+   |
+
+E501 Line too long (224 > 120)
+  --> backend/seed_rules.py:73:101
+   |
+72 | …
+73 | …型安全优势。使用unknown替代any以强制类型收窄,或定义明确的interface/type。', 'typescript', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+74 | …d properties of undefined。使用??设置默认值: const name = user?.profile?.name ?? "未知"。', 'typescript', '高'),
+75 | …ait,导致Promise未被等待直接用于后续逻辑。所有返回Promise的调用在需要结果时必须await。', 'typescript', '高'),
+   |
+
+E501 Line too long (248 > 120)
+  --> backend/seed_rules.py:74:93
+   |
+72 | …
+73 | …nknown替代any以强制类型收窄,或定义明确的interface/type。', 'typescript', '中'),
+74 | …ies of undefined。使用??设置默认值: const name = user?.profile?.name ?? "未知"。', 'typescript', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+75 | …mise未被等待直接用于后续逻辑。所有返回Promise的调用在需要结果时必须await。', 'typescript', '高'),
+76 | …中props只读,Vue中props不可直接赋值。深拷贝后再修改,或使用不可变更新模式。', 'typescript', '高'),
+   |
+
+E501 Line too long (236 > 120)
+  --> backend/seed_rules.py:75:102
+   |
+73 | …使用unknown替代any以强制类型收窄,或定义明确的interface/type。', 'typescript', '中'),
+74 | …erties of undefined。使用??设置默认值: const name = user?.profile?.name ?? "未知"。', 'typescript', '高'),
+75 | …Promise未被等待直接用于后续逻辑。所有返回Promise的调用在需要结果时必须await。', 'typescript', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+76 | …act中props只读,Vue中props不可直接赋值。深拷贝后再修改,或使用不可变更新模式。', 'typescript', '高'),
+77 | …是否包含所有在闭包内引用的状态/属性。缺少依赖可能导致闭包陷阱(使用过期值)。使用eslint-plugin-react-hooks检查。', 'typescript', '高'),
+   |
+
+E501 Line too long (242 > 120)
+  --> backend/seed_rules.py:76:98
+   |
+74 | …ies of undefined。使用??设置默认值: const name = user?.profile?.name ?? "未知"。', 'typescript', '高'),
+75 | …mise未被等待直接用于后续逻辑。所有返回Promise的调用在需要结果时必须await。', 'typescript', '高'),
+76 | …中props只读,Vue中props不可直接赋值。深拷贝后再修改,或使用不可变更新模式。', 'typescript', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+77 | …含所有在闭包内引用的状态/属性。缺少依赖可能导致闭包陷阱(使用过期值)。使用eslint-plugin-react-hooks检查。', 'typescript', '高'),
+78 | …重渲染。稳定引用使用useMemo/useCallback包裹,子组件使用React.memo。', 'typescript', '中'),
+   |
+
+E501 Line too long (258 > 120)
+  --> backend/seed_rules.py:77:111
+   |
+75 | …ise未被等待直接用于后续逻辑。所有返回Promise的调用在需要结果时必须await。', 'typescript', '高'),
+76 | …props只读,Vue中props不可直接赋值。深拷贝后再修改,或使用不可变更新模式。', 'typescript', '高'),
+77 | …所有在闭包内引用的状态/属性。缺少依赖可能导致闭包陷阱(使用过期值)。使用eslint-plugin-react-hooks检查。', 'typescript', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+78 | …渲染。稳定引用使用useMemo/useCallback包裹,子组件使用React.memo。', 'typescript', '中'),
+79 | …列表增删/排序时会导致渲染错误和状态串位。使用唯一且稳定的ID作为key。', 'typescript', '中'),
+   |
+
+E501 Line too long (242 > 120)
+  --> backend/seed_rules.py:78:99
+   |
+76 | …中props只读,Vue中props不可直接赋值。深拷贝后再修改,或使用不可变更新模式。', 'typescript', '高'),
+77 | …含所有在闭包内引用的状态/属性。缺少依赖可能导致闭包陷阱(使用过期值)。使用eslint-plugin-react-hooks检查。', 'typescript', '高'),
+78 | …重渲染。稳定引用使用useMemo/useCallback包裹,子组件使用React.memo。', 'typescript', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+79 | …在列表增删/排序时会导致渲染错误和状态串位。使用唯一且稳定的ID作为key。', 'typescript', '中'),
+80 | …be是否在组件卸载(onUnmounted/useEffect return)时清理,导致内存泄漏。', 'typescript', '高'),
+   |
+
+E501 Line too long (229 > 120)
+  --> backend/seed_rules.py:79:103
+   |
+77 | …依赖数组是否包含所有在闭包内引用的状态/属性。缺少依赖可能导致闭包陷阱(使用过期值)。使用eslint-plugin-react-hooks检查。', 'typescript'                                             …
+78 | …子组件不必要的重渲染。稳定引用使用useMemo/useCallback包裹,子组件使用React.memo。', 'typescript', '中'),
+79 | …ex作为key在列表增删/排序时会导致渲染错误和状态串位。使用唯一且稳定的ID作为key。', 'typescript', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+80 | …subscribe是否在组件卸载(onUnmounted/useEffect return)时清理,导致内存泄漏。', 'typescript', '高'),
+81 | …能无意中影响其他组件。使用CSS Modules/scoped样式/BEM命名约定。', 'typescript', '低'),
+   |
+
+E501 Line too long (220 > 120)
+  --> backend/seed_rules.py:80:106
+   |
+78 | …用,导致子组件不必要的重渲染。稳定引用使用useMemo/useCallback包裹,子组件使用React.memo。', 'typescript', '中'),
+79 | …。index作为key在列表增删/排序时会导致渲染错误和状态串位。使用唯一且稳定的ID作为key。', 'typescript', '中'),
+80 | …val/subscribe是否在组件卸载(onUnmounted/useEffect return)时清理,导致内存泄漏。', 'typescript', '高'),
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+81 | …短),可能无意中影响其他组件。使用CSS Modules/scoped样式/BEM命名约定。', 'typescript', '低'),
+82 | …否缺少.catch()或在async函数中缺少try-catch。未处理的Promise rejection可能导致静默失败或进程崩溃。', 'typescript', '高'),
+   |
+
+E501 Line too long (220 > 120)
+  --> backend/seed_rules.py:81:98
+   |
+79 | …。index作为key在列表增删/排序时会导致渲染错误和状态串位。使用唯一且稳定的ID作为key。', 'typescript', '中'),
+80 | …val/subscribe是否在组件卸载(onUnmounted/useEffect return)时清理,导致内存泄漏。', 'typescript', '高'),
+81 | …短),可能无意中影响其他组件。使用CSS Modules/scoped样式/BEM命名约定。', 'typescript', '低'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+82 | …否缺少.catch()或在async函数中缺少try-catch。未处理的Promise rejection可能导致静默失败或进程崩溃。', 'typescript', '高'),
+83 | …)/setTimeout(string)执行动态代码,可导致XSS和代码注入。使用JSON.parse解析数据,动态逻辑使用策略模式/映射表。', 'typescript', '严重'),
+   |
+
+E501 Line too long (237 > 120)
+  --> backend/seed_rules.py:82:107
+   |
+80 | …ribe是否在组件卸载(onUnmounted/useEffect return)时清理,导致内存泄漏。', 'typescript', '高'),
+81 | …响其他组件。使用CSS Modules/scoped样式/BEM命名约定。', 'typescript', '低'),
+82 | …()或在async函数中缺少try-catch。未处理的Promise rejection可能导致静默失败或进程崩溃。', 'typescript', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+83 | …out(string)执行动态代码,可导致XSS和代码注入。使用JSON.parse解析数据,动态逻辑使用策略模式/映射表。', 'typescript', '严重'),
+84 | …ument.write或React的dangerouslySetInnerHTML。必须对内容进行DOMPurify.sanitize(),或使用textContent/创建文本节点。', 'typescript', '严重                     …
+   |
+
+E501 Line too long (245 > 120)
+  --> backend/seed_rules.py:83:111
+   |
+81 | …他组件。使用CSS Modules/scoped样式/BEM命名约定。', 'typescript', '低'),
+82 | …或在async函数中缺少try-catch。未处理的Promise rejection可能导致静默失败或进程崩溃。', 'typescript', '高'),
+83 | …t(string)执行动态代码,可导致XSS和代码注入。使用JSON.parse解析数据,动态逻辑使用策略模式/映射表。', 'typescript', '严重'),
+ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+84 | …ent.write或React的dangerouslySetInnerHTML。必须对内容进行DOMPurify.sanitize(),或使用textContent/创建文本节点。', 'typescript', '严重'),
+85 | …会丢失Date/Function/undefined/循环引用。使用structuredClone()或lodash.cloneDeep。', 'typescript', '中'),
+   |
+
+E501 Line too long (258 > 120)
+  --> backend/seed_rules.py:84:113
+   |
+82 | …或在async函数中缺少try-catch。未处理的Promise rejection可能导致静默失败或进程崩溃。', 'typescript', '高'),
+83 | …t(string)执行动态代码,可导致XSS和代码注入。使用JSON.parse解析数据,动态逻辑使用策略模式/映射表。', 'typescript', '严重'),
+84 | …ent.write或React的dangerouslySetInnerHTML。必须对内容进行DOMPurify.sanitize(),或使用textContent/创建文本节点。', 'typescript', '严重'),
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+85 | …会丢失Date/Function/undefined/循环引用。使用structuredClone()或lodash.cloneDeep。', 'typescript', '中'),
+86 | …e.all并发执行: await Promise.all(items.map(async i => ...))。', 'typescript', '中'),
+   |
+
+E501 Line too long (236 > 120)
+  --> backend/seed_rules.py:85:104
+   |
+83 | …eout(string)执行动态代码,可导致XSS和代码注入。使用JSON.parse解析数据,动态逻辑使用策略模式/映射表。', 'typescript', '严重'),
+84 | …cument.write或React的dangerouslySetInnerHTML。必须对内容进行DOMPurify.sanitize(),或使用textContent/创建文本节点。', 'typescript', '严                    …
+85 | …)),会丢失Date/Function/undefined/循环引用。使用structuredClone()或lodash.cloneDeep。', 'typescript', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+86 | …mise.all并发执行: await Promise.all(items.map(async i => ...))。', 'typescript', '中'),
+87 | …n等敏感凭证。前端所有密钥均公开,敏感操作必须在后端代理。', 'typescript', '严重'),
+   |
+
+E501 Line too long (235 > 120)
+  --> backend/seed_rules.py:86:98
+   |
+84 | …cument.write或React的dangerouslySetInnerHTML。必须对内容进行DOMPurify.sanitize(),或使用textContent/创建文本节点。', 'typescript', '严                    …
+85 | …)),会丢失Date/Function/undefined/循环引用。使用structuredClone()或lodash.cloneDeep。', 'typescript', '中'),
+86 | …mise.all并发执行: await Promise.all(items.map(async i => ...))。', 'typescript', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+87 | …n等敏感凭证。前端所有密钥均公开,敏感操作必须在后端代理。', 'typescript', '严重'),
+88 | ….href=params.redirect)。redirect参数必须做白名单校验,防止开放重定向钓鱼。', 'typescript', '高'),
+   |
+
+E501 Line too long (212 > 120)
+  --> backend/seed_rules.py:87:102
+   |
+85 | …tringify(obj)),会丢失Date/Function/undefined/循环引用。使用structuredClone()或lodash.cloneDeep。', 'typescript', '中'),
+86 | …依赖的异步任务使用Promise.all并发执行: await Promise.all(items.map(async i => ...))。', 'typescript', '中'),
+87 | …t/AccessToken等敏感凭证。前端所有密钥均公开,敏感操作必须在后端代理。', 'typescript', '严重'),
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+88 | …跳转(如location.href=params.redirect)。redirect参数必须做白名单校验,防止开放重定向钓鱼。', 'typescript', '高'),
+89 | …址而非内容。使用lodash.isEqual或JSON.stringify比较(注意key顺序)。', 'typescript', '中'),
+   |
+
+E501 Line too long (236 > 120)
+  --> backend/seed_rules.py:88:98
+   |
+86 | …mise.all并发执行: await Promise.all(items.map(async i => ...))。', 'typescript', '中'),
+87 | …n等敏感凭证。前端所有密钥均公开,敏感操作必须在后端代理。', 'typescript', '严重'),
+88 | ….href=params.redirect)。redirect参数必须做白名单校验,防止开放重定向钓鱼。', 'typescript', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+89 | …sh.isEqual或JSON.stringify比较(注意key顺序)。', 'typescript', '中'),
+90 | …是异步批处理的。使用setState的函数式更新(state=>...),或useEffect监听state变化后执行。', 'typescript', '高'),
+   |
+
+E501 Line too long (215 > 120)
+  --> backend/seed_rules.py:89:98
+   |
+87 | …AccessToken等敏感凭证。前端所有密钥均公开,敏感操作必须在后端代理。', 'typescript', '严重'),
+88 | …(如location.href=params.redirect)。redirect参数必须做白名单校验,防止开放重定向钓鱼。', 'typescript', '高'),
+89 | …非内容。使用lodash.isEqual或JSON.stringify比较(注意key顺序)。', 'typescript', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+90 | …ct state更新是异步批处理的。使用setState的函数式更新(state=>...),或useEffect监听state变化后执行。', 'typescript', '高'),
+91 | …rom "lodash"),导致打包体积过大。使用按需导入(import debounce from "lodash/debounce")。', 'typescript', '中'),
+   |
+
+E501 Line too long (238 > 120)
+  --> backend/seed_rules.py:90:105
+   |
+88 | …href=params.redirect)。redirect参数必须做白名单校验,防止开放重定向钓鱼。', 'typescript', '高'),
+89 | …h.isEqual或JSON.stringify比较(注意key顺序)。', 'typescript', '中'),
+90 | …异步批处理的。使用setState的函数式更新(state=>...),或useEffect监听state变化后执行。', 'typescript', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+91 | …"),导致打包体积过大。使用按需导入(import debounce from "lodash/debounce")。', 'typescript', '中'),
+92 | …切换)。使用AbortController取消前一次请求,或在响应中携带版本号/请求ID。', 'typescript', '高'),
+   |
+
+E501 Line too long (232 > 120)
+  --> backend/seed_rules.py:91:100
+   |
+89 | …dash.isEqual或JSON.stringify比较(注意key顺序)。', 'typescript', '中'),
+90 | …更新是异步批处理的。使用setState的函数式更新(state=>...),或useEffect监听state变化后执行。', 'typescript', '高'),
+91 | …ash"),导致打包体积过大。使用按需导入(import debounce from "lodash/debounce")。', 'typescript', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+92 | …/分页切换)。使用AbortController取消前一次请求,或在响应中携带版本号/请求ID。', 'typescript', '高'),
+   |
+
+E501 Line too long (241 > 120)
+  --> backend/seed_rules.py:92:98
+   |
+90 | …步批处理的。使用setState的函数式更新(state=>...),或useEffect监听state变化后执行。', 'typescript', '高'),
+91 | …),导致打包体积过大。使用按需导入(import debounce from "lodash/debounce")。', 'typescript', '中'),
+92 | …换)。使用AbortController取消前一次请求,或在响应中携带版本号/请求ID。', 'typescript', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+93 | …
+94 | …
+   |
+
+E501 Line too long (243 > 120)
+  --> backend/seed_rules.py:95:102
+   |
+94 | …
+95 | …>替代null返回值,使用@Nullable/@NonNull注解明确约定。Objects.requireNonNull进行参数校验。', 'java', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+96 | …llect(Collectors.toList())优于forEach手动add。大集合避免频繁boxing/unboxing。', 'java', '中'),
+97 | …/Statement/ResultSet等是否未使用try-with-resources自动关闭。Java 7+的AutoCloseable实现类必须用此语法。', 'java', '高'),
+   |
+
+E501 Line too long (234 > 120)
+  --> backend/seed_rules.py:96:105
+   |
+94 | …
+95 | …al<T>替代null返回值,使用@Nullable/@NonNull注解明确约定。Objects.requireNonNull进行参数校验。', 'java', '高'),
+96 | …合。collect(Collectors.toList())优于forEach手动add。大集合避免频繁boxing/unboxing。', 'java', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+97 | …tion/Statement/ResultSet等是否未使用try-with-resources自动关闭。Java 7+的AutoCloseable实现类必须用此语法。', 'java', '高'),
+98 | …s比较值。字符串/包装类型必须使用equals。枚举常量可以使用==。', 'java', '高'),
+   |
+
+E501 Line too long (241 > 120)
+  --> backend/seed_rules.py:97:114
+   |
+95 | …>替代null返回值,使用@Nullable/@NonNull注解明确约定。Objects.requireNonNull进行参数校验。', 'java', '高'),
+96 | …llect(Collectors.toList())优于forEach手动add。大集合避免频繁boxing/unboxing。', 'java', '中'),
+97 | …/Statement/ResultSet等是否未使用try-with-resources自动关闭。Java 7+的AutoCloseable实现类必须用此语法。', 'java', '高'),
+   |^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+98 | …。字符串/包装类型必须使用equals。枚举常量可以使用==。', 'java', '高'),
+99 | …会抛出ConcurrentModificationException。使用Iterator.remove()或CopyOnWriteArrayList或Stream.filter收集。', 'java', '高'),
+   |
+
+E501 Line too long (210 > 120)
+   --> backend/seed_rules.py:98:103
+    |
+ 96 | …eam使用非线程安全集合。collect(Collectors.toList())优于forEach手动add。大集合避免频繁boxing/unboxing。', 'java', '中'),
+ 97 | …ream/Connection/Statement/ResultSet等是否未使用try-with-resources自动关闭。Java 7+的AutoCloseable实现类必须用此语法。', 'java', '高')                      …
+ 98 | …较引用地址,equals比较值。字符串/包装类型必须使用equals。枚举常量可以使用==。', 'java', '高'),
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 99 | …进行add/remove操作,会抛出ConcurrentModificationException。使用Iterator.remove()或CopyOnWriteArrayList或Stream.filter收集。', 'java',               …
+100 | …rivate static final long serialVersionUID字段。未定义会在类结构变化时导致InvalidClassException。', 'java', '中'),
+    |
+
+E501 Line too long (256 > 120)
+   --> backend/seed_rules.py:99:103
+    |
+ 97 | …Statement/ResultSet等是否未使用try-with-resources自动关闭。Java 7+的AutoCloseable实现类必须用此语法。', 'java', '高'),
+ 98 | …字符串/包装类型必须使用equals。枚举常量可以使用==。', 'java', '高'),
+ 99 | …抛出ConcurrentModificationException。使用Iterator.remove()或CopyOnWriteArrayList或Stream.filter收集。', 'java', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+100 | …nal long serialVersionUID字段。未定义会在类结构变化时导致InvalidClassException。', 'java', '中'),
+101 | …有字段,可能造成JPA代理对象比较异常。JPA Entity使用@Getter/@Setter而非@Data。', 'java', '中'),
+    |
+
+E501 Line too long (230 > 120)
+   --> backend/seed_rules.py:100:104
+    |
+ 98 | …als比较值。字符串/包装类型必须使用equals。枚举常量可以使用==。', 'java', '高'),
+ 99 | …ove操作,会抛出ConcurrentModificationException。使用Iterator.remove()或CopyOnWriteArrayList或Stream.filter收集。', 'java', '高'),
+100 | …atic final long serialVersionUID字段。未定义会在类结构变化时导致InvalidClassException。', 'java', '中'),
+ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+101 | …Code包含所有字段,可能造成JPA代理对象比较异常。JPA Entity使用@Getter/@Setter而非@Data。', 'java', '中'),
+102 | …线程环境共享。使用DateTimeFormatter/ConcurrentHashMap替代。共享可变状态使用synchronized保护。', 'java', '高'),
+    |
+
+E501 Line too long (227 > 120)
+   --> backend/seed_rules.py:101:106
+    |
+ 99 | …move操作,会抛出ConcurrentModificationException。使用Iterator.remove()或CopyOnWriteArrayList或Stream.filter收集。', 'java', '高'),
+100 | …tatic final long serialVersionUID字段。未定义会在类结构变化时导致InvalidClassException。', 'java', '中'),
+101 | …hCode包含所有字段,可能造成JPA代理对象比较异常。JPA Entity使用@Getter/@Setter而非@Data。', 'java', '中'),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+102 | …多线程环境共享。使用DateTimeFormatter/ConcurrentHashMap替代。共享可变状态使用synchronized保护。', 'java', '高'),
+103 | …SQL。必须使用PreparedStatement预编译,参数用?占位符绑定。MyBatis中使用#{param}而非${param}。', 'java', '严重'),
+    |
+
+E501 Line too long (238 > 120)
+   --> backend/seed_rules.py:102:106
+    |
+100 | … final long serialVersionUID字段。未定义会在类结构变化时导致InvalidClassException。', 'java', '中'),
+101 | …包含所有字段,可能造成JPA代理对象比较异常。JPA Entity使用@Getter/@Setter而非@Data。', 'java', '中'),
+102 | …共享。使用DateTimeFormatter/ConcurrentHashMap替代。共享可变状态使用synchronized保护。', 'java', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+103 | …须使用PreparedStatement预编译,参数用?占位符绑定。MyBatis中使用#{param}而非${param}。', 'java', '严重'),
+104 | …直接写入response。使用ESAPI.encoder()进行输出编码。Spring默认开启HTML转义。', 'java', '严重'),
+    |
+
+E501 Line too long (230 > 120)
+   --> backend/seed_rules.py:103:109
+    |
+101 | …Code包含所有字段,可能造成JPA代理对象比较异常。JPA Entity使用@Getter/@Setter而非@Data。', 'java', '中'),
+102 | …线程环境共享。使用DateTimeFormatter/ConcurrentHashMap替代。共享可变状态使用synchronized保护。', 'java', '高'),
+103 | …QL。必须使用PreparedStatement预编译,参数用?占位符绑定。MyBatis中使用#{param}而非${param}。', 'java', '严重'),
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+104 | …用户输入直接写入response。使用ESAPI.encoder()进行输出编码。Spring默认开启HTML转义。', 'java', '严重'),
+105 | …使用ESAPI日志接口或对用户输入做清洗(过滤\\r\\n)。', 'java', '中'),
+    |
+
+E501 Line too long (219 > 120)
+   --> backend/seed_rules.py:104:112
+    |
+102 | …类是否在多线程环境共享。使用DateTimeFormatter/ConcurrentHashMap替代。共享可变状态使用synchronized保护。', 'java', '高'),
+103 | …ry拼接SQL。必须使用PreparedStatement预编译,参数用?占位符绑定。MyBatis中使用#{param}而非${param}。', 'java', '严重'),
+104 | …r中是否将用户输入直接写入response。使用ESAPI.encoder()进行输出编码。Spring默认开启HTML转义。', 'java', '严重'),
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+105 | …日志条目。使用ESAPI日志接口或对用户输入做清洗(过滤\\r\\n)。', 'java', '中'),
+106 | …。缩小同步块范围,仅保护临界区。ConcurrentHashMap替代全量加锁。', 'java', '中'),
+    |
+
+E501 Line too long (208 > 120)
+   --> backend/seed_rules.py:105:99
+    |
+103 | …uteQuery拼接SQL。必须使用PreparedStatement预编译,参数用?占位符绑定。MyBatis中使用#{param}而非${param}。', 'java', '严重'),
+104 | …troller中是否将用户输入直接写入response。使用ESAPI.encoder()进行输出编码。Spring默认开启HTML转义。', 'java', '严重'),
+105 | …含换行符伪造日志条目。使用ESAPI日志接口或对用户输入做清洗(过滤\\r\\n)。', 'java', '中'),
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+106 | …共享状态操作。缩小同步块范围,仅保护临界区。ConcurrentHashMap替代全量加锁。', 'java', '中'),
+107 | …枚举值时的default处理,可能导致逻辑分支缺失。建议为switch添加default并记录日志或抛异常。', 'java', '中'),
+    |
+
+E501 Line too long (209 > 120)
+   --> backend/seed_rules.py:106:100
+    |
+104 | …roller中是否将用户输入直接写入response。使用ESAPI.encoder()进行输出编码。Spring默认开启HTML转义。', 'java', '严重'),
+105 | …换行符伪造日志条目。使用ESAPI日志接口或对用户输入做清洗(过滤\\r\\n)。', 'java', '中'),
+106 | …享状态操作。缩小同步块范围,仅保护临界区。ConcurrentHashMap替代全量加锁。', 'java', '中'),
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+107 | …举值时的default处理,可能导致逻辑分支缺失。建议为switch添加default并记录日志或抛异常。', 'java', '中'),
+108 | …BigDecimal(double),会引入浮点精度误差。必须使用new BigDecimal(String)或BigDecimal.valueOf(double)。金融计算使用BigDecimal。', 'java',                      …
+    |
+
+E501 Line too long (221 > 120)
+   --> backend/seed_rules.py:107:101
+    |
+105 | …志条目。使用ESAPI日志接口或对用户输入做清洗(过滤\\r\\n)。', 'java', '中'),
+106 | …缩小同步块范围,仅保护临界区。ConcurrentHashMap替代全量加锁。', 'java', '中'),
+107 | …fault处理,可能导致逻辑分支缺失。建议为switch添加default并记录日志或抛异常。', 'java', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+108 | …imal(double),会引入浮点精度误差。必须使用new BigDecimal(String)或BigDecimal.valueOf(double)。金融计算使用BigDecimal。', 'java', '高')                       …
+109 | …ingleton)作用域,导致多线程/多用户数据串用。有状态Bean应使用prototype/request/session作用域。', 'java', '高'),
+    |
+
+E501 Line too long (251 > 120)
+   --> backend/seed_rules.py:108:109
+    |
+106 | …护临界区。ConcurrentHashMap替代全量加锁。', 'java', '中'),
+107 | …导致逻辑分支缺失。建议为switch添加default并记录日志或抛异常。', 'java', '中'),
+108 | …e),会引入浮点精度误差。必须使用new BigDecimal(String)或BigDecimal.valueOf(double)。金融计算使用BigDecimal。', 'java', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+109 | …用域,导致多线程/多用户数据串用。有状态Bean应使用prototype/request/session作用域。', 'java', '高'),
+110 | …容。使用Arrays.toString(arr)或Arrays.deepToString(嵌套数组)。', 'java', '中'),
+    |
+
+E501 Line too long (234 > 120)
+   --> backend/seed_rules.py:109:103
+    |
+107 | …,可能导致逻辑分支缺失。建议为switch添加default并记录日志或抛异常。', 'java', '中'),
+108 | …uble),会引入浮点精度误差。必须使用new BigDecimal(String)或BigDecimal.valueOf(double)。金融计算使用BigDecimal。', 'java', '高'),
+109 | …n)作用域,导致多线程/多用户数据串用。有状态Bean应使用prototype/request/session作用域。', 'java', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+110 | …数组内容。使用Arrays.toString(arr)或Arrays.deepToString(嵌套数组)。', 'java', '中'),
+111 | …Exception(msg, e)),导致异常链断裂难以排查根因。', 'java', '中'),
+    |
+
+E501 Line too long (224 > 120)
+   --> backend/seed_rules.py:110:103
+    |
+108 | …mal(double),会引入浮点精度误差。必须使用new BigDecimal(String)或BigDecimal.valueOf(double)。金融计算使用BigDecimal。', 'java', '高'),
+109 | …ngleton)作用域,导致多线程/多用户数据串用。有状态Bean应使用prototype/request/session作用域。', 'java', '高'),
+110 | …和哈希码而非数组内容。使用Arrays.toString(arr)或Arrays.deepToString(嵌套数组)。', 'java', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+111 | …e(new Exception(msg, e)),导致异常链断裂难以排查根因。', 'java', '中'),
+112 | …创建新String副本。使用StringBuilder(非线程安全)或StringBuffer(线程安全)。', 'java', '中'),
+    |
+
+E501 Line too long (203 > 120)
+   --> backend/seed_rules.py:111:99
+    |
+109 | …误用了默认单例(Singleton)作用域,导致多线程/多用户数据串用。有状态Bean应使用prototype/request/session作用域。', 'java', '高'),
+110 | …),默认输出类型标识和哈希码而非数组内容。使用Arrays.toString(arr)或Arrays.deepToString(嵌套数组)。', 'java', '中'),
+111 | …原始异常作为cause(new Exception(msg, e)),导致异常链断裂难以排查根因。', 'java', '中'),
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+112 | …at拼接字符串,每次创建新String副本。使用StringBuilder(非线程安全)或StringBuffer(线程安全)。', 'java', '中'),
+    |
+
+E501 Line too long (221 > 120)
+   --> backend/seed_rules.py:112:101
+    |
+110 | …识和哈希码而非数组内容。使用Arrays.toString(arr)或Arrays.deepToString(嵌套数组)。', 'java', '中'),
+111 | …se(new Exception(msg, e)),导致异常链断裂难以排查根因。', 'java', '中'),
+112 | …次创建新String副本。使用StringBuilder(非线程安全)或StringBuffer(线程安全)。', 'java', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+113 | …
+114 | …
+    |
+
+E501 Line too long (226 > 120)
+   --> backend/seed_rules.py:115:99
+    |
+114 | …
+115 | …个error,使用if err!=nil处理。defer中的错误也需要检查或显式忽略并注释原因。', 'go', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+116 | …er resp.Body.Close()应紧跟在http.Get/open之后,在错误检查之前执行。', 'go', '高'),
+117 | ….Context传递取消信号,select监听ctx.Done()。无缓冲channel的发送方若没有接收方会永久阻塞。', 'go', '高'),
+    |
+
+E501 Line too long (213 > 120)
+   --> backend/seed_rules.py:116:100
+    |
+114 | …
+115 | …须显式检查每个error,使用if err!=nil处理。defer中的错误也需要检查或显式忽略并注释原因。', 'go', '高'),
+116 | …关闭。defer resp.Body.Close()应紧跟在http.Get/open之后,在错误检查之前执行。', 'go', '高'),
+    |^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+117 | …ontext.Context传递取消信号,select监听ctx.Done()。无缓冲channel的发送方若没有接收方会永久阻塞。', 'go', '高'),
+118 | …channel,否则range永久阻塞。原则:发送方关闭channel。使用sync.WaitGroup等待所有goroutine完成。', 'go', '高'),
+    |
+
+E501 Line too long (227 > 120)
+   --> backend/seed_rules.py:117:104
+    |
+115 | …error,使用if err!=nil处理。defer中的错误也需要检查或显式忽略并注释原因。', 'go', '高'),
+116 | …r resp.Body.Close()应紧跟在http.Get/open之后,在错误检查之前执行。', 'go', '高'),
+117 | …Context传递取消信号,select监听ctx.Done()。无缓冲channel的发送方若没有接收方会永久阻塞。', 'go', '高'),
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+118 | …,否则range永久阻塞。原则:发送方关闭channel。使用sync.WaitGroup等待所有goroutine完成。', 'go', '高'),
+119 | …。Mutex使用指针接收者。go vet会提示此问题。', 'go', '高'),
+    |
+
+E501 Line too long (230 > 120)
+   --> backend/seed_rules.py:118:101
+    |
+116 | …resp.Body.Close()应紧跟在http.Get/open之后,在错误检查之前执行。', 'go', '高'),
+117 | …ntext传递取消信号,select监听ctx.Done()。无缓冲channel的发送方若没有接收方会永久阻塞。', 'go', '高'),
+118 | …则range永久阻塞。原则:发送方关闭channel。使用sync.WaitGroup等待所有goroutine完成。', 'go', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+119 | …utex使用指针接收者。go vet会提示此问题。', 'go', '高'),
+120 | …ng]int; m["key"]=1),会触发panic。使用make(map[K]V)初始化,或使用字面量声明。', 'go', '高'),
+    |
+
+E501 Line too long (197 > 120)
+   --> backend/seed_rules.py:119:99
+    |
+117 | …退出机制。使用context.Context传递取消信号,select监听ctx.Done()。无缓冲channel的发送方若没有接收方会永久阻塞。', 'go', '高'),
+118 | …在发送完成后关闭channel,否则range永久阻塞。原则:发送方关闭channel。使用sync.WaitGroup等待所有goroutine完成。', 'go', '高'),
+119 | …非指针传递,值拷贝后互斥锁失效。Mutex使用指针接收者。go vet会提示此问题。', 'go', '高'),
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+120 | …操作(var m map[string]int; m["key"]=1),会触发panic。使用make(map[K]V)初始化,或使用字面量声明。', 'go', '高'),
+121 | …否与原始slice共享底层数组,可能产生副作用。需要独立副本时使用copy(dst,src)或append([]T{},src...)。', 'go', '中'),
+    |
+
+E501 Line too long (213 > 120)
+   --> backend/seed_rules.py:120:108
+    |
+118 | …channel,否则range永久阻塞。原则:发送方关闭channel。使用sync.WaitGroup等待所有goroutine完成。', 'go', '高'),
+119 | …贝后互斥锁失效。Mutex使用指针接收者。go vet会提示此问题。', 'go', '高'),
+120 | … map[string]int; m["key"]=1),会触发panic。使用make(map[K]V)初始化,或使用字面量声明。', 'go', '高'),
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+121 | …e共享底层数组,可能产生副作用。需要独立副本时使用copy(dst,src)或append([]T{},src...)。', 'go', '中'),
+122 | …致无法超时取消。使用context.WithTimeout设置合理超时,HTTP handler使用r.Context()。', 'go', '中'),
+    |
+
+E501 Line too long (214 > 120)
+   --> backend/seed_rules.py:121:106
+    |
+119 | …后互斥锁失效。Mutex使用指针接收者。go vet会提示此问题。', 'go', '高'),
+120 | …map[string]int; m["key"]=1),会触发panic。使用make(map[K]V)初始化,或使用字面量声明。', 'go', '高'),
+121 | …共享底层数组,可能产生副作用。需要独立副本时使用copy(dst,src)或append([]T{},src...)。', 'go', '中'),
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+122 | …无法超时取消。使用context.WithTimeout设置合理超时,HTTP handler使用r.Context()。', 'go', '中'),
+123 | …r,goroutine的panic会导致整个进程崩溃。在每个goroutine的顶层defer中recover,并记录日志。', 'go', '高'),
+    |
+
+E501 Line too long (222 > 120)
+   --> backend/seed_rules.py:122:97
+    |
+120 | …[string]int; m["key"]=1),会触发panic。使用make(map[K]V)初始化,或使用字面量声明。', 'go', '高'),
+121 | …层数组,可能产生副作用。需要独立副本时使用copy(dst,src)或append([]T{},src...)。', 'go', '中'),
+122 | …时取消。使用context.WithTimeout设置合理超时,HTTP handler使用r.Context()。', 'go', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+123 | …oroutine的panic会导致整个进程崩溃。在每个goroutine的顶层defer中recover,并记录日志。', 'go', '高'),
+124 | …须使用参数化查询:db.Query("SELECT ... WHERE name=?", name)。禁止拼接用户输入到SQL字符串。', 'go', '严重'),
+    |
+
+E501 Line too long (214 > 120)
+   --> backend/seed_rules.py:123:110
+    |
+121 | …e共享底层数组,可能产生副作用。需要独立副本时使用copy(dst,src)或append([]T{},src...)。', 'go', '中'),
+122 | …致无法超时取消。使用context.WithTimeout设置合理超时,HTTP handler使用r.Context()。', 'go', '中'),
+123 | …er,goroutine的panic会导致整个进程崩溃。在每个goroutine的顶层defer中recover,并记录日志。', 'go', '高'),
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+124 | …执行。必须使用参数化查询:db.Query("SELECT ... WHERE name=?", name)。禁止拼接用户输入到SQL字符串。', 'go', '严重'),
+125 | …TML,该模板不转义HTML特殊字符。必须使用html/template包,它自动根据上下文转义。', 'go', '严重'),
+    |
+
+E501 Line too long (233 > 120)
+   --> backend/seed_rules.py:124:103
+    |
+122 | …context.WithTimeout设置合理超时,HTTP handler使用r.Context()。', 'go', '中'),
+123 | …ne的panic会导致整个进程崩溃。在每个goroutine的顶层defer中recover,并记录日志。', 'go', '高'),
+124 | …查询:db.Query("SELECT ... WHERE name=?", name)。禁止拼接用户输入到SQL字符串。', 'go', '严重'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+125 | …HTML特殊字符。必须使用html/template包,它自动根据上下文转义。', 'go', '严重'),
+126 | …外省略。API返回中应使用指针类型*int/*bool来区分未设置和零值。', 'go', '中'),
+    |
+
+E501 Line too long (207 > 120)
+   --> backend/seed_rules.py:125:107
+    |
+123 | …cover,goroutine的panic会导致整个进程崩溃。在每个goroutine的顶层defer中recover,并记录日志。', 'go', '高'),
+124 | …并直接执行。必须使用参数化查询:db.Query("SELECT ... WHERE name=?", name)。禁止拼接用户输入到SQL字符串。', 'go', '严重'),
+125 | …生成HTML,该模板不转义HTML特殊字符。必须使用html/template包,它自动根据上下文转义。', 'go', '严重'),
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+126 | …是否被omitempty意外省略。API返回中应使用指针类型*int/*bool来区分未设置和零值。', 'go', '中'),
+127 | …是否有误。interface包含(type,value)双元组,仅当type和value都为nil时才等于nil。', 'go', '高'),
+    |
+
+E501 Line too long (200 > 120)
+   --> backend/seed_rules.py:126:109
+    |
+124 | …造SQL并直接执行。必须使用参数化查询:db.Query("SELECT ... WHERE name=?", name)。禁止拼接用户输入到SQL字符串。', 'go', '严重'),
+125 | …late生成HTML,该模板不转义HTML特殊字符。必须使用html/template包,它自动根据上下文转义。', 'go', '严重'),
+126 | …e/0)是否被omitempty意外省略。API返回中应使用指针类型*int/*bool来区分未设置和零值。', 'go', '中'),
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+127 | …il判断是否有误。interface包含(type,value)双元组,仅当type和value都为nil时才等于nil。', 'go', '高'),
+128 | …s.Exit或log.Fatal,导致调用方无法优雅处理。库中应返回error让调用方决定如何处理。', 'go', '中'),
+    |
+
+E501 Line too long (202 > 120)
+   --> backend/seed_rules.py:127:104
+    |
+125 | …ate生成HTML,该模板不转义HTML特殊字符。必须使用html/template包,它自动根据上下文转义。', 'go', '严重'),
+126 | …/0)是否被omitempty意外省略。API返回中应使用指针类型*int/*bool来区分未设置和零值。', 'go', '中'),
+127 | …l判断是否有误。interface包含(type,value)双元组,仅当type和value都为nil时才等于nil。', 'go', '高'),
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+128 | ….Exit或log.Fatal,导致调用方无法优雅处理。库中应返回error让调用方决定如何处理。', 'go', '中'),
+    |
+
+E501 Line too long (207 > 120)
+   --> backend/seed_rules.py:128:102
+    |
+126 | …是否被omitempty意外省略。API返回中应使用指针类型*int/*bool来区分未设置和零值。', 'go', '中'),
+127 | …是否有误。interface包含(type,value)双元组,仅当type和value都为nil时才等于nil。', 'go', '高'),
+128 | …it或log.Fatal,导致调用方无法优雅处理。库中应返回error让调用方决定如何处理。', 'go', '中'),
+    |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+129 | …
+130 | …
+    |
+
+E501 Line too long (207 > 120)
+   --> backend/seed_rules.py:131:105
+    |
+130 | …
+131 | …列,造成不必要的IO和带宽消耗。显式列出所需字段,避免查询大字段(BLOB/TEXT)除非必要。', 'sql', '中'),
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+132 | …列是否建立了索引。经常查询的列/外键列/排序列应创建索引。但避免过度索引降低写入性能。使用EXPLAIN分析执行计划。', 'sql', '高'),
+133 | …事务中。使用BEGIN/COMMIT/ROLLBACK确保ACID。事务应尽量短小。', 'sql', '高'),
+    |
+
+E501 Line too long (239 > 120)
+   --> backend/seed_rules.py:132:102
+    |
+130 | …
+131 | …显式列出所需字段,避免查询大字段(BLOB/TEXT)除非必要。', 'sql', '中'),
+132 | …外键列/排序列应创建索引。但避免过度索引降低写入性能。使用EXPLAIN分析执行计划。', 'sql', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+133 | …IT/ROLLBACK确保ACID。事务应尽量短小。', 'sql', '高'),
+134 | …E条件左右两侧类型一致。', 'sql', '中'),
+    |
+
+E501 Line too long (210 > 120)
+   --> backend/seed_rules.py:133:91
+    |
+131 | …,造成不必要的IO和带宽消耗。显式列出所需字段,避免查询大字段(BLOB/TEXT)除非必要。', 'sql', '中'),
+132 | …是否建立了索引。经常查询的列/外键列/排序列应创建索引。但避免过度索引降低写入性能。使用EXPLAIN分析执行计划。', 'sql', '高'),
+133 | …务中。使用BEGIN/COMMIT/ROLLBACK确保ACID。事务应尽量短小。', 'sql', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+134 | …转换导致索引失效。保持WHERE条件左右两侧类型一致。', 'sql', '中'),
+135 | …ame LIKE "%keyword"),无法使用B-tree索引。改为后置通配符(name LIKE "keyword%")或使用全文索引(FULLTEXT)。', 'sql', '高'),
+    |
+
+E501 Line too long (196 > 120)
+   --> backend/seed_rules.py:134:94
+    |
+132 | …BY子句中的列是否建立了索引。经常查询的列/外键列/排序列应创建索引。但避免过度索引降低写入性能。使用EXPLAIN分析执行计划。', 'sql', '高'                                                      …
+133 | …是否未包裹在事务中。使用BEGIN/COMMIT/ROLLBACK确保ACID。事务应尽量短小。', 'sql', '高'),
+134 | …较,会触发隐式转换导致索引失效。保持WHERE条件左右两侧类型一致。', 'sql', '中'),
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+135 | …WHERE name LIKE "%keyword"),无法使用B-tree索引。改为后置通配符(name LIKE "keyword%")或使用全文索引(FULLTEXT)。', 'sql', '高'),
+136 | …L值,导致整条结果变为NULL。使用COALESCE(col,"")或CONCAT_WS(分隔符, col1, col2)忽略NULL。', 'sql', '中'),
+    |
+
+E501 Line too long (242 > 120)
+   --> backend/seed_rules.py:135:97
+    |
+133 | …T/ROLLBACK确保ACID。事务应尽量短小。', 'sql', '高'),
+134 | …条件左右两侧类型一致。', 'sql', '中'),
+135 | …rd"),无法使用B-tree索引。改为后置通配符(name LIKE "keyword%")或使用全文索引(FULLTEXT)。', 'sql', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+136 | …SCE(col,"")或CONCAT_WS(分隔符, col1, col2)忽略NULL。', 'sql', '中'),
+137 | …ime)="2024-01-01"),导致索引失效。使用范围查询替代函数。', 'sql', '高'),
+    |
+
+E501 Line too long (217 > 120)
+   --> backend/seed_rules.py:136:97
+    |
+134 | …索引失效。保持WHERE条件左右两侧类型一致。', 'sql', '中'),
+135 | …LIKE "%keyword"),无法使用B-tree索引。改为后置通配符(name LIKE "keyword%")或使用全文索引(FULLTEXT)。', 'sql', '高'),
+136 | …NULL。使用COALESCE(col,"")或CONCAT_WS(分隔符, col1, col2)忽略NULL。', 'sql', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+137 | …ATE(create_time)="2024-01-01"),导致索引失效。使用范围查询替代函数。', 'sql', '高'),
+138 | …大偏移量分页(offset>1000),数据库需要扫描后丢弃。使用游标分页(WHERE id>last_id ORDER BY id LIMIT page_size)。', 'sql', '中'),
+    |
+
+E501 Line too long (216 > 120)
+   --> backend/seed_rules.py:137:94
+    |
+135 | …LIKE "%keyword"),无法使用B-tree索引。改为后置通配符(name LIKE "keyword%")或使用全文索引(FULLTEXT)。', 'sql', '高'),
+136 | …NULL。使用COALESCE(col,"")或CONCAT_WS(分隔符, col1, col2)忽略NULL。', 'sql', '中'),
+137 | …ATE(create_time)="2024-01-01"),导致索引失效。使用范围查询替代函数。', 'sql', '高'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+138 | …大偏移量分页(offset>1000),数据库需要扫描后丢弃。使用游标分页(WHERE id>last_id ORDER BY id LIMIT page_size)。', 'sql', '中'),
+139 | … IN (1,2,NULL)结果永远为空。使用NOT EXISTS替代。', 'sql', '中'),
+    |
+
+E501 Line too long (245 > 120)
+   --> backend/seed_rules.py:138:104
+    |
+136 | …CE(col,"")或CONCAT_WS(分隔符, col1, col2)忽略NULL。', 'sql', '中'),
+137 | …me)="2024-01-01"),导致索引失效。使用范围查询替代函数。', 'sql', '高'),
+138 | …>1000),数据库需要扫描后丢弃。使用游标分页(WHERE id>last_id ORDER BY id LIMIT page_size)。', 'sql', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+139 | …)结果永远为空。使用NOT EXISTS替代。', 'sql', '中'),
+140 | …先RENAME备份。生产环境的DDL应走变更工单流程。', 'sql', '高'),
+    |
+
+E501 Line too long (186 > 120)
+   --> backend/seed_rules.py:139:102
+    |
+137 | …引列上使用了函数(WHERE DATE(create_time)="2024-01-01"),导致索引失效。使用范围查询替代函数。', 'sql', '高'),
+138 | …fset,page_size进行大偏移量分页(offset>1000),数据库需要扫描后丢弃。使用游标分页(WHERE id>last_id ORDER BY id LIMIT page_size)。', 'sql                         …
+139 | …询中是否可能返回NULL,NOT IN (1,2,NULL)结果永远为空。使用NOT EXISTS替代。', 'sql', '中'),
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+140 | …TABLE/TRUNCATE等不可逆操作,应添加确认逻辑或先RENAME备份。生产环境的DDL应走变更工单流程。', 'sql', '高'),
+141 | …TE/UPDATE是否缺少WHERE条件或WHERE条件覆盖全表,可能意外删除/更新所有数据。先SELECT验证影响行数。', 'sql', '严重'),
+    |
+
+E501 Line too long (208 > 120)
+   --> backend/seed_rules.py:140:103
+    |
+138 | …ize进行大偏移量分页(offset>1000),数据库需要扫描后丢弃。使用游标分页(WHERE id>last_id ORDER BY id LIMIT page_size)。', 'sql', '中'),
+139 | …L,NOT IN (1,2,NULL)结果永远为空。使用NOT EXISTS替代。', 'sql', '中'),
+140 | …ATE等不可逆操作,应添加确认逻辑或先RENAME备份。生产环境的DDL应走变更工单流程。', 'sql', '高'),
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+141 | …缺少WHERE条件或WHERE条件覆盖全表,可能意外删除/更新所有数据。先SELECT验证影响行数。', 'sql', '严重'),
+142 | …,浮点精度可能导致意外结果。使用范围比较(ABS(a-b)<epsilon)或使用DECIMAL类型。', 'sql', '中'),
+    |
+
+E501 Line too long (205 > 120)
+   --> backend/seed_rules.py:141:109
+    |
+139 | …LL,NOT IN (1,2,NULL)结果永远为空。使用NOT EXISTS替代。', 'sql', '中'),
+140 | …CATE等不可逆操作,应添加确认逻辑或先RENAME备份。生产环境的DDL应走变更工单流程。', 'sql', '高'),
+141 | …否缺少WHERE条件或WHERE条件覆盖全表,可能意外删除/更新所有数据。先SELECT验证影响行数。', 'sql', '严重'),
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+142 | …型,浮点精度可能导致意外结果。使用范围比较(ABS(a-b)<epsilon)或使用DECIMAL类型。', 'sql', '中'),
+    |
+
+E501 Line too long (207 > 120)
+   --> backend/seed_rules.py:142:102
+    |
+140 | …ATE等不可逆操作,应添加确认逻辑或先RENAME备份。生产环境的DDL应走变更工单流程。', 'sql', '高'),
+141 | …缺少WHERE条件或WHERE条件覆盖全表,可能意外删除/更新所有数据。先SELECT验证影响行数。', 'sql', '严重'),
+142 | …,浮点精度可能导致意外结果。使用范围比较(ABS(a-b)<epsilon)或使用DECIMAL类型。', 'sql', '中'),
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+143 | …
+144 | …
+    |
+
+E501 Line too long (209 > 120)
+   --> backend/seed_rules.py:145:94
+    |
+144 | …
+145 | …/返回值/异常。Python使用docstring,Java使用Javadoc,TS使用JSDoc。', '*', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+146 | …是否缺少解释性注释,说明为什么这样做而非做了什么。代码本身应自解释"做什么",注释解释"为什么"。', '*', '中'),
+147 | …否缺少负责人和关联issue,容易成为永久技术债。', '*', '低'),
+    |
+
+E501 Line too long (226 > 120)
+   --> backend/seed_rules.py:146:100
+    |
+144 | …
+145 | …Python使用docstring,Java使用Javadoc,TS使用JSDoc。', '*', '中'),
+146 | …释,说明为什么这样做而非做了什么。代码本身应自解释"做什么",注释解释"为什么"。', '*', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+147 | …联issue,容易成为永久技术债。', '*', '低'),
+148 | …eaking Change)应明确标注并提供迁移指南。', '*', '低'),
+    |
+
+E501 Line too long (165 > 120)
+   --> backend/seed_rules.py:147:107
+    |
+145 | …函数/类/接口是否缺少文档注释描述用途/参数/返回值/异常。Python使用docstring,Java使用Javadoc,TS使用JSDoc。', '*', '中'),
+146 | …法/业务规则/hack/workaround是否缺少解释性注释,说明为什么这样做而非做了什么。代码本身应自解释"做什么",注释解释"为什么"。', '*', '中')                                                 …
+147 | … '检查TODO/FIXME/HACK注释是否缺少负责人和关联issue,容易成为永久技术债。', '*', '低'),
+    |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+148 | …现有行为/API签名的代码是否缺少变更说明。破坏性变更(Breaking Change)应明确标注并提供迁移指南。', '*', '低'),
+149 | …目根目录是否缺少README.md,至少包含:项目简介/环境要求/安装步骤/快速开始/API文档链接/贡献指南。新成员应能在15分钟内完成首次启动。', '*                                                     …
+    |
+
+E501 Line too long (198 > 120)
+   --> backend/seed_rules.py:148:95
+    |
+146 | …round是否缺少解释性注释,说明为什么这样做而非做了什么。代码本身应自解释"做什么",注释解释"为什么"。', '*', '中'),
+147 | …CK注释是否缺少负责人和关联issue,容易成为永久技术债。', '*', '低'),
+148 | …变更说明。破坏性变更(Breaking Change)应明确标注并提供迁移指南。', '*', '低'),
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+149 | …,至少包含:项目简介/环境要求/安装步骤/快速开始/API文档链接/贡献指南。新成员应能在15分钟内完成首次启动。', '*', '中'),
+150 | …le文件,文档化所有环境变量的含义和默认值。敏感信息使用占位符: SECRET_KEY=your-secret-here。', '*', '低'),
+    |
+
+E501 Line too long (225 > 120)
+   --> backend/seed_rules.py:149:102
+    |
+147 | …联issue,容易成为永久技术债。', '*', '低'),
+148 | …eaking Change)应明确标注并提供迁移指南。', '*', '低'),
+149 | …要求/安装步骤/快速开始/API文档链接/贡献指南。新成员应能在15分钟内完成首次启动。', '*', '中'),
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+150 | …量的含义和默认值。敏感信息使用占位符: SECRET_KEY=your-secret-here。', '*', '低'),
+151 | …
+    |
+
+E501 Line too long (211 > 120)
+   --> backend/seed_rules.py:150:103
+    |
+148 | …坏性变更(Breaking Change)应明确标注并提供迁移指南。', '*', '低'),
+149 | …项目简介/环境要求/安装步骤/快速开始/API文档链接/贡献指南。新成员应能在15分钟内完成首次启动。', '*', '中'),
+150 | …档化所有环境变量的含义和默认值。敏感信息使用占位符: SECRET_KEY=your-secret-here。', '*', '低'),
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+151 | …
+    |
+
+Found 149 errors.
+[*] 25 fixable with the `--fix` option.

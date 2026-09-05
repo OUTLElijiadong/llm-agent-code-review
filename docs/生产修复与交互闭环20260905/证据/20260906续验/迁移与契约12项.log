@@ -1,0 +1,6 @@
+started_at=2026-09-05T18:17:12.085781+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B /tmp/prism-readonly-20260905-tests/pytest_readonly.py -q -o addopts= -p no:cacheprovider -p pytest_asyncio.plugin -p pytest_cov.plugin --basetemp=/tmp/prism-readonly-20260905-tests/pytest/release-final-migration-contracts-20260906 --junitxml=/tmp/prism-readonly-20260905-tests/release-final-migration-contracts-20260906.xml --tb=short tests/unit/test_migration_047_review_input_snapshot.py tests/unit/test_alembic_metadata_imports.py tests/unit/services/test_frontend_api_contract.py tests/unit/scripts/test_project_contract_scripts.py
+............                                                             [100%]
+- generated xml file: /tmp/prism-readonly-20260905-tests/release-final-migration-contracts-20260906.xml -
+12 passed in 7.54s

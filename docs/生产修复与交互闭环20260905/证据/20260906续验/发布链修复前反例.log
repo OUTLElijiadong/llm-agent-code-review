@@ -1,0 +1,23 @@
+baseline_revision=50673898bf89adb7d626647a067162fef5f7326c
+test_artifacts=/tmp/prism-release-20260906/prism-release-tests.gjoLGG
+FAIL write_version (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/write_version.log)
+FAIL legacy_labels (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/legacy_labels.log)
+FAIL legacy_git (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/legacy_git.log)
+FAIL missing_evidence (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/missing_evidence.log)
+FAIL conflicting_labels (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/conflicting_labels.log)
+FAIL wrong_revision (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/wrong_revision.log)
+FAIL invalid_version (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/invalid_version.log)
+FAIL digest_changed (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/digest_changed.log)
+FAIL ops_default_drift (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/ops_default_drift.log)
+FAIL ops_masked_drift (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/ops_masked_drift.log)
+FAIL ops_running_drift (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/ops_running_drift.log)
+FAIL ops_consistent (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/ops_consistent.log)
+FAIL restore_missing_image (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/restore_missing_image.log)
+FAIL restore_missing_evidence (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/restore_missing_evidence.log)
+FAIL restore_invalid_heads (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/restore_invalid_heads.log)
+FAIL restore_pinned_image (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/restore_pinned_image.log)
+FAIL rollback_version (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/rollback_version.log)
+FAIL rollback_legacy (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/rollback_legacy.log)
+FAIL rollback_missing_evidence (/tmp/prism-release-20260906/prism-release-tests.gjoLGG/release-binding/rollback_missing_evidence.log)
+release binding tests: passed=0 failed=19
+exit_code=1

@@ -1,0 +1,5 @@
+[2026-09-05T12:02:15Z] INFO  服务 mysql 已就绪(status=healthy)
+[2026-09-05T12:02:16Z] INFO  开始 MySQL 一致性备份(reason=repair_preflight_20260905)
+[2026-09-05T12:03:34Z] INFO  最后发布 .sql.gz 完成标志: /opt/code-review/backups/repair-20260905/code_review_20260905T120216Z_4b1711adf0e7.sql.gz
+[2026-09-05T12:03:36Z] INFO  备份完成: /opt/code-review/backups/repair-20260905/code_review_20260905T120216Z_4b1711adf0e7.sql.gz
+/opt/code-review/backups/repair-20260905/code_review_20260905T120216Z_4b1711adf0e7.sql.gz

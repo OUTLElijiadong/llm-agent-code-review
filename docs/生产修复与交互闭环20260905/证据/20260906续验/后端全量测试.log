@@ -1,0 +1,70 @@
+started_at=2026-09-05T17:48:56.773097+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B /tmp/prism-readonly-20260905-tests/pytest_readonly.py -q -o addopts= -p no:cacheprovider -p pytest_asyncio.plugin -p pytest_cov.plugin --basetemp=/tmp/prism-readonly-20260905-tests/pytest/release-backend-20260906 --cov=app --cov-report=json:/tmp/prism-readonly-20260905-tests/coverage/release-backend-20260906.json --junitxml=/tmp/prism-readonly-20260905-tests/release-backend-20260906.xml --tb=short --durations=15 -ra tests
+........................................................................ [  2%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 15%]
+........................................................................ [ 18%]
+........................................................................ [ 20%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 28%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 46%]
+........................................................................ [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 59%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 90%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 98%]
+..............................................                           [100%]
+=============================== warnings summary ===============================
+app/agents/test_review_reporter_agent.py:96
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/test_review_reporter_agent.py:96: PytestCollectionWarning: cannot collect test class 'TestReviewReporterAgent' because it has a __init__ constructor (from: tests/unit/services/test_review_dynamic_roles.py)
+    class TestReviewReporterAgent(BaseAgent):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /tmp/prism-readonly-20260905-tests/release-backend-20260906.xml -
+
+---------- coverage: platform darwin, python 3.9.6-final-0 -----------
+Coverage JSON written to file /tmp/prism-readonly-20260905-tests/coverage/release-backend-20260906.json
+
+============================= slowest 15 durations =============================
+17.58s call     tests/unit/services/test_security_sentinel_agent.py::test_scan_project_bounds_raw_findings_then_scores_deduplicated_results
+5.03s call     tests/unit/test_pentest_service.py::test_detect_interrupt_on_cancel_keeps_cancelled_not_failed
+5.03s call     tests/unit/test_pentest_service.py::test_detect_queued_line_timeout_marks_skipped_not_running
+3.33s call     tests/unit/scripts/test_quarantine_projects.py::test_cli_file_backed_roundtrip_is_rechecked_in_fresh_readonly_process
+3.25s call     tests/unit/services/test_scheduler_configuration_closure.py::test_real_timer_applies_cadence_disable_enable_and_current_config
+3.03s call     tests/unit/test_pentest_service.py::test_probe_poll_releases_snapshot_and_finishes
+2.30s call     tests/unit/test_alembic_metadata_imports.py::test_autogenerate_does_not_propose_dropping_existing_orm_tables
+2.23s call     tests/unit/test_alembic_metadata_imports.py::test_alembic_env_imports_every_declared_table_without_application_startup
+1.86s call     tests/unit/test_alembic_metadata_imports.py::test_model_registry_is_explicit_lazy_and_idempotent
+1.05s call     tests/unit/services/test_clarify_v2.py::test_clarify_store_ttl_expiry
+0.99s call     tests/test_rbac_api.py::test_admin_capability_service_reenters_real_api_with_current_user
+0.88s call     tests/unit/test_alembic_metadata_imports.py::test_alembic_retains_the_existing_single_head
+0.81s call     tests/unit/services/test_agent_governance_api_integration.py::test_admin_governance_api_business_loop
+0.46s setup    tests/unit/agents/test_scan_entry_input_closure.py::test_discussion_invalid_input_closes_with_error_without_model[ \n\t]
+0.45s setup    tests/unit/agents/test_scan_entry_input_closure.py::test_discussion_invalid_input_closes_with_error_without_model[missing historic evidence]
+2782 passed, 1 warning in 122.18s (0:02:02)

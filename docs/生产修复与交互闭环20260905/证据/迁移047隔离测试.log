@@ -1,0 +1,3 @@
+{"stage": "upgraded", "version": "8.0.46", "legacy_task_count": 1, "legacy_input_count": 1, "legacy_snapshot_unknown": 1}
+{"stage": "roundtrip", "sha_len": 64, "file_name": "source.py"}
+{"stage": "downgraded", "task_count": 1, "input_count": 1}

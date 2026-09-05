@@ -1,0 +1,7 @@
+
+In deploy/ops-check.sh line 88:
+  local total available page_size available_pages
+              ^-------^ SC2034 (warning): available appears unused. Verify use (or export if used externally).
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2034 -- available appears unused. Verify ...
