@@ -35,6 +35,7 @@ from jinja2 import Environment, select_autoescape
 
 from app.ai.scoring import SCORING_VERSION, compute_score_breakdown, score_risk_level
 from app.constants.compliance import build_compliance_summary
+from app.core.exceptions import ConflictError
 
 # ============ 模块常量 ============
 
@@ -360,6 +361,11 @@ def _build_report_context(
         Dict[str, Any]: 渲染上下文字典,结构见模块文档字符串。
     """
     task_info = _normalize_task(task)
+    if task_info.get("review_type") in {"sandbox_test", "pentest"}:
+        raise ConflictError(
+            "领域报告必须使用来源导出器，不能生成空标准报告", code=40941,
+            next_action=f"请使用 GET /api/reports/tasks/{task_info['id']}/export?format=json 下载真实领域数据",
+        )
     normalized_issues = [_normalize_issue(issue) for issue in issues or []]
 
     # 按严重度排序(严重 > 高 > 中 > 低),同级别保持原顺序

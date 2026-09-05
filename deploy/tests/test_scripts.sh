@@ -167,7 +167,299 @@ ENV
 # 参数: 无。
 # 返回: 始终返回 0。
 cleanup_test_workspace() {
+  [[ "${PRISM_KEEP_TEST_ARTIFACTS:-0}" != "1" ]] || return 0
   [[ -z "${test_root:-}" ]] || rm -rf "$test_root"
+}
+
+write_release_fake_docker() {
+  cat > "$1" <<'SCRIPT'
+#!/usr/bin/env bash
+set -eu
+printf '%s | release=%s version=%s backend=%s frontend=%s\n' "$*" "${APP_RELEASE:-unset}" "${APP_VERSION:-unset}" "${BACKEND_RELEASE:-unset}" "${FRONTEND_RELEASE:-unset}" >> "${FAKE_DOCKER_LOG:?}"
+release_sha="${FAKE_RELEASE_SHA:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
+release_version="${FAKE_RELEASE_VERSION:-3.8.2}"
+alembic_revision="${FAKE_ALEMBIC_REVISION:-047_review_input_snapshot}"
+image_digit=1
+case "$*" in
+  *bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb*) release_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; release_version=3.8.4; image_digit=3 ;;
+esac
+case "$*" in *prism-frontend*) image_digit=$((image_digit + 1)) ;; esac
+image_id="sha256:$(printf '%064d' 0 | tr 0 "$image_digit")"
+case "${1:-}" in
+  compose)
+    shift
+    env_file="${DEPLOY_ENV_FILE:-.env}"
+    if [[ "${1:-}" == --env-file ]]; then env_file="$2"; shift 2; fi
+    case "${1:-}" in
+      version) echo 'Docker Compose version v2.fake' ;;
+      config)
+        case "${2:-}" in
+          --environment)
+            for key in MYSQL_ROOT_PASSWORD MYSQL_PASSWORD APP_RELEASE APP_VERSION BACKEND_RELEASE FRONTEND_RELEASE; do
+              value="$(awk -F= -v key="$key" '$1==key {value=substr($0,index($0,"=")+1)} END {print value}' "$env_file")"
+              if [[ -n "${!key:-}" ]]; then value="${!key}"; fi
+              [[ -z "$value" ]] || printf '%s=%s\n' "$key" "$value"
+            done ;;
+          --images)
+            for key in BACKEND_RELEASE FRONTEND_RELEASE; do
+              value="$(awk -F= -v key="$key" '$1==key {value=$2} END {print value}' "$env_file")"
+              [[ -z "${!key:-}" ]] || value="${!key}"
+              repository=prism-backend
+              [[ "$key" != FRONTEND_RELEASE ]] || repository=prism-frontend
+              printf '%s:%s\n' "$repository" "${value:-local}"
+            done ;;
+        esac ;;
+      ps)
+        service="${*: -1}"
+        if [[ "$service" == backend && -f "${FAKE_RELEASE_WORKSPACE:?}/stopped" && "$*" != *'-a'* ]]; then exit 0; fi
+        printf 'cid-%s\n' "$service" ;;
+      stop) touch "${FAKE_RELEASE_WORKSPACE:?}/stopped" ;;
+      up) rm -f "${FAKE_RELEASE_WORKSPACE:?}/stopped" ;;
+      build) : ;;
+      exec)
+        case "$*" in
+          *'printf "%s" "$MYSQL_DATABASE"'*) printf 'code_review' ;;
+          *'SELECT version_num'*) echo "$alembic_revision" ;;
+          *'alembic heads'*) echo "$alembic_revision (head)" ;;
+          *'--max-allowed-packet'*)
+            cat >/dev/null
+            if [[ "${FAKE_RELEASE_MODE:-}" == restore_import_failure ]]; then
+              import_count=0
+              [[ ! -f "${FAKE_RESTORE_STATE:?}" ]] || read -r import_count < "$FAKE_RESTORE_STATE"
+              import_count=$((import_count + 1))
+              printf '%s\n' "$import_count" > "$FAKE_RESTORE_STATE"
+              [[ "$import_count" != 1 ]] || exit 42
+            fi ;;
+        esac ;;
+      run)
+        case "$*" in
+          *'alembic heads'*) echo "$alembic_revision (head)" ;;
+          *'alembic current'*) echo "$alembic_revision" ;;
+        esac ;;
+    esac ;;
+  image)
+    [[ "${2:-}" == inspect ]] || exit 0
+    [[ "${FAKE_RELEASE_MODE:-}" != missing_image ]] || exit 1
+    case "$*" in
+      *org.opencontainers.image.revision*)
+        [[ "${FAKE_RELEASE_MODE:-}" != no_evidence && "${FAKE_RELEASE_MODE:-}" != git_evidence ]] || exit 0
+        if [[ "${FAKE_RELEASE_MODE:-}" == wrong_revision ]]; then echo cccccccccccccccccccccccccccccccccccccccc; else echo "$release_sha"; fi ;;
+      *org.opencontainers.image.version*)
+        [[ "${FAKE_RELEASE_MODE:-}" != no_evidence && "${FAKE_RELEASE_MODE:-}" != git_evidence ]] || exit 0
+        if [[ "${FAKE_RELEASE_MODE:-}" == conflicting_labels && "$*" == *prism-frontend* ]]; then echo 8.8.8; else echo "$release_version"; fi ;;
+      *) echo "$image_id" ;;
+    esac ;;
+  inspect)
+    case "$*" in
+      *'{{.Image}}'*)
+        case "$*" in *frontend*) printf 'sha256:%064d\n' 0 | tr 0 2 ;; *) printf 'sha256:%064d\n' 0 | tr 0 1 ;; esac ;;
+      *'{{.Config.Image}}'*)
+        case "$*" in *frontend*) echo "prism-frontend:$release_sha" ;; *) echo "prism-backend:$release_sha" ;; esac ;;
+      *'.Config.Env'*)
+        if [[ "${FAKE_RELEASE_MODE:-}" == running_drift ]]; then echo APP_RELEASE=cccccccccccccccccccccccccccccccccccccccc; else echo "APP_RELEASE=$release_sha"; fi
+        echo "APP_VERSION=$release_version" ;;
+      *) echo healthy ;;
+    esac ;;
+  run)
+    case "$*" in
+      *'heads'*)
+        [[ "${FAKE_RELEASE_MODE:-}" != invalid_heads ]] || exit 23
+        echo "$alembic_revision (head)" ;;
+      *'current'*) echo "$alembic_revision" ;;
+    esac ;;
+  *) echo 'unexpected fake Docker command' >&2; exit 96 ;;
+esac
+SCRIPT
+  chmod +x "$1"
+}
+
+run_release_binding_case() {
+  local test_case="$1"
+  local workspace="$2"
+  local previous_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  local current_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  local output_file="$workspace/output.log"
+  local docker_log="$workspace/docker.log"
+  local status_code
+  mkdir -p "$workspace/deploy/lib" "$workspace/bin" "$workspace/releases" "$workspace/backups"
+  cp lib/common.sh "$workspace/deploy/lib/common.sh"
+  cp restore.sh rollback.sh ops-check.sh "$workspace/deploy/"
+  write_strong_database_test_env "$workspace/deploy/.env"
+  cat >> "$workspace/deploy/.env" <<ENV
+APP_RELEASE=$previous_sha
+APP_VERSION=3.8.2
+BACKEND_RELEASE=$previous_sha
+FRONTEND_RELEASE=$previous_sha
+ENV
+  cat > "$workspace/releases/current.env" <<STATE
+RELEASE_SHA=$previous_sha
+APP_VERSION=3.8.2
+BACKEND_RELEASE=$previous_sha
+FRONTEND_RELEASE=$previous_sha
+BACKUP_FILE=none
+ALEMBIC_REVISION=047_review_input_snapshot
+TARGET=all
+STATE
+  cp "$workspace/releases/current.env" "$workspace/releases/previous.env"
+  printf 'CREATE TABLE restored(id INT);\n' | gzip -c > "$workspace/backups/target.sql.gz"
+  printf '%s  %s\n' "$(file_sha256 "$workspace/backups/target.sql.gz")" target.sql.gz > "$workspace/backups/target.sql.gz.sha256"
+  cp "$workspace/backups/target.sql.gz" "$workspace/backups/code_review_fixture.sql.gz"
+  cp "$workspace/backups/target.sql.gz.sha256" "$workspace/backups/code_review_fixture.sql.gz.sha256"
+  cat > "$workspace/deploy/verify-backup.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'verify\n' >> "${FAKE_DOCKER_LOG:?}"
+SCRIPT
+  cat > "$workspace/deploy/backup.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "${FAKE_RELEASE_WORKSPACE:?}/backups/target.sql.gz"
+SCRIPT
+  write_release_fake_docker "$workspace/bin/docker"
+  write_fake_df "$workspace/bin/df"
+  cat > "$workspace/bin/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+set -eu
+case "$*" in
+  *healthz*) printf '{"status":"ok","version":"%s","release":"%s"}' "${APP_VERSION:-3.8.2}" "${APP_RELEASE:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" ;;
+  *readyz*) printf '{"status":"ready","version":"%s","release":"%s"}' "${APP_VERSION:-3.8.2}" "${APP_RELEASE:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" ;;
+  *http://*) printf 308 ;;
+esac
+SCRIPT
+  cat > "$workspace/bin/git" <<'SCRIPT'
+#!/usr/bin/env bash
+set -eu
+[[ "${FAKE_RELEASE_MODE:-}" == git_evidence ]] || exit 1
+case "$*" in
+  *show*aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:VERSION*) printf '3.8.2\n' ;;
+  *) exit 1 ;;
+esac
+SCRIPT
+  chmod +x "$workspace/deploy/"*.sh "$workspace/bin/"*
+  export PATH="$workspace/bin:$PATH" FAKE_DOCKER_LOG="$docker_log" FAKE_RELEASE_WORKSPACE="$workspace"
+  export RELEASE_STATE_DIR="$workspace/releases" DEPLOY_ENV_FILE=.env
+  export MAINTENANCE_LOCK_DIR="$workspace/maintenance.lock" BACKEND_HEALTH_TIMEOUT=1 FRONTEND_HEALTH_TIMEOUT=1
+  export BACKUP_DIR="$workspace/backups" OPS_MEMORY_MAX_PERCENT=100 OPS_MEMORY_CRITICAL_PERCENT=100
+  unset APP_VERSION APP_RELEASE BACKEND_RELEASE FRONTEND_RELEASE
+  : > "$docker_log"
+  cd "$workspace/deploy"
+  case "$test_case" in
+    write_version)
+      APP_VERSION=9.9.9 bash -c 'source lib/common.sh; write_release_state "$1" "$2" "$2" "$2" all none 047_review_input_snapshot 3.8.4' _ "$workspace/new.env" "$current_sha"
+      assert_contains "$workspace/new.env" 'APP_VERSION=3.8.4' ;;
+    legacy_labels|legacy_git|missing_evidence|conflicting_labels|wrong_revision|invalid_version|digest_changed)
+      if [[ "$test_case" != invalid_version && "$test_case" != digest_changed ]]; then
+        sed '/^APP_VERSION=/d' "$workspace/releases/current.env" > "$workspace/legacy.env"
+      else
+        cp "$workspace/releases/current.env" "$workspace/legacy.env"
+      fi
+      case "$test_case" in
+        legacy_git) export FAKE_RELEASE_MODE=git_evidence ;;
+        missing_evidence) export FAKE_RELEASE_MODE=no_evidence ;;
+        conflicting_labels|wrong_revision) export FAKE_RELEASE_MODE="$test_case" ;;
+        invalid_version) printf 'APP_VERSION=not-a-version\n' >> "$workspace/legacy.env" ;;
+        digest_changed) printf 'BACKEND_IMAGE_ID=sha256:%064d\n' 0 >> "$workspace/legacy.env" ;;
+      esac
+      if [[ "$test_case" == legacy_labels || "$test_case" == legacy_git ]]; then
+        APP_VERSION=9.9.9 bash -c 'source lib/common.sh; load_release_environment "$1"; printf "resolved=%s\n" "$APP_VERSION"' _ "$workspace/legacy.env" > "$output_file"
+        assert_contains "$output_file" 'resolved=3.8.2'
+      else
+        if bash -c 'source lib/common.sh; load_release_environment "$1"' _ "$workspace/legacy.env" > "$output_file" 2>&1; then
+          echo "不可信账本未被拒绝: $test_case" >&2; exit 1
+        fi
+      fi ;;
+    ops_default_drift|ops_masked_drift|ops_running_drift|ops_consistent)
+      if [[ "$test_case" == ops_default_drift || "$test_case" == ops_masked_drift ]]; then
+        printf 'APP_VERSION=1.0.0\nAPP_RELEASE=cccccccccccccccccccccccccccccccccccccccc\nBACKEND_RELEASE=cccccccccccccccccccccccccccccccccccccccc\nFRONTEND_RELEASE=cccccccccccccccccccccccccccccccccccccccc\n' >> .env
+      fi
+      if [[ "$test_case" == ops_masked_drift ]]; then export APP_VERSION=3.8.2 APP_RELEASE="$previous_sha" BACKEND_RELEASE="$previous_sha" FRONTEND_RELEASE="$previous_sha"; fi
+      [[ "$test_case" != ops_running_drift ]] || export FAKE_RELEASE_MODE=running_drift
+      status_code=0
+      ./ops-check.sh > "$output_file" || status_code=$?
+      python3 - "$output_file" "$test_case" "$status_code" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    result = json.load(source)
+if sys.argv[2] == "ops_consistent":
+    assert result["checks"]["release"]["ok"] is True, result
+    assert result["can_continue"] is True and sys.argv[3] == "0", result
+else:
+    assert sys.argv[3] == "1", result
+    assert result["checks"]["release"]["ok"] is False, result
+    assert "release" in result["blocking_checks"], result
+    assert result["can_continue"] is False, result
+PY
+      assert_not_contains "$docker_log" 'compose up'
+      assert_not_contains "$docker_log" 'DROP DATABASE' ;;
+    restore_missing_image|restore_missing_evidence|restore_invalid_heads|restore_pinned_image)
+      case "$test_case" in
+        restore_missing_image) export FAKE_RELEASE_MODE=missing_image ;;
+        restore_missing_evidence)
+          sed '/^APP_VERSION=/d' "$workspace/releases/current.env" > "$workspace/releases/legacy.env"
+          mv "$workspace/releases/legacy.env" "$workspace/releases/current.env"
+          export FAKE_RELEASE_MODE=no_evidence ;;
+        restore_invalid_heads) export FAKE_RELEASE_MODE=invalid_heads ;;
+      esac
+      status_code=0
+      ./restore.sh "$workspace/backups/target.sql.gz" --confirm RESTORE_PRODUCTION --skip-safety-backup > "$output_file" 2>&1 || status_code=$?
+      if [[ "$test_case" == restore_pinned_image ]]; then
+        [[ "$status_code" == 0 ]] || { cat "$output_file"; exit 1; }
+        assert_contains "$docker_log" 'compose stop backend'
+        assert_contains "$docker_log" '--no-build --pull never backend'
+        assert_contains "$docker_log" "sha256:$(printf '%064d' 0 | tr 0 1)"
+        python3 - "$docker_log" <<'PY'
+import sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    entries = source.readlines()
+stop_index = next(index for index, entry in enumerate(entries) if "compose stop backend" in entry)
+restart_index = next(index for index, entry in enumerate(entries) if "compose up " in entry and "backend" in entry)
+assert any("heads" in entry for entry in entries[:stop_index])
+assert not any("compose ps -q backend" in entry for entry in entries[stop_index + 1:restart_index])
+assert any("--network container:cid-mysql" in entry and "sha256:" + "1" * 64 in entry for entry in entries[stop_index + 1:])
+PY
+      else
+        [[ "$status_code" != 0 ]] || { echo "恢复错误未被拒绝: $test_case" >&2; exit 1; }
+        assert_not_contains "$docker_log" 'compose stop backend'
+        assert_not_contains "$docker_log" 'DROP DATABASE'
+        assert_not_contains "$docker_log" 'upgrade head'
+      fi ;;
+    rollback_version|rollback_legacy|rollback_missing_evidence)
+      if [[ "$test_case" != rollback_version ]]; then
+        sed '/^APP_VERSION=/d' "$workspace/releases/previous.env" > "$workspace/releases/legacy.env"
+        mv "$workspace/releases/legacy.env" "$workspace/releases/previous.env"
+      fi
+      if [[ "$test_case" == rollback_missing_evidence ]]; then
+        export FAKE_RELEASE_MODE=no_evidence
+        if ./rollback.sh all --confirm ROLLBACK_APPLICATION > "$output_file" 2>&1; then
+          echo '回滚缺少可信旧版本仍被放行' >&2
+          exit 1
+        fi
+        assert_not_contains "$docker_log" 'compose up '
+        assert_not_contains "$docker_log" 'compose build '
+        return 0
+      fi
+      export APP_VERSION=3.8.4
+      ./rollback.sh all --confirm ROLLBACK_APPLICATION > "$output_file" 2>&1
+      assert_contains "$workspace/releases/current.env" 'APP_VERSION=3.8.2'
+      assert_contains "$docker_log" "compose up -d --no-deps --no-build --pull never backend | release=$previous_sha version=3.8.2"
+      assert_not_contains "$docker_log" "backend | release=$previous_sha version=3.8.4" ;;
+    *) echo "未知发布测试: $test_case" >&2; exit 1 ;;
+  esac
+  printf 'release binding case: %s PASS\n' "$test_case"
+}
+
+run_release_binding_tests() {
+  local workspace="$1/release-binding"
+  local test_case failed=0 passed=0
+  mkdir -p "$workspace"
+  for test_case in write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence; do
+    if bash "$PWD/tests/test_scripts.sh" --release-case "$test_case" "$workspace/$test_case" > "$workspace/$test_case.log" 2>&1; then
+      passed=$((passed + 1)); printf 'PASS %s\n' "$test_case"
+    else
+      failed=$((failed + 1)); printf 'FAIL %s (%s)\n' "$test_case" "$workspace/$test_case.log"
+    fi
+  done
+  printf 'release binding tests: passed=%s failed=%s\n' "$passed" "$failed"
+  [[ "$failed" == 0 ]]
 }
 
 # 写入可预测的 Docker 命令替身。
@@ -195,6 +487,8 @@ case "${1:-}" in
           awk '/^[[:space:]]*(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)[[:space:]]*=/ {
             line=$0
             sub(/^[[:space:]]*/, "", line)
+            sub(/[[:space:]]+#.*/, "", line)
+            gsub(/\$\{PRISM_TEST_CREDENTIAL_PADDING_NOT_SET:-\}/, "", line)
             print line
           }' "$env_file"
         fi
@@ -364,61 +658,7 @@ SCRIPT
 # 参数: $1 目标可执行文件路径。
 # 返回: 写入和 chmod 成功时返回 0。
 write_restore_fake_docker() {
-  local target="$1"
-  cat > "$target" <<'SCRIPT'
-#!/usr/bin/env bash
-set -eu
-log_file="${FAKE_DOCKER_LOG:?FAKE_DOCKER_LOG is required}"
-state_file="${FAKE_RESTORE_STATE:?FAKE_RESTORE_STATE is required}"
-printf '%s\n' "$*" >> "$log_file"
-
-case "${1:-}" in
-  compose)
-    shift
-    case "${1:-}" in
-      --env-file)
-        env_file="${2:?env file is required}"
-        shift 2
-        if [[ "${1:-}" == "config" && "${2:-}" == "--environment" ]]; then
-          awk '/^[[:space:]]*(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)[[:space:]]*=/ {
-            line=$0
-            sub(/^[[:space:]]*/, "", line)
-            print line
-          }' "$env_file"
-        fi
-        ;;
-      exec)
-        case "$*" in
-          *'printf "%s" "$MYSQL_DATABASE"'*)
-            printf '%s' 'code_review'
-            ;;
-          *'DROP DATABASE IF EXISTS'*)
-            ;;
-          *'--max-allowed-packet=64M "$MYSQL_DATABASE"'*)
-            cat >/dev/null
-            import_count=0
-            [[ ! -f "$state_file" ]] || read -r import_count < "$state_file"
-            import_count=$((import_count + 1))
-            printf '%s\n' "$import_count" > "$state_file"
-            if [[ "$import_count" == "1" ]]; then
-              exit 42
-            fi
-            ;;
-        esac
-        ;;
-      stop|up)
-        ;;
-      ps)
-        [[ "${2:-}" == "-q" ]] && printf 'cid-%s\n' "${3:-unknown}"
-        ;;
-    esac
-    ;;
-  inspect)
-    printf '%s\n' 'healthy'
-    ;;
-esac
-SCRIPT
-  chmod +x "$target"
+  write_release_fake_docker "$1"
 }
 
 # 写入可预测的 curl 命令替身。
@@ -457,7 +697,7 @@ SCRIPT
 # 参数: $1 fake bin 目录；$2 测试根目录。
 # 返回: 所有断言通过时返回 0。
 run_ops_check_simulation() {
-  local fake_bin="$1"
+  local fake_bin="$2/ops-bin"
   local workspace="$2"
   local backup_dir="$workspace/backups"
   local persistent_backup_dir="$workspace/persistent-backups"
@@ -469,13 +709,29 @@ run_ops_check_simulation() {
   local degraded_file="$workspace/ops-degraded.json"
   local exit_code
 
-  mkdir -p "$persistent_backup_dir"
+  local RELEASE_STATE_DIR="$workspace/ops-release-state"
+  local FAKE_RELEASE_WORKSPACE="$workspace"
+  export RELEASE_STATE_DIR FAKE_RELEASE_WORKSPACE
+  mkdir -p "$persistent_backup_dir" "$fake_bin" "$RELEASE_STATE_DIR"
+  write_release_fake_docker "$fake_bin/docker"
+  write_fake_curl "$fake_bin/curl"
+  write_fake_df "$fake_bin/df"
   ln -s "$persistent_backup_dir" "$backup_dir"
   cat > "$env_file" <<'ENV'
 APP_DOMAIN=example.test
 MYSQL_ROOT_PASSWORD=RootCredentialForTests2026Alpha01
 MYSQL_PASSWORD=AppCredentialForTests2026Beta002
+APP_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+APP_VERSION=3.8.2
+BACKEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FRONTEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ENV
+  cat > "$RELEASE_STATE_DIR/current.env" <<'STATE'
+RELEASE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+APP_VERSION=3.8.2
+BACKEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FRONTEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+STATE
   printf '%s\n' 'CREATE TABLE healthcheck(id INT);' | gzip -c > "$backup_file"
   printf '%s\n' 'stale backup without checksum' | gzip -c > "$stale_lexical_backup"
   touch -t 202001010000 "$stale_lexical_backup"
@@ -505,13 +761,13 @@ with open(sys.argv[1], encoding="utf-8") as source:
     payload = json.load(source)
 assert payload["schema_version"] == 1
 assert payload["status"] == "ok"
-expected = {"containers", "disk", "memory", "backup", "alembic", "https"}
+expected = {"release", "containers", "disk", "memory", "backup", "alembic", "https"}
 assert set(payload["checks"]) == expected
 assert all(payload["checks"][name]["ok"] is True for name in expected)
 assert payload["checks"]["containers"]["services"]["redis"] in {"healthy", "running"}
 assert payload["checks"]["https"]["http_redirect_code"] == "308"
-assert payload["checks"]["alembic"]["current"] == "009"
-assert payload["checks"]["alembic"]["head"] == "009"
+assert payload["checks"]["alembic"]["current"] == "047_review_input_snapshot"
+assert payload["checks"]["alembic"]["head"] == "047_review_input_snapshot"
 assert payload["checks"]["backup"]["file"] == "code_review_20990101_000000.sql.gz"
 assert payload["can_continue"] is True
 assert payload["checks"]["disk"]["status"] == "ok"
@@ -999,6 +1255,19 @@ run_restore_failure_simulation() {
   cp lib/common.sh "$workspace/lib/common.sh"
   write_restore_fake_docker "$fake_bin/docker"
   write_strong_database_test_env "$workspace/.env"
+  cat >> "$workspace/.env" <<'ENV'
+APP_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+APP_VERSION=3.8.2
+BACKEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FRONTEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ENV
+  mkdir -p "$workspace/releases"
+  cat > "$workspace/releases/current.env" <<'STATE'
+RELEASE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+APP_VERSION=3.8.2
+BACKEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FRONTEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+STATE
   printf '%s\n' 'CREATE TABLE restored(id INT);' | gzip -c > "$target_backup"
   : > "$docker_log"
   : > "$child_log"
@@ -1026,7 +1295,8 @@ SCRIPT
   env PATH="$fake_bin:$PATH" DEPLOY_ENV_FILE=.env \
     MAINTENANCE_LOCK_DIR="$lock_dir" BACKEND_HEALTH_TIMEOUT=1 \
     FAKE_DOCKER_LOG="$docker_log" FAKE_RESTORE_STATE="$state_file" \
-    FAKE_RESTORE_CHILD_LOG="$child_log" \
+    FAKE_RESTORE_CHILD_LOG="$child_log" RELEASE_STATE_DIR="$workspace/releases" \
+    FAKE_RELEASE_WORKSPACE="$workspace" FAKE_RELEASE_MODE=restore_import_failure \
     "$workspace/restore.sh" "$target_backup" --confirm RESTORE_PRODUCTION \
     > "$output_file" 2>&1
   exit_code=$?
@@ -1046,7 +1316,7 @@ SCRIPT
     printf 'restore 回填前未再次停止 Backend\n' >&2
     exit 1
   }
-  assert_contains "$docker_log" 'compose up -d --no-deps backend'
+  assert_contains "$docker_log" 'compose up -d --no-deps --no-build --pull never backend'
   [[ "$(grep -c '^verify:' "$child_log")" == "2" ]] || {
     printf 'restore 未在共享锁内验证目标与安全备份\n' >&2
     exit 1
@@ -1106,43 +1376,7 @@ exit 0
 SCRIPT
   chmod +x "$repo/deploy/"*.sh
 
-  cat > "$fake_bin/docker" <<'SCRIPT'
-#!/usr/bin/env bash
-set -eu
-printf '%s\n' "$*" >> "${FAKE_DOCKER_LOG:?}"
-if [[ "${1:-}" == "compose" ]]; then
-  shift
-  if [[ "${1:-}" == "--env-file" ]]; then
-    env_file="$2"
-    shift 2
-    if [[ "${1:-}" == "config" && "${2:-}" == "--environment" ]]; then
-      awk '/^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)=/ {print}' "$env_file"
-    fi
-    exit 0
-  fi
-  case "${1:-}" in
-    version|build|up) exit 0 ;;
-    ps) [[ "${2:-}" == "-q" ]] && printf 'cid-%s\n' "${3:-unknown}" ;;
-    exec)
-      case "$*" in
-        *'SELECT version_num FROM alembic_version'*) printf '%s\n' '045' ;;
-      esac
-      ;;
-    run)
-      case "$*" in
-        *'alembic heads'*) printf '%s\n' '045 (head)' ;;
-        *'alembic current'*) printf '%s\n' '045' ;;
-      esac
-      ;;
-  esac
-  exit 0
-fi
-case "${1:-}" in
-  inspect) printf '%s\n' 'healthy' ;;
-  image) exit 0 ;;
-  run) exit 0 ;;
-esac
-SCRIPT
+  write_release_fake_docker "$fake_bin/docker"
   cat > "$fake_bin/curl" <<'SCRIPT'
 #!/usr/bin/env bash
 # 应用已切换后让 backend 冒烟失败，触发自动回滚。
@@ -1150,14 +1384,24 @@ exit 22
 SCRIPT
   chmod +x "$fake_bin/docker" "$fake_bin/curl"
 
-  git -C "$repo" init -q
-  git -C "$repo" add VERSION backend deploy
-  git -C "$repo" -c user.name=PrismTest -c user.email=prism@example.test commit -qm init
-  release_sha="$(git -C "$repo" rev-parse HEAD)"
+  release_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  cat > "$fake_bin/git" <<'SCRIPT'
+#!/usr/bin/env bash
+set -eu
+case "$*" in
+  *'rev-parse --git-dir'*) printf '.git\n' ;;
+  *'rev-parse'*) printf '%s\n' "${FAKE_RELEASE_SHA:?}" ;;
+  *'status --porcelain'*) exit 0 ;;
+  *"show ${FAKE_RELEASE_SHA:?}:VERSION"*) printf '3.7.0\n' ;;
+  *) exit 97 ;;
+esac
+SCRIPT
+  chmod +x "$fake_bin/git"
   cat > "$state_dir/current.env" <<STATE
 RELEASE_SHA=$release_sha
-BACKEND_RELEASE=previous-backend
-FRONTEND_RELEASE=previous-frontend
+APP_VERSION=3.7.0
+BACKEND_RELEASE=$release_sha
+FRONTEND_RELEASE=$release_sha
 TARGET=all
 BACKUP_FILE=none
 ALEMBIC_REVISION=045
@@ -1169,6 +1413,8 @@ STATE
   env PATH="$fake_bin:$PATH" DEPLOY_ENV_FILE=.env RELEASE_STATE_DIR="$state_dir" \
     MAINTENANCE_LOCK_DIR="$lock_dir" FAKE_DOCKER_LOG="$docker_log" \
     FAKE_ROLLBACK_LOG="$rollback_log" BACKEND_HEALTH_TIMEOUT=1 \
+    FAKE_RELEASE_WORKSPACE="$workspace" FAKE_RELEASE_SHA="$release_sha" \
+    FAKE_RELEASE_VERSION=3.7.0 FAKE_ALEMBIC_REVISION=045 \
     "$repo/deploy/deploy.sh" all --revision "$release_sha" > "$output_file" 2>&1
   exit_code=$?
   set -e
@@ -1271,6 +1517,31 @@ verify_systemd_templates() {
   done
 }
 
+if [[ "${1:-}" == --release-case ]]; then
+  run_release_binding_case "$2" "$3"
+  exit 0
+fi
+if [[ "${1:-}" == --release-only ]]; then
+  test_root="$(mktemp -d "${TMPDIR:-/tmp}/prism-release-tests.XXXXXX")"
+  trap cleanup_test_workspace EXIT
+  printf 'test_artifacts=%s\n' "$test_root"
+  run_release_binding_tests "$test_root"
+  exit 0
+fi
+
+test_root="$(mktemp -d "${TMPDIR:-/tmp}/prism-deploy-tests.XXXXXX")"
+trap cleanup_test_workspace EXIT
+fake_bin="$test_root/bin"
+mkdir -p "$fake_bin"
+write_fake_docker "$fake_bin/docker"
+write_fake_curl "$fake_bin/curl"
+write_fake_df "$fake_bin/df"
+printf 'test_artifacts=%s\n' "$test_root"
+if [[ "${PRISM_FAKE_DOCKER_ONLY:-0}" == 1 ]]; then
+  export PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$test_root/docker.log"
+  printf 'docker_mode=fake-only (Compose parser integration not exercised)\n'
+fi
+
 for script in \
   lib/common.sh backup.sh verify-backup.sh restore.sh deploy.sh rollback.sh \
   cleanup.sh ops-check.sh issue-cert.sh renew-cert.sh systemd/install.sh \
@@ -1315,7 +1586,7 @@ assert_contains restore.sh 'RESTORE_PRODUCTION'
 assert_contains restore.sh 'run_admin_alembic upgrade head'
 assert_contains restore.sh 'trap on_restore_exit EXIT'
 assert_contains restore.sh 'restore_database_file "$safety_backup"'
-assert_contains restore.sh '生产保持维护状态'
+assert_contains restore.sh '恢复未完成'
 for maintenance_script in \
   backup.sh verify-backup.sh restore.sh deploy.sh rollback.sh cleanup.sh; do
   assert_contains "$maintenance_script" 'maintenance_lock_path'
@@ -1344,7 +1615,9 @@ assert_contains ops-check.sh '"schema_version": 1'
 assert_contains ops-check.sh 'current_alembic_revision'
 assert_contains ops-check.sh 'http_redirect_code'
 assert_contains prism_ops_executor.py 'certbot" / "conf" / "live"'
-assert_contains RELEASE_CHECKLIST.md './deploy.sh backend --revision <FULL_COMMIT_SHA>'
+assert_contains RELEASE_CHECKLIST.md './deploy.sh all --revision <FULL_COMMIT_SHA>'
+assert_not_contains RELEASE_CHECKLIST.md './deploy.sh backend --revision'
+assert_contains deploy.sh '当前仅支持 all，前后端必须使用同一提交发布。'
 assert_contains RELEASE_CHECKLIST.md './rollback.sh all --confirm ROLLBACK_APPLICATION'
 assert_not_contains RELEASE_CHECKLIST.md '--target'
 assert_contains docker-compose.yml "prism-backend:\${BACKEND_RELEASE:-local}"
@@ -1438,14 +1711,8 @@ PYTHON_BASE_IMAGE='python:3.11-slim' PYTHON_BASE_IMAGE_DIGEST="$digest_placehold
   PHP_BASE_IMAGE='php:8.3-cli-bookworm' PHP_BASE_IMAGE_DIGEST="$digest_placeholder" \
   docker compose -f sandbox/docker-compose.build.yml config --quiet
 
-test_root="$(mktemp -d "${TMPDIR:-/tmp}/prism-deploy-tests.XXXXXX")"
-trap cleanup_test_workspace EXIT
-fake_bin="$test_root/bin"
-mkdir -p "$fake_bin"
-write_fake_docker "$fake_bin/docker"
-write_fake_curl "$fake_bin/curl"
-write_fake_df "$fake_bin/df"
 run_database_credential_validation "$test_root"
+run_release_binding_tests "$test_root"
 run_backup_archive_drift_simulation "$fake_bin" "$test_root"
 run_verify_backup_guard_simulation "$fake_bin" "$test_root"
 run_restore_failure_simulation "$test_root"

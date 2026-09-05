@@ -21,6 +21,41 @@ import type {
   ReportTemplateType,
 } from '@/types/report'
 
+interface ReportExportError {
+  code: number
+  message: string
+  next_action?: string
+  retryable?: boolean
+}
+
+async function throwIfErrorBlob(blob: Blob): Promise<void> {
+  const text = typeof blob.text === 'function'
+    ? await blob.text()
+    : await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = () => reject(reader.error ?? new Error('无法读取报告响应'))
+      reader.readAsText(blob)
+    })
+  if (!text.trim()) return
+  try {
+    const payload = JSON.parse(text) as Partial<ReportExportError>
+    if (typeof payload.code === 'number' && typeof payload.message === 'string') {
+      throw payload as ReportExportError
+    }
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error) throw error
+  }
+}
+
+async function normalizeBlobError(error: unknown): Promise<never> {
+  const responseData = (error as { response?: { data?: unknown } } | null)?.response?.data
+  if (responseData instanceof Blob) {
+    await throwIfErrorBlob(responseData)
+  }
+  throw error
+}
+
 // ============ 既有报告 API ============
 
 /**
@@ -97,9 +132,13 @@ export async function generateReport(
     template_type: templateType,
   }
   // 后端返回非 Resp 包装,统一用 blob 响应类型获取原始内容
-  const resp = await http.post<Blob>('/reports/generate', body, {
-    responseType: 'blob',
-  })
+  let resp
+  try {
+    resp = await http.post<Blob>('/reports/generate', body, { responseType: 'blob' })
+  } catch (error) {
+    return normalizeBlobError(error)
+  }
+  await throwIfErrorBlob(resp.data)
   // pdf/word 为二进制文件,直接返回 Blob 供调用方下载
   if (format === 'pdf' || format === 'word') {
     return resp.data
@@ -122,9 +161,8 @@ export async function previewReport(
   taskId: number,
   templateType: ReportTemplateType = 'detailed',
 ): Promise<string> {
-  const blob = await download(`/reports/tasks/${taskId}`, {
-    template_type: templateType,
-  })
+  const blob = await download(`/reports/tasks/${taskId}`, { template_type: templateType })
+  await throwIfErrorBlob(blob)
   return await blob.text()
 }
 
@@ -147,6 +185,9 @@ export function exportReport(
   return download(`/reports/tasks/${taskId}/export`, {
     format,
     template_type: templateType,
+  }).then(async (blob) => {
+    await throwIfErrorBlob(blob)
+    return blob
   })
 }
 

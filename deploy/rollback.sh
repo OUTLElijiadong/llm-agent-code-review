@@ -65,6 +65,9 @@ if [[ "$from_deploy_failure" != "1" ]]; then
 fi
 
 load_release_environment "$previous_state"
+[[ "$target" == all ]] || fatal "回滚必须使用 all，禁止前后端版本分离"
+assert_compose_release_environment
+assert_bound_release_images
 previous_sha="$APP_RELEASE"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then
   release_image_exists prism-backend "$BACKEND_RELEASE" \
@@ -77,24 +80,25 @@ fi
 
 log_warn "开始应用层回滚(target=$target, release=$previous_sha)；数据库保持当前 revision"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then
-  compose up -d --no-deps backend
+  compose up -d --no-deps --no-build --pull never backend
   wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || fatal "回滚 Backend 不健康"
   curl --fail --silent --show-error --max-time 15 \
     "${BACKEND_SMOKE_URL:-http://127.0.0.1:8000}/healthz" >/dev/null \
     || fatal "回滚 Backend 存活探测失败"
 fi
 if [[ "$target" == "all" || "$target" == "frontend" ]]; then
-  compose up -d --no-deps frontend
+  compose up -d --no-deps --no-build --pull never frontend
   wait_for_service_health frontend "${FRONTEND_HEALTH_TIMEOUT:-120}" || fatal "回滚 Frontend 不健康"
 fi
-smoke_https unknown || fatal "回滚后 HTTPS 冒烟失败"
+smoke_backend "$previous_sha" || fatal "回滚后 Backend 版本冒烟失败"
+smoke_https "$previous_sha" || fatal "回滚后 HTTPS 冒烟失败"
 
 mkdir -p "$release_dir"
 rollback_from="$release_dir/rollback-from-$(date -u '+%Y%m%d%H%M%S').env"
 if [[ -f "$current_state" ]]; then
   cp "$current_state" "$rollback_from"
 fi
-cp "$previous_state" "$current_state"
+write_bound_release_state "$current_state" "$previous_state"
 if [[ -f "$rollback_from" ]]; then
   cp "$rollback_from" "$previous_state"
 fi

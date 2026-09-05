@@ -541,20 +541,27 @@ def test_mixed_archive_and_editable_files_fail_closed(db) -> None:
         project_source_service.build_source_archive(db, user, project.id)
 
 
-def test_code_file_write_access_uses_project_row_lock() -> None:
+def test_code_file_write_access_uses_project_row_lock(monkeypatch) -> None:
     db = MagicMock()
     project = Project(id=7, user_id=1, project_name="locked", status="active")
     project_query = MagicMock()
-    project_query.filter.return_value.with_for_update.return_value.first.return_value = project
+    locked_query = project_query.filter.return_value.with_for_update.return_value
+    locked_query.populate_existing.return_value.first.return_value = project
     archive_query = MagicMock()
     archive_query.filter.return_value.first.return_value = None
     db.query.side_effect = [project_query, archive_query]
+    db.get.return_value = project
+    permission_check = MagicMock(return_value="owner")
+    monkeypatch.setattr(code_file_service, "require_project_access", permission_check)
+    actor = User(id=1, username="owner", role="user", status=1)
 
     result = code_file_service._check_project_access(
         db,
-        User(id=1, username="owner", role="user", status=1),
+        actor,
         7,
     )
 
     assert result is project
     project_query.filter.return_value.with_for_update.assert_called_once_with()
+    locked_query.populate_existing.assert_called_once_with()
+    permission_check.assert_called_once_with(db, 7, actor, need_write=True)

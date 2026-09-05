@@ -2,7 +2,6 @@
 Alembic环境配置
 """
 
-from importlib import import_module
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
@@ -10,34 +9,9 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 from app.core.config import settings
 from app.core.database import Base
+from app.models import load_all_models
 
-_MODEL_MODULES = (
-    "app.models.admin_chat",
-    "app.models.agent_response_run",
-    "app.models.agent_governance",
-    "app.models.agent_capability",
-    "app.models.ai_call_log",
-    "app.models.api_config",
-    "app.models.audit_log",
-    "app.models.beta_invite_code",
-    "app.models.code_file",
-    "app.models.code_version",
-    "app.models.custom_agent",
-    "app.models.pentest",
-    "app.models.project",
-    "app.models.project_import_task",
-    "app.models.project_source_archive",
-    "app.models.project_source_revision",
-    "app.models.review_issue",
-    "app.models.review_report",
-    "app.models.review_rule",
-    "app.models.review_task",
-    "app.models.review_task_file",
-    "app.models.user",
-)
-
-for module_name in _MODEL_MODULES:
-    import_module(module_name)
+load_all_models()
 
 config = context.config
 if config.config_file_name is not None:

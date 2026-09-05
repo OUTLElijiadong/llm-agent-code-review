@@ -14,7 +14,7 @@
           placeholder="任务状态"
           clearable
           style="width: 140px"
-          @change="loadData"
+          @change="loadData()"
         >
           <el-option label="待处理" value="pending" />
           <el-option label="运行中" value="running" />
@@ -29,7 +29,7 @@
           clearable
           filterable
           style="width: 200px"
-          @change="loadData"
+          @change="loadData()"
         >
           <el-option
             v-for="p in projects"
@@ -47,9 +47,22 @@
           end-placeholder="结束日期"
           value-format="YYYY-MM-DD"
           style="width: 260px"
-          @change="loadData"
+          @change="loadData()"
           size="default"
         />
+      </div>
+
+      <el-alert v-if="loadError" type="warning" :closable="false" show-icon title="任务状态刷新失败，后台最新状态尚未确认">
+        <p>{{ loadError }}。保留最近成功读取的结果；自动重试间隔 {{ retryDelayMs / 1000 }} 秒。</p>
+        <el-button :loading="refreshing" :disabled="refreshing" @click="loadData()">立即重试</el-button>
+      </el-alert>
+      <el-alert v-if="projectsError" type="warning" :closable="false" :title="projectsError">
+        <el-button @click="loadProjects">重试项目筛选加载</el-button>
+      </el-alert>
+      <div role="status" aria-live="polite">
+        <span v-if="refreshing">正在读取任务状态…</span>
+        <span v-else-if="lastUpdatedAt">最近成功读取：{{ formatDateTime(lastUpdatedAt, 'YYYY-MM-DD HH:mm:ss') }}</span>
+        <el-button v-if="!loadError" link :disabled="refreshing" @click="loadData()">刷新任务状态</el-button>
       </div>
 
       <el-table
@@ -64,9 +77,9 @@
       >
         <template #empty>
           <EmptyState
-            :description="hasFilter ? '当前筛选条件下没有审查任务,试试放宽条件' : '还没有审查任务'"
-            :action-text="hasFilter || !canStartReview ? '' : '启动第一个审查'"
-            :action-to="hasFilter || !canStartReview ? '' : '/reviews/start'"
+            :description="loadError ? '任务列表读取失败，请重试' : (hasFilter ? '当前筛选条件下没有审查任务,试试放宽条件' : '还没有审查任务')"
+            :action-text="loadError || hasFilter || !canStartReview ? '' : '启动第一个审查'"
+            :action-to="loadError || hasFilter || !canStartReview ? '' : '/reviews/start'"
           />
         </template>
         <el-table-column v-if="canCancelReview" type="selection" width="44" />
@@ -86,9 +99,10 @@
             <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="score" label="评分" width="80" sortable>
+        <el-table-column prop="score" label="评分" width="120" sortable :sort-method="compareScores">
           <template #default="{ row }">
-            <span :class="scoreClass(row.score)">{{ row.score }}</span>
+            <span v-if="row.status === 'success'" :class="scoreClass(row.score)">{{ row.score }}</span>
+            <span v-else>未形成评分</span>
           </template>
         </el-table-column>
         <el-table-column prop="total_issues" label="问题数" width="80" sortable />
@@ -143,7 +157,7 @@
           :total="total"
           :page-sizes="[20, 50, 100]"
           layout="total, sizes, prev, pager, next"
-          @change="loadData"
+          @change="loadData()"
         />
       </div>
     </el-card>
@@ -171,6 +185,11 @@ const userStore = useUserStore()
 const tableRef = ref()
 
 const loading = ref(false)
+const refreshing = ref(false)
+const loadError = ref('')
+const projectsError = ref('')
+const lastUpdatedAt = ref('')
+const retryDelayMs = ref(4000)
 const tasks = ref<TaskOut[]>([])
 const projects = ref<ProjectOut[]>([])
 const total = ref(0)
@@ -220,15 +239,25 @@ function scoreClass(score: number) {
   return 'score-low'
 }
 
+function compareScores(first: TaskOut, second: TaskOut): number {
+  const firstScore = first.status === 'success' ? first.score : -1
+  const secondScore = second.status === 'success' ? second.score : -1
+  return firstScore - secondScore
+}
+
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
   return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`
 }
 
-// 审查在后台异步执行,列表里存在 running 任务时轮询刷新,跑完即停。
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 const POLL_INTERVAL = 4000
+const MAX_POLL_INTERVAL = 30000
+let failureCount = 0
+let loadRequest = 0
+let requestKey = ''
+let disposed = false
 
 function clearPoll() {
   if (pollTimer) {
@@ -239,37 +268,68 @@ function clearPoll() {
 
 function maybeSchedulePoll() {
   clearPoll()
-  if (tasks.value.some((t) => t.status === 'running')) {
-    pollTimer = setTimeout(() => loadData(true), POLL_INTERVAL)
+  if (disposed || refreshing.value) return
+  if (loadError.value || tasks.value.some(task => task.status === 'running' || task.status === 'pending')) {
+    retryDelayMs.value = loadError.value
+      ? Math.min(POLL_INTERVAL * 2 ** Math.max(0, failureCount - 1), MAX_POLL_INTERVAL)
+      : POLL_INTERVAL
+    pollTimer = setTimeout(() => {
+      pollTimer = null
+      void loadData(true)
+    }, retryDelayMs.value)
   }
 }
 
 async function loadData(silent = false) {
+  if (disposed) return
+  const params: Record<string, unknown> = {
+    page: page.value,
+    page_size: pageSize.value,
+  }
+  if (filterStatus.value) params.status = filterStatus.value
+  if (filterProjectId.value) params.project_id = filterProjectId.value
+  if (dateRange.value) {
+    params.start = dateRange.value[0]
+    params.end = dateRange.value[1]
+  }
+  const nextKey = JSON.stringify(params)
+  if (refreshing.value && requestKey === nextKey) return
+  requestKey = nextKey
+  const request = ++loadRequest
+  clearPoll()
+  refreshing.value = true
   if (!silent) loading.value = true
   try {
-    const params: Record<string, unknown> = {
-      page: page.value,
-      page_size: pageSize.value,
-    }
-    if (filterStatus.value) params.status = filterStatus.value
-    if (filterProjectId.value) params.project_id = filterProjectId.value
-    if (dateRange.value) {
-      params.start = dateRange.value[0]
-      params.end = dateRange.value[1]
-    }
-
     const data = await getReviewTasks(params)
+    if (disposed || request !== loadRequest) return
     tasks.value = data.items
     total.value = data.total
-    maybeSchedulePoll()
+    loadError.value = ''
+    lastUpdatedAt.value = new Date().toISOString()
+    failureCount = 0
+  } catch (error) {
+    if (disposed || request !== loadRequest) return
+    loadError.value = error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+      ? error.message || '任务状态读取失败' : '任务状态读取失败'
+    failureCount = Math.min(failureCount + 1, 4)
   } finally {
-    if (!silent) loading.value = false
+    if (!disposed && request === loadRequest) {
+      loading.value = false
+      refreshing.value = false
+      maybeSchedulePoll()
+    }
   }
 }
 
 async function loadProjects() {
-  const data = await getProjects({ page_size: 100 })
-  projects.value = data.items
+  try {
+    const data = await getProjects({ page_size: 100 })
+    if (disposed) return
+    projects.value = data.items
+    projectsError.value = ''
+  } catch {
+    if (!disposed) projectsError.value = '项目筛选加载失败，仍可查看任务列表或重试'
+  }
 }
 
 function onRowClick(row: TaskOut) {
@@ -380,7 +440,11 @@ onMounted(() => {
   loadData()
 })
 
-onUnmounted(clearPoll)
+onUnmounted(() => {
+  disposed = true
+  loadRequest++
+  clearPoll()
+})
 </script>
 
 <style scoped lang="scss">

@@ -66,6 +66,7 @@ export interface CodeFileOut {
   version_no: number
   /** v2: 是否二进制文件(0否 1是),二进制文件不展示编辑器,改用下载接口 */
   is_binary: number
+  is_reviewable?: boolean
   /** v3: 文件 MIME 类型(如 image/png、application/zip),用于前端图标识别 */
   mime_type?: string
   /** v3: 原始字节数(对二进制文件等于 original_blob 长度,文本文件等于 content 编码长度) */

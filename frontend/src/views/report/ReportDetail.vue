@@ -11,6 +11,7 @@
           <el-icon><Printer /></el-icon>打印
         </el-button>
         <el-button
+          v-if="!isDomainReport"
           :loading="exportingWord"
           data-testid="report-export-word"
           @click="downloadWord"
@@ -18,6 +19,7 @@
           <el-icon><Document /></el-icon>导出 Word
         </el-button>
         <el-button
+          v-if="!isDomainReport"
           type="primary"
           :loading="exportingPdf"
           data-testid="report-export-pdf"
@@ -49,22 +51,26 @@
             @click="handleGenerate('json')"
           >生成 JSON</el-button>
           <el-button
+            v-if="!isDomainReport"
             size="small"
             :loading="generatingFormat === 'html'"
             @click="handleGenerate('html')"
           >生成 HTML</el-button>
           <el-button
+            v-if="!isDomainReport"
             size="small"
             :loading="generatingFormat === 'pdf'"
             @click="handleGenerate('pdf')"
           >生成 PDF</el-button>
           <el-button
+            v-if="!isDomainReport"
             size="small"
             :loading="generatingFormat === 'word'"
             @click="handleGenerate('word')"
           >生成 Word</el-button>
         </el-button-group>
         <el-button
+          v-if="!isDomainReport"
           ref="previewButtonRef"
           size="small"
           :loading="previewing"
@@ -81,13 +87,19 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item :command="'json'">JSON</el-dropdown-item>
-              <el-dropdown-item :command="'html'">HTML</el-dropdown-item>
-              <el-dropdown-item :command="'pdf'">PDF</el-dropdown-item>
-              <el-dropdown-item :command="'word'">Word</el-dropdown-item>
+              <el-dropdown-item v-if="!isDomainReport" :command="'html'">HTML</el-dropdown-item>
+              <el-dropdown-item v-if="!isDomainReport" :command="'pdf'">PDF</el-dropdown-item>
+              <el-dropdown-item v-if="!isDomainReport" :command="'word'">Word</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
       </div>
+    </section>
+
+    <section v-if="exportErrorMessage" class="report-export-error no-print" role="alert">
+      <strong>{{ exportErrorMessage }}</strong>
+      <span v-if="exportErrorNextAction">{{ exportErrorNextAction }}</span>
+      <el-button v-if="retryExportFormat" size="small" @click="retryExport">重试导出</el-button>
     </section>
 
     <div v-if="report" class="report-paper">
@@ -502,6 +514,9 @@ const previewButtonRef = ref<PreviewButtonTarget | null>(null)
 const previewUrlTimers = new Map<string, ReturnType<typeof setTimeout>>()
 /** 当前正在导出的格式(用于导出下拉按钮 loading 态),null 表示无操作 */
 const exportingFormat = ref<ReportFormat | null>(null)
+const exportErrorMessage = ref('')
+const exportErrorNextAction = ref('')
+const retryExportFormat = ref<ReportFormat | null>(null)
 /** 报告关联的全部问题列表(含 v3 字段,用于 CVSS/合规/Top10/修复方案展示) */
 const issues = ref<ReportIssue[]>([])
 /** issues 是否正在加载 */
@@ -532,6 +547,10 @@ const templateTypeOptions: Array<{ label: string; value: ReportTemplateType }> =
 ]
 
 const stats = computed<Record<string, unknown>>(() => report.value?.stats ?? {})
+const isDomainReport = computed(() => {
+  const sourceType = report.value?.source?.type
+  return sourceType === 'sandbox_test' || sourceType === 'pentest'
+})
 
 // AI 总结:封面用纯文本(剥离 markdown 符号),AI 总结卡片用消毒后的 markdown 渲染
 const summaryText = computed(() => stripMarkdown((report.value?.summary as string) ?? ''))
@@ -843,6 +862,13 @@ function cvssSeverityColor(score?: number | null): string {
  * @param format - 报告格式
  */
 async function handleGenerate(format: ReportFormat): Promise<void> {
+  if (generatingFormat.value !== null) return
+  if (isDomainReport.value && format !== 'json') {
+    exportErrorMessage.value = `领域报告不支持 ${format.toUpperCase()}`
+    exportErrorNextAction.value = '请生成真实领域 JSON'
+    retryExportFormat.value = 'json'
+    return
+  }
   generatingFormat.value = format
   try {
     const result = await apiGenerateReport(taskId, format, templateType.value)
@@ -860,8 +886,8 @@ async function handleGenerate(format: ReportFormat): Promise<void> {
       downloadBlob(blob, `review_report_${taskId}.${ext}`)
       ElMessage.success(`${format.toUpperCase()} 报告生成成功`)
     }
-  } catch {
-    ElMessage.error(`${format.toUpperCase()} 报告生成失败`)
+  } catch (error) {
+    showExportError(error, format, '生成')
   } finally {
     generatingFormat.value = null
   }
@@ -929,6 +955,12 @@ function preopenPreviewWindow(): Window | null {
  * 弹窗被拦截或在等待期间被关闭时，改用 sandbox iframe 页内预览。
  */
 async function handlePreview(): Promise<void> {
+  if (isDomainReport.value) {
+    exportErrorMessage.value = '领域报告不支持 HTML 预览'
+    exportErrorNextAction.value = '请导出真实领域 JSON'
+    retryExportFormat.value = 'json'
+    return
+  }
   const popup = preopenPreviewWindow()
 
   previewing.value = true
@@ -968,7 +1000,19 @@ async function handlePreview(): Promise<void> {
  * @param format - 导出格式
  */
 async function handleExport(format: ReportFormat): Promise<void> {
+  if (exportingFormat.value !== null) return
+  if (isDomainReport.value && format !== 'json') {
+    showExportError({
+      code: 40941,
+      message: `领域报告不支持 ${format.toUpperCase()}`,
+      next_action: '请导出真实领域 JSON',
+    }, format, '导出')
+    return
+  }
   exportingFormat.value = format
+  exportErrorMessage.value = ''
+  exportErrorNextAction.value = ''
+  retryExportFormat.value = null
   try {
     const blob = await apiExportReport(taskId, format, templateType.value)
     const extMap: Record<ReportFormat, string> = {
@@ -976,11 +1020,23 @@ async function handleExport(format: ReportFormat): Promise<void> {
     }
     downloadBlob(blob, `review_report_${taskId}.${extMap[format]}`)
     ElMessage.success(`${format.toUpperCase()} 报告导出成功`)
-  } catch {
-    ElMessage.error(`${format.toUpperCase()} 报告导出失败`)
+  } catch (error) {
+    showExportError(error, format, '导出')
   } finally {
     exportingFormat.value = null
   }
+}
+
+function showExportError(error: unknown, format: ReportFormat, action: string): void {
+  const payload = error as { message?: string; next_action?: string }
+  exportErrorMessage.value = payload?.message || `${format.toUpperCase()} 报告${action}失败`
+  exportErrorNextAction.value = payload?.next_action || '请检查报告状态后重试'
+  retryExportFormat.value = payload?.next_action ? (isDomainReport.value ? 'json' : format) : null
+  ElMessage.error(exportErrorMessage.value)
+}
+
+function retryExport(): void {
+  if (retryExportFormat.value) void handleExport(retryExportFormat.value)
 }
 
 /**

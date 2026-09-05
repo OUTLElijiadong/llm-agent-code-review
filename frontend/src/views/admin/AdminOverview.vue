@@ -1,12 +1,12 @@
 <template>
-  <div class="admin-overview" :class="{ 'is-booting': pageLoading }">
+  <div class="admin-overview">
     <!-- 顶部:标题 + 安全态势等级 -->
     <header class="ov-head">
       <div>
         <h2 class="ov-title font-display">总览大屏</h2>
         <p class="ov-sub">{{ canViewServer ? '服务器 · 安全态势 · 登录来源 · Agent 活跃 实时一览' : '安全态势 · 登录来源 · Agent 活跃 实时一览' }}</p>
       </div>
-      <div class="posture-badge" :class="`lv-${posture?.level || 'ok'}`">
+      <div class="posture-badge" :class="`lv-${postureLevel}`" role="status">
         <span class="pulse-dot"></span>
         {{ postureLabel }}
       </div>
@@ -15,27 +15,30 @@
     <!-- 服务器状态 + 安全态势 -->
     <div class="row-2 prism-stagger" :class="{ 'single-column': !canViewServer }">
       <!-- 服务器状态 -->
-      <section v-if="canViewServer" class="card prism-glass-card">
+      <section v-if="canViewServer" class="card prism-glass-card" :data-state="systemState.status" :aria-busy="systemState.status === 'loading'">
         <header class="card-head">
           <h3><el-icon><Monitor /></el-icon>服务器状态</h3>
           <span class="uptime font-mono" v-if="system?.uptime_seconds">运行 {{ formatUptime(system.uptime_seconds) }}</span>
+          <button type="button" class="retry-button" :disabled="systemState.status === 'loading'" @click="loadSystem()">{{ loadButtonText(systemState) }}</button>
         </header>
-        <div v-if="!system?.available" class="muted">系统指标不可用(psutil 未就绪)</div>
-        <div v-else class="metrics">
+        <p v-if="systemState.status === 'loading'" class="section-state muted" role="status">正在加载服务器状态…<span v-if="systemState.hasResult">显示上次成功数据，等待更新。</span></p>
+        <p v-if="systemState.error" class="section-state error" role="alert">服务器状态加载失败：{{ systemState.error }}<span v-if="systemState.hasResult" class="stale-note">上次成功数据已过期</span></p>
+        <div v-if="systemState.status === 'empty'" class="muted">{{ system?.available === false ? '服务器已返回：指标采集不可用' : '未取得服务器指标' }}</div>
+        <div v-if="system?.available" class="metrics">
           <div class="metric">
             <div class="m-label">CPU</div>
-            <div class="m-bar"><i :style="{ width: (system.cpu_percent||0)+'%' }" :class="barClass(system.cpu_percent)"></i></div>
-            <div class="m-val font-mono">{{ system.cpu_percent }}%</div>
+            <div class="m-bar"><i v-if="Number.isFinite(system.cpu_percent)" :style="{ width: system.cpu_percent+'%' }" :class="barClass(system.cpu_percent)"></i></div>
+            <div class="m-val font-mono">{{ formatMetric(system.cpu_percent, '%') }}</div>
           </div>
           <div class="metric">
             <div class="m-label">内存</div>
-            <div class="m-bar"><i :style="{ width: (system.memory_percent||0)+'%' }" :class="barClass(system.memory_percent)"></i></div>
-            <div class="m-val font-mono">{{ system.memory_percent }}%</div>
+            <div class="m-bar"><i v-if="Number.isFinite(system.memory_percent)" :style="{ width: system.memory_percent+'%' }" :class="barClass(system.memory_percent)"></i></div>
+            <div class="m-val font-mono">{{ formatMetric(system.memory_percent, '%') }}</div>
           </div>
           <div class="metric">
             <div class="m-label">磁盘</div>
-            <div class="m-bar"><i :style="{ width: (system.disk_percent||0)+'%' }" :class="barClass(system.disk_percent)"></i></div>
-            <div class="m-val font-mono">{{ system.disk_used_gb }}/{{ system.disk_total_gb }}G</div>
+            <div class="m-bar"><i v-if="Number.isFinite(system.disk_percent)" :style="{ width: system.disk_percent+'%' }" :class="barClass(system.disk_percent)"></i></div>
+            <div class="m-val font-mono">{{ formatMetric(system.disk_used_gb) }}/{{ formatMetric(system.disk_total_gb, 'G') }}</div>
           </div>
           <div class="metric" v-if="system.load_avg">
             <div class="m-label">负载</div>
@@ -45,22 +48,26 @@
       </section>
 
       <!-- 安全态势 -->
-      <section class="card prism-glass-card">
+      <section class="card prism-glass-card" :data-state="postureState.status" :aria-busy="postureState.status === 'loading'">
         <header class="card-head">
           <h3><el-icon><Aim /></el-icon>安全态势</h3>
           <span class="muted sm">基于应用日志</span>
+          <button type="button" class="retry-button" :disabled="postureState.status === 'loading'" @click="loadPosture()">{{ loadButtonText(postureState) }}</button>
         </header>
+        <p v-if="postureState.status === 'loading'" class="section-state muted" role="status">正在加载安全态势…<span v-if="postureState.hasResult">显示上次成功数据，等待更新。</span></p>
+        <p v-if="postureState.error" class="section-state error" role="alert">安全态势加载失败：{{ postureState.error }}<span v-if="postureState.hasResult" class="stale-note">上次成功数据已过期</span></p>
+        <p v-if="postureState.status === 'empty'" class="muted">未取得安全态势，无法判断是否存在异常。</p>
         <div class="posture-grid">
           <div class="p-stat">
-            <div class="p-num font-display" :class="{ danger: (posture?.login_failed_24h||0) > 10 }">{{ posture?.login_failed_24h ?? '-' }}</div>
+            <div class="p-num font-display" :class="{ danger: (posture?.login_failed_24h||0) > 10 }">{{ formatMetric(posture?.login_failed_24h) }}</div>
             <div class="p-label">24h 登录失败</div>
           </div>
           <div class="p-stat">
-            <div class="p-num font-display"><span v-if="pageLoading" class="num-skeleton" aria-label="加载中"></span><template v-else>{{ posture?.login_success_24h ?? '-' }}</template></div>
+            <div class="p-num font-display">{{ formatMetric(posture?.login_success_24h) }}</div>
             <div class="p-label">24h 登录成功</div>
           </div>
           <div class="p-stat">
-            <div class="p-num font-display" :class="{ danger: (posture?.malware_infected_24h||0) > 0 }">{{ posture?.malware_infected_24h ?? 0 }}</div>
+            <div class="p-num font-display" :class="{ danger: (posture?.malware_infected_24h||0) > 0 }">{{ formatMetric(posture?.malware_infected_24h) }}</div>
             <div class="p-label">24h 恶意文件</div>
           </div>
         </div>
@@ -83,31 +90,37 @@
             <span class="sig-go" aria-hidden="true">去处理 ›</span>
           </li>
         </ul>
-        <div v-else class="ok-line">✓ 未发现爆破/恶意扫描迹象</div>
+        <div v-else-if="postureLevel === 'ok'" class="ok-line">✓ 当前应用日志未发现异常信号</div>
+        <div v-else-if="postureState.status === 'success'" class="muted">{{ Array.isArray(posture?.signals) ? '安全态势数据待核验，请刷新后确认。' : '信号数据未取得，无法判断是否存在异常。' }}</div>
       </section>
     </div>
 
     <!-- 登录来源地图 + Agent 活跃 -->
     <div class="row-2 prism-stagger">
       <!-- 世界地图 -->
-      <section class="card map-card prism-glass-card">
+      <section class="card map-card prism-glass-card" :data-state="geoState.status" :aria-busy="geoState.status === 'loading'">
         <header class="card-head">
           <h3><el-icon><MapLocation /></el-icon>登录来源分布</h3>
-          <span class="muted sm">近30天成功登录 · {{ geoPoints.length }} 个来源</span>
+          <span class="muted sm">近30天成功登录 · <template v-if="geoState.hasResult">{{ geoState.status === 'loading' || geoState.error ? '上次结果：' : '' }}{{ geoPoints.length }} 个来源</template><template v-else>来源数未知</template></span>
+          <button type="button" class="retry-button" :disabled="geoState.status === 'loading'" @click="loadGeo()">{{ loadButtonText(geoState) }}</button>
         </header>
+        <p v-if="geoState.status === 'loading'" class="section-state muted" role="status">正在加载登录来源…<span v-if="geoState.hasResult">显示上次成功数据，等待更新。</span></p>
+        <p v-if="geoState.error" class="section-state error" role="alert">登录来源数据加载失败：{{ geoState.error }}<span v-if="geoState.hasResult" class="stale-note">上次成功数据已过期</span></p>
         <div ref="mapRef" class="world-map"></div>
-        <div v-if="geoLoadFailed" class="map-state error">登录来源数据加载失败</div>
-        <div v-else-if="!geoPoints.length" class="map-state muted">暂无可定位的成功登录来源</div>
+        <div v-if="geoState.status === 'empty'" class="map-state muted">{{ geoState.hasResult ? '暂无可定位的成功登录来源' : '未取得登录来源数据' }}</div>
       </section>
 
       <!-- Agent 活跃 -->
-      <section class="card prism-glass-card">
+      <section class="card prism-glass-card" :data-state="agentsState.status" :aria-busy="agentsState.status === 'loading'">
         <header class="card-head">
           <h3><el-icon><Cpu /></el-icon>Agent 活跃状态</h3>
           <div class="live-status" :class="`live-${eventStreamStatus}`">
-            <span class="live-dot"></span>{{ liveStatusText }} · {{ workingCount }} 个运行中
+            <span class="live-dot"></span>{{ liveStatusText }} · <template v-if="agentsState.hasResult && (agentsState.status === 'success' || agentsState.status === 'empty')">{{ workingCount }} 个运行中</template><template v-else>运行状态未知</template>
           </div>
+          <button type="button" class="retry-button" :disabled="agentsState.status === 'loading'" @click="loadAgents()">{{ loadButtonText(agentsState) }}</button>
         </header>
+        <p v-if="agentsState.status === 'loading'" class="section-state muted" role="status">正在加载 Agent 活跃状态…<span v-if="agentsState.hasResult">显示上次成功数据，等待更新。</span></p>
+        <p v-if="agentsState.error" class="section-state error" role="alert">Agent 数据加载失败：{{ agentsState.error }}<span v-if="agentsState.hasResult" class="stale-note">上次成功数据已过期</span></p>
         <ul class="agent-list">
           <li v-for="a in agents" :key="a.agent_code" class="agent-item" :class="a.status">
             <span class="a-avatar" :class="a.status">
@@ -136,7 +149,7 @@
               </span>
             </div>
           </li>
-          <li v-if="!agents.length" class="muted center">暂无 Agent 数据</li>
+          <li v-if="agentsState.status === 'empty'" class="muted center">{{ agentsState.hasResult ? '暂无 Agent 数据' : '未取得 Agent 数据' }}</li>
         </ul>
       </section>
     </div>
@@ -144,7 +157,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Aim, Cpu, MapLocation, Monitor, WarningFilled } from '@element-plus/icons-vue'
 import * as echarts from 'echarts/core'
@@ -187,25 +200,50 @@ function goSignalDetail(signal: { title?: string; detail?: string; severity?: st
 
 const system = ref<SystemStatus | null>(null)
 const userStore = useUserStore()
-const canViewServer = computed(() => userStore.isSuperAdmin())
+const canViewServer = computed(() => {
+  const profile = userStore.profile
+  return profile?.username === 'admin' && profile.status === 1 &&
+    profile.role === 'super_admin' && userStore.roles.includes('super_admin')
+})
 const posture = ref<SecurityPosture | null>(null)
 const geoPoints = ref<GeoPoint[]>([])
-const geoLoadFailed = ref(false)
 const agents = ref<AgentActivity[]>([])
+interface LoadState {
+  status: 'loading' | 'error' | 'empty' | 'success'
+  error: string
+  hasResult: boolean
+  permissionDenied: boolean
+}
+function createLoadState(): LoadState {
+  return reactive({ status: 'loading', error: '', hasResult: false, permissionDenied: false })
+}
+const systemState = createLoadState()
+const postureState = createLoadState()
+const geoState = createLoadState()
+const agentsState = createLoadState()
+const pendingRequests = new Set<LoadState>()
 const expandedUsageCode = ref<string | null>(null)
 const mapRef = ref<HTMLElement | null>(null)
 let mapChart: echarts.EChartsType | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 let eventStream: { close: () => void } | null = null
 const eventStreamStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'closed'>('connecting')
-const pageLoading = ref(true)
-let refreshing = false
+let disposed = false
 
+const postureLevel = computed(() => {
+  if (postureState.status !== 'success' || !posture.value) return 'unknown'
+  const value = posture.value
+  if (value.level === 'attack' || value.level === 'suspicious') return value.level
+  if (value.level === 'ok' && Array.isArray(value.signals) && value.signals.length === 0 &&
+    [value.login_failed_24h, value.login_success_24h, value.malware_infected_24h].every((count) => Number.isFinite(count))) return 'ok'
+  return 'unknown'
+})
 const postureLabel = computed(() => {
-  const lv = posture.value?.level
-  if (lv === 'attack') return '检测到攻击迹象'
-  if (lv === 'suspicious') return '存在可疑活动'
-  return '系统正常'
+  if (postureState.status === 'loading') return '安全态势：加载中'
+  if (postureLevel.value === 'attack') return '安全态势：检测到攻击迹象'
+  if (postureLevel.value === 'suspicious') return '安全态势：存在可疑活动'
+  if (postureLevel.value === 'ok') return '安全态势：日志未见异常'
+  return '安全态势：未知'
 })
 const workingCount = computed(() => agents.value.filter((a) => ['working', 'thinking', 'blocked'].includes(a.status)).length)
 const liveStatusText = computed(() => ({
@@ -232,6 +270,9 @@ function barClass(v?: number): string {
   if (n >= 65) return 'warn'
   return 'ok'
 }
+function formatMetric(value: unknown, suffix = ''): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value}${suffix}` : '未知'
+}
 function formatUptime(sec: number): string {
   const d = Math.floor(sec / 86400)
   const h = Math.floor((sec % 86400) / 3600)
@@ -239,7 +280,7 @@ function formatUptime(sec: number): string {
 }
 
 function renderMap(): void {
-  if (!mapRef.value) return
+  if (disposed || !mapRef.value) return
   if (!mapChart) {
     echarts.registerMap('world', worldJson as never)
     mapChart = echarts.init(mapRef.value)
@@ -250,15 +291,16 @@ function renderMap(): void {
     ip: p.ip,
     label: `${p.country || ''} ${p.city || ''}`.trim() || p.ip,
   }))
-  const max = Math.max(1, ...geoPoints.value.map((p) => p.count))
+  const max = Math.max(0, ...geoPoints.value.map((p) => p.count))
   mapChart.setOption({
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'item',
       appendTo: 'body',
       formatter: (p: { data?: { label?: string; value?: number[]; ip?: string } }) => {
-        const d = p.data || {}
-        return `<b>${d.label || ''}</b><br/>IP:${d.ip || ''}<br/>登录 ${d.value?.[2] ?? 0} 次`
+        const d = p.data
+        if (!d?.value) return ''
+        return `<b>${d.label || ''}</b><br/>IP:${d.ip || ''}<br/>登录 ${formatMetric(d.value[2])} 次`
       },
     },
     geo: {
@@ -269,12 +311,13 @@ function renderMap(): void {
       itemStyle: { areaColor: '#EEF1F7', borderColor: '#C9D2E3', borderWidth: 0.5 },
       emphasis: { itemStyle: { areaColor: '#C7CBE8' }, label: { show: false } },
     },
-    visualMap: {
+    visualMap: data.length ? {
+      show: true,
       min: 0, max, left: 8, bottom: 8,
       text: ['多', '少'], calculable: true,
       inRange: { color: ['#8EA2F8', '#5B58E8', '#C92A6E'] },
       textStyle: { color: '#6B7280', fontSize: 11 },
-    },
+    } : { show: false },
     series: [
       {
         type: 'effectScatter',
@@ -289,28 +332,84 @@ function renderMap(): void {
   }, true)
 }
 
-async function loadAll(): Promise<void> {
-  if (refreshing) return
-  refreshing = true
+function loadButtonText(state: LoadState): string {
+  if (state.status === 'loading') return '加载中…'
+  return state.status === 'error' ? '重试' : '刷新'
+}
+
+function loadErrorDetails(error: unknown): { message: string; permissionDenied: boolean } {
+  const failure = error as {
+    message?: string
+    code?: number
+    next_action?: string
+    response?: { status?: number; data?: { message?: string; code?: number; next_action?: string } }
+  } | null
+  const detail = failure?.response?.data ?? failure
+  const forbidden = failure?.response?.status === 403 || detail?.code === 403 || Math.floor((detail?.code ?? 0) / 100) === 403
+  let message = detail?.message || (forbidden ? '读取权限不足（403），请确认当前账号权限' : '请求失败，请稍后重试')
+  if (detail?.next_action) message += `；${detail.next_action}`
+  if (forbidden) message += '；自动刷新已暂停，请确认权限后手动重试。'
+  return { message, permissionDenied: forbidden }
+}
+
+async function loadSection<T>(state: LoadState, request: () => Promise<T>, accept: (value: T) => boolean, manual: boolean): Promise<void> {
+  if (disposed || pendingRequests.has(state) || (!manual && state.permissionDenied)) return
+  pendingRequests.add(state)
+  state.status = 'loading'
   try {
-    const [sys, sec, geo, ag] = await Promise.allSettled([
-      canViewServer.value ? getSystemStatus() : Promise.resolve(null),
-      getSecurityPosture(), getLoginGeo(), getAgentsActivity(),
-    ])
-    if (sys.status === 'fulfilled') system.value = sys.value
-    if (sec.status === 'fulfilled') posture.value = sec.value
-    if (geo.status === 'fulfilled') {
-      geoPoints.value = geo.value
-      geoLoadFailed.value = false
-    } else {
-      geoLoadFailed.value = true
+    const result = await request()
+    if (disposed) return
+    state.status = accept(result) ? 'success' : 'empty'
+    state.hasResult = result != null
+    state.error = ''
+    state.permissionDenied = false
+  } catch (error) {
+    if (!disposed) {
+      state.status = 'error'
+      const failure = loadErrorDetails(error)
+      state.error = failure.message
+      state.permissionDenied = failure.permissionDenied
     }
-    if (ag.status === 'fulfilled') agents.value = ag.value
-    renderMap()
   } finally {
-    refreshing = false
-    pageLoading.value = false
+    pendingRequests.delete(state)
   }
+}
+
+async function loadSystem(manual = true): Promise<void> {
+  if (!canViewServer.value) return
+  await loadSection(systemState, getSystemStatus, (value) => {
+    system.value = value ?? null
+    return value?.available === true
+  }, manual)
+}
+
+async function loadPosture(manual = true): Promise<void> {
+  await loadSection(postureState, getSecurityPosture, (value) => {
+    posture.value = value ?? null
+    return value != null
+  }, manual)
+}
+
+async function loadGeo(manual = true): Promise<void> {
+  await loadSection(geoState, () => {
+    renderMap()
+    return getLoginGeo()
+  }, (value) => {
+    geoPoints.value = value ?? []
+    renderMap()
+    return geoPoints.value.length > 0
+  }, manual)
+}
+
+async function loadAgents(manual = true): Promise<void> {
+  await loadSection(agentsState, getAgentsActivity, (value) => {
+    agents.value = value ?? []
+    return agents.value.length > 0
+  }, manual)
+}
+
+async function loadAll(): Promise<void> {
+  await Promise.all([loadSystem(false), loadPosture(false), loadGeo(false), loadAgents(false)])
 }
 
 function applyAgentEvent(event: AgentEvent): void {
@@ -340,28 +439,32 @@ onMounted(() => {
   timer = setInterval(loadAll, 5_000) // SSE 实时事件 + 5s 数据兜底
 })
 onBeforeUnmount(() => {
+  disposed = true
   window.removeEventListener('resize', onResize)
   if (timer) clearInterval(timer)
   eventStream?.close()
   mapChart?.dispose()
+  mapChart = null
 })
 </script>
 
 <style scoped lang="scss">
 .admin-overview { display: flex; flex-direction: column; gap: 16px; }
 
-.ov-head { display: flex; justify-content: space-between; align-items: flex-end; }
+.ov-head { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-end; }
 .ov-title { margin: 0; font-size: 22px; font-weight: 600; color: var(--gray-900); }
 .ov-sub { margin: 4px 0 0; font-size: 12.5px; color: var(--gray-500); }
 
 .posture-badge {
   display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0; white-space: nowrap;
   padding: 8px 16px; border-radius: 999px;
   font-size: 13px; font-weight: 600;
   .pulse-dot { width: 9px; height: 9px; border-radius: 50%; animation: pulse 1.6s infinite; }
   &.lv-ok { background: rgba(79,184,122,.12); color: #2F8F5B; .pulse-dot { background: #4FB87A; } }
   &.lv-suspicious { background: rgba(217,168,87,.14); color: #B9832F; .pulse-dot { background: #D9A857; } }
   &.lv-attack { background: rgba(220,73,97,.12); color: #C92A4E; .pulse-dot { background: #DC4961; } }
+  &.lv-unknown { background: var(--gray-100); color: var(--gray-600); .pulse-dot { background: currentColor; animation: none; } }
 }
 @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: .4; transform: scale(.8);} }
 
@@ -389,7 +492,7 @@ onBeforeUnmount(() => {
   opacity: 0.72;
   pointer-events: none;
 }
-.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+.card-head { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; margin-bottom: 14px;
   h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--gray-900); display: flex; align-items: center; gap: 7px; }
 }
 .live-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--gray-500); white-space: nowrap;
@@ -400,6 +503,15 @@ onBeforeUnmount(() => {
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.2s infinite; }
 .uptime { font-size: 11.5px; color: var(--gray-500); }
 .muted { color: var(--gray-400); font-size: 12.5px; &.sm { font-size: 11.5px; } &.center { text-align: center; padding: 24px 0; } }
+.section-state { margin: 0 0 12px; font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.section-state.error { color: #C92A4E; }
+.stale-note { display: block; font-weight: 600; }
+.retry-button {
+  flex-shrink: 0; padding: 4px 10px; border: 1px solid var(--gray-300); border-radius: 6px;
+  background: var(--gray-50); color: var(--brand-600); font: inherit; font-size: 12px; cursor: pointer;
+  &:disabled { cursor: wait; color: var(--gray-500); }
+  &:focus-visible { outline: 2px solid var(--brand-300); outline-offset: 2px; }
+}
 
 .metrics { display: flex; flex-direction: column; gap: 13px; }
 .metric { display: flex; align-items: center; gap: 12px; }
@@ -521,17 +633,4 @@ onBeforeUnmount(() => {
   .a-usage-detail { grid-column: 1 / -1; text-align: left; }
 }
 
-/* 首载数字骨架:呼吸条替代闪零;整页轻降透明而非压灰遮罩 */
-.num-skeleton {
-  display: inline-block;
-  width: 44px;
-  height: 24px;
-  border-radius: 5px;
-  background: var(--gray-100);
-  animation: num-skeleton-breathe 1.4s ease-in-out infinite;
-}
-.admin-overview.is-booting { opacity: 0.75; transition: opacity 0.3s ease; }
-.admin-overview { transition: opacity 0.3s ease; }
-@keyframes num-skeleton-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .num-skeleton { animation: none; } }
 </style>

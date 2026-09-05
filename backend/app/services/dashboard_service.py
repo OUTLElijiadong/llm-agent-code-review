@@ -6,6 +6,8 @@ v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
     - 非 admin 视角: owner ∪ member 项目聚合(scope='self')
     - _scope_filter / _valid_task_ids 统一改用 get_visible_project_ids
 """
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -13,10 +15,10 @@ from sqlalchemy.orm import Session
 
 from app.models.code_file import CodeFile
 from app.models.project import Project
-from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services.project_member_service import get_visible_project_ids
+from app.services.report_service import load_task_issue_stats
 
 
 def _visible_project_ids(db: Session, user: User) -> list[int]:
@@ -30,7 +32,9 @@ def _visible_project_ids(db: Session, user: User) -> list[int]:
         list[int]: 可见项目 ID 列表(admin 为全部非删除项目;非 admin 为 owner ∪ member)
     """
     visible_ids, _ = get_visible_project_ids(db, user)
-    return visible_ids
+    return [row[0] for row in db.query(Project.id).filter(
+        Project.id.in_(visible_ids), Project.status != "deleted",
+    ).all()] if visible_ids else []
 
 
 def _valid_task_ids(db: Session, user: User):
@@ -51,6 +55,12 @@ def _valid_task_ids(db: Session, user: User):
         ReviewTask.status != "deleted",
         ReviewTask.project_id.in_(visible_ids),
     )
+
+
+def _issue_stats(db: Session, user: User, *, since: datetime | None = None) -> list[dict]:
+    """所有图表复用报告来源事实，保持非删除任务及项目成员可见范围。"""
+    tasks = db.query(ReviewTask).filter(ReviewTask.id.in_(_valid_task_ids(db, user))).all()
+    return list(load_task_issue_stats(db, tasks, since=since).values())
 
 
 def get_summary(db: Session, user: User) -> dict:
@@ -91,11 +101,9 @@ def get_summary(db: Session, user: User) -> dict:
         .scalar() or 0
     )
 
-    valid_ids = _valid_task_ids(db, user)
-    total_issues = db.query(func.count(ReviewIssue.id)).filter(
-        ReviewIssue.task_id.in_(valid_ids)).scalar() or 0
-    severe_issues = db.query(func.count(ReviewIssue.id)).filter(
-        ReviewIssue.task_id.in_(valid_ids), ReviewIssue.severity == "严重").scalar() or 0
+    issue_stats = _issue_stats(db, user)
+    total_issues = sum(item["total_issues"] for item in issue_stats)
+    severe_issues = sum(item["severity"].get("严重", 0) for item in issue_stats)
 
     avg_score = round(
         db.query(func.avg(ReviewTask.score))
@@ -154,13 +162,10 @@ def get_risk_distribution(db: Session, user: User, days: int = 30) -> list[dict]
         list[dict]: [{severity: str, count: int}, ...]
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    base_q = db.query(ReviewIssue.severity, func.count(ReviewIssue.id)).filter(
-        ReviewIssue.create_time >= cutoff,
-        ReviewIssue.task_id.in_(_valid_task_ids(db, user)))
-    rows = base_q.group_by(ReviewIssue.severity).all()
     result = {"严重": 0, "高": 0, "中": 0, "低": 0}
-    for sev, cnt in rows:
-        result[sev] = cnt
+    for item in _issue_stats(db, user, since=cutoff):
+        for severity, count in item["severity"].items():
+            result[severity] = result.get(severity, 0) + count
     return [{"severity": k, "count": v} for k, v in result.items()]
 
 
@@ -176,11 +181,11 @@ def get_issue_type_statistics(db: Session, user: User, days: int = 30) -> list[d
         list[dict]: [{issue_type: str, count: int}, ...]
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    base_q = db.query(ReviewIssue.issue_type, func.count(ReviewIssue.id)).filter(
-        ReviewIssue.create_time >= cutoff,
-        ReviewIssue.task_id.in_(_valid_task_ids(db, user)))
-    rows = base_q.group_by(ReviewIssue.issue_type).all()
-    return [{"issue_type": t, "count": c} for t, c in rows]
+    result: dict[str, int] = {}
+    for item in _issue_stats(db, user, since=cutoff):
+        for kind, count in item["by_type"].items():
+            result[kind] = result.get(kind, 0) + count
+    return [{"issue_type": kind, "count": count} for kind, count in result.items()]
 
 
 def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:

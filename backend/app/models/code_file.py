@@ -20,6 +20,11 @@ class CodeFile(Base, IdMixin, TimestampMixin):
     """
 
     __tablename__ = "code_file"
+
+    @property
+    def is_reviewable(self) -> bool:
+        return self.is_binary == 0 and bool((self.content or "").strip()) and self.status == "active"
+
     __table_args__ = (
         Index("ix_code_file_project_status", "project_id", "status"),
         Index("ix_code_file_project_lang", "project_id", "language"),

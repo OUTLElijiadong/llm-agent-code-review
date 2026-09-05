@@ -25,18 +25,17 @@ cd /path/to/project/deploy
 - [ ] 已记录备份文件名、校验和、当前 Alembic revision 和恢复验证结果。
 - [ ] 若任一项失败，停止发布；不得以旧备份冒充本次发布门禁。
 
-## 3. 小步发布（T0）
+## 3. 同版本发布（T0）
 
 ```bash
-./deploy.sh backend --revision <FULL_COMMIT_SHA>
-# 验证稳定后，再按计划发布 frontend 或 all
-# 注意: 发布 frontend 后必须执行 ./sync-frontend-assets.sh 同步 assets 卷,
-#       否则 index.html 引用的新哈希文件 404 导致页面空白。
+./deploy.sh all --revision <FULL_COMMIT_SHA>
 ```
 
 - [ ] 目标 revision 解析为计划中的完整 SHA。
-- [ ] 只发布本次必要组件；数据库迁移只执行 `alembic upgrade head`。
-- [ ] Backend `/healthz`、`/readyz`、version、release 标识和日志通过后，才继续前端/全量步骤。
+- [ ] 前后端使用同一提交发布；脚本拒绝单独发布 backend/frontend，避免接口版本漂移。
+- [ ] 数据库迁移只执行 `alembic upgrade head`；发布脚本重新生成并验证本次备份。
+- [ ] Backend `/healthz`、`/readyz`、version、release 标识和日志通过后，脚本才切换前端。
+- [ ] 脚本自动调用 `sync-frontend-assets.sh` 同步 assets 卷；首页引用的新哈希资源均可读取。
 - [ ] HTTP 仅保留 ACME challenge，其余返回 308；HTTPS 首页和同源 `/healthz` 通过。
 - [ ] 生产 `/docs`、`/redoc`、`/openapi.json` 均不可公开访问。
 - [ ] MySQL、ClamAV、Backend、Frontend 四个容器均 healthy，ClamAV 3310 未映射公网。

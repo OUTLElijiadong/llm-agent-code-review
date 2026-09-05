@@ -205,6 +205,21 @@ if ! DEPLOY_ENV_FILE="$env_file" compose --env-file "$env_file" config --quiet >
   exit 1
 fi
 
+release_ok=false
+release_status=error
+release_message=""
+if release_message="$( (
+  load_release_environment "${RELEASE_STATE_DIR:-.releases}/current.env" || exit 1
+  assert_compose_release_environment || exit 1
+  assert_bound_release_images || exit 1
+  assert_running_release_environment || exit 1
+  assert_compose_release_environment default || exit 1
+  printf '发布账本、运行镜像和默认环境一致'
+  ) 2>&1)"; then
+  release_ok=true
+  release_status=ok
+fi
+
 containers_ok=true
 services_json=""
 for service in mysql redis clamav backend frontend; do
@@ -344,6 +359,10 @@ if [[ "$https_status" == "error" ]]; then
   add_blocking_check https
   add_action "https_recovery" "恢复 HTTPS" "公网 HTTPS 或健康检查失败，请先恢复入口再继续发布。" true
 fi
+if [[ "$release_status" == "error" ]]; then
+  add_blocking_check release
+  add_action "release_reconcile" "核对发布绑定" "发布账本、镜像或默认 Compose 环境不一致，禁止使用默认环境重建。" true
+fi
 
 status="ok"
 exit_code=0
@@ -369,6 +388,7 @@ cat <<JSON
   "blocking_checks": [$blocking_checks_json],
   "checked_at_utc": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
   "checks": {
+    "release": {"ok": $release_ok, "status": "$release_status", "message": "$(json_escape "$release_message")"},
     "containers": {"ok": $containers_ok, "status": "$containers_status", "services": {$services_json}},
     "disk": {"ok": $disk_ok, "status": "$disk_status", "used_percent": $disk_used, "max_percent": $disk_threshold, "critical_percent": $disk_critical_threshold},
     "memory": {"ok": $memory_ok, "status": "$memory_status", "used_percent": $memory_used, "max_percent": $memory_threshold, "critical_percent": $memory_critical_threshold},

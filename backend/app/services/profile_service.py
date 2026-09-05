@@ -94,6 +94,8 @@ def refresh_implicit(db: Session, user_id: int, force: bool = False) -> UserProf
     from app.models.project import Project
     from app.models.review_issue import ReviewIssue
     from app.models.review_task import ReviewTask
+    from app.models.user import User
+    from app.services.project_member_service import get_visible_project_ids
 
     profile = get_or_create(db, user_id)
     if not profile.auto_learn and not force:
@@ -122,9 +124,11 @@ def refresh_implicit(db: Session, user_id: int, force: bool = False) -> UserProf
     tolerated_types = [t for t, _ in tolerated[:3]]
 
     # 2) 项目语言分布
+    user = db.get(User, user_id)
+    visible_ids, _scope = get_visible_project_ids(db, user) if user else ([], "self")
     lang_rows = (
         db.query(Project.language, func.count(Project.id))
-        .filter(Project.user_id == user_id, Project.status != "deleted",
+        .filter(Project.user_id == user_id, Project.id.in_(visible_ids),
                 Project.language.isnot(None))
         .group_by(Project.language)
         .all()

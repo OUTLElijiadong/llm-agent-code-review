@@ -1,0 +1,6 @@
+checked_at_utc	endpoint	http_status	content_type
+2026-09-05T18:19:25Z	/healthz	200	application/json
+2026-09-05T18:19:25Z	/readyz	200	application/json
+2026-09-05T18:19:25Z	/api/auth/me	401	application/json
+2026-09-05T18:19:25Z	/api/projects	401	application/json
+2026-09-05T18:19:25Z	/api/reports	401	application/json

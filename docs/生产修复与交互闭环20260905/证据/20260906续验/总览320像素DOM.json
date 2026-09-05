@@ -1,0 +1,11 @@
+{
+  "documentWidth": 320,
+  "statuses": [
+    {
+      "left": 10,
+      "right": 202,
+      "text": " 安全态势：日志未见异常"
+    }
+  ],
+  "viewport": 320
+}

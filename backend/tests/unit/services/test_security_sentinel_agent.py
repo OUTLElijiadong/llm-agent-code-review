@@ -1866,8 +1866,8 @@ def test_scan_project_preserves_raw_dataflow_link_total_after_bounding(monkeypat
     assert compliance["response_graph_truncated"] is True
 
 
-def test_scan_all_projects_empty_scope_returns_empty_result():
-    """全量扫描在没有可见项目时应稳定返回空结果"""
+def test_scan_all_projects_empty_scope_returns_explicit_failure():
+    """没有可见项目时未执行扫描，不得返回成功、零发现和100分。"""
     agent = SecuritySentinelAgent()
     db = MagicMock()
     chain = MagicMock()
@@ -1878,11 +1878,14 @@ def test_scan_all_projects_empty_scope_returns_empty_result():
 
     result = agent.scan_all_projects()
 
-    assert result.success is True
+    assert result.success is False
+    assert result.failure_kind == "empty_scan_input"
+    assert result.error
     assert result.data["findings"] == []
     assert result.data["file_count"] == 0
-    assert result.data["risk_score"] == 100
+    assert result.data["risk_score"] is None
     assert result.data["compliance"]["project_count"] == 0
+    assert result.data["compliance"]["scan_complete"] is False
 
 
 def test_scan_all_projects_aggregates_project_results(monkeypatch):

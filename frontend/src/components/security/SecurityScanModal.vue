@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { Download, Lock, RefreshRight, View } from '@element-plus/icons-vue'
 import { scanAllProjects, scanFile, scanProject, scanTask } from '@/api/security'
-import { ElMessage } from 'element-plus/es/components/message/index'
 import { renderMarkdown } from '@/utils/markdown'
 import type {
   ApiEndpointOut,
@@ -54,6 +53,13 @@ const loading = ref(false)
 const result = ref<SecurityScanOut | null>(null)
 const activeFindingIdx = ref(0)
 const errorMessage = ref('')
+const errorNextAction = ref('')
+const errorRequestId = ref('')
+const retryAllowed = ref(true)
+const resultOrigin = ref<'response' | 'saved'>('response')
+const pendingScope = ref('')
+let requestGeneration = 0
+let disposed = false
 
 const dialogTitle = computed(() => {
   const map = {
@@ -62,7 +68,7 @@ const dialogTitle = computed(() => {
     project: '项目威胁建模',
     'all-projects': '全量项目安全扫描',
   }
-  return `🛡 ${map[props.source]}`
+  return map[props.source]
 })
 
 const isProjectScan = computed(() => {
@@ -71,7 +77,30 @@ const isProjectScan = computed(() => {
 
 const scopeLabel = computed(() => {
   if (props.source === 'all-projects') return '全部可见项目'
-  return `${props.source}#${props.refId ?? '-'}`
+  const labels = { file: '文件', task: '任务', project: '项目' }
+  return `${labels[props.source]} #${props.refId ?? '未选择'}`
+})
+
+const statusTitle = computed(() => {
+  if (loading.value) return '请求已发起 · 等待服务端响应'
+  if (errorMessage.value) return '扫描未完成'
+  if (result.value) return resultOrigin.value === 'saved' ? '已加载保存结果' : '已收到扫描结果'
+  return '尚未提交扫描'
+})
+
+const scanActionLabel = computed(() => {
+  if (loading.value) return '等待服务端响应'
+  if (errorMessage.value) return '重试扫描'
+  return result.value ? '重新扫描' : '开始扫描'
+})
+
+const scopeDescription = computed(() => {
+  if (props.source === 'task') return '仅整理已有安全问题的 OWASP/CWE 标签，不调用模型，也不重新扫描源码。'
+  if (props.source === 'file') return '按所选深度进行敏感信息、静态规则和语义检查；实际覆盖以返回结果为准。'
+  if (props.source === 'all-projects') return '扫描当前账号可见的活跃项目；实际范围与覆盖以返回结果为准。'
+  if (scanMode.value === 'triage') return '仅检查风险优先子集，不代表完整项目覆盖。'
+  if (scanMode.value === 'static_full') return '全包静态检查与有界语义分析，不代表完整语义覆盖。'
+  return '请求全包静态与语义审计；实际完成范围及覆盖以返回结果为准。'
 })
 
 const severityCounts = computed(() => {
@@ -116,44 +145,61 @@ const scoreIcon = computed(() => {
 })
 
 async function runScan(): Promise<void> {
-  if (props.source !== 'all-projects' && props.refId === null) {
-    ElMessage.warning('缺少必要的 ID 参数')
+  if (loading.value || disposed || !retryAllowed.value) return
+  if (props.source !== 'all-projects' && (!Number.isInteger(props.refId) || (props.refId ?? 0) <= 0)) {
+    errorMessage.value = '缺少有效的扫描目标，请重新选择后再试。'
     return
   }
+  const generation = requestGeneration
   loading.value = true
+  pendingScope.value = `${scopeLabel.value}${props.refName ? ` · ${props.refName}` : ''}`
   result.value = null
   activeFindingIdx.value = 0
   errorMessage.value = ''
+  errorNextAction.value = ''
+  errorRequestId.value = ''
   try {
+    let response: SecurityScanOut
     if (props.source === 'file') {
-      result.value = await scanFile({
+      response = await scanFile({
         file_id: props.refId as number,
         scan_depth: scanDepth.value,
       })
     } else if (props.source === 'task') {
-      result.value = await scanTask({ task_id: props.refId as number })
+      response = await scanTask({ task_id: props.refId as number })
     } else if (props.source === 'project') {
-      result.value = await scanProject({
+      response = await scanProject({
         project_id: props.refId as number,
         scan_mode: scanMode.value,
         top_n: topN.value,
         trace_dataflow: traceDataflow.value,
       })
     } else {
-      result.value = await scanAllProjects({
+      response = await scanAllProjects({
         top_n_per_project: topN.value,
         trace_dataflow: traceDataflow.value,
       })
     }
-    if (!result.value?.findings?.length) {
-      ElMessage.success('未检出安全风险')
+    if (disposed || generation !== requestGeneration) return
+    if (!response || !Array.isArray(response.findings) || !Number.isFinite(response.risk_score)) {
+      throw new Error('扫描服务未返回有效结果，请核对服务状态后重试。')
     }
+    result.value = response
+    resultOrigin.value = 'response'
     emit('completed')
-  } catch (e: unknown) {
-    const err = e as { message?: string }
-    errorMessage.value = err.message || '扫描失败'
+  } catch (error: unknown) {
+    if (disposed || generation !== requestGeneration) return
+    const failure = error as { message?: unknown; next_action?: unknown; request_id?: unknown; retryable?: boolean } | null
+    errorMessage.value = typeof failure?.message === 'string' && failure.message.trim()
+      ? failure.message : '未能获取扫描结果，请检查网络连接后重试。'
+    errorNextAction.value = typeof failure?.next_action === 'string' ? failure.next_action : ''
+    errorRequestId.value = typeof failure?.request_id === 'string' ? failure.request_id : ''
+    retryAllowed.value = failure?.retryable !== false
   } finally {
-    loading.value = false
+    if (!disposed) {
+      loading.value = false
+      if (generation !== requestGeneration && visible.value && props.autoStart) void runScan()
+    }
   }
 }
 
@@ -281,20 +327,30 @@ function complianceMetric(key: string, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
-watch(visible, (v) => {
-  if (v && props.initialResult) {
-    result.value = props.initialResult
-    activeFindingIdx.value = 0
-    errorMessage.value = ''
-  }
-  if (v && props.autoStart && !result.value) {
-    runScan()
-  }
+watch(() => [props.source, props.refId], () => {
+  requestGeneration++
+  result.value = null
+  activeFindingIdx.value = 0
+  errorMessage.value = ''
+  errorNextAction.value = ''
+  errorRequestId.value = ''
+  retryAllowed.value = true
+  if (visible.value && props.autoStart) void runScan()
 })
 
-watch(() => props.refId, () => {
-  result.value = null
-  if (visible.value && props.autoStart) runScan()
+watch([visible, () => props.initialResult], ([isVisible]) => {
+  if (!isVisible || loading.value) return
+  if (props.initialResult && !result.value && !errorMessage.value) {
+    result.value = props.initialResult
+    resultOrigin.value = 'saved'
+    activeFindingIdx.value = 0
+  }
+  if (props.autoStart && !result.value && !errorMessage.value) void runScan()
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  disposed = true
+  requestGeneration++
 })
 </script>
 
@@ -304,14 +360,21 @@ watch(() => props.refId, () => {
     :title="dialogTitle"
     width="min(880px, 94vw)"
     :close-on-click-modal="false"
+    :show-close="!loading"
+    :close-on-press-escape="true"
     top="5vh"
   >
+    <div class="scan-context">
+      <span class="context-label">扫描范围</span>
+      <strong>{{ scopeLabel }}<template v-if="refName"> · {{ refName }}</template></strong>
+      <p>{{ scopeDescription }}</p>
+    </div>
     <!-- 顶部配置区 -->
-    <div class="sec-toolbar">
+    <div class="sec-toolbar" :aria-busy="loading">
       <div class="tb-left">
         <template v-if="source === 'file'">
           <span class="tb-label">扫描深度</span>
-          <el-radio-group v-model="scanDepth" size="small">
+          <el-radio-group v-model="scanDepth" size="small" :disabled="loading" aria-label="扫描深度">
             <el-radio-button value="quick">快速</el-radio-button>
             <el-radio-button value="standard">标准</el-radio-button>
             <el-radio-button value="deep">深度</el-radio-button>
@@ -321,7 +384,7 @@ watch(() => props.refId, () => {
         <template v-else-if="isProjectScan">
           <template v-if="source === 'project'">
             <span class="tb-label">审计范围</span>
-            <el-radio-group v-model="scanMode" size="small">
+            <el-radio-group v-model="scanMode" size="small" :disabled="loading" aria-label="审计范围">
               <el-radio-button value="static_full">全量静态</el-radio-button>
               <el-radio-button value="full">完整语义</el-radio-button>
               <el-radio-button value="triage">风险抽样</el-radio-button>
@@ -331,15 +394,18 @@ watch(() => props.refId, () => {
               v-model="topN"
               :min="1"
               :max="200"
+              :precision="0"
+              :disabled="loading"
+              aria-label="语义候选上限"
               size="small"
             />
             <span v-if="scanMode !== 'full'" class="tb-label">语义候选上限</span>
           </template>
           <template v-else>
             <span class="tb-label">每项目文件数</span>
-            <el-input-number v-model="topN" :min="1" :max="200" size="small" />
+            <el-input-number v-model="topN" :min="1" :max="200" :precision="0" size="small" :disabled="loading" aria-label="每项目文件数" />
           </template>
-          <el-checkbox v-model="traceDataflow" size="small">跨文件数据流追踪</el-checkbox>
+          <el-checkbox v-model="traceDataflow" size="small" :disabled="loading">跨文件数据流追踪</el-checkbox>
         </template>
 
         <template v-else>
@@ -355,9 +421,10 @@ watch(() => props.refId, () => {
           type="primary"
           :icon="Lock"
           :loading="loading"
+          :disabled="loading || !retryAllowed"
           @click="runScan"
         >
-          {{ result ? '重新扫描' : '开始扫描' }}
+          {{ scanActionLabel }}
         </el-button>
         <el-button
           v-if="result"
@@ -370,34 +437,30 @@ watch(() => props.refId, () => {
       </div>
     </div>
 
-    <!-- loading -->
-    <div v-if="loading" class="sec-loading">
-      <div class="loading-icon">🛡</div>
-      <div class="loading-text">
-        {{
-          source === 'all-projects'
-            ? '正在扫描全部可见项目、接口和代码联动关系'
-            : source === 'project'
-              ? '正在执行整包源码白盒审计'
-              : '正在执行网络安全审查'
-        }}
-      </div>
-      <div class="loading-sub">
-        {{
-          isProjectScan
-            ? '全包静态覆盖、项目级语义批处理与跨文件数据流追踪'
-            : '正则秘钥扫描 + LLM 深度漏洞审查'
-        }}
+    <div class="scan-status" :class="{ 'is-waiting': loading, 'has-error': errorMessage }" role="status" aria-live="polite" aria-atomic="true">
+      <span class="status-indicator" aria-hidden="true"></span>
+      <div>
+        <strong>{{ statusTitle }}</strong>
+        <p v-if="loading">{{ pendingScope }}。当前接口不返回阶段进度或预计剩余时间，请等待响应。</p>
+        <p v-else-if="result && resultOrigin === 'response'">结果已返回本窗口；接口未提供独立保存回执，可下载报告保留本次结果。</p>
+        <p v-else-if="result">展示项目提供的已持久化结果，重新扫描会发起新请求。</p>
+        <p v-else-if="!errorMessage">确认范围与配置后开始，状态将随实际请求结果更新。</p>
       </div>
     </div>
 
+    <p v-if="loading" class="scan-close-note">关闭窗口不会取消服务端扫描；返回本窗口可继续等待。当前接口不支持确认取消，离开页面后也无法在此恢复请求。</p>
+
     <!-- 错误 -->
-    <div v-else-if="errorMessage" class="sec-error">
-      {{ errorMessage }}
+    <div v-if="errorMessage" class="sec-error" role="alert">
+      <strong>{{ errorMessage }}</strong>
+      <p v-if="errorNextAction">{{ errorNextAction }}</p>
+      <p v-if="errorRequestId">排查编号：<code>{{ errorRequestId }}</code></p>
+      <p>失败或连接中断不代表服务端已取消；重试前请确认前一次扫描状态，避免重复扫描。</p>
     </div>
 
     <!-- 结果 -->
-    <div v-else-if="result" class="sec-result">
+    <div v-else-if="result && !loading" class="sec-result">
+      <p v-if="!result.findings.length" class="scan-close-note">本次响应未返回安全发现，不代表完整覆盖或确认安全；请结合扫描范围与覆盖证据判断。</p>
       <!-- 评分 + 严重度 -->
       <div class="sec-score-bar">
         <div class="score-card">
@@ -568,6 +631,8 @@ watch(() => props.refId, () => {
                 v-for="f in group.items"
                 :key="`${f.file_path}-${f.line_number}-${f.title}`"
                 class="finding-row"
+                type="button"
+                :aria-pressed="sortedFindings[activeFindingIdx] === f"
                 :class="{
                   active:
                     sortedFindings[activeFindingIdx] &&
@@ -679,22 +744,71 @@ watch(() => props.refId, () => {
     </div>
 
     <!-- 初始空态 -->
-    <div v-else class="sec-empty">
-      <div class="empty-icon">🛡</div>
+    <div v-else-if="!loading" class="sec-empty">
+      <div class="empty-icon" aria-hidden="true">🛡</div>
       <div class="empty-text">点击右上角「开始扫描」启动安全审计</div>
       <div class="empty-sub">
-        将由 <code>security_sentinel</code> Agent 负责执行,
-        包含正则秘钥识别 + LLM 深度漏洞审查
-        <span v-if="isProjectScan"> + 跨文件数据流追踪</span>
+        {{ scopeDescription }}
       </div>
       <el-button type="primary" :icon="RefreshRight" :loading="loading" @click="runScan">
         开始扫描
       </el-button>
     </div>
+    <template #footer>
+      <el-button @click="visible = false">{{ loading ? '关闭窗口（不取消扫描）' : '关闭窗口' }}</el-button>
+    </template>
   </el-dialog>
 </template>
 
 <style scoped lang="scss">
+.scan-context {
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  background: var(--gray-50);
+  overflow-wrap: anywhere;
+
+  .context-label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--gray-600); }
+  strong { font-size: 15px; color: var(--gray-900); }
+  p { margin: 8px 0 0; font-size: 12px; line-height: 1.7; color: var(--gray-600); }
+}
+
+.scan-status {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: var(--gray-50);
+  color: var(--gray-800);
+
+  strong { font-size: 14px; }
+  p { margin: 6px 0 0; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+  &.is-waiting { background: rgba(91, 88, 232, 0.06); }
+  &.has-error { background: #fff4f5; }
+}
+
+.status-indicator {
+  flex: 0 0 14px;
+  height: 14px;
+  margin-top: 3px;
+  border: 2px solid var(--gray-300);
+  border-radius: 50%;
+}
+
+.is-waiting .status-indicator {
+  border-top-color: var(--brand-600, #5B58E8);
+  animation: scanWaiting 1s linear infinite;
+}
+
+.scan-close-note { font-size: 12px; line-height: 1.7; color: var(--gray-600); margin: 12px 0; }
+.sec-result { animation: scanResultReveal 0.18s ease-out; }
+.sec-error p { margin: 8px 0 0; line-height: 1.7; overflow-wrap: anywhere; }
+
+@keyframes scanWaiting { to { transform: rotate(360deg); } }
+@keyframes scanResultReveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
 .sec-toolbar {
   display: flex;
   justify-content: space-between;
@@ -729,6 +843,8 @@ watch(() => props.refId, () => {
   display: flex;
   align-items: center;
   gap: 8px;
+
+  :deep(.el-button) { min-height: 36px; margin-left: 0; }
 }
 
 .sec-loading,
@@ -767,7 +883,7 @@ watch(() => props.refId, () => {
   border-left: 3px solid #DC4961;
   padding: 10px 12px;
   font-size: 13px;
-  color: #DC4961;
+  color: #a62b43;
   border-radius: 4px;
   margin: 12px 0;
 }
@@ -896,7 +1012,7 @@ watch(() => props.refId, () => {
 
 .findings-grid {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
   gap: 12px;
   min-height: 280px;
   max-height: 48vh;
@@ -932,9 +1048,11 @@ watch(() => props.refId, () => {
   gap: 8px;
   align-items: flex-start;
   cursor: pointer;
+  min-height: 44px;
   transition: all 0.15s ease;
 
   &:hover { background: #fff; }
+  &:focus-visible { outline: 2px solid var(--brand-600, #5B58E8); outline-offset: -2px; }
   &.active {
     background: #fff;
     border-color: #D93B3B;
@@ -1277,6 +1395,32 @@ watch(() => props.refId, () => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+}
+
+@media (max-width: 680px) {
+  .sec-score-bar,
+  .sec-threat-grid,
+  .findings-grid { grid-template-columns: minmax(0, 1fr); }
+  .findings-grid { max-height: none; }
+  .findings-list { max-height: 240px; }
+  .finding-view { max-height: 420px; }
+  .sev-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tb-right { width: 100%; flex-wrap: wrap; }
+  .tb-right :deep(.el-button) { min-height: 44px; }
+  .discussion-turn { grid-template-columns: minmax(0, 1fr); }
+  .flow-row { grid-template-columns: auto minmax(0, 1fr); }
+  .flow-path { grid-column: 1 / -1; white-space: normal !important; overflow-wrap: anywhere; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-indicator,
+  .sec-result,
+  .finding-row,
+  :deep(.el-button *),
+  :deep(.el-radio-button *) {
+    animation: none !important;
+    transition: none !important;
   }
 }
 </style>

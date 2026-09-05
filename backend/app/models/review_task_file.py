@@ -1,7 +1,7 @@
 """
 审查任务与代码文件关联表 ORM 模型
 """
-from sqlalchemy import BigInteger, Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Index, Integer, String, UniqueConstraint
 
 from app.core.database import Base
 from app.models.base import IdMixin, _utcnow
@@ -18,4 +18,7 @@ class ReviewTaskFile(Base, IdMixin):
 
     task_id = Column(BigInteger, nullable=False, index=True)
     file_id = Column(BigInteger, nullable=False)
+    version_no = Column(Integer, nullable=True)
+    content_sha256 = Column(String(64), nullable=True)
+    file_snapshot = Column(JSON, nullable=True)
     create_time = Column(DateTime, default=_utcnow, nullable=False)

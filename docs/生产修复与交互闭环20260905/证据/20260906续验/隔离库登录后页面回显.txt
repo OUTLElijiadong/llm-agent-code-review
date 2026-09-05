@@ -1,0 +1,85 @@
+- complementary:
+  - generic: Prism 管理后台
+  - generic: 智能体治理
+  - navigation:
+    - button "总览大屏":
+      - generic: 总览大屏
+    - button "Agent 管理":
+      - generic: Agent 管理
+    - button "审批中心":
+      - generic: 审批中心
+    - button "Agent 发布审批":
+      - generic: Agent 发布审批
+    - button "内测码管理":
+      - generic: 内测码管理
+    - button "策略中心":
+      - generic: 策略中心
+    - button "工具权限":
+      - generic: 工具权限
+    - button "知识与记忆":
+      - generic: 知识与记忆
+    - button "任务调度":
+      - generic: 任务调度
+    - button "监控告警":
+      - generic: 监控告警
+    - button "奖惩趋势":
+      - generic: 奖惩趋势
+    - button "回滚中心":
+      - generic: 回滚中心
+    - button "用户管理":
+      - generic: 用户管理
+    - button "角色管理":
+      - generic: 角色管理
+    - button "权限点列表":
+      - generic: 权限点列表
+    - button "用户角色分配":
+      - generic: 用户角色分配
+    - button "Agent 调用日志":
+      - generic: Agent 调用日志
+    - button "报告模板":
+      - generic: 报告模板
+    - button "系统操作审计":
+      - generic: 系统操作审计
+    - button "Agent 自进化":
+      - generic: Agent 自进化
+    - button "Skill 管理":
+      - generic: Skill 管理
+    - button "MCP 与沙箱节点":
+      - generic: MCP 与沙箱节点
+    - button "大模型配置":
+      - generic: 大模型配置
+    - button "RAG 嵌入配置":
+      - generic: RAG 嵌入配置
+- generic: 管理控制台
+- heading "总览大屏" [level=1]
+- generic: 本地隔离验收管理员
+- generic: 超级管理员
+- button "退出":
+  - generic: 退出
+- main:
+  - heading "总览大屏" [level=2]
+  - paragraph: 安全态势 · 登录来源 · Agent 活跃 实时一览
+  - status: 安全态势：日志未见异常
+  - heading "安全态势" [level=3]:
+    - text: 安全态势
+  - generic: 基于应用日志
+  - button "刷新"
+  - generic: "1"
+  - generic: 24h 登录失败
+  - generic: "7"
+  - generic: 24h 登录成功
+  - generic: "0"
+  - generic: 24h 恶意文件
+  - generic: ✓ 当前应用日志未发现异常信号
+  - heading "登录来源分布" [level=3]:
+    - text: 登录来源分布
+  - generic: 近30天成功登录 · 0 个来源
+  - button "刷新"
+  - generic: 暂无可定位的成功登录来源
+  - heading "Agent 活跃状态" [level=3]:
+    - text: Agent 活跃状态
+  - generic: 实时连接 · 0 个运行中
+  - button "刷新"
+  - list:
+    - listitem: 暂无 Agent 数据
+- button "打开贾维斯 · 全局运维":

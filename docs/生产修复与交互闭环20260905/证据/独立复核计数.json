@@ -1,0 +1,75 @@
+{
+  "generated_at": "2026-09-05",
+  "scope": "独立只读后端验收",
+  "repository": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台",
+  "full_suite": {
+    "requested_run": "independent-backend-final3",
+    "final_hashcheck_run": "independent-backend-final3-hashcheck2",
+    "junit_tests": 2782,
+    "passed": 2782,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 0
+  },
+  "target_groups": {
+    "review_recovery_integrity": 13,
+    "review_input_lifecycle": 13,
+    "project_lifecycle_guards": 12,
+    "agent_project_quarantine": 18,
+    "scan_entry_input_closure": 73,
+    "scheduler_configuration_closure": 37,
+    "migration_047_review_input_snapshot": 1,
+    "total": 167,
+    "passed": 167,
+    "failed": 0
+  },
+  "recovery_counterexamples": {
+    "collected": 13,
+    "passed": 13,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "network_audit": {
+    "full_suite_events": 6,
+    "getaddrinfo_events": 6,
+    "connect_events": 0,
+    "bind_events": 0,
+    "targeted_recovery_events": 0,
+    "real_model_calls": 0
+  },
+  "source_sha": {
+    "files": 9,
+    "before_after_equal": true,
+    "diff_lines": 0,
+    "before": "/tmp/prism-readonly-20260905-tests/independent-final3-hashcheck2-before.sha256",
+    "after": "/tmp/prism-readonly-20260905-tests/independent-final3-hashcheck2-after.sha256"
+  },
+  "production_evidence": {
+    "backup_restore_verified": true,
+    "backup_bytes": 402258176,
+    "restored_alembic_revision": "046_finding_aggregation",
+    "independent_mysql_047_roundtrip_verified": true,
+    "production_047_applied_proven": false,
+    "production_fix_proven": false
+  },
+  "findings": {
+    "confirmed_new_issues_in_requested_scopes": 0,
+    "historical_independent_failures": 7,
+    "historical_distinct_findings": 6,
+    "current_reproducible_failures": 0
+  },
+  "warnings": {
+    "pytest_collection_warnings": 1,
+    "untested_external_boundaries": 4
+  },
+  "artifacts": {
+    "full_junit": "/tmp/prism-readonly-20260905-tests/independent-backend-final3-hashcheck2.xml",
+    "full_log": "/tmp/prism-readonly-20260905-tests/independent-backend-final3-hashcheck2.log",
+    "network_audit": "/tmp/prism-readonly-20260905-tests/independent-backend-final3-hashcheck2-network-audit.jsonl",
+    "recovery_junit": "/tmp/prism-readonly-20260905-tests/recovery-current.xml",
+    "report": "/tmp/prism-readonly-20260905-tests/independent-final-review.md"
+  },
+  "final_status": "PASS_CURRENT_SOURCE_NOT_PRODUCTION_SIGN_OFF"
+}

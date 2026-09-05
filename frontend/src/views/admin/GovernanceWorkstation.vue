@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import EmptyState from '@/components/common/EmptyState.vue'
 import { confirmDanger } from '@/composables/useDangerConfirm'
-import { isCronValid } from '@/utils/cronValidate'
+import { isScheduleValid } from '@/utils/cronValidate'
 import { useRouter } from 'vue-router'
 const router = useRouter()
 import { computed, onMounted, ref, watch } from 'vue'
@@ -124,6 +124,8 @@ const knowledgeSourceForm = ref({
   config_content: '',
 })
 const jobEdit = ref<Record<number, { schedule: string; status: string }>>({})
+const jobSaving = ref<Record<number, boolean>>({})
+const jobSaveErrors = ref<Record<number, string>>({})
 
 /** 统计卡入口:跳到对应治理工作台。 */
 function goMetric(route: string): void {
@@ -135,7 +137,7 @@ function goMetric(route: string): void {
 function scheduleInvalid(rowId: number): boolean {
   const edit = jobEdit.value[rowId]
   if (!edit || !edit.schedule) return false
-  return !isCronValid(edit.schedule)
+  return !isScheduleValid(edit.schedule)
 }
 
 
@@ -418,13 +420,25 @@ async function onSaveJob(row: AgentJob): Promise<void> {
     })
   } catch { return }
   const data = jobEdit.value[row.id]
-  if (data && !isCronValid(data.schedule)) {
-    ElMessage.warning('cron 格式不正确,应为五段(分 时 日 月 周),如 0 3 * * *')
+  if (data && !isScheduleValid(data.schedule)) {
+    ElMessage.warning('调度计划格式不正确，请使用已有格式或五段 cron')
     return
   }
-  await updateJob(row.id, { schedule: data.schedule, status: data.status })
-  ElMessage.success('任务配置已保存')
-  await loadData()
+  if (!data || jobSaving.value[row.id]) return
+  jobSaving.value[row.id] = true
+  delete jobSaveErrors.value[row.id]
+  try {
+    await updateJob(row.id, { schedule: data.schedule, status: data.status })
+    ElMessage.success('任务配置已保存')
+    await loadData()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : (error as { message?: string })?.message
+    const display = message || '调度器同步失败，请稍后重试'
+    jobSaveErrors.value[row.id] = display
+    ElMessage.error(display)
+  } finally {
+    jobSaving.value[row.id] = false
+  }
 }
 
 /**
@@ -1038,7 +1052,15 @@ onMounted(loadData)
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button link type="primary" @click="onRunJob(row)">运行</el-button>
-            <el-button link type="success" @click="onSaveJob(row)">保存</el-button>
+            <el-button
+              link
+              type="success"
+              :loading="jobSaving[row.id]"
+              :disabled="jobSaving[row.id]"
+              :aria-busy="jobSaving[row.id] ? 'true' : undefined"
+              :data-testid="`save-job-${row.id}`"
+              @click="onSaveJob(row)"
+            >保存</el-button>
           </template>
         </el-table-column>
       </el-table>

@@ -16,12 +16,27 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
 
+HIDDEN_PROJECT_STATUSES = ("deleted", "quarantined")
+
+
+def _require_visible_project(db: Session, project_id: int) -> Project:
+    """内部隔离态与软删除态对业务调用均表现为不存在。"""
+    project = (
+        db.query(Project)
+        .populate_existing()
+        .filter(Project.id == project_id)
+        .one_or_none()
+    )
+    if not project or project.status in HIDDEN_PROJECT_STATUSES:
+        raise NotFoundError("项目不存在", code=40400)
+    return project
+
 
 def get_visible_project_ids(db: Session, user: Optional[User]) -> tuple[list[int], str]:
     """返回当前用户可见的项目 ID 列表 + 范围标识。
 
     可见范围定义:
-        - admin: 全部非删除项目,scope='global'
+        - admin: 全部非删除、非隔离项目,scope='global'
         - 非admin: owner 项目(Project.user_id==user.id) ∪ member 项目(project_member.user_id==user.id),scope='self'
 
     Args:
@@ -34,13 +49,13 @@ def get_visible_project_ids(db: Session, user: Optional[User]) -> tuple[list[int
             - scope='self': 普通用户视角,返回 owner ∪ member 项目
     """
     if user is None or user.role in {"admin", "super_admin"}:
-        rows = db.query(Project.id).filter(Project.status != "deleted").all()
+        rows = db.query(Project.id).filter(Project.status.notin_(HIDDEN_PROJECT_STATUSES)).all()
         return [r[0] for r in rows], "global"
 
     # owner 项目
     owner_rows = (
         db.query(Project.id)
-        .filter(Project.user_id == user.id, Project.status != "deleted")
+        .filter(Project.user_id == user.id, Project.status.notin_(HIDDEN_PROJECT_STATUSES))
         .all()
     )
     owner_ids = [r[0] for r in owner_rows]
@@ -48,7 +63,8 @@ def get_visible_project_ids(db: Session, user: Optional[User]) -> tuple[list[int
     # member 项目
     member_rows = (
         db.query(ProjectMember.project_id)
-        .filter(ProjectMember.user_id == user.id)
+        .join(Project, Project.id == ProjectMember.project_id)
+        .filter(ProjectMember.user_id == user.id, Project.status.notin_(HIDDEN_PROJECT_STATUSES))
         .all()
     )
     member_ids = [r[0] for r in member_rows]
@@ -75,13 +91,17 @@ def is_project_member(
             - (True, "reviewer"): 项目成员(审查员)
             - (False, ""): 无访问权限
     """
+    # owner 检查
+    project = (
+        db.query(Project)
+        .populate_existing()
+        .filter(Project.id == project_id)
+        .one_or_none()
+    )
+    if not project or project.status in HIDDEN_PROJECT_STATUSES:
+        return False, ""
     if user.role in {"admin", "super_admin"}:
         return True, "admin"
-
-    # owner 检查
-    project = db.get(Project, project_id)
-    if not project or project.status == "deleted":
-        return False, ""
     if project.user_id == user.id:
         return True, "owner"
 
@@ -123,9 +143,7 @@ def require_project_access(
         NotFoundError: 项目不存在
         ForbiddenError: 无访问权限或写权限不足
     """
-    project = db.get(Project, project_id)
-    if not project or project.status == "deleted":
-        raise NotFoundError("项目不存在", code=40400)
+    _require_visible_project(db, project_id)
 
     can_access, role = is_project_member(db, project_id, user)
     if not can_access:
@@ -231,9 +249,7 @@ def add_member(
         require_project_access(db, project_id, operator, need_write=True)
 
     # 校验项目存在
-    project = db.get(Project, project_id)
-    if not project or project.status == "deleted":
-        raise NotFoundError("项目不存在", code=40400)
+    _require_visible_project(db, project_id)
 
     # 校验用户存在
     target_user = db.get(User, user_id)
@@ -292,6 +308,7 @@ def remove_member(
     """
     if operator is not None:
         require_project_access(db, project_id, operator, need_write=True)
+    _require_visible_project(db, project_id)
 
     # 不允许移除 owner
     member = (
@@ -338,6 +355,7 @@ def update_member_role(
     """
     if operator is not None:
         require_project_access(db, project_id, operator, need_write=True)
+    _require_visible_project(db, project_id)
 
     member = (
         db.query(ProjectMember)
@@ -382,7 +400,8 @@ def list_members(db: Session, project_id: int) -> list[dict]:
             ProjectMember.update_time,
         )
         .join(User, User.id == ProjectMember.user_id)
-        .filter(ProjectMember.project_id == project_id)
+        .join(Project, Project.id == ProjectMember.project_id)
+        .filter(ProjectMember.project_id == project_id, Project.status.notin_(HIDDEN_PROJECT_STATUSES))
         .order_by(ProjectMember.create_time)
         .all()
     )
@@ -409,6 +428,7 @@ def ensure_owner_member(db: Session, project_id: int, user_id: int) -> None:
         project_id: 项目ID
         user_id: 拥有者用户ID
     """
+    _require_visible_project(db, project_id)
     existing = (
         db.query(ProjectMember)
         .filter(

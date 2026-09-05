@@ -1,0 +1,76 @@
+{
+  "environment": "LOCAL_ISOLATED_SQLITE_NOT_PRODUCTION",
+  "model_calls": 0,
+  "records": [
+    {
+      "method": "POST",
+      "path": "/auth/login",
+      "status": 200,
+      "code": 0
+    },
+    {
+      "method": "GET",
+      "path": "/code-files?project_id=1&page_size=500",
+      "status": 200,
+      "code": 0
+    },
+    {
+      "method": "GET",
+      "path": "/code-files?project_id=1&page_size=500",
+      "status": 200,
+      "code": 0
+    },
+    {
+      "method": "POST",
+      "path": "/review/start",
+      "status": 400,
+      "code": 40001
+    },
+    {
+      "method": "POST",
+      "path": "/review/start",
+      "status": 400,
+      "code": 40001
+    },
+    {
+      "method": "POST",
+      "path": "/review/start",
+      "status": 200,
+      "code": 0
+    },
+    {
+      "method": "GET",
+      "path": "/review/tasks/1",
+      "status": 200,
+      "code": 0
+    },
+    {
+      "method": "GET",
+      "path": "/review/tasks/1",
+      "status": 200,
+      "code": 0
+    },
+    {
+      "method": "PUT",
+      "path": "/code-files/1",
+      "status": 200,
+      "code": 0
+    },
+    {
+      "method": "GET",
+      "path": "/review/tasks/1",
+      "status": 200,
+      "code": 0
+    }
+  ],
+  "file_ids": [
+    1,
+    2,
+    3
+  ],
+  "task_id": 1,
+  "task_status": "failed",
+  "error_message": "扫描覆盖不完整: 通用质量代理: 审查代理不可用",
+  "snapshot_version": 1,
+  "current_version": 2
+}

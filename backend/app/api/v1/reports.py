@@ -44,7 +44,7 @@ from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
-from app.schemas.report import ReportDetailOut, ReportListItem
+from app.schemas.report import DomainReportExportOut, ReportDetailOut, ReportListItem
 from app.schemas.report_template import ReportTemplateIn, ReportTemplateOut, ReportTemplateUpdate
 from app.services import audit_service, report_service, report_template_service
 from app.services.rbac_service import check_permission
@@ -109,6 +109,9 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
         raise NotFoundError("报告不存在", code=40400)
 
+    if task.review_type in {"sandbox_test", "pentest"}:
+        return task, [], task.summary or "", task.score
+
     issues: List[ReviewIssue] = (
         db.query(ReviewIssue)
         .filter(ReviewIssue.task_id == task_id)
@@ -172,6 +175,19 @@ def _ensure_report_export_permission(db: Session, user: User, format: str) -> No
         )
 
 
+def _domain_export_response(db: Session, user: User, task: ReviewTask, format: str, *, download: bool = False):
+    """所有报告出口共用来源分流；不支持等价导出的格式由服务抛出业务错误。"""
+    payload = report_service.get_domain_report_export(db, user, task, format)
+    if payload is None:
+        return None
+    content = DomainReportExportOut(**payload).model_dump_json(indent=2)
+    if download:
+        return _build_download_response(
+            content.encode("utf-8"), "application/json", f"{task.review_type}_report_{task.id}.json",
+        )
+    return Response(content=content, media_type="application/json")
+
+
 # ============ T12 报告生成与导出路由(字面路径优先) ============
 
 @router.post("/generate")
@@ -202,6 +218,9 @@ def generate_report(
     fmt = payload.format
     _ensure_report_export_permission(db, user, fmt)
     task, issues, summary, score = _get_task_with_issues(db, payload.task_id, user)
+    domain_response = _domain_export_response(db, user, task, fmt)
+    if domain_response is not None:
+        return domain_response
     evidence = _get_report_evidence(db, payload.task_id)
 
     if fmt == "json":
@@ -255,6 +274,9 @@ def preview_report(
         NotFoundError: 任务不存在或未完成(404)。
     """
     task, issues, summary, score = _get_task_with_issues(db, task_id, user)
+    domain_response = _domain_export_response(db, user, task, "html")
+    if domain_response is not None:
+        return domain_response
     evidence = _get_report_evidence(db, task_id)
     template_content = _get_template_content(db, template_type)
     html_str = export_to_html(task, issues, summary, score, template_content, evidence)
@@ -301,6 +323,9 @@ def export_report(
         NotFoundError: 任务不存在或未完成(404)。
     """
     task, issues, summary, score = _get_task_with_issues(db, task_id, user)
+    domain_response = _domain_export_response(db, user, task, format, download=True)
+    if domain_response is not None:
+        return domain_response
     evidence = _get_report_evidence(db, task_id)
 
     if format == "json":
@@ -497,6 +522,9 @@ def export_word(task_id: int, db: Session = Depends(get_db),
     """兼容旧 Word 地址，委托统一报告导出器。"""
     _ensure_report_export_permission(db, user, "word")
     task, issues, summary, score = _get_task_with_issues(db, task_id, user)
+    domain_response = _domain_export_response(db, user, task, "word", download=True)
+    if domain_response is not None:
+        return domain_response
     evidence = _get_report_evidence(db, task_id)
     content = export_to_word(task, issues, summary, score, "detailed", evidence)
     return _build_download_response(
@@ -512,6 +540,9 @@ def export_pdf(task_id: int, db: Session = Depends(get_db),
     """兼容旧 PDF 地址，委托统一报告导出器。"""
     _ensure_report_export_permission(db, user, "pdf")
     task, issues, summary, score = _get_task_with_issues(db, task_id, user)
+    domain_response = _domain_export_response(db, user, task, "pdf", download=True)
+    if domain_response is not None:
+        return domain_response
     evidence = _get_report_evidence(db, task_id)
     content = export_to_pdf(task, issues, summary, score, "detailed", evidence)
     return _build_download_response(

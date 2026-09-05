@@ -43,6 +43,7 @@ class CodeFileOut(BaseModel):
     line_count: int
     version_no: int
     is_binary: int = 0
+    is_reviewable: bool = False
     # R3 修复:补齐 status/raw_size,对齐 CodeFile ORM 与 CodeFileMetaOut
     status: str = "active"
     raw_size: int = 0

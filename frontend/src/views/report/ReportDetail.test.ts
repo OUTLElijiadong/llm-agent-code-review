@@ -94,6 +94,52 @@ beforeEach(() => {
 })
 
 describe('ReportDetail 报告口径', () => {
+  it('领域报告只显示真实 JSON 出口并隐藏非等价导出和预览', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '渗透项目', language: 'unknown' },
+      task: { task_name: '渗透报告', review_type: 'pentest', total_files: 0 },
+      stats: { score: 0, total_issues: 2 }, files: [], rules_snapshot: [],
+      source: { type: 'pentest', stats_basis: 'pentest_findings' },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="report-export-word"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="report-export-pdf"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('生成 JSON')
+    expect(wrapper.text()).not.toContain('生成 HTML')
+    expect(wrapper.text()).not.toContain('生成 PDF')
+    expect(wrapper.text()).not.toContain('生成 Word')
+    expect(wrapper.text()).not.toContain('预览 HTML')
+    wrapper.unmount()
+  })
+
+  it('导出请求期间重复调用只发出一次，并且错误不会保存文件', async () => {
+    const pending = new Promise<Blob>(() => {})
+    reportApi.exportReport.mockReturnValue(pending)
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = setupState(wrapper)
+    const first = vm.handleExport('json')
+    const second = vm.handleExport('json')
+    await flushPromises()
+    expect(reportApi.exportReport).toHaveBeenCalledTimes(1)
+    expect(vm.exportingFormat).toBe('json')
+    expect(first).toBeInstanceOf(Promise)
+    expect(second).toBeInstanceOf(Promise)
+    wrapper.unmount()
+  })
+
+  it('导出错误展示后端message和next_action并提供重试操作', async () => {
+    reportApi.exportReport.mockRejectedValueOnce({ code: 40941, message: '领域报告不支持 PDF', next_action: '请导出真实领域 JSON' })
+    const wrapper = mountPage()
+    await flushPromises()
+    await setupState(wrapper).handleExport('pdf')
+    expect(wrapper.text()).toContain('领域报告不支持 PDF')
+    expect(wrapper.text()).toContain('请导出真实领域 JSON')
+    expect(wrapper.findAll('button').some(button => button.text().includes('重试导出'))).toBe(true)
+    wrapper.unmount()
+  })
+
   it('兼容后端 task.name 字段并展示真实任务名', async () => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: { project_name: '测试项目', language: 'typescript' },

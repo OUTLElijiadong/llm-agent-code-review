@@ -9,15 +9,20 @@ v3.0 AgentSkill 升级新增:
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+from datetime import datetime
+from threading import RLock
 from typing import Optional
 
 from loguru import logger
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.exceptions import ServiceUnavailableError, ValidationError
 from app.services import agent_governance_service, scheduler_service
 
 _scheduler = None
+job_configuration_lock = RLock()
 
 
 def _parse_daily_schedule(schedule: str) -> Optional[tuple[int, int]]:
@@ -103,7 +108,46 @@ def _parse_interval_seconds_schedule(schedule: str) -> Optional[int]:
     return seconds if 1 <= seconds <= 86400 else None
 
 
-def _run_scheduled_job(job_id: int) -> None:
+def _parse_schedule(schedule: str):
+    """解析已有简写、manual 和 APScheduler 五段 cron（星期一为 0）。"""
+    if not isinstance(schedule, str) or not schedule.strip():
+        raise ValueError("调度表达式不能为空")
+    schedule = schedule.strip()
+    if schedule == "manual":
+        return None
+    daily = _parse_daily_schedule(schedule)
+    if daily is not None:
+        return "cron", {"hour": daily[0], "minute": daily[1]}
+    hourly = _parse_hourly_schedule(schedule)
+    if hourly is not None:
+        return "cron", {"hour": "*", "minute": hourly}
+    minutes = _parse_interval_schedule(schedule)
+    if minutes is not None:
+        return "interval", {"minutes": minutes}
+    seconds = _parse_interval_seconds_schedule(schedule)
+    if seconds is not None:
+        return "interval", {"seconds": seconds}
+    if len(schedule.split()) == 5:
+        from apscheduler.triggers.cron import CronTrigger
+
+        trigger = CronTrigger.from_crontab(schedule, timezone=getattr(_scheduler, "timezone", None))
+        if trigger.get_next_fire_time(None, datetime.now(trigger.timezone)) is None:
+            raise ValueError("调度表达式没有可执行日期")
+        minute, hour, day, month, weekday = schedule.split()
+        return "cron", {"minute": minute, "hour": hour, "day": day, "month": month, "day_of_week": weekday}
+    raise ValueError("不支持的调度表达式")
+
+
+def validate_schedule(schedule: str) -> str:
+    """保存前验证计划，非法表达式不能以成功响应静默入库。"""
+    try:
+        _parse_schedule(schedule)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("无效调度计划：请使用 daily、hourly、interval、五段 cron 或 manual") from exc
+    return schedule.strip()
+
+
+def _run_scheduled_job(job_id: int, expected_schedule: Optional[str] = None) -> None:
     """执行一次后台调度任务并记录日志。
 
     Args:
@@ -114,7 +158,9 @@ def _run_scheduled_job(job_id: int) -> None:
     """
     db = SessionLocal()
     try:
-        run = scheduler_service.run_job(db, job_id, system_scheduled=True)
+        run = scheduler_service.run_job(
+            db, job_id, system_scheduled=True, expected_schedule=expected_schedule,
+        )
         logger.info("[agent-governance-scheduler] job_id={} run_id={} status={}", job_id, run.id, run.status)
     except Exception as exc:  # noqa: BLE001 - 后台任务异常不能杀死调度器
         logger.warning("[agent-governance-scheduler] job_id={} failed: {}", job_id, exc)
@@ -140,76 +186,101 @@ def _register_job_to_scheduler(scheduler, job) -> bool:
     ):
         return False
 
-    # 优先尝试 daily 表达式
-    daily_parsed = _parse_daily_schedule(job.schedule)
-    if daily_parsed is not None:
-        hour, minute = daily_parsed
-        scheduler.add_job(
-            _run_scheduled_job,
-            "cron",
-            id=f"agent-governance-{job.id}",
-            args=[job.id],
-            hour=hour,
-            minute=minute,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
+    try:
+        parsed = _parse_schedule(job.schedule)
+    except (TypeError, ValueError):
+        logger.warning(
+            "[agent-governance-scheduler] unsupported schedule job_code={} schedule={}",
+            job.job_code, job.schedule,
         )
-        return True
-
-    # 回退到 hourly 表达式(v3.0 新增)
-    hourly_minute = _parse_hourly_schedule(job.schedule)
-    if hourly_minute is not None:
-        scheduler.add_job(
-            _run_scheduled_job,
-            "cron",
-            id=f"agent-governance-{job.id}",
-            args=[job.id],
-            hour="*",
-            minute=hourly_minute,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-        return True
-
-    interval_minutes = _parse_interval_schedule(job.schedule)
-    if interval_minutes is not None:
-        scheduler.add_job(
-            _run_scheduled_job,
-            "interval",
-            id=f"agent-governance-{job.id}",
-            args=[job.id],
-            minutes=interval_minutes,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-        return True
-
-    interval_seconds = _parse_interval_seconds_schedule(job.schedule)
-    if interval_seconds is not None:
-        scheduler.add_job(
-            _run_scheduled_job,
-            "interval",
-            id=f"agent-governance-{job.id}",
-            args=[job.id],
-            seconds=interval_seconds,
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-        return True
-
-    logger.warning(
-        "[agent-governance-scheduler] unsupported schedule job_code={} schedule={}",
-        job.job_code,
-        job.schedule,
+        return False
+    if parsed is None:
+        return False
+    trigger, trigger_args = parsed
+    scheduler.add_job(
+        _run_scheduled_job,
+        trigger,
+        id=f"agent-governance-{job.id}",
+        args=[job.id, job.schedule],
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        **trigger_args,
     )
-    return False
+    return True
+
+
+def _restore_registration(scheduler, scheduler_id: str, previous: Optional[dict]) -> None:
+    current = scheduler.get_job(scheduler_id)
+    if previous is None:
+        if current is not None:
+            scheduler.remove_job(scheduler_id)
+    elif current is None:
+        scheduler.add_job(id=scheduler_id, replace_existing=True, **previous)
+    else:
+        scheduler.modify_job(scheduler_id, **previous)
+
+
+@contextmanager
+def synchronize_job(job):
+    """在配置锁内与数据库提交协作，失败恢复原触发器及下次执行时间。"""
+    scheduler = _scheduler
+    if scheduler is None or not scheduler.running:
+        if settings.agent_governance_scheduler_enabled:
+            raise ServiceUnavailableError("后台调度器不可用，任务配置未保存，请稍后重试")
+        yield
+        return
+
+    scheduler_id = f"agent-governance-{job.id}"
+    current = scheduler.get_job(scheduler_id)
+    previous = None
+    if current is not None:
+        previous = {
+            name: getattr(current, name)
+            for name in (
+                "func", "trigger", "args", "kwargs", "executor", "name",
+                "misfire_grace_time", "coalesce", "max_instances", "next_run_time",
+            )
+        }
+    should_register = (
+        job.status == "enabled"
+        and job.schedule != "manual"
+        and settings.agent_governance_scheduler_enabled
+        and (job.job_type not in {"skill_evolution", "skill_proactive"} or settings.skill_scheduler_enabled)
+    )
+    try:
+        if should_register:
+            if current is None or current.args != (job.id, job.schedule):
+                if not _register_job_to_scheduler(scheduler, job):
+                    raise ValueError("调度计划未注册")
+        elif current is not None:
+            scheduler.remove_job(scheduler_id)
+    except Exception as exc:
+        try:
+            _restore_registration(scheduler, scheduler_id, previous)
+        except Exception as restore_error:
+            logger.exception("[agent-governance-scheduler] registration rollback failed job_id={}", job.id)
+            raise ServiceUnavailableError("调度同步及恢复失败，配置未保存，请重试并核验后台计划") from restore_error
+        raise ServiceUnavailableError("调度同步失败，任务配置未保存，请稍后重试") from exc
+
+    try:
+        yield
+    except Exception:
+        try:
+            _restore_registration(scheduler, scheduler_id, previous)
+        except Exception as restore_error:
+            logger.exception("[agent-governance-scheduler] registration rollback failed job_id={}", job.id)
+            raise ServiceUnavailableError("数据库提交失败且调度恢复失败，请重试并核验后台计划") from restore_error
+        raise
 
 
 def start_agent_governance_scheduler() -> None:
+    """序列化启动与配置更新，避免启动快照覆盖刚保存的计划。"""
+    with job_configuration_lock:
+        _start_agent_governance_scheduler()
+
+
+def _start_agent_governance_scheduler() -> None:
     """启动 Agent 治理后台调度器(含 v3.0 Skill 调度 + 事件触发订阅)
 
     流程:
@@ -277,6 +348,12 @@ def start_agent_governance_scheduler() -> None:
 
 
 def stop_agent_governance_scheduler() -> None:
+    """在停止调度器前等待当前配置事务完成。"""
+    with job_configuration_lock:
+        _stop_agent_governance_scheduler()
+
+
+def _stop_agent_governance_scheduler() -> None:
     """停止 Agent 治理后台调度器(含 v3.0 Skill 事件触发订阅)
 
     Returns:

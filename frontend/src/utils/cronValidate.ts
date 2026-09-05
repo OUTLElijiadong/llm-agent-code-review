@@ -25,3 +25,22 @@ export function isCronValid(expr: string): boolean {
   if (/^[0-9]+$/.test(hour) && Number(hour) > 23) return false
   return true
 }
+
+export function isScheduleValid(expr: string): boolean {
+  const value = expr.trim().toLowerCase()
+  if (!value || value === 'manual') return value === 'manual'
+
+  const daily = /^daily@(\d{1,2}):(\d{2})$/.exec(value)
+  if (daily) return Number(daily[1]) <= 23 && Number(daily[2]) <= 59
+
+  const hourly = /^hourly@(?:\*:)?(\d{1,2})$/.exec(value)
+  if (hourly) return Number(hourly[1]) <= 59
+
+  const minutes = /^interval@(\d+)m$/.exec(value)
+  if (minutes) return Number(minutes[1]) >= 1 && Number(minutes[1]) <= 1440
+
+  const seconds = /^interval@(\d+)s$/.exec(value)
+  if (seconds) return Number(seconds[1]) >= 1 && Number(seconds[1]) <= 86400
+
+  return isCronValid(value)
+}

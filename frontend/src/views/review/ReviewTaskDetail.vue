@@ -9,22 +9,38 @@
     />
 
     <!-- ============ 加载失败 ============ -->
-    <div v-else-if="pageError" class="page-error">
+    <div v-else-if="pageError" class="page-error" role="alert">
       <EmptyState :description="pageError" />
-      <el-button type="primary" :icon="RefreshRight" @click="loadAllData" style="margin-top: 12px">
+      <el-button type="primary" :icon="RefreshRight" :disabled="refreshing" @click="loadAllData" style="margin-top: 12px">
         重新加载
       </el-button>
     </div>
 
     <!-- ============ 正常内容 ============ -->
     <template v-else>
-    <!-- ============ AI 进度光带（运行中显示）============ -->
-    <AiLoadingBeam
-      v-if="task?.status === 'running'"
-      class="ai-ribbon"
-      :title="`正在审查 ${task.task_name || '任务 #' + taskId}`"
-      :status="`DeepSeek V4 · 已处理 ${task.processed_files ?? 0}/${task.total_files ?? 0} 文件`"
-    />
+    <section v-if="task" class="execution-panel" aria-label="执行阶段与覆盖">
+      <div class="execution-status" role="status" aria-live="polite" aria-atomic="true">
+        <div class="execution-heading">
+          <strong>{{ stageLabel }}</strong>
+          <span>{{ modelLabel }}</span>
+          <span v-if="detailError" class="stale-note">上次成功获取的数据；当前连接已中断</span>
+          <span v-else-if="refreshing">正在获取最新状态…</span>
+        </div>
+        <dl class="coverage-grid">
+          <div><dt>当前文件</dt><dd>{{ task.coverage?.current_file || '未知（接口未提供）' }}</dd></div>
+          <div><dt>已完成文件 / 总文件</dt><dd>{{ coverageCount(task.coverage?.completed_files) }} / {{ coverageCount(task.coverage?.total_files) }}</dd></div>
+          <div><dt>当前 / 最近文件分片</dt><dd>{{ coverageCount(task.coverage?.completed_chunks) }} / {{ coverageCount(task.coverage?.total_chunks) }}</dd></div>
+        </dl>
+        <p class="coverage-note">仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。</p>
+      </div>
+      <div v-if="taskFailure" class="execution-error" role="alert">{{ taskFailure }}</div>
+    </section>
+
+    <div v-if="detailError" class="connection-error" role="alert">
+      <strong>状态更新失败：{{ detailError }}</strong>
+      <p>已暂停自动刷新。重新获取只读取原任务状态，不会重新发起审查。</p>
+      <el-button :loading="refreshing" :disabled="refreshing" @click="loadAllData">{{ refreshing ? '正在重新连接' : '重新获取状态' }}</el-button>
+    </div>
 
     <!-- ============ 顶部摘要条 ============ -->
     <header class="task-head">
@@ -37,7 +53,7 @@
         <div class="head-meta font-mono">
           <span>{{ reviewTypeLabel(task?.review_type) }}</span>
           <span class="dot">·</span>
-          <span>{{ task?.model_name || 'DeepSeek V4' }}</span>
+          <span>{{ modelLabel }}</span>
           <span class="dot">·</span>
           <span>{{ formatDuration(Number(task?.duration_ms ?? 0)) }}</span>
         </div>
@@ -46,23 +62,24 @@
           <el-button v-if="task?.project_id" link type="primary" @click="goProject(task.project_id)">
             {{ task.project_name || `项目 #${task.project_id}` }}
           </el-button>
-          <el-button link type="primary" @click="goReport(taskId)">报告 #{{ taskId }}</el-button>
+          <el-button v-if="task?.status === 'success'" link type="primary" @click="goReport(taskId)">报告 #{{ taskId }}</el-button>
           <el-tag v-for="agent in task?.agent_releases || []" :key="agent.release_id" size="small" type="success" effect="plain">
             {{ agent.agent_name }} v{{ agent.agent_version }}
           </el-tag>
         </div>
       </div>
 
-      <div class="head-score">
-        <div class="score-orb" :style="{ background: scoreGradient(animatedScore) }">
-          <span class="score-val font-display">{{ animatedScore }}</span>
+      <div v-if="displayScore !== null" class="head-score">
+        <div class="score-orb" :style="{ background: scoreGradient(displayScore) }">
+          <span class="score-val font-display">{{ displayScore }}</span>
           <span class="score-out font-mono">/100</span>
         </div>
         <div class="score-meta">
           <div class="score-label">代码质量</div>
-          <div class="score-status" :style="{ color: scoreFlatColor(animatedScore) }">{{ riskLevel }}</div>
+          <div class="score-status" :style="{ color: scoreFlatColor(displayScore) }">{{ riskLevel }}</div>
         </div>
       </div>
+      <div v-else class="score-unavailable">{{ task?.status === 'success' ? '评分未知（接口未提供有效评分）' : '尚无最终评分' }}</div>
 
       <div class="head-tally">
         <div class="tally-item">
@@ -161,8 +178,13 @@
             v-for="f in fileList"
             :key="f.file_id"
             class="file-row"
+            role="button"
+            tabindex="0"
+            :aria-pressed="currentFileId === f.file_id"
             :class="{ active: currentFileId === f.file_id }"
             @click="onFilePick(f.file_id)"
+            @keydown.enter.self.prevent="onFilePick(f.file_id)"
+            @keydown.space.self.prevent="onFilePick(f.file_id)"
           >
             <span class="file-ico font-mono">{{ fileGlyph(f.file_name) }}</span>
             <span class="file-name">{{ f.file_name }}</span>
@@ -175,9 +197,10 @@
               link
               size="small"
               type="primary"
+              title="编辑当前版本，内容可能不同于本次审查快照"
               @click.stop="goFile(f.project_id, f.file_id)"
             >
-              打开
+              编辑当前版本
             </el-button>
           </div>
           <EmptyState v-if="fileList.length === 0" description="暂无审查文件" compact />
@@ -185,7 +208,7 @@
       </aside>
 
       <!-- 中：Monaco 代码 -->
-      <main class="pane pane-code">
+      <main class="pane pane-code" :aria-busy="loadingCode">
         <header class="pane-head pane-head-code">
           <div class="code-file font-mono">
             <span class="file-ico">{{ fileGlyph(currentFileName) }}</span>
@@ -199,8 +222,26 @@
             </el-button-group>
           </div>
         </header>
+        <div
+          v-if="currentFileId !== null"
+          class="code-provenance"
+          :class="{ 'is-warning': previewSource === 'current', 'is-error': !!codeError }"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <strong>{{ codeProvenanceTitle }}</strong>
+          <span v-if="loadingCode">{{ previewSource === 'snapshot' ? '正在读取并校验审查输入，校验完成前不展示内容。' : '正在读取当前文件内容。' }}</span>
+          <span v-else-if="previewVerified">SHA-256 已校验；内容与任务冻结的摘要一致。编辑入口打开当前版本，不修改此快照。</span>
+          <span v-else-if="previewSource === 'current'">当前文件，无法证明当时输入；此预览不能作为本次审查输入的证据。</span>
+          <span v-else>未通过读取与完整性校验，不展示内容，也不以当前版本替代。</span>
+        </div>
         <div class="pane-body code-body">
           <div v-if="loadingCode" class="loading-box"><el-skeleton :rows="14" animated /></div>
+          <div v-else-if="codeError" class="code-error" role="alert">
+            <p>{{ codeError }}</p>
+            <el-button @click="retryFileCode">重新加载代码</el-button>
+          </div>
           <EmptyState v-else-if="!codeContent && !currentIsBinary" description="请从左侧选择一个文件查看代码" />
           <CodeViewer
             v-else
@@ -252,12 +293,20 @@
         </div>
 
         <div class="pane-body issue-body">
+          <div v-if="issuesError" class="issues-error" role="alert">
+            <p>问题列表更新失败：{{ issuesError }}。已有内容为上次成功获取的结果。</p>
+            <el-button :loading="issuesLoading" :disabled="issuesLoading" @click="retryIssues">重新加载问题</el-button>
+          </div>
           <div
             v-for="issue in issues"
             :key="issue.id"
             class="issue-row"
+            role="button"
+            tabindex="0"
             :class="{ active: selectedIssue?.id === issue.id }"
             @click="onIssueClick(issue)"
+            @keydown.enter.prevent="onIssueClick(issue)"
+            @keydown.space.prevent="onIssueClick(issue)"
           >
             <span class="sev" :class="`sev-${severityClass(issue.severity)}`">{{ severityDisplayLabel(issue.severity) }}</span>
             <div class="issue-meta">
@@ -270,7 +319,7 @@
             </div>
             <span class="issue-status font-mono" :class="`is-${issue.status}`">{{ issueStatusLabel(issue.status) }}</span>
           </div>
-          <EmptyState v-if="issues.length === 0" description="没有匹配的问题" compact />
+          <EmptyState v-if="!issuesError && issues.length === 0" :description="task?.status === 'success' ? '没有匹配的问题' : '尚无可展示的问题，不代表审查通过'" compact />
         </div>
 
         <footer v-if="issueTotal > issuePageSize" class="pane-foot">
@@ -296,7 +345,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 import { ArrowLeft, Lock, MagicStick, ZoomIn, ZoomOut, RefreshRight } from '@element-plus/icons-vue'
@@ -306,22 +355,19 @@ import IssueDetailDrawer from '@/components/issue/IssueDetailDrawer.vue'
 import AiPromptModal from '@/components/issue/AiPromptModal.vue'
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import AiLoadingBeam from '@/components/common/AiLoadingBeam.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import { getReviewTaskDetail, getTaskIssues } from '@/api/review'
-import { getDetail as getCodeFileDetail } from '@/api/codeFile'
+import { getDetail as getCodeFileDetail, getVersion as getCodeFileVersion } from '@/api/codeFile'
 import type { TaskDetailOut, TaskFileOut, IssueOut } from '@/types/review'
 import type { CodeFileMetaOut } from '@/types/project'
 import { PRISM_SEVERITY_COLORS } from '@/components/chart/prismTheme'
 import { SEVERITY_OPTIONS, severityClass, severityDisplayLabel } from '@/constants/severity'
 import { DIM_META, normalizeDimKey, dimColor as resolveDimColor, dimLabel as resolveDimLabel } from '@/constants/dim'
 import { reviewTypeLabel } from '@/constants/reviewType'
-import { ElMessage } from 'element-plus/es/components/message/index'
-import { useCountUp } from '@/composables/useCountUp'
 
 const route = useRoute()
 const router = useRouter()
-const taskId = Number(route.params.id)
+const taskId = computed(() => Number(route.params.id))
 
 type TraceFileItem = Partial<TaskFileOut> & {
   file_id: number
@@ -331,13 +377,42 @@ type TraceFileItem = Partial<TaskFileOut> & {
 
 const pageLoading = ref(true)
 const pageError = ref('')
+const detailError = ref('')
+const issuesError = ref('')
+const codeError = ref('')
+const refreshing = ref(false)
+const issuesLoading = ref(false)
+let disposed = false
+let viewGeneration = 0
+let issueSequence = 0
+let codeSequence = 0
+const snapshotFileIds = new Set<number>()
+let detailRequest: { generation: number; promise: Promise<void> } | null = null
+let issueRequest: { key: string; promise: Promise<void> } | null = null
 const task = ref<TaskDetailOut | null>(null)
-const scoreTarget = computed(() => {
-  const value = Number(task.value?.score ?? 0)
-  return Number.isFinite(value) ? value : 0
+const displayScore = computed(() => {
+  const value = task.value?.score
+  return task.value?.status === 'success' && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
 })
-const animatedScoreValue = useCountUp(scoreTarget, 1200)
-const animatedScore = computed(() => Math.round(animatedScoreValue.value))
+const modelLabel = computed(() => task.value?.model_name?.trim() || '模型未知（接口未提供）')
+const stageLabel = computed(() => {
+  const stage = task.value?.coverage?.stage
+  const labels: Record<string, string> = {
+    queued: '等待执行', analyzing: '分析中', complete: '执行完成',
+    failed: '执行失败', cancelled: '已取消', deleted: '已删除',
+  }
+  return stage ? labels[stage] || `未知阶段（${stage}）` : '阶段未知（接口未提供）'
+})
+const taskFailure = computed(() => task.value?.coverage?.error || task.value?.error_message || (task.value?.status === 'failed' ? '审查失败，接口未提供具体原因。' : ''))
+
+function coverageCount(value: unknown): string {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? String(value) : '未知'
+}
+
+function requestError(error: unknown, fallback: string): string {
+  const failure = error as { message?: unknown } | null
+  return typeof failure?.message === 'string' && failure.message.trim() ? failure.message : fallback
+}
 const issues = ref<IssueOut[]>([])
 const issueTotal = ref(0)
 const issuePage = ref(1)
@@ -357,6 +432,15 @@ const currentIsBinary = ref(false)
 /** v3: 当前二进制文件的元信息(仅 currentIsBinary 为 true 时使用) */
 const currentBinaryMeta = ref<CodeFileMetaOut | null>(null)
 const loadingCode = ref(false)
+const previewSource = ref<'snapshot' | 'current' | null>(null)
+const previewVerified = ref(false)
+const snapshotVersion = ref<number | null>(null)
+const codeProvenanceTitle = computed(() => {
+  if (previewSource.value === 'current') return '当前内容，历史输入未知'
+  const version = snapshotVersion.value === null ? '版本未知' : `v${snapshotVersion.value}`
+  const state = previewVerified.value ? '快照' : loadingCode.value ? '快照待校验' : '快照不可用'
+  return `审查输入 ${version} / ${state}`
+})
 const fileList = ref<TraceFileItem[]>([])
 
 const drawerVisible = ref(false)
@@ -396,11 +480,12 @@ const severityChips = computed(() => {
 const dimChips = computed(() => dimMeta)
 
 const riskLevel = computed(() => {
-  const s = task.value?.score ?? 0
-  if (s >= 90) return '优秀 · 可发布'
-  if (s >= 80) return '良好 · 关注潜在风险'
-  if (s >= 70) return '一般 · 建议修复'
-  if (s >= 60) return '及格 · 需要重构'
+  const score = displayScore.value
+  if (score === null) return ''
+  if (score >= 90) return '优秀 · 以审查范围为准'
+  if (score >= 80) return '良好 · 关注潜在风险'
+  if (score >= 70) return '一般 · 建议修复'
+  if (score >= 60) return '及格 · 需要重构'
   return '风险 · 必须处理'
 })
 
@@ -482,26 +567,47 @@ const highlightLines = computed(() => {
   return lines
 })
 
-async function loadTaskDetail(silent = false) {
-  try {
-    task.value = await getReviewTaskDetail(taskId)
-    fileList.value = (task.value.files ?? []).map((item) => ({ ...item }))
-  } catch {
-    if (!silent) pageError.value = '加载审查任务详情失败'
-  }
+function loadTaskDetail(): Promise<void> {
+  if (detailRequest?.generation === viewGeneration) return detailRequest.promise
+  const generation = viewGeneration
+  const promise = getReviewTaskDetail(taskId.value).then((data) => {
+    if (disposed || generation !== viewGeneration) return
+    if (!data) throw new Error('接口未返回审查任务详情')
+    task.value = data
+    detailError.value = ''
+    pageError.value = ''
+    fileList.value = (data.files ?? []).map((item) => ({ ...item }))
+    for (const file of data.files ?? []) {
+      if (file.snapshot_verified === true || file.content_sha256 != null) snapshotFileIds.add(file.file_id)
+    }
+  }).catch((error: unknown) => {
+    if (disposed || generation !== viewGeneration) return
+    detailError.value = requestError(error, '无法连接审查服务')
+    if (!task.value) pageError.value = `加载审查任务详情失败：${detailError.value}`
+  }).finally(() => {
+    if (detailRequest?.promise === promise) detailRequest = null
+  })
+  detailRequest = { generation, promise }
+  return promise
 }
 
-async function doLoadIssues(silent = false) {
-  try {
-    const params: Record<string, unknown> = {
-      page: issuePage.value,
-      page_size: issuePageSize.value,
-      ...Object.fromEntries(Object.entries(filter.value).filter(([, v]) => v)),
-    }
-    if (!params.status) params.status = 'all'
-    const data = await getTaskIssues(taskId, params)
+function doLoadIssues(): Promise<void> {
+  const params: Record<string, unknown> = {
+    page: issuePage.value,
+    page_size: issuePageSize.value,
+    ...Object.fromEntries(Object.entries(filter.value).filter(([, value]) => value)),
+  }
+  if (!params.status) params.status = 'all'
+  const generation = viewGeneration
+  const key = JSON.stringify([generation, taskId.value, params])
+  if (issueRequest?.key === key) return issueRequest.promise
+  const sequence = ++issueSequence
+  issuesLoading.value = true
+  const promise = getTaskIssues(taskId.value, params).then((data) => {
+    if (disposed || generation !== viewGeneration || sequence !== issueSequence) return
     issues.value = data.items
     issueTotal.value = data.total
+    issuesError.value = ''
 
     const fileSet = new Map<number, TraceFileItem>()
     fileList.value.forEach((item) => fileSet.set(item.file_id, item))
@@ -515,21 +621,37 @@ async function doLoadIssues(silent = false) {
       }
     })
     fileList.value = Array.from(fileSet.values())
-  } catch {
-    if (!silent) ElMessage.error('加载问题列表失败')
-  }
+  }).catch((error: unknown) => {
+    if (disposed || generation !== viewGeneration || sequence !== issueSequence) return
+    issuesError.value = requestError(error, '无法获取问题列表')
+  }).finally(() => {
+    if (!disposed && sequence === issueSequence) issuesLoading.value = false
+    if (issueRequest?.promise === promise) issueRequest = null
+  })
+  issueRequest = { key, promise }
+  return promise
+}
+
+async function retryIssues(): Promise<void> {
+  await doLoadIssues()
+  schedulePollIfRunning()
 }
 
 async function loadAllData() {
-  pageLoading.value = true
+  if (refreshing.value || disposed) return
+  const generation = viewGeneration
+  refreshing.value = true
+  stopPolling()
+  pageLoading.value = !task.value
   pageError.value = ''
   try {
     await Promise.all([loadTaskDetail(), doLoadIssues()])
-  } catch {
-    if (!pageError.value) pageError.value = '加载审查详情失败'
   } finally {
-    pageLoading.value = false
-    schedulePollIfRunning()
+    if (!disposed && generation === viewGeneration) {
+      pageLoading.value = false
+      refreshing.value = false
+      schedulePollIfRunning()
+    }
   }
 }
 
@@ -546,19 +668,63 @@ function stopPolling() {
 
 function schedulePollIfRunning() {
   stopPolling()
-  if (task.value?.status !== 'running') return
+  if (disposed || refreshing.value || detailError.value || issuesError.value || !['pending', 'running'].includes(task.value?.status || '')) return
+  const generation = viewGeneration
   pollTimer = setTimeout(async () => {
-    // 静默刷新,避免轮询期间反复弹出错误提示或闪烁整页骨架屏
-    await loadTaskDetail(true)
-    await doLoadIssues(true)
+    pollTimer = null
+    await loadTaskDetail()
+    if (disposed || generation !== viewGeneration) return
+    if (!detailError.value) await doLoadIssues()
+    if (disposed || generation !== viewGeneration) return
     schedulePollIfRunning()
   }, POLL_INTERVAL)
 }
 
 async function loadFileCode(fileId: number) {
+  const sequence = ++codeSequence
+  const generation = viewGeneration
+  const taskFile = task.value?.files?.find((file) => file.file_id === fileId)
+  const hasSnapshot = snapshotFileIds.has(fileId) || taskFile?.snapshot_verified === true || taskFile?.content_sha256 != null
+  previewSource.value = hasSnapshot ? 'snapshot' : 'current'
+  previewVerified.value = false
+  snapshotVersion.value = typeof taskFile?.version_no === 'number' && Number.isInteger(taskFile.version_no) && taskFile.version_no > 0 ? taskFile.version_no : null
+  currentFileName.value = taskFile?.file_name || fileList.value.find((file) => file.file_id === fileId)?.file_name || ''
+  currentLanguage.value = taskFile?.language || 'text'
+  codeContent.value = ''
+  currentIsBinary.value = false
+  currentBinaryMeta.value = null
   loadingCode.value = true
+  codeError.value = ''
   try {
+    if (hasSnapshot) {
+      if (!taskFile || taskFile.snapshot_verified !== true) {
+        throw new Error('快照完整性校验失败：服务端未通过校验，重试将重新获取任务记录')
+      }
+      const versionNo = taskFile.version_no
+      const expectedHash = taskFile.content_sha256
+      if (typeof versionNo !== 'number' || !Number.isInteger(versionNo) || versionNo < 1 || typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/i.test(expectedHash)) {
+        throw new Error('快照元数据缺失或无效，无法确认历史版本与内容摘要')
+      }
+      if (typeof globalThis.crypto?.subtle?.digest !== 'function' || typeof TextEncoder !== 'function') {
+        throw new Error('浏览器不支持快照完整性校验，请使用支持 WebCrypto 的安全浏览器环境')
+      }
+      const version = await getCodeFileVersion(fileId, versionNo)
+      if (disposed || generation !== viewGeneration || sequence !== codeSequence) return
+      if (version?.file_id !== fileId || version.version_no !== versionNo || typeof version.content !== 'string') {
+        throw new Error('历史版本响应与任务文件或版本不符，或缺少原始内容')
+      }
+      const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(version.content))
+      if (disposed || generation !== viewGeneration || sequence !== codeSequence) return
+      const actualHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+      if (actualHash !== expectedHash.toLowerCase()) {
+        throw new Error('SHA-256 不匹配，历史内容与审查输入不一致')
+      }
+      codeContent.value = version.content
+      previewVerified.value = true
+      return
+    }
     const file = await getCodeFileDetail(fileId)
+    if (disposed || generation !== viewGeneration || sequence !== codeSequence) return
     // v3: 二进制文件 content 由后端置空,不展示 Monaco,改为 CodeViewer 内部的二进制提示卡片
     currentIsBinary.value = file.is_binary === 1
     if (currentIsBinary.value) {
@@ -585,9 +751,33 @@ async function loadFileCode(fileId: number) {
     }
     currentLanguage.value = file.language
     currentFileName.value = file.file_name
+  } catch (error: unknown) {
+    if (disposed || generation !== viewGeneration || sequence !== codeSequence) return
+    codeError.value = hasSnapshot
+      ? `无法读取原始审查输入：${requestError(error, '读取或校验失败')}。不会改用当前文件。`
+      : requestError(error, '无法获取代码内容，请重试')
   } finally {
-    loadingCode.value = false
+    if (!disposed && generation === viewGeneration && sequence === codeSequence) loadingCode.value = false
   }
+}
+
+async function retryFileCode() {
+  const fileId = currentFileId.value
+  if (fileId === null || loadingCode.value) return
+  const taskFile = task.value?.files?.find((file) => file.file_id === fileId)
+  if ((snapshotFileIds.has(fileId) || taskFile?.content_sha256 != null) && taskFile?.snapshot_verified !== true) {
+    const generation = viewGeneration
+    const sequence = codeSequence
+    loadingCode.value = true
+    await loadTaskDetail()
+    if (disposed || generation !== viewGeneration || sequence !== codeSequence) return
+    loadingCode.value = false
+    if (detailError.value) {
+      codeError.value = `无法重新确认原始审查输入：${detailError.value}。不会改用当前文件。`
+      return
+    }
+  }
+  await loadFileCode(fileId)
 }
 
 function onFilePick(fileId: number) {
@@ -621,7 +811,7 @@ async function onIssueReviewed(updated: IssueOut): Promise<void> {
   selectedIssue.value = updated
   const index = issues.value.findIndex((item) => item.id === updated.id)
   if (index >= 0) issues.value.splice(index, 1, updated)
-  await Promise.all([loadTaskDetail(true), doLoadIssues(true)])
+  await Promise.all([loadTaskDetail(), doLoadIssues()])
 }
 
 /**
@@ -674,11 +864,45 @@ function goFile(projectId: number, fileId: number): void {
   router.push(`/code/${projectId}/file/${fileId}`)
 }
 
+watch(taskId, () => {
+  viewGeneration++
+  issueSequence++
+  codeSequence++
+  snapshotFileIds.clear()
+  stopPolling()
+  task.value = null
+  fileList.value = []
+  issues.value = []
+  issueTotal.value = 0
+  issuePage.value = 1
+  currentFileId.value = null
+  currentFileName.value = ''
+  currentLanguage.value = 'text'
+  codeContent.value = ''
+  previewSource.value = null
+  previewVerified.value = false
+  snapshotVersion.value = null
+  currentIsBinary.value = false
+  currentBinaryMeta.value = null
+  loadingCode.value = false
+  codeError.value = ''
+  detailError.value = ''
+  issuesError.value = ''
+  selectedIssue.value = null
+  drawerVisible.value = false
+  aiPromptVisible.value = false
+  securityScanVisible.value = false
+  refreshing.value = false
+  void loadAllData()
+})
+
 onMounted(() => {
   loadAllData()
 })
 
 onUnmounted(() => {
+  disposed = true
+  viewGeneration++
   stopPolling()
 })
 </script>
@@ -698,6 +922,72 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   min-height: 320px;
+}
+
+.execution-panel {
+  padding: 16px 20px;
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.execution-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: var(--gray-600);
+  font-size: 12px;
+
+  strong { color: var(--gray-900); font-size: 15px; }
+}
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 0;
+
+  dt { color: var(--gray-600); font-size: 12px; margin-bottom: 6px; }
+  dd { margin: 0; color: var(--gray-900); font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+}
+
+.coverage-note { margin: 12px 0 0; color: var(--gray-600); font-size: 12px; line-height: 1.6; }
+.score-unavailable { font-size: 12px; color: var(--gray-600); }
+.stale-note { color: #a62b43; }
+.execution-error,
+.connection-error,
+.issues-error,
+.code-error {
+  padding: 12px 14px;
+  border: 1px solid #f0c4cc;
+  border-radius: 8px;
+  background: #fff4f5;
+  color: #a62b43;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+
+  p { margin: 6px 0 10px; }
+}
+.execution-error { margin-top: 12px; }
+
+.file-row:focus-visible,
+.issue-row:focus-visible,
+.chip:focus-visible,
+.dim-chip:focus-visible { outline: 2px solid var(--brand-500); outline-offset: -2px; }
+
+@media (max-width: 680px) {
+  .coverage-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-dot,
+  .file-row,
+  .issue-row,
+  .chip,
+  .dim-chip,
+  :deep(.el-button *) { animation: none !important; transition: none !important; }
 }
 
 /* ============ AI 进度光带 ============ */
@@ -1019,6 +1309,23 @@ onUnmounted(() => {
   }
 }
 
+.code-provenance {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--gray-100);
+  background: var(--brand-50);
+  color: var(--gray-700);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+
+  &.is-warning { background: var(--el-color-warning-light-9); }
+  &.is-error { background: var(--el-color-danger-light-9); }
+}
+
 .code-body {
   padding: 0;
   position: relative;
@@ -1038,7 +1345,7 @@ onUnmounted(() => {
 /* ============ 文件列表 ============ */
 .file-row {
   display: grid;
-  grid-template-columns: 24px 1fr auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;

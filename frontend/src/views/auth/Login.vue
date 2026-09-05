@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 
 import { User, Lock } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getRoleHomePath } from '@/utils/roleHome'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
 
 const router = useRouter()
 const userStore = useUserStore()
+const buildVersion = import.meta.env.VITE_APP_VERSION?.trim() ? APP_DISPLAY_VERSION : null
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const loginError = ref('')
+const loginStatus = ref('输入账号与密码，进入对应角色的工作台。')
 
 const form = reactive({
   username: '',
@@ -35,30 +39,30 @@ const rules: FormRules = {
  * @returns Promise<void>
  */
 async function handleLogin(): Promise<void> {
-  if (!formRef.value) return
-  await formRef.value.validate(async (valid) => {
-    if (!valid) return
-    loading.value = true
-    try {
-      await userStore.login({ username: form.username, password: form.password })
-      ElMessage.success('登录成功')
-      // 登录后一律回角色首页(工作台/总览),不跟随 redirect——
-      // 避免从旧链接/过期会话跳转时落到非预期页面。
-      router.replace(getRoleHomePath(userStore.profile?.role))
-    } catch {
-      /* 请求拦截器会展示后端返回的错误信息，避免重复 toast。 */
-    } finally {
-      loading.value = false
+  if (!formRef.value || loading.value) return
+  loading.value = true
+  loginError.value = ''
+  loginStatus.value = '正在校验登录信息…'
+  try {
+    const valid = await formRef.value.validate().catch(() => false)
+    if (!valid) {
+      loginStatus.value = '请检查账号与密码的填写提示。'
+      return
     }
-  })
-}
-
-/**
- * 跳转到注册页
- * @returns void
- */
-function goRegister(): void {
-  router.push('/register')
+    loginStatus.value = '正在验证账号，请稍候…'
+    await userStore.login({ username: form.username, password: form.password })
+    loginStatus.value = '登录成功，正在进入工作台…'
+    ElMessage.success('登录成功')
+    await router.replace(getRoleHomePath(userStore.profile?.role))
+  } catch (error: unknown) {
+    const failure = error as { message?: unknown } | null
+    loginError.value = typeof failure?.message === 'string' && failure.message.trim()
+      ? failure.message
+      : '登录失败，请检查网络连接后重试。'
+    loginStatus.value = '登录未完成，请查看错误提示。'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -72,19 +76,19 @@ function goRegister(): void {
       </header>
 
       <div class="brand-center">
-        <div class="brand-eyebrow font-mono">AI CODE REVIEW · POWERED BY DEEPSEEK</div>
+        <div class="brand-eyebrow font-mono">AI CODE REVIEW · AGENT WORKSPACE</div>
         <h1 class="brand-title font-display">
           让代码穿过<br>
           <em>棱镜</em>，<br>
           折射真相。
         </h1>
         <p class="brand-sub">
-          大模型智能体替你读完每一行代码，并用自然语言告诉你：哪里有问题、为什么有问题、怎么改才更好。
-          比 SonarQube 更懂语义，比人工 Review 快 10 倍。
+          围绕代码规范、安全与可维护性开展审查。
+          在工作台查看问题证据、修复建议与审查报告，让每一次修改有据可查。
         </p>
 
-        <div class="brand-spectrum">
-          <div v-for="(seg, i) in 8" :key="i" :class="`seg seg-${i}`" :style="{ animationDelay: `${i * 0.1}s` }"></div>
+        <div class="brand-spectrum" aria-hidden="true">
+          <div v-for="segment in 8" :key="segment" :class="`seg seg-${segment - 1}`" :style="{ animationDelay: `${segment * 0.06}s` }"></div>
         </div>
         <div class="brand-spectrum-labels font-mono">
           <span>规范</span><span>命名</span><span>注释</span><span>维护</span>
@@ -93,8 +97,8 @@ function goRegister(): void {
       </div>
 
       <footer class="brand-bottom font-mono">
-        <span class="online-dot">DeepSeek V4 在线</span>
-        <span>v1.0 · 2026</span>
+        <span>代码审查 · 问题跟踪 · 报告</span>
+        <span>{{ buildVersion ? `构建版本 ${buildVersion}` : '构建版本未提供' }}</span>
       </footer>
     </aside>
 
@@ -109,15 +113,18 @@ function goRegister(): void {
         <h2 class="form-title font-display">登录到你的工作台</h2>
         <p class="form-sub">
           还没有账号？
-          <a class="link" @click="goRegister">立即注册 →</a>
+          <RouterLink class="link" to="/register">立即注册 →</RouterLink>
         </p>
 
         <el-form
           ref="formRef"
           :model="form"
           :rules="rules"
+          :disabled="loading"
+          :aria-busy="loading"
+          label-position="top"
           class="prism-form"
-          @keyup.enter="handleLogin"
+          @submit.prevent="handleLogin"
         >
           <el-form-item prop="username" label="账号 / 学号">
             <el-input
@@ -141,17 +148,19 @@ function goRegister(): void {
           </el-form-item>
 
           <button
-            type="button"
+            type="submit"
             class="btn-login font-display"
             :class="{ loading }"
             :disabled="loading"
-            @click="handleLogin"
           >
-            <span v-if="!loading">进入棱镜</span>
-            <span v-else class="think-dots"><span></span><span></span><span></span></span>
-            <span v-if="!loading" class="arrow font-mono">→</span>
+            <span>{{ loading ? '正在登录…' : loginError ? '重新登录' : '进入棱镜' }}</span>
+            <span v-if="loading" class="login-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span v-else class="arrow font-mono" aria-hidden="true">→</span>
           </button>
         </el-form>
+
+        <p class="login-status" role="status" aria-live="polite" aria-atomic="true">{{ loginStatus }}</p>
+        <div v-if="loginError" class="login-error" role="alert">{{ loginError }}</div>
 
         <div class="footer-mini font-mono">© 2026 Prism · 棱镜智能代码审查</div>
       </div>
@@ -164,6 +173,7 @@ function goRegister(): void {
   display: grid;
   grid-template-columns: 1fr 560px;
   min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
   background: #fff;
   overflow: hidden;
@@ -279,7 +289,7 @@ function goRegister(): void {
   .seg {
     height: 4px;
     border-radius: 2px;
-    animation: pulseSeg 3s ease-in-out infinite;
+    animation: spectrumReveal 0.55s ease-out both;
   }
   .seg-0 { background: #6B7CFF; }
   .seg-1 { background: #4B9BFF; }
@@ -291,9 +301,9 @@ function goRegister(): void {
   .seg-7 { background: #B85AC4; }
 }
 
-@keyframes pulseSeg {
-  0%, 100% { opacity: 0.55; transform: scaleY(1); }
-  50%      { opacity: 1;    transform: scaleY(1.6); }
+@keyframes spectrumReveal {
+  from { opacity: 0; transform: scaleX(0.6); }
+  to { opacity: 1; transform: scaleX(1); }
 }
 
 .brand-spectrum-labels {
@@ -302,30 +312,17 @@ function goRegister(): void {
   grid-template-columns: repeat(8, 1fr);
   gap: 6px;
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .brand-bottom {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-.online-dot {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-
-  &::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--status-fixed);
-    box-shadow: 0 0 8px var(--status-fixed);
-  }
+  color: rgba(255, 255, 255, 0.65);
 }
 
 /* ============ 右侧表单区 ============ */
@@ -379,8 +376,55 @@ function goRegister(): void {
 .link {
   color: var(--brand-500);
   cursor: pointer;
+  display: inline-block;
+  padding: 6px 0;
 
   &:hover { text-decoration: underline; }
+}
+
+.link:focus-visible,
+.btn-login:focus-visible {
+  outline: 3px solid var(--brand-400, #8E88F5);
+  outline-offset: 4px;
+}
+
+.login-status {
+  min-height: 20px;
+  margin: 14px 0 0;
+  color: var(--gray-600);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.login-error {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f0c4cc;
+  border-radius: 8px;
+  background: #fff4f5;
+  color: #a62b43;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.login-dots {
+  display: inline-flex;
+  gap: 4px;
+
+  span {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: loginPulse 1s ease-in-out infinite;
+  }
+  span:nth-child(2) { animation-delay: 0.15s; }
+  span:nth-child(3) { animation-delay: 0.3s; }
+}
+
+@keyframes loginPulse {
+  50% { opacity: 0.4; transform: translateY(-2px); }
 }
 
 .prism-form {
@@ -511,6 +555,18 @@ function goRegister(): void {
 
   .footer-mini {
     margin-top: 26px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-spectrum .seg,
+  .login-dots span,
+  .btn-login,
+  .btn-login::after,
+  .prism-form :deep(*) {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
   }
 }
 </style>

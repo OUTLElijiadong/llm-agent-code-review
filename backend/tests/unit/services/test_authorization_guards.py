@@ -4,7 +4,7 @@ import pytest
 from app.agents.discussion_bus import DiscussionSession
 from app.api.v1.discussion import start_discussion
 from app.api.v1.ws_discussion import _can_access_session
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
@@ -189,15 +189,33 @@ def test_rule_mutation_requires_owner_or_admin(db):
     assert custom.rule_name == "Owner Rule v2"
 
 
-def test_discussion_start_requires_project_owner(db):
+def test_discussion_start_requires_project_owner(db, monkeypatch):
     """讨论审预检必须与普通审查一样校验项目归属。"""
     owner = _user(db, "disc-owner")
     other = _user(db, "disc-other")
     project = _project(db, owner)
     code_file = _code_file(db, project)
 
-    with pytest.raises(ForbiddenError):
+    registered = []
+    monkeypatch.setattr("app.api.v1.discussion.register_pending", lambda **kwargs: registered.append(kwargs))
+    with pytest.raises(NotFoundError):
         start_discussion(project_id=project.id, file_id=code_file.id, review_type="full", db=db, user=other)
+    assert not registered
+
+
+@pytest.mark.parametrize("content,binary", [("", 0), (" \t\n\u3000", 0), ("encoded", 1)])
+def test_discussion_preflight_rejects_empty_scan_before_registration(db, monkeypatch, content, binary):
+    owner = _user(db, "empty-disc-owner")
+    project = _project(db, owner)
+    code_file = _code_file(db, project)
+    code_file.content = content
+    code_file.is_binary = binary
+    db.commit()
+    registered = []
+    monkeypatch.setattr("app.api.v1.discussion.register_pending", lambda **kwargs: registered.append(kwargs))
+    with pytest.raises(ValidationError, match="有效非空"):
+        start_discussion(project_id=project.id, file_id=code_file.id, review_type="full", db=db, user=owner)
+    assert not registered
 
 
 def test_discussion_session_access_requires_owner_or_admin(db):
@@ -211,4 +229,3 @@ def test_discussion_session_access_requires_owner_or_admin(db):
     assert _can_access_session(admin, session.owner_user_id) is True
     assert _can_access_session(other, session.owner_user_id) is False
     assert _can_access_session(owner, 0) is False
-

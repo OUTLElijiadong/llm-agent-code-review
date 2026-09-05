@@ -12,7 +12,7 @@ from app.schemas.agent_governance import parse_json_value
 class ReviewStartIn(BaseModel):
     """启动审查请求体"""
     project_id: int
-    file_ids: list[int] = Field(min_length=1)
+    file_ids: list[int] = Field(min_length=1, max_length=500)
     review_type: Optional[str] = Field(default="standard", pattern="^(quick|standard|security|performance|full)$")
     task_name: Optional[str] = Field(default=None, max_length=100)
 
@@ -49,6 +49,8 @@ class TaskFileOut(BaseModel):
     language: str
     line_count: int
     version_no: int
+    content_sha256: Optional[str] = None
+    snapshot_verified: bool = False
 
 
 class AggregationSummaryOut(BaseModel):
@@ -91,6 +93,7 @@ class TaskDetailOut(BaseModel):
     create_time: datetime
     # R4 修复:任务失败时返回错误原因,对齐 ReviewTask.error_message
     error_message: Optional[str] = None
+    coverage: Optional[dict] = None
     files: list[TaskFileOut] = Field(default_factory=list)
     agent_releases: list[dict[str, Any]] = Field(default_factory=list)
     aggregation_summary: AggregationSummaryOut = Field(default_factory=AggregationSummaryOut)

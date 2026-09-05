@@ -14,12 +14,14 @@ from app.agents.discussion_bus import DiscussionBus
 from app.api.v1.ws_discussion import register_pending
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import NotFoundError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.common import Resp
 from app.services import rule_service
+from app.services.project_member_service import require_project_access
+from app.services.review_input_service import validate_review_input
 
 router = APIRouter()
 
@@ -50,8 +52,7 @@ def start_discussion(
     project = db.get(Project, project_id)
     if not project or project.status == "deleted":
         raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
-        raise ForbiddenError("无访问权限", code=40300)
+    require_project_access(db, project_id, user, need_write=False)
 
     code_file = db.query(CodeFile).filter(
         CodeFile.id == file_id,
@@ -60,6 +61,7 @@ def start_discussion(
     ).first()
     if not code_file:
         raise NotFoundError("文件不存在", code=40400)
+    validate_review_input(code_file)
 
     from app.ai.multi_agent import get_discussion_agent_profiles
     profiles = get_discussion_agent_profiles()

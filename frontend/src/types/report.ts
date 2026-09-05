@@ -11,6 +11,13 @@ export type ReportTemplateType = 'simple' | 'detailed' | 'compliance' | 'custom'
 /** 报告导出格式(json/html/pdf/word) */
 export type ReportFormat = 'json' | 'html' | 'pdf' | 'word'
 
+export interface ReportSource {
+  type?: string
+  stats_basis?: string
+  detail_api?: string
+  [key: string]: unknown
+}
+
 /** 合规映射结构(对应后端 IssueOut.compliance_mapping v3 字段) */
 export interface ComplianceMapping {
   /** ISO 27001 控制点编号列表,如 ['A.9.4.2', 'A.12.6.1'] */
@@ -77,6 +84,7 @@ export interface ReportListItem {
   score: number
   status: 'success' | 'failed'
   create_time: string
+  source?: ReportSource
 }
 
 /** 报告详情(与后端 ReportDetailOut 对齐,issues 需前端单独调用 issue API 获取) */
@@ -87,6 +95,7 @@ export interface ReportDetailOut {
   summary?: string
   files: Record<string, unknown>[]
   rules_snapshot: Record<string, unknown>[]
+  source?: ReportSource
 }
 
 /**

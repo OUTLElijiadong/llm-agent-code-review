@@ -167,6 +167,8 @@ class CodeReviewerAgent(BaseAgent):
                 "issues": findings,
                 "summary": review_result.summary,
                 "score": review_result.score,
+                "invalid_issue_count": review_result.invalid_issue_count,
+                "diagnostics": [item.code for item in review_result.diagnostics],
             },
             model=result.model,
             duration_ms=result.duration_ms,

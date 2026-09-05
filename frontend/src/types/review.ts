@@ -120,6 +120,18 @@ export interface TaskFileOut {
   language: string
   line_count: number
   version_no: number
+  content_sha256?: string | null
+  snapshot_verified?: boolean
+}
+
+export interface TaskCoverageOut {
+  stage?: string | null
+  current_file?: string | null
+  completed_files?: number | null
+  total_files?: number | null
+  completed_chunks?: number | null
+  total_chunks?: number | null
+  error?: string | null
 }
 
 export interface TaskDetailOut {
@@ -139,6 +151,8 @@ export interface TaskDetailOut {
   score: number
   summary?: string
   model_name?: string
+  coverage?: TaskCoverageOut | null
+  error_message?: string | null
   duration_ms: number
   start_time?: string
   end_time?: string

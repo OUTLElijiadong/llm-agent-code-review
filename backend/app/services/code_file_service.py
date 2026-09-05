@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.language_detector import detect_language
 from app.core.config import settings
-from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.models.agent_capability import SandboxEnvironment
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
@@ -29,6 +29,7 @@ from app.models.project import Project
 from app.models.project_source_archive import ProjectSourceArchive
 from app.models.user import User
 from app.schemas.code_file import CodeFileIn
+from app.services.project_member_service import require_project_access
 from app.utils.archive_extractor import ExtractedFile, extract_archive, is_archive
 from app.utils.encoding_utils import BASE64_PREFIX, to_utf8
 from app.utils.file_validator import (
@@ -64,11 +65,7 @@ def list_files(db: Session, user: User, project_id: int = None, language: str = 
     if not project_id:
         raise ValidationError("project_id 必填", code=40001)
 
-    project = db.get(Project, project_id)
-    if not project or project.status == "deleted":
-        raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
-        raise ForbiddenError("无访问权限", code=40300)
+    require_project_access(db, project_id, user, need_write=False)
 
     q = db.query(CodeFile).filter(
         CodeFile.status == "active", CodeFile.project_id == project_id)
@@ -448,7 +445,7 @@ def _upload_archive(
 
 
 def _check_project_access(db: Session, user: User, project_id: int) -> Project:
-    """校验项目访问权限(存在性 + 归属)
+    """锁定项目并校验统一成员写权限及源码互斥状态。
 
     Args:
         db: 数据库会话
@@ -459,7 +456,7 @@ def _check_project_access(db: Session, user: User, project_id: int) -> Project:
         Project: 项目 ORM 对象
 
     Raises:
-        NotFoundError: 项目不存在或已删除
+        NotFoundError: 项目不存在、已删除、已隔离或不可见
         ForbiddenError: 无访问权限
     """
     # 与隔离整包上传使用同一 Project 行锁。锁保持到文件提交，跨 worker
@@ -468,12 +465,12 @@ def _check_project_access(db: Session, user: User, project_id: int) -> Project:
         db.query(Project)
         .filter(Project.id == project_id)
         .with_for_update()
+        .populate_existing()
         .first()
     )
-    if not project or project.status == "deleted":
+    if project is None:
         raise NotFoundError("项目不存在", code=40400)
-    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
-        raise ForbiddenError("无访问权限", code=40300)
+    require_project_access(db, project_id, user, need_write=True)
     if db.query(ProjectSourceArchive.id).filter(
         ProjectSourceArchive.project_id == project_id,
         ProjectSourceArchive.storage_status == "active",
@@ -593,6 +590,25 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
     return code_file.id, language, 1
 
 
+def _get_accessible_file(db: Session, user: User, file_id: int, *, need_write: bool = False) -> CodeFile:
+    """先校验项目可见性及成员权限，写操作与运维隔离共用项目行锁。"""
+    code_file = db.get(CodeFile, file_id)
+    if not code_file or code_file.status == "deleted":
+        raise NotFoundError("文件不存在", code=40400)
+    if need_write:
+        project = (
+            db.query(Project)
+            .filter(Project.id == code_file.project_id)
+            .with_for_update()
+            .populate_existing()
+            .first()
+        )
+        if project is None:
+            raise NotFoundError("项目不存在", code=40400)
+    require_project_access(db, code_file.project_id, user, need_write=need_write)
+    return code_file
+
+
 def get_file(db: Session, user: User, file_id: int) -> CodeFile:
     """获取代码文件详情(含内容)
 
@@ -607,12 +623,7 @@ def get_file(db: Session, user: User, file_id: int) -> CodeFile:
     Returns:
         CodeFile: 文件ORM对象(is_binary=1 时 content 字段被置空)
     """
-    code_file = db.get(CodeFile, file_id)
-    if not code_file or code_file.status == "deleted":
-        raise NotFoundError("文件不存在", code=40400)
-    project = db.get(Project, code_file.project_id)
-    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
-        raise ForbiddenError("无访问权限", code=40300)
+    code_file = _get_accessible_file(db, user, file_id)
     # v2: 二进制文件不返回 base64 content,前端通过下载接口获取
     if code_file.is_binary == 1:
         code_file.content = ""
@@ -631,15 +642,9 @@ def get_binary_content(db: Session, user: User, file_id: int) -> Tuple[bytes, st
         Tuple[bytes, str]: (原始字节, 文件名)
 
     Raises:
-        NotFoundError: 文件不存在或非二进制文件
-        ForbiddenError: 无访问权限
+        NotFoundError: 文件或项目不存在、项目不可见，或文件不是二进制文件
     """
-    code_file = db.get(CodeFile, file_id)
-    if not code_file or code_file.status == "deleted":
-        raise NotFoundError("文件不存在", code=40400)
-    project = db.get(Project, code_file.project_id)
-    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
-        raise ForbiddenError("无访问权限", code=40300)
+    code_file = _get_accessible_file(db, user, file_id)
     if code_file.is_binary != 1:
         raise NotFoundError("该文件不是二进制文件", code=40400)
     # 优先从 original_blob 取,降级从 content(base64)还原
@@ -674,12 +679,7 @@ def get_file_meta(db: Session, user: User, file_id: int) -> dict:
     import hashlib
     import mimetypes
 
-    code_file = db.get(CodeFile, file_id)
-    if not code_file or code_file.status == "deleted":
-        raise NotFoundError("文件不存在", code=40400)
-    project = db.get(Project, code_file.project_id)
-    if project.user_id != user.id and user.role not in {"admin", "super_admin"}:
-        raise ForbiddenError("无访问权限", code=40300)
+    code_file = _get_accessible_file(db, user, file_id)
 
     # MIME 类型按文件名扩展名推断;mimetypes 未知时回退到 application/octet-stream
     mime_type, _ = mimetypes.guess_type(code_file.file_name)
@@ -743,7 +743,7 @@ def update_content(db: Session, user: User, file_id: int, content: str, change_d
     Raises:
         ValidationError: 二进制文件不允许在线编辑
     """
-    code_file = get_file(db, user, file_id)
+    code_file = _get_accessible_file(db, user, file_id, need_write=True)
     if code_file.is_binary == 1:
         raise ValidationError("二进制文件不支持在线编辑", code=40001)
     code_file.content = content
@@ -774,7 +774,7 @@ def rename_file(db: Session, user: User, file_id: int, file_name: str, file_path
         file_name: 新文件名
         file_path: 可选新逻辑路径
     """
-    code_file = get_file(db, user, file_id)
+    code_file = _get_accessible_file(db, user, file_id, need_write=True)
     validate_filename(file_name, settings.allowed_extensions)
     code_file.file_name = file_name
     if file_path is not None:
@@ -790,7 +790,7 @@ def delete_file(db: Session, user: User, file_id: int) -> None:
         user: 当前用户
         file_id: 文件ID
     """
-    code_file = get_file(db, user, file_id)
+    code_file = _get_accessible_file(db, user, file_id, need_write=True)
     code_file.status = "deleted"
     db.commit()
 
@@ -810,7 +810,7 @@ def list_versions(db: Session, user: User, file_id: int, page: int = 1, page_siz
     """
     from app.core.pagination import Pagination
 
-    get_file(db, user, file_id)
+    _get_accessible_file(db, user, file_id)
     q = db.query(CodeVersion).filter(CodeVersion.file_id == file_id)
     total = q.count()
     pagination = Pagination(page, page_size, total)
@@ -830,7 +830,7 @@ def get_version(db: Session, user: User, file_id: int, version_no: int) -> CodeV
     Returns:
         CodeVersion: 版本ORM对象
     """
-    get_file(db, user, file_id)
+    _get_accessible_file(db, user, file_id)
     version = db.query(CodeVersion).filter(
         CodeVersion.file_id == file_id, CodeVersion.version_no == version_no).first()
     if not version:

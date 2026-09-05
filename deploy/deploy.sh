@@ -11,11 +11,13 @@ source "lib/common.sh"
 # 返回: 始终返回 0。
 usage() {
   cat <<'USAGE'
-用法: ./deploy.sh [all|backend|frontend] --revision <commit-ish>
+用法: ./deploy.sh [all] --revision <commit-ish>
 
 说明:
   - revision 会解析为完整 SHA，并且必须等于当前干净工作区 HEAD；脚本不 pull/reset。
-  - backend/all 发布前自动备份，随后由目标 Backend 镜像执行 Alembic。
+  - 当前仅支持 all，前后端必须使用同一提交发布。
+  - 发布前自动备份并验证恢复，随后由目标 Backend 镜像执行 Alembic。
+  - 前端切换后自动同步 assets 卷并检查同源 HTTPS。
   - 健康或冒烟失败时尝试切回 previous.env 记录的应用镜像，不自动降级数据库。
 USAGE
 }
@@ -111,19 +113,37 @@ on_deploy_error() {
 }
 trap on_deploy_error ERR
 
-bootstrap_tag="rollback-$(date -u '+%Y%m%d%H%M%S')"
 if [[ -f "$current_state" ]]; then
-  cp "$current_state" "$previous_state"
-  current_sha="$(read_release_value "$current_state" RELEASE_SHA)"
-  current_backend="$(read_release_value "$current_state" BACKEND_RELEASE)"
-  current_frontend="$(read_release_value "$current_state" FRONTEND_RELEASE)"
+  load_release_environment "$current_state"
+  assert_running_release_environment
+  current_sha="$APP_RELEASE"
+  current_backend="$BACKEND_RELEASE"
+  current_frontend="$FRONTEND_RELEASE"
+  write_bound_release_state "$previous_state" "$current_state"
 else
-  current_sha="$head_sha"
-  current_backend="$(capture_running_image backend prism-backend "$bootstrap_tag" || printf 'local\n')"
-  current_frontend="$(capture_running_image frontend prism-frontend "$bootstrap_tag" || printf 'local\n')"
-  write_release_state \
-    "$previous_state" "$current_sha" "$current_backend" "$current_frontend" \
-    bootstrap none "$(current_alembic_revision)"
+  backend_container="$(service_container_id backend || true)"
+  frontend_container="$(service_container_id frontend || true)"
+  current_backend=""
+  current_frontend=""
+  if [[ -n "$backend_container" || -n "$frontend_container" ]]; then
+    [[ -n "$backend_container" && -n "$frontend_container" ]] || fatal "缺少发布账本且运行服务不完整，拒绝猜测上一版本"
+    backend_image="$(docker inspect --format '{{.Config.Image}}' "$backend_container")"
+    frontend_image="$(docker inspect --format '{{.Config.Image}}' "$frontend_container")"
+    [[ "$backend_image" == prism-backend:* && "$frontend_image" == prism-frontend:* ]] || fatal "运行镜像缺少可验证发布标签"
+    current_backend="${backend_image#prism-backend:}"
+    current_frontend="${frontend_image#prism-frontend:}"
+    current_sha="$current_backend"
+    current_version="$(resolve_release_version "$current_sha" "$current_backend" "$current_frontend")"
+    export APP_RELEASE="$current_sha" APP_VERSION="$current_version"
+    export BACKEND_RELEASE="$current_backend" FRONTEND_RELEASE="$current_frontend"
+    BOUND_BACKEND_IMAGE_ID="$(release_image_id "$backend_image")"
+    BOUND_FRONTEND_IMAGE_ID="$(release_image_id "$frontend_image")"
+    export BOUND_BACKEND_IMAGE_ID BOUND_FRONTEND_IMAGE_ID
+    assert_running_release_environment
+    write_release_state \
+      "$previous_state" "$current_sha" "$current_backend" "$current_frontend" \
+      bootstrap none "$(current_alembic_revision)" "$current_version"
+  fi
 fi
 
 case "$target" in
@@ -164,8 +184,9 @@ export BACKEND_RELEASE="$desired_backend"
 export FRONTEND_RELEASE="$desired_frontend"
 write_release_state \
   "$pending_state" "$target_sha" "$desired_backend" "$desired_frontend" \
-  "$target" none "$(current_alembic_revision)"
+  "$target" none "$(current_alembic_revision)" "$app_version"
 validate_compose_environment
+assert_compose_release_environment
 log_info "发布预检通过(target=$target, version=$APP_VERSION, sha=$target_sha)"
 
 backup_file="none"
@@ -178,6 +199,7 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
   PRISM_MAINTENANCE_LOCK_HELD=1 ./verify-backup.sh "$backup_file"
   log_info "发布前备份已完成"
   compose build backend
+  prepare_admin_alembic
   run_admin_alembic upgrade head
   assert_alembic_at_head || fatal "Alembic 未位于唯一 head"
   # GeoLite2 以只读 bind 挂载进容器，而后端以非 root(prism, uid 10001)运行；
@@ -188,7 +210,7 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
     chmod 644 "$geolite_host" 2>/dev/null || log_warn "无法调整 GeoLite2 权限: $geolite_host"
   fi
   deployment_mutated=1
-  compose up -d --no-deps backend
+  compose up -d --no-deps --no-build --pull never backend
   wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || deploy_fatal "Backend 未恢复健康"
   smoke_backend "$target_sha" || deploy_fatal "Backend 冒烟失败"
 fi
@@ -199,7 +221,7 @@ fi
 if [[ "$target" == "all" || "$target" == "frontend" ]]; then
   compose build frontend
   deployment_mutated=1
-  compose up -d --no-deps frontend
+  compose up -d --no-deps --no-build --pull never frontend
   # assets 是命名卷挂载，必须把新镜像 dist 同步进卷，否则 index.html 引用的
   # 新哈希文件 404 导致页面空白。
   ./sync-frontend-assets.sh "$desired_frontend" || deploy_fatal "前端 assets 卷同步失败"
@@ -210,8 +232,11 @@ smoke_https "$desired_backend" || deploy_fatal "HTTPS/同源冒烟失败"
 alembic_revision="$(current_alembic_revision)"
 write_release_state \
   "$current_state" "$target_sha" "$desired_backend" "$desired_frontend" \
-  "$target" "$backup_file" "$alembic_revision"
+  "$target" "$backup_file" "$alembic_revision" "$app_version"
 rm -f "$pending_state"
 trap - ERR
 log_info "发布完成(target=$target, sha=$target_sha, alembic=$alembic_revision)"
+if ! assert_compose_release_environment default; then
+  log_warn "应用已按目标版本发布，但默认 Compose 环境仍漂移；校准默认配置前禁止直接重建"
+fi
 compose ps

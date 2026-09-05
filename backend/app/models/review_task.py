@@ -37,6 +37,7 @@ class ReviewTask(Base, IdMixin, TimestampMixin):
     end_time = Column(DateTime)
     duration_ms = Column(Integer, nullable=False, default=0, comment="耗时毫秒")
     error_message = Column(String(500))
+    coverage = Column(JSON, nullable=True, comment="真实执行阶段及覆盖缺口；历史任务未知")
     execution_token = Column(
         String(64),
         nullable=False,

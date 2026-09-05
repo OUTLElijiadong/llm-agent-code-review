@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "queried_at_utc": "2026-09-05T17:30:58Z",
+  "evidence_origin": "本任务先前已完成的生产只读 probe 工具输出；本文件为去敏摘录，不是重新查询生产的结果",
+  "runtime": {
+    "git_head": "4b1711adf0e79a95eed35be3ab17605fe10869cf",
+    "app_release": "4b1711adf0e79a95eed35be3ab17605fe10869cf",
+    "app_version": "3.8.3",
+    "backend_image": "prism-backend:4b1711adf0e79a95eed35be3ab17605fe10869cf",
+    "frontend_image": "prism-frontend:4b1711adf0e79a95eed35be3ab17605fe10869cf"
+  },
+  "default_compose_environment": {
+    "APP_RELEASE": "c8a80228f48b949daabe4520c880a8994540c08b",
+    "APP_VERSION": "3.8.1",
+    "BACKEND_RELEASE": "c8a80228f48b949daabe4520c880a8994540c08b",
+    "FRONTEND_RELEASE": "c8a80228f48b949daabe4520c880a8994540c08b"
+  },
+  "release_ledger": {
+    "current": {
+      "release_sha": "4b1711adf0e79a95eed35be3ab17605fe10869cf",
+      "app_version_recorded": false,
+      "app_version": null
+    },
+    "previous": {
+      "release_sha": "7f57071428e416deaa4d86cabccdc9073a1e6f00",
+      "app_version_recorded": false,
+      "app_version": null,
+      "verified_source_version": "3.8.2",
+      "version_source": "7f57071428e416deaa4d86cabccdc9073a1e6f00:VERSION"
+    }
+  },
+  "observed_drift": {
+    "default_environment_matches_runtime": false,
+    "legacy_current_load_compose_version": "3.8.1",
+    "legacy_previous_load_compose_version": "3.8.1",
+    "legacy_ops_check_detected_drift": false
+  },
+  "operation_boundary": {
+    "production_probe_read_only": true,
+    "production_writes_performed": false,
+    "production_restore_migration_restart_deploy_performed": false,
+    "production_requeried_for_this_archive": false,
+    "archive_write_scope": "/tmp/prism-release-20260906/production-release-preflight.json",
+    "full_dotenv_or_credentials_included": false,
+    "current_production_state_revalidated": false
+  }
+}

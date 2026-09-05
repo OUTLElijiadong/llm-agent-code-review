@@ -1,6 +1,7 @@
 """ReviewService 状态机、事务、权限与后台执行的隔离覆盖测试。"""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,6 +11,7 @@ from sqlalchemy.exc import PendingRollbackError
 from app.agents.events import AgentEventType
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.code_file import CodeFile
+from app.models.code_version import CodeVersion
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
@@ -216,6 +218,8 @@ def _make_file(db: Any, project_id: int, file_id: int = 100, *, name: str = "app
         status="active",
     )
     db.add(code_file)
+    db.add(CodeVersion(file_id=file_id, version_no=1, content=code_file.content,
+                       create_time=datetime.now(timezone.utc)))
     db.commit()
     return code_file
 
@@ -278,6 +282,7 @@ def _runtime_task() -> SimpleNamespace:
         summary=None,
         status="running",
         end_time=None,
+        coverage=None,
         duration_ms=0,
         error_message=None,
     )
@@ -353,7 +358,7 @@ def test_start_rejects_missing_project_and_partial_files(db: Any, monkeypatch: p
 
 def test_run_review_task_executes_with_degraded_optional_context(monkeypatch: pytest.MonkeyPatch) -> None:
     """经验和画像加载失败时后台入口仍应执行审查并释放全部资源。"""
-    task = SimpleNamespace(id=11, project_id=3, review_type="standard")
+    task = SimpleNamespace(id=11, project_id=3, review_type="standard", status="running")
     user = SimpleNamespace(id=22)
     project = SimpleNamespace(id=3, language="Python")
     code_file = SimpleNamespace(id=33)
@@ -380,6 +385,7 @@ def test_run_review_task_executes_with_degraded_optional_context(monkeypatch: py
     monkeypatch.setattr(review_service, "_enabled_review_profiles", lambda db, profiles: profiles)
     monkeypatch.setattr(review_service, "DeepSeekAgent", FakeDeepSeekAgent)
     monkeypatch.setattr(review_service, "_execute_review", _capture_execute)
+    monkeypatch.setattr(review_service, "load_task_inputs", lambda *args: [code_file])
     monkeypatch.setattr("app.services.experience_service.retrieve", _raise_experience)
     monkeypatch.setattr("app.services.personalization_service.build_review_context", _raise_persona)
     monkeypatch.setattr("app.utils.api_resolver.resolve_api_config", lambda *args, **kwargs: {"provider": "fake"})
@@ -414,7 +420,7 @@ def test_execute_review_success_normalizes_severity_and_emits_progress(monkeypat
     """成功流程应累计文件、归一化未知严重度、评分并发布完成事件。"""
     task = _runtime_task()
     user = SimpleNamespace(id=9)
-    files = [SimpleNamespace(id=1, file_name="a.py")]
+    files = [SimpleNamespace(id=1, file_name="a.py", content="value = 1")]
     issues = [SimpleNamespace(severity="严重"), SimpleNamespace(severity="unexpected")]
     events: list[tuple[AgentEventType, str]] = []
     commit_calls: list[Any] = []
@@ -458,7 +464,7 @@ def test_execute_review_success_normalizes_severity_and_emits_progress(monkeypat
     assert task.score == 77
     assert task.summary == "summary"
     assert task.duration_ms == 250
-    assert len(commit_calls) == 2
+    assert len(commit_calls) == 3
     assert (AgentEventType.PROGRESS, "code_reviewer") in events
     assert (AgentEventType.COMPLETE, "review_orchestrator") in events
 
@@ -472,6 +478,8 @@ def test_execute_review_preserves_cancelled_state(monkeypatch: pytest.MonkeyPatc
 
     def _raise_cancelled(*args: Any, **kwargs: Any) -> None:
         """模拟用户已经取消任务。"""
+        task.status = "cancelled"
+        task.duration_ms = 100
         raise review_service.TaskCancelledError("cancelled")
 
     def _capture_event(
@@ -490,12 +498,12 @@ def test_execute_review_preserves_cancelled_state(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(review_service, "_emit_review_event", _capture_event)
 
     review_service._execute_review(
-        SimpleNamespace(),
+        SimpleNamespace(rollback=lambda: None),
         None,
         None,
         task,
         user,
-        [SimpleNamespace(file_name="a.py")],
+        [SimpleNamespace(file_name="a.py", content="value = 1")],
         [],
         (SimpleNamespace(code="security"),),
         "",
@@ -524,6 +532,7 @@ def test_execute_review_records_failure_reason(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(review_service.time, "time", lambda: next(clock))
     monkeypatch.setattr(review_service, "_check_cancelled", lambda *args, **kwargs: None)
     monkeypatch.setattr(review_service, "_review_one_file", _raise_failure)
+    monkeypatch.setattr(review_service, "_update_issue_counts", lambda *args: None)
     monkeypatch.setattr(review_service, "_safe_commit", lambda *args, **kwargs: None)
     monkeypatch.setattr(review_service, "_emit_review_event", _capture_event)
 
@@ -533,7 +542,7 @@ def test_execute_review_records_failure_reason(monkeypatch: pytest.MonkeyPatch) 
         None,
         task,
         user,
-        [SimpleNamespace(file_name="bad.py")],
+        [SimpleNamespace(file_name="bad.py", content="value = 1")],
         [],
         (SimpleNamespace(code="general"),),
         "",

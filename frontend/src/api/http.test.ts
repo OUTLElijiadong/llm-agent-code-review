@@ -150,6 +150,15 @@ describe('http interceptors', () => {
     expect(harness.messageError).toHaveBeenLastCalledWith('Network Error')
   })
 
+  it('解析 Blob 形式的领域导出错误并保留下一步操作', async () => {
+    const data = { code: 40941, message: '领域报告不支持 PDF', next_action: '请导出真实领域 JSON', retryable: false }
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
+    await expect(harness.state.responseRejected!({
+      response: { status: 409, data: blob }, message: 'Request failed', config: { responseType: 'blob' },
+    })).rejects.toMatchObject(data)
+    expect(harness.messageError).toHaveBeenCalledWith('领域报告不支持 PDF')
+  })
+
   it('silently propagates an explicitly cancelled request', async () => {
     /** 验证主动取消不弹错误、不跳登录，只把取消对象交还调用方。 */
     const cancelled = { message: 'canceled' }

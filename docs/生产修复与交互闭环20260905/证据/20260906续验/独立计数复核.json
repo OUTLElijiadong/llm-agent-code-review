@@ -1,0 +1,147 @@
+{
+  "document_type": "independent_readonly_count_review",
+  "reviewed_at_utc": "2026-09-05T18:34:22.089075+00:00",
+  "status": "PASS_WITH_LOCAL_ONLY_BOUNDARY",
+  "scope": "有界只读计数复核，不重跑测试、不扩展审计",
+  "checks": {
+    "backend_counts": true,
+    "frontend_counts": true,
+    "login_counts": true,
+    "baseline_hashes": true,
+    "reviewed_inputs_unchanged": true
+  },
+  "backend": {
+    "tests": 2782,
+    "passed": 2782,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "unique_cases": 2782,
+    "suite_totals": {
+      "tests": 2782,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "matches_expected": true
+  },
+  "frontend": {
+    "files": 77,
+    "unique_files": 77,
+    "file_statuses": {
+      "passed": 77
+    },
+    "tests": 575,
+    "passed": 575,
+    "failed": 0,
+    "pending": 0,
+    "skipped": 0,
+    "todo": 0,
+    "other_statuses": {},
+    "report_success": true,
+    "report_suite_count": 178,
+    "matches_expected": true
+  },
+  "login": {
+    "window_start_utc": "2026-09-04T18:34:22.089075+00:00",
+    "window_end_utc": "2026-09-05T18:34:22.089075+00:00",
+    "sql": "SELECT status, COUNT(id) AS row_count FROM audit_log WHERE action = 'login' AND create_time >= ? AND create_time <= ? GROUP BY status ORDER BY status",
+    "parameters": [
+      "2026-09-04 18:34:22.089075",
+      "2026-09-05 18:34:22.089075"
+    ],
+    "connection_mode": "mode=ro&immutable=1",
+    "database_counts": {
+      "failed": 1,
+      "success": 7
+    },
+    "ui_text_counts": {
+      "success": 7,
+      "failed": 1
+    },
+    "recorded_json_counts": {
+      "failed": 1,
+      "success": 7
+    },
+    "database_sha256_before": "4eec75374525f352fbd5d28f15c7076768536220a65821999f24c14ca2531364",
+    "database_sha256_after": "4eec75374525f352fbd5d28f15c7076768536220a65821999f24c14ca2531364",
+    "database_unchanged": true,
+    "matches_expected": true
+  },
+  "baseline": {
+    "repository_sha256": "c5bcac0150b09cb827788dfcec3bc0d4e215979d0d37082fbf8e429c4b64967e",
+    "exported_sha256": "c5bcac0150b09cb827788dfcec3bc0d4e215979d0d37082fbf8e429c4b64967e",
+    "byte_identical": true,
+    "production_deployment_inferred": false
+  },
+  "layout_evidence": {
+    "390": {
+      "path": "/tmp/prism-release-20260906/admin-overview-390.png",
+      "existing_image_reviewed": true,
+      "scope": "仅检查390布局与安全徽章单行；不将该截图用作最终7/1登录计数证据。",
+      "observation": "既有390×844画面内徽章单行，卡片布局未见明显错位；不推导全页面或运行时验收结论。"
+    },
+    "320": {
+      "dom_evidence_path": "/tmp/prism-release-20260906/admin-overview-320-layout.json",
+      "dom_only": true,
+      "screenshot_excluded_from_visual_evidence": true,
+      "visual_verdict": "未作视觉验收，不发布320截图作视觉结论。"
+    }
+  },
+  "boundaries": {
+    "tests_rerun": false,
+    "production_access_performed": false,
+    "production_deployment_verified": false,
+    "all_accounts_verified": false,
+    "real_model_verified": false,
+    "browser_actions_performed": false,
+    "services_started": false,
+    "database_writes_performed": false,
+    "source_edits_performed": false,
+    "dotenv_read": false,
+    "git_commit_or_push_performed": false,
+    "interpretation": "仅验证既有本地隔离测试产物、SQLite快照计数和源码契约文件；不是生产部署、生产数据库真实性、全账号或真实模型验收。"
+  },
+  "material_discrepancies": [],
+  "input_fingerprints": {
+    "frontend_json": {
+      "path": "/tmp/prism-release-20260906/frontend-tests.json",
+      "sha256": "8bed39971469d427b4c290677e1c29570171a1ba04e6352714ac13fec7942590",
+      "bytes": 198437
+    },
+    "backend_xml": {
+      "path": "/tmp/prism-readonly-20260905-tests/release-backend-20260906.xml",
+      "sha256": "7a84c43ab06ed9f67708127308224e076135fcbd1eec1f47dd0b7ce9f78d960a",
+      "bytes": 413301
+    },
+    "ui_text": {
+      "path": "/tmp/prism-release-20260906/local-overview-after-login.txt",
+      "sha256": "62f2db4a677e42578c8fff1177bc92ea04f611bd9d9b5f1728d2e32303b62da9",
+      "bytes": 2676
+    },
+    "login_counts_json": {
+      "path": "/tmp/prism-release-20260906/local-db-login-counts.json",
+      "sha256": "b1033768650cc76f050b5525b6fe2939cc1e12ae01e133bc543fcac143946a26",
+      "bytes": 106
+    },
+    "database": {
+      "path": "/tmp/prism-repair-ui-20260905/isolated-ui.db",
+      "sha256": "4eec75374525f352fbd5d28f15c7076768536220a65821999f24c14ca2531364",
+      "bytes": 1294336
+    },
+    "repository_baseline": {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/openapi-baseline.json",
+      "sha256": "c5bcac0150b09cb827788dfcec3bc0d4e215979d0d37082fbf8e429c4b64967e",
+      "bytes": 945450
+    },
+    "exported_baseline": {
+      "path": "/tmp/prism-release-20260906/baseline-openapi.json",
+      "sha256": "c5bcac0150b09cb827788dfcec3bc0d4e215979d0d37082fbf8e429c4b64967e",
+      "bytes": 945450
+    }
+  },
+  "outputs": [
+    "/tmp/prism-release-20260906/independent-data-review.md",
+    "/tmp/prism-release-20260906/independent-data-review.json"
+  ]
+}

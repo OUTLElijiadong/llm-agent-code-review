@@ -236,6 +236,12 @@ select {
   .el-message-box {
     width: calc(100vw - 32px) !important;
   }
+
+  .el-message__content {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.user import User
@@ -297,8 +297,8 @@ class TestArchiveUpload:
 class TestPermissionCheck:
     """权限校验测试"""
 
-    def test_non_owner_rejected(self, db):
-        """非项目所有者应被拒绝"""
+    def test_non_owner_rejected(self, db, monkeypatch):
+        """非成员返回404防枚举，拒绝发生在读取上传内容或创建文件之前。"""
         user1 = _make_user(uid=1)
         user2 = _make_user(uid=2, role="user")
         project = _make_project(pid=1, uid=1)  # user1 的项目
@@ -308,10 +308,21 @@ class TestPermissionCheck:
         db.commit()
 
         upload_file = _make_upload_file("x.py", b"x = 1\n")
-        with pytest.raises(ForbiddenError):
+        upload_file.file.read = MagicMock(wraps=upload_file.file.read)
+        scanner_factory = MagicMock()
+        write_file = MagicMock(wraps=code_file_service._upload_single_file)
+        monkeypatch.setattr(code_file_service, "get_scanner", scanner_factory)
+        monkeypatch.setattr(code_file_service, "_upload_single_file", write_file)
+        with pytest.raises(NotFoundError) as denied:
             code_file_service.upload(
                 db=db, user=user2, project_id=1, upload_file=upload_file,
             )
+        assert denied.value.http_status == 404
+        assert denied.value.code == 40400
+        upload_file.file.read.assert_not_called()
+        scanner_factory.assert_not_called()
+        write_file.assert_not_called()
+        assert db.query(CodeFile).count() == 0
 
     def test_nonexistent_project_rejected(self, db):
         """不存在的项目应被拒绝"""

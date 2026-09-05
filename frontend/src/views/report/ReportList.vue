@@ -2,8 +2,14 @@
   <div class="report-list-page">
     <div class="page-header">
       <h2>审查报告列表</h2>
-      <p class="page-sub">审查任务完成后自动生成报告,可导出 Word/PDF</p>
+      <p class="page-sub">审查任务完成后自动生成报告；导出格式以报告来源和实际制品为准</p>
     </div>
+
+    <section v-if="exportErrorMessage" class="report-export-error" role="alert">
+      <strong>{{ exportErrorMessage }}</strong>
+      <span v-if="exportErrorNextAction">{{ exportErrorNextAction }}</span>
+      <el-button v-if="retryExportRow && retryExportFormat" size="small" @click="retryExport">重试导出</el-button>
+    </section>
 
     <el-card shadow="hover">
       <div class="filter-bar">
@@ -95,9 +101,9 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item v-if="canExport('json')" :command="'export:json'">导出 JSON</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('html')" :command="'export:html'">导出 HTML</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('pdf')" :command="'export:pdf'">导出 PDF</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('word')" :command="'export:word'">导出 Word</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('html') && !isDomainReport(row)" :command="'export:html'">导出 HTML</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('pdf') && !isDomainReport(row)" :command="'export:pdf'">导出 PDF</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('word') && !isDomainReport(row)" :command="'export:word'">导出 Word</el-dropdown-item>
                   <el-dropdown-item :command="'delete'" divided>
                     <span class="danger-item">删除报告</span>
                   </el-dropdown-item>
@@ -154,6 +160,14 @@ const canStartReview = computed(() => userStore.hasPermission('review:start'))
 const dateRange = ref<[string, string] | null>(null)
 /** 当前正在导出的任务 ID(用于导出按钮 loading 态),null 表示无操作 */
 const exportingTaskId = ref<number | null>(null)
+const exportErrorMessage = ref('')
+const exportErrorNextAction = ref('')
+const retryExportRow = ref<ReportListItem | null>(null)
+const retryExportFormat = ref<ReportFormat | null>(null)
+
+function isDomainReport(row: ReportListItem): boolean {
+  return row.source?.type === 'sandbox_test' || row.source?.type === 'pentest'
+}
 
 function canExport(format: ReportFormat): boolean {
   return userStore.hasPermission(`report:export:${format}`)
@@ -231,7 +245,16 @@ function downloadBlob(blob: Blob, filename: string): void {
  */
 async function handleExport(row: ReportListItem, format: ReportFormat): Promise<void> {
   if (!canExport(format)) return
+  if (exportingTaskId.value !== null) return
+  if (isDomainReport(row) && format !== 'json') {
+    showExportError({ message: `领域报告不支持 ${format.toUpperCase()}`, next_action: '请导出真实领域 JSON' }, format, row)
+    return
+  }
   exportingTaskId.value = row.task_id
+  exportErrorMessage.value = ''
+  exportErrorNextAction.value = ''
+  retryExportRow.value = null
+  retryExportFormat.value = null
   try {
     const blob = await exportReport(row.task_id, format, 'detailed')
     const extMap: Record<ReportFormat, string> = {
@@ -240,10 +263,25 @@ async function handleExport(row: ReportListItem, format: ReportFormat): Promise<
     const taskName = row.task_name || `task_${row.task_id}`
     downloadBlob(blob, `review_report_${taskName}_${row.task_id}.${extMap[format]}`)
     ElMessage.success(`${format.toUpperCase()} 报告导出成功`)
-  } catch {
-    ElMessage.error(`${format.toUpperCase()} 报告导出失败`)
+  } catch (error) {
+    showExportError(error, format, row)
   } finally {
     exportingTaskId.value = null
+  }
+}
+
+function showExportError(error: unknown, format: ReportFormat, row?: ReportListItem): void {
+  const payload = error as { message?: string; next_action?: string }
+  exportErrorMessage.value = payload?.message || `${format.toUpperCase()} 报告导出失败`
+  exportErrorNextAction.value = payload?.next_action || '请检查报告状态后重试'
+  retryExportRow.value = row ?? null
+  retryExportFormat.value = row && isDomainReport(row) ? 'json' : (row ? format : null)
+  ElMessage.error(exportErrorMessage.value)
+}
+
+function retryExport(): void {
+  if (retryExportRow.value && retryExportFormat.value) {
+    void handleExport(retryExportRow.value, retryExportFormat.value)
   }
 }
 

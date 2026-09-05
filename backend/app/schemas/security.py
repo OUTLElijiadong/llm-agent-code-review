@@ -197,10 +197,29 @@ class TrendPointOut(BaseModel):
     high: int = 0
 
 
+class IssueSourceSummaryOut(BaseModel):
+    """统计窗口内各任务来源的全部发现；已排除渗透发现不计入严重度分布。"""
+
+    source: str
+    total_issues: int = 0
+    severity: dict[str, int] = Field(default_factory=dict)
+    confirmed: int = 0
+    refuted: int = 0
+
+
 class SecurityDashboardSummaryOut(BaseModel):
     """工作台安全态势汇总"""
 
     user_scope: str = Field("self", description="self / global(admin)")
+    issue_scope: str = Field(
+        "review_issue_security", description="既有四级指标、热点和趋势仅统计标准问题表的安全漏洞子集",
+    )
+    score_scope: str = Field(
+        "latest_successful_task_per_project", description="每项目最新成功任务的原始评分，含0分，不重算领域分数",
+    )
+    source_summaries: List[IssueSourceSummaryOut] = Field(
+        default_factory=list, description="按来源聚合全部发现，包括沙箱与渗透",
+    )
     project_count: int = 0
     scanned_project_count: int = 0
     avg_risk_score: Optional[int] = None

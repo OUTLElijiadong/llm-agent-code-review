@@ -1,6 +1,6 @@
 """Agent 治理调度服务。
 
-本阶段持久化任务定义与运行记录，并预留 APScheduler 接入点。
+持久化任务定义与运行记录，并同步当前进程的 APScheduler 计划。
 
 v3.0 AgentSkill 升级新增:
 - Skill 调度任务类型: skill_evolution / skill_proactive
@@ -17,7 +17,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.agent_governance import AgentJob, AgentJobRun
 from app.models.user import User
 from app.services import agent_knowledge_service, agent_memory_service
@@ -278,20 +278,32 @@ def update_job(db: Session, job_id: int, payload: dict, *, actor: Optional[User]
     Raises:
         NotFoundError: 任务不存在。
     """
-    job = db.get(AgentJob, job_id)
-    if not job:
-        raise NotFoundError("调度任务不存在", code=40400)
-    if requires_super_admin(job.job_type) and not can_access_restricted_jobs(db, actor):
-        raise ForbiddenError("仅超级管理员 admin 可修改受限调度任务", code=40322)
-    if payload.get("schedule") is not None:
-        job.schedule = payload["schedule"]
-    if payload.get("status") is not None:
-        job.status = payload["status"]
-    if payload.get("config_json") is not None:
-        job.config_json = json.dumps(payload["config_json"], ensure_ascii=False)
-    db.commit()
-    db.refresh(job)
-    return job
+    from app.services import agent_scheduler_runtime
+
+    with agent_scheduler_runtime.job_configuration_lock:
+        try:
+            job = db.get(AgentJob, job_id, populate_existing=True, with_for_update=True)
+            if not job:
+                raise NotFoundError("调度任务不存在", code=40400)
+            if requires_super_admin(job.job_type) and not can_access_restricted_jobs(db, actor):
+                raise ForbiddenError("仅超级管理员 admin 可修改受限调度任务", code=40322)
+            status = payload.get("status") if payload.get("status") is not None else job.status
+            if status not in {"enabled", "disabled"}:
+                raise ValidationError("任务状态必须为 enabled 或 disabled")
+            schedule = payload.get("schedule") if payload.get("schedule") is not None else job.schedule
+            if payload.get("schedule") is not None or status == "enabled":
+                schedule = agent_scheduler_runtime.validate_schedule(schedule)
+            job.schedule = schedule
+            job.status = status
+            if payload.get("config_json") is not None:
+                job.config_json = json.dumps(payload["config_json"], ensure_ascii=False)
+            db.flush()
+            with agent_scheduler_runtime.synchronize_job(job):
+                db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        return job
 
 
 def run_job(
@@ -300,8 +312,9 @@ def run_job(
     *,
     actor: Optional[User] = None,
     system_scheduled: bool = False,
+    expected_schedule: Optional[str] = None,
 ) -> AgentJobRun:
-    """手动运行一个治理调度任务。
+    """运行治理任务；停用仅禁止后台计划，不禁止有权限的手动执行。
 
     Args:
         db: 数据库会话。
@@ -313,21 +326,29 @@ def run_job(
     Raises:
         NotFoundError: 任务不存在。
     """
-    job = db.get(AgentJob, job_id)
-    if not job:
-        raise NotFoundError("调度任务不存在", code=40400)
-    if (
-        requires_super_admin(job.job_type)
-        and not system_scheduled
-        and not can_access_restricted_jobs(db, actor)
-    ):
-        raise ForbiddenError("仅超级管理员 admin 可手动运行受限调度任务", code=40322)
-    if job.job_type in _SKILL_JOB_TYPES and not settings.skill_scheduler_enabled:
-        return _record_skipped_run(db, job, reason="skill_scheduler_disabled")
-    run = AgentJobRun(job_id=job.id, status="running", started_at=_utcnow())
-    db.add(run)
-    db.commit()
-    db.refresh(run)
+    from app.services import agent_scheduler_runtime
+
+    with agent_scheduler_runtime.job_configuration_lock:
+        job = db.get(AgentJob, job_id, populate_existing=True, with_for_update=True)
+        if not job:
+            raise NotFoundError("调度任务不存在", code=40400)
+        if (
+            requires_super_admin(job.job_type)
+            and not system_scheduled
+            and not can_access_restricted_jobs(db, actor)
+        ):
+            raise ForbiddenError("仅超级管理员 admin 可手动运行受限调度任务", code=40322)
+        if system_scheduled:
+            if job.status != "enabled":
+                return _record_skipped_run(db, job, reason="job_disabled")
+            if job.schedule == "manual" or (expected_schedule is not None and job.schedule != expected_schedule):
+                return _record_skipped_run(db, job, reason="schedule_changed")
+        if job.job_type in _SKILL_JOB_TYPES and not settings.skill_scheduler_enabled:
+            return _record_skipped_run(db, job, reason="skill_scheduler_disabled")
+        run = AgentJobRun(job_id=job.id, status="running", started_at=_utcnow())
+        db.add(run)
+        db.commit()
+        db.refresh(run)
     try:
         result = _execute_job(db, job)
         # 真实失败均需落入运行记录；安全监控只有在“部分数据源可用”时

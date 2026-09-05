@@ -39,6 +39,29 @@ function isSilent(config: AxiosRequestConfig | undefined, data: Resp | undefined
   return typeof code === 'number' && codes.includes(code)
 }
 
+async function readBlobText(blob: Blob): Promise<string> {
+  if (typeof blob.text === 'function') return blob.text()
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('无法读取错误响应'))
+    reader.readAsText(blob)
+  })
+}
+
+async function parseBlobError(data: unknown): Promise<Resp | undefined> {
+  if (!(data instanceof Blob)) return data as Resp | undefined
+  try {
+    const text = await readBlobText(data)
+    const parsed = JSON.parse(text) as Resp
+    return typeof parsed?.code === 'number' && typeof parsed?.message === 'string'
+      ? parsed
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   // 慢推理模型单次调用可达 ~90s+,聊天为多次调用串联;
@@ -66,11 +89,11 @@ http.interceptors.response.use(
     }
     return Promise.reject(data)
   },
-  (err: AxiosError<Resp>) => {
+  async (err: AxiosError<Resp | Blob>) => {
     // 主动取消属于正常交互，不弹全局错误，也不触发鉴权跳转。
     if (axios.isCancel(err)) return Promise.reject(err)
     const status = err.response?.status
-    const data = err.response?.data
+    const data = await parseBlobError(err.response?.data)
     if (status === 401) {
       // 并发请求可能同时 401,只处理一次:清 token、跳登录、弹一次错,
       // 避免"缺少token"等错误消息反复弹出刷屏。

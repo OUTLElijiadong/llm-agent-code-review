@@ -31,7 +31,7 @@ from app.ai.scoring import compute_score_breakdown
 from app.ai.security_patterns import list_patterns, scan_secrets
 from app.ai.security_static_rules import apply_static_rules, list_static_rules
 from app.core.config import settings
-from app.core.exceptions import AppError, ConflictError
+from app.core.exceptions import AppError, ConflictError, ValidationError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
@@ -39,6 +39,7 @@ from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services import project_source_service
 from app.services.project_member_service import get_visible_project_ids, require_project_access
+from app.services.review_input_service import validate_review_input
 from app.utils.encoding_utils import MAX_AUDIT_TEXT_LINES_PER_FILE
 from app.utils.source_archive_gate import source_archive_workload
 
@@ -317,9 +318,17 @@ class SecuritySentinelAgent(BaseAgent):
         return None
 
     def _authz_project(self, project: Project) -> Optional[AgentResult]:
-        if self._user is None or self._user.role in {"admin", "super_admin"}:
-            return None
-        if project.user_id == self._user.id:
+        if self._db is None:
+            return AgentResult(success=False, error="DB 未注入")
+        if self._user is None:
+            current = (
+                self._db.query(Project)
+                .populate_existing()
+                .filter(Project.id == project.id)
+                .one_or_none()
+            )
+            if current is None or current.status in {"deleted", "quarantined"}:
+                return AgentResult(success=False, error="无权访问该项目")
             return None
         try:
             require_project_access(self._db, project.id, self._user, need_write=False)
@@ -328,9 +337,17 @@ class SecuritySentinelAgent(BaseAgent):
         return None
 
     def _authz_task(self, task: ReviewTask) -> Optional[AgentResult]:
-        if self._user is None or self._user.role in {"admin", "super_admin"}:
-            return None
-        if task.user_id == self._user.id:
+        if self._db is None:
+            return AgentResult(success=False, error="DB 未注入")
+        if self._user is None:
+            project = (
+                self._db.query(Project)
+                .populate_existing()
+                .filter(Project.id == task.project_id)
+                .one_or_none()
+            )
+            if project is None or project.status in {"deleted", "quarantined"}:
+                return AgentResult(success=False, error="无权访问该任务")
             return None
         try:
             require_project_access(self._db, task.project_id, self._user, need_write=False)
@@ -339,7 +356,17 @@ class SecuritySentinelAgent(BaseAgent):
         return None
 
     def _authz_file(self, file: CodeFile) -> Optional[AgentResult]:
-        if self._user is None or self._user.role in {"admin", "super_admin"}:
+        if self._db is None:
+            return AgentResult(success=False, error="DB 未注入")
+        if self._user is None:
+            project = (
+                self._db.query(Project)
+                .populate_existing()
+                .filter(Project.id == file.project_id)
+                .one_or_none()
+            )
+            if project is None or project.status in {"deleted", "quarantined"}:
+                return AgentResult(success=False, error="无权访问该文件")
             return None
         try:
             require_project_access(self._db, file.project_id, self._user, need_write=False)
@@ -403,6 +430,23 @@ class SecuritySentinelAgent(BaseAgent):
             return err
 
         t0 = time.time()
+        try:
+            validate_review_input(file)
+        except ValidationError as exc:
+            error = str(exc)
+            duration_ms = int((time.time() - t0) * 1000)
+            self._emit(
+                AgentEventType.FAILED, ctx, message=error,
+                payload={"scope": "file", "file_id": file_id, "scan_depth": scan_depth,
+                         "phase": "input_validation", "failure_kind": "empty_scan_input"},
+            )
+            return AgentResult(
+                success=False, error=error, failure_kind="empty_scan_input",
+                data={"findings": [], "file_count": 0, "risk_score": None, "summary": error,
+                      "compliance": {"scan_complete": False, "failure_kind": "empty_scan_input"},
+                      "duration_ms": duration_ms},
+                model=self._model, duration_ms=duration_ms,
+            )
         self._emit(
             AgentEventType.DISPATCH, ctx,
             message=f"开始扫描文件 {file.file_name}",
@@ -647,23 +691,6 @@ class SecuritySentinelAgent(BaseAgent):
             self._user,
             project_id,
         )
-        if not files:
-            if archive_audit_active:
-                project_source_service.finish_source_archive_audit(
-                    self._db,
-                    project_id,
-                    "failed",
-                    {"error": "项目下没有可扫描的代码文件"},
-                    audit_run_id=audit_run_id,
-                )
-            return AgentResult(success=False, error="项目下没有可扫描的代码文件")
-        source_archive, source_archive_filename = project_source_service.build_source_archive(
-            self._db,
-            self._user,
-            project_id,
-        )
-        source_archive_sha256 = hashlib.sha256(source_archive).hexdigest()
-        top_limit = max(1, min(200, int(top_n)))
         all_files_sorted = sorted(
             files,
             key=lambda item: ((item.file_path or item.file_name or "").lower(), item.id),
@@ -672,6 +699,48 @@ class SecuritySentinelAgent(BaseAgent):
             file for file in all_files_sorted
             if not bool(file.is_binary) and bool((file.content or "").strip())
         ]
+        if not archive_text_files:
+            error = "项目下没有可扫描的有效非空文本，空文件和二进制文件不能生成审计结论"
+            duration_ms = int((time.time() - t0) * 1000)
+            result_data = {
+                "scan_mode": scan_mode,
+                "failure_kind": "empty_scan_input",
+                "error": error,
+                "findings": [],
+                "total_file_count": len(files),
+                "scanned_file_count": 0,
+                "archive_text_file_count": 0,
+                "archive_text_source_chars": 0,
+                "binary_or_empty_file_count": len(files),
+                "semantic_source_chars": 0,
+                "semantic_complete": False,
+                "audit_complete": False,
+                "coverage_ratio": 0,
+                "duration_ms": duration_ms,
+            }
+            self._emit(
+                AgentEventType.FAILED, ctx, message=error,
+                payload={"phase": "input_validation", **result_data},
+            )
+            if archive_audit_active:
+                project_source_service.finish_source_archive_audit(
+                    self._db,
+                    project_id,
+                    "failed",
+                    result_data,
+                    audit_run_id=audit_run_id,
+                )
+            return AgentResult(
+                success=False, error=error, data=result_data, model=self._model,
+                duration_ms=duration_ms, failure_kind="empty_scan_input",
+            )
+        source_archive, source_archive_filename = project_source_service.build_source_archive(
+            self._db,
+            self._user,
+            project_id,
+        )
+        source_archive_sha256 = hashlib.sha256(source_archive).hexdigest()
+        top_limit = max(1, min(200, int(top_n)))
         archive_text_source_chars = sum(
             len(file.content or "") for file in archive_text_files
         )
@@ -1401,6 +1470,37 @@ class SecuritySentinelAgent(BaseAgent):
         projects = q.order_by(Project.id.asc()).all()
 
         t0 = time.time()
+        if not projects:
+            error = "当前账号没有可见且可扫描的活跃项目，未执行安全扫描，不能生成审计结论。"
+            duration_ms = int((time.time() - t0) * 1000)
+            self._emit(
+                AgentEventType.FAILED, ctx, message=error,
+                payload={"scope": "all_projects", "project_count": 0,
+                         "phase": "input_validation", "failure_kind": "empty_scan_input"},
+            )
+            return AgentResult(
+                success=False,
+                error=error,
+                failure_kind="empty_scan_input",
+                data={
+                    "findings": [],
+                    "compliance": {
+                        "project_count": 0,
+                        "scanned_project_count": 0,
+                        "skipped_project_count": 0,
+                        "project_errors": [],
+                        "scan_complete": False,
+                        "failure_kind": "empty_scan_input",
+                    },
+                    "risk_score": None,
+                    "summary": error,
+                    "file_count": 0,
+                    "duration_ms": duration_ms,
+                },
+                model=self._model,
+                duration_ms=duration_ms,
+            )
+
         self._emit(
             AgentEventType.DISPATCH, ctx,
             message=f"开始全量扫描 {len(projects)} 个项目",
@@ -1411,78 +1511,6 @@ class SecuritySentinelAgent(BaseAgent):
                 "trace_dataflow": trace_dataflow,
             },
         )
-
-        if not projects:
-            duration_ms = int((time.time() - t0) * 1000)
-            return AgentResult(
-                success=True,
-                data={
-                    "findings": [],
-                    "threat_model": {
-                        "entry_points": [],
-                        "data_flows": [],
-                        "api_endpoints": [],
-                        "code_links": [],
-                        "attack_surface_summary": "当前账号暂无可扫描的活跃项目。",
-                    },
-                    "discussion": self._build_multi_agent_discussion([], {
-                        "entry_points": [],
-                        "data_flows": [],
-                        "api_endpoints": [],
-                        "code_links": [],
-                    }),
-                    "compliance": {
-                        "project_count": 0,
-                        "scanned_project_count": 0,
-                        "skipped_project_count": 0,
-                        "project_errors": [],
-                        "raw_candidate_count": 0,
-                        "deduplicated_finding_count": 0,
-                        "finding_total_count": 0,
-                        "retained_finding_count": 0,
-                        "scored_finding_count": 0,
-                        "refuted_finding_count": 0,
-                        "findings_truncated": False,
-                        "finding_severity_counts": {
-                            "严重": 0,
-                            "高": 0,
-                            "中": 0,
-                            "低": 0,
-                        },
-                        "raw_finding_severity_counts": {
-                            "严重": 0,
-                            "高": 0,
-                            "中": 0,
-                            "低": 0,
-                        },
-                        "verification": {
-                            "confirmed": 0,
-                            "refuted": 0,
-                            "reviewed": 0,
-                        },
-                        "entry_point_total_count": 0,
-                        "retained_entry_point_count": 0,
-                        "returned_entry_point_count": 0,
-                        "api_endpoint_total_count": 0,
-                        "retained_api_endpoint_count": 0,
-                        "returned_api_endpoint_count": 0,
-                        "data_flow_total_count": 0,
-                        "retained_data_flow_count": 0,
-                        "returned_data_flow_count": 0,
-                        "code_link_total_count": 0,
-                        "retained_code_link_count": 0,
-                        "returned_code_link_count": 0,
-                        "graph_items_truncated": False,
-                        "response_graph_truncated": False,
-                    },
-                    "risk_score": 100,
-                    "summary": "当前账号暂无可扫描的活跃项目。",
-                    "file_count": 0,
-                    "duration_ms": duration_ms,
-                },
-                model=self._model,
-                duration_ms=duration_ms,
-            )
 
         all_findings: List[dict] = []
         all_entries: List[dict] = []

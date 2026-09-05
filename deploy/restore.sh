@@ -50,7 +50,6 @@ done
 [[ "$confirmation" == "RESTORE_PRODUCTION" ]] || fatal "确认口令不匹配，恢复已取消"
 require_commands docker gzip
 validate_compose_environment
-
 lock_dir="$(maintenance_lock_path)"
 mkdir -p "$(dirname "$lock_dir")"
 acquire_directory_lock "$lock_dir"
@@ -61,11 +60,17 @@ on_restore_exit() {
   exit_code="$?"
   release_directory_lock "$lock_dir"
   if [[ "$exit_code" != "0" ]]; then
-    log_warn "生产保持维护状态，需人工确认恢复结果"
+    log_warn "恢复未完成，需核对失败阶段与数据库状态"
   fi
   return "$exit_code"
 }
 trap on_restore_exit EXIT
+
+load_release_environment "${RELEASE_STATE_DIR:-.releases}/current.env"
+assert_compose_release_environment
+prepare_admin_alembic
+database_name="$(compose exec -T mysql sh -ec 'printf "%s" "$MYSQL_DATABASE"')"
+[[ "$database_name" =~ ^[A-Za-z0-9_]+$ ]] || fatal "MYSQL_DATABASE 名称不安全"
 
 ./verify-backup.sh "$backup_file"
 
@@ -84,10 +89,9 @@ restore_database_file() {
 }
 
 log_warn "即将停止 Backend 并重建生产应用数据库"
+assert_bound_release_images
 compose stop backend
 
-database_name="$(compose exec -T mysql sh -ec 'printf "%s" "$MYSQL_DATABASE"')"
-[[ "$database_name" =~ ^[A-Za-z0-9_]+$ ]] || fatal "MYSQL_DATABASE 名称不安全"
 compose exec -T mysql sh -ec '
   db="$1"
   [[ "$db" =~ ^[A-Za-z0-9_]+$ ]]
@@ -108,7 +112,8 @@ if [[ "$restore_rc" != "0" ]]; then
     compose stop backend
     restore_database_file "$safety_backup"
     run_admin_alembic upgrade head
-    compose up -d --no-deps backend
+    assert_bound_release_images
+    compose up -d --no-deps --no-build --pull never backend
     wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-180}" || fatal "安全备份回填后 Backend 未恢复健康"
     log_warn "已回填事前数据并恢复 Backend"
   else
@@ -119,6 +124,7 @@ fi
 
 run_admin_alembic upgrade head
 assert_alembic_at_head || fatal "恢复后 Alembic 未位于 head，Backend 保持停止"
-compose up -d --no-deps backend
+assert_bound_release_images
+compose up -d --no-deps --no-build --pull never backend
 wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-180}" || fatal "恢复后 Backend 未恢复健康"
 log_info "生产数据库恢复完成并通过健康检查"

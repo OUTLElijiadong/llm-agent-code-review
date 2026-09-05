@@ -362,6 +362,7 @@ async function logout(): Promise<void> {
 
   .admin-sidebar {
     width: 100%;
+    max-width: 100%;
     height: auto;
     min-height: auto;
     flex-basis: auto;
@@ -386,6 +387,55 @@ async function logout(): Promise<void> {
 
   .admin-content {
     padding: 16px;
+  }
+
+  .admin-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 14px 16px;
+  }
+
+  .admin-header > div:first-child {
+    min-width: 0;
+    flex: 1 1 220px;
+  }
+
+  .admin-user {
+    flex: 1 1 100%;
+    min-width: 0;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-brand {
+    height: 64px;
+    padding: 0 14px;
+  }
+
+  .admin-logo {
+    font-size: 16px;
+  }
+
+  .admin-nav {
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .admin-nav-item {
+    min-height: 38px;
+    padding: 0 10px;
+    font-size: 14px;
+  }
+
+  .admin-content {
+    padding: 12px 10px 24px;
+  }
+
+  .admin-header h1 {
+    font-size: 20px;
   }
 }
 

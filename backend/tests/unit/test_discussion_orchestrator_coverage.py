@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pytest
@@ -17,6 +18,8 @@ from app.ai import discussion_orchestrator as module
 from app.ai.discussion_orchestrator import DiscussionOrchestrator
 from app.ai.multi_agent import GENERAL_AGENT, SECURITY_AGENT
 from app.ai.result_parser import Issue
+from app.models.code_file import CodeFile
+from app.models.code_version import CodeVersion
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
@@ -791,12 +794,22 @@ def test_create_review_task_persists_task_and_file_link(
         return db
 
     monkeypatch.setattr(module, "SessionLocal", get_session)
+    db.add(CodeFile(
+        id=5, project_id=4, file_name="demo.py", file_path="demo.py",
+        language="python", content="value = 1\n", version_no=1, is_binary=0, status="active",
+    ))
+    db.add(CodeVersion(
+        file_id=5, version_no=1, content="value = 1\n", create_time=datetime.now(timezone.utc),
+    ))
+    db.commit()
 
     task_id = module._create_review_task(
         user_id=3,
         project_id=4,
         file_id=5,
         file_name="demo.py",
+        code="value = 1\n",
+        language="python",
         review_type="full",
         model_name="fake-model",
         profiles=(GENERAL_AGENT, SECURITY_AGENT),
@@ -814,6 +827,9 @@ def test_create_review_task_persists_task_and_file_link(
         {"code": "security", "name": "安全审查代理"},
     ]
     assert link.file_id == 5
+    assert link.version_no == 1
+    assert len(link.content_sha256) == 64
+    assert link.file_snapshot["file_name"] == "demo.py"
 
 
 def test_extract_issues_parses_json_and_isolates_logging_failure(
@@ -1384,6 +1400,9 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
     monkeypatch.setattr(module, "_create_review_task", create_task)
     monkeypatch.setattr(module, "_finalize_review", finalize_review)
     monkeypatch.setattr(module, "new_trace_id", fixed_trace_id)
+    monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
+        "status": "success" if "review" in finalized else "running", "error": "",
+    })
     monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
     monkeypatch.setattr(module, "AgentEventBus", EventBusProvider)
     EventBusProvider.current = event_bus
@@ -1482,6 +1501,7 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
     monkeypatch.setattr(module, "_create_review_task", create_task)
     monkeypatch.setattr(module, "_cancel_review_task", cancel_review)
     monkeypatch.setattr(module, "_finalize_review", finalize_review)
+    monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {"status": "cancelled", "error": ""})
 
     run = asyncio.create_task(
         orchestrator.start_discussion(
@@ -1512,7 +1532,7 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
 async def test_start_discussion_handles_missing_session_and_setup_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """缺失会话应直接返回，环境与任务创建失败时仍应完成降级关闭。
+    """缺失会话应直接返回，任务创建失败必须失败关闭，不再执行讨论。
 
     Args:
         monkeypatch: Pytest 属性替换工具。
@@ -1594,18 +1614,19 @@ async def test_start_discussion_handles_missing_session_and_setup_failures(
 
     await orchestrator.start_discussion(
         "degraded",
-        (),
-        "",
+        (GENERAL_AGENT,),
+        "value = 1\n",
         "python",
         "degraded.py",
         7,
         8,
         9,
-        max_rounds=0,
+        max_rounds=1,
     )
 
     assert orchestrator._env is None
     assert orchestrator._task_id == 0
     assert session.status == "concluded"
     assert session.report_task_id == 0
-    assert len(session.turns) == 2
+    assert len(session.turns) == 1
+    assert "database unavailable" in session.turns[0].content

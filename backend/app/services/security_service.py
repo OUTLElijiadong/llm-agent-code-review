@@ -22,6 +22,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services.project_member_service import get_visible_project_ids
+from app.services.report_service import load_task_issue_stats
 
 _SEVERITY_KEYS = ("严重", "高", "中", "低")
 
@@ -67,10 +68,20 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     """
     days = max(1, min(365, days))
     project_ids, scope = _project_ids_for_user(db, user)
+    if project_ids:
+        project_ids = [row[0] for row in db.query(Project.id).filter(
+            Project.id.in_(project_ids), Project.status != "deleted",
+        ).all()]
+    source_scope = {
+        "issue_scope": "review_issue_security",
+        "score_scope": "latest_successful_task_per_project",
+        "source_summaries": [],
+    }
 
     # 空项目快速路径
     if not project_ids:
         return {
+            **source_scope,
             "user_scope": scope,
             "project_count": 0,
             "scanned_project_count": 0,
@@ -88,7 +99,7 @@ def get_dashboard_summary(db: Session, user: Optional[User],
 
     # 项目下所有任务(排除已删除任务,避免删除报告后安全统计虚高)
     task_rows = (
-        db.query(ReviewTask.id, ReviewTask.project_id, ReviewTask.score)
+        db.query(ReviewTask)
         .filter(ReviewTask.project_id.in_(project_ids),
                 ReviewTask.status != "deleted")
         .all()
@@ -96,12 +107,13 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     task_ids_by_project: dict[int, list[int]] = defaultdict(list)
     score_by_project: dict[int, int] = {}
     latest_scored_task_by_project: dict[int, int] = {}
-    for task_id, pid, score in task_rows:
+    for task in task_rows:
+        task_id, pid, score = task.id, task.project_id, task.score
         task_ids_by_project[pid].append(task_id)
         # 任务 id 单调递增；只保留每个项目最新一条有效评分。
         if (
-            score is not None
-            and score > 0
+            task.status == "success"
+            and score is not None
             and task_id > latest_scored_task_by_project.get(pid, -1)
         ):
             score_by_project[pid] = score
@@ -110,6 +122,7 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     all_task_ids = [tid for ids in task_ids_by_project.values() for tid in ids]
     if not all_task_ids:
         return {
+            **source_scope,
             "user_scope": scope,
             "project_count": len(project_ids),
             "scanned_project_count": 0,
@@ -127,7 +140,9 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     issues = (
         db.query(ReviewIssue)
         .filter(
-            ReviewIssue.task_id.in_(all_task_ids),
+            ReviewIssue.task_id.in_([
+                task.id for task in task_rows if task.review_type not in {"sandbox_test", "pentest"}
+            ]),
             ReviewIssue.issue_type == "安全漏洞",
             ReviewIssue.create_time >= cutoff,
         )
@@ -142,8 +157,8 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     owasp_counter: Counter[str] = Counter()
     issues_by_project: dict[int, list[ReviewIssue]] = defaultdict(list)
     task_to_project: dict[int, int] = {}
-    for tid, pid, _ in task_rows:
-        task_to_project[tid] = pid
+    for task in task_rows:
+        task_to_project[task.id] = task.project_id
     for i in issues:
         owasp = _infer_owasp_from_issue(i, agent._infer_owasp_cwe)
         if owasp:
@@ -161,7 +176,7 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     name_by_pid = {pid: name for pid, name in project_rows}
 
     # 风险评分: 平均 + 高风险项目排序
-    scored_pids = [pid for pid in score_by_project if score_by_project[pid] > 0]
+    scored_pids = list(score_by_project)
     avg_score: Optional[int] = (
         round(sum(score_by_project[pid] for pid in scored_pids) / len(scored_pids))
         if scored_pids else None
@@ -187,7 +202,20 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     # 趋势曲线: 按天聚合 (按 issue.create_time)
     trend = _build_trend(issues, days)
 
+    source_summaries: dict[str, dict] = {}
+    for item in load_task_issue_stats(db, task_rows, since=cutoff).values():
+        source = item["source"]["type"]
+        aggregate = source_summaries.setdefault(source, {
+            "source": source, "total_issues": 0, "severity": {}, "confirmed": 0, "refuted": 0,
+        })
+        for field in ("total_issues", "confirmed", "refuted"):
+            aggregate[field] += item[field]
+        for severity, count in item["severity"].items():
+            aggregate["severity"][severity] = aggregate["severity"].get(severity, 0) + count
+
     return {
+        **source_scope,
+        "source_summaries": list(source_summaries.values()),
         "user_scope": scope,
         "project_count": len(project_ids),
         "scanned_project_count": len(issues_by_project),

@@ -51,6 +51,12 @@ from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.schemas.review import ReviewStartIn
 from app.services.issue_merger import finding_to_issue, merge_findings_and_issues
+from app.services.review_input_service import (
+    freeze_task_inputs,
+    load_task_inputs,
+    validate_review_input,
+    verified_task_input_ids,
+)
 from app.services.rule_service import get_enabled_rules
 
 # 多 Agent 审查画像 → 注册中心 BaseAgent name 的映射(v2.2 真实调用 Agent)
@@ -126,13 +132,13 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
         NotFoundError: 项目或文件不存在
         ValidationError: 文件数量不合法
     """
-    project = db.get(Project, payload.project_id)
+    project = db.get(Project, payload.project_id, populate_existing=True, with_for_update=True)
     if not project:
         raise NotFoundError("项目不存在", code=40400)
     # v2.4: 改用 project_member 关系校验(owner/admin/reviewer 都可启动审查)
     from app.services.project_member_service import require_project_access
     require_project_access(db, project.id, user, need_write=False)
-    if not 1 <= len(payload.file_ids) <= 500:
+    if not 1 <= len(payload.file_ids) <= 500 or len(set(payload.file_ids)) != len(payload.file_ids):
         raise ValidationError("file_ids 需为 1-500 个", code=40001)
 
     files = (
@@ -142,10 +148,13 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
             CodeFile.project_id == project.id,
             CodeFile.status == "active",
         )
+        .with_for_update()
         .all()
     )
     if len(files) != len(payload.file_ids):
         raise NotFoundError("部分文件不存在", code=40400)
+    for code_file in files:
+        validate_review_input(code_file)
 
     project_lang = (project.language or "").strip().lower()
     rules = get_enabled_rules(db, user.id, language=project_lang)
@@ -166,19 +175,40 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
         rules_snapshot=[{"code": r.rule_code, "name": r.rule_name} for r in rules],
         start_time=datetime.now(timezone.utc),
         execution_token=uuid.uuid4().hex,
+        coverage={"stage": "queued", "completed_files": 0, "total_files": len(files)},
     )
-    db.add(task)
-    _safe_commit(db)
-    db.refresh(task)
-    db.add_all(ReviewTaskFile(task_id=task.id, file_id=f.id) for f in files)
-    _safe_commit(db)
+    try:
+        db.add(task)
+        db.flush()
+        freeze_task_inputs(db, task.id, files)
+        db.commit()
+        db.refresh(task)
+    except Exception:
+        db.rollback()
+        raise
 
-    threading.Thread(
-        target=_run_review_task,
-        args=(task.id, user.id, str(task.execution_token)),
-        name=f"review-task-{task.id}",
-        daemon=True,
-    ).start()
+    dispatch_token = str(task.execution_token)
+    try:
+        threading.Thread(
+            target=_run_review_task,
+            args=(task.id, user.id, dispatch_token),
+            name=f"review-task-{task.id}",
+            daemon=True,
+        ).start()
+    except Exception:
+        db.rollback()
+        error_message = "后台任务提交失败，请重试"
+        try:
+            _check_cancelled(db, task, dispatch_token, lock=True)
+            task.status = "failed"
+            task.error_message = error_message
+            task.end_time = datetime.now(timezone.utc)
+            _update_duration(task)
+            task.coverage = {**(task.coverage or {}), "stage": "failed"}
+            db.commit()
+        except (TaskCancelledError, TaskSupersededError):
+            db.rollback()
+        raise ValidationError(error_message, code=40001) from None
     logger.info(
         f"审查任务 #{task.id} 已提交后台执行 (type={review_type}, files={len(files)})",
     )
@@ -232,6 +262,7 @@ def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) ->
                 _RECOVERING_REVIEW_TASK_IDS.discard(task_id)
             return
         task = db.query(ReviewTask).filter(ReviewTask.id == task_id).one()
+        load_task_inputs(db, task_id)
         db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id).delete(
             synchronize_session=False,
         )
@@ -242,6 +273,9 @@ def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) ->
         task.medium_issues = 0
         task.low_issues = 0
         task.score = 0
+        task.score_version = None
+        task.score_breakdown = None
+        task.coverage = {"stage": "recovering", "completed_files": 0, "total_files": task.total_files}
         task.summary = None
         task.end_time = None
         task.duration_ms = 0
@@ -250,12 +284,19 @@ def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) ->
         _safe_commit(db, task)
     except Exception as exc:  # noqa: BLE001 - 恢复准备失败必须落库并隔离
         db.rollback()
-        task = db.get(ReviewTask, task_id)
-        if task is not None:
-            task.status = "failed"
-            task.error_message = f"重启后自动恢复失败: {exc}"[:500]
-            task.end_time = datetime.now(timezone.utc)
-            _safe_commit(db, task)
+        failed_task = db.query(ReviewTask).filter(
+            ReviewTask.id == task_id, ReviewTask.status == "running",
+            ReviewTask.execution_token.in_((previous_token, next_token)),
+        ).with_for_update().populate_existing().one_or_none()
+        if failed_task is not None:
+            failed_task.status = "failed"
+            failed_task.error_message = f"重启后自动恢复失败: {exc}"[:500]
+            failed_task.end_time = datetime.now(timezone.utc)
+            failed_task.coverage = {**(failed_task.coverage or {}), "stage": "failed",
+                                    "error": failed_task.error_message}
+            _update_issue_counts(db, failed_task)
+            _update_duration(failed_task)
+        db.commit()
         logger.exception("[recovery] 审查任务 #{} 恢复准备失败: {}", task_id, exc)
         with _RECOVERY_LOCK:
             _RECOVERING_REVIEW_TASK_IDS.discard(task_id)
@@ -282,6 +323,7 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
     """
     _REVIEW_SEMAPHORE.acquire()
     db = SessionLocal()
+    task = None
     try:
         task = db.get(ReviewTask, task_id)
         user = db.get(User, user_id)
@@ -293,7 +335,7 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
             if execution_token is not None
             else str(getattr(task, "execution_token", "") or "")
         )
-        if str(getattr(task, "execution_token", "") or "") != active_token:
+        if task.status != "running" or str(getattr(task, "execution_token", "") or "") != active_token:
             logger.info("[review] 后台任务 #{} 的执行租约已失效，跳过旧 Worker", task_id)
             return
 
@@ -359,13 +401,7 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
         api_config = resolve_api_config(db, user.id)
         # 保留共享实例参数兼容既有内部调用；各独立代理会创建隔离客户端。
         collab_agent = DeepSeekAgent(api_config=api_config)
-        files = (
-            db.query(CodeFile)
-            .join(ReviewTaskFile, ReviewTaskFile.file_id == CodeFile.id)
-            .filter(ReviewTaskFile.task_id == task.id)
-            .order_by(ReviewTaskFile.id.asc())
-            .all()
-        )
+        files = load_task_inputs(db, task.id)
 
         _execute_review(
             db,
@@ -379,8 +415,21 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
             experience_section,
             execution_token=active_token,
         )
+    except (TaskCancelledError, TaskSupersededError):
+        db.rollback()
     except Exception as e:
         logger.exception(e)
+        db.rollback()
+        if task is not None:
+            try:
+                _check_cancelled(db, task, execution_token, lock=True)
+                task.status = "failed"
+                task.error_message = str(e)[:500]
+                task.end_time = datetime.now(timezone.utc)
+                task.coverage = {**(task.coverage or {}), "stage": "failed"}
+                _safe_commit(db, task)
+            except (TaskCancelledError, TaskSupersededError):
+                db.rollback()
     finally:
         db.close()
         _REVIEW_SEMAPHORE.release()
@@ -536,15 +585,24 @@ def _execute_review(
                            f"审查任务 #{task.id} 启动",
                            agent_code=ac)
     try:
+        if not files or not profiles:
+            raise ValidationError("没有有效非空扫描输入或可用审查代理", code=40001)
+        for code_file in files:
+            validate_review_input(code_file)
         all_issues: list[ReviewIssue] = []
         for code_file in files:
-            _check_cancelled(db, task, execution_token)
+            _check_cancelled(db, task, execution_token, lock=True)
+            task.coverage = {**(task.coverage or {}), "stage": "analyzing", "current_file": code_file.file_name,
+                             "total_files": len(files), "completed_files": int(task.processed_files or 0),
+                             "completed_chunks": 0, "total_chunks": None}
+            _safe_commit(db, task)
             file_issues = _review_one_file(db, collab_agent, api_config, task, code_file, rules, user, profiles,
                                            experience_section=experience_section,
                                            execution_token=execution_token)
             all_issues.extend(file_issues)
             _check_cancelled(db, task, execution_token, lock=True)
             task.processed_files += 1
+            task.coverage = {**(task.coverage or {}), "completed_files": task.processed_files}
             _safe_commit(db)
             db.refresh(task)
             for ac in set(agent_codes):
@@ -582,6 +640,7 @@ def _execute_review(
         task.score_breakdown = score_breakdown
         task.summary = _build_summary(profiles, len(files), len(all_issues), task.score)
         task.status = "success"
+        task.coverage = {**(task.coverage or {}), "stage": "complete", "current_file": None}
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
         _safe_commit(db)
@@ -593,10 +652,7 @@ def _execute_review(
                                f"审查任务 #{task.id} 完成",
                                agent_code=ac)
     except TaskCancelledError:
-        task.status = "cancelled"
-        task.end_time = datetime.now(timezone.utc)
-        task.duration_ms = int((time.time() - t0) * 1000)
-        _safe_commit(db)
+        db.rollback()
         logger.info(f"审查任务 #{task.id} 已被用户取消")
         for ac in set(agent_codes):
             _emit_review_event(AgentEventType.FAILED, task, user,
@@ -620,6 +676,8 @@ def _execute_review(
         task.error_message = str(e)[:500]
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
+        _update_issue_counts(db, task)
+        task.coverage = {**(task.coverage or {}), "stage": "failed", "error": str(e)[:500]}
         _safe_commit(db)
         _emit_review_event(AgentEventType.FAILED, task, user,
                            f"审查任务 #{task.id} 失败: {task.error_message}")
@@ -665,6 +723,9 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
         logger.info(f"[review] 文件 {code_file.file_name} 为二进制,跳过审查")
         return []
 
+    validate_review_input(code_file)
+    failures: list[str] = []
+
     # ===== 引擎1:静态规则前置过滤(确定性命中,无 LLM 调用)=====
     static_findings: List[Finding] = []
     try:
@@ -676,7 +737,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                 agent_code="static_analyzer",
             )
     except Exception as e:
-        logger.warning(f"[review] 静态规则引擎执行失败,跳过: {e}")
+        failures.append(f"静态规则引擎失败: {e}")
 
     # ===== 引擎2:LLM 深度审查(分片 + 多代理协同)=====
     llm_findings: List[Finding] = []
@@ -689,18 +750,35 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
     # Agent 仍应获得一次独立调用，而不是被静态 Agent 注册表路径吞掉。
     use_collab = len(profiles) >= 2 or any(profile.is_custom for profile in profiles)
 
+    _check_cancelled(db, task, execution_token, lock=True)
+    task.coverage = {**(task.coverage or {}), "current_file": code_file.file_name,
+                     "completed_chunks": 0, "total_chunks": len(chunks)}
+    _safe_commit(db, task)
+
     for idx, chunk in enumerate(chunks):
-        if use_collab:
-            chunk_findings = _review_chunk_collaborative(
-                db, collab_agent, api_config, task, code_file, rules, user,
-                profiles, idx, chunk, experience_section=experience_section,
-            )
-        else:
-            chunk_findings = _review_chunk_sequential(
-                db, api_config, task, code_file, rules, user,
-                profiles, idx, chunk, experience_section=experience_section,
-            )
-        llm_findings.extend(chunk_findings)
+        _check_cancelled(db, task, execution_token)
+        try:
+            if use_collab:
+                chunk_findings = _review_chunk_collaborative(
+                    db, collab_agent, api_config, task, code_file, rules, user,
+                    profiles, idx, chunk, experience_section=experience_section,
+                )
+            else:
+                chunk_findings = _review_chunk_sequential(
+                    db, api_config, task, code_file, rules, user,
+                    profiles, idx, chunk, experience_section=experience_section,
+                )
+            llm_findings.extend(chunk_findings)
+        except ReviewCoverageError as exc:
+            llm_findings.extend(exc.findings)
+            failures.extend(exc.failures)
+            break
+        _check_cancelled(db, task, execution_token, lock=True)
+        task.coverage = {**(task.coverage or {}), "stage": "analyzing", "current_file": code_file.file_name,
+                         "completed_chunks": idx + 1, "total_chunks": len(chunks)}
+        _safe_commit(db, task)
+        _emit_review_event(AgentEventType.PROGRESS, task, user,
+                           f"{code_file.file_name}: 已完成分片 {idx + 1}/{len(chunks)}")
 
     # ===== 双引擎合并去重(T08 核心)=====
     # 将 LLM Findings 转换为 Issues(source="llm"),与静态 Findings 合并
@@ -721,6 +799,8 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
         _check_cancelled(db, task, execution_token, lock=True)
         db.add_all(issues_acc)
         db.commit()
+    if failures:
+        raise ReviewCoverageError(failures)
     return issues_acc
 
 
@@ -775,12 +855,14 @@ def _review_chunk_sequential(
         List[Finding]: 标准化漏洞发现列表(可能为空)
     """
     findings: List[Finding] = []
+    failures: list[str] = []
 
     for agent_idx, profile in enumerate(profiles):
         # 从注册中心获取真实 Agent
         agent = _get_agent_for_profile(profile.code)
         if agent is None:
             logger.warning(f"[review] 未找到 profile={profile.code} 对应的 Agent,跳过")
+            failures.append(f"{profile.name}: 审查代理不可用")
             continue
 
         target_agent = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
@@ -826,9 +908,11 @@ def _review_chunk_sequential(
                 )
             else:
                 logger.warning(f"[review] Agent {target_agent} 不支持 execute_review/scan_file_for_review,跳过")
+                failures.append(f"{profile.name}: 审查代理缺少执行能力")
                 continue
 
             if not result.success:
+                failures.append(f"{profile.name}: {result.error or '分析失败'}")
                 logger.warning(f"[review] {profile.code} 审查失败: {result.error}")
                 _emit_review_event(
                     AgentEventType.FAILED, task, user,
@@ -848,22 +932,27 @@ def _review_chunk_sequential(
             if isinstance(result.data, dict):
                 chunk_findings = result.data.get("issues", []) or []
             findings.extend(chunk_findings)
+            invalid_count = int(result.data.get("invalid_issue_count", 0) or 0) if isinstance(result.data, dict) else 0
+            if invalid_count:
+                failures.append(f"{profile.name}: {invalid_count} 条模型结果未通过解析校验")
 
             # 补写 AiCallLog(成功):BaseAgent.call() 不写日志,这里补写实现 Agent 归因
             _log_sequential_call(
                 db, task, user, code_file, chunk_idx, agent_idx,
-                target_agent, result, status="success",
+                target_agent, result, status="failed" if invalid_count else "success",
+                error=f"{invalid_count} 条模型结果未通过解析校验" if invalid_count else None,
                 agent=agent,
             )
 
             _emit_review_event(
-                AgentEventType.COMPLETE, task, user,
+                AgentEventType.FAILED if invalid_count else AgentEventType.COMPLETE, task, user,
                 f"[{profile.name}] 审查 {code_file.file_name} 完成,"
                 f"发现 {len(chunk_findings)} 个问题",
                 agent_code=target_agent,
             )
         except Exception as e:
             logger.warning(f"文件 {code_file.file_name} chunk {chunk_idx} {profile.code} 失败: {e}")
+            failures.append(f"{profile.name}: {e}")
             _emit_review_event(
                 AgentEventType.FAILED, task, user,
                 f"[{profile.name}] 审查异常: {e}",
@@ -881,6 +970,8 @@ def _review_chunk_sequential(
                 logger.debug(f"[review] 补写异常日志失败: {log_err}")
             continue
 
+    if failures:
+        raise ReviewCoverageError(failures, findings)
     return findings
 
 
@@ -1015,6 +1106,7 @@ def _review_chunk_collaborative(
     agent_findings: dict[str, list[dict]] = {}
     agent_names: dict[str, str] = {}
     deferred_logs: list[dict] = []
+    failures: list[str] = []
 
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(_COLLAB_PARALLEL_THREADS, len(profiles)),
@@ -1065,6 +1157,7 @@ def _review_chunk_collaborative(
                     for it in parsed.issues
                 ]
                 if parsed.diagnostics:
+                    failures.append(f"{profile.name}: {parsed.invalid_issue_count} 条模型结果未通过解析校验")
                     logger.warning(
                         "[collab] agent=%s chunk=%s isolated_invalid=%s diagnostics=%s",
                         profile.code,
@@ -1083,6 +1176,7 @@ def _review_chunk_collaborative(
                     })
             except Exception as e:
                 logger.warning(f"并行审查 {profile.code}({agent_label}) 失败: {e}")
+                failures.append(f"{profile.name}: {e}")
                 agent_findings[profile.code] = []
                 _emit_review_event(AgentEventType.FAILED, task, user,
                                    f"[{profile.name}] 审查失败: {e}",
@@ -1120,6 +1214,8 @@ def _review_chunk_collaborative(
 
     # 零发现快速路径
     if total_raw == 0:
+        if failures:
+            raise ReviewCoverageError(failures)
         for profile in profiles:
             target = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
             _emit_review_event(AgentEventType.COMPLETE, task, user,
@@ -1145,6 +1241,8 @@ def _review_chunk_collaborative(
         chunk_id=f"task:{task.id}:file:{code_file.id}:chunk:{chunk_idx}",
     )
     final_issues = aggregated.issues
+    if failures:
+        raise ReviewCoverageError(failures, [_final_issue_to_finding(item) for item in final_issues])
     if aggregated.diagnostics:
         logger.warning(
             "[collab] %s chunk=%s isolated_invalid=%s diagnostics=%s",
@@ -1428,6 +1526,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "severe_issues": row.severe_issues, "high_issues": row.high_issues,
             "medium_issues": row.medium_issues, "low_issues": row.low_issues,
             "score": row.score, "duration_ms": row.duration_ms,
+            "score_version": row.score_version, "score_breakdown": row.score_breakdown,
             "create_time": row.create_time,
         })
     return pagination.to_dict(items)
@@ -1467,11 +1566,13 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "severe_issues": task.severe_issues, "high_issues": task.high_issues,
         "medium_issues": task.medium_issues, "low_issues": task.low_issues,
         "score": task.score, "summary": task.summary,
+        "score_version": task.score_version, "score_breakdown": task.score_breakdown,
         "model_name": task.model_name, "duration_ms": task.duration_ms,
         "start_time": task.start_time, "end_time": task.end_time,
         "create_time": task.create_time,
         # R4 修复:任务失败时返回错误原因,对齐 TaskDetailOut schema
         "error_message": task.error_message,
+        "coverage": task.coverage,
         "files": _task_file_summaries(db, task.id),
         "agent_releases": _task_agent_release_summaries(db, task.id),
         "aggregation_summary": _task_aggregation_summary(db, task.id),
@@ -1535,6 +1636,14 @@ def _task_file_summaries(db: Session, task_id: int) -> list[dict]:
     Returns:
         list[dict]: 任务关联文件列表
     """
+    snapshots = db.query(ReviewTaskFile).filter(ReviewTaskFile.task_id == task_id).order_by(ReviewTaskFile.id).all()
+    if snapshots and all(item.file_snapshot and item.version_no and item.content_sha256 for item in snapshots):
+        verified_ids = verified_task_input_ids(db, task_id)
+        return [
+            {"file_id": item.file_id, **item.file_snapshot, "version_no": item.version_no,
+             "content_sha256": item.content_sha256, "snapshot_verified": item.id in verified_ids}
+            for item in snapshots
+        ]
     files = db.query(CodeFile).join(
         ReviewTaskFile,
         ReviewTaskFile.file_id == CodeFile.id,
@@ -1633,7 +1742,13 @@ def delete_task(db: Session, user: User, task_id: int) -> None:
         raise NotFoundError("审查任务不存在", code=40400)
     # v2.4: 删除任务视为写操作,仅 owner/admin 可执行
     require_project_access(db, task.project_id, user, need_write=True)
+    task = db.query(ReviewTask).filter_by(id=task_id).with_for_update().populate_existing().one()
     task.status = "deleted"
+    task.execution_token = uuid.uuid4().hex
+    task.end_time = task.end_time or datetime.now(timezone.utc)
+    _update_duration(task)
+    task.coverage = {**(task.coverage or {}), "stage": "deleted"}
+    _update_issue_counts(db, task)
     db.commit()
 
 
@@ -1656,10 +1771,42 @@ def cancel_task(db: Session, user: User, task_id: int) -> None:
         raise NotFoundError("审查任务不存在", code=40400)
     # v2.4: 取消任务视为写操作,仅 owner/admin 可执行
     require_project_access(db, task.project_id, user, need_write=True)
+    task = db.query(ReviewTask).filter_by(id=task_id).with_for_update().populate_existing().one()
     if task.status != "running":
         raise ValidationError("只能取消运行中的任务", code=40001)
     task.status = "cancelled"
+    task.execution_token = uuid.uuid4().hex
+    task.end_time = datetime.now(timezone.utc)
+    _update_duration(task)
+    task.coverage = {**(task.coverage or {}), "stage": "cancelled"}
+    _update_issue_counts(db, task)
     db.commit()
+
+
+def _update_issue_counts(db: Session, task: ReviewTask) -> None:
+    counts = {"严重": 0, "高": 0, "中": 0, "低": 0}
+    for severity, count in db.query(ReviewIssue.severity, func.count(ReviewIssue.id)).filter(
+        ReviewIssue.task_id == task.id,
+    ).group_by(ReviewIssue.severity).all():
+        counts[severity if severity in counts else "中"] += count
+    task.total_issues = sum(counts.values())
+    task.severe_issues, task.high_issues, task.medium_issues, task.low_issues = (
+        counts["严重"], counts["高"], counts["中"], counts["低"],
+    )
+
+
+def _update_duration(task: ReviewTask) -> None:
+    if task.start_time and task.end_time:
+        start_time = task.start_time.replace(tzinfo=timezone.utc) if task.start_time.tzinfo is None else task.start_time
+        end_time = task.end_time.replace(tzinfo=timezone.utc) if task.end_time.tzinfo is None else task.end_time
+        task.duration_ms = max(0, int((end_time - start_time).total_seconds() * 1000))
+
+
+class ReviewCoverageError(Exception):
+    def __init__(self, failures: list[str], findings: Optional[list[Finding]] = None):
+        self.failures = failures
+        self.findings = findings or []
+        super().__init__("扫描覆盖不完整: " + "; ".join(failures))
 
 
 class TaskCancelledError(Exception):
@@ -1695,11 +1842,15 @@ def _check_cancelled(
             .one()
         )
     else:
-        db.refresh(task)
+        db.refresh(task, with_for_update=True)
     if task.status == "cancelled":
         raise TaskCancelledError("审查任务已被用户取消")
+    if task.status != "running":
+        raise TaskSupersededError("审查任务已停止或被删除")
     if execution_token is not None and str(task.execution_token or "") != execution_token:
         raise TaskSupersededError("审查任务执行租约已被新的 Worker 接管")
+    if not lock:
+        db.commit()
 
 
 def _emit_review_event(

@@ -16,11 +16,13 @@ from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.agents.contracts import compose_system_prompt
+from app.core.exceptions import AppError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from app.services.project_member_service import require_project_access
 from app.utils.encoding_utils import BASE64_PREFIX
 
 SUPPORTED_TOOLS: Tuple[str, ...] = (
@@ -150,12 +152,31 @@ class AiPromptAgent(BaseAgent):
         return None
 
     def _authz_issue(self, issue: ReviewIssue) -> Optional[AgentResult]:
-        """普通用户只能给自己任务下的问题生成提示词"""
-        if self._user is None or self._user.role in {"admin", "super_admin"}:
-            return None
         task = self._db.get(ReviewTask, issue.task_id)
-        if task is None or task.user_id != self._user.id:
+        if task is None:
             return AgentResult(success=False, error="无权访问该问题")
+        if (err := self._authz_project(task.project_id, "无权访问该问题")) is not None:
+            return err
+        return None
+
+    def _authz_project(self, project_id: int, message: str) -> Optional[AgentResult]:
+        """所有提示词入口均复用项目可见性和成员读权限。"""
+        if self._db is None:
+            return AgentResult(success=False, error="DB 未注入")
+        if self._user is None:
+            project = (
+                self._db.query(Project)
+                .populate_existing()
+                .filter(Project.id == project_id)
+                .one_or_none()
+            )
+            if project is None or project.status in {"deleted", "quarantined"}:
+                return AgentResult(success=False, error=message)
+            return None
+        try:
+            require_project_access(self._db, project_id, self._user, need_write=False)
+        except AppError:
+            return AgentResult(success=False, error=message)
         return None
 
     def _extract_context(
@@ -388,8 +409,8 @@ class AiPromptAgent(BaseAgent):
         task = self._db.get(ReviewTask, task_id)
         if task is None:
             return AgentResult(success=False, error="审查任务不存在")
-        if self._user and self._user.role not in {"admin", "super_admin"} and task.user_id != self._user.id:
-            return AgentResult(success=False, error="无权访问该任务")
+        if (err := self._authz_project(task.project_id, "无权访问该任务")) is not None:
+            return err
         q = self._db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id)
         if severity_filter:
             q = q.filter(ReviewIssue.severity.in_(severity_filter))
@@ -434,8 +455,8 @@ class AiPromptAgent(BaseAgent):
         project = self._db.get(Project, project_id)
         if project is None:
             return AgentResult(success=False, error="项目不存在")
-        if self._user and self._user.role not in {"admin", "super_admin"} and project.user_id != self._user.id:
-            return AgentResult(success=False, error="无权访问该项目")
+        if (err := self._authz_project(project_id, "无权访问该项目")) is not None:
+            return err
         # 严重度排序: 严重 > 高 > 中 > 低
         severity_order = ["严重", "高", "中", "低"]
         task_ids_query = select(ReviewTask.id).where(

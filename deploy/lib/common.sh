@@ -287,20 +287,28 @@ validate_geolite_database() {
 # 使用 MySQL 容器网络命名空间内的 root@% TCP 账号执行数据库结构迁移。
 # 参数: 原样传递给 alembic。
 # 返回: alembic 的退出状态。
+prepare_admin_alembic() {
+  [[ -n "${BACKEND_RELEASE:-}" && -n "${APP_RELEASE:-}" && -n "${APP_VERSION:-}" ]] \
+    || fatal "迁移前必须绑定已验证的发布账本或目标版本"
+  validate_app_version "$APP_VERSION"
+  validate_release_token "$BACKEND_RELEASE" BACKEND_RELEASE
+  MIGRATION_BACKEND_IMAGE_ID="$(release_image_id "prism-backend:$BACKEND_RELEASE")" || return 1
+  MIGRATION_MYSQL_CONTAINER_ID="$(service_container_id mysql)" || fatal "MySQL 容器不存在，无法执行迁移"
+  local heads
+  heads="$(docker run --rm --network none --entrypoint alembic \
+    "$MIGRATION_BACKEND_IMAGE_ID" heads 2>/dev/null)" || fatal "迁移镜像无法读取 Alembic heads，拒绝停止服务"
+  MIGRATION_ALEMBIC_HEAD="$(printf '%s\n' "$heads" | awk '$2 == "(head)" {print $1}')"
+  [[ "$MIGRATION_ALEMBIC_HEAD" =~ ^[A-Za-z0-9_]+$ ]] || fatal "迁移镜像必须包含唯一 Alembic head"
+}
+
 run_admin_alembic() {
   local env_file="${DEPLOY_ENV_FILE:-.env}"
-  local mysql_container backend_container backend_image
+  local mysql_container backend_image
   [[ -f "$env_file" ]] || fatal "缺少部署环境文件: $env_file"
-
-  mysql_container="$(service_container_id mysql)" || fatal "MySQL 容器不存在，无法执行迁移"
-  if [[ -n "${BACKEND_RELEASE:-}" ]]; then
-    validate_release_token "$BACKEND_RELEASE" BACKEND_RELEASE
-    backend_image="prism-backend:$BACKEND_RELEASE"
-  else
-    backend_container="$(service_container_id backend)" || fatal "无法确定 Alembic 所在的 Backend 镜像"
-    backend_image="$(docker inspect --format '{{.Config.Image}}' "$backend_container")"
-  fi
-  [[ -n "$backend_image" ]] || fatal "Backend 镜像名为空"
+  [[ "${MIGRATION_BACKEND_IMAGE_ID:-}" =~ ^sha256:[0-9a-f]{64}$ \
+    && -n "${MIGRATION_MYSQL_CONTAINER_ID:-}" ]] || fatal "尚未完成迁移镜像预检，拒绝执行迁移"
+  mysql_container="$MIGRATION_MYSQL_CONTAINER_ID"
+  backend_image="$MIGRATION_BACKEND_IMAGE_ID"
   docker image inspect "$backend_image" >/dev/null 2>&1 || fatal "Backend 迁移镜像不存在: $backend_image"
 
   # 生产开启 binary log 时，创建触发器需要数据库管理权限。
@@ -309,7 +317,8 @@ run_admin_alembic() {
   docker run --rm \
     --network "container:$mysql_container" \
     --env-file "$env_file" \
-    -e "APP_RELEASE=${APP_RELEASE:-migration}" \
+    -e "APP_RELEASE=$APP_RELEASE" \
+    -e "APP_VERSION=$APP_VERSION" \
     -e MALWARE_SCAN_FAIL_CLOSED=true \
     -e DB_HOST=127.0.0.1 \
     -e DB_PORT=3306 \
@@ -329,12 +338,12 @@ run_admin_alembic() {
 # 返回: 一致时 0，否则返回 1。
 assert_alembic_at_head() {
   local heads current
-  heads="$(compose run --rm --no-deps backend alembic heads 2>/dev/null | awk '{print $1}' | sed '/^$/d')"
+  heads="$(run_admin_alembic heads 2>/dev/null | awk '{print $1}' | sed '/^$/d')"
   if [[ "$(printf '%s\n' "$heads" | wc -l | tr -d ' ')" != "1" ]]; then
     log_warn "Alembic 必须只有一个 head，实际: ${heads:-none}"
     return 1
   fi
-  current="$(compose run --rm --no-deps backend alembic current 2>/dev/null | awk '{print $1}' | tail -n 1)"
+  current="$(run_admin_alembic current 2>/dev/null | awk '{print $1}' | tail -n 1)"
   if [[ "$current" != "$heads" ]]; then
     log_warn "Alembic revision 不一致(current=${current:-none}, head=$heads)"
     return 1
@@ -358,6 +367,100 @@ validate_release_token() {
   [[ "$value" =~ ^[A-Za-z0-9_.:-]+$ ]] || fatal "发布状态字段 $field 非法"
 }
 
+validate_app_version() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fatal "APP_VERSION 必须是可验证的 x.y.z 版本"
+}
+
+release_image_id() {
+  local image_id
+  image_id="$(docker image inspect --format '{{.Id}}' "$1" 2>/dev/null)" \
+    || fatal "发布镜像不存在: $1"
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fatal "发布镜像摘要无效: $1"
+  printf '%s\n' "$image_id"
+}
+
+resolve_release_version() {
+  local release_sha="$1" backend_release="$2" frontend_release="$3" version="${4:-}"
+  local image tag label_revision label_version source_version
+  [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fatal "发布账本必须包含完整提交 SHA"
+  [[ -z "$version" ]] || validate_app_version "$version"
+  for image in "prism-backend:$backend_release" "prism-frontend:$frontend_release"; do
+    release_image_id "$image" >/dev/null || return 1
+    tag="${image#*:}"
+    label_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image" 2>/dev/null)" \
+      || fatal "无法读取发布镜像来源"
+    label_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image" 2>/dev/null)" \
+      || fatal "无法读取发布镜像版本"
+    [[ "$label_revision" != '<no value>' ]] || label_revision=""
+    [[ "$label_version" != '<no value>' ]] || label_version=""
+    [[ -z "$label_revision" || "$label_revision" == "$release_sha" ]] || fatal "发布镜像来源与账本 SHA 冲突"
+    [[ "$tag" == "$release_sha" || "$label_revision" == "$release_sha" ]] || fatal "镜像标签缺少可验证的提交来源"
+    if [[ -n "$label_version" ]]; then
+      validate_app_version "$label_version"
+      [[ -z "$version" || "$version" == "$label_version" ]] || fatal "发布账本与镜像版本证据冲突"
+      version="$label_version"
+    fi
+  done
+  source_version="$(git -C .. show "$release_sha:VERSION" 2>/dev/null)" || source_version=""
+  source_version="$(printf '%s' "$source_version" | tr -d '\r\n')"
+  if [[ -n "$source_version" ]]; then
+    validate_app_version "$source_version"
+    [[ -z "$version" || "$version" == "$source_version" ]] || fatal "发布版本与提交 VERSION 冲突"
+    version="$source_version"
+  fi
+  [[ -n "$version" ]] || fatal "历史账本缺少 APP_VERSION 且无可验证的镜像或源码版本证据"
+  printf '%s\n' "$version"
+}
+
+assert_bound_release_images() {
+  [[ "$(release_image_id "prism-backend:$BACKEND_RELEASE")" == "$BOUND_BACKEND_IMAGE_ID" ]] \
+    || fatal "Backend 镜像标签已漂移"
+  [[ "$(release_image_id "prism-frontend:$FRONTEND_RELEASE")" == "$BOUND_FRONTEND_IMAGE_ID" ]] \
+    || fatal "Frontend 镜像标签已漂移"
+}
+
+assert_compose_release_environment() (
+  local mode="${1:-bound}" env_file="${DEPLOY_ENV_FILE:-.env}"
+  local expected_release="$APP_RELEASE" expected_version="$APP_VERSION"
+  local expected_backend="$BACKEND_RELEASE" expected_frontend="$FRONTEND_RELEASE"
+  local configuration images key expected actual
+  if [[ "$mode" == default ]]; then unset APP_RELEASE APP_VERSION BACKEND_RELEASE FRONTEND_RELEASE; fi
+  configuration="$(compose --env-file "$env_file" config --environment 2>/dev/null)" \
+    || fatal "无法解析发布环境"
+  for key in APP_RELEASE APP_VERSION BACKEND_RELEASE FRONTEND_RELEASE; do
+    case "$key" in
+      APP_RELEASE) expected="$expected_release" ;;
+      APP_VERSION) expected="$expected_version" ;;
+      BACKEND_RELEASE) expected="$expected_backend" ;;
+      FRONTEND_RELEASE) expected="$expected_frontend" ;;
+    esac
+    actual="$(printf '%s\n' "$configuration" | awk -F= -v key="$key" '$1 == key {value=substr($0,index($0,"=")+1)} END {print value}')"
+    [[ "$actual" == "$expected" ]] || fatal "Compose $mode 发布环境漂移: $key"
+  done
+  images="$(compose --env-file "$env_file" config --images 2>/dev/null)" || fatal "无法解析发布镜像"
+  printf '%s\n' "$images" | grep -Fxq "prism-backend:$expected_backend" || fatal "Compose $mode Backend 镜像漂移"
+  printf '%s\n' "$images" | grep -Fxq "prism-frontend:$expected_frontend" || fatal "Compose $mode Frontend 镜像漂移"
+)
+
+assert_running_release_environment() {
+  local service container_id expected_id actual_id environment runtime_release runtime_version
+  for service in backend frontend; do
+    container_id="$(compose ps -a -q "$service")"
+    [[ -n "$container_id" ]] || fatal "无法识别发布容器: $service"
+    expected_id="$BOUND_BACKEND_IMAGE_ID"
+    [[ "$service" != frontend ]] || expected_id="$BOUND_FRONTEND_IMAGE_ID"
+    actual_id="$(docker inspect --format '{{.Image}}' "$container_id")"
+    [[ "$actual_id" == "$expected_id" ]] || fatal "运行容器镜像与发布账本不一致: $service"
+    if [[ "$service" == backend ]]; then
+      environment="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_id")"
+      runtime_release="$(printf '%s\n' "$environment" | awk -F= '$1 == "APP_RELEASE" {print $2}')"
+      runtime_version="$(printf '%s\n' "$environment" | awk -F= '$1 == "APP_VERSION" {print $2}')"
+      [[ "$runtime_release" == "$APP_RELEASE" && "$runtime_version" == "$APP_VERSION" ]] \
+        || fatal "运行容器版本与发布账本不一致"
+    fi
+  done
+}
+
 # 原子写入发布状态文件。
 # 参数: $1 文件；$2 SHA；$3 Backend tag；$4 Frontend tag；$5 target；$6 备份；$7 Alembic。
 # 返回: 写入成功时 0。
@@ -369,17 +472,27 @@ write_release_state() {
   local target="$5"
   local backup_file="${6:-none}"
   local alembic_revision="${7:-unknown}"
+  local app_version="${8:-}"
+  local backend_image_id frontend_image_id
   local temp_file="${state_file}.tmp"
   validate_release_token "$release_sha" RELEASE_SHA
   validate_release_token "$backend_release" BACKEND_RELEASE
   validate_release_token "$frontend_release" FRONTEND_RELEASE
   validate_release_token "$target" TARGET
+  validate_app_version "$app_version"
+  backend_image_id="$(docker image inspect --format '{{.Id}}' "prism-backend:$backend_release" 2>/dev/null || true)"
+  frontend_image_id="$(docker image inspect --format '{{.Id}}' "prism-frontend:$frontend_release" 2>/dev/null || true)"
+  [[ -z "$backend_image_id" || "$backend_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fatal "Backend 镜像摘要无效"
+  [[ -z "$frontend_image_id" || "$frontend_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fatal "Frontend 镜像摘要无效"
   mkdir -p "$(dirname "$state_file")"
   umask 077
   cat > "$temp_file" <<STATE
 RELEASE_SHA=$release_sha
+APP_VERSION=$app_version
 BACKEND_RELEASE=$backend_release
 FRONTEND_RELEASE=$frontend_release
+BACKEND_IMAGE_ID=$backend_image_id
+FRONTEND_IMAGE_ID=$frontend_image_id
 TARGET=$target
 BACKUP_FILE=$backup_file
 ALEMBIC_REVISION=$alembic_revision
@@ -393,7 +506,7 @@ STATE
 # 返回: 成功时 0；字段缺失时终止脚本。
 load_release_environment() {
   local state_file="$1"
-  local release_sha backend_release frontend_release
+  local release_sha backend_release frontend_release app_version recorded_id
   [[ -f "$state_file" ]] || fatal "发布状态不存在: $state_file"
   release_sha="$(read_release_value "$state_file" RELEASE_SHA)" || fatal "状态缺少 RELEASE_SHA"
   backend_release="$(read_release_value "$state_file" BACKEND_RELEASE)" || fatal "状态缺少 BACKEND_RELEASE"
@@ -401,9 +514,24 @@ load_release_environment() {
   validate_release_token "$release_sha" RELEASE_SHA
   validate_release_token "$backend_release" BACKEND_RELEASE
   validate_release_token "$frontend_release" FRONTEND_RELEASE
+  app_version="$(resolve_release_version "$release_sha" "$backend_release" "$frontend_release" \
+    "$(read_release_value "$state_file" APP_VERSION || true)")" || return 1
+  BOUND_BACKEND_IMAGE_ID="$(release_image_id "prism-backend:$backend_release")" || return 1
+  BOUND_FRONTEND_IMAGE_ID="$(release_image_id "prism-frontend:$frontend_release")" || return 1
+  recorded_id="$(read_release_value "$state_file" BACKEND_IMAGE_ID || true)"
+  [[ -z "$recorded_id" || "$recorded_id" == "$BOUND_BACKEND_IMAGE_ID" ]] || fatal "Backend 镜像摘要与发布账本不一致"
+  recorded_id="$(read_release_value "$state_file" FRONTEND_IMAGE_ID || true)"
+  [[ -z "$recorded_id" || "$recorded_id" == "$BOUND_FRONTEND_IMAGE_ID" ]] || fatal "Frontend 镜像摘要与发布账本不一致"
   export APP_RELEASE="$release_sha"
+  export APP_VERSION="$app_version"
   export BACKEND_RELEASE="$backend_release"
   export FRONTEND_RELEASE="$frontend_release"
+}
+
+write_bound_release_state() {
+  write_release_state "$1" "$APP_RELEASE" "$BACKEND_RELEASE" "$FRONTEND_RELEASE" all \
+    "$(read_release_value "$2" BACKUP_FILE || printf 'none')" \
+    "$(read_release_value "$2" ALEMBIC_REVISION || printf 'unknown')" "$APP_VERSION"
 }
 
 # 给当前运行容器镜像创建可回滚的本地 tag。

@@ -20,6 +20,7 @@ from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
 from app.services import project_source_revision_service
 from app.services.project_member_service import (
+    HIDDEN_PROJECT_STATUSES,
     ensure_owner_member,
     get_visible_project_ids,
     require_project_access,
@@ -47,7 +48,7 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
     """查询当前用户可访问的项目列表(基于 project_member 关系)
 
     可见范围:
-        - admin: 全部非删除项目
+        - admin: 全部非删除、非隔离项目
         - 非 admin: owner 项目 ∪ member 项目
 
     Args:
@@ -63,15 +64,15 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
         dict: 分页响应
     """
     visible_ids, _ = get_visible_project_ids(db, user)
-    q = db.query(Project).filter(Project.id.in_(visible_ids))
+    q = db.query(Project).filter(
+        Project.id.in_(visible_ids), Project.status.notin_(HIDDEN_PROJECT_STATUSES),
+    )
     if keyword:
         q = q.filter(Project.project_name.contains(keyword))
     if language:
         q = q.filter(Project.language == language)
     if status:
         q = q.filter(Project.status == status)
-    else:
-        q = q.filter(Project.status != "deleted")
     total = q.count()
     pagination = Pagination(page, page_size, total)
     rows = q.order_by(Project.create_time.desc()).offset(pagination.offset).limit(pagination.page_size).all()
@@ -320,6 +321,25 @@ def delete_project(db: Session, user: User, project_id: int) -> None:
         ForbiddenError: 仅 owner/admin 可删除
     """
     require_project_access(db, project_id, user, need_write=True)
-    project = db.get(Project, project_id)
+    project = (
+        db.query(Project)
+        .populate_existing()
+        .filter(Project.id == project_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if project is None or project.status in HIDDEN_PROJECT_STATUSES:
+        raise ConflictError("项目状态已变化，请刷新后重试")
+    active_tasks = (
+        db.query(ReviewTask.id)
+        .filter(
+            ReviewTask.project_id == project_id,
+            ReviewTask.status.in_(("pending", "running")),
+        )
+        .with_for_update()
+        .all()
+    )
+    if active_tasks:
+        raise ConflictError("项目存在进行中的审查任务，请先取消任务后再删除")
     project.status = "deleted"
     db.commit()
