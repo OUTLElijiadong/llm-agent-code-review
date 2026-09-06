@@ -1,0 +1,5727 @@
+{
+  "checkedAt": "2026-09-05T19:35:18.222Z",
+  "origin": "http://127.0.0.1:50322",
+  "librarySha": "80e9a0926dd59d5aba8ce332370d7dce82ad4d85",
+  "mainHeadObserved": "343616d9d40c1e44e17c7da465c7173c418debb5",
+  "mainVersion": "3.8.4",
+  "callCount": 46,
+  "familyCount": 19,
+  "httpChecks": [
+    {
+      "resource": "/gallery/",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "5132",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/start.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "5937",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/references.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "23214",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/app.js",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "43158",
+      "mime": "text/javascript; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/styles.css",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "21372",
+      "mime": "text/css; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/filter-utils.mjs",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3050",
+      "mime": "text/javascript; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/api/library.json",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "72166",
+      "mime": "application/json; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/registry/library.v1.json",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "28512",
+      "mime": "application/json; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/ReferenceCoreCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13317",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/ReferenceCoreCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3177",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/slam-title-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "266861",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/slam-title-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/266861"
+    },
+    {
+      "resource": "/gallery/source/SlamTitleSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "22421",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/ReferenceCoreCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13317",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/ReferenceCoreCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3177",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/hero-number-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "112587",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/hero-number-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/112587"
+    },
+    {
+      "resource": "/gallery/source/HeroNumberSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "22468",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch09DataCards.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "8870",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7649",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/metric-card-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "198015",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/metric-card-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/198015"
+    },
+    {
+      "resource": "/gallery/source/MetricCardSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "22361",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch09DataCards.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "8870",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7649",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/gold-price-tag-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "282580",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/gold-price-tag-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/282580"
+    },
+    {
+      "resource": "/gallery/source/GoldPriceTagSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "22351",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/TimelineRailSourceFaithful.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "8772",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "4887",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/timeline-rail-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "91273",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/timeline-rail-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/91273"
+    },
+    {
+      "resource": "/gallery/source/TimelineRailSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "20419",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/NumberedPanelSourceFaithful.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "4283",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "4887",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/numbered-panel-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "155345",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/numbered-panel-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/155345"
+    },
+    {
+      "resource": "/gallery/source/NumberedPanelSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "14594",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/ChecklistSourceFaithful.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "2353",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "4887",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/checklist-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "47206",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/checklist-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/47206"
+    },
+    {
+      "resource": "/gallery/source/ChecklistSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "17923",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch09FlowDiagrams.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "17548",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7649",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/pipeline-flow-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "200827",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/pipeline-flow-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/200827"
+    },
+    {
+      "resource": "/gallery/source/PipelineFlowSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "31673",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch09FlowDiagrams.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "17548",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7649",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/branch-diagram-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "205335",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/branch-diagram-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/205335"
+    },
+    {
+      "resource": "/gallery/source/BranchDiagramSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "31685",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch09FlowDiagrams.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "17548",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7649",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/icon-chain-flow-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "222245",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/icon-chain-flow-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/222245"
+    },
+    {
+      "resource": "/gallery/source/IconChainFlowSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "31684",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/CrossOutDecisionSourceFaithful.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "5220",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "4887",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/cross-out-decision-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "48454",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/cross-out-decision-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/48454"
+    },
+    {
+      "resource": "/gallery/source/CrossOutDecisionSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "16585",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch09EvidenceOverlays.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "11910",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7649",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/web-article-card-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "245863",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/web-article-card-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/245863"
+    },
+    {
+      "resource": "/gallery/source/WebArticleCardSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "26158",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch09EvidenceOverlays.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "11910",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7649",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/news-overlay-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "191732",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/news-overlay-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/191732"
+    },
+    {
+      "resource": "/gallery/source/NewsOverlaySourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "26127",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch09EvidenceOverlays.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "11910",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7649",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/side-clip-card-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "118330",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-09/side-clip-card-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/118330"
+    },
+    {
+      "resource": "/gallery/source/SideClipCardSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "26139",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10EditorialMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "8978",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/big-chapter-tag-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "222564",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/big-chapter-tag-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/222564"
+    },
+    {
+      "resource": "/gallery/source/BigChapterTagSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "26344",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10EditorialMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "8978",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/editorial-left-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "212263",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/editorial-left-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/212263"
+    },
+    {
+      "resource": "/gallery/source/EditorialLeftSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "26338",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10EditorialMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "8978",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/editorial-title-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "167989",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/editorial-title-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/167989"
+    },
+    {
+      "resource": "/gallery/source/EditorialTitleSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "26366",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/ReferenceCoreCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13317",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/ReferenceCoreCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3177",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/vs-cards-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "195202",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/vs-cards-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/195202"
+    },
+    {
+      "resource": "/gallery/source/VsCardsSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "22430",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10ComparisonMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "11291",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/swap-card-row-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "196916",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/swap-card-row-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/196916"
+    },
+    {
+      "resource": "/gallery/source/SwapCardRowSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "29002",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10ComparisonMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "11291",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/vote-tally-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "115547",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/vote-tally-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/115547"
+    },
+    {
+      "resource": "/gallery/source/VoteTallySourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "29012",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10ComparisonMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "11291",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/dual-node-badge-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "200627",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/dual-node-badge-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/200627"
+    },
+    {
+      "resource": "/gallery/source/DualNodeBadgeSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "29056",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/GenericSubscribeNudgeSourceFaithful.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "17394",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/SystemSourceFaithfulCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3363",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/generic-subscribe-nudge-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "421114",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/generic-subscribe-nudge-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/421114"
+    },
+    {
+      "resource": "/gallery/source/GenericSubscribeNudgeSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "27235",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/PhoneRecordingFrameNeutral.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "16112",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/Root.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "361",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/kimi-pack/PhoneRecordingFrameNeutral.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "2140436",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/kimi-pack/PhoneRecordingFrameNeutral.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/2140436"
+    },
+    {
+      "resource": "/gallery/source/PhoneRecordingFrameNeutral.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "22179",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/WorkflowTipsTerminalAlpha.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10438",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/WorkflowTipsTerminalAlpha.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10438",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/g16-workflow-tips-terminal-v2-fixed.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "364502",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/g16-workflow-tips-terminal-v2-fixed.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/364502"
+    },
+    {
+      "resource": "/gallery/source/WorkflowTipsTerminalAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "16842",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/LargeCodeCardSourceFaithful.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3581",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/SystemSourceFaithfulCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3363",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/large-code-card-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "174774",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/large-code-card-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/174774"
+    },
+    {
+      "resource": "/gallery/source/LargeCodeCardSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "31542",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/GitHubRepoCardSourceFaithful.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "6600",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/SystemSourceFaithfulCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3363",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/github-repo-card-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "116219",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/github-repo-card-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/116219"
+    },
+    {
+      "resource": "/gallery/source/GitHubRepoCardSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "34810",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/InvalidStampSourceFaithful.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "2142",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/SystemSourceFaithfulCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3363",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/invalid-stamp-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "58060",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/source-faithful/invalid-stamp-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/58060"
+    },
+    {
+      "resource": "/gallery/source/InvalidStampSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "29915",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/OfficialConceptCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "6450",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/OfficialCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "2724",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/moving-pill-captions-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "170793",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/moving-pill-captions-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/170793"
+    },
+    {
+      "resource": "/gallery/source/MovingPillCaptionsAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13703",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/CaptionLocalizationCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10296",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/CaptionLocalizationCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "2465",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-03/popping-word-captions-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "164499",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-03/popping-word-captions-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/164499"
+    },
+    {
+      "resource": "/gallery/source/PoppingWordCaptionsAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "18104",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/CaptionLocalizationCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10296",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/CaptionLocalizationCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "2465",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-03/word-highlight-captions-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "308036",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-03/word-highlight-captions-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/308036"
+    },
+    {
+      "resource": "/gallery/source/WordHighlightCaptionsAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "18133",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/AstraSolBenchmarkComparison.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "6682",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/AstraSolBenchmarkComparison.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "6682",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/astra-sol-benchmark-comparison-v1.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "1091166",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/astra-sol-benchmark-comparison-v1.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/1091166"
+    },
+    {
+      "resource": "/gallery/source/AstraSolBenchmarkComparisonV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13385",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/HorizontalBarChartCandidate.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "7890",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/HorizontalBarChartCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "1412",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-02/horizontal-bar-chart-clean-room-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "211879",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-02/horizontal-bar-chart-clean-room-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/211879"
+    },
+    {
+      "resource": "/gallery/source/HorizontalBarChartCleanRoomAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "14348",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10ChartMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "16804",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/compare-bars-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "155503",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/compare-bars-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/155503"
+    },
+    {
+      "resource": "/gallery/source/CompareBarsSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "34963",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10ChartMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "16804",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/income-bars-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "88963",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/income-bars-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/88963"
+    },
+    {
+      "resource": "/gallery/source/IncomeBarsSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "34970",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10ChartMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "16804",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/line-chart-draw-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "136345",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/line-chart-draw-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/136345"
+    },
+    {
+      "resource": "/gallery/source/LineChartDrawSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "34970",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch10ChartMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "16804",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10875",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/scenario-curves-source-faithful-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "302423",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-10/scenario-curves-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/302423"
+    },
+    {
+      "resource": "/gallery/source/ScenarioCurvesSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "34961",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch11ChartMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "12554",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3432",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/radar-pentagon.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "208554",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/radar-pentagon.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/208554"
+    },
+    {
+      "resource": "/gallery/source/RadarPentagonSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "25379",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch11ChartMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "12554",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3432",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/score-ring.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "139183",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/score-ring.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/139183"
+    },
+    {
+      "resource": "/gallery/source/ScoreRingSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "25371",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch11ChartMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "12554",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3432",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/dot-matrix.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "223503",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/dot-matrix.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/223503"
+    },
+    {
+      "resource": "/gallery/source/DotMatrixSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "25429",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch11ChartMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "12554",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3432",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/fan-lines.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "150164",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/fan-lines.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/150164"
+    },
+    {
+      "resource": "/gallery/source/FanLinesSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "25375",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/EvidenceLocalizationCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13370",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/EvidenceLocalizationCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3069",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-02/polaroid-evidence-stack-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "758342",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-02/polaroid-evidence-stack-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/758342"
+    },
+    {
+      "resource": "/gallery/source/PolaroidEvidenceStackAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "22244",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/EvidenceLocalizationCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13370",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/EvidenceLocalizationCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3069",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-02/public-comment-evidence-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "439419",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-02/public-comment-evidence-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/439419"
+    },
+    {
+      "resource": "/gallery/source/PublicCommentEvidenceAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "22358",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/SpinningTextWheelCandidate.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "10886",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/SpinningTextWheelCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "1286",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-03/spinning-text-wheel-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "1164501",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-03/spinning-text-wheel-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/1164501"
+    },
+    {
+      "resource": "/gallery/source/SpinningTextWheelAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "17374",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/OfficialConceptCandidates.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "6450",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/OfficialCandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "2724",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/text-marker-v1-silent.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "155340",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/text-marker-v1-silent.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/155340"
+    },
+    {
+      "resource": "/gallery/source/TextMarkerAlphaV1.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13659",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch11AnnotationMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "4009",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3432",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/strike-text.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "31594",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/strike-text.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/31594"
+    },
+    {
+      "resource": "/gallery/source/StrikeTextSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "13087",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/components/motion-library/Batch11AnnotationMasters.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "4009",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "3432",
+      "mime": "text/plain; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/highlight-passage.mp4",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "129085",
+      "mime": "video/mp4",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates-batch-11/highlight-passage.mp4",
+      "method": "GET",
+      "status": 206,
+      "bytes": "1024",
+      "mime": "video/mp4",
+      "contentRange": "bytes 0-1023/129085"
+    },
+    {
+      "resource": "/gallery/source/HighlightPassageSourceFaithfulV1Alpha.html",
+      "method": "HEAD",
+      "status": 200,
+      "bytes": "15890",
+      "mime": "text/html; charset=utf-8",
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/",
+      "method": "POST",
+      "status": 405,
+      "bytes": null,
+      "mime": null,
+      "contentRange": null
+    },
+    {
+      "resource": "/.git/config",
+      "method": "HEAD",
+      "status": 403,
+      "bytes": null,
+      "mime": null,
+      "contentRange": null
+    },
+    {
+      "resource": "/node_modules/anything",
+      "method": "HEAD",
+      "status": 403,
+      "bytes": null,
+      "mime": null,
+      "contentRange": null
+    },
+    {
+      "resource": "/%2e%2e%2fpackage.json",
+      "method": "HEAD",
+      "status": 403,
+      "bytes": null,
+      "mime": null,
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/missing-file.mp4",
+      "method": "HEAD",
+      "status": 404,
+      "bytes": null,
+      "mime": null,
+      "contentRange": null
+    },
+    {
+      "resource": "/gallery/media/candidates/slam-title-source-faithful-v1-silent.mp4",
+      "method": "GET",
+      "status": 416,
+      "bytes": null,
+      "mime": null,
+      "contentRange": null
+    }
+  ],
+  "dependencyInstallPerformed": false,
+  "browserUsed": false,
+  "remotionStudioStarted": false,
+  "lockfile": {
+    "sha256": "f3ed186d1fdc92b674819feb278c388699a85d714e5969e8881a7de40e89529f",
+    "version": 3,
+    "count": 307,
+    "hosts": [
+      "registry.npmjs.org"
+    ],
+    "installScripts": [
+      {
+        "name": "node_modules/esbuild",
+        "version": "0.28.1"
+      }
+    ]
+  },
+  "checksPerformed": "HTTP 状态、HEAD 长度、Range/ftyp、46 个 ffprobe 元数据；未做全片解码或视觉验收",
+  "selected": [
+    {
+      "code": "G05::PipelineFlowSourceFaithfulV1Alpha",
+      "compositionId": "PipelineFlowSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/pipeline-flow-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/pipeline-flow-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/PipelineFlowSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09FlowDiagrams.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "stages",
+        "title",
+        "direction",
+        "delay",
+        "stagger",
+        "style"
+      ],
+      "sha256": "dc0541b65f45500f706928c125020c1e39d83c4b3628c05efbfb8f05b3743b37",
+      "bytes": 200827,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::ChecklistSourceFaithfulV1Alpha",
+      "compositionId": "ChecklistSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/checklist-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/checklist-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/ChecklistSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/ChecklistSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "14fa124173f2c5661037bcaa96623bde5e06d955fb93d478e1bac222af4732a9",
+      "bytes": 47206,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "120",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "4.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::TimelineRailSourceFaithfulV1Alpha",
+      "compositionId": "TimelineRailSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/timeline-rail-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/timeline-rail-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/TimelineRailSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/TimelineRailSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "195de7be360be997299033ec7d828e76a1c3845a72a86c51015d8efbeb45fa0b",
+      "bytes": 91273,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "240",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "8.000000"
+        }
+      }
+    },
+    {
+      "code": "G03::MetricCardSourceFaithfulV1Alpha",
+      "compositionId": "MetricCardSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/metric-card-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/metric-card-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/MetricCardSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09DataCards.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "source",
+        "meta",
+        "from",
+        "to",
+        "unit",
+        "equivalent",
+        "footnote",
+        "accentColor",
+        "iconText",
+        "decimals",
+        "locale",
+        "delay",
+        "countDuration",
+        "style"
+      ],
+      "sha256": "1ebd31be5118c2150943eb7894323a6693f9fda8a5df852b1df92578421c791d",
+      "bytes": 198015,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::ScoreRingSourceFaithfulV1Alpha",
+      "compositionId": "ScoreRingSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-11/score-ring.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-11/score-ring.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/ScoreRingSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch11ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "props": [
+        "value",
+        "max",
+        "label",
+        "eyebrow",
+        "color",
+        "chips",
+        "delay",
+        "scale"
+      ],
+      "sha256": "bc437051ebce6c209e1c1d39129ed8af5db85478a1ec3141835531c5549278d4",
+      "bytes": 139183,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G19::HighlightPassageSourceFaithfulV1Alpha",
+      "compositionId": "HighlightPassageSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-11/highlight-passage.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-11/highlight-passage.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/HighlightPassageSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch11AnnotationMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "props": [
+        "text",
+        "translation",
+        "phrases",
+        "color",
+        "delay",
+        "stagger",
+        "drawFrames",
+        "width",
+        "fontSize"
+      ],
+      "sha256": "8647193c23fa7839526b52b26ff1aa2b5526ee21255bd0223fd1029bdd5377b4",
+      "bytes": 129085,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G10::SideClipCardSourceFaithfulV1Alpha",
+      "compositionId": "SideClipCardSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/side-clip-card-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/side-clip-card-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/SideClipCardSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09EvidenceOverlays.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "clipSrc",
+        "clipType",
+        "eyebrow",
+        "title",
+        "caption",
+        "indexLabel",
+        "accentColor",
+        "side",
+        "delay",
+        "style"
+      ],
+      "sha256": "ec2b61b594f29c799dd6f8f3c1a0c92b2eb81d8c675566cbc310a0da1ffe20be",
+      "bytes": 118330,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::BranchDiagramSourceFaithfulV1Alpha",
+      "compositionId": "BranchDiagramSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/branch-diagram-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/branch-diagram-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/BranchDiagramSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09FlowDiagrams.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "sourceTitle",
+        "sourceEyebrow",
+        "branches",
+        "delay",
+        "style"
+      ],
+      "sha256": "e5aa40b38c7cb986cadc72a9ab3c9da7a814345a8a2777a8a6e7f8c8e5e28ade",
+      "bytes": 205335,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    }
+  ],
+  "allMedia": [
+    {
+      "code": "G01::SlamTitleSourceFaithfulV1Alpha",
+      "compositionId": "SlamTitleSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates/slam-title-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates/slam-title-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/SlamTitleSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/ReferenceCoreCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ReferenceCoreCandidateCompositions.tsx",
+      "props": [
+        "eyebrow",
+        "title",
+        "subtitle",
+        "accentColor",
+        "delay",
+        "fontSize",
+        "maxWidth",
+        "align"
+      ],
+      "sha256": "0ed481912ee933e7357696783ed15dd28ad5d737b8af7b30a20443830b64c3bd",
+      "bytes": 266861,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "120",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "4.000000"
+        }
+      }
+    },
+    {
+      "code": "G03::HeroNumberSourceFaithfulV1Alpha",
+      "compositionId": "HeroNumberSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates/hero-number-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates/hero-number-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/HeroNumberSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/ReferenceCoreCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ReferenceCoreCandidateCompositions.tsx",
+      "props": [
+        "from",
+        "to",
+        "prefix",
+        "suffix",
+        "label",
+        "detail",
+        "accentColor",
+        "delay",
+        "countDuration",
+        "decimals",
+        "locale",
+        "fontSize",
+        "align"
+      ],
+      "sha256": "81f4d73a514ea82820d0999141f51a48e578724505fe40864d46be998b66b1bf",
+      "bytes": 112587,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G03::MetricCardSourceFaithfulV1Alpha",
+      "compositionId": "MetricCardSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/metric-card-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/metric-card-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/MetricCardSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09DataCards.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "source",
+        "meta",
+        "from",
+        "to",
+        "unit",
+        "equivalent",
+        "footnote",
+        "accentColor",
+        "iconText",
+        "decimals",
+        "locale",
+        "delay",
+        "countDuration",
+        "style"
+      ],
+      "sha256": "1ebd31be5118c2150943eb7894323a6693f9fda8a5df852b1df92578421c791d",
+      "bytes": 198015,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G03::GoldPriceTagSourceFaithfulV1Alpha",
+      "compositionId": "GoldPriceTagSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/gold-price-tag-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/gold-price-tag-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/GoldPriceTagSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09DataCards.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "from",
+        "to",
+        "prefix",
+        "unit",
+        "eyebrow",
+        "note",
+        "accentColor",
+        "decimals",
+        "locale",
+        "delay",
+        "countDuration",
+        "align",
+        "style"
+      ],
+      "sha256": "7645c36d5eeeea69dca050fb74afe91bb803df8cb8ff0abcc9018b4078082ee2",
+      "bytes": 282580,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::TimelineRailSourceFaithfulV1Alpha",
+      "compositionId": "TimelineRailSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/timeline-rail-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/timeline-rail-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/TimelineRailSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/TimelineRailSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "195de7be360be997299033ec7d828e76a1c3845a72a86c51015d8efbeb45fa0b",
+      "bytes": 91273,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "240",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "8.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::NumberedPanelSourceFaithfulV1Alpha",
+      "compositionId": "NumberedPanelSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/numbered-panel-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/numbered-panel-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/NumberedPanelSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/NumberedPanelSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "16c0f375ae8a30aee8ff6776598487ab2b02f73bc083f5a8c286004c68347cfa",
+      "bytes": 155345,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::ChecklistSourceFaithfulV1Alpha",
+      "compositionId": "ChecklistSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/checklist-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/checklist-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/ChecklistSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/ChecklistSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "14fa124173f2c5661037bcaa96623bde5e06d955fb93d478e1bac222af4732a9",
+      "bytes": 47206,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "120",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "4.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::PipelineFlowSourceFaithfulV1Alpha",
+      "compositionId": "PipelineFlowSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/pipeline-flow-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/pipeline-flow-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/PipelineFlowSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09FlowDiagrams.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "stages",
+        "title",
+        "direction",
+        "delay",
+        "stagger",
+        "style"
+      ],
+      "sha256": "dc0541b65f45500f706928c125020c1e39d83c4b3628c05efbfb8f05b3743b37",
+      "bytes": 200827,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::BranchDiagramSourceFaithfulV1Alpha",
+      "compositionId": "BranchDiagramSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/branch-diagram-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/branch-diagram-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/BranchDiagramSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09FlowDiagrams.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "sourceTitle",
+        "sourceEyebrow",
+        "branches",
+        "delay",
+        "style"
+      ],
+      "sha256": "e5aa40b38c7cb986cadc72a9ab3c9da7a814345a8a2777a8a6e7f8c8e5e28ade",
+      "bytes": 205335,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G05::IconChainFlowSourceFaithfulV1Alpha",
+      "compositionId": "IconChainFlowSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/icon-chain-flow-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/icon-chain-flow-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/IconChainFlowSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09FlowDiagrams.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "steps",
+        "resultText",
+        "delay",
+        "stagger",
+        "dimPreviousAt",
+        "style"
+      ],
+      "sha256": "07fe3495865d54e375b4f794485a3ba44327b7cb3f3d744a516026e24924ded3",
+      "bytes": 222245,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G09::CrossOutDecisionSourceFaithfulV1Alpha",
+      "compositionId": "CrossOutDecisionSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/cross-out-decision-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/cross-out-decision-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/CrossOutDecisionSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/CrossOutDecisionSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ProcessSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "5d130676ff24c5d68c99fd15e3c352d7ce446f9ee151c5145d83847208a630d0",
+      "bytes": 48454,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G10::WebArticleCardSourceFaithfulV1Alpha",
+      "compositionId": "WebArticleCardSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/web-article-card-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/web-article-card-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/WebArticleCardSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09EvidenceOverlays.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "publication",
+        "section",
+        "date",
+        "headline",
+        "summary",
+        "sourceLabel",
+        "highlightText",
+        "accentColor",
+        "delay",
+        "style"
+      ],
+      "sha256": "6d417d7e780c102bb805a52c7ee37402afd04d5afb039e28c61f9726b425a70f",
+      "bytes": 245863,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G10::NewsOverlaySourceFaithfulV1Alpha",
+      "compositionId": "NewsOverlaySourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/news-overlay-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/news-overlay-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/NewsOverlaySourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09EvidenceOverlays.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "channel",
+        "liveLabel",
+        "headline",
+        "detail",
+        "location",
+        "timestamp",
+        "accentColor",
+        "delay",
+        "style"
+      ],
+      "sha256": "e7efae16b81a3736d6806697ac65551b35cfc510cc44d1e6bdb8990484f20b8a",
+      "bytes": 191732,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G10::SideClipCardSourceFaithfulV1Alpha",
+      "compositionId": "SideClipCardSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-09/side-clip-card-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-09/side-clip-card-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/SideClipCardSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch09EvidenceOverlays.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch09CandidateCompositions.tsx",
+      "props": [
+        "clipSrc",
+        "clipType",
+        "eyebrow",
+        "title",
+        "caption",
+        "indexLabel",
+        "accentColor",
+        "side",
+        "delay",
+        "style"
+      ],
+      "sha256": "ec2b61b594f29c799dd6f8f3c1a0c92b2eb81d8c675566cbc310a0da1ffe20be",
+      "bytes": 118330,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G02::BigChapterTagSourceFaithfulV1Alpha",
+      "compositionId": "BigChapterTagSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/big-chapter-tag-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/big-chapter-tag-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/BigChapterTagSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10EditorialMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "eyebrow",
+        "title",
+        "accentText",
+        "steps",
+        "activeStep",
+        "accentColor",
+        "delay"
+      ],
+      "sha256": "ed06c54701ef375a2a4651df1ad3906350eac1ea52ea2769f03d4bee8f171b55",
+      "bytes": 222564,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G02::EditorialLeftSourceFaithfulV1Alpha",
+      "compositionId": "EditorialLeftSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/editorial-left-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/editorial-left-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/EditorialLeftSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10EditorialMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "eyebrow",
+        "label",
+        "lines",
+        "subline",
+        "context",
+        "accentColor",
+        "delay"
+      ],
+      "sha256": "0d5dcad66741f1ca0c119cef3da16f5e8597cbadb48b2d2cb62c3a4acad185dd",
+      "bytes": 212263,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G02::EditorialTitleSourceFaithfulV1Alpha",
+      "compositionId": "EditorialTitleSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/editorial-title-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/editorial-title-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/EditorialTitleSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10EditorialMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "caseLabel",
+        "chapter",
+        "headline",
+        "accentText",
+        "subline",
+        "verdict",
+        "accentColor",
+        "delay"
+      ],
+      "sha256": "5aff4c2f26b3b2f63b31e3f42d0547a56356b871dbffbb14ea34f39f535b539c",
+      "bytes": 167989,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G04::VsCardsSourceFaithfulV1Alpha",
+      "compositionId": "VsCardsSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates/vs-cards-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates/vs-cards-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/VsCardsSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/ReferenceCoreCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/ReferenceCoreCandidateCompositions.tsx",
+      "props": [
+        "left",
+        "right",
+        "bridgeLabel",
+        "accentColor",
+        "positiveColor",
+        "negativeColor",
+        "delay"
+      ],
+      "sha256": "7fe6dee5b169afe666d03dc830d48d6b6228c71ee64a9b45d4167a9ba3fc619d",
+      "bytes": 195202,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G04::SwapCardRowSourceFaithfulV1Alpha",
+      "compositionId": "SwapCardRowSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/swap-card-row-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/swap-card-row-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/SwapCardRowSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10ComparisonMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "from",
+        "to",
+        "swapLabel",
+        "accentColor",
+        "rejectColor",
+        "delay",
+        "swapAt"
+      ],
+      "sha256": "b36a27bc94e99f91856968c87e438eddbf73a4a0dc8b230e0df9c6e817ddd76c",
+      "bytes": 196916,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G04::VoteTallySourceFaithfulV1Alpha",
+      "compositionId": "VoteTallySourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/vote-tally-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/vote-tally-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/VoteTallySourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10ComparisonMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "eyebrow",
+        "title",
+        "rows",
+        "forLabel",
+        "againstLabel",
+        "note",
+        "accentColor",
+        "delay"
+      ],
+      "sha256": "8882bfc2aead5df817c6970c9d42e81b27e3c2c9ac1ab250076e12a50aeedb8a",
+      "bytes": 115547,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G12::DualNodeBadgeSourceFaithfulV1Alpha",
+      "compositionId": "DualNodeBadgeSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/dual-node-badge-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/dual-node-badge-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/DualNodeBadgeSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10ComparisonMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "leftLabel",
+        "leftGlyph",
+        "rightLabel",
+        "rightGlyph",
+        "centerText",
+        "leftColor",
+        "rightColor",
+        "connectorLabel",
+        "delay"
+      ],
+      "sha256": "1c788a37fb7db6679fccc5a0bc0db0b5c0227fc836b67f42dccd8268ecb3c561",
+      "bytes": 200627,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G14::GenericSubscribeNudgeSourceFaithfulV1Alpha",
+      "compositionId": "GenericSubscribeNudgeSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/generic-subscribe-nudge-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/generic-subscribe-nudge-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/GenericSubscribeNudgeSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/GenericSubscribeNudgeSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/SystemSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "9431c952b8bb0997b20ab996836d0c9102acf513662bb5d75127902c44a5eafa",
+      "bytes": 421114,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "144",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "4.800000"
+        }
+      }
+    },
+    {
+      "code": "G15::PhoneRecordingFrameNeutral",
+      "compositionId": "PhoneRecordingFrameNeutral",
+      "previewPath": "/gallery/media/kimi-pack/PhoneRecordingFrameNeutral.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/kimi-pack/PhoneRecordingFrameNeutral.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/PhoneRecordingFrameNeutral.html",
+      "sourceFile": "src/compositions/PhoneRecordingFrameNeutral.tsx",
+      "compositionSourceFile": "src/Root.tsx",
+      "props": [],
+      "sha256": "c8d2e8f78be85a452f0e1650349c8ee5b41b8a0e780dfcede13cc043a507c2a2",
+      "bytes": 2140436,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.058667"
+        }
+      }
+    },
+    {
+      "code": "G16::WorkflowTipsTerminalAlphaV1",
+      "compositionId": "WorkflowTipsTerminalAlphaV1",
+      "previewPath": "/gallery/media/g16-workflow-tips-terminal-v2-fixed.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/g16-workflow-tips-terminal-v2-fixed.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/WorkflowTipsTerminalAlphaV1.html",
+      "sourceFile": "src/compositions/WorkflowTipsTerminalAlpha.tsx",
+      "compositionSourceFile": "src/compositions/WorkflowTipsTerminalAlpha.tsx",
+      "props": [],
+      "sha256": "a7333f433b0edd69702b4b1ee748fd309b3e4b6543059072e526ba48f746365c",
+      "bytes": 364502,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "135"
+          }
+        ],
+        "format": {
+          "duration": "4.500000"
+        }
+      }
+    },
+    {
+      "code": "G16::LargeCodeCardSourceFaithfulV1Alpha",
+      "compositionId": "LargeCodeCardSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/large-code-card-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/large-code-card-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/LargeCodeCardSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/LargeCodeCardSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/SystemSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "5b6c9c9147cad36bf34dec30cdcd4c052836568a1879fc50e8577310d97a3529",
+      "bytes": 174774,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "120",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "4.000000"
+        }
+      }
+    },
+    {
+      "code": "G16::GitHubRepoCardSourceFaithfulV1Alpha",
+      "compositionId": "GitHubRepoCardSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/github-repo-card-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/github-repo-card-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/GitHubRepoCardSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/GitHubRepoCardSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/SystemSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "8707def0b1bc2d12f4a2d7fda8fee0fd6572ae8f205b3caacd8b858f3ae11b8e",
+      "bytes": 116219,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G17::InvalidStampSourceFaithfulV1Alpha",
+      "compositionId": "InvalidStampSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/source-faithful/invalid-stamp-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/source-faithful/invalid-stamp-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/InvalidStampSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/InvalidStampSourceFaithful.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/SystemSourceFaithfulCompositions.tsx",
+      "props": [],
+      "sha256": "4e42fb728c8d728a5b14ff6b49f5c80d28b6b61f62d051cb118f5ec7cbae8770",
+      "bytes": 58060,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "90",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "3.000000"
+        }
+      }
+    },
+    {
+      "code": "R01::MovingPillCaptionsAlphaV1",
+      "compositionId": "MovingPillCaptionsAlphaV1",
+      "previewPath": "/gallery/media/candidates/moving-pill-captions-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates/moving-pill-captions-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/MovingPillCaptionsAlphaV1.html",
+      "sourceFile": "src/components/motion-library/OfficialConceptCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/OfficialCandidateCompositions.tsx",
+      "props": [
+        "tokens",
+        "accentColor",
+        "activeTextColor",
+        "inactiveTextColor",
+        "fontSize",
+        "gap",
+        "horizontalPadding",
+        "moveDurationInFrames"
+      ],
+      "sha256": "5c0c98cbd356de3735301cae427ba6f00c20891e4dbd037e0bf1d9a97949656c",
+      "bytes": 170793,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "210",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "7.000000"
+        }
+      }
+    },
+    {
+      "code": "R02::PoppingWordCaptionsAlphaV1",
+      "compositionId": "PoppingWordCaptionsAlphaV1",
+      "previewPath": "/gallery/media/candidates-batch-03/popping-word-captions-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-03/popping-word-captions-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/PoppingWordCaptionsAlphaV1.html",
+      "sourceFile": "src/components/motion-library/CaptionLocalizationCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/CaptionLocalizationCandidateCompositions.tsx",
+      "props": [
+        "tokens",
+        "timings",
+        "accentColor",
+        "position",
+        "delay",
+        "exitFrame",
+        "fontSize",
+        "maxWidth"
+      ],
+      "sha256": "4490187b80034c57a7f6df4ec1c17dbdf1d2eac342f36f1acacf3dd4aeae612e",
+      "bytes": 164499,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "R02::WordHighlightCaptionsAlphaV1",
+      "compositionId": "WordHighlightCaptionsAlphaV1",
+      "previewPath": "/gallery/media/candidates-batch-03/word-highlight-captions-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-03/word-highlight-captions-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/WordHighlightCaptionsAlphaV1.html",
+      "sourceFile": "src/components/motion-library/CaptionLocalizationCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/CaptionLocalizationCandidateCompositions.tsx",
+      "props": [
+        "tokens",
+        "timings",
+        "accentColor",
+        "activeTextColor",
+        "position",
+        "delay",
+        "exitFrame",
+        "fontSize",
+        "maxWidth"
+      ],
+      "sha256": "adcad8986f3c7b243c32aafe3d9c691fe09f5f659b2fb549a1ed88b797367bfd",
+      "bytes": 308036,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::AstraSolBenchmarkComparisonV1",
+      "compositionId": "AstraSolBenchmarkComparisonV1",
+      "previewPath": "/gallery/media/astra-sol-benchmark-comparison-v1.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/astra-sol-benchmark-comparison-v1.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/AstraSolBenchmarkComparisonV1.html",
+      "sourceFile": "src/compositions/AstraSolBenchmarkComparison.tsx",
+      "compositionSourceFile": "src/compositions/AstraSolBenchmarkComparison.tsx",
+      "props": [],
+      "sha256": "62dc6511cc3377b31e4827ed0a756ac0d0ea4c9e8c2213bf9a9fab804c3af5b4",
+      "bytes": 1091166,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "360",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "12.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::HorizontalBarChartCleanRoomAlphaV1",
+      "compositionId": "HorizontalBarChartCleanRoomAlphaV1",
+      "previewPath": "/gallery/media/candidates-batch-02/horizontal-bar-chart-clean-room-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-02/horizontal-bar-chart-clean-room-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/HorizontalBarChartCleanRoomAlphaV1.html",
+      "sourceFile": "src/components/motion-library/HorizontalBarChartCandidate.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/HorizontalBarChartCandidateCompositions.tsx",
+      "props": [
+        "items",
+        "title",
+        "unit",
+        "sourceLabel",
+        "highlightIndex",
+        "accentColor",
+        "delay"
+      ],
+      "sha256": "aa848a801d068857a22a70880b7b2ed7caadd887a8dc9ba164d130bae14f3e49",
+      "bytes": 211879,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::CompareBarsSourceFaithfulV1Alpha",
+      "compositionId": "CompareBarsSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/compare-bars-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/compare-bars-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/CompareBarsSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "eyebrow",
+        "title",
+        "rows",
+        "maxValue",
+        "unit",
+        "accentColor",
+        "delay",
+        "stagger"
+      ],
+      "sha256": "740524bed86c6e96bd3e1d5ace08e81966ad9d82be5fa7cf2702073f76665735",
+      "bytes": 155503,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::IncomeBarsSourceFaithfulV1Alpha",
+      "compositionId": "IncomeBarsSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/income-bars-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/income-bars-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/IncomeBarsSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "eyebrow",
+        "title",
+        "bars",
+        "maxValue",
+        "unit",
+        "highlightLabel",
+        "accentColor",
+        "delay",
+        "stagger"
+      ],
+      "sha256": "5d48c1723c1fad80d74bbe781eba5c1226929223730a72aced776094f2e9c0a6",
+      "bytes": 88963,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::LineChartDrawSourceFaithfulV1Alpha",
+      "compositionId": "LineChartDrawSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/line-chart-draw-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/line-chart-draw-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/LineChartDrawSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "eyebrow",
+        "title",
+        "points",
+        "labels",
+        "endLabel",
+        "unit",
+        "accentColor",
+        "delay"
+      ],
+      "sha256": "f9ada37dd314b49f98a499af217238d9fd84a027372822e60ef206e036d56371",
+      "bytes": 136345,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::ScenarioCurvesSourceFaithfulV1Alpha",
+      "compositionId": "ScenarioCurvesSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-10/scenario-curves-source-faithful-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-10/scenario-curves-source-faithful-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/ScenarioCurvesSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch10ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch10CandidateCompositions.tsx",
+      "props": [
+        "eyebrow",
+        "title",
+        "scenarios",
+        "accentColor",
+        "delay",
+        "sceneDuration"
+      ],
+      "sha256": "a0aeeeb9eb4bf36ba3f24356387a09e650fac94e573c413f3013ddcbea9524f2",
+      "bytes": 302423,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "270",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "9.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::RadarPentagonSourceFaithfulV1Alpha",
+      "compositionId": "RadarPentagonSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-11/radar-pentagon.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-11/radar-pentagon.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/RadarPentagonSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch11ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "props": [
+        "axes",
+        "values",
+        "max",
+        "color",
+        "scale",
+        "delay",
+        "note"
+      ],
+      "sha256": "63782f7f9dfec3a3cc0da9fa63ac6557ae3f998fd06f9f1f09938d4097d76ade",
+      "bytes": 208554,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::ScoreRingSourceFaithfulV1Alpha",
+      "compositionId": "ScoreRingSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-11/score-ring.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-11/score-ring.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/ScoreRingSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch11ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "props": [
+        "value",
+        "max",
+        "label",
+        "eyebrow",
+        "color",
+        "chips",
+        "delay",
+        "scale"
+      ],
+      "sha256": "bc437051ebce6c209e1c1d39129ed8af5db85478a1ec3141835531c5549278d4",
+      "bytes": 139183,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::DotMatrixSourceFaithfulV1Alpha",
+      "compositionId": "DotMatrixSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-11/dot-matrix.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-11/dot-matrix.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/DotMatrixSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch11ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "props": [
+        "rows",
+        "cols",
+        "ratio",
+        "shape",
+        "fill",
+        "label",
+        "selectedLabel",
+        "color",
+        "selectedColor",
+        "fillFrames",
+        "scale",
+        "delay"
+      ],
+      "sha256": "e4dcb67988d5dea93feee96e38d9745e1fbf2f094fdf5a7885931279ddc06ee5",
+      "bytes": 223503,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "G18::FanLinesSourceFaithfulV1Alpha",
+      "compositionId": "FanLinesSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-11/fan-lines.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-11/fan-lines.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/FanLinesSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch11ChartMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "props": [
+        "lines",
+        "summary",
+        "drawFrames",
+        "stagger",
+        "delay",
+        "scale"
+      ],
+      "sha256": "3d8b3c22dfbfcbbc7994f3fdda1bb1c8db01e18d02d0ebee8693ed59f3bbd063",
+      "bytes": 150164,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "R04::PolaroidEvidenceStackAlphaV1",
+      "compositionId": "PolaroidEvidenceStackAlphaV1",
+      "previewPath": "/gallery/media/candidates-batch-02/polaroid-evidence-stack-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-02/polaroid-evidence-stack-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/PolaroidEvidenceStackAlphaV1.html",
+      "sourceFile": "src/components/motion-library/EvidenceLocalizationCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/EvidenceLocalizationCandidateCompositions.tsx",
+      "props": [
+        "items",
+        "primaryIndex",
+        "delay",
+        "durationInFrames"
+      ],
+      "sha256": "883ebe6e65146422bfc0a90bc9a35f23bf5df42b1657cce81d6eff65825e9ba2",
+      "bytes": 758342,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "150",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "5.000000"
+        }
+      }
+    },
+    {
+      "code": "R05::PublicCommentEvidenceAlphaV1",
+      "compositionId": "PublicCommentEvidenceAlphaV1",
+      "previewPath": "/gallery/media/candidates-batch-02/public-comment-evidence-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-02/public-comment-evidence-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/PublicCommentEvidenceAlphaV1.html",
+      "sourceFile": "src/components/motion-library/EvidenceLocalizationCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/EvidenceLocalizationCandidateCompositions.tsx",
+      "props": [
+        "avatarSrc",
+        "avatarFallback",
+        "displayName",
+        "handle",
+        "platform",
+        "body",
+        "highlightText",
+        "sourceLabel",
+        "accentColor",
+        "delay",
+        "durationInFrames"
+      ],
+      "sha256": "323415cae6fb6d70bbfc3a2438a4be15337013ed1b3d23d36eec92e564368919",
+      "bytes": 439419,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "R06::SpinningTextWheelAlphaV1",
+      "compositionId": "SpinningTextWheelAlphaV1",
+      "previewPath": "/gallery/media/candidates-batch-03/spinning-text-wheel-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-03/spinning-text-wheel-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/SpinningTextWheelAlphaV1.html",
+      "sourceFile": "src/components/motion-library/SpinningTextWheelCandidate.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/SpinningTextWheelCandidateCompositions.tsx",
+      "props": [
+        "items",
+        "targetIndex",
+        "accentColor",
+        "delay",
+        "spinDuration",
+        "turns",
+        "eyebrow",
+        "resultLabel",
+        "itemFontSize"
+      ],
+      "sha256": "67af49435c2fb21e45071e11ca2ce85d01722369771763ab66d741a4f43a3cec",
+      "bytes": 1164501,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    },
+    {
+      "code": "G19::TextMarkerAlphaV1",
+      "compositionId": "TextMarkerAlphaV1",
+      "previewPath": "/gallery/media/candidates/text-marker-v1-silent.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates/text-marker-v1-silent.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/TextMarkerAlphaV1.html",
+      "sourceFile": "src/components/motion-library/OfficialConceptCandidates.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/OfficialCandidateCompositions.tsx",
+      "props": [
+        "prefix",
+        "highlight",
+        "suffix",
+        "markerColor",
+        "textColor",
+        "fontSize",
+        "startFrame",
+        "drawDurationInFrames",
+        "maxWidth"
+      ],
+      "sha256": "3dd650741a1a1b82e3165f9d5b3c2ed6c9ed4e9e86d4d661985c8a11a11ccd16",
+      "bytes": 155340,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "120",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "4.000000"
+        }
+      }
+    },
+    {
+      "code": "G19::StrikeTextSourceFaithfulV1Alpha",
+      "compositionId": "StrikeTextSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-11/strike-text.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-11/strike-text.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/StrikeTextSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch11AnnotationMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "props": [
+        "text",
+        "eyebrow",
+        "strikeAt",
+        "drawFrames",
+        "delay",
+        "fontSize",
+        "color",
+        "strikeColor"
+      ],
+      "sha256": "9f3f0b145d4296f4920cc7b23368de8485dded0c755fdbf1b1e95f6fbcaec070",
+      "bytes": 31594,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "120",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "4.000000"
+        }
+      }
+    },
+    {
+      "code": "G19::HighlightPassageSourceFaithfulV1Alpha",
+      "compositionId": "HighlightPassageSourceFaithfulV1Alpha",
+      "previewPath": "/gallery/media/candidates-batch-11/highlight-passage.mp4",
+      "previewUrl": "http://127.0.0.1:50322/gallery/media/candidates-batch-11/highlight-passage.mp4",
+      "sourcePage": "http://127.0.0.1:50322/gallery/source/HighlightPassageSourceFaithfulV1Alpha.html",
+      "sourceFile": "src/components/motion-library/Batch11AnnotationMasters.tsx",
+      "compositionSourceFile": "src/compositions/motion-library/Batch11CandidateCompositions.tsx",
+      "props": [
+        "text",
+        "translation",
+        "phrases",
+        "color",
+        "delay",
+        "stagger",
+        "drawFrames",
+        "width",
+        "fontSize"
+      ],
+      "sha256": "8647193c23fa7839526b52b26ff1aa2b5526ee21255bd0223fd1029bdd5377b4",
+      "bytes": 129085,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "avg_frame_rate": "30/1",
+            "nb_frames": "180",
+            "side_data_list": [
+              {}
+            ]
+          }
+        ],
+        "format": {
+          "duration": "6.000000"
+        }
+      }
+    }
+  ],
+  "mainSourceStructuralInventory": [
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/App.vue",
+      "sha256": "f1e4ad71fed17c7e3a8409772e2a8875747ddbfb21c62620752fb7bfdc9eed87",
+      "lines": 167,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion",
+        "<transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/adminCopilot.ts",
+      "sha256": "b4712bb6b6e53294879be5e845f4e3c1108455829bc1966ff2acf06f07f0eb7c",
+      "lines": 39,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/adminGovernance.ts",
+      "sha256": "8cad21b03d95a539b12588bc92ca347b3e0aaac62119a124fb625bdcb29549d4",
+      "lines": 180,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/adminOverview.ts",
+      "sha256": "43e5df16d55477de87aeb7eca2c3defc02c0384b401f2912729154c7c3b261c6",
+      "lines": 80,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/agent.ts",
+      "sha256": "3c2376e37c95ba3c5a255ace2e12867d0d1c8b60e439e99b2fa33ccb4352224b",
+      "lines": 165,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/agentMesh.ts",
+      "sha256": "c4fe1bbccda58af61fb55c360f5c52f9709b9b5ea158794f81cfd5a0f343ad9a",
+      "lines": 128,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/agentResponses.ts",
+      "sha256": "01f640da736f247c86b7a703f0dc4a5aed6775186d5386b2d3b93fae1223d0dc",
+      "lines": 79,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/agentStudio.ts",
+      "sha256": "aa055f86d8697e02b5db98032d8a57ba0a845871a6a04fb8b214542a2b4a1ad9",
+      "lines": 107,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/agentTeams.ts",
+      "sha256": "fb9269159c91715d89e10ee7cc1dc1ce33dcb13556c244118f141daf7d9a2f5c",
+      "lines": 266,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/aiLog.ts",
+      "sha256": "2adab31bd44727fe30b818cd2d724c163a9ac170aa36590bddecc34c4e8ad010",
+      "lines": 12,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/aiPrompt.ts",
+      "sha256": "9d1c79a1336fed989ee647a29104642e2b8ac186f09e8815d6180dc64bf1c726",
+      "lines": 37,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/apiConfig.ts",
+      "sha256": "9998d3da53b678aadde6649271c59afb6e8dc78fbc7c4cefa4c8454431e50a4a",
+      "lines": 50,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/audit.ts",
+      "sha256": "4439d82ab97b710129bcfb97327a0d15c1152e07d90bee6eff4e48f350aa3c3c",
+      "lines": 13,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/auth.ts",
+      "sha256": "4ec9015cce4662f52017d5c76962f1139c4a1afaacaeadd2e8d9188f673a8b14",
+      "lines": 58,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/betaCode.ts",
+      "sha256": "fb138ddfd1feec776362ac045b31b0708a315334107fc9e3b9c60ea60a578640",
+      "lines": 26,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/codeFile.ts",
+      "sha256": "d93445c4787db6f160f8a6368a1c1f6b3dab6472e1f4fe0a63a03e16acb86b4e",
+      "lines": 172,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/dashboard.ts",
+      "sha256": "f0d4888ab5cd5a9accd63fe37ba38e37860c5289254d1139e05e4e21edeab21d",
+      "lines": 23,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/discussion.ts",
+      "sha256": "fd1157f4e5da51746a1e066c2d7705e36e2727d04681e56bd8e0199310f984b5",
+      "lines": 22,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/evolution.ts",
+      "sha256": "b436cac08757678ca1afeebdd5eebcf74339a529241b0fa57126cd1a244fe1a7",
+      "lines": 85,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/feedback.ts",
+      "sha256": "8803e6376da738f1b3d00102c24e3ff053458d4c7c07d86a7e4dea1f5898e4b1",
+      "lines": 46,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/forum.ts",
+      "sha256": "34bf62c9bdc6b22da5301120a31ef2c09a5df15c6f10dd4893cf5394d214ce55",
+      "lines": 84,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/http.ts",
+      "sha256": "5dd4efd2c4791b600a72392b28759762f4cc20ef77c6db7a407b3f92a4beb70d",
+      "lines": 171,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/issue.ts",
+      "sha256": "09821b992060c748761410db8ad3c9480f1adbda98496b0b9ef91f1bfde8c242",
+      "lines": 53,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/knowledge.ts",
+      "sha256": "5f3b0037f010afdf52cb81a5065030ccff55df0d98a321232b015b0c83f8ad58",
+      "lines": 91,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/llmConfig.ts",
+      "sha256": "2109771e60c30f628449e1e40f282c24f292ca7aa1ae3c1054775950cff40362",
+      "lines": 77,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/maintenance.ts",
+      "sha256": "8438e9898ab75e5c5b35aa47044812727a369fec36fa141d82636814a1d0fe6e",
+      "lines": 52,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/mcpGovernance.ts",
+      "sha256": "d1a68a9eb0ff2d1d8efc9f2d4fe0b78675f42eee394e394756daa9d2253fd6ae",
+      "lines": 107,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/pentest.ts",
+      "sha256": "fba20d4d45bd97e245be7018383d9776a4700d033d8ca10cd672f7c4c7e89c77",
+      "lines": 48,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/profile.ts",
+      "sha256": "991ec68215657959572623e988c874e2b63e3347381c3e99987041536c6d7a17",
+      "lines": 40,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/project.ts",
+      "sha256": "7c6329aa1a1c644f3139295372f43a47624a5e4c6d3867da552885f67649ae32",
+      "lines": 203,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/projectMember.ts",
+      "sha256": "99cab519f59d065046d837a7490ffc6e12ac3283b004c27704c286f8dd52d5ca",
+      "lines": 56,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/rbac.ts",
+      "sha256": "8fcf838a512df0890b580561242756ba1749145e567286d5c738258af40d106c",
+      "lines": 179,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/report.ts",
+      "sha256": "36be18730ac97a6536559e764bc93cabe05fb6cb5b74b7f703c32df09775e52a",
+      "lines": 236,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/review.ts",
+      "sha256": "6bc305b98fffec8f7245d4f854dbe5369fa9d2ab1b47af8b99793533a05a1c6d",
+      "lines": 28,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/rule.ts",
+      "sha256": "ee8e105f4129e7abbd4f3bbcd9bcfc639f1ec6ee0b6026016d509664dbae4dcb",
+      "lines": 23,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/sandbox.ts",
+      "sha256": "4feedb5896565a3134f71f23953225645aafb30d2ff6082522e01ffd23335adb",
+      "lines": 39,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/security.ts",
+      "sha256": "8541a8c2786c974c9f4a0db501ed9ab17f647768b37b9767d364e059f81b7b8d",
+      "lines": 49,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/securityAlerts.ts",
+      "sha256": "ee723ea3e20d10f513cf875c882bd46559128233daaaf0008483bede8b704b8d",
+      "lines": 20,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/user.ts",
+      "sha256": "7cf870b204245b5a7b0e6f79704232ec83ce1d19c4097fe7af12928d1a5f2efa",
+      "lines": 24,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/assets/styles/element-index.scss",
+      "sha256": "6143d7f6e36ea99b10f07bffe5705a0d07cc0849b6d6458a286c4d38de024bd2",
+      "lines": 81,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/assets/styles/index.scss",
+      "sha256": "25738d97d8e1ae818d9263d4e6bc41bfdfb02b04fabe3492dce5960a2f712d4d",
+      "lines": 669,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/assets/styles/variables.scss",
+      "sha256": "949dbeb0c6a3d085a896692f77a6d5fe48e77396c849cf2b86c23f9cbbbafd13",
+      "lines": 383,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/admin/AdminCopilot.vue",
+      "sha256": "e638ac80c0c8fdb0b517652d2f2277e751734c5afe85ff05bf7e341fe5bc538b",
+      "lines": 2615,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/admin/AdminLayout.vue",
+      "sha256": "420c8ee993ec58c62f052060d892dae3cb7ceba53a3685bf6915b82fe484b0f2",
+      "lines": 457,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion",
+        "<transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/agent/AgentAvatar.vue",
+      "sha256": "48cd329592f23976d25623dd6a885ef98e3c52c0a87510054677c42eaad9bf9d",
+      "lines": 315,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/agent/AgentDeskCard.vue",
+      "sha256": "d0f4a523be16ee86eb483f5a10d3d56697e852a83ca12bfc39cb1ead37c2c338",
+      "lines": 278,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/agent/AgentDiscussionPanel.vue",
+      "sha256": "9f3297872301434f857e8c2b448bb7093bef5093a87d82913faca7295ff1702e",
+      "lines": 769,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/agent/MetaGPTOrchestrationPanel.vue",
+      "sha256": "ea6c4b3388a7fa3661bca8f9b1294ad59b9b52f8339a42cbc5d2026feb1c799c",
+      "lines": 676,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/agent/SituationPanel.vue",
+      "sha256": "3dabdebd24a0dd0dc920747db602e997f612cb107848cbbdd9076b0b6b72e61a",
+      "lines": 297,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentActivityBorder.vue",
+      "sha256": "86db38e6288674e60ded571cb0f889fa8d6bcae8fe0d1fd70a94698bea7db51e",
+      "lines": 180,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentChatDrawer.vue",
+      "sha256": "ea6fed0169d53ecf26fd57a05a9bc21860023fcd57f2f892888aa996736b3af9",
+      "lines": 3921,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentMemberWorkCard.vue",
+      "sha256": "ba0ebc5ac7200a56b1bdf45e47cd649c813b3f81f7a1aaacccd318c1249e341b",
+      "lines": 391,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentNavLink.vue",
+      "sha256": "ca54ef68bbea1385f60e0fbbf75386f116c7b7335e2f879f0aea0d87b3cbbc15",
+      "lines": 110,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentSessionSwitcher.vue",
+      "sha256": "c3a34166e26e365278291a2f57a6f8c72ea1c0dee06ad55d6bcdcb07b41297f5",
+      "lines": 697,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentTeamCard.vue",
+      "sha256": "566a18ccfc081bf626b75e7e81fe153f9f1dfa9d00a381493667a4f5dd28c3e6",
+      "lines": 315,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentTeamMemberBadge.vue",
+      "sha256": "469b1cd303c7dff4427e66ff9225ba414c22650cd70e3dd37bf727cc9582e8ef",
+      "lines": 122,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentTeamSidePanel.vue",
+      "sha256": "b45e434d7416eaf89cd05953200958564ff6ca954666efb021afdc32be41663a",
+      "lines": 379,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentTeamTrace.vue",
+      "sha256": "91d52e5ce4398a0e3d8d8884e7c4355da1343ebeea8d3e46320a7c6ac9a3e56e",
+      "lines": 446,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentTeamWindow.vue",
+      "sha256": "8004a52d5a60cba56e8a42a773e0894b2718cd091c00cbaff2f7e1fae3445e0e",
+      "lines": 736,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/PrismMascot.vue",
+      "sha256": "5a181940f983f8428abc45e0138abaad9f6ca74725ab499f73617dc91fb8b0e7",
+      "lines": 163,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/ProactivePageGuide.vue",
+      "sha256": "5421f779a20fa2692c14dbad03f64f725046c7eb8df79ddbdf488a357cd50be7",
+      "lines": 192,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/TaskCancelConfirm.vue",
+      "sha256": "b0cc760ee09e5b6e81dc2c144013201844a64521f02bc694bee764053e3b5f73",
+      "lines": 174,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/ThinkingCity.vue",
+      "sha256": "a8964a5afaf3e98957ea4ecc443afaea703268e4c0df31b1fc881708234b6c7f",
+      "lines": 1013,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion",
+        "requestAnimationFrame",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/VirtualCursor.vue",
+      "sha256": "d13e51e128a03c73060d498e78838abc88607616b9b21ea38769f74b5c527923",
+      "lines": 608,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion",
+        "requestAnimationFrame",
+        "<Transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/XiaolingActionOverlay.vue",
+      "sha256": "30034493c874a0b27e66730b1aa648f60b144d2b1189481f1761b3469f26fb34",
+      "lines": 68,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/responses/ResponseApprovalCard.vue",
+      "sha256": "2f37f0e08e5fb4ab696540776e49edda3cd01358bf314af472cdccb1ae039655",
+      "lines": 130,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/responses/ResponseInputCard.vue",
+      "sha256": "7da71150c6fc8b0ff062ec53ee3809045b463ce0a51752b5edbc8154c8a1b1c6",
+      "lines": 136,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/responses/ResponseToolTimeline.vue",
+      "sha256": "6f03746fe340a5286b4f0c45d49a0e17739c004160faf662176354866309792e",
+      "lines": 370,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/chart/BaseChart.vue",
+      "sha256": "e047b206bd5dcfa997f2289ef4d1a688f1d4580a8476e97d66a2156f9b3c4f0e",
+      "lines": 92,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/chart/prismTheme.ts",
+      "sha256": "c6d70c888368b5b2143b88da456444005cd89b612d2d1a5733b113987e5ea0b9",
+      "lines": 92,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/code/CodeViewer.vue",
+      "sha256": "a0eafb718b26c78b73914761242c3daf2c341427e692a819861001a9dc92b0f1",
+      "lines": 125,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/common/AiLoadingBeam.vue",
+      "sha256": "c4336041720fc429284836bdfd8c7c258f7b82269ed0f8cad28d4d54f639435b",
+      "lines": 91,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/common/AiOrb.vue",
+      "sha256": "5b81025fe23ad87abebd53171a118df09139807bc3143b3e732d5ff48fadcdf8",
+      "lines": 266,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/common/EmptyState.vue",
+      "sha256": "3b704c8b3183635a1979b2bfe1d0ac36378ddfc67c982be5450965af8562f6fc",
+      "lines": 103,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/common/FluidProgress.vue",
+      "sha256": "b862d62657a48d67c3019383f8780cf3a2026d5da2ee324c97b7cd2d5e56e01c",
+      "lines": 354,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion",
+        "requestAnimationFrame"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/common/PrismLoading.vue",
+      "sha256": "66432739dcf9f6fe5d24b36e2b6fee614d08e8844aae33d88d1c38654142b0a9",
+      "lines": 97,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/editor/MonacoEditor.vue",
+      "sha256": "cefa129cf4de4e62808a95c6cfdd1de2d2177f5541f5704076b3efb72f8e6f1d",
+      "lines": 176,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/editor/prismMonacoTheme.ts",
+      "sha256": "ec75a0fcfe0e2439ffc63b4ba42de2f470bb9024d4b4986226ac7e1b7be0eeb5",
+      "lines": 84,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/issue/AiPromptModal.vue",
+      "sha256": "a02b5b76bbc6c928af2c630afc943b5a2ae870e4b115684909adbe09f85afa3b",
+      "lines": 510,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/issue/IssueDetailDrawer.vue",
+      "sha256": "c0e03d910a7f6b88f9be9b874d69a47889f6ff5b9f26bccb0a6558a6224ea9e3",
+      "lines": 563,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/issue/SeverityTag.vue",
+      "sha256": "82184a04279d1f5a08ada898582d35952806724dbf6e58f46a12b5a65245fb08",
+      "lines": 18,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/layout/AppHeader.vue",
+      "sha256": "251dde4a7c104cd3e7212fa113ec50263ce78449ae22de5d3bab3ff9b66da703",
+      "lines": 722,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/layout/AppLayout.vue",
+      "sha256": "43289ec76076b2fa8215b5649a1379c730eecfa021062131e3d43c6bd93ba520",
+      "lines": 145,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion",
+        "<transition"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/layout/AppSidebar.vue",
+      "sha256": "3b7b4331f06ccd8624d8427c604ae5eacd2bd65e9e1a45022d75d543d738f2cc",
+      "lines": 554,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/security/SecurityPostureCard.vue",
+      "sha256": "21b3df3c01de4081d0d49792ec2b490a57058083dda24774ffcbb408dc1045be",
+      "lines": 642,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/security/SecurityScanModal.vue",
+      "sha256": "5cbecb9dfd935b4c56f26c41fad05bd326c2f297e5c97578f53f5a37797ca13b",
+      "lines": 1427,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useAgentTeamEvents.ts",
+      "sha256": "7f4930c6edaede66bca0a51c0cefc2175cec6d11c3d4ab429ee08af41bfa9a40",
+      "lines": 168,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useCountUp.ts",
+      "sha256": "7add950baaa8ce9e3838e50752eb2101350d8b920160a66329b62460a8e613fb",
+      "lines": 49,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion",
+        "requestAnimationFrame"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useDangerConfirm.ts",
+      "sha256": "2ecbf68e81943c245d3ec77a9df454bc7d6b86383e0514c24684f3cfa4a548a0",
+      "lines": 51,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useFloatingChatPosition.ts",
+      "sha256": "e88c5722348ffd5fdb9782c79700fcd8186f909a6703385dcf000087eee8da04",
+      "lines": 108,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useSecurityAlerts.ts",
+      "sha256": "98a53774247d8ff43212a0a05d7f0b832d2e702d845c81e7ec292e439120008e",
+      "lines": 232,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/withFeedback.ts",
+      "sha256": "1016e0991a4f56db8a1a22e13b6739d367611e5de1d5de7733a88a1bfff2c2a5",
+      "lines": 85,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/constants/adminGovernance.ts",
+      "sha256": "dffd86d01290c818e40e08d56be6b5875a8622bbf03293013c260c5e36eb1737",
+      "lines": 211,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/constants/agentStatus.ts",
+      "sha256": "61f61d145183539507278e3dc947c6643106cfe037c3b08ad6a788d2feee0dc8",
+      "lines": 79,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/constants/buildInfo.ts",
+      "sha256": "f584a5ffafdc2893c807fee52589f34ea19b92c90ea8c1b04544d5348f615030",
+      "lines": 6,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/constants/dim.ts",
+      "sha256": "4d09efbaeb428c36b8d4ff2005a2c9294c8956d5b768c3185f2184613f2b2373",
+      "lines": 99,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/constants/issueType.ts",
+      "sha256": "07a442c99dfd8fae1375b60bde1433841c4fd783d2ef36a18e817e658fcfdc14",
+      "lines": 34,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/constants/pentest.ts",
+      "sha256": "98f0bb06eb04dee7f5a4dfcf98e4100a66a5037008a404311e67ee9b2377369a",
+      "lines": 107,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/constants/reviewType.ts",
+      "sha256": "5fc281e5cf0470f98c3f49b08871c4296d6b30485d6901d308ede612822ddfe0",
+      "lines": 38,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/constants/severity.ts",
+      "sha256": "2687f7143221b78dbcefefd7c6bba62a17cad5b5d2ee0fa4b2153f2bd7de2791",
+      "lines": 92,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/main.ts",
+      "sha256": "8d0292443dd47af8d79ef9e63deb91ccdd0c87c61236b712e671282a3894058e",
+      "lines": 20,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/plugins/elementPlus.ts",
+      "sha256": "01c0c748b94b4d086b6eaf15c37ea6fc786ad687f46141e8190d25a4bd55f888",
+      "lines": 195,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/router/guards.ts",
+      "sha256": "0d5805a5046fc6e85dd2fc92d86722e995c346dcdf6e13247c80792a7845dc71",
+      "lines": 115,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/router/index.ts",
+      "sha256": "f103dd4e10a40388440fd7838d0c98b9dcc2c4bf478d371ed170de08d414c4f8",
+      "lines": 399,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/stores/agentActivity.ts",
+      "sha256": "c49eff0efa154e7d94c07fd974b736771b909ba371fd9445160f0d21809e238e",
+      "lines": 96,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/stores/user.ts",
+      "sha256": "8369bc33f3b1118c62fbaa392675df2cada41706e643e72d3f0026b76c9c1630",
+      "lines": 253,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/test/setup.ts",
+      "sha256": "378258553e928590a8a041d67af1cb54da0d8349f2cd39f8abdfc9273576b702",
+      "lines": 70,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/adminGovernance.ts",
+      "sha256": "834b104413aa85c5230f2c125f220e20015ce02e137e3ab8dad02621c4d374de",
+      "lines": 190,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/agent.ts",
+      "sha256": "c55cf2d7db8ee555a3cc686cc5fe994dab8dc5ec5c17b39b05697dcab6ecbfa8",
+      "lines": 237,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/agentEvent.ts",
+      "sha256": "24828984761815aee1d81516580f6d218ef23221175ebcbdbdefc30e4678c186",
+      "lines": 31,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/agentGuide.ts",
+      "sha256": "720982131efb2c68288d06a53a62ec2f2be627f01bd931baa5bd630a202b6c37",
+      "lines": 15,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/agentStudio.ts",
+      "sha256": "ee1be3c783ed16ff2defaa657ccfdfecf7acc7c1275fe0727fe7642627028aa5",
+      "lines": 105,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/aiLog.ts",
+      "sha256": "c8afdb1698eee674268babddec9b7ef1ec746e47dc239de78afd8c2e84f92fbb",
+      "lines": 43,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/aiPrompt.ts",
+      "sha256": "2a05fbe0d0a4fc4bcf42e7ab7e4828d87d7057418caf4ae09c0fb12dfbe7d74e",
+      "lines": 47,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/audit.ts",
+      "sha256": "1abfcc5d610dd934d624d08d1126c229b18a69c1aeb9cb381c494328b1d15461",
+      "lines": 23,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/auth.ts",
+      "sha256": "2b7c4e1881fe824a2b87270228e4a8abe2974a05b6e4f99b34605b974b218e25",
+      "lines": 38,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/betaCode.ts",
+      "sha256": "f05ac9b42d969cdf3c2b92151a8be26a4926d08b67b1dd9876476af584dd1545",
+      "lines": 35,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/common.ts",
+      "sha256": "908beb16cd418d4eb82c24e6ade114fa8db9c787495605b141329e25a833904d",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/dashboard.ts",
+      "sha256": "0f574793dba17a548122c4bde96f3d9cf3097fd3d1dab4fbc98336a38b53e79e",
+      "lines": 41,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/evolution.ts",
+      "sha256": "d3997206a0564bcd8a861c8013977587ec09ac44886be78073da69485f560043",
+      "lines": 85,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/mcpGovernance.ts",
+      "sha256": "0cad944df03604764748d3c976983dfc256585b000c681d718095fe9d33fccf0",
+      "lines": 106,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/pentest.ts",
+      "sha256": "3d6ebf9417d8fcacea7d9d376ea7babd5f19e62fb01ad31d57deaf969edcab2c",
+      "lines": 102,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/project.ts",
+      "sha256": "9979b32b9f2d59b8171f5b9d0e1e8c71ff552c3492e612651dc5ae9e3082e205",
+      "lines": 156,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/projectMember.ts",
+      "sha256": "5008c987164373af030d3115399139df75b5a05a6a9814ec6553599e582020fc",
+      "lines": 38,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/rbac.ts",
+      "sha256": "9adfe95dd6ac4205d5e9a85e4bb1b27a539dc420bfee36c34c8b5005db2b103b",
+      "lines": 168,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/report.ts",
+      "sha256": "0f1225a3b76ed8b66bdaaf742849f8a8302e88d33e1d4e69ba14fe7bd06b77c2",
+      "lines": 161,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/responses.ts",
+      "sha256": "d563e600b15ab27ab334ace9be92330c9334b5b1170db71a292e949457bc56e0",
+      "lines": 198,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/review.ts",
+      "sha256": "4a9b43e8a7c4dcea9ff547d2e4b8e9507226e9112d64fae4673ca8a0c3604cf9",
+      "lines": 215,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/rule.ts",
+      "sha256": "5321b1af160d263951d8aded7df17410acee9b3529fceb04f692ea079a0afc78",
+      "lines": 32,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/sandbox.ts",
+      "sha256": "e655d69bcf2d5a1b3a6c0fad209b47a92be75a1b447c440d8876a41d037ccc78",
+      "lines": 70,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/security.ts",
+      "sha256": "d4749cfcc8e31f36fde77be8cf94bcdf3a339e13f47aa9c1a373395705e7a13b",
+      "lines": 164,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/securityAlert.ts",
+      "sha256": "ca0a76234f713840d062ef2aa08ac3b2d5e77b112714319ba0609b4b072d32c0",
+      "lines": 77,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/types/user.ts",
+      "sha256": "f1c2bc17037cda0d6a3ed73aa12dfab6cbb94b94a795ff64c317f7cf71a24928",
+      "lines": 12,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/agentActivityPresentation.ts",
+      "sha256": "d187ea8f66cd7e22db1da4c1798aab55943cf243f60545b898dd5d19e97e6e27",
+      "lines": 53,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/agentChatSessions.ts",
+      "sha256": "c08d7cfe3d8be413ea9d9239b0751fe3b2d3ec1995630a8a8aef2de4b8e20b80",
+      "lines": 365,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/agentEventStream.ts",
+      "sha256": "0510fc26390211255f69345e43a5050ea84db734e8e66aed3fed70ab60079e5c",
+      "lines": 134,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/agentMeshBridge.ts",
+      "sha256": "6336dec899b0c5f0d188c246a82e830f3de2b7d9130aca0d8f370e3909a0b0c5",
+      "lines": 139,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/agentMeshTimeline.ts",
+      "sha256": "c17f080f00cab8b441065c31ee34aca314c02623106cb2e6315a60560e8931b1",
+      "lines": 95,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/agentNavigation.ts",
+      "sha256": "37b02920dadb35cb61176743d9eb315d606cb06546c98dc8f3deb0f6f264dfb8",
+      "lines": 293,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/agentResponseSession.ts",
+      "sha256": "b2e929e5b40e0932879ff075845ab2518f4cf18f66b8289bb256c4bb1b9cefa3",
+      "lines": 38,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/agentText.ts",
+      "sha256": "e9c520468dfc4dfc042d16a0debd943a5447a1af22a3e9ec937da9a56d3af41b",
+      "lines": 103,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/autoValidation.ts",
+      "sha256": "5a90a984d8df18f9643b48c8b3acbd5d9000976fc103f1b0750fd30917b55dc7",
+      "lines": 17,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/clarifyProjectOptions.ts",
+      "sha256": "be06362a559581c8d709d14482e662f3a228ff09a2ac872112cbc1f9655491ba",
+      "lines": 101,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/cronValidate.ts",
+      "sha256": "cad81b455b761037b98c4dad931a8119216a010a6ba1b80baf4225ab61b4cf3f",
+      "lines": 47,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/discussionStream.ts",
+      "sha256": "ee6eeeb90584b19a9ffea2efbb7542690af6ffe2080287960d3d06bd7404eee9",
+      "lines": 249,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/format.ts",
+      "sha256": "88fa98b2a45769e7b811d1de411de6e9439bec50a5c60e1e3c59876c84410b02",
+      "lines": 109,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/language.ts",
+      "sha256": "f1c1d74e89aeec23b9c40cac42d9855127c38b92783cabfca6a04d8b3fb3d43d",
+      "lines": 112,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/markdown.ts",
+      "sha256": "6d9bbf1d487b1ef719ea345247f813ea28f86ece3202583f0ed3f0ef5fc98f86",
+      "lines": 79,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/navigation.ts",
+      "sha256": "851ca730db4a117d94e41f29d5641af9d29cde07b4138120ce0895d758fe646b",
+      "lines": 22,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/pageGuideTips.ts",
+      "sha256": "82e43949ee0d9ac10e8182c853c9f83f84c9ec07a7c237f58065582a5d0f34d0",
+      "lines": 50,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/responsesStream.ts",
+      "sha256": "823a9c4f8368070dd400ec42fb1cc90125963ba4a046d67c578cb479f4736bd0",
+      "lines": 252,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/responsesTimeline.ts",
+      "sha256": "758aacf87bcf12d24189a06192b29368ddef386077092a760be5b27d1403af98",
+      "lines": 345,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/reviewScore.ts",
+      "sha256": "066b8aa85e0325e525722d9e150d76fc269368ab3ded7d4d3f7f324fddccb6ac",
+      "lines": 30,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/roleHome.ts",
+      "sha256": "52a7275515b7bdbd6771c4c98ad3cf3ec7167a0cf921b38bfe93e78bd6fe8e5e",
+      "lines": 104,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/sandboxPresentation.ts",
+      "sha256": "448eafdfde4adf6268ba62c246b018e588feb7a8d9d2fa87a77789cb68b86b88",
+      "lines": 99,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/thinkingCityEngine.ts",
+      "sha256": "9bbccf8cb6c20b6cbd28757f4b38e92c735a7abd52df8fa878b4eecf8c6fce08",
+      "lines": 570,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/thinkingCityMemory.ts",
+      "sha256": "9c43c9784dc9d0cfa0b0c7386122ef90571e56b1e048e47c12b7a7a47c6b471c",
+      "lines": 116,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/tilt.ts",
+      "sha256": "dc92ff2b5a01bb7e7880f596a72223444daf3cddca4eb08bc46cb154e41d5354",
+      "lines": 69,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/token.ts",
+      "sha256": "f049e4a4060ecb721e6feecbb41008dc97fc7ce732aeea5a65e37b324178f015",
+      "lines": 14,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/toolDisplay.ts",
+      "sha256": "6e3760fd791d7c41adab064a7ceca97c5616a30ecff8f9e6ab89f795b266faaa",
+      "lines": 168,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/xiaolingNavigation.ts",
+      "sha256": "c5b413650885e509ddb107376179cd952dcfa7cab51426a88a92058785dca359",
+      "lines": 48,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/AdminOverview.vue",
+      "sha256": "26725db7a2d33ae9ea121ab272f66eda31a5ce78f373e36869707ba48bb13fd3",
+      "lines": 637,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/AgentGovernance.vue",
+      "sha256": "1fc5f7affd4b17733874c47cc2f31d44ca1cd2d0d96c5d0b44187eecc2975e10",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/AgentReleaseAdmin.vue",
+      "sha256": "40ddd8161df9472a856c7cec5b3df338dbf8526d406ba7f479f6359324552181",
+      "lines": 326,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/AiLogList.vue",
+      "sha256": "3763c152ff7301052226faa9383b423f2c6089032dff7ca4c9d1e93c78c7bde8",
+      "lines": 395,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/ApprovalCenter.vue",
+      "sha256": "83e818f8865159d87d8bdba61a3292835d71414b213ff2b102b4bdc2c2a71af1",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/BetaCodeAdmin.vue",
+      "sha256": "7fbd62898603749da595c804fce63c21c1af1382bc63915e0aed950b2e5af868",
+      "lines": 255,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/EmbeddingConfig.vue",
+      "sha256": "705bf862cf6105de91874f474545c9914804b3cd97686ab15002da51f6ed8aab",
+      "lines": 105,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/EvolutionCenter.vue",
+      "sha256": "01e4c9d8ffddc09878474669568e5ebe0fc6f1b0bdf25f42586b0eb75feb2e87",
+      "lines": 806,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/GovernanceWorkstation.vue",
+      "sha256": "4fdd86cf5d9ced44c4ac17c077507671003df69223abd3e274efc04a0288a368",
+      "lines": 1347,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/JobCenter.vue",
+      "sha256": "fe0502ee56952c4b7932062e4c525440badeec1de846c2a15b6c5827aecfb530",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/KnowledgeGovernance.vue",
+      "sha256": "8e67a549f0e25b6cd973e2fc7fafed7efabc9e4de08c2716479cdc27a348fdb9",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/LlmConfig.vue",
+      "sha256": "09f779114888ea5f6651e94c2a2ade08b346d19a827957df04023595a7d1a59c",
+      "lines": 580,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/McpWorkerGovernance.vue",
+      "sha256": "00d6b4eb89c416a4329f81e4a76d5d97ae83fe46bc2dbc2c0a33c05ab8c6fd7e",
+      "lines": 517,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/ObservabilityCenter.vue",
+      "sha256": "96ba30075e229733735ced797a386fbcd35db15639ae03c0a89589b0e159b11b",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/PermissionList.vue",
+      "sha256": "d5e8fe0635cec7c2c43bfc6b30ed18d5b97f8a95988bf64732c3c582530dc681",
+      "lines": 225,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/PolicyCenter.vue",
+      "sha256": "b1279fe110026c2fc63baca8cc1ea3ac1693a1bcb8e61c89ab3218c475474d10",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/RewardCenter.vue",
+      "sha256": "123d323e7335dbf683b96504f920464f5bbb1d22c530ccfca30a520f6778bf7c",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/RoleManage.vue",
+      "sha256": "df1bc580844396e7963de70496d7a5e8e32c8c65810adf38479d034269717f5c",
+      "lines": 482,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "requestAnimationFrame"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/RollbackCenter.vue",
+      "sha256": "176e1fe4327efe67e4f916dc2ac90079a9e516ffcfe4931bf742af9821b9aad1",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/SkillManager.vue",
+      "sha256": "3714052ce2418c045d5bec5bc6b035d55832b69c7ea1e119ce71986c09df0936",
+      "lines": 702,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/SystemAudit.vue",
+      "sha256": "e7228484b82851fa2ed655189ebe9c7e8598d198f9177dc66ff16e2689588eb4",
+      "lines": 236,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/ToolGovernance.vue",
+      "sha256": "2526371cc86246d71808889e5c8b74344f806bd9d16b0d63c283f1066de74c6e",
+      "lines": 8,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/UserManage.vue",
+      "sha256": "7dfca4303014de2ccfa804ac3f35fbabfaba901f828844fd689c708df4796baf",
+      "lines": 341,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/admin/UserRoleAssign.vue",
+      "sha256": "c56ec6c2b8fe1cee6008c5c5164956ca14e79cf41db8cb4240a570bd9562e0a6",
+      "lines": 372,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/agent/AgentCenter.vue",
+      "sha256": "d399c1783a5cf4f220bd273b4818356402a02dbcbe876632b0edc8b9039c4d15",
+      "lines": 880,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/agent/AgentStudio.vue",
+      "sha256": "87997bd62e918d80027bdda7b4549d0449496997db23235446fc75da216f84d7",
+      "lines": 332,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/auth/Login.vue",
+      "sha256": "16b14cf6df029b466c693cae7941f8e5a5b7aa2351b43b03003fa27034f71e21",
+      "lines": 573,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/auth/Register.vue",
+      "sha256": "820f1493e33cc166988c68d02e4f49cc6b6938cffa6d2e5285642efe7736a2b5",
+      "lines": 813,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/code/CodeEditor.vue",
+      "sha256": "fdb191aa435a703ab5f28d0a0519c563e53800c8ee75fe51d3860cd1380baca9",
+      "lines": 380,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/code/CodeFileList.vue",
+      "sha256": "30ebc4a41548f3d7c0d93d1f881c9231d1ea195c6d9902d9bceb806456c5f059",
+      "lines": 342,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/code/CodeHub.vue",
+      "sha256": "c3608ef3519c5ec87647a0168f712d671e02bebaa3e9eb8b6cd44bb011874560",
+      "lines": 186,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/code/VersionHistory.vue",
+      "sha256": "8711a2733d238b698de90da296ee2b9badb7e3372589c323da31cc0a9f6a9dd4",
+      "lines": 207,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+      "sha256": "72157be4b2084157dfbab9e6352bb09eeab00a1677eeec5b263587a09b728dfb",
+      "lines": 1110,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes",
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/error/Forbidden.vue",
+      "sha256": "4606a6ec5ff9ea076dea69850a8e5bae969a335b369f81642be9659c1c2c0195",
+      "lines": 71,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/error/NotFound.vue",
+      "sha256": "161dcf76659ea98137a02537f4d4fdd2876a029b933508abab15e60e612f2957",
+      "lines": 71,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/forum/ForumList.vue",
+      "sha256": "bcdf0ae5b328716cbd2c3a3c697b6b06f9505fccdba4d514aa1a0d78c76c5ba7",
+      "lines": 119,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/forum/ForumPostDetail.vue",
+      "sha256": "70ffa338756e61b430274e2d5bfb54a19d9710e252fc916ffcdd5fd5eef894f1",
+      "lines": 188,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/forum/ForumPostEdit.vue",
+      "sha256": "dddbf299b9347800da1d9f95714d155cde951269ba9f7512e1524b4057287796",
+      "lines": 136,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/issue/IssueHub.vue",
+      "sha256": "cf8911ae78aa9a4f8a2ed4976d60feaed220f9374305e057c2839419fe1cd2e1",
+      "lines": 333,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/knowledge/KnowledgeBase.vue",
+      "sha256": "6d741f54fe6d752bae6a953ed244bb8082c997bddd139d52628740572bce734c",
+      "lines": 230,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/pentest/PentestDetail.vue",
+      "sha256": "9b4968c0174ed58d3a23c940854296e5d085ed2e4302bf05001dec6e91b5e4ef",
+      "lines": 625,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/pentest/PentestList.vue",
+      "sha256": "095e4c9f9078b3da2ed7e746b8272ffd42992be208a46f9a2b2f7d4cef97541e",
+      "lines": 283,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/pentest/PentestStart.vue",
+      "sha256": "b9d6d8bf8bbaa57f47b0d0acfeb154df581627e7d542576e0f60c52ebafad3c8",
+      "lines": 386,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/profile/ApiConfig.vue",
+      "sha256": "3386acd36270a2b3a143eba7538a673e8f781069479f2c82fd510eced254e9d8",
+      "lines": 432,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/profile/ChangePassword.vue",
+      "sha256": "dedd175e51de708db38458b35798f3ee756cb98d206a29aff8dd5f84b452e957",
+      "lines": 166,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/profile/PersonalizationCenter.vue",
+      "sha256": "1e0e4d622ff135cd9ec9a932ff84250724da952f2b210f12e84db1748e96dd4d",
+      "lines": 156,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/profile/ProfileCenter.vue",
+      "sha256": "727e1e3bc35e8d2a4fbc10ee79195d022f2a732a383e3f212d361f75d3b9fcdd",
+      "lines": 234,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/project/ProjectDetail.vue",
+      "sha256": "2f12689872e9217dd262f20fd7559242ad21ec15cc5acded523913b493c4fac1",
+      "lines": 926,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/project/ProjectForm.vue",
+      "sha256": "c85441acaeb0d2a0814ed588e9b9246bf0e6b17cc98ab32f5b52108d2e8bdb4d",
+      "lines": 515,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "@keyframes"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/project/ProjectList.vue",
+      "sha256": "def2ea42862174bb507d4ff7472fe07898cf3dcd2d5f39f33035a197f0988803",
+      "lines": 1497,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/report/ReportDetail.vue",
+      "sha256": "5be790d28723cea96204040b216b428b5c3687269f2c5cf43f910b1433c49a36",
+      "lines": 1768,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/report/ReportList.vue",
+      "sha256": "d2a14fbbb4032bd0b606f79d2961af8fe2f382e08f921bd63630071ba8a26969",
+      "lines": 358,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/report/ReportTemplateManage.vue",
+      "sha256": "244ebb6ae011da5e347db9c720d1937bb55b0bd68062753318d267a9e91c2cf1",
+      "lines": 595,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/review/ReviewStart.vue",
+      "sha256": "c341f4163255303495b00f6589600ba01f4d38806be53323f2bfac32418891ca",
+      "lines": 673,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/review/ReviewTaskDetail.vue",
+      "sha256": "7c437fc08501e8b8cc7bb328f5406177d7a64e276a34c6b6b35b57d18e6ff34a",
+      "lines": 1543,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": [
+        "prefers-reduced-motion"
+      ]
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/review/ReviewTaskList.vue",
+      "sha256": "21aa6385c5b7f3375d81138036c8c2518284de760e8e852762ca228779936ca8",
+      "lines": 498,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/review/scanRegressionTestUtils.ts",
+      "sha256": "9954f13ba1a7b3e8aeda20f0d06b8da4c4e79d76d06684c3ba1d9c29d520f89c",
+      "lines": 69,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/rule/RuleConfig.vue",
+      "sha256": "f829aeffc7bbb51136518d090d86db365ecc18d5760e8286b6e0afcbbcf9872a",
+      "lines": 395,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/sandbox/SandboxWorkstation.vue",
+      "sha256": "ca7f9d4014da4b0e1c07a097c3cd7bb1364d07fefc8f8e497c1367cbf8b9d9b3",
+      "lines": 699,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/security/SecurityCenter.vue",
+      "sha256": "a57fac8d91c6efe454e7ddf1af5be7cbdf4c209ef468bce9f766466bb7c91a3d",
+      "lines": 913,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/security/owasp-knowledge.ts",
+      "sha256": "ed999b5a1360e1651b076d9211e44e98f5fd8c8027097edb7b357c0869c38003",
+      "lines": 474,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/support/FeedbackCenter.vue",
+      "sha256": "9c456cf6004bec0902957da27ad39a3921581b8dc8f3de35576e3d5dccfea972",
+      "lines": 192,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/support/MaintenanceCenter.vue",
+      "sha256": "be2605c6867a7d0bfb082b8fb616d622c877d1dd8434b2e15e7e5bb0f5aa63c1",
+      "lines": 226,
+      "reviewMethod": "全文关键词结构扫描，不等于逐行业务审计",
+      "flags": []
+    }
+  ]
+}

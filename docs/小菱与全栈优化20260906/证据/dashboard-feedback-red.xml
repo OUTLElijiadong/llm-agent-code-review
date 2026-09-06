@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="1" failures="1" errors="0" time="0">
+    <testsuite name="src/views/dashboard/Dashboard.test.ts" timestamp="2026-09-05T23:28:50.363Z" hostname="lijiadongdeMacBook-Air-7.local" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="src/views/dashboard/Dashboard.test.ts" time="0">
+            <failure message="[vitest] No &quot;createRouter&quot; export is defined on the &quot;vue-router&quot; mock. Did you forget to return it from &quot;vi.mock&quot;?
+If you need to partially mock a module, you can use &quot;importOriginal&quot; helper inside:
+" type="Error">
+Error: [vitest] No &quot;createRouter&quot; export is defined on the &quot;vue-router&quot; mock. Did you forget to return it from &quot;vi.mock&quot;?
+If you need to partially mock a module, you can use &quot;importOriginal&quot; helper inside:
+
+vi.mock(import(&quot;vue-router&quot;), async (importOriginal) =&gt; {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ src/router/index.ts:391:16
+ ❯ src/api/http.ts:3:1
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

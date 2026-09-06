@@ -1,0 +1,16 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --reporter=default --reporter=junit --outputFile.junit=/tmp/prism-release-20260906/dashboard-independent-findings-green.xml src/views/dashboard/Dashboard.test.ts src/views/permissionVisibility.regression.test.ts
+
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend
+
+ ✓ src/views/dashboard/Dashboard.test.ts (45 tests) 160ms
+ ✓ src/views/permissionVisibility.regression.test.ts (6 tests) 43ms
+
+ Test Files  2 passed (2)
+      Tests  51 passed (51)
+   Start at  08:07:48
+   Duration  1.19s (transform 547ms, setup 23ms, collect 1.21s, tests 203ms, environment 568ms, prepare 62ms)
+
+JUNIT report written to /tmp/prism-release-20260906/dashboard-independent-findings-green.xml

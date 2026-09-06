@@ -1,0 +1,21 @@
+{
+  "buttons": [
+    {
+      "text": "进入棱镜\n→",
+      "width": 272
+    }
+  ],
+  "height": 740,
+  "inputs": [
+    {
+      "type": "text",
+      "width": 226
+    },
+    {
+      "type": "password",
+      "width": 226
+    }
+  ],
+  "scrollWidth": 320,
+  "width": 320
+}

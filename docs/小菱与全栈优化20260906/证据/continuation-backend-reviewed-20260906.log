@@ -1,0 +1,66 @@
+started_at=2026-09-06T00:14:19.047978+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B /tmp/prism-readonly-20260905-tests/pytest_readonly.py -q -o addopts= -p no:cacheprovider -p pytest_asyncio.plugin -p pytest_cov.plugin --basetemp=/tmp/prism-readonly-20260905-tests/pytest/continuation-backend-reviewed-20260906 --cov=app --cov-report=json:/tmp/prism-readonly-20260905-tests/coverage/continuation-backend-reviewed-20260906.json --junitxml=/tmp/prism-readonly-20260905-tests/continuation-backend-reviewed-20260906.xml --tb=short --durations=10 -ra tests
+........................................................................ [  2%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 15%]
+........................................................................ [ 17%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 25%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 48%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 71%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 94%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+............                                                             [100%]
+=============================== warnings summary ===============================
+app/agents/test_review_reporter_agent.py:96
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/test_review_reporter_agent.py:96: PytestCollectionWarning: cannot collect test class 'TestReviewReporterAgent' because it has a __init__ constructor (from: tests/unit/services/test_review_dynamic_roles.py)
+    class TestReviewReporterAgent(BaseAgent):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /tmp/prism-readonly-20260905-tests/continuation-backend-reviewed-20260906.xml -
+
+---------- coverage: platform darwin, python 3.9.6-final-0 -----------
+Coverage JSON written to file /tmp/prism-readonly-20260905-tests/coverage/continuation-backend-reviewed-20260906.json
+
+============================= slowest 10 durations =============================
+16.77s call     tests/unit/services/test_security_sentinel_agent.py::test_scan_project_bounds_raw_findings_then_scores_deduplicated_results
+5.03s call     tests/unit/test_pentest_service.py::test_detect_queued_line_timeout_marks_skipped_not_running
+5.02s call     tests/unit/test_pentest_service.py::test_detect_interrupt_on_cancel_keeps_cancelled_not_failed
+3.25s call     tests/unit/services/test_scheduler_configuration_closure.py::test_real_timer_applies_cadence_disable_enable_and_current_config
+3.03s call     tests/unit/test_pentest_service.py::test_probe_poll_releases_snapshot_and_finishes
+2.99s call     tests/unit/scripts/test_quarantine_projects.py::test_cli_file_backed_roundtrip_is_rechecked_in_fresh_readonly_process
+2.17s call     tests/unit/test_alembic_metadata_imports.py::test_autogenerate_does_not_propose_dropping_existing_orm_tables
+2.08s call     tests/unit/test_alembic_metadata_imports.py::test_alembic_env_imports_every_declared_table_without_application_startup
+1.92s call     tests/unit/test_alembic_metadata_imports.py::test_model_registry_is_explicit_lazy_and_idempotent
+1.06s call     tests/unit/services/test_clarify_v2.py::test_clarify_store_ttl_expiry
+2820 passed, 1 warning in 115.90s (0:01:55)

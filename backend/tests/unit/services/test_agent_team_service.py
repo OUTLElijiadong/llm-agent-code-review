@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.orm import Session
+from sqlalchemy.sql.dml import Update
 
 from app.models.agent_capability import SandboxEnvironment
 from app.models.agent_governance import AgentMemory
@@ -63,6 +65,29 @@ def _payload(**overrides):
     }
     value.update(overrides)
     return AgentTeamCreateIn.model_validate(value)
+
+
+def _branching_payload(*, root_attempts=1):
+    return _payload(tasks=[
+        {"task_key": "read", "member_key": "reader", "title": "主分支", "instructions": "读取主分支",
+         "priority": 100, "max_attempts": root_attempts},
+        {"task_key": "sibling", "member_key": "reader", "title": "独立分支", "instructions": "读取独立分支",
+         "priority": 90},
+        {"task_key": "spare", "member_key": "reader", "title": "排队分支", "instructions": "读取排队分支",
+         "priority": 80},
+        {"task_key": "followup", "member_key": "reader", "title": "独立分支后继", "instructions": "处理独立结果",
+         "depends_on": ["sibling"]},
+        {"task_key": "verify", "member_key": "reviewer", "title": "最终复核", "instructions": "复核全部分支",
+         "depends_on": ["read", "spare", "followup"]},
+    ])
+
+
+def _fail_claim(db, team_id, claim, *, retryable=False):
+    return agent_team_service.complete_task(
+        db, team_id, claim["task_id"], lease_token=claim["lease_token"],
+        result={"status": "failed", "summary": "确定性失败", "retryable": retryable},
+        success=False, error="确定性失败",
+    )
 
 
 def _claimed_deploy_and_verifier(db, team_user):
@@ -623,6 +648,317 @@ def test_dependency_failure_recursively_blocks_all_descendants(db, team_user):
         "summary": "blocked",
     }
     assert all(item["completed_at"] for item in result["tasks"])
+
+
+@pytest.mark.parametrize(("retryable", "root_status"), [(False, "failed"), (True, "dead_letter")])
+def test_terminal_failure_closes_independent_queued_and_waiting_tasks(db, team_user, retryable, root_status):
+    """失败根节点、独立排队分支及其等待后继必须在同一提交中闭合。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    result = _fail_claim(db, created["team_id"], claim, retryable=retryable)
+    tasks = {item["task_key"]: item for item in result["tasks"]}
+    assert result["status"] == "failed"
+    assert tasks["read"]["status"] == root_status
+    assert {tasks[key]["status"] for key in ("sibling", "spare", "followup", "verify")} == {"blocked"}
+    assert result["counts"]["queued"] == result["counts"]["running"] == 0
+    assert all(task["completed_at"] and task["next_attempt_at"] is None for task in tasks.values())
+    for key in ("sibling", "spare", "followup"):
+        assert any(error["code"] == "team_failed" and "read" in error["failed_tasks"] for error in tasks[key]["errors"])
+    assert tasks["verify"]["errors"][0]["code"] == "dependency_failed"
+    assert all(member["status"] == "failed" for member in result["members"])
+    detail = agent_team_service.get_team(db, team_user, created["team_id"])
+    blocked = [event for event in detail["events"] if event["event_type"] == "task.blocked"]
+    assert {event["detail"]["task_key"] for event in blocked} == {"sibling", "spare", "followup", "verify"}
+    terminal_event = [event for event in detail["events"] if event["to_status"] == "failed"][-1]
+    assert terminal_event["detail"]["counts"]["queued"] == 0
+    assert all(row.lease_token is None and row.lease_expires_at is None for row in db.query(AgentTeamTask).all())
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+
+
+def test_terminal_failure_and_block_events_are_atomic(db, team_user, monkeypatch):
+    """阻断事件写入失败时，失败父、失败子和兄弟阻断必须一起回滚。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    before = {task.task_key: task.status for task in db.query(AgentTeamTask).all()}
+    event_count = db.query(AgentTeamEvent).count()
+    original_event = agent_team_service._event
+
+    def fail_block_event(*args, **kwargs):
+        if args[2] == "task.blocked" and kwargs["task"].task_key == "spare":
+            raise RuntimeError("blocked event write failed")
+        return original_event(*args, **kwargs)
+
+    monkeypatch.setattr(agent_team_service, "_event", fail_block_event)
+    with pytest.raises(RuntimeError, match="blocked event write failed"):
+        _fail_claim(db, created["team_id"], claim)
+    db.rollback()
+    assert {task.task_key: task.status for task in db.query(AgentTeamTask).all()} == before
+    assert db.get(AgentTeam, created["team_id"]).status == "running"
+    assert db.get(AgentTeamTask, claim["task_id"]).lease_token == claim["lease_token"]
+    assert db.query(AgentTeamEvent).count() == event_count
+
+
+def test_retryable_failure_keeps_independent_branches_schedulable(db, team_user):
+    """尚有自动重试预算不构成团队终态失败，也不阻断其他分支。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload(root_attempts=2))
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    result = _fail_claim(db, created["team_id"], claim, retryable=True)
+    assert result["status"] == "queued"
+    assert result["completed_at"] is None
+    assert {item["task_key"]: item["status"] for item in result["tasks"]} == {
+        "read": "queued", "sibling": "queued", "spare": "queued",
+        "followup": "waiting_dependency", "verify": "waiting_dependency",
+    }
+    assert db.query(AgentTeamEvent).filter_by(event_type="task.blocked").count() == 0
+    retry = agent_team_service.claim_next_task(db, created["team_id"])
+    assert retry["task_id"] == claim["task_id"] and retry["attempt_count"] == 2
+    assert agent_team_service.claim_next_task(db, created["team_id"])["task_key"] == "sibling"
+
+
+@pytest.mark.parametrize("sibling_success", [True, False])
+def test_fail_fast_drains_running_sibling_without_starting_more_work(db, team_user, sibling_success):
+    """在途兄弟保留租约；禁止新领取，真实返回后才归约失败父。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    root = agent_team_service.claim_next_task(db, created["team_id"])
+    sibling = agent_team_service.claim_next_task(db, created["team_id"])
+    running = _fail_claim(db, created["team_id"], root)
+    by_key = {item["task_key"]: item for item in running["tasks"]}
+    assert running["status"] == "running" and running["completed_at"] is None
+    assert by_key["sibling"]["status"] == "running" and by_key["sibling"]["completed_at"] is None
+    assert by_key["spare"]["status"] == by_key["followup"]["status"] == "blocked"
+    assert db.get(AgentTeamTask, sibling["task_id"]).lease_token == sibling["lease_token"]
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+    final = agent_team_service.complete_task(
+        db, created["team_id"], sibling["task_id"], lease_token=sibling["lease_token"],
+        result={"status": "completed" if sibling_success else "failed", "retryable": True},
+        success=sibling_success, error="" if sibling_success else "兄弟暂时失败",
+    )
+    assert final["status"] == "failed"
+    assert final["counts"]["queued"] == final["counts"]["running"] == 0
+    sibling_task = db.get(AgentTeamTask, sibling["task_id"])
+    assert sibling_task.status == ("completed" if sibling_success else "blocked")
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+
+
+@pytest.mark.parametrize("terminal", ["failed", "completed", "cancelled", "expired"])
+def test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped(db, team_user, terminal):
+    """防御已有异常组合：拒绝晚到结果，不改写运行任务或假称资源已停止。"""
+    created = agent_team_service.create_team(db, team_user, _payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    team = db.get(AgentTeam, created["team_id"])
+    team.status = terminal
+    team.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    before = db.query(AgentTeamEvent).count()
+    for _attempt in range(2):
+        with pytest.raises(agent_team_service.AgentTeamLeaseError):
+            agent_team_service.complete_task(
+                db, team.id, claim["task_id"], lease_token=claim["lease_token"], result={"summary": "晚到成功"},
+            )
+    db.expire_all()
+    assert db.get(AgentTeam, team.id).status == terminal
+    task = db.get(AgentTeamTask, claim["task_id"])
+    assert task.status == "running" and task.lease_token == claim["lease_token"]
+    assert task.result_json == "{}" and task.completed_at is None
+    assert db.query(AgentTeamEvent).count() == before
+
+
+def test_stale_session_cannot_claim_after_another_session_fails_team(db, team_user):
+    """两个会话交错：旧 identity map 不得领取或复活另一个会话已失败的团队。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    with Session(bind=db.get_bind(), autoflush=False, expire_on_commit=False) as stale_db:
+        stale_team = stale_db.get(AgentTeam, created["team_id"])
+        stale_db.commit()
+        _fail_claim(db, created["team_id"], claim)
+        assert stale_team.status == "running"
+        event_count = db.query(AgentTeamEvent).count()
+        assert agent_team_service.claim_next_task(stale_db, created["team_id"]) is None
+        stale_db.rollback()
+        db.expire_all()
+        assert db.get(AgentTeam, created["team_id"]).status == "failed"
+        assert db.query(AgentTeamEvent).count() == event_count
+
+
+def test_stale_session_cannot_complete_an_old_attempt_after_retry_claim(db, team_user):
+    """两个会话交错：旧缓存中的 token 不能覆盖新的领取与尝试。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload(root_attempts=2))
+    old_claim = agent_team_service.claim_next_task(db, created["team_id"])
+    with Session(bind=db.get_bind(), autoflush=False, expire_on_commit=False) as stale_db:
+        stale_team = stale_db.get(AgentTeam, created["team_id"])
+        stale_task = stale_db.get(AgentTeamTask, old_claim["task_id"])
+        stale_db.commit()
+        _fail_claim(db, created["team_id"], old_claim, retryable=True)
+        current_claim = agent_team_service.claim_next_task(db, created["team_id"])
+        assert stale_team.status == "running" and stale_task.lease_token == old_claim["lease_token"]
+        with pytest.raises(agent_team_service.AgentTeamLeaseError):
+            agent_team_service.complete_task(
+                stale_db, created["team_id"], old_claim["task_id"],
+                lease_token=old_claim["lease_token"], result={"summary": "旧尝试晚到"},
+            )
+        stale_db.rollback()
+        db.expire_all()
+        current = db.get(AgentTeamTask, current_claim["task_id"])
+        assert current.status == "running" and current.lease_token == current_claim["lease_token"]
+        assert current.attempt_count == 2
+
+
+def test_claim_lost_cas_has_no_running_transition_or_event(db, team_user, monkeypatch):
+    """可控模拟 CAS 竞争失败，失败领取必须回滚且不得生成执行事件。"""
+    created = agent_team_service.create_team(db, team_user, _payload())
+    event_count = db.query(AgentTeamEvent).count()
+    original_execute = db.execute
+    attempted = []
+
+    def lose_claim(statement, *args, **kwargs):
+        if isinstance(statement, Update) and statement.table.name == "agent_team_task":
+            attempted.append(True)
+            return SimpleNamespace(rowcount=0)
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", lose_claim)
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+    assert attempted == [True]
+    assert db.query(AgentTeamTask).filter_by(status="running").count() == 0
+    assert db.query(AgentTeamEvent).count() == event_count
+
+
+def test_failed_team_refresh_and_repeated_completion_do_not_reopen_or_duplicate(db, team_user):
+    """重复回调或状态归约不得复活终态，也不重复写失败/阻断事件。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    _fail_claim(db, created["team_id"], claim)
+    team = db.get(AgentTeam, created["team_id"])
+    original_error = team.error_json
+    event_count = db.query(AgentTeamEvent).count()
+    for _attempt in range(2):
+        agent_team_service._refresh_team_status(db, team)
+        assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+        with pytest.raises(agent_team_service.AgentTeamLeaseError):
+            _fail_claim(db, created["team_id"], claim)
+    assert team.status == "failed" and team.error_json == original_error
+    assert db.query(AgentTeamEvent).count() == event_count
+    for task in db.query(AgentTeamTask).all():
+        task.status = "completed"
+    db.flush()
+    agent_team_service._refresh_team_status(db, team)
+    assert team.status == "failed" and team.error_json == original_error
+    assert db.query(AgentTeamEvent).count() == event_count
+
+
+def test_expired_last_attempt_closes_independent_pending_tasks(db, team_user):
+    """租约恢复耗尽预算时也必须闭合独立分支，而非只闭合依赖后继。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    db.get(AgentTeamTask, claim["task_id"]).lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+    assert agent_team_service.recover_expired_leases(db) == 1
+    detail = agent_team_service.get_team(db, team_user, created["team_id"])
+    assert detail["status"] == "failed"
+    assert detail["counts"]["queued"] == detail["counts"]["running"] == 0
+    assert db.get(AgentTeamTask, claim["task_id"]).status == "dead_letter"
+
+
+def test_failed_branch_waits_for_sibling_cleanup_before_terminal_reduction(db, team_user, monkeypatch):
+    """清理未确认时兄弟仍运行；确认后停止调度重试并归约失败父。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    root = agent_team_service.claim_next_task(db, created["team_id"])
+    sibling = agent_team_service.claim_next_task(db, created["team_id"])
+    _fail_claim(db, created["team_id"], root)
+    outcomes = iter([False, True])
+    monkeypatch.setattr(agent_team_service, "_cleanup_task_runtime_resources", lambda *args, **kwargs: next(outcomes))
+    for expected in (0, 1):
+        task = db.get(AgentTeamTask, sibling["task_id"])
+        task.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+        assert agent_team_service.recover_expired_leases(db) == expected
+        if expected == 0:
+            assert db.get(AgentTeamTask, sibling["task_id"]).status == "running"
+            assert db.get(AgentTeam, created["team_id"]).status == "running"
+            assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+    detail = agent_team_service.get_team(db, team_user, created["team_id"])
+    assert detail["status"] == "failed" and detail["counts"]["queued"] == detail["counts"]["running"] == 0
+    assert db.get(AgentTeamTask, sibling["task_id"]).status == "blocked"
+
+
+def test_explicit_root_retry_restores_its_fail_fast_blocked_branches(db, team_user):
+    """显式改变根节点方案后，可恢复由它全局阻断的节点，不改变原始 DAG。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    failed = _fail_claim(db, created["team_id"], claim)
+    assert {item["status"] for item in failed["tasks"] if item["task_key"] != "read"} == {"blocked"}
+    retried = agent_team_service.retry_team(
+        db, team_user, created["team_id"], task_keys=["read"],
+        strategy_changes={"read": "改用第二路径并先缩小输入范围"},
+    )
+    assert {item["task_key"]: item["status"] for item in retried["tasks"]} == {
+        "read": "queued", "sibling": "queued", "spare": "queued",
+        "followup": "waiting_dependency", "verify": "waiting_dependency",
+    }
+    assert [item["depends_on"] for item in retried["tasks"]] == [item["depends_on"] for item in created["tasks"]]
+    next_claim = agent_team_service.claim_next_task(db, created["team_id"])
+    assert next_claim["task_id"] == claim["task_id"] and next_claim["attempt_count"] == 2
+    with pytest.raises(agent_team_service.AgentTeamLeaseError):
+        _fail_claim(db, created["team_id"], claim)
+
+
+def test_independent_branching_team_still_completes_normally(db, team_user):
+    """没有不可恢复失败时，所有独立分支与验证节点保持原有正常完成语义。"""
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    for _attempt in range(5):
+        claim = agent_team_service.claim_next_task(db, created["team_id"])
+        assert claim is not None
+        result = agent_team_service.complete_task(
+            db, created["team_id"], claim["task_id"], lease_token=claim["lease_token"],
+            result={"status": "completed", "summary": "真实结果"},
+        )
+    assert result["status"] == "completed" and result["counts"]["completed"] == 5
+    assert db.query(AgentTeamEvent).filter_by(event_type="task.blocked").count() == 0
+
+
+@pytest.mark.parametrize("last_success", [True, False])
+def test_missing_verifier_drains_running_tasks_before_failing(db, team_user, last_success):
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    first = agent_team_service.claim_next_task(db, created["team_id"])
+    second = agent_team_service.claim_next_task(db, created["team_id"])
+    verifier = db.query(AgentTeamMember).filter_by(team_id=created["team_id"], role="verifier").one()
+    verifier.role = "worker"
+    db.commit()
+
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+    parent = db.get(AgentTeam, created["team_id"])
+    assert parent.status == "running" and parent.completed_at is None
+    for claim in (first, second):
+        task = db.get(AgentTeamTask, claim["task_id"])
+        assert task.status == "running" and task.lease_token == claim["lease_token"]
+    assert db.query(AgentTeamTask).filter(AgentTeamTask.status.in_(["queued", "waiting_dependency"])).count() == 0
+
+    partial = agent_team_service.complete_task(
+        db, created["team_id"], first["task_id"], lease_token=first["lease_token"],
+        result={"status": "completed", "summary": "已完成读取"},
+    )
+    assert partial["status"] == "running" and partial["completed_at"] is None
+    final = agent_team_service.complete_task(
+        db, created["team_id"], second["task_id"], lease_token=second["lease_token"],
+        result={"status": "completed" if last_success else "failed", "retryable": False},
+        success=last_success, error="" if last_success else "读取失败",
+    )
+    assert final["status"] == "failed" and final["completed_at"] is not None
+    assert db.query(AgentTeamTask).filter_by(team_id=created["team_id"], status="running").count() == 0
+    assert db.query(AgentTeamEvent).filter_by(
+        team_id=created["team_id"], event_type="team.status_changed", to_status="failed",
+    ).count() == 1
+
+
+def test_missing_verifier_without_running_tasks_still_fails_immediately(db, team_user):
+    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    verifier = db.query(AgentTeamMember).filter_by(team_id=created["team_id"], role="verifier").one()
+    verifier.role = "worker"
+    db.commit()
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+    parent = db.get(AgentTeam, created["team_id"])
+    assert parent.status == "failed" and parent.completed_at is not None
+    assert {task.status for task in db.query(AgentTeamTask).filter_by(team_id=parent.id)} == {"blocked"}
 
 
 def test_claim_respects_team_concurrency_and_lease_cas(db, team_user):

@@ -1,0 +1,65 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --reporter=default --reporter=junit --outputFile.junit=/tmp/prism-release-20260906/dashboard-feedback-green.xml src/views/dashboard/Dashboard.test.ts src/views/permissionVisibility.regression.test.ts
+
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/dashboard/Dashboard.test.ts (12 tests | 2 failed) 78ms
+   × 成员仪表盘真实读取状态 > 首载未取得摘要时不显示零项任务或零分 22ms
+     → expected '2026 年 9 月 6 日 · 周日' not to contain '0'
+   × 成员仪表盘真实读取状态 > 摘要失败显示可重试错误而不假报空业务 5ms
+     → expected '2026 年 9 月 6 日 · 周日' not to contain '0'
+   ✓ 成员仪表盘真实读取状态 > 真实全零保留零值，没有已完成审查时不判为风险或零分 14ms
+   ✓ 成员仪表盘真实读取状态 > 已有成功审查的真实零分不被当成未知 4ms
+   ✓ 成员仪表盘真实读取状态 > 畸形摘要不得变成可导出的统计事实 4ms
+   ✓ 成员仪表盘真实读取状态 > 部分接口迟迟未返回时成功分区仍立即展示 3ms
+   ✓ 成员仪表盘真实读取状态 > 维度接口成功且为空不再永远显示汇总中或八个假零 3ms
+   ✓ 成员仪表盘真实读取状态 > 单图失败与空态分开且仅重试失败图 5ms
+   ✓ 成员仪表盘真实读取状态 > 切换日期时旧区间成功响应不得覆盖新图 8ms
+   ✓ 成员仪表盘真实读取状态 > 旧区间失败不得覆盖新请求成功状态 4ms
+   ✓ 成员仪表盘真实读取状态 > 读取失败或仍在加载时禁止导出不完整报告 3ms
+   ✓ 成员仪表盘真实读取状态 > 不展示写死的宣传、假直播标签和非周区间的周报文案 3ms
+ ✓ src/views/permissionVisibility.regression.test.ts (6 tests) 41ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 首载未取得摘要时不显示零项任务或零分
+AssertionError: expected '2026 年 9 月 6 日 · 周日' not to contain '0'
+
+Expected: "0"
+Received: "2026 年 9 月 6 日 · 周日"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:102:50
+    100|     await flushPromises()
+    101|     expect(wrapper.find('.stat-grid').exists()).toBe(false)
+    102|     expect(wrapper.find('.page-sub').text()).not.toContain('0')
+       |                                                  ^
+    103|     expect(section(wrapper, 'summary').attributes('aria-busy')).toBe('…
+    104|     expect(wrapper.get('[data-testid="dashboard-progress"]').text()).t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要失败显示可重试错误而不假报空业务
+AssertionError: expected '2026 年 9 月 6 日 · 周日' not to contain '0'
+
+Expected: "0"
+Received: "2026 年 9 月 6 日 · 周日"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:114:50
+    112|     expect(wrapper.find('.stat-grid').exists()).toBe(false)
+    113|     expect(wrapper.text()).not.toContain('暂无最近活动')
+    114|     expect(wrapper.find('.page-sub').text()).not.toContain('0')
+       |                                                  ^
+    115|     await section(wrapper, 'summary').get('button').trigger('click')
+    116|     await flushPromises()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 16 passed (18)
+   Start at  07:35:12
+   Duration  1.20s (transform 552ms, setup 21ms, collect 1.24s, tests 120ms, environment 544ms, prepare 78ms)
+
+JUNIT report written to /tmp/prism-release-20260906/dashboard-feedback-green.xml

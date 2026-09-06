@@ -1,0 +1,736 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --reporter=default --reporter=junit --reporter=json --outputFile.junit=/tmp/prism-release-20260906/continuation-frontend-reviewed.xml --outputFile.json=/tmp/prism-release-20260906/continuation-frontend-reviewed.json
+
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend
+
+ ✓ src/views/admin/AdminOverview.test.ts (40 tests) 567ms
+ ✓ src/views/report/ReportDetail.test.ts (14 tests) 516ms
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 停止请求失败时保持服务端运行并给出同步提示
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/components/security/SecurityScanModal.test.ts (16 tests) 700ms
+ ✓ src/views/pentest/PentestStart.regression.test.ts (7 tests) 764ms
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 创建团队后主响应结束也持续展示真实子 Agent 协作城市
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 服务端拒绝停止时不把本地运行误标记为已取消
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 后台历史会话完成 Mesh 任务后不抢占当前管理新对话
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 恢复当前管理会话时拉取服务端团队并默认折叠展示协作过程
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 成员追问按钮关闭面板并预填管理输入框
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 刷新恢复后仍先显示工具调用，再显示最终结论
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/views/review/ReviewTaskList.polling.test.ts (10 tests) 971ms
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 初始会话恢复完成前禁止发送
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 恢复运行态后轮询到待审批仍按低频间隔继续刷新
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > labels a fresh Xiaoling conversation with the Pro orchestrator model
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 空闲时实时拉取子 Agent 交流过程并默认折叠详情
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 后台历史会话完成 Mesh 任务后不抢占当前新对话
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 轮询失败时显示同步中断并在下一轮恢复
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 运行中调用 create_agent_team 时立即显示团队卡片
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 刷新后恢复待审批内容并在高危确认后续跑
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > opens empty and renders only the first meaningful streamed delta
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 团队卡片锚定在调用时间线,不会排到最终结论之后
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > keeps a streamed Markdown user table complete inside the chat bubble
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 恢复当前会话时拉取服务端团队并默认折叠展示协作过程
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > approves by click and resumes without adding a fake user message
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 刷新恢复后仍先显示工具调用，再显示最终结论
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 初始会话恢复完成前禁止发送
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > marks a resumed approval as failed when the terminal response has no tool result
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/views/sandbox/SandboxWorkstation.test.ts (7 tests) 160ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 恢复运行态后轮询到动态追问仍按低频间隔继续刷新
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/views/project/ProjectList.test.ts (15 tests) 231ms
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > does not mark a tool completed without response.tool.completed evidence
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > shows one-time sensitive results without sending them into the next model request
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/views/review/ReviewTaskDetail.test.ts (44 tests) 1548ms
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > streams function arguments and submits a structured option immediately
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 空闲时实时拉取子 Agent 交流过程并默认折叠详情
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/components/ai/AgentTeamCard.test.ts (2 tests) 40ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 轮询失败时显示同步中断并在下一轮恢复
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > does not submit Enter while the Chinese IME is composing
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 刷新后恢复动态追问,点选候选后再点提交才续跑
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 历史bug回归(本PR补齐项) > 【修复】协议错误必须留在消息流(旧版只有几秒即逝的Toast,回来后零痕迹)
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > keeps the existing prefill workflow
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill="检查这段代码" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 历史bug回归(本PR补齐项) > 【修复】助手消息必须有一键复制(旧版只能手动拖选悬浮窗文本)
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/components/ai/AgentTeamTrace.test.ts (6 tests) 180ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > keeps the empty view with only the mascot greeting, then incrementally updates one assistant bubble
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 历史bug回归(本PR补齐项) > 【修复】面板可见时按 / 必须聚焦输入框(旧版只支持 Escape)
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 窄桌面布局回归 > 1280x800 默认展开时不覆盖用户管理表格右侧操作区
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/auth/Login.test.ts > 登录真实反馈 > 真实表单校验阻止空提交并展示必填错误
+async-validator: [ 'username is required' ]
+
+stderr | src/views/auth/Login.test.ts > 登录真实反馈 > 真实表单校验阻止空提交并展示必填错误
+async-validator: [ 'password is required' ]
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 导航指令完成后渲染为确认按钮(无路由测试环境不自动跳转)
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 窄桌面布局回归 > 1280x800 安全停靠后仍可拖动并保存位置
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 窄桌面布局回归 > 520px 以下仍由移动端 inset 布局接管且禁止拖动
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AdminCopilot ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/components/admin/AdminCopilot.test.ts (25 tests) 1201ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > resumes a non-danger approval directly without a confirmation phrase or fake reply
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > marks a resumed approval as failed when the terminal response has no tool result
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/views/auth/Login.test.ts (8 tests) 348ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > submits the model generated question as an answer continuation
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > renders structured candidates and submits only after clicking the submit button
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > keeps an explicit tool failure visible after the response completes
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 运行中显示「停止响应」,点击后中止流并留下可重试的取消卡片
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/components/security/SecurityPostureCard.test.ts (8 tests) 104ms
+ ✓ src/components/ai/AgentSessionSwitcher.test.ts (23 tests) 146ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 团队悬浮窗追问成员:点击后预填输入框
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/utils/discussionStream.test.ts (5 tests) 32ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 网络错误留在消息流:错误卡片 + Toast,重试可恢复
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/components/ai/VirtualCursor.test.ts (6 tests) 140ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 协议错误(回答没说完)同样沉淀为错误卡片,且不进入后续上下文
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 助手消息可复制:写入剪贴板并短暂显示对勾
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/components/ai/AgentTeamSidePanel.test.ts (5 tests) 102ms
+stderr | src/components/ai/AgentChatDrawer.test.ts > 恢复进行中会话时展示调用链、部分输出与运行状态
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > 运行中展示小菱执行进度条(已完成 X/Y 步 + 当前动作),完成后收起
+[Vue warn]: injection "Symbol(router)" not found. 
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/components/ai/AgentChatDrawer.test.ts (28 tests) 2068ms
+   ✓ AgentChatDrawer Responses stream > 服务端拒绝停止时不把本地运行误标记为已取消  304ms
+ ✓ src/components/ai/mobileInteraction.regression.test.ts (4 tests) 118ms
+ ✓ src/views/auth/Register.test.ts (3 tests) 256ms
+ ✓ src/views/dashboard/Dashboard.test.ts (45 tests) 495ms
+ ✓ src/views/admin/LlmConfig.test.ts (6 tests) 62ms
+ ✓ src/views/admin/AgentReleaseAdmin.test.ts (3 tests) 56ms
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing daily@02:00 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing daily@02:00 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing daily@02:00 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing daily@02:00 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing daily@02:00 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@*:17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@*:17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@*:17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@*:17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@*:17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing hourly@17 without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@7m without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@7m without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@7m without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@7m without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@7m without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@45s without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@45s without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@45s without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@45s without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > submits existing interval@45s without cron false positive
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > rejects invalid schedule before submitting
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > rejects invalid schedule before submitting
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > rejects invalid schedule before submitting
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > shows saving state and disables the row save button until request settles
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > shows saving state and disables the row save button until request settles
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > shows saving state and disables the row save button until request settles
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > shows saving state and disables the row save button until request settles
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > shows saving state and disables the row save button until request settles
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > shows the backend error, preserves edits, and clears saving state
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > shows the backend error, preserves edits, and clears saving state
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/admin/GovernanceWorkstation.scheduler.test.ts > GovernanceWorkstation scheduler compatibility > shows the backend error, preserves edits, and clears saving state
+[Vue warn]: Failed to resolve component: el-tag
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-input-number
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <GovernanceWorkstation mode="jobs" ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ✓ src/views/admin/GovernanceWorkstation.scheduler.test.ts (14 tests) 90ms
+ ✓ src/components/ai/AgentMemberWorkCard.regression.test.ts (5 tests) 53ms
+stderr | src/components/common/TriEndUx.regression.test.ts > 三端交互升级第二批回归 > 【缩放】CodeViewer 暴露 zoomIn/zoomOut 且字号持久化在限定范围
+[Vue warn]: Failed to resolve component: el-icon
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <CodeViewer code="let x = 1" language="javascript" fileName="a.js"  ... > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-descriptions-item
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <CodeViewer code="let x = 1" language="javascript" fileName="a.js"  ... > 
+  at <VTUROOT>
+[Vue warn]: Failed to resolve component: el-descriptions
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <CodeViewer code="let x = 1" language="javascript" fileName="a.js"  ... > 
+  at <VTUROOT>
+
+ ✓ src/components/common/TriEndUx.regression.test.ts (4 tests) 63ms
+ ✓ src/views/rule/RuleConfig.test.ts (2 tests) 47ms
+ ✓ src/views/report/ReportList.test.ts (3 tests) 53ms
+ ✓ src/utils/coreUtils.test.ts (13 tests) 48ms
+ ✓ src/components/layout/AppSidebar.test.ts (4 tests) 100ms
+ ✓ src/components/ai/ProactivePageGuide.test.ts (9 tests) 54ms
+ ✓ src/composables/useFloatingChatPosition.test.ts (3 tests) 31ms
+ ✓ src/components/layout/AppHeader.test.ts (4 tests) 77ms
+ ✓ src/App.test.ts (3 tests) 62ms
+ ✓ src/components/ai/AgentMemberWorkCard.test.ts (5 tests) 50ms
+ ✓ src/components/ai/AgentNavLink.test.ts (3 tests) 28ms
+ ✓ src/components/issue/IssueDetailDrawer.test.ts (3 tests) 49ms
+ ✓ src/utils/elementPlusContracts.test.ts (1 test) 16ms
+ ✓ src/composables/useSecurityAlerts.test.ts (7 tests) 38ms
+ ✓ src/utils/thinkingCityEngine.test.ts (7 tests) 51ms
+ ✓ src/components/ai/AgentActivityBorder.test.ts (1 test) 82ms
+ ✓ src/views/permissionVisibility.regression.test.ts (6 tests) 178ms
+ ✓ src/views/profile/ChangePassword.test.ts (1 test) 41ms
+ ✓ src/views/review/ReviewStart.regression.test.ts (32 tests) 5123ms
+   ✓ 审查扫描范围失败回归 > 超过500个可选文件时仍可明确选择后续页文件，不自动截取前500项  1114ms
+   ✓ 审查扫描范围失败回归 > 全部项目实际提交包含第101个项目，不只修正显示计数  1503ms
+ ✓ src/api/report.test.ts (3 tests) 17ms
+ ✓ src/composables/useAgentTeamEvents.test.ts (3 tests) 18ms
+ ✓ src/api/http.test.ts (10 tests) 11ms
+ ✓ src/views/admin/RoleManage.test.ts (2 tests) 19ms
+ ✓ src/utils/responsesStream.test.ts (9 tests) 12ms
+ ✓ src/composables/useCountUp.test.ts (2 tests) 30ms
+ ✓ src/utils/agentEventStream.test.ts (3 tests) 21ms
+ ✓ src/utils/agentChatSessions.test.ts (21 tests) 5ms
+ ✓ src/stores/user.test.ts (7 tests) 10ms
+ ✓ src/views/admin/BetaCodeAdmin.responsive.test.ts (1 test) 9ms
+ ✓ src/utils/responsesTimeline.test.ts (5 tests) 5ms
+ ✓ src/api/agentTeams.test.ts (2 tests) 4ms
+ ✓ src/router/guards.test.ts (8 tests) 6ms
+ ✓ src/utils/agentMeshTimeline.test.ts (11 tests) 4ms
+ ✓ src/utils/agentMeshBridge.test.ts (6 tests) 5ms
+ ✓ src/utils/xiaolingNavigation.test.ts (3 tests) 5ms
+ ✓ src/utils/tilt.test.ts (3 tests) 11ms
+ ✓ src/utils/sandboxPresentation.test.ts (4 tests) 4ms
+ ✓ src/utils/toolDisplay.test.ts (6 tests) 12ms
+ ✓ src/utils/clarifyProjectOptions.test.ts (6 tests) 4ms
+ ✓ src/api/llmConfig.test.ts (2 tests) 3ms
+ ✓ src/utils/agentNavigation.test.ts (10 tests) 6ms
+ ✓ src/utils/thinkingCityMemory.test.ts (4 tests) 3ms
+ ✓ src/utils/pageGuideTips.test.ts (4 tests) 4ms
+ ✓ src/constants/pentest.test.ts (3 tests) 6ms
+ ✓ src/api/sandbox.test.ts (2 tests) 34ms
+ ✓ src/utils/agentActivityPresentation.test.ts (3 tests) 3ms
+ ✓ src/api/project.test.ts (3 tests) 4ms
+ ✓ src/utils/autoValidation.test.ts (1 test) 1ms
+ ✓ src/components/admin/AdminLayout.test.ts (1 test) 2ms
+ ✓ src/constants/adminGovernance.test.ts (4 tests) 3ms
+ ✓ src/utils/reviewScore.test.ts (2 tests) 3ms
+ ✓ src/router/index.test.ts (2 tests) 3ms
+ ✓ src/composables/withFeedback.test.ts (4 tests) 2ms
+
+ Test Files  78 passed (78)
+      Tests  620 passed (620)
+   Start at  08:13:06
+   Duration  9.04s (transform 4.85s, setup 573ms, collect 21.24s, tests 17.43s, environment 25.15s, prepare 3.87s)
+
+JSON report written to /tmp/prism-release-20260906/continuation-frontend-reviewed.json
+JUNIT report written to /tmp/prism-release-20260906/continuation-frontend-reviewed.xml

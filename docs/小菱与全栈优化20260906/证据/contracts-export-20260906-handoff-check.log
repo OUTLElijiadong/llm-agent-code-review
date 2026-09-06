@@ -1,0 +1,4 @@
+started_at=2026-09-05T20:26:53.226027+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B scripts/export_agent_contracts.py --markdown '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.md' --json '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.json' --check
+{"contracts": 32, "differences": [], "json": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.json", "markdown": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.md", "protected": ["chat_assistant", "manager"]}

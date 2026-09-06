@@ -1,0 +1,906 @@
+{
+  "schema": "independent-production-review-v1",
+  "generated_at_utc": "2026-09-05T20:10:01.451513+00:00",
+  "overall_status": "通过（限定本次只读发布、结构、聚合与测试来源核验）",
+  "release": "343616d9d40c1e44e17c7da465c7173c418debb5",
+  "version": "3.8.4",
+  "checks": [
+    {
+      "name": "本地测试及47条发布证据闭环",
+      "status": "通过"
+    },
+    {
+      "name": "Git账本及公网版本一致",
+      "status": "通过"
+    },
+    {
+      "name": "实际镜像ID与账本及release标签一致",
+      "status": "通过"
+    },
+    {
+      "name": "后端运行版本及前端构建版本一致",
+      "status": "通过"
+    },
+    {
+      "name": "补证期间账本与运行镜像稳定",
+      "status": "通过"
+    },
+    {
+      "name": "047版本及四列类型nullable一致",
+      "status": "通过"
+    },
+    {
+      "name": "89表精确计数及分状态对账",
+      "status": "通过"
+    },
+    {
+      "name": "一致性只读事务身份",
+      "status": "通过"
+    },
+    {
+      "name": "17逻辑及1实际外键无孤儿",
+      "status": "通过"
+    },
+    {
+      "name": "跨项目关联及当前版本无缺失",
+      "status": "通过"
+    },
+    {
+      "name": "四项目固定测试来源逐项可证明",
+      "status": "通过"
+    },
+    {
+      "name": "fresh备份哈希字节双侧一致",
+      "status": "通过"
+    },
+    {
+      "name": "采集无未恢复错误",
+      "status": "通过"
+    }
+  ],
+  "data_snapshot": {
+    "start": {
+      "kind": "snapshot_start",
+      "isolation": "REPEATABLE-READ",
+      "read_only": 1,
+      "observed_at_utc": "2026-09-05 19:52:07.375710",
+      "database_matches_expected": true
+    },
+    "end": {
+      "kind": "snapshot_end",
+      "read_only": 1,
+      "observed_at_utc": "2026-09-05 19:52:10.539339"
+    },
+    "query_sha256": "7a026669db969932d765ffebda67b11573a6b20db9c0aa41e7a73724346276f6",
+    "query_statement_count": 139
+  },
+  "source_snapshot": {
+    "start": {
+      "utc": "2026-09-05 20:04:11.021271",
+      "kind": "snapshot_start",
+      "read_only": 1,
+      "database_matches_expected": true
+    },
+    "end": {
+      "utc": "2026-09-05 20:04:11.077268",
+      "kind": "snapshot_end",
+      "read_only": 1
+    },
+    "query_sha256": "28f6192936a42f947acb0134a461cdce20be3c46ba23f7de15e88086dd2cc3f3"
+  },
+  "release_identity": {
+    "remote_git_head": "343616d9d40c1e44e17c7da465c7173c418debb5",
+    "ledger": {
+      "path": "/opt/code-review/deploy/.releases/current.env",
+      "sha256": "6e8d39a9717260051c4967b46801f4c6a27d5c2c9bc0d36625a287aa34c3585a",
+      "allowed_identity_fields": {
+        "RELEASE_SHA": "343616d9d40c1e44e17c7da465c7173c418debb5",
+        "APP_VERSION": "3.8.4",
+        "BACKEND_RELEASE": "343616d9d40c1e44e17c7da465c7173c418debb5",
+        "FRONTEND_RELEASE": "343616d9d40c1e44e17c7da465c7173c418debb5",
+        "BACKEND_IMAGE_ID": "sha256:ea9eea7997be8ab879b6ddba16bd97a80efd69c9d936dc68b524ee9aedde6cdc",
+        "FRONTEND_IMAGE_ID": "sha256:47f434723751b5e0e9704cd8b212e47d9185a6e483675b9173b9d4e6547c582b",
+        "TARGET": "all",
+        "BACKUP_FILE": "../backups/code_review_20260905T193203Z_343616d9d40c.sql.gz",
+        "ALEMBIC_REVISION": "047_review_input_snapshot",
+        "DEPLOYED_AT_UTC": "2026-09-05T19:36:21Z"
+      }
+    },
+    "runtime": {
+      "backend": {
+        "image_id": "sha256:ea9eea7997be8ab879b6ddba16bd97a80efd69c9d936dc68b524ee9aedde6cdc",
+        "image_reference": "prism-backend:343616d9d40c1e44e17c7da465c7173c418debb5",
+        "running": true,
+        "health": "healthy",
+        "ledger_image_id_matches": true,
+        "release_tag_id_matches_runtime": true,
+        "oci_version": "",
+        "oci_revision": "",
+        "runtime_version_matches_expected": true,
+        "runtime_release_matches_expected": true
+      },
+      "frontend": {
+        "image_id": "sha256:47f434723751b5e0e9704cd8b212e47d9185a6e483675b9173b9d4e6547c582b",
+        "image_reference": "prism-frontend:343616d9d40c1e44e17c7da465c7173c418debb5",
+        "running": true,
+        "health": "healthy",
+        "ledger_image_id_matches": true,
+        "release_tag_id_matches_runtime": true,
+        "oci_version": "",
+        "oci_revision": ""
+      },
+      "mysql": {
+        "image_id": "sha256:6cd09145362dfe6831b14545de3d5fd6cc75c37cfd6ef8561429c1fc73518b39",
+        "image_reference": "mysql:8.0",
+        "running": true,
+        "health": "healthy"
+      }
+    },
+    "public_health": {
+      "healthz": {
+        "http_status": 200,
+        "status": "ok",
+        "version": "3.8.4",
+        "release": "343616d9d40c1e44e17c7da465c7173c418debb5",
+        "observed_at_utc": "2026-09-05T19:52:06.095205+00:00"
+      },
+      "readyz": {
+        "http_status": 200,
+        "status": "ready",
+        "version": "3.8.4",
+        "release": "343616d9d40c1e44e17c7da465c7173c418debb5",
+        "observed_at_utc": "2026-09-05T19:52:06.169165+00:00"
+      }
+    },
+    "frontend_index": {
+      "served_index_sha256": "6697076f8dd38c32fbfa5a4f2dcaaf0787676d3083b82552b456d09909c23b79",
+      "image_index_sha256": "6697076f8dd38c32fbfa5a4f2dcaaf0787676d3083b82552b456d09909c23b79",
+      "served_index_matches_image_build": true,
+      "version_literal_present_in_image_js": true,
+      "release_literal_present_in_image_js": false,
+      "note": "原镜像/opt/prism-dist中核对，不混入保留的历史assets；文字命中不是全部页面验收。"
+    },
+    "frontend_version_asset": {
+      "observed_at_utc": "2026-09-05T19:54:52.347621+00:00",
+      "frontend_build_info": [
+        {
+          "asset_name": "buildInfo-hRihXxdr.js",
+          "sha256": "8e05954b72a78b11ca37f7439ccd07299644cb07c3315c4d1399f5d8e5295cd7",
+          "bytes": 86,
+          "served_bytes_match_image": true,
+          "version_literals": [
+            "3.8.4"
+          ],
+          "expected_release_literal_present": false
+        }
+      ],
+      "ledger_sha256": "6e8d39a9717260051c4967b46801f4c6a27d5c2c9bc0d36625a287aa34c3585a",
+      "backend_image_id": "sha256:ea9eea7997be8ab879b6ddba16bd97a80efd69c9d936dc68b524ee9aedde6cdc",
+      "frontend_image_id": "sha256:47f434723751b5e0e9704cd8b212e47d9185a6e483675b9173b9d4e6547c582b"
+    }
+  },
+  "migration": {
+    "head": [
+      {
+        "kind": "migration",
+        "revision": "047_review_input_snapshot"
+      }
+    ],
+    "columns": [
+      {
+        "table": "review_task_file",
+        "column": "version_no",
+        "exists": true,
+        "type": "int",
+        "nullable": "YES",
+        "expected_type": "int",
+        "expected_nullable": "YES",
+        "matches": true
+      },
+      {
+        "table": "review_task_file",
+        "column": "content_sha256",
+        "exists": true,
+        "type": "varchar",
+        "nullable": "YES",
+        "expected_type": "varchar",
+        "expected_nullable": "YES",
+        "matches": true
+      },
+      {
+        "table": "review_task_file",
+        "column": "file_snapshot",
+        "exists": true,
+        "type": "json",
+        "nullable": "YES",
+        "expected_type": "json",
+        "expected_nullable": "YES",
+        "matches": true
+      },
+      {
+        "table": "review_task",
+        "column": "coverage",
+        "exists": true,
+        "type": "json",
+        "nullable": "YES",
+        "expected_type": "json",
+        "expected_nullable": "YES",
+        "matches": true
+      }
+    ],
+    "legacy_null_aggregates": [
+      {
+        "kind": "snapshot_nulls",
+        "table": "review_task_file",
+        "total": 2185,
+        "version_no_null": 2185,
+        "file_snapshot_null": 2185,
+        "content_sha256_null": 2185
+      },
+      {
+        "kind": "snapshot_nulls",
+        "table": "review_task",
+        "total": 146,
+        "coverage_null": 146
+      }
+    ]
+  },
+  "database": {
+    "inventory": {
+      "table_count": 89,
+      "engines": {
+        "InnoDB": 89
+      }
+    },
+    "exact_counts": {
+      "admin_chat_message": 32,
+      "admin_chat_session": 3,
+      "agent_alert": 93,
+      "agent_artifact_version": 31,
+      "agent_capability_alias": 60,
+      "agent_job": 36,
+      "agent_job_run": 54800,
+      "agent_knowledge_chunk": 347,
+      "agent_knowledge_doc": 39,
+      "agent_knowledge_source": 1,
+      "agent_mcp_binding": 14,
+      "agent_memory": 456,
+      "agent_mesh_conversation": 607,
+      "agent_mesh_message": 850,
+      "agent_mesh_message_event": 3101,
+      "agent_metric_snapshot": 4,
+      "agent_profile": 35,
+      "agent_reflection": 30,
+      "agent_response_run": 776,
+      "agent_reward_event": 30,
+      "agent_skill_binding": 165,
+      "agent_skill_record": 21104,
+      "agent_team": 63,
+      "agent_team_event": 884,
+      "agent_team_member": 189,
+      "agent_team_task": 197,
+      "agent_tool_execution": 2556,
+      "agent_tool_permission": 221,
+      "ai_call_log": 9532,
+      "alembic_version": 1,
+      "approval_item": 223,
+      "audit_log": 84635,
+      "beta_invite_code": 21,
+      "code_file": 1771,
+      "code_version": 1773,
+      "custom_agent": 2,
+      "custom_agent_release": 3,
+      "custom_agent_skill_binding": 0,
+      "custom_agent_version": 3,
+      "custom_skill": 0,
+      "custom_skill_version": 0,
+      "data_scope": 5,
+      "eval_case": 6,
+      "evolution_proposal": 1,
+      "forum_post": 40,
+      "forum_reply": 86,
+      "knowledge_chunk": 1938,
+      "knowledge_doc": 312,
+      "maintenance_ticket": 0,
+      "malware_scan_log": 0,
+      "mcp_server": 4,
+      "mcp_tool": 7,
+      "menu": 17,
+      "ops_execution": 82504,
+      "pentest_engagement": 3,
+      "pentest_finding": 2,
+      "pentest_line_run": 12,
+      "pentest_phase_run": 12,
+      "permission": 60,
+      "policy_decision_log": 1512,
+      "policy_rule": 3,
+      "project": 100,
+      "project_import_task": 0,
+      "project_member": 90,
+      "project_source_archive": 23,
+      "project_source_revision": 5,
+      "repo_change_set": 1,
+      "repo_change_set_item": 1,
+      "report_template": 3,
+      "review_experience": 22,
+      "review_issue": 1201,
+      "review_report": 72,
+      "review_rule": 116,
+      "review_task": 146,
+      "review_task_agent_release": 16,
+      "review_task_file": 2185,
+      "role": 5,
+      "role_permission": 206,
+      "sandbox_artifact": 865,
+      "sandbox_environment": 159,
+      "sandbox_event": 2658,
+      "sandbox_worker": 1,
+      "system_config": 2,
+      "tool_call_log": 82612,
+      "user": 39,
+      "user_api_config": 0,
+      "user_feedback": 1,
+      "user_profile": 9,
+      "user_role": 31
+    },
+    "status_counts": {
+      "project": {
+        "active": 29,
+        "deleted": 71
+      },
+      "code_file": {
+        "active": 1767,
+        "deleted": 4
+      },
+      "review_task": {
+        "cancelled": 5,
+        "deleted": 10,
+        "failed": 20,
+        "success": 111
+      },
+      "agent_team": {
+        "completed": 42,
+        "failed": 15,
+        "cancelled": 6
+      },
+      "agent_team_task": {
+        "blocked": 16,
+        "cancelled": 14,
+        "completed": 145,
+        "dead_letter": 11,
+        "failed": 9,
+        "queued": 1,
+        "waiting_dependency": 1
+      },
+      "agent_job_run": {
+        "failed": 7749,
+        "success": 47051
+      }
+    },
+    "logical_orphans": [
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "project.user_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "code_file.project_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "code_version.file_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "code_version.operator_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "review_task.project_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "review_task.user_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "review_task_file.task_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "review_task_file.file_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "review_issue.task_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "review_issue.file_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "review_report.task_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "project_member.project_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "project_member.user_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "user_role.user_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "user_role.role_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "role_permission.role_id"
+      },
+      {
+        "kind": "logical_orphans",
+        "count": 0,
+        "relation": "role_permission.permission_id"
+      }
+    ],
+    "physical_fk_orphans": [
+      {
+        "kind": "physical_fk_orphans",
+        "count": 0,
+        "table": "user_api_config",
+        "constraint": "user_api_config_ibfk_1"
+      }
+    ],
+    "other_integrity_checks": {
+      "cross_project_task_file": [
+        {
+          "kind": "cross_project_task_file",
+          "count": 0
+        }
+      ],
+      "cross_project_issue_file": [
+        {
+          "kind": "cross_project_issue_file",
+          "count": 0
+        }
+      ],
+      "current_version_missing": [
+        {
+          "kind": "current_version_missing",
+          "count": 0
+        }
+      ]
+    }
+  },
+  "project_source_judgments": [
+    {
+      "project_id": 24,
+      "status": "可证明",
+      "checks": {
+        "one_exact_project": true,
+        "id_owner_exact_name_description_language": true,
+        "historical_timestamp_matches": true,
+        "epoch_chronology_within_http_timeout": true,
+        "one_exact_source_file_path": true,
+        "byte_exact_payload_matches": true,
+        "file_creation_chronology": true,
+        "matching_test_task_and_link": true,
+        "task_creation_chronology": true
+      },
+      "source_sha256": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+      "scope": "固定AC2端到端测试样例数据来源；不重建具体操作者或原始HTTP会话",
+      "direct_historical_acceptance_exists": false,
+      "blocking_reasons": [],
+      "field_aggregates": [
+        {
+          "kind": "project_whitelist",
+          "project_id": 24,
+          "active_count": 1,
+          "project_count": 1,
+          "owner1_matches": 1,
+          "language_matches": 1,
+          "quarantined_count": 0,
+          "description_sha256": "834941e3c1e7663ebe8d6802bfa18423525f07b7753d9026b680ed8096c62406",
+          "exact_name_matches": 1,
+          "fixed_description_matches": 1,
+          "historical_create_time_matches": 1,
+          "name_epoch_to_creation_seconds_max": 1,
+          "name_epoch_to_creation_seconds_min": 1
+        },
+        {
+          "kind": "file_whitelist",
+          "file_count": 1,
+          "project_id": 24,
+          "language_matches": 1,
+          "active_file_count": 1,
+          "content_bytes_max": 1079,
+          "content_bytes_min": 1079,
+          "nonbinary_matches": 1,
+          "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "relative_path_sha256": "d67ed7e7c64b81bc6ccd5a281e6b89773ede5ec8ca81ed034f5de14897d6e21f",
+          "sample_sha256_matches": 1,
+          "exact_filename_matches": 1,
+          "exact_relative_path_matches": 1,
+          "project_to_file_seconds_max": 0,
+          "project_to_file_seconds_min": 0
+        },
+        {
+          "kind": "matching_test_task",
+          "project_id": 24,
+          "owner1_matches": 1,
+          "matching_task_count": 1,
+          "project_to_task_seconds_max": 0,
+          "project_to_task_seconds_min": 0
+        },
+        {
+          "kind": "matching_task_file_link",
+          "project_id": 24,
+          "matching_link_count": 1,
+          "file_precedes_task_count": 1
+        }
+      ]
+    },
+    {
+      "project_id": 25,
+      "status": "可证明",
+      "checks": {
+        "one_exact_project": true,
+        "id_owner_exact_name_description_language": true,
+        "historical_timestamp_matches": true,
+        "epoch_chronology_within_http_timeout": true,
+        "one_exact_source_file_path": true,
+        "byte_exact_payload_matches": true,
+        "file_creation_chronology": true,
+        "matching_test_task_and_link": true,
+        "task_creation_chronology": true
+      },
+      "source_sha256": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+      "scope": "固定AC2端到端测试样例数据来源；不重建具体操作者或原始HTTP会话",
+      "direct_historical_acceptance_exists": false,
+      "blocking_reasons": [],
+      "field_aggregates": [
+        {
+          "kind": "project_whitelist",
+          "project_id": 25,
+          "active_count": 1,
+          "project_count": 1,
+          "owner1_matches": 1,
+          "language_matches": 1,
+          "quarantined_count": 0,
+          "description_sha256": "834941e3c1e7663ebe8d6802bfa18423525f07b7753d9026b680ed8096c62406",
+          "exact_name_matches": 1,
+          "fixed_description_matches": 1,
+          "historical_create_time_matches": 1,
+          "name_epoch_to_creation_seconds_max": 1,
+          "name_epoch_to_creation_seconds_min": 1
+        },
+        {
+          "kind": "file_whitelist",
+          "file_count": 1,
+          "project_id": 25,
+          "language_matches": 1,
+          "active_file_count": 1,
+          "content_bytes_max": 1079,
+          "content_bytes_min": 1079,
+          "nonbinary_matches": 1,
+          "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "relative_path_sha256": "d67ed7e7c64b81bc6ccd5a281e6b89773ede5ec8ca81ed034f5de14897d6e21f",
+          "sample_sha256_matches": 1,
+          "exact_filename_matches": 1,
+          "exact_relative_path_matches": 1,
+          "project_to_file_seconds_max": 0,
+          "project_to_file_seconds_min": 0
+        },
+        {
+          "kind": "matching_test_task",
+          "project_id": 25,
+          "owner1_matches": 1,
+          "matching_task_count": 1,
+          "project_to_task_seconds_max": 0,
+          "project_to_task_seconds_min": 0
+        },
+        {
+          "kind": "matching_task_file_link",
+          "project_id": 25,
+          "matching_link_count": 1,
+          "file_precedes_task_count": 1
+        }
+      ]
+    },
+    {
+      "project_id": 27,
+      "status": "可证明",
+      "checks": {
+        "one_exact_project": true,
+        "id_owner_exact_name_description_language": true,
+        "historical_timestamp_matches": true,
+        "epoch_chronology_within_http_timeout": true,
+        "one_exact_source_file_path": true,
+        "byte_exact_payload_matches": true,
+        "file_creation_chronology": true,
+        "matching_test_task_and_link": true,
+        "task_creation_chronology": true
+      },
+      "source_sha256": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+      "scope": "固定AC2端到端测试样例数据来源；不重建具体操作者或原始HTTP会话",
+      "direct_historical_acceptance_exists": false,
+      "blocking_reasons": [],
+      "field_aggregates": [
+        {
+          "kind": "project_whitelist",
+          "project_id": 27,
+          "active_count": 1,
+          "project_count": 1,
+          "owner1_matches": 1,
+          "language_matches": 1,
+          "quarantined_count": 0,
+          "description_sha256": "834941e3c1e7663ebe8d6802bfa18423525f07b7753d9026b680ed8096c62406",
+          "exact_name_matches": 1,
+          "fixed_description_matches": 1,
+          "historical_create_time_matches": 1,
+          "name_epoch_to_creation_seconds_max": 1,
+          "name_epoch_to_creation_seconds_min": 1
+        },
+        {
+          "kind": "file_whitelist",
+          "file_count": 1,
+          "project_id": 27,
+          "language_matches": 1,
+          "active_file_count": 1,
+          "content_bytes_max": 1079,
+          "content_bytes_min": 1079,
+          "nonbinary_matches": 1,
+          "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "relative_path_sha256": "d67ed7e7c64b81bc6ccd5a281e6b89773ede5ec8ca81ed034f5de14897d6e21f",
+          "sample_sha256_matches": 1,
+          "exact_filename_matches": 1,
+          "exact_relative_path_matches": 1,
+          "project_to_file_seconds_max": 0,
+          "project_to_file_seconds_min": 0
+        },
+        {
+          "kind": "matching_test_task",
+          "project_id": 27,
+          "owner1_matches": 1,
+          "matching_task_count": 1,
+          "project_to_task_seconds_max": 0,
+          "project_to_task_seconds_min": 0
+        },
+        {
+          "kind": "matching_task_file_link",
+          "project_id": 27,
+          "matching_link_count": 1,
+          "file_precedes_task_count": 1
+        }
+      ]
+    },
+    {
+      "project_id": 26,
+      "status": "可证明",
+      "checks": {
+        "one_exact_project": true,
+        "id_owner_exact_name_description_language": true,
+        "historical_timestamp_matches": true,
+        "epoch_chronology_within_http_timeout": true,
+        "one_exact_source_file_path": true,
+        "byte_exact_payload_matches": true,
+        "file_creation_chronology": true,
+        "matching_test_task_and_link": true,
+        "task_creation_chronology": true
+      },
+      "source_sha256": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+      "scope": "固定AC2端到端测试样例数据来源；不重建具体操作者或原始HTTP会话",
+      "direct_historical_acceptance_exists": true,
+      "blocking_reasons": [],
+      "field_aggregates": [
+        {
+          "kind": "project_whitelist",
+          "project_id": 26,
+          "active_count": 1,
+          "project_count": 1,
+          "owner1_matches": 1,
+          "language_matches": 1,
+          "quarantined_count": 0,
+          "description_sha256": "834941e3c1e7663ebe8d6802bfa18423525f07b7753d9026b680ed8096c62406",
+          "exact_name_matches": 1,
+          "fixed_description_matches": 1,
+          "historical_create_time_matches": 1,
+          "name_epoch_to_creation_seconds_max": 1,
+          "name_epoch_to_creation_seconds_min": 1
+        },
+        {
+          "kind": "file_whitelist",
+          "file_count": 1,
+          "project_id": 26,
+          "language_matches": 1,
+          "active_file_count": 1,
+          "content_bytes_max": 1079,
+          "content_bytes_min": 1079,
+          "nonbinary_matches": 1,
+          "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "relative_path_sha256": "d67ed7e7c64b81bc6ccd5a281e6b89773ede5ec8ca81ed034f5de14897d6e21f",
+          "sample_sha256_matches": 1,
+          "exact_filename_matches": 1,
+          "exact_relative_path_matches": 1,
+          "project_to_file_seconds_max": 0,
+          "project_to_file_seconds_min": 0
+        },
+        {
+          "kind": "matching_test_task",
+          "project_id": 26,
+          "owner1_matches": 1,
+          "matching_task_count": 1,
+          "project_to_task_seconds_max": 0,
+          "project_to_task_seconds_min": 0
+        },
+        {
+          "kind": "matching_task_file_link",
+          "project_id": 26,
+          "matching_link_count": 1,
+          "file_precedes_task_count": 1
+        }
+      ]
+    }
+  ],
+  "source_method": {
+    "historical_revision": "ae712da361f974230f2379ec42a167b35162a7f9",
+    "source_script_git_path": "backend/tests/e2e/ac2_e2e_verify.py",
+    "source_script_sha256": "e4db797d22a255cf887e72b9ad5f9e5bd0711e089694c6ef902faf4cf29d3480",
+    "historical_script_sha256": "0e6845542a7dd0a6e6f707157c1aa7d27e0508ec16e30fb3c08576eeb46eb75e",
+    "fixed_create_payload_sha256": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+    "fixed_create_payload_bytes": 1079,
+    "fixed_payload_unchanged_from_historical_revision": true,
+    "fixed_description_sha256": "834941e3c1e7663ebe8d6802bfa18423525f07b7753d9026b680ed8096c62406",
+    "expected_filename_and_relative_path_sha256": "d67ed7e7c64b81bc6ccd5a281e6b89773ede5ec8ca81ed034f5de14897d6e21f",
+    "relative_path_basis": "创建脚本省略file_path；历史ae712da的code_file_service.py第422行以file_name作为默认相对路径；不是任意路径白名单。",
+    "sample_basis": "使用创建脚本VULNERABLE_CODE的AST字面量；并非旁边fixtures文件，该fixtures文件和实际创建payload字节不同。",
+    "time_basis": "历史TimestampMixin使用UTC；SQL按1970-01-01 UTC-naive加名称中精确epoch计算差值，避免FROM_UNIXTIME受会话时区影响。历史文档的时区注记不参与判定。",
+    "script_executed": false,
+    "source_or_description_returned": false,
+    "excluded_project_ids": [
+      161
+    ]
+  },
+  "target_task_statuses_at_source_snapshot": [
+    {
+      "kind": "target_task_status_count",
+      "count": 1,
+      "status": "failed"
+    },
+    {
+      "kind": "target_task_status_count",
+      "count": 6,
+      "status": "success"
+    }
+  ],
+  "quarantine_apply_by_this_reviewer": false,
+  "predeploy_comparison": {
+    "review_task": {
+      "predeploy_total": 146,
+      "independent_snapshot_total": 146,
+      "total_delta": 0,
+      "status_deltas": {
+        "cancelled": 0,
+        "deleted": 0,
+        "failed": 0,
+        "success": 0
+      }
+    },
+    "agent_team": {
+      "predeploy_total": 63,
+      "independent_snapshot_total": 63,
+      "total_delta": 0,
+      "status_deltas": {
+        "cancelled": 0,
+        "completed": 0,
+        "failed": 0
+      }
+    },
+    "agent_team_task": {
+      "predeploy_total": 197,
+      "independent_snapshot_total": 197,
+      "total_delta": 0,
+      "status_deltas": {
+        "blocked": 0,
+        "cancelled": 0,
+        "completed": 0,
+        "dead_letter": 0,
+        "failed": 0,
+        "queued": 0,
+        "waiting_dependency": 0
+      }
+    },
+    "agent_job_run": {
+      "predeploy_total": 54742,
+      "independent_snapshot_total": 54800,
+      "total_delta": 58,
+      "status_deltas": {
+        "failed": 1,
+        "success": 57
+      }
+    }
+  },
+  "fresh_backup": {
+    "path": "/opt/code-review/backups/code_review_20260905T193203Z_343616d9d40c.sql.gz",
+    "exists": true,
+    "bytes": 402690439,
+    "sha256": "f3dfe91bacb6d0953d8119273fe2f3c127362822923488876f1eff677c25813c",
+    "restore_independently_replayed": false,
+    "matches_main_thread_bytes": true,
+    "matches_main_thread_sha256": true,
+    "main_thread_restore_claim": "主线程告知已完成89表隔离恢复；本代理只读计算原备份哈希/字节，未执行或独立重放恢复。"
+  },
+  "local_release_evidence": {
+    "backend_passed": 2782,
+    "frontend_passed": 575,
+    "frontend_files": 77,
+    "manifest_entries": 47,
+    "manifest_passed": 47,
+    "status": "通过"
+  },
+  "remaining_source_capture_block": "原pre-deploy累计日志的采集身份仍未独立闭环；不影响本次新快照的身份与算术核验。",
+  "full_production_business_acceptance": "未测，不能表述为全量通过",
+  "limitations": [
+    "当前可证明的是四项目与固定AC2测试样例的来源关联；24/25/27没有找到各自原始HTTP创建回执，不重建具体操作者或某一次脚本进程。此缺口不冒充已经补出的证据。",
+    "本地precheck保留其生成时的三项目阻塞，作为阶段记录不回写。后续完整内容指纹、路径、说明、精确身份和时间关联已逐项补证，以本报告来源矩阵为后续结论。",
+    "pre-deploy-task-counts-and-disk.log本身仍缺采集身份、SQL和事务时间；新的独立生产快照有明确SSH目标及只读事务证据，但不反向伪造旧日志的来源链。",
+    "四表处于不同层级，不能相加当独立业务任务数。agent_job_run为累计调度执行记录，不是人工审查、独立用户任务或AI调用次数；没有时间窗，不是今日数量。",
+    "调度累计由54742变为54800，其中success增加57、failed增加1；仅说明两份快照数值差异，未将差异归因于本次发布、特定任务或数据损坏。",
+    "生产数据快照固定于所列UTC时间。四项目来源补证为稍后的独立只读快照；本报告不把不同时间查询合并声称一个事务。",
+    "前端buildInfo产物仅包含版本3.8.4，没有release SHA字面量；源码仅声明APP_RELEASE_SHA而未作为页面消费者使用。因此前端release绑定使用账本、实际imageID和tag对象，未伪称前端JS独立自报SHA。两个镜像未提供OCI版本标签，该项不冒充已验证证据。",
+    "047四列允许NULL符合迁移设计；2185条既有任务文件记录的三列均NULL，146条既有任务coverage均NULL。没有伪造历史快照；本次未新建任务，未验证新任务快照写入功能。",
+    "全部89表COUNT与核心孤儿检查不等于逐条业务真实性、全角色全按钮、登录正向能力、真实扫描/模型用量或全部业务链路验收。无认证浏览器，相关业务功能未测。",
+    "只读取既有备份字节及哈希，没有解压取回数据行，也没有运行恢复；主线程89表隔离恢复成功属于主线程证据。本代理没有重新运行ops-check。",
+    "本代理不执行隔离apply、不创建或登录账号、不生成JWT或密码、不调用真实模型、不修改生产或主仓库；不运行E2E创建脚本。项目161不在逐项来源核验或隔离范围。"
+  ],
+  "collection_notes": [
+    "首次采集在数据库读取前因账本基目录不正确退出；按deploy.sh第5行和远端存在性只读复现，改用deploy/.releases/current.env。没有执行生产写入。"
+  ],
+  "input_artifacts": [
+    {
+      "path": "/tmp/prism-optimization-20260906/independent-release-precheck.md",
+      "sha256": "880e043efde42e58ea568b2edac12166caf5a4a7d3d7b2aa0e7c2792684fd258"
+    },
+    {
+      "path": "/tmp/prism-optimization-20260906/independent-release-precheck.json",
+      "sha256": "79531fdd50181122d2bd863d46d1bb506a4570b6df0509f1992962075e659bde"
+    },
+    {
+      "path": "/tmp/prism-optimization-20260906/independent-production-observation.json",
+      "sha256": "a2e6b074f761ec2dd900de13199801abbfddf3a27a5abcf45d85aac01ae5076f"
+    },
+    {
+      "path": "/tmp/prism-optimization-20260906/independent-frontend-identity-check.json",
+      "sha256": "7462b2edc8fdb7b8054dbd68a696c41e484ef7d128ff14c154a0e2412a9fe381"
+    },
+    {
+      "path": "/tmp/prism-optimization-20260906/independent-project-source-whitelist.json",
+      "sha256": "792df92eb58468da1d4e698c9b686bcd70aad2c04e1e19e8905afb95b2a33eac"
+    }
+  ]
+}

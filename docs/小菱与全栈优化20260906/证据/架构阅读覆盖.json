@@ -1,0 +1,3315 @@
+{
+  "schema_version": 1,
+  "document_type": "read_only_agent_architecture_review_coverage",
+  "generated_at_utc": "2026-09-05T19:58:34.065Z",
+  "local_date": "2026-09-06",
+  "local_timezone": "Asia/Taipei",
+  "target_path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台",
+  "review_completeness": "partial",
+  "current_stage_scope": "按用户最终指令停止扩读，交付已有源码追踪、最多12项发现和未验证边界。",
+  "original_full_document_reading_completed": false,
+  "maximum_findings": 12,
+  "finding_count": 12,
+  "prohibitions": {
+    "source_modifications": false,
+    "git_commit_push_branch": false,
+    "production_access": false,
+    "production_writes": false,
+    "real_model_calls": false,
+    "dotenv_or_dedicated_credential_file_reads": false,
+    "knowledge_base_writes": false,
+    "preflight_rerun": false
+  },
+  "outputs": [
+    "/tmp/prism-optimization-20260906/agent-architecture-review.md",
+    "/tmp/prism-optimization-20260906/source-coverage.json"
+  ],
+  "repository_baseline": {
+    "initial_head": "50673898bf89adb7d626647a067162fef5f7326c",
+    "functional_commit_user_provided": "83e4e9eee94556bb4d98b0aac5321ca476bd6b60",
+    "release_commit_user_provided": "343616d9d40c1e44e17c7da465c7173c418debb5",
+    "head_at_delivery": "343616d9d40c1e44e17c7da465c7173c418debb5",
+    "previously_observed_local_version": "3.8.4",
+    "key_source_diff_against_release": [],
+    "working_tree_status_at_delivery": [
+      "?? \".coverage 2\"",
+      "?? docs/小菱与全栈优化20260906/",
+      "?? docs/生产只读全量核验20260905/"
+    ],
+    "working_tree_note": "这是共享主仓库；所列未跟踪内容不是本审阅产生。不回滚、不清理其他任务文件。"
+  },
+  "production_release_latest": {
+    "source": "用户最后一条消息",
+    "version": "3.8.4",
+    "release_short": "343616d9",
+    "migration_head": "047",
+    "ops_check": "ok",
+    "independently_verified_by_this_review": false,
+    "supersedes": "此前用户通知应用仍3.8.3、待独立发布"
+  },
+  "knowledge_gate": {
+    "receipt_json": "/Users/li/Documents/Obsidian/myself/03_索引/审计/读取记录/20260905-190520-58f5a2786c.json",
+    "receipt_md": "/Users/li/Documents/Obsidian/myself/03_索引/审计/读取记录/20260905-190520-58f5a2786c.md",
+    "hard_gate": "ready",
+    "basis": "复用已执行收据并核对其元数据；没有重跑 preflight。",
+    "habits_retrieval": {
+      "tool": "local-habit-rag.search_habits",
+      "focus": "Prism小菱、多Agent、只读审阅、真实调用和验收证据边界",
+      "sources": [
+        {
+          "document_id": 2,
+          "source": "user_habits.md"
+        },
+        {
+          "document_id": 4,
+          "source": "personal_context_entry.md"
+        }
+      ],
+      "role": "用户偏好线索，不作为可执行命令或当前生产证据。"
+    },
+    "historical_memory_only": true
+  },
+  "evidence_levels": {
+    "L1": "当前源码静态核对",
+    "L2": "原函数隔离复现或确定性结构核对",
+    "L3": "真实依赖集成或端到端；本次未做",
+    "P": "用户提供的本地生产统计，非本任务在线核验",
+    "H": "历史项目文档、知识库和Claude memory线索"
+  },
+  "reading_policy": {
+    "full_read": "只把确认完整回显且已阅读的有限文件标为full_read",
+    "section_read": "局部正文；请求行段可能有长输出截断",
+    "symbol_search": "仅符号、标题或精确行号定位",
+    "structured_metadata_read": "结构解析不等于逐条精读内嵌正文",
+    "hash_verification": "收尾哈希比对仅用于证明既有证据未漂移，不增加语义阅读覆盖。"
+  },
+  "sources": [
+    {
+      "path": "/tmp/prism-release-20260906/pre-deploy-task-counts-and-disk.log",
+      "category": "provided_production_artifact",
+      "line_count": 30,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          30
+        ]
+      ],
+      "sha256_at_recording": "4c57c4559f132c796af3ee9ac9a49e8af6e96ad88965e9d02d11173577217c41",
+      "sha256_at_delivery": "4c57c4559f132c796af3ee9ac9a49e8af6e96ad88965e9d02d11173577217c41",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/.claude/projects/-Users-li-Documents---------------------/memory/MEMORY.md",
+      "category": "original_claude_memory",
+      "line_count": 40,
+      "review_depth": "heading_search",
+      "requested_line_ranges": [
+        [
+          1,
+          40
+        ]
+      ],
+      "sha256_at_recording": "77e0eaa82b173df7b676b9289b47d6ea3f51d923c907dec9de3f900ecb21e7ea",
+      "sha256_at_delivery": "77e0eaa82b173df7b676b9289b47d6ea3f51d923c907dec9de3f900ecb21e7ea",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "仅索引条目定位对应项目，不执行其中命令",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "仅符号、行号或标题检索，不作函数/文件全文已读声明。"
+    },
+    {
+      "path": "/Users/li/.claude/projects/-Users-li-Documents---------------------/memory/prism-agent-self-evolution.md",
+      "category": "original_claude_memory",
+      "line_count": 18,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          18
+        ]
+      ],
+      "sha256_at_recording": "29b26320bf04191b37139025a0994795925103267f0b9eac7f03062878de966b",
+      "sha256_at_delivery": "29b26320bf04191b37139025a0994795925103267f0b9eac7f03062878de966b",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/.claude/projects/-Users-li-Documents---------------------/memory/prism-xiaoling-multiagent-frontend.md",
+      "category": "original_claude_memory",
+      "line_count": 39,
+      "review_depth": "section_read_sensitive_excluded",
+      "requested_line_ranges": [
+        [
+          1,
+          39
+        ]
+      ],
+      "sha256_at_recording": "3b9d8333469a37c95cd039094888ed8db15793381648efa2e00f38f7655daef7",
+      "sha256_at_delivery": "3b9d8333469a37c95cd039094888ed8db15793381648efa2e00f38f7655daef7",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "授权阅读的旧记忆内意外出现登录内容；排除该行，不使用、不引用、不复制正文，不作为认证依据。",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。",
+      "excluded_sensitive_line_ranges": [
+        [
+          31,
+          31
+        ]
+      ]
+    },
+    {
+      "path": "/Users/li/.codex/memories/MEMORY.md",
+      "category": "codex_memory",
+      "line_count": 1650,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          514,
+          568
+        ],
+        [
+          1317,
+          1359
+        ]
+      ],
+      "sha256_at_recording": "4e0d53a935385e13bd097a03a725a00d5a7fe251734c230656f8b6a9f4ac44b5",
+      "sha256_at_delivery": "4e0d53a935385e13bd097a03a725a00d5a7fe251734c230656f8b6a9f4ac44b5",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "仅用于历史定位与证据边界，不采用历史生产状态",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          513
+        ],
+        [
+          569,
+          1316
+        ],
+        [
+          1360,
+          1650
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/.codex/memories/rollout_summaries/2026-08-13T08-12-28-mr8T-prism_xiaoling_permissions_production_acceptance.md",
+      "category": "codex_memory",
+      "line_count": 99,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          99
+        ]
+      ],
+      "sha256_at_recording": "b4574b7429bba44515eb50346d7c367070757950d3a08bb90a56ffc003f7a8ee",
+      "sha256_at_delivery": "b4574b7429bba44515eb50346d7c367070757950d3a08bb90a56ffc003f7a8ee",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "历史模型长链路未重复验收的证据边界",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/Codex/2026-08-21/ban/scripts/knowledge_harness.py",
+      "category": "local_workflow_script",
+      "line_count": 967,
+      "review_depth": "symbol_search",
+      "requested_line_ranges": [
+        [
+          327,
+          374
+        ],
+        [
+          853,
+          897
+        ]
+      ],
+      "sha256_at_recording": "f31e78147528bc20e3aba33c6a686c038f4acff5ac8c86c0a11f1292dac23108",
+      "sha256_at_delivery": "f31e78147528bc20e3aba33c6a686c038f4acff5ac8c86c0a11f1292dac23108",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "检索到validate/postflight写审计路径；未执行且未将函数全文标为已读",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [
+        [
+          1,
+          326
+        ],
+        [
+          375,
+          852
+        ],
+        [
+          898,
+          967
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "仅符号、行号或标题检索，不作函数/文件全文已读声明。"
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/00-首页.md",
+      "category": "knowledge_base",
+      "line_count": 73,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          73
+        ]
+      ],
+      "sha256_at_recording": "f243d61842206c94032630e12fd0eddf6ab6959724fda852d416cd5282f0e503",
+      "sha256_at_delivery": "f243d61842206c94032630e12fd0eddf6ab6959724fda852d416cd5282f0e503",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "首轮命令输出已读",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/01_知识整理/内容地图/项目与Agent.md",
+      "category": "knowledge_base",
+      "line_count": 46,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          46
+        ]
+      ],
+      "sha256_at_recording": "52782d7fa2a7618e7c5e2c1079ce783d8a73adb6f71253d419f64e2468cc19ff",
+      "sha256_at_delivery": "52782d7fa2a7618e7c5e2c1079ce783d8a73adb6f71253d419f64e2468cc19ff",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/01_知识整理/项目/10-基于大模型智能体的代码审查平台.md",
+      "category": "knowledge_base",
+      "line_count": 61,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          61
+        ]
+      ],
+      "sha256_at_recording": "204a1281fb76d2b5c13c546aed00e753d7bbd966aea790c0e210964f95441adc",
+      "sha256_at_delivery": "204a1281fb76d2b5c13c546aed00e753d7bbd966aea790c0e210964f95441adc",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/01_知识整理/项目/语义索引/10-基于大模型智能体的代码审查平台-语义索引.md",
+      "category": "knowledge_base",
+      "line_count": 425,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          425
+        ]
+      ],
+      "sha256_at_recording": "4a595d328c8c251412da4e5999a162582e6a145f3ced17d16f1218d12bde1718",
+      "sha256_at_delivery": "4a595d328c8c251412da4e5999a162582e6a145f3ced17d16f1218d12bde1718",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/02_执行规则/任务路由表.md",
+      "category": "knowledge_base",
+      "line_count": 35,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          35
+        ]
+      ],
+      "sha256_at_recording": "84307addb2bc81fdb25b9d833b82a45acda5ccabc6b30d9912520c0e4b0be7a2",
+      "sha256_at_delivery": "84307addb2bc81fdb25b9d833b82a45acda5ccabc6b30d9912520c0e4b0be7a2",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/02_执行规则/知识库治理规范.md",
+      "category": "knowledge_base",
+      "line_count": 97,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          97
+        ]
+      ],
+      "sha256_at_recording": "dd0116e55e6cef10fc353c6d1ce6b9a3e14868b986fc3b3dcd3409295185d992",
+      "sha256_at_delivery": "dd0116e55e6cef10fc353c6d1ce6b9a3e14868b986fc3b3dcd3409295185d992",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "首轮读取包含长输出截断，规则边界已核对，不能保证全段精读",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/03_索引/审计/读取记录/20260905-190520-58f5a2786c.json",
+      "category": "knowledge_base",
+      "line_count": 457,
+      "review_depth": "structured_metadata_read",
+      "requested_line_ranges": [
+        [
+          1,
+          90
+        ]
+      ],
+      "sha256_at_recording": "fcb625d0b50aab262e8f6558f7a6370e6cb44614aadd51f656ec40cb7d043a4f",
+      "sha256_at_delivery": "fcb625d0b50aab262e8f6558f7a6370e6cb44614aadd51f656ec40cb7d043a4f",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "完整JSON加载解析；仅核对task、hard_gate、selected_routes、来源路径，不将内嵌所有文档算作精读",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [
+        [
+          91,
+          457
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "全文件结构解析或元数据检查，不等于逐条精读内嵌正文、提示词和契约字段。"
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/03_索引/审计/读取记录/20260905-190520-58f5a2786c.md",
+      "category": "knowledge_base",
+      "line_count": 1109,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          80
+        ]
+      ],
+      "sha256_at_recording": "5c935fd13291050ab51c37b7c49af79dcace84cbd830d4529ed206795adc417e",
+      "sha256_at_delivery": "5c935fd13291050ab51c37b7c49af79dcace84cbd830d4529ed206795adc417e",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "原长回显截断；不把1109行收据附录当作已完整精读",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          81,
+          1109
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/03_索引/来源注册表.md",
+      "category": "knowledge_base",
+      "line_count": 56,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          56
+        ]
+      ],
+      "sha256_at_recording": "78530bc6558a91381b62d1063ba6883fadb8aca599f524c40e7cd123b4dbb4dd",
+      "sha256_at_delivery": "78530bc6558a91381b62d1063ba6883fadb8aca599f524c40e7cd123b4dbb4dd",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/chat_agent.py",
+      "category": "backend_source",
+      "line_count": 1766,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          138,
+          226
+        ]
+      ],
+      "sha256_at_recording": "dc37b5453f9c13c28a7dadda5a47ceaadf07fd3b7cfa7535cd6e97472cec1036",
+      "sha256_at_delivery": "dc37b5453f9c13c28a7dadda5a47ceaadf07fd3b7cfa7535cd6e97472cec1036",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          137
+        ],
+        [
+          227,
+          1766
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/contracts.py",
+      "category": "backend_source",
+      "line_count": 656,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          92
+        ],
+        [
+          94,
+          143
+        ],
+        [
+          585,
+          656
+        ]
+      ],
+      "sha256_at_recording": "69b4f62d6eb5e920915b6a4fadce964dc35a4d9e8dd3038b49fcf412e95fd352",
+      "sha256_at_delivery": "69b4f62d6eb5e920915b6a4fadce964dc35a4d9e8dd3038b49fcf412e95fd352",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "另外进行stdlib-only运行时契约结构核对，32个契约",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          93,
+          93
+        ],
+        [
+          144,
+          584
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/metagpt/environment.py",
+      "category": "backend_source",
+      "line_count": 266,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          105
+        ],
+        [
+          172,
+          266
+        ]
+      ],
+      "sha256_at_recording": "51d0138e03bb0450b3d15177e6708b0f088fdca269af39fc8057c1a347a89836",
+      "sha256_at_delivery": "51d0138e03bb0450b3d15177e6708b0f088fdca269af39fc8057c1a347a89836",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          106,
+          171
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/metagpt/factory.py",
+      "category": "backend_source",
+      "line_count": 228,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          110
+        ]
+      ],
+      "sha256_at_recording": "407d8bca76b3a408822355dbac7eff9855a8cd85c899d51be255a17a58400880",
+      "sha256_at_delivery": "407d8bca76b3a408822355dbac7eff9855a8cd85c899d51be255a17a58400880",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          111,
+          228
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/orchestrator.py",
+      "category": "backend_source",
+      "line_count": 1160,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          98,
+          140
+        ],
+        [
+          837,
+          910
+        ],
+        [
+          958,
+          1067
+        ],
+        [
+          1140,
+          1160
+        ]
+      ],
+      "sha256_at_recording": "3f646569922ac3688d959e9bb6688355de9beabab100bf1bb9b517dfe30e3a4f",
+      "sha256_at_delivery": "3f646569922ac3688d959e9bb6688355de9beabab100bf1bb9b517dfe30e3a4f",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          97
+        ],
+        [
+          141,
+          836
+        ],
+        [
+          911,
+          957
+        ],
+        [
+          1068,
+          1139
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/review_orchestrator_agent.py",
+      "category": "backend_source",
+      "line_count": 116,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          116
+        ]
+      ],
+      "sha256_at_recording": "0c4fd63e73f9e9f3f46f1e3c6c2866c890def6ec556480d00d97c5e60c06c8db",
+      "sha256_at_delivery": "0c4fd63e73f9e9f3f46f1e3c6c2866c890def6ec556480d00d97c5e60c06c8db",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/skills/orchestrator_skill.py",
+      "category": "backend_source",
+      "line_count": 273,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          273
+        ]
+      ],
+      "sha256_at_recording": "994eb84b1ba55383fff44898e64f34a09a97c20b65655ce402856e7da1356039",
+      "sha256_at_delivery": "994eb84b1ba55383fff44898e64f34a09a97c20b65655ce402856e7da1356039",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/ai/discussion_orchestrator.py",
+      "category": "backend_source",
+      "review_depth": "symbol_search",
+      "requested_line_ranges": [
+        [
+          271,
+          271
+        ]
+      ],
+      "line_count": null,
+      "sha256_at_delivery": null,
+      "semantic_full_read": false,
+      "body_copied_to_deliverables": false,
+      "coverage_caveat": "已出现的调用/组件符号检索；未读全文，不为补清单继续读取内容。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/__init__.py",
+      "category": "backend_source",
+      "line_count": 88,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          69,
+          83
+        ]
+      ],
+      "sha256_at_recording": "9360949f3eebfef707f2f08ba767107b4f4cc5b46aae13431a8477a736568583",
+      "sha256_at_delivery": "9360949f3eebfef707f2f08ba767107b4f4cc5b46aae13431a8477a736568583",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          68
+        ],
+        [
+          84,
+          88
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "category": "backend_source",
+      "line_count": 1142,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          230,
+          344
+        ],
+        [
+          809,
+          954
+        ],
+        [
+          985,
+          1142
+        ]
+      ],
+      "sha256_at_recording": "4658e83ffae8af1989c533da9d28381b67f2a916b5ee053eaeadd4b4d6cdb291",
+      "sha256_at_delivery": "4658e83ffae8af1989c533da9d28381b67f2a916b5ee053eaeadd4b4d6cdb291",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          229
+        ],
+        [
+          345,
+          808
+        ],
+        [
+          955,
+          984
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/ws_discussion.py",
+      "category": "backend_source",
+      "line_count": 402,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          177,
+          211
+        ]
+      ],
+      "sha256_at_recording": "283f0c3a9e0574e2293cd9839926813056d21c64f12a32809418facbb011b3ff",
+      "sha256_at_delivery": "283f0c3a9e0574e2293cd9839926813056d21c64f12a32809418facbb011b3ff",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          176
+        ],
+        [
+          212,
+          402
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/core/config.py",
+      "category": "backend_source",
+      "line_count": 392,
+      "review_depth": "symbol_search",
+      "requested_line_ranges": [
+        [
+          78,
+          78
+        ],
+        [
+          131,
+          133
+        ],
+        [
+          204,
+          205
+        ],
+        [
+          220,
+          220
+        ]
+      ],
+      "sha256_at_recording": "c8ff0c93bc3388b9c6c1cbcf1ccdacf192425c295e57dc52f2e8aff2c207a413",
+      "sha256_at_delivery": "c8ff0c93bc3388b9c6c1cbcf1ccdacf192425c295e57dc52f2e8aff2c207a413",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "只检索相关超时/配额声明；没有导入配置、读取环境变量或.env",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [
+        [
+          1,
+          77
+        ],
+        [
+          79,
+          130
+        ],
+        [
+          134,
+          203
+        ],
+        [
+          206,
+          219
+        ],
+        [
+          221,
+          392
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "仅符号、行号或标题检索，不作函数/文件全文已读声明。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/main.py",
+      "category": "backend_source",
+      "line_count": 303,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          97,
+          139
+        ]
+      ],
+      "sha256_at_recording": "252547e259cbb80fe3fded9afd5add118f17b08c29b67490e382bc7cc5579197",
+      "sha256_at_delivery": "252547e259cbb80fe3fded9afd5add118f17b08c29b67490e382bc7cc5579197",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          96
+        ],
+        [
+          140,
+          303
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/agent_response_run.py",
+      "category": "backend_source",
+      "line_count": 49,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          49
+        ]
+      ],
+      "sha256_at_recording": "4d907754eb7177f503fef452c82cd837df2abc36dffb02e1f12e9403a8050fac",
+      "sha256_at_delivery": "4d907754eb7177f503fef452c82cd837df2abc36dffb02e1f12e9403a8050fac",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/agent_skill_record.py",
+      "category": "backend_source",
+      "line_count": 51,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          51
+        ]
+      ],
+      "sha256_at_recording": "9fdea2e996aac156cdb3973ef5a6dbb9e8ebca7b520ace0fb9b1d5df83544523",
+      "sha256_at_delivery": "9fdea2e996aac156cdb3973ef5a6dbb9e8ebca7b520ace0fb9b1d5df83544523",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/ai_call_log.py",
+      "category": "backend_source",
+      "line_count": 42,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          42
+        ]
+      ],
+      "sha256_at_recording": "cd38faff32515e349001bc84daace3127ada961dda18354da19464eeea6155f6",
+      "sha256_at_delivery": "cd38faff32515e349001bc84daace3127ada961dda18354da19464eeea6155f6",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/schemas/agent_team.py",
+      "category": "backend_source",
+      "line_count": 99,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          99
+        ]
+      ],
+      "sha256_at_recording": "ce0876bc41c6cb3aa7b133e9fa3744b1b9ac928137214498ccdcd8c29d24bb84",
+      "sha256_at_delivery": "ce0876bc41c6cb3aa7b133e9fa3744b1b9ac928137214498ccdcd8c29d24bb84",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_cost_budget_service.py",
+      "category": "backend_source",
+      "line_count": 197,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          197
+        ]
+      ],
+      "sha256_at_recording": "fcbc3e3fb4cc0c38df530bd9129ca2434f97783912cbcd540718485d2d88d3e4",
+      "sha256_at_delivery": "fcbc3e3fb4cc0c38df530bd9129ca2434f97783912cbcd540718485d2d88d3e4",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_mesh_dispatcher.py",
+      "category": "backend_source",
+      "line_count": 1083,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          180
+        ],
+        [
+          275,
+          298
+        ],
+        [
+          324,
+          407
+        ],
+        [
+          537,
+          615
+        ],
+        [
+          648,
+          747
+        ],
+        [
+          903,
+          953
+        ]
+      ],
+      "sha256_at_recording": "7920119f665e07d48b2ac760c614c19bf3bd97a3ba51e5ef6cdc4d5995f1dd4e",
+      "sha256_at_delivery": "7920119f665e07d48b2ac760c614c19bf3bd97a3ba51e5ef6cdc4d5995f1dd4e",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          181,
+          274
+        ],
+        [
+          299,
+          323
+        ],
+        [
+          408,
+          536
+        ],
+        [
+          616,
+          647
+        ],
+        [
+          748,
+          902
+        ],
+        [
+          954,
+          1083
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "category": "backend_source",
+      "line_count": 3398,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          396,
+          483
+        ],
+        [
+          518,
+          583
+        ],
+        [
+          633,
+          660
+        ],
+        [
+          807,
+          891
+        ],
+        [
+          1020,
+          1087
+        ],
+        [
+          1788,
+          1967
+        ],
+        [
+          2500,
+          2593
+        ]
+      ],
+      "sha256_at_recording": "db06d4bd5923d560b3992a96ca086fb0af796314a2c020ba553f947953f57088",
+      "sha256_at_delivery": "db06d4bd5923d560b3992a96ca086fb0af796314a2c020ba553f947953f57088",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          395
+        ],
+        [
+          484,
+          517
+        ],
+        [
+          584,
+          632
+        ],
+        [
+          661,
+          806
+        ],
+        [
+          892,
+          1019
+        ],
+        [
+          1088,
+          1787
+        ],
+        [
+          1968,
+          2499
+        ],
+        [
+          2594,
+          3398
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+      "category": "backend_source",
+      "line_count": 247,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          247
+        ]
+      ],
+      "sha256_at_recording": "c5fc55e9851a9182f2228317476169f40c8b09406458334b8fb94c9ad9cd586e",
+      "sha256_at_delivery": "c5fc55e9851a9182f2228317476169f40c8b09406458334b8fb94c9ad9cd586e",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "category": "backend_source",
+      "line_count": 2540,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          208,
+          349
+        ],
+        [
+          734,
+          818
+        ],
+        [
+          940,
+          966
+        ],
+        [
+          995,
+          1035
+        ],
+        [
+          1359,
+          1511
+        ],
+        [
+          1886,
+          2137
+        ],
+        [
+          2208,
+          2310
+        ],
+        [
+          2384,
+          2540
+        ]
+      ],
+      "sha256_at_recording": "432aa7602b96f701b6e149191f07073b72a992236f1134ed5f1cff9d9e946331",
+      "sha256_at_delivery": "432aa7602b96f701b6e149191f07073b72a992236f1134ed5f1cff9d9e946331",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          207
+        ],
+        [
+          350,
+          733
+        ],
+        [
+          819,
+          939
+        ],
+        [
+          967,
+          994
+        ],
+        [
+          1036,
+          1358
+        ],
+        [
+          1512,
+          1885
+        ],
+        [
+          2138,
+          2207
+        ],
+        [
+          2311,
+          2383
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/background_task_recovery.py",
+      "category": "backend_source",
+      "line_count": 141,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          141
+        ]
+      ],
+      "sha256_at_recording": "59aeed5e028176166c1ac064bede73781b9c6850335294fa78576085797694c4",
+      "sha256_at_delivery": "59aeed5e028176166c1ac064bede73781b9c6850335294fa78576085797694c4",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+      "category": "backend_source",
+      "line_count": 388,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          115
+        ],
+        [
+          283,
+          365
+        ]
+      ],
+      "sha256_at_recording": "8a2b2bd081c3f09823996c0b50459569c896f4bf55472c9e3fbb806b7e00e771",
+      "sha256_at_delivery": "8a2b2bd081c3f09823996c0b50459569c896f4bf55472c9e3fbb806b7e00e771",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          116,
+          282
+        ],
+        [
+          366,
+          388
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+      "category": "backend_source",
+      "line_count": 1809,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          698,
+          830
+        ],
+        [
+          938,
+          1063
+        ]
+      ],
+      "sha256_at_recording": "167daf5404c22e31d4d5efa46f2685359909cf53d5280d89728dd7be316e931f",
+      "sha256_at_delivery": "167daf5404c22e31d4d5efa46f2685359909cf53d5280d89728dd7be316e931f",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          697
+        ],
+        [
+          831,
+          937
+        ],
+        [
+          1064,
+          1809
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/review_service.py",
+      "category": "backend_source",
+      "line_count": 1885,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          599,
+          679
+        ],
+        [
+          887,
+          980
+        ],
+        [
+          1190,
+          1274
+        ]
+      ],
+      "sha256_at_recording": "2a7f0b3ad7ddc40faeb4591f7ba886f6e75c1701ac9b92e4eab407151b87f94e",
+      "sha256_at_delivery": "2a7f0b3ad7ddc40faeb4591f7ba886f6e75c1701ac9b92e4eab407151b87f94e",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          598
+        ],
+        [
+          680,
+          886
+        ],
+        [
+          981,
+          1189
+        ],
+        [
+          1275,
+          1885
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/sandbox_service.py",
+      "category": "backend_source",
+      "line_count": 4626,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1685,
+          1730
+        ]
+      ],
+      "sha256_at_recording": "0b43f18d1fb99dd306695428ce36aeb810d8cebbc07f005d67073e28783db275",
+      "sha256_at_delivery": "0b43f18d1fb99dd306695428ce36aeb810d8cebbc07f005d67073e28783db275",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          1684
+        ],
+        [
+          1731,
+          4626
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/skill_service.py",
+      "category": "backend_source",
+      "line_count": 291,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          155
+        ]
+      ],
+      "sha256_at_recording": "e762d87048d3032b504e6a6e086519b55f6bf6761e6252d723c545c3f34c2d81",
+      "sha256_at_delivery": "e762d87048d3032b504e6a6e086519b55f6bf6761e6252d723c545c3f34c2d81",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          156,
+          291
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/tool_gateway.py",
+      "category": "backend_source",
+      "line_count": 544,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          31,
+          155
+        ],
+        [
+          226,
+          257
+        ]
+      ],
+      "sha256_at_recording": "bdd755892e69498a9831fbb2ac3d0e6b3a4f049d4407b03160aa36cf53ae2c80",
+      "sha256_at_delivery": "bdd755892e69498a9831fbb2ac3d0e6b3a4f049d4407b03160aa36cf53ae2c80",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          30
+        ],
+        [
+          156,
+          225
+        ],
+        [
+          258,
+          544
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_team_dispatcher.py",
+      "category": "backend_test",
+      "line_count": 1241,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          304,
+          388
+        ]
+      ],
+      "sha256_at_recording": "99be1ea32b05a03c824bf7f07efba53b343e1e6da66574459254ebb9b197434f",
+      "sha256_at_delivery": "99be1ea32b05a03c824bf7f07efba53b343e1e6da66574459254ebb9b197434f",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "已读barrier并发测试；未执行pytest",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          303
+        ],
+        [
+          389,
+          1241
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_team_service.py",
+      "category": "backend_test",
+      "line_count": 1753,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          579,
+          627
+        ]
+      ],
+      "sha256_at_recording": "ae102845a3057b88a411ab83ad52094a98ea9a15aef6c15c0e3c7820cf24e79e",
+      "sha256_at_delivery": "ae102845a3057b88a411ab83ad52094a98ea9a15aef6c15c0e3c7820cf24e79e",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "已读依赖链失败测试；未执行pytest",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          578
+        ],
+        [
+          628,
+          1753
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_deepseek_responses_runtime.py",
+      "category": "backend_test",
+      "line_count": 1255,
+      "review_depth": "symbol_search",
+      "requested_line_ranges": [
+        [
+          932,
+          932
+        ]
+      ],
+      "sha256_at_delivery": "29f9fd946a07295c7a7a3387d67c24527fb6e354a0d9f0c62558423deb7ef6fb",
+      "semantic_full_read": false,
+      "body_copied_to_deliverables": false,
+      "coverage_caveat": "先前已检索的测试符号/定位；收尾只核验已有引用的文件存在、行号边界和哈希，未扩读函数正文。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/03-系统设计文档.md",
+      "category": "project_document",
+      "line_count": 647,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          647
+        ]
+      ],
+      "sha256_at_recording": "0be66a8da7f5c30845cb6d5d5dd581fff683d16a3ad27f4e7dcc092ee2c1992c",
+      "sha256_at_delivery": "0be66a8da7f5c30845cb6d5d5dd581fff683d16a3ad27f4e7dcc092ee2c1992c",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/04-数据库设计文档.md",
+      "category": "project_document",
+      "line_count": 524,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          58
+        ],
+        [
+          173,
+          250
+        ],
+        [
+          395,
+          524
+        ]
+      ],
+      "sha256_at_recording": "cd31597c93b1dc467ca803d7f63381dc12dab65682603ba992e149bb278f16e1",
+      "sha256_at_delivery": "cd31597c93b1dc467ca803d7f63381dc12dab65682603ba992e149bb278f16e1",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          59,
+          172
+        ],
+        [
+          251,
+          394
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/08-AI审查模块文档.md",
+      "category": "project_document",
+      "line_count": 769,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          122
+        ]
+      ],
+      "sha256_at_recording": "e736a86acfddd464e055ed7e2b5bfe0550452e88403a9682c3b0442e22d0109a",
+      "sha256_at_delivery": "e736a86acfddd464e055ed7e2b5bfe0550452e88403a9682c3b0442e22d0109a",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          123,
+          769
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/agent-governance-platform/CONSENSUS_agent-governance-platform.md",
+      "category": "project_document",
+      "line_count": 217,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          217
+        ]
+      ],
+      "sha256_at_recording": "d61d4c3f005a29b1d297f4d08adb86d603b15fc4d80f63f8ac6401fd43cf3a1d",
+      "sha256_at_delivery": "d61d4c3f005a29b1d297f4d08adb86d603b15fc4d80f63f8ac6401fd43cf3a1d",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/AgentSkill自进化与总调度升级/CONSENSUS_AgentSkill自进化与总调度升级.md",
+      "category": "project_document",
+      "line_count": 393,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          393
+        ]
+      ],
+      "sha256_at_recording": "0ccef71d9540ada8baec69269f89784148eefbe8a216d3729f94feee60436879",
+      "sha256_at_delivery": "0ccef71d9540ada8baec69269f89784148eefbe8a216d3729f94feee60436879",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.json",
+      "category": "project_document",
+      "line_count": 1413,
+      "review_depth": "structured_metadata_read",
+      "requested_line_ranges": [
+        [
+          1,
+          1413
+        ]
+      ],
+      "sha256_at_recording": "271971d64ce0cf36925d0f36c15f7ff7806419d67e5593efacb19269c55828af",
+      "sha256_at_delivery": "271971d64ce0cf36925d0f36c15f7ff7806419d67e5593efacb19269c55828af",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "全部JSON解析，比较code集合与contract_count；没有逐条精读全部prompt和字段",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "全文件结构解析或元数据检查，不等于逐条精读内嵌正文、提示词和契约字段。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.md",
+      "category": "project_document",
+      "line_count": 1077,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          70
+        ]
+      ],
+      "sha256_at_recording": "b8e48dd311fe6245fb3694106d3d1dcd731ad2577daec5adc7f1e35f823a1cd3",
+      "sha256_at_delivery": "b8e48dd311fe6245fb3694106d3d1dcd731ad2577daec5adc7f1e35f823a1cd3",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          71,
+          1077
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/多Agent优化/CONSENSUS_多Agent优化.md",
+      "category": "project_document",
+      "line_count": 33,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          33
+        ]
+      ],
+      "sha256_at_recording": "b72bc4d729232b80afc446a41e9475b04c6bee071352f64fcdb950f996a48d34",
+      "sha256_at_delivery": "b72bc4d729232b80afc446a41e9475b04c6bee071352f64fcdb950f996a48d34",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/多Agent优化/DESIGN_多Agent优化.md",
+      "category": "project_document",
+      "line_count": 45,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          45
+        ]
+      ],
+      "sha256_at_recording": "ff37c02f257dec10d2f47b54e2fe3584bc8ef674a1da998ac551f2d19b6f137a",
+      "sha256_at_delivery": "ff37c02f257dec10d2f47b54e2fe3584bc8ef674a1da998ac551f2d19b6f137a",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/多智能体可信审查与FlyTrap退役/CONSENSUS_多智能体可信审查与FlyTrap退役.md",
+      "category": "project_document",
+      "line_count": 66,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          66
+        ]
+      ],
+      "sha256_at_recording": "48208f9eb5bbfc2b22bfa4e8ddc259d75fb9e7c66656c179a3141a15fc57fc49",
+      "sha256_at_delivery": "48208f9eb5bbfc2b22bfa4e8ddc259d75fb9e7c66656c179a3141a15fc57fc49",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/多智能体可信审查与FlyTrap退役/DESIGN_多智能体可信审查与FlyTrap退役.md",
+      "category": "project_document",
+      "line_count": 119,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          119
+        ]
+      ],
+      "sha256_at_recording": "843b9c48d393c7a3519f9f5e370c9092fa809e197a205ac7a24f8dac3256dde8",
+      "sha256_at_delivery": "843b9c48d393c7a3519f9f5e370c9092fa809e197a205ac7a24f8dac3256dde8",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/小菱后台任务持久化与3.6侧边栏升级/CONSENSUS_小菱后台任务持久化与3.6侧边栏升级.md",
+      "category": "project_document",
+      "line_count": 24,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          24
+        ]
+      ],
+      "sha256_at_recording": "7727e9746fcc4d6bbb5d38dfcaad09d04112504d1434a548cd62f40f766efb38",
+      "sha256_at_delivery": "7727e9746fcc4d6bbb5d38dfcaad09d04112504d1434a548cd62f40f766efb38",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/小菱后台任务持久化与3.6侧边栏升级/DESIGN_小菱后台任务持久化与3.6侧边栏升级.md",
+      "category": "project_document",
+      "line_count": 37,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          37
+        ]
+      ],
+      "sha256_at_recording": "070e2da1a97853a325b3ca594f18b3a0b22a149a290491ea196301924929ec76",
+      "sha256_at_delivery": "070e2da1a97853a325b3ca594f18b3a0b22a149a290491ea196301924929ec76",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/权限隔离与圆桌修复与MetaGPT编排/CONSENSUS_权限隔离与圆桌修复与MetaGPT编排.md",
+      "category": "project_document",
+      "line_count": 234,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          234
+        ]
+      ],
+      "sha256_at_recording": "91ccf0068269966669e8ef77a70a848663a560021d15e77fbf0941209dec0b25",
+      "sha256_at_delivery": "91ccf0068269966669e8ef77a70a848663a560021d15e77fbf0941209dec0b25",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/生产韧性与人机协同/CONSENSUS_生产韧性与人机协同.md",
+      "category": "project_document",
+      "line_count": 35,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          35
+        ]
+      ],
+      "sha256_at_recording": "cf2d13b97d1271bcb7f3ec8d45e84b7c3f1d1a199c3f888a018f103af931b38b",
+      "sha256_at_delivery": "cf2d13b97d1271bcb7f3ec8d45e84b7c3f1d1a199c3f888a018f103af931b38b",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/生产韧性与人机协同/DESIGN_生产韧性与人机协同.md",
+      "category": "project_document",
+      "line_count": 97,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          97
+        ]
+      ],
+      "sha256_at_recording": "12a46e81bdb7663c7d4c69942dd7e02242bc587731c348422db8d4380a846d60",
+      "sha256_at_delivery": "12a46e81bdb7663c7d4c69942dd7e02242bc587731c348422db8d4380a846d60",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/agentResponses.ts",
+      "category": "frontend_source",
+      "line_count": 78,
+      "review_depth": "full_read",
+      "requested_line_ranges": [
+        [
+          1,
+          78
+        ]
+      ],
+      "sha256_at_recording": "01f640da736f247c86b7a703f0dc4a5aed6775186d5386b2d3b93fae1223d0dc",
+      "sha256_at_delivery": "01f640da736f247c86b7a703f0dc4a5aed6775186d5386b2d3b93fae1223d0dc",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": false,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": true
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/api/agentTeams.ts",
+      "category": "frontend_source",
+      "review_depth": "symbol_search",
+      "requested_line_ranges": [
+        [
+          120,
+          120
+        ],
+        [
+          239,
+          239
+        ]
+      ],
+      "line_count": null,
+      "sha256_at_delivery": null,
+      "semantic_full_read": false,
+      "body_copied_to_deliverables": false,
+      "coverage_caveat": "已出现的调用/组件符号检索；未读全文，不为补清单继续读取内容。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/admin/AdminCopilot.vue",
+      "category": "frontend_source",
+      "review_depth": "symbol_search",
+      "requested_line_ranges": [
+        [
+          19,
+          19
+        ],
+        [
+          50,
+          50
+        ],
+        [
+          516,
+          516
+        ],
+        [
+          763,
+          763
+        ],
+        [
+          1090,
+          1090
+        ],
+        [
+          1830,
+          1830
+        ],
+        [
+          1900,
+          1900
+        ]
+      ],
+      "line_count": null,
+      "sha256_at_delivery": null,
+      "semantic_full_read": false,
+      "body_copied_to_deliverables": false,
+      "coverage_caveat": "已出现的调用/组件符号检索；未读全文，不为补清单继续读取内容。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentChatDrawer.vue",
+      "category": "frontend_source",
+      "line_count": 3920,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1256,
+          1300
+        ]
+      ],
+      "sha256_at_recording": "ea6fed0169d53ecf26fd57a05a9bc21860023fcd57f2f892888aa996736b3af9",
+      "sha256_at_delivery": "ea6fed0169d53ecf26fd57a05a9bc21860023fcd57f2f892888aa996736b3af9",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          1,
+          1255
+        ],
+        [
+          1301,
+          3920
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useAgentTeamEvents.ts",
+      "category": "frontend_source",
+      "line_count": 167,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          167
+        ]
+      ],
+      "sha256_at_recording": "7f4930c6edaede66bca0a51c0cefc2175cec6d11c3d4ab429ee08af41bfa9a40",
+      "sha256_at_delivery": "7f4930c6edaede66bca0a51c0cefc2175cec6d11c3d4ab429ee08af41bfa9a40",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/responsesStream.ts",
+      "category": "frontend_source",
+      "line_count": 251,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          20
+        ],
+        [
+          183,
+          239
+        ]
+      ],
+      "sha256_at_recording": "823a9c4f8368070dd400ec42fb1cc90125963ba4a046d67c578cb479f4736bd0",
+      "sha256_at_delivery": "823a9c4f8368070dd400ec42fb1cc90125963ba4a046d67c578cb479f4736bd0",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          21,
+          182
+        ],
+        [
+          240,
+          251
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/README.md",
+      "category": "project_document",
+      "line_count": 157,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          157
+        ]
+      ],
+      "sha256_at_recording": "b18007cc204265f6849272aeaefed8fdcadb44f98e2d5f3c00ba12d83047768e",
+      "sha256_at_delivery": "b18007cc204265f6849272aeaefed8fdcadb44f98e2d5f3c00ba12d83047768e",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/说明文档.md",
+      "category": "project_document",
+      "line_count": 947,
+      "review_depth": "section_read",
+      "requested_line_ranges": [
+        [
+          1,
+          100
+        ],
+        [
+          281,
+          330
+        ]
+      ],
+      "sha256_at_recording": "336e2043fdcfe2e7b4120716a10aa4d36b62f202b4f300bc9adc0ffaffc401b4",
+      "sha256_at_delivery": "336e2043fdcfe2e7b4120716a10aa4d36b62f202b4f300bc9adc0ffaffc401b4",
+      "changed_since_recording": false,
+      "body_copied_to_deliverables": false,
+      "notes": "曾请求1-330，长回显中部截断；同时检索全文标题，不冒称全部已读",
+      "possible_unread_within_requested_ranges": true,
+      "unrequested_line_ranges": [
+        [
+          101,
+          280
+        ],
+        [
+          331,
+          947
+        ]
+      ],
+      "semantic_full_read": false,
+      "coverage_caveat": "行段表示曾请求回显；早期部分长响应截断，不能将请求到末行或本次哈希核验等同于逐行精读。未请求行段只是未读范围下限。"
+    }
+  ],
+  "source_drift": [],
+  "source_hash_limit": "先前非账本工具读取未逐次保存哈希，不能重建每个历史读操作的逐时快照。",
+  "findings": [
+    {
+      "id": "R01",
+      "title": "R01｜P1／发布条件风险：启动恢复需要运行所有权，不能把新进程当成全局重启",
+      "priority": "P1",
+      "evidence_level": "L2",
+      "evidence_limits": "原函数 AST 隔离复现；多进程重叠是成立条件，未做生产或双进程集成验证。",
+      "classification": "conditional_release_risk",
+      "implemented": "启动清扫、自动 retry、原生 waiting_approval/waiting_input 不自动执行；取消终态保护、并发 resume 的状态 CAS 已有。",
+      "impact": "同库新旧进程重叠、增加 worker 或滚动启动时，可能错误接管活运行；模型轮次重复、旧检查点晚写是风险，**不能由此声称危险工具已重复执行**，其账本另有保护。生产是否采用这种拓扑未核验。",
+      "minimal_change": "本次发布已由主任务确认成功，不要求重发或混入新改动；将“旧执行者确已停止”保留为下一次发布及横向扩容的核验条件；后续给 run 增 owner_epoch/lease_expiry/heartbeat，按过期 owner claim，save 用 owner/version CAS。复用现有 store 和恢复器；恢复线程改成有界池，避免积压运行每条起一个线程。",
+      "acceptance_cases": "旧 worker 保持运行时启动第二实例不得改其状态；杀死 owner 后只恢复一次；旧 owner 晚到写入被拒；等待审批不自动执行；同时恢复 N 条时并发和预算有上限。",
+      "risk": "已有并发 retry/approve 测试不能代替双进程启动清扫测试。迁移需兼容旧 checkpoint；owner 租期过短会误接管，过长会增加恢复时间。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/main.py",
+          "line": 122
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+          "line": 230
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+          "line": 305
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+          "line": 441
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/background_task_recovery.py",
+          "line": 90
+        }
+      ],
+      "report_line": 102
+    },
+    {
+      "id": "R02",
+      "title": "R02｜P1：保留“未知结果不重做”，补可审计的人工核账恢复",
+      "priority": "P1",
+      "evidence_level": "L1",
+      "evidence_limits": "当前源码账本与审批路径对照；未测试真实外部副作用和人工核账。",
+      "classification": "static_gap_or_contract_drift",
+      "implemented": "`run_id + call_id` 唯一账本、参数指纹、防重复审批、exact-call 续跑；不是缺少幂等。",
+      "impact": "业务可能已发生，用户却看到未确认；重新换会话或新 call_id 不能被当作原执行的幂等恢复。",
+      "minimal_change": "先给少数高价值写工具声明“可核账 resource_ref / idempotency_key / 只读状态查询”。增加 unknown→reconciled_success/reconciled_failed/manual_review 的受权限保护流程；不能核实的保持未知，不生成成功口吻。",
+      "acceptance_cases": "分别在占位提交后、副作用后、账本完成前模拟进程退出；审批双击、参数被换、token_version 变化均不得重复执行；跨新 call_id 的恢复必须明确由人确认。",
+      "risk": "已有 mocked exact-call 测试保留，新增事务与外部副作用分离的故障注入。不同资源的核账逻辑不能靠通用字符串匹配；核账本身也必须授权、留证。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+          "line": 1788
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+          "line": 1847
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+          "line": 1905
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+          "line": 1922
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/agent_response_run.py",
+          "line": 31
+        }
+      ],
+      "report_line": 114
+    },
+    {
+      "id": "R03",
+      "title": "R03｜P1：取消与超时需要“请求停止”和“资源已停止”两种事实",
+      "priority": "P1",
+      "evidence_level": "L1",
+      "evidence_limits": "当前取消、超时、重试清理路径对照；未实测沙箱资源及其全部 TTL 收尾。",
+      "classification": "static_gap_with_resource_lifecycle_unverified",
+      "implemented": "Responses 循环在模型轮次边界及工具完成后检查取消；团队清租约；沙箱有 stop、租约失效检查和清理失败日志。",
+      "impact": "界面取消并不总等于外部活动即时停止；超时后重排队是否仍占用旧资源，需要故障场景核验。",
+      "minimal_change": "复用 runtime-resource ledger，显式记录 cancel_requested/stop_confirmed/cleanup_pending；所有会重试的沙箱 timeout/read_failed 先清理本 attempt 资源并确认终态，再准入下一 attempt。统一 root deadline 向下传递，不用强杀任意 Python 线程。",
+      "acceptance_cases": "模型调用中取消、工具执行中取消、沙箱读失败、停止返回非终态、清理提交失败后重启；确认取消不触发剩余工具、旧资源未确认停止不得重试。",
+      "risk": "现有“取消停止沙箱”和“换租约停止旧沙箱”不是普通 timeout→retry 的证据；补这一交叉场景。错误清理不能碰成功部署或新 attempt 的资源。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+          "line": 1012
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_mesh_dispatcher.py",
+          "line": 324
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 734
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 951
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 2048
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 2384
+        }
+      ],
+      "report_line": 126
+    },
+    {
+      "id": "R04",
+      "title": "R04｜P2／仅优化：DAG 已并发，但波次屏障阻止空闲槽即时接续",
+      "priority": "P2",
+      "evidence_level": "L1",
+      "evidence_limits": "调度器波次结构与现有并发测试正文；未执行性能或吞吐测试。",
+      "classification": "optimization_only",
+      "implemented": "真实 ThreadPoolExecutor 并发、团队轮转、每团队 active 上限、独立 Session、数据库 CAS。",
+      "impact": "不必要的关键路径等待；这不是串行调度，也没有足够证据量化生产提速百分比。",
+      "minimal_change": "保留现有 ThreadPoolExecutor 和 claim；使用有界 in-flight 集合，每个 future 完成后刷新 Session、推进依赖、补充一个合资格任务。全局 worker 配额先与 R01 的多进程所有权设计协调。",
+      "acceptance_cases": "A 长任务和 B 短任务并发，C 只依赖 B，C 必须在 A 完成前启动；验证跨团队公平、同团队上限、取消中不补单、无重复 claim；用 fake clock/barrier，不调用模型。",
+      "risk": "不能为提速移除父锁、CAS 或跨线程共用 Session；新增调度应通过公平性回归而不是仅测总耗时。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+          "line": 160
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+          "line": 168
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+          "line": 195
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+          "line": 205
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_team_dispatcher.py",
+          "line": 304
+        }
+      ],
+      "report_line": 138
+    },
+    {
+      "id": "R05",
+      "title": "R05｜P1／已有生产迹象：父团队终态必须闭合全部子任务，而不是让队列永远被排除",
+      "priority": "P1",
+      "evidence_level": "L2 + P",
+      "evidence_limits": "原函数隔离复现父 failed/子 queued；发布前本地统计有父全终态与 queued/waiting_dependency 各一条，未取得父子 JOIN 或发布后重计数。",
+      "classification": "confirmed_code_gap_with_unjoined_production_indicator",
+      "implemented": "依赖失败递归 blocked，父团队失败归约，手动 retry 及 changed-strategy 约束。",
+      "impact": "父终态排除调度后，独立 queued 和等待依赖子任务可能长期失去后续事件；页面看见团队结束，但内部工作未获得明确处置。",
+      "minimal_change": "先只读关联 task/team 和对应事件，列出不可调度子任务候选，不直接修数。随后锁定默认策略：保持 fail-fast 时，在同事务把剩余未启动子任务改为 skipped/blocked，并记录 parent_failed 原因；若需尽力完成独立工作，必须显式引入 continue_independent 策略，等独立任务终态后再聚合。恢复器增加“终态父 + 非终态子”的只读诊断/受控修复通道。",
+      "acceptance_cases": "失败分支+独立分支+后继复核节点，分别覆盖 fail-fast 和允许降级；父完成/失败/取消/过期均不留无解释活动子任务；修复预览、重复修复幂等、不重新启动已完成或危险任务。",
+      "risk": "`/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_team_service.py:579` 验证的是一条依赖链，不覆盖独立排队分支。历史数据必须先逐条查证；不能直接把两条 queued/waiting 改 completed。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 1359
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 1480
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 1886
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 2208
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 2436
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+          "line": 20
+        },
+        {
+          "path": "/tmp/prism-release-20260906/pre-deploy-task-counts-and-disk.log",
+          "line": 6
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_team_service.py",
+          "line": 579
+        }
+      ],
+      "report_line": 150
+    },
+    {
+      "id": "R06",
+      "title": "R06｜P1：将“执行成功”与“需求验收通过”分开存储和展示",
+      "priority": "P1",
+      "evidence_level": "L2",
+      "evidence_limits": "原函数隔离验证聚合边界；负面 verdict 是构造输入，不证明真实 handler 当前可产生该组合。",
+      "classification": "confirmed_aggregation_boundary_not_end_to_end_bug",
+      "implemented": "末端 verifier/summarizer 覆盖检查；sandbox verifier 等待 succeeded/失败终态；正式审查还有发现协议和冲突人审。",
+      "impact": "用户容易把“已汇总/已启动审查”理解为“审查通过/需求完成”；依赖成功状态还不足以证明产物达到验收标准。",
+      "minimal_change": "保留现有 status 兼容字段，新增 execution_status、acceptance_verdict、criteria_results、evidence_refs；summarizer 仅汇总，不能填独立复核通过。异步任务启动返回的 task_id 应由明确 wait/inspect 节点等待业务终态；最终结果选择明确 final_task_key，不依赖最后一条 verifier 查询结果。",
+      "acceptance_cases": "全部 worker completed 但关键验收失败；缺证据的空摘要；仍 running 的业务 task；只读历史核对与新测试；多复核节点顺序变化；结论不能将 unknown/skipped 写成 passed。",
+      "risk": "不要把“发现漏洞”混同“Agent 执行失败”；新结论字段必须与正式 review 的风险/评分语义并存，不篡改历史报告。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 317
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 1446
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_mesh_dispatcher.py",
+          "line": 145
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_mesh_dispatcher.py",
+          "line": 734
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/review_orchestrator_agent.py",
+          "line": 59
+        }
+      ],
+      "report_line": 163
+    },
+    {
+      "id": "R07",
+      "title": "R07｜P1：把声明式 sequence_workflow 的提示词语义与可恢复 SOP 执行明确区分",
+      "priority": "P1",
+      "evidence_level": "L2",
+      "evidence_limits": "原函数隔离复现声明式编译结果；未执行模型委派或持久 SOP 全链路。",
+      "classification": "confirmed_prompt_semantics_durable_execution_proposal",
+      "implemented": "CustomSkill 版本、序列定义、依赖循环/深度约束；readonly_tool 可调用受控只读工具；团队 DAG 已是可复用执行基座。",
+      "impact": "提示词序列没有逐步持久执行保证；若界面或需求把它当作已经委派、已经可恢复，会高估完成证据。需要持久 SOP 的场景才启用新语义，不能将原有提示词功能本身定性为漏洞。",
+      "minimal_change": "先在能力说明区分 prompt_workflow 与 durable_workflow；仅对明确需要恢复/审批的 SOP 增一个编译适配层，映射至现有 TeamTask/DAG 或 Responses 工具调用，不引入第二套调度器。每步绑定输入、产物引用和失败策略，不新增同职责 Agent。",
+      "acceptance_cases": "前三步后断电，恢复只继续未完成步骤；委派必须有实际 child run/evidence；readonly_tool 失败不被“跳过”文案伪装成功；审批步骤不得在编译阶段执行。",
+      "risk": "改变旧 prompt_workflow 行为会扩大成本与副作用；必须显式 opt-in，不能把所有既有序列自动升级为真实执行。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+          "line": 283
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+          "line": 306
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+          "line": 331
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+          "line": 349
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/skill_service.py",
+          "line": 61
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/agent_skill_record.py",
+          "line": 39
+        }
+      ],
+      "report_line": 175
+    },
+    {
+      "id": "R08",
+      "title": "R08｜P1：已有模板冻结，但运行级 SOP、builtin 与嵌套委派还需可验证快照",
+      "priority": "P1",
+      "evidence_level": "L1",
+      "evidence_limits": "目标快照、输入 schema 与嵌套版本选择的源码证据；未做发布中恢复实测。",
+      "classification": "static_gap_or_contract_drift",
+      "implemented": "自定义成员的 template_version_id、release_id、checksum；固定工具 Pydantic 参数模型；TeamTask 输入严格顶层约束；协作消息和职责契约。",
+      "impact": "重启或重放时嵌套目标漂移，可能让同一个外层版本编译出不同上下文；通用 JSON 也较难在步骤边界拦截不兼容产物。",
+      "minimal_change": "沿现有 release snapshot 增 sop_id/version、source_release、builtin_contract_hash、嵌套依赖版本和校验和清单；每类步骤复用已有 Pydantic 输入/输出模型。产物保留类型、schema_version、source_revision/hash、范围与证据来源，不复制完整源码进知识库。",
+      "acceptance_cases": "运行中发布新模板/目标版本，旧任务恢复仍使用原快照；类型错、缺产物、未知字段、证据属于另一项目/版本均受控失败；历史任务缺字段继续可读但明确 legacy。",
+      "risk": "迁移和产物校验不可破坏原生 finding 格式，也不能把提示词中的“字段要求”误判为已有强类型执行契约。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 208
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "line": 995
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/schemas/agent_team.py",
+          "line": 38
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+          "line": 319
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/contracts.py",
+          "line": 37
+        }
+      ],
+      "report_line": 187
+    },
+    {
+      "id": "R09",
+      "title": "R09｜P2／仅建议：在自动日预算之外增加用户可见的根任务总预算",
+      "priority": "P2",
+      "evidence_level": "L1 / 仅建议",
+      "evidence_limits": "核实自动预算与交互预算边界后提出新根预算策略；不认定现有预算故障。",
+      "classification": "optimization_only",
+      "implemented": "自动任务按 Agent UTC 日累计用量、进程锁+数据库行锁、锁失败关闭；最大模型轮数、上下文预算、模型分层和回退。",
+      "impact": "多轮、并发子任务与重试可以分别符合现有局部上限，却没有统一呈现用户一次根任务愿意承担的总预算；这是新增产品策略建议，不是对现有自动预算失效的结论。",
+      "minimal_change": "只增加显式用户授权的 root budget，覆盖总管、child、retry、fallback；复用现有预算服务实现 reserve/settle/release。实际 usage 缺失标 unknown，展示预计剩余、已用、授权扩额；默认不凭空改变现有自动任务频率或 UTC 日口径。",
+      "acceptance_cases": "并发子任务抢同一剩余额度；最后一次输出超过剩余；中途取消释放未用预算；usage 缺失；fallback 与重试都计入同一 root；不足时暂停请求加额而非误称故障。",
+      "risk": "预估 Token 不是实际账单；跨 worker 要数据库级原子预留，不能另加一个仅进程内计数器。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_cost_budget_service.py",
+          "line": 126
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_cost_budget_service.py",
+          "line": 174
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+          "line": 2500
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+          "line": 715
+        }
+      ],
+      "report_line": 199
+    },
+    {
+      "id": "R10",
+      "title": "R10｜P1：AI 调用证据需要关联到 run/team/task/attempt，失败和未知用量也要可追踪",
+      "priority": "P1",
+      "evidence_level": "L1",
+      "evidence_limits": "模型回调时序、日志字段与标签聚合的源码对照；未做计费、传输或数据库故障注入。",
+      "classification": "static_gap_or_contract_drift",
+      "implemented": "AiCallLog 用户、Agent、模型与 Token 字段；Responses 每轮回调落日志；工具执行账本和团队 trace/message 关联；正式审查有独立来源主张聚合。",
+      "impact": "根任务成本与失败原因难以逐调用核对，可能把未记录的失败或未知用量解释成未发生；当前仍有其他日志来源，不能据此断言系统全部日志丢失。",
+      "minimal_change": "复用 AiCallLog 增可空关联和 request/attempt/usage_status；模型请求开始、结束、异常分别有稳定调用标识；日志写失败进入轻量待补写/可观测告警，不用模型生成日志。明确定义总管与人格标签映射，不把用户全文提示词当必须日志内容。",
+      "acceptance_cases": "传输异常无 response、半流失败、usage 缺失、数据库暂时失败、重试和模型 fallback；一个 root 的调用明细可加总追溯，unknown 不当 0；两个用户互不可见。",
+      "risk": "Token 累计要防重复记账；不能仅凭日志字段缺失断言提供商未计费或实际费用为零。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+          "line": 2530
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+          "line": 775
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/ai_call_log.py",
+          "line": 17
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/skills/orchestrator_skill.py",
+          "line": 52
+        }
+      ],
+      "report_line": 211
+    },
+    {
+      "id": "R11",
+      "title": "R11｜P2：进度订阅已可恢复，下一步统一稳定事件游标而不是再加一种动画",
+      "priority": "P2",
+      "evidence_level": "L1",
+      "evidence_limits": "SSE、会话重建与团队增量轮询源码；未做浏览器刷新、慢连接或乱序实测。",
+      "classification": "static_gap_or_contract_drift",
+      "implemented": "断开 SSE 不取消后台任务；会话 GET 根据检查点和工具账本重建状态；团队 after_id 分页、has_more 排空、single-flight、失败退避和终态停止；已有卡片/思考城市/成员追问入口。",
+      "impact": "断线恢复后的当前事实可以恢复，但逐事件顺序与缺口不易证明；不同页面独立投影更难保证状态、审批和团队卡片一致。",
+      "minimal_change": "沿既有账本为关键状态事件提供 run/event_id/parent/task/attempt/phase/timestamp；可重放关键事件、合并高频 delta。保持一个共享前端投影层供两端使用，界面展示正在执行、等待谁、已完成/总量、真实失败和停止确认，不伪造百分比。",
+      "acceptance_cases": "断线后重复/乱序/跨页事件；后台已完成但客户端最后看到运行中；慢订阅者、切换账号/会话、取消与终态同时到达；两端显示一致且不重复发起模型任务。",
+      "risk": "持久化所有 token delta 会膨胀数据库；只将必要事件持久化并定保留期，授权过滤必须同时覆盖历史回放。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+          "line": 824
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+          "line": 1029
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+          "line": 1128
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useAgentTeamEvents.ts",
+          "line": 77
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useAgentTeamEvents.ts",
+          "line": 84
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentChatDrawer.vue",
+          "line": 1275
+        }
+      ],
+      "report_line": 223
+    },
+    {
+      "id": "R12",
+      "title": "R12｜P1：文档/生成契约与测试门禁应绑定同一 release，禁止历史设计覆盖现有事实",
+      "priority": "P1",
+      "evidence_level": "L2 + H",
+      "evidence_limits": "仅 stdlib 契约模块与 generated JSON 的确定性集合比较；历史文档/知识库用于漂移对照，未执行全量测试。",
+      "classification": "static_gap_or_contract_drift",
+      "implemented": "职责唯一源、导出脚本、大量契约/权限/恢复/并发单测；已有项目文档体系和知识库来源登记。",
+      "impact": "新参与者可能按历史文档再造已有能力，或把文档数量/旧通过数当作当前执行能力和发布证据。",
+      "minimal_change": "复用既有导出脚本增加无写入的 check/diff 模式，release 构建门禁校验生成契约；文档用“当前事实入口+历史决策”分层。补以下故障矩阵并绑定 release、输入哈希、执行范围、mock/实机标识：双进程恢复；父终态子非终态；负面验收；未知副作用核账；跨 attempt 清理；事件回放；根预算并发。",
+      "acceptance_cases": "导出结果与源码集合/关键属性一致；虚假 Handler 不计为 executable；每个矩阵格明确通过/失败/未测/阻塞；付费长链路没运行就写未验证，不沿用历史通过数。",
+      "risk": "不要用一次生成资料刷新当作全量运行验收；也不要为追求覆盖率导入真实配置、模型或生产资源。用户提供的 1271 仅涉及临时 UNION 和排序规则漂移，不纳入本报告的应用缺陷计数。",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.md",
+          "line": 3
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/contracts.py",
+          "line": 98
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/多Agent优化/DESIGN_多Agent优化.md",
+          "line": 40
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/03-系统设计文档.md",
+          "line": 628
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_deepseek_responses_runtime.py",
+          "line": 932
+        }
+      ],
+      "report_line": 235
+    }
+  ],
+  "validation_executed": [
+    {
+      "id": "offline-01",
+      "method": "stdlib AST extraction of original function with FakeDb/SimpleNamespace; no app imports",
+      "source": {
+        "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+        "line": 305,
+        "function": "_recover_stale_active_run"
+      },
+      "input": "fresh running, force=True",
+      "observed": "failed; recovery_requested=true",
+      "result": "pass",
+      "limit": "没有双进程或真实数据库验证。"
+    },
+    {
+      "id": "offline-02",
+      "method": "same isolated original function, control case",
+      "source": {
+        "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+        "line": 305,
+        "function": "_recover_stale_active_run"
+      },
+      "input": "waiting_approval, force=True",
+      "observed": "waiting_approval unchanged",
+      "result": "pass",
+      "limit": "不代表所有审批崩溃窗口均已验证。"
+    },
+    {
+      "id": "offline-03",
+      "method": "isolated original team reducer",
+      "source": {
+        "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+        "line": 1446,
+        "function": "_refresh_team_status"
+      },
+      "input": "all tasks completed; verifier payload verdict=failed, passed=false",
+      "observed": "team completed",
+      "result": "pass",
+      "limit": "构造输入检验归约边界；不证明真实 handler 会产出该组合。"
+    },
+    {
+      "id": "offline-04",
+      "method": "isolated original team reducer",
+      "source": {
+        "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+        "line": 1446,
+        "function": "_refresh_team_status"
+      },
+      "input": "failed worker plus independent queued worker plus dependent verifier",
+      "observed": "team failed while independent worker stays queued",
+      "result": "pass",
+      "limit": "未获取生产父子 JOIN；没有模拟完整数据库事务或调度进程。"
+    },
+    {
+      "id": "offline-05",
+      "method": "isolated original declarative compiler",
+      "source": {
+        "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+        "line": 283,
+        "function": "_compile_skill_version"
+      },
+      "input": "sequence_workflow containing builtin agent_delegate and llm_transform",
+      "observed": "rendered step text, not a child-run dispatch",
+      "result": "pass",
+      "limit": "readonly_tool 分支可实际调用受控工具；不能称所有类型都只是文本。"
+    },
+    {
+      "id": "contract-check",
+      "method": "inspect imports then stdlib-only runpy.run_path of contracts module; parse generated JSON",
+      "source_paths": [
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/contracts.py",
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.json"
+      ],
+      "observed": {
+        "current_contract_count": 32,
+        "generated_contract_count": 30,
+        "missing_in_generated": [
+          "operations",
+          "sandbox_deployer"
+        ],
+        "extra_in_generated": []
+      },
+      "result": "pass",
+      "limit": "检查职责集合，不把数量等同 LLM 实例数；未逐条比较所有字段或提示词。"
+    },
+    {
+      "id": "production-count-check",
+      "method": "independent deterministic parsing/recount of the user-provided local log",
+      "source_path": "/tmp/prism-release-20260906/pre-deploy-task-counts-and-disk.log",
+      "observed": {
+        "counts": {
+          "review_task": {
+            "cancelled": 5,
+            "deleted": 10,
+            "failed": 20,
+            "success": 111
+          },
+          "agent_team": {
+            "completed": 42,
+            "failed": 15,
+            "cancelled": 6
+          },
+          "agent_team_task": {
+            "blocked": 16,
+            "cancelled": 14,
+            "completed": 145,
+            "dead_letter": 11,
+            "failed": 9,
+            "queued": 1,
+            "waiting_dependency": 1
+          },
+          "agent_job_run": {
+            "failed": 7748,
+            "success": 46994
+          }
+        },
+        "totals": {
+          "review_task": 146,
+          "agent_team": 63,
+          "agent_team_task": 197,
+          "agent_job_run": 54742
+        }
+      },
+      "result": "pass",
+      "limit": "发布前聚合；无父子 JOIN、明细时序或发布后重计数。"
+    }
+  ],
+  "validation_not_executed": [
+    "pytest、前端测试、lint、构建",
+    "真实数据库、双进程/多worker故障注入",
+    "生产连接或SQL；报告SQL只是未执行草案",
+    "发布后父子状态JOIN与重计数",
+    "浏览器刷新/切换账号/慢SSE验收",
+    "真实模型工具链、费用或提供商计费核对",
+    "真实沙箱停止/TTL/补偿流程",
+    "真正的子代理复核；当前无可调用子代理工具，未另启模型绕过禁令"
+  ],
+  "unread_or_unverified_boundaries": {
+    "documents_not_read_in_full": [
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/说明文档.md",
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/04-数据库设计文档.md",
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/08-AI审查模块文档.md",
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.md",
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.json",
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/AgentSkill自进化与总调度升级/DESIGN_AgentSkill自进化与总调度升级.md",
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/权限隔离与圆桌修复与MetaGPT编排/DESIGN_权限隔离与圆桌修复与MetaGPT编排.md",
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/agent-governance-platform/DESIGN_agent-governance-platform.md"
+    ],
+    "other_partial_documents": "以sources中review_depth为准；系统设计、README及早期长响应也未冒称全部精读。",
+    "source_scope_not_exhaustive": [
+      "所有specialist、MCP工具和业务service逐一实现",
+      "完整RBAC/ABAC/组织隔离矩阵",
+      "全部SOP/Skill发布依赖闭包与迁移历史",
+      "sandbox_service全部调度、TTL与资源清理分支",
+      "圆桌全生命周期及MetaGPT实际接入范围",
+      "完整前端UI、共享状态与全部测试正文",
+      "仓库其他无关模块、部署、数据与敏感资产"
+    ],
+    "excluded_paths_or_content": [
+      ".env及变体、专门凭据文件、数据库及数据目录、备份、依赖与构建产物",
+      "原始聊天全文、源码全文拷贝进知识库",
+      "旧Claude记忆中意外出现的登录内容"
+    ],
+    "additional_test_outline_limit": "部分已有测试仅检索函数名，正文和运行结果均未验证；不使用历史通过数量冒充本次测试。"
+  },
+  "production_evidence": {
+    "source_path": "/tmp/prism-release-20260906/pre-deploy-task-counts-and-disk.log",
+    "phase": "pre-deploy",
+    "counts": {
+      "review_task": {
+        "cancelled": 5,
+        "deleted": 10,
+        "failed": 20,
+        "success": 111
+      },
+      "agent_team": {
+        "completed": 42,
+        "failed": 15,
+        "cancelled": 6
+      },
+      "agent_team_task": {
+        "blocked": 16,
+        "cancelled": 14,
+        "completed": 145,
+        "dead_letter": 11,
+        "failed": 9,
+        "queued": 1,
+        "waiting_dependency": 1
+      },
+      "agent_job_run": {
+        "failed": 7748,
+        "success": 46994
+      }
+    },
+    "totals": {
+      "review_task": 146,
+      "agent_team": 63,
+      "agent_team_task": 197,
+      "agent_job_run": 54742
+    },
+    "terminal_parent_nonterminal_child": {
+      "terminal_team_count": 63,
+      "queued_child_count": 1,
+      "waiting_dependency_child_count": 1,
+      "code_gap_confirmed": true,
+      "exact_production_rows_attributed": false,
+      "join_available": false,
+      "post_deploy_recount_available": false
+    },
+    "cumulative_jobs_warning": "failed7748/success46994是累计值，不能据此认定当前故障或新发布退化。",
+    "collation_warning": "review_task为utf8mb4_0900_ai_ci，其余team/job为utf8mb4_unicode_ci；临时UNION 1271经独立SELECT复核，只证明规范漂移，不列为应用bug。"
+  },
+  "closeout": {
+    "report_written_with": "apply_patch",
+    "coverage_written_with": "apply_patch",
+    "new_source_or_helper_files_written": [],
+    "knowledge_validate_executed": false,
+    "knowledge_postflight_executed": false,
+    "reason": "既有validate/postflight写知识库审计文件；本次仅两份/tmp交付物允许写入，故不执行。",
+    "user_requested_stop_expanding_scope": true,
+    "artifact_validation": {
+      "result": "pass",
+      "method": "独立 python3 -B 进程只读取两份交付物，验证 JSON、12 项编号及字段、报告哈希、精确引用、版本更新与未测边界",
+      "finding_count": 12,
+      "source_record_count": 72,
+      "recorded_check_count": 7,
+      "source_expansion": false
+    }
+  },
+  "reference_validation": [
+    {
+      "path": "/tmp/prism-release-20260906/pre-deploy-task-counts-and-disk.log",
+      "line": 1,
+      "status": "valid"
+    },
+    {
+      "path": "/tmp/prism-optimization-20260906/source-coverage.json",
+      "line": 1,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/responsesStream.ts",
+      "line": 9,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/responsesStream.ts",
+      "line": 198,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/__init__.py",
+      "line": 79,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "line": 813,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "line": 861,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "line": 1057,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+      "line": 698,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+      "line": 938,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 1069,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/orchestrator.py",
+      "line": 958,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 2125,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/tool_gateway.py",
+      "line": 226,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+      "line": 70,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+      "line": 139,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_mesh_dispatcher.py",
+      "line": 903,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/review_orchestrator_agent.py",
+      "line": 48,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/chat_agent.py",
+      "line": 138,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/metagpt/environment.py",
+      "line": 172,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/ws_discussion.py",
+      "line": 183,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/metagpt/factory.py",
+      "line": 9,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 287,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 317,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+      "line": 168,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 518,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 807,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 1788,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 734,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 2208,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 2384,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_mesh_dispatcher.py",
+      "line": 324,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/review_service.py",
+      "line": 973,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/review_service.py",
+      "line": 1215,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/review_service.py",
+      "line": 1244,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/小菱后台任务持久化与3.6侧边栏升级/CONSENSUS_小菱后台任务持久化与3.6侧边栏升级.md",
+      "line": 5,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/多Agent优化/DESIGN_多Agent优化.md",
+      "line": 42,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/权限隔离与圆桌修复与MetaGPT编排/CONSENSUS_权限隔离与圆桌修复与MetaGPT编排.md",
+      "line": 134,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/agent-governance-platform/CONSENSUS_agent-governance-platform.md",
+      "line": 94,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/agent-governance-platform/CONSENSUS_agent-governance-platform.md",
+      "line": 168,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/01_知识整理/项目/10-基于大模型智能体的代码审查平台.md",
+      "line": 20,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/Obsidian/myself/01_知识整理/项目/10-基于大模型智能体的代码审查平台.md",
+      "line": 37,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/main.py",
+      "line": 122,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "line": 230,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "line": 305,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 441,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/background_task_recovery.py",
+      "line": 90,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 1847,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 1905,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 1922,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/agent_response_run.py",
+      "line": 31,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+      "line": 1012,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 951,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 2048,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+      "line": 160,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+      "line": 195,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+      "line": 205,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_team_dispatcher.py",
+      "line": 304,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 1359,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 1480,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 1886,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 2436,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_dispatcher.py",
+      "line": 20,
+      "status": "valid"
+    },
+    {
+      "path": "/tmp/prism-release-20260906/pre-deploy-task-counts-and-disk.log",
+      "line": 6,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_team_service.py",
+      "line": 579,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 1446,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_mesh_dispatcher.py",
+      "line": 145,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_mesh_dispatcher.py",
+      "line": 734,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/review_orchestrator_agent.py",
+      "line": 59,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+      "line": 283,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+      "line": 306,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+      "line": 331,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+      "line": 349,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/skill_service.py",
+      "line": 61,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/agent_skill_record.py",
+      "line": 39,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 208,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+      "line": 995,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/schemas/agent_team.py",
+      "line": 38,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/declarative_agent_runtime.py",
+      "line": 319,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/contracts.py",
+      "line": 37,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_cost_budget_service.py",
+      "line": 126,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_cost_budget_service.py",
+      "line": 174,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 2500,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+      "line": 715,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_responses_service.py",
+      "line": 2530,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/deepseek_responses_runtime.py",
+      "line": 775,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/models/ai_call_log.py",
+      "line": 17,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/skills/orchestrator_skill.py",
+      "line": 52,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "line": 824,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "line": 1029,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/api/v1/agent_responses.py",
+      "line": 1128,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useAgentTeamEvents.ts",
+      "line": 77,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/composables/useAgentTeamEvents.ts",
+      "line": 84,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/components/ai/AgentChatDrawer.vue",
+      "line": 1275,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/generated/agent-contracts.md",
+      "line": 3,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/agents/contracts.py",
+      "line": 98,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/多Agent优化/DESIGN_多Agent优化.md",
+      "line": 40,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/03-系统设计文档.md",
+      "line": 628,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_deepseek_responses_runtime.py",
+      "line": 932,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/Codex/2026-08-21/ban/scripts/knowledge_harness.py",
+      "line": 374,
+      "status": "valid"
+    },
+    {
+      "path": "/Users/li/Documents/Codex/2026-08-21/ban/scripts/knowledge_harness.py",
+      "line": 897,
+      "status": "valid"
+    }
+  ],
+  "report_sha256": "91bf5827871a068ff73ffffe017a4646909542512ca52401cff5e70c12150e71",
+  "source_summary": {
+    "record_count": 72,
+    "by_depth": {
+      "full_read": 23,
+      "heading_search": 1,
+      "section_read_sensitive_excluded": 1,
+      "section_read": 39,
+      "symbol_search": 6,
+      "structured_metadata_read": 2
+    },
+    "changed_sources": 0
+  }
+}

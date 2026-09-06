@@ -1,0 +1,6 @@
+started_at=2026-09-05T20:26:52.246185+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B /tmp/prism-readonly-20260905-tests/pytest_readonly.py -q -o addopts= -p no:cacheprovider -p pytest_asyncio.plugin --noconftest --basetemp=/tmp/prism-readonly-20260905-tests/pytest/contracts-export-20260906-handoff-tests --junitxml=/tmp/prism-readonly-20260905-tests/contracts-export-20260906-handoff-tests.xml --tb=short tests/unit/test_export_agent_contracts.py
+.................                                                        [100%]
+- generated xml file: /tmp/prism-readonly-20260905-tests/contracts-export-20260906-handoff-tests.xml -
+17 passed in 0.35s

@@ -1,0 +1,39 @@
+{
+  "schema": "prism-local-candidate-sources-v1",
+  "production_release": "343616d9d40c1e44e17c7da465c7173c418debb5",
+  "candidate_status": "local_unreleased",
+  "sources": [
+    {
+      "path": "backend/app/services/agent_team_service.py",
+      "sha256": "8a7a8c3992c62e51559f4cee8821ea74a5d58d009b2f54bf5604fd5d28d8e6a9"
+    },
+    {
+      "path": "backend/tests/unit/services/test_agent_team_service.py",
+      "sha256": "77f36b9f803814ff32c37799a8114a043a7ffc95f8beef6275ce6f13357aa6b1"
+    },
+    {
+      "path": "backend/scripts/export_agent_contracts.py",
+      "sha256": "03832d15df50693285bf2c64314daa03ac57183939f7092afe5b73baa68fa7f7"
+    },
+    {
+      "path": "backend/tests/unit/test_export_agent_contracts.py",
+      "sha256": "30c91e8a7e36c025468fc62d7da4ab4ef53a7bf5b3488b5f82a0a90a378a1328"
+    },
+    {
+      "path": "frontend/src/views/dashboard/Dashboard.vue",
+      "sha256": "4a497f5a53886fd418b112922b98d2b463f1e1859c9789c5d5a5e86a40a443d3"
+    },
+    {
+      "path": "frontend/src/views/dashboard/Dashboard.test.ts",
+      "sha256": "e164275f99108ea5a58460657aeb0edc6a3b93596cae95647bccf581c2e03f88"
+    },
+    {
+      "path": "docs/generated/agent-contracts.md",
+      "sha256": "03925fcaa8602416ea28dc87826b411211cdc90547bc9b1995121681cb255fa9"
+    },
+    {
+      "path": "docs/generated/agent-contracts.json",
+      "sha256": "f672f05282fa3bda50cb193564af067797236dee3a368e6bc860d6648a66de47"
+    }
+  ]
+}

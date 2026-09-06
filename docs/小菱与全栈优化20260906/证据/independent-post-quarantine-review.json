@@ -1,0 +1,706 @@
+{
+  "schema": "independent-post-quarantine-review-v1",
+  "generated_at_utc": "2026-09-05T20:48:40.055342+00:00",
+  "overall_status": "部分通过，161完整前后未变仍阻塞",
+  "checks": {
+    "清单与committed回执": "通过",
+    "四目标状态时间戳源码及已知关联": "通过",
+    "四项目字段覆盖完整性": "通过",
+    "核心6表行数保持": "通过",
+    "当前health与release": "通过",
+    "161完整前后未变": "阻塞",
+    "两条team现状核实": "通过",
+    "本地17与32计数": "通过",
+    "既有阶段报告未修改": "通过",
+    "采集完成": "通过"
+  },
+  "observation": {
+    "errors": [],
+    "started_at_utc": "2026-09-05T20:48:39.288140+00:00",
+    "manifest": {
+      "path": "/opt/code-review/backups/release-20260906/quarantine-24-27/operation-20260905T201834Z.json",
+      "sha256": "d36ca7e949035d7310e563a96fd1919519d5a45fb95f2175d8abb4a21133b59a",
+      "bytes": 2771,
+      "regular_non_symlink": true,
+      "mode": "0o600",
+      "stable_during_read": true
+    },
+    "completion": {
+      "path": "/opt/code-review/backups/release-20260906/quarantine-24-27/operation-20260905T201834Z.json.result.json",
+      "sha256": "d7273989b447639d6bef2b374d88d2ede0030de26dfd9d258d07fa032cb4302f",
+      "bytes": 225,
+      "regular_non_symlink": true,
+      "mode": "0o600",
+      "stable_during_read": true
+    },
+    "receipt": {
+      "state": "committed",
+      "operation_id": "874c7f1be92b4c338c93d232389c1b2e",
+      "changed_ids": [
+        24,
+        25,
+        26,
+        27
+      ],
+      "manifest_sha256": "d36ca7e949035d7310e563a96fd1919519d5a45fb95f2175d8abb4a21133b59a"
+    },
+    "query_sha256": "8022ddbc30185cf3abfc65e7b3217d271fe9e6c77025891e9ecf0ed69b103311",
+    "query_statement_count": 34,
+    "aggregates": [
+      {
+        "utc": "2026-09-05 20:48:39.372262",
+        "kind": "snapshot_start",
+        "read_only": 1,
+        "database_matches_expected": true
+      },
+      {
+        "kind": "project_column",
+        "column": "id"
+      },
+      {
+        "kind": "project_column",
+        "column": "user_id"
+      },
+      {
+        "kind": "project_column",
+        "column": "project_name"
+      },
+      {
+        "kind": "project_column",
+        "column": "description"
+      },
+      {
+        "kind": "project_column",
+        "column": "language"
+      },
+      {
+        "kind": "project_column",
+        "column": "status"
+      },
+      {
+        "kind": "project_column",
+        "column": "create_time"
+      },
+      {
+        "kind": "project_column",
+        "column": "update_time"
+      },
+      {
+        "kind": "core_count",
+        "count": 100,
+        "table": "project"
+      },
+      {
+        "kind": "core_count",
+        "count": 1771,
+        "table": "code_file"
+      },
+      {
+        "kind": "core_count",
+        "count": 1773,
+        "table": "code_version"
+      },
+      {
+        "kind": "core_count",
+        "count": 146,
+        "table": "review_task"
+      },
+      {
+        "kind": "core_count",
+        "count": 1201,
+        "table": "review_issue"
+      },
+      {
+        "kind": "core_count",
+        "count": 72,
+        "table": "review_report"
+      },
+      {
+        "kind": "project_status_count",
+        "count": 25,
+        "status": "active"
+      },
+      {
+        "kind": "project_status_count",
+        "count": 71,
+        "status": "deleted"
+      },
+      {
+        "kind": "project_status_count",
+        "count": 4,
+        "status": "quarantined"
+      },
+      {
+        "kind": "target_project",
+        "count": 1,
+        "project_id": 24,
+        "language_matches": 1,
+        "after_snapshot_matches": 1,
+        "fixed_description_matches": 1,
+        "create_time_matches_before": 1,
+        "update_time_matches_before": 1
+      },
+      {
+        "kind": "target_file",
+        "count": 1,
+        "bytes_max": 1079,
+        "bytes_min": 1079,
+        "project_id": 24,
+        "sample_matches": 1,
+        "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+        "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+        "relative_path_matches": 1
+      },
+      {
+        "kind": "target_tasks",
+        "count": 1,
+        "project_id": 24
+      },
+      {
+        "kind": "target_test_link",
+        "count": 1,
+        "project_id": 24
+      },
+      {
+        "kind": "target_project",
+        "count": 1,
+        "project_id": 25,
+        "language_matches": 1,
+        "after_snapshot_matches": 1,
+        "fixed_description_matches": 1,
+        "create_time_matches_before": 1,
+        "update_time_matches_before": 1
+      },
+      {
+        "kind": "target_file",
+        "count": 1,
+        "bytes_max": 1079,
+        "bytes_min": 1079,
+        "project_id": 25,
+        "sample_matches": 1,
+        "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+        "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+        "relative_path_matches": 1
+      },
+      {
+        "kind": "target_tasks",
+        "count": 1,
+        "project_id": 25
+      },
+      {
+        "kind": "target_test_link",
+        "count": 1,
+        "project_id": 25
+      },
+      {
+        "kind": "target_project",
+        "count": 1,
+        "project_id": 26,
+        "language_matches": 1,
+        "after_snapshot_matches": 1,
+        "fixed_description_matches": 1,
+        "create_time_matches_before": 1,
+        "update_time_matches_before": 1
+      },
+      {
+        "kind": "target_file",
+        "count": 1,
+        "bytes_max": 1079,
+        "bytes_min": 1079,
+        "project_id": 26,
+        "sample_matches": 1,
+        "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+        "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+        "relative_path_matches": 1
+      },
+      {
+        "kind": "target_tasks",
+        "count": 1,
+        "project_id": 26
+      },
+      {
+        "kind": "target_test_link",
+        "count": 1,
+        "project_id": 26
+      },
+      {
+        "kind": "target_project",
+        "count": 1,
+        "project_id": 27,
+        "language_matches": 1,
+        "after_snapshot_matches": 1,
+        "fixed_description_matches": 1,
+        "create_time_matches_before": 1,
+        "update_time_matches_before": 1
+      },
+      {
+        "kind": "target_file",
+        "count": 1,
+        "bytes_max": 1079,
+        "bytes_min": 1079,
+        "project_id": 27,
+        "sample_matches": 1,
+        "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+        "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+        "relative_path_matches": 1
+      },
+      {
+        "kind": "target_tasks",
+        "count": 4,
+        "project_id": 27
+      },
+      {
+        "kind": "target_test_link",
+        "count": 1,
+        "project_id": 27
+      },
+      {
+        "kind": "project161_available_fields",
+        "count": 1,
+        "active_count": 1,
+        "historical_name_matches": 1,
+        "historical_owner_matches": 1,
+        "historical_create_time_matches": 1
+      },
+      {
+        "kind": "team_diagnostic",
+        "count": 1,
+        "task_id": 11,
+        "team_id": 5,
+        "parent_failed_matches": 1,
+        "child_expected_status_matches": 1
+      },
+      {
+        "kind": "team_diagnostic",
+        "count": 1,
+        "task_id": 35,
+        "team_id": 12,
+        "parent_failed_matches": 1,
+        "child_expected_status_matches": 1
+      },
+      {
+        "utc": "2026-09-05 20:48:39.757795",
+        "kind": "snapshot_end",
+        "read_only": 1
+      }
+    ],
+    "release": {
+      "version": "3.8.4",
+      "sha": "343616d9d40c1e44e17c7da465c7173c418debb5",
+      "migration": "047_review_input_snapshot"
+    },
+    "health": {
+      "healthz": {
+        "http_status": 200,
+        "status": "ok",
+        "version": "3.8.4",
+        "release": "343616d9d40c1e44e17c7da465c7173c418debb5"
+      },
+      "readyz": {
+        "http_status": 200,
+        "status": "ready",
+        "version": "3.8.4",
+        "release": "343616d9d40c1e44e17c7da465c7173c418debb5"
+      }
+    },
+    "finished_at_utc": "2026-09-05T20:48:40.028895+00:00"
+  },
+  "operation_evidence": {
+    "manifest": {
+      "path": "/opt/code-review/backups/release-20260906/quarantine-24-27/operation-20260905T201834Z.json",
+      "sha256": "d36ca7e949035d7310e563a96fd1919519d5a45fb95f2175d8abb4a21133b59a",
+      "bytes": 2771,
+      "regular_non_symlink": true,
+      "mode": "0o600",
+      "stable_during_read": true
+    },
+    "result": {
+      "path": "/opt/code-review/backups/release-20260906/quarantine-24-27/operation-20260905T201834Z.json.result.json",
+      "sha256": "d7273989b447639d6bef2b374d88d2ede0030de26dfd9d258d07fa032cb4302f",
+      "bytes": 225,
+      "regular_non_symlink": true,
+      "mode": "0o600",
+      "stable_during_read": true
+    },
+    "backup": {
+      "path": "/opt/code-review/backups/code_review_20260905T201610Z_343616d9d40c.sql.gz",
+      "sha256": "7bb99942cc0e571008743fc66b0d1cdd88fcf13640579b32fb493c0679d7dc6f",
+      "bytes": 402726075,
+      "regular_non_symlink": true,
+      "mode": "0o600",
+      "stable_during_read": true
+    },
+    "operation_id": "874c7f1be92b4c338c93d232389c1b2e",
+    "state": "committed",
+    "checks": {
+      "manifest_sha_matches_user": true,
+      "operation_matches_user": true,
+      "action_is_quarantine": true,
+      "exact_target_ids": true,
+      "result_is_committed": true,
+      "result_operation_matches": true,
+      "result_manifest_sha_matches": true,
+      "result_exact_changed_ids": true,
+      "backup_sha_matches_user": true,
+      "manifest_backup_sha_matches": true,
+      "manifest_backup_bytes_matches": true
+    },
+    "targets": [
+      {
+        "project_id": 24,
+        "only_status_changed_in_manifest": true,
+        "changed_columns": [
+          "status"
+        ],
+        "before_active_after_quarantined": true,
+        "timestamps_unchanged_in_manifest": true,
+        "exact_name_and_owner_match": true
+      },
+      {
+        "project_id": 25,
+        "only_status_changed_in_manifest": true,
+        "changed_columns": [
+          "status"
+        ],
+        "before_active_after_quarantined": true,
+        "timestamps_unchanged_in_manifest": true,
+        "exact_name_and_owner_match": true
+      },
+      {
+        "project_id": 26,
+        "only_status_changed_in_manifest": true,
+        "changed_columns": [
+          "status"
+        ],
+        "before_active_after_quarantined": true,
+        "timestamps_unchanged_in_manifest": true,
+        "exact_name_and_owner_match": true
+      },
+      {
+        "project_id": 27,
+        "only_status_changed_in_manifest": true,
+        "changed_columns": [
+          "status"
+        ],
+        "before_active_after_quarantined": true,
+        "timestamps_unchanged_in_manifest": true,
+        "exact_name_and_owner_match": true
+      }
+    ]
+  },
+  "target_comparison": [
+    {
+      "project_id": 24,
+      "status": "通过",
+      "checks": {
+        "status_and_manifest_fields_match": true,
+        "timestamps_match_before": true,
+        "description_and_language_match_prior": true,
+        "one_file_same_hash_1079_bytes": true,
+        "relative_path_unchanged": true,
+        "task_count_unchanged": true,
+        "known_test_association_unchanged": true
+      },
+      "aggregates": {
+        "target_project": {
+          "kind": "target_project",
+          "count": 1,
+          "project_id": 24,
+          "language_matches": 1,
+          "after_snapshot_matches": 1,
+          "fixed_description_matches": 1,
+          "create_time_matches_before": 1,
+          "update_time_matches_before": 1
+        },
+        "target_file": {
+          "kind": "target_file",
+          "count": 1,
+          "bytes_max": 1079,
+          "bytes_min": 1079,
+          "project_id": 24,
+          "sample_matches": 1,
+          "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "relative_path_matches": 1
+        },
+        "target_tasks": {
+          "kind": "target_tasks",
+          "count": 1,
+          "project_id": 24
+        },
+        "target_test_link": {
+          "kind": "target_test_link",
+          "count": 1,
+          "project_id": 24
+        }
+      }
+    },
+    {
+      "project_id": 25,
+      "status": "通过",
+      "checks": {
+        "status_and_manifest_fields_match": true,
+        "timestamps_match_before": true,
+        "description_and_language_match_prior": true,
+        "one_file_same_hash_1079_bytes": true,
+        "relative_path_unchanged": true,
+        "task_count_unchanged": true,
+        "known_test_association_unchanged": true
+      },
+      "aggregates": {
+        "target_project": {
+          "kind": "target_project",
+          "count": 1,
+          "project_id": 25,
+          "language_matches": 1,
+          "after_snapshot_matches": 1,
+          "fixed_description_matches": 1,
+          "create_time_matches_before": 1,
+          "update_time_matches_before": 1
+        },
+        "target_file": {
+          "kind": "target_file",
+          "count": 1,
+          "bytes_max": 1079,
+          "bytes_min": 1079,
+          "project_id": 25,
+          "sample_matches": 1,
+          "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "relative_path_matches": 1
+        },
+        "target_tasks": {
+          "kind": "target_tasks",
+          "count": 1,
+          "project_id": 25
+        },
+        "target_test_link": {
+          "kind": "target_test_link",
+          "count": 1,
+          "project_id": 25
+        }
+      }
+    },
+    {
+      "project_id": 26,
+      "status": "通过",
+      "checks": {
+        "status_and_manifest_fields_match": true,
+        "timestamps_match_before": true,
+        "description_and_language_match_prior": true,
+        "one_file_same_hash_1079_bytes": true,
+        "relative_path_unchanged": true,
+        "task_count_unchanged": true,
+        "known_test_association_unchanged": true
+      },
+      "aggregates": {
+        "target_project": {
+          "kind": "target_project",
+          "count": 1,
+          "project_id": 26,
+          "language_matches": 1,
+          "after_snapshot_matches": 1,
+          "fixed_description_matches": 1,
+          "create_time_matches_before": 1,
+          "update_time_matches_before": 1
+        },
+        "target_file": {
+          "kind": "target_file",
+          "count": 1,
+          "bytes_max": 1079,
+          "bytes_min": 1079,
+          "project_id": 26,
+          "sample_matches": 1,
+          "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "relative_path_matches": 1
+        },
+        "target_tasks": {
+          "kind": "target_tasks",
+          "count": 1,
+          "project_id": 26
+        },
+        "target_test_link": {
+          "kind": "target_test_link",
+          "count": 1,
+          "project_id": 26
+        }
+      }
+    },
+    {
+      "project_id": 27,
+      "status": "通过",
+      "checks": {
+        "status_and_manifest_fields_match": true,
+        "timestamps_match_before": true,
+        "description_and_language_match_prior": true,
+        "one_file_same_hash_1079_bytes": true,
+        "relative_path_unchanged": true,
+        "task_count_unchanged": true,
+        "known_test_association_unchanged": true
+      },
+      "aggregates": {
+        "target_project": {
+          "kind": "target_project",
+          "count": 1,
+          "project_id": 27,
+          "language_matches": 1,
+          "after_snapshot_matches": 1,
+          "fixed_description_matches": 1,
+          "create_time_matches_before": 1,
+          "update_time_matches_before": 1
+        },
+        "target_file": {
+          "kind": "target_file",
+          "count": 1,
+          "bytes_max": 1079,
+          "bytes_min": 1079,
+          "project_id": 27,
+          "sample_matches": 1,
+          "source_sha256_max": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "source_sha256_min": "5058a415e5bf92ea54204f5e691f3941f3d761d0a280c4b5cbb071dc8ea9f4e9",
+          "relative_path_matches": 1
+        },
+        "target_tasks": {
+          "kind": "target_tasks",
+          "count": 4,
+          "project_id": 27
+        },
+        "target_test_link": {
+          "kind": "target_test_link",
+          "count": 1,
+          "project_id": 27
+        }
+      }
+    }
+  ],
+  "project_columns_complete_covered": true,
+  "core_six_table_comparison": {
+    "project": {
+      "before": 100,
+      "after": 100,
+      "matches": true
+    },
+    "code_file": {
+      "before": 1771,
+      "after": 1771,
+      "matches": true
+    },
+    "code_version": {
+      "before": 1773,
+      "after": 1773,
+      "matches": true
+    },
+    "review_task": {
+      "before": 146,
+      "after": 146,
+      "matches": true
+    },
+    "review_issue": {
+      "before": 1201,
+      "after": 1201,
+      "matches": true
+    },
+    "review_report": {
+      "before": 72,
+      "after": 72,
+      "matches": true
+    }
+  },
+  "project161": {
+    "status": "阻塞",
+    "observed_available_fields": [
+      {
+        "kind": "project161_available_fields",
+        "count": 1,
+        "active_count": 1,
+        "historical_name_matches": 1,
+        "historical_owner_matches": 1,
+        "historical_create_time_matches": 1
+      }
+    ],
+    "reason": "历史只读证据可以比较名称、owner、create_time和active状态，但没有161的完整update_time/description/language变更前快照。cr_testdb容器当前仅有sandbox_test的9张表，89表恢复基线当前不可用；不能证明161全部字段未变。",
+    "quarantine_manifest_excludes_161": true
+  },
+  "team_diagnostic": {
+    "rows": [
+      {
+        "kind": "team_diagnostic",
+        "count": 1,
+        "task_id": 11,
+        "team_id": 5,
+        "parent_failed_matches": 1,
+        "child_expected_status_matches": 1
+      },
+      {
+        "kind": "team_diagnostic",
+        "count": 1,
+        "task_id": 35,
+        "team_id": 12,
+        "parent_failed_matches": 1,
+        "child_expected_status_matches": 1
+      }
+    ],
+    "expected_pairs": [
+      {
+        "task_id": 11,
+        "team_id": 5,
+        "child_status": "queued",
+        "parent_status": "failed"
+      },
+      {
+        "task_id": 35,
+        "team_id": 12,
+        "child_status": "waiting_dependency",
+        "parent_status": "failed"
+      }
+    ],
+    "source_diagnostic_sha256": "9d6c9f05543b01f6ba213d94fb62fc332d41ac7a573cbabb96ed8b18fdb82a2a",
+    "interpretation": "仅确认两组现状与主线程诊断一致；未修改，未推断完整成因或归因于隔离。"
+  },
+  "local_only_normalization": {
+    "status": "通过",
+    "tests": {
+      "green": {
+        "testcases": 17,
+        "counts": {
+          "passed": 17
+        },
+        "sha256": "de513df2ecc3317560dfa54ce932c2c9b5430bf0c81cd3ac4bde9a4b61776fad"
+      },
+      "red": {
+        "testcases": 17,
+        "counts": {
+          "failed": 16,
+          "passed": 1
+        },
+        "sha256": "26790e82c6725d5a1362ee41db86bd7bd1b8a6457a6c20bcba8869463bcf3c38"
+      }
+    },
+    "contract_count": 32,
+    "agents_count": 32,
+    "unique_agent_codes": 32,
+    "source_contracts_count": 32,
+    "source_unique_codes": 32,
+    "source_code_set_matches": true,
+    "catalog_sha256": "f672f05282fa3bda50cb193564af067797236dee3a368e6bc860d6648a66de47",
+    "source_sha256": "69b4f62d6eb5e920915b6a4fadce964dc35a4d9e8dd3038b49fcf412e95fd352",
+    "scope": "仅本地规范化补丁数值重算；未重跑测试或--check，不属于已部署343616d9运行代码。"
+  },
+  "preserved_stage_hashes": {
+    "independent-release-precheck.md": "880e043efde42e58ea568b2edac12166caf5a4a7d3d7b2aa0e7c2792684fd258",
+    "independent-release-precheck.json": "79531fdd50181122d2bd863d46d1bb506a4570b6df0509f1992962075e659bde",
+    "independent-production-review.md": "7ce89cfbacd3f69b35c1dbccf1a6c7b1a1528486dbf7cc3d02f7f0a6fb5abb6d",
+    "independent-production-review.json": "6d675979bd5b3d5026c597afb47a0985499f846a93315854fe84c762f7f65860",
+    "independent-project-source-whitelist.json": "792df92eb58468da1d4e698c9b686bcd70aad2c04e1e19e8905afb95b2a33eac"
+  },
+  "preserved_stage_reports_unchanged": true,
+  "limitations": [
+    "已停止恢复基线定位，没有重做恢复、解析备份数据或重新扫描89表。新备份哈希及402726075字节由此前本次只读校验取得。",
+    "此前将cr_testdb误当作生产MySQL中的库名导致采集提前停止；只读确认它是独立容器且当前仅保留sandbox_test九表后，不把它冒充本次89表恢复基线。",
+    "6表COUNT保持不等于证明每条业务记录语义或所有关联数据完全不变；四目标这里只覆盖已明确列出的字段、文件数、任务数与已知测试关联。",
+    "运行日志增长未在此有界检查重新计数或归因。",
+    "本代理无生产写入、登录、JWT/密码构造、真实模型调用；未修改已有阶段报告、主仓库。",
+    "本地规范化补丁结果单独列示，不能替代343616d9生产运行验证。"
+  ]
+}

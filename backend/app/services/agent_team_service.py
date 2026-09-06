@@ -968,7 +968,7 @@ def _team_or_raise(db: Session, user: User, team_id: int, *, lock: bool = False)
     query = db.query(AgentTeam).filter(AgentTeam.id == int(team_id))
     if not _is_admin(db, user):
         query = query.filter(AgentTeam.user_id == int(user.id))
-    row = query.with_for_update() if lock else query
+    row = query.populate_existing().with_for_update() if lock else query
     team = row.first()
     if team is None:
         raise AgentTeamNotFoundError("团队不存在或不属于当前账户")
@@ -1356,8 +1356,22 @@ def list_team_messages(
     return _team_message_page(db, team, before_id=before_id, limit=limit)
 
 
+def _locked_team_tasks(db: Session, team: AgentTeam) -> list[AgentTeamTask]:
+    """在已持有父团队锁的事务内读取任务最新状态，保留本事务尚未刷新的变更。"""
+
+    db.flush()
+    return (
+        db.query(AgentTeamTask)
+        .filter(AgentTeamTask.team_id == team.id)
+        .order_by(AgentTeamTask.id.asc())
+        .populate_existing()
+        .with_for_update()
+        .all()
+    )
+
+
 def _promote_dependencies(db: Session, team: AgentTeam) -> None:
-    tasks = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).all()
+    tasks = _locked_team_tasks(db, team)
     by_key = {row.task_key: row for row in tasks}
     now = _now()
     changed = False
@@ -1444,8 +1458,10 @@ def _refresh_member_statuses(db: Session, team: AgentTeam, *, reclaim: bool = Fa
 
 
 def _refresh_team_status(db: Session, team: AgentTeam) -> None:
-    tasks = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).all()
-    if not tasks or team.status in {"cancelled", "expired"}:
+    if team.status in {"failed", "cancelled", "expired"}:
+        return
+    tasks = _locked_team_tasks(db, team)
+    if not tasks:
         return
     members = {
         int(item.id): item for item in db.query(AgentTeamMember).filter(AgentTeamMember.team_id == team.id).all()
@@ -1460,7 +1476,41 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
     ]
     workers = [item for item in tasks if item not in verification]
 
-    if not verification:
+    if failed or not verification:
+        failed_keys = [item.task_key for item in failed]
+        now = _now()
+        for task in tasks:
+            if task.status not in {"queued", "waiting_dependency"}:
+                continue
+            previous_status = task.status
+            task.status = "blocked"
+            task.completed_at = now
+            task.next_attempt_at = None
+            task.lease_token = None
+            task.lease_expires_at = None
+            errors = _unjson(task.errors_json, [])
+            errors = errors if isinstance(errors, list) else []
+            failure = {
+                "code": "team_failed",
+                "message": "团队失败，按 fail-fast 策略阻断后续调度",
+                "failed_tasks": failed_keys,
+            }
+            if not verification:
+                failure["reason"] = "missing_verifier_or_summarizer"
+            task.errors_json = _json([*errors, failure][-20:])
+            _event(
+                db,
+                team,
+                "task.blocked",
+                task=task,
+                member=members.get(int(task.member_id)),
+                from_status=previous_status,
+                to_status="blocked",
+                detail={"reason": "team_failed", "failed_tasks": failed_keys},
+            )
+            failed.append(task)
+
+    if not verification and not running:
         team.status = "failed"
         team.completed_at = team.completed_at or _now()
         team.error_json = _json({"reason": "missing_verifier_or_summarizer"})
@@ -1884,7 +1934,9 @@ def _record_task_strategy(
 
 
 def claim_next_task(db: Session, team_id: int, *, lease_seconds: Optional[int] = None) -> Optional[dict[str, Any]]:
-    team = db.query(AgentTeam).filter(AgentTeam.id == int(team_id)).with_for_update().first()
+    team = (
+        db.query(AgentTeam).filter(AgentTeam.id == int(team_id)).populate_existing().with_for_update().first()
+    )
     if team is None or team.status in _TERMINAL_TEAM:
         return None
     now = _now()
@@ -1898,6 +1950,12 @@ def claim_next_task(db: Session, team_id: int, *, lease_seconds: Optional[int] =
             _cleanup_team_runtime_resources(db, team, reason="deadline_reached")
             return None
     _promote_dependencies(db, team)
+    _refresh_team_status(db, team)
+    _refresh_member_statuses(db, team)
+    db.flush()
+    if team.status in _TERMINAL_TEAM:
+        db.commit()
+        return None
     active_count = (
         db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id, AgentTeamTask.status == "running").count()
     )
@@ -1909,10 +1967,11 @@ def claim_next_task(db: Session, team_id: int, *, lease_seconds: Optional[int] =
         .filter(AgentTeamTask.team_id == team.id, AgentTeamTask.status == "queued")
         .filter(or_(AgentTeamTask.next_attempt_at.is_(None), AgentTeamTask.next_attempt_at <= now))
         .order_by(AgentTeamTask.priority.desc(), AgentTeamTask.create_time.asc(), AgentTeamTask.id.asc())
+        .populate_existing()
+        .with_for_update()
         .first()
     )
     if candidate is None:
-        _refresh_team_status(db, team)
         db.commit()
         return None
     token = secrets.token_urlsafe(32)
@@ -1960,8 +2019,8 @@ def claim_next_task(db: Session, team_id: int, *, lease_seconds: Optional[int] =
         message_id=request_message_id or None,
         correlation_id=f"team:{team.id}:task:{candidate.id}",
     )
-    _refresh_member_statuses(db, team)
     _refresh_team_status(db, team)
+    _refresh_member_statuses(db, team)
     db.commit()
     return {
         "team_id": int(team.id),
@@ -1991,10 +2050,13 @@ def complete_task(
     success: bool = True,
     error: str = "",
 ) -> dict[str, Any]:
-    team = db.query(AgentTeam).filter(AgentTeam.id == int(team_id)).with_for_update().first()
+    team = (
+        db.query(AgentTeam).filter(AgentTeam.id == int(team_id)).populate_existing().with_for_update().first()
+    )
     task = (
         db.query(AgentTeamTask)
         .filter(AgentTeamTask.id == int(task_id), AgentTeamTask.team_id == int(team_id))
+        .populate_existing()
         .with_for_update()
         .first()
     )
@@ -2002,6 +2064,10 @@ def complete_task(
         raise AgentTeamNotFoundError("团队任务不存在")
     if team.status in {"cancelled", "expired"}:
         raise AgentTeamLeaseError("团队已取消或过期，任务租约失效")
+    if team.status == "failed":
+        raise AgentTeamLeaseError("团队已失败，任务租约失效")
+    if team.status == "completed":
+        raise AgentTeamLeaseError("团队已完成，任务租约失效")
     if task.status != "running" or not lease_token or task.lease_token != lease_token:
         raise AgentTeamLeaseError("团队任务租约已失效")
     now = _now()
@@ -2091,6 +2157,7 @@ def complete_task(
         elif retryable:
             task.status = "dead_letter"
             task.completed_at = now
+            task.next_attempt_at = None
             _event(
                 db,
                 team,
@@ -2129,8 +2196,8 @@ def complete_task(
         error=error,
     )
     _promote_dependencies(db, team)
-    _refresh_member_statuses(db, team)
     _refresh_team_status(db, team)
+    _refresh_member_statuses(db, team)
     db.commit()
     return _team_out(db, team)
 
@@ -2207,10 +2274,10 @@ def expire_due_teams(db: Session, *, limit: int = 100) -> int:
 
 def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
     initial_now = _now()
-    task_ids = [
-        int(row[0])
+    task_refs = [
+        (int(row[0]), int(row[1]))
         for row in (
-            db.query(AgentTeamTask.id)
+            db.query(AgentTeamTask.id, AgentTeamTask.team_id)
             .filter(
                 AgentTeamTask.status == "running",
                 AgentTeamTask.lease_expires_at.is_not(None),
@@ -2223,10 +2290,21 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
     ]
     count = 0
     cleanup_retry_seconds = max(5, min(60, int(settings.agent_team_dispatch_interval_seconds) * 2))
-    for task_id in task_ids:
+    for task_id, team_id in task_refs:
+        team = (
+            db.query(AgentTeam).filter(AgentTeam.id == team_id).populate_existing().with_for_update().first()
+        )
+        if team is None or team.status in _TERMINAL_TEAM:
+            db.rollback()
+            continue
         task = (
             db.query(AgentTeamTask)
-            .filter(AgentTeamTask.id == task_id, AgentTeamTask.status == "running")
+            .filter(
+                AgentTeamTask.id == task_id,
+                AgentTeamTask.team_id == team_id,
+                AgentTeamTask.status == "running",
+            )
+            .populate_existing()
             .with_for_update()
             .first()
         )
@@ -2237,10 +2315,6 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
         if lease_expiry.tzinfo is None:
             lease_expiry = lease_expiry.replace(tzinfo=timezone.utc)
         if lease_expiry > _now():
-            db.rollback()
-            continue
-        team = db.get(AgentTeam, task.team_id)
-        if not team or team.status in _TERMINAL_TEAM:
             db.rollback()
             continue
         previous_lease_token = str(task.lease_token or "")
@@ -2267,11 +2341,20 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
         db.commit()
         if not _cleanup_task_runtime_resources(db, team, task, reason="lease_expired"):
             db.expire_all()
-            current = db.get(AgentTeamTask, task_id)
-            current_team = db.get(AgentTeam, int(team.id))
+            current_team = (
+                db.query(AgentTeam).filter(AgentTeam.id == team_id).populate_existing().with_for_update().first()
+            )
+            current = (
+                db.query(AgentTeamTask)
+                .filter(AgentTeamTask.id == task_id, AgentTeamTask.team_id == team_id)
+                .populate_existing()
+                .with_for_update()
+                .first()
+            )
             if (
                 current is not None
                 and current_team is not None
+                and current_team.status not in _TERMINAL_TEAM
                 and current.status == "running"
                 and current.lease_token == cleanup_token
             ):
@@ -2301,13 +2384,16 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
             continue
 
         db.expire_all()
+        team = (
+            db.query(AgentTeam).filter(AgentTeam.id == team_id).populate_existing().with_for_update().first()
+        )
         task = (
             db.query(AgentTeamTask)
-            .filter(AgentTeamTask.id == task_id, AgentTeamTask.team_id == team.id)
+            .filter(AgentTeamTask.id == task_id, AgentTeamTask.team_id == team_id)
+            .populate_existing()
             .with_for_update()
             .first()
         )
-        team = db.query(AgentTeam).filter(AgentTeam.id == team.id).with_for_update().first()
         if (
             task is None
             or team is None
@@ -2334,6 +2420,7 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
         if int(task.attempt_count or 0) >= int(task.max_attempts or team.max_attempts or 1):
             task.status = "dead_letter"
             task.completed_at = now
+            task.next_attempt_at = None
             _event(
                 db,
                 team,
@@ -2374,8 +2461,8 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
                 },
             )
         _promote_dependencies(db, team)
-        _refresh_member_statuses(db, team)
         _refresh_team_status(db, team)
+        _refresh_member_statuses(db, team)
         count += 1
         db.commit()
     return count
@@ -2445,18 +2532,17 @@ def retry_team(
     if team.status not in {"failed", "completed", "queued", "running"}:
         raise AgentTeamStateError("当前团队状态不允许重试")
     wanted = set(task_keys or [])
-    query = db.query(AgentTeamTask).filter(
-        AgentTeamTask.team_id == team.id, AgentTeamTask.status.in_(("failed", "dead_letter", "blocked"))
-    )
-    if wanted:
-        query = query.filter(AgentTeamTask.task_key.in_(wanted))
-    rows = query.all()
+    all_tasks = _locked_team_tasks(db, team)
+    rows = [
+        task
+        for task in all_tasks
+        if task.status in {"failed", "dead_letter", "blocked"} and (not wanted or task.task_key in wanted)
+    ]
     if not rows:
         raise AgentTeamStateError("没有可重试的失败任务")
     # 只指定失败根节点时，自动带上由它阻断的后继节点；后继节点会在根节点
     # 成功后重新等待依赖，不要求小菱重复枚举整张工作图。
     if wanted:
-        all_tasks = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).all()
         selected_keys = {task.task_key for task in rows}
         changed = True
         while changed:
@@ -2465,7 +2551,15 @@ def retry_team(
                 if task.task_key in selected_keys or task.status != "blocked":
                     continue
                 dependencies = set(_unjson(task.dependency_keys_json, []))
-                if dependencies & selected_keys:
+                errors = _unjson(task.errors_json, [])
+                errors = errors if isinstance(errors, list) else []
+                failed_keys = {
+                    str(key)
+                    for failure in errors
+                    if isinstance(failure, dict) and failure.get("code") == "team_failed"
+                    for key in failure.get("failed_tasks", [])
+                }
+                if (dependencies | failed_keys) & selected_keys:
                     rows.append(task)
                     selected_keys.add(task.task_key)
                     changed = True

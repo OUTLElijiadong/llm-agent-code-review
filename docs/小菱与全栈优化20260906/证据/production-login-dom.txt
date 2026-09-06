@@ -1,0 +1,39 @@
+- complementary:
+  - generic: Prism · 棱镜
+  - generic: AI CODE REVIEW · AGENT WORKSPACE
+  - heading "让代码穿过 棱镜， 折射真相。" [level=1]:
+    - text: 让代码穿过
+    - emphasis: 棱镜
+    - text: ，
+    - text: 折射真相。
+  - paragraph: 围绕代码规范、安全与可维护性开展审查。 在工作台查看问题证据、修复建议与审查报告，让每一次修改有据可查。
+  - generic: 规范
+  - generic: 命名
+  - generic: 注释
+  - generic: 维护
+  - generic: 性能
+  - generic: 异常
+  - generic: Bug
+  - generic: 安全
+  - generic: 代码审查 · 问题跟踪 · 报告
+  - generic: 构建版本 v3.8.4
+- main:
+  - generic: WELCOME BACK
+  - heading "登录到你的工作台" [level=2]
+  - paragraph:
+    - text: 还没有账号？
+    - link "立即注册 →":
+      - /url: /register
+  - generic: "*账号 / 学号"
+  - textbox "*账号 / 学号":
+    - /placeholder: 请输入用户名
+  - generic: 请输入用户名
+  - generic: "*密码"
+  - textbox "*密码":
+    - /placeholder: 请输入密码
+  - generic: 请输入密码
+  - button "进入棱镜":
+    - generic: 进入棱镜
+    - generic: →
+  - status: 请检查账号与密码的填写提示。
+  - generic: © 2026 Prism · 棱镜智能代码审查

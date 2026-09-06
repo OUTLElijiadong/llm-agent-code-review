@@ -1,0 +1,138 @@
+started_at=2026-09-05T23:41:33.371829+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B /tmp/prism-readonly-20260905-tests/pytest_readonly.py -q -o addopts= -p no:cacheprovider -p pytest_asyncio.plugin --basetemp=/tmp/prism-readonly-20260905-tests/pytest/team-terminal-20260906-red --junitxml=/tmp/prism-readonly-20260905-tests/team-terminal-20260906-red.xml --tb=short tests/unit/services/test_agent_team_service.py
+...........FFF.FFFF..FF.FFF...............................               [100%]
+=================================== FAILURES ===================================
+_ test_terminal_failure_closes_independent_queued_and_waiting_tasks[False-failed] _
+tests/unit/services/test_agent_team_service.py:662: in test_terminal_failure_closes_independent_queued_and_waiting_tasks
+    assert {tasks[key]["status"] for key in ("sibling", "spare", "followup", "verify")} == {"blocked"}
+E   AssertionError: assert {'blocked', '...g_dependency'} == {'blocked'}
+E     
+E     Extra items in the left set:
+E     'waiting_dependency'
+E     'queued'
+E     
+E     Full diff:
+E       {
+E           'blocked',
+E     +     'queued',
+E     +     'waiting_dependency',
+E       }
+_ test_terminal_failure_closes_independent_queued_and_waiting_tasks[True-dead_letter] _
+tests/unit/services/test_agent_team_service.py:662: in test_terminal_failure_closes_independent_queued_and_waiting_tasks
+    assert {tasks[key]["status"] for key in ("sibling", "spare", "followup", "verify")} == {"blocked"}
+E   AssertionError: assert {'blocked', '...g_dependency'} == {'blocked'}
+E     
+E     Extra items in the left set:
+E     'waiting_dependency'
+E     'queued'
+E     
+E     Full diff:
+E       {
+E           'blocked',
+E     +     'queued',
+E     +     'waiting_dependency',
+E       }
+______________ test_terminal_failure_and_block_events_are_atomic _______________
+tests/unit/services/test_agent_team_service.py:693: in test_terminal_failure_and_block_events_are_atomic
+    _fail_claim(db, created["team_id"], claim)
+E   Failed: DID NOT RAISE <class 'RuntimeError'>
+____ test_fail_fast_drains_running_sibling_without_starting_more_work[True] ____
+tests/unit/services/test_agent_team_service.py:728: in test_fail_fast_drains_running_sibling_without_starting_more_work
+    assert by_key["spare"]["status"] == by_key["followup"]["status"] == "blocked"
+E   AssertionError: assert 'queued' == 'waiting_dependency'
+E     
+E     - waiting_dependency
+E     + queued
+___ test_fail_fast_drains_running_sibling_without_starting_more_work[False] ____
+tests/unit/services/test_agent_team_service.py:728: in test_fail_fast_drains_running_sibling_without_starting_more_work
+    assert by_key["spare"]["status"] == by_key["followup"]["status"] == "blocked"
+E   AssertionError: assert 'queued' == 'waiting_dependency'
+E     
+E     - waiting_dependency
+E     + queued
+_ test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped[failed] _
+tests/unit/services/test_agent_team_service.py:755: in test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped
+    agent_team_service.complete_task(
+E   Failed: DID NOT RAISE <class 'app.services.agent_team_service.AgentTeamLeaseError'>
+_ test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped[completed] _
+tests/unit/services/test_agent_team_service.py:755: in test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped
+    agent_team_service.complete_task(
+E   Failed: DID NOT RAISE <class 'app.services.agent_team_service.AgentTeamLeaseError'>
+_______ test_stale_session_cannot_claim_after_another_session_fails_team _______
+tests/unit/services/test_agent_team_service.py:776: in test_stale_session_cannot_claim_after_another_session_fails_team
+    assert agent_team_service.claim_next_task(stale_db, created["team_id"]) is None
+E   AssertionError: assert {'address': 'agent:project_analyzer', 'attempt_count': 1, 'dependency_context': {}, 'input': {'operation': 'inspect_project'}, ...} is None
+E    +  where {'address': 'agent:project_analyzer', 'attempt_count': 1, 'dependency_context': {}, 'input': {'operation': 'inspect_project'}, ...} = <function claim_next_task at 0x10bced5e0>(<sqlalchemy.orm.session.Session object at 0x10d50c130>, 1)
+E    +    where <function claim_next_task at 0x10bced5e0> = agent_team_service.claim_next_task
+_____ test_stale_session_cannot_complete_an_old_attempt_after_retry_claim ______
+tests/unit/services/test_agent_team_service.py:795: in test_stale_session_cannot_complete_an_old_attempt_after_retry_claim
+    agent_team_service.complete_task(
+E   Failed: DID NOT RAISE <class 'app.services.agent_team_service.AgentTeamLeaseError'>
+_ test_failed_team_refresh_and_repeated_completion_do_not_reopen_or_duplicate __
+tests/unit/services/test_agent_team_service.py:845: in test_failed_team_refresh_and_repeated_completion_do_not_reopen_or_duplicate
+    assert team.status == "failed" and team.error_json == original_error
+E   AssertionError: assert ('completed' == 'failed'
+E     
+E     - failed
+E     + completed)
+__________ test_expired_last_attempt_closes_independent_pending_tasks __________
+tests/unit/services/test_agent_team_service.py:858: in test_expired_last_attempt_closes_independent_pending_tasks
+    assert detail["counts"]["queued"] == detail["counts"]["running"] == 0
+E   assert 3 == 0
+____ test_failed_branch_waits_for_sibling_cleanup_before_terminal_reduction ____
+tests/unit/services/test_agent_team_service.py:878: in test_failed_branch_waits_for_sibling_cleanup_before_terminal_reduction
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+E   AssertionError: assert {'address': 'agent:project_analyzer', 'attempt_count': 1, 'dependency_context': {}, 'input': {'operation': 'inspect_project'}, ...} is None
+E    +  where {'address': 'agent:project_analyzer', 'attempt_count': 1, 'dependency_context': {}, 'input': {'operation': 'inspect_project'}, ...} = <function claim_next_task at 0x10bced5e0>(<sqlalchemy.orm.session.Session object at 0x10c741d60>, 1)
+E    +    where <function claim_next_task at 0x10bced5e0> = agent_team_service.claim_next_task
+- generated xml file: /tmp/prism-readonly-20260905-tests/team-terminal-20260906-red.xml -
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_agent_team_service.py::test_terminal_failure_closes_independent_queued_and_waiting_tasks[False-failed] - AssertionError: assert {'blocked', '...g_dependency'} == {'blocked'}
+  
+  Extra items in the left set:
+  'waiting_dependency'
+  'queued'
+  
+  Full diff:
+    {
+        'blocked',
+  +     'queued',
+  +     'waiting_dependency',
+    }
+FAILED tests/unit/services/test_agent_team_service.py::test_terminal_failure_closes_independent_queued_and_waiting_tasks[True-dead_letter] - AssertionError: assert {'blocked', '...g_dependency'} == {'blocked'}
+  
+  Extra items in the left set:
+  'waiting_dependency'
+  'queued'
+  
+  Full diff:
+    {
+        'blocked',
+  +     'queued',
+  +     'waiting_dependency',
+    }
+FAILED tests/unit/services/test_agent_team_service.py::test_terminal_failure_and_block_events_are_atomic - Failed: DID NOT RAISE <class 'RuntimeError'>
+FAILED tests/unit/services/test_agent_team_service.py::test_fail_fast_drains_running_sibling_without_starting_more_work[True] - AssertionError: assert 'queued' == 'waiting_dependency'
+  
+  - waiting_dependency
+  + queued
+FAILED tests/unit/services/test_agent_team_service.py::test_fail_fast_drains_running_sibling_without_starting_more_work[False] - AssertionError: assert 'queued' == 'waiting_dependency'
+  
+  - waiting_dependency
+  + queued
+FAILED tests/unit/services/test_agent_team_service.py::test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped[failed] - Failed: DID NOT RAISE <class 'app.services.agent_team_service.AgentTeamLeaseError'>
+FAILED tests/unit/services/test_agent_team_service.py::test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped[completed] - Failed: DID NOT RAISE <class 'app.services.agent_team_service.AgentTeamLeaseError'>
+FAILED tests/unit/services/test_agent_team_service.py::test_stale_session_cannot_claim_after_another_session_fails_team - AssertionError: assert {'address': 'agent:project_analyzer', 'attempt_count': 1, 'dependency_context': {}, 'input': {'operation': 'inspect_project'}, ...} is None
+ +  where {'address': 'agent:project_analyzer', 'attempt_count': 1, 'dependency_context': {}, 'input': {'operation': 'inspect_project'}, ...} = <function claim_next_task at 0x10bced5e0>(<sqlalchemy.orm.session.Session object at 0x10d50c130>, 1)
+ +    where <function claim_next_task at 0x10bced5e0> = agent_team_service.claim_next_task
+FAILED tests/unit/services/test_agent_team_service.py::test_stale_session_cannot_complete_an_old_attempt_after_retry_claim - Failed: DID NOT RAISE <class 'app.services.agent_team_service.AgentTeamLeaseError'>
+FAILED tests/unit/services/test_agent_team_service.py::test_failed_team_refresh_and_repeated_completion_do_not_reopen_or_duplicate - AssertionError: assert ('completed' == 'failed'
+  
+  - failed
+  + completed)
+FAILED tests/unit/services/test_agent_team_service.py::test_expired_last_attempt_closes_independent_pending_tasks - assert 3 == 0
+FAILED tests/unit/services/test_agent_team_service.py::test_failed_branch_waits_for_sibling_cleanup_before_terminal_reduction - AssertionError: assert {'address': 'agent:project_analyzer', 'attempt_count': 1, 'dependency_context': {}, 'input': {'operation': 'inspect_project'}, ...} is None
+ +  where {'address': 'agent:project_analyzer', 'attempt_count': 1, 'dependency_context': {}, 'input': {'operation': 'inspect_project'}, ...} = <function claim_next_task at 0x10bced5e0>(<sqlalchemy.orm.session.Session object at 0x10c741d60>, 1)
+ +    where <function claim_next_task at 0x10bced5e0> = agent_team_service.claim_next_task
+12 failed, 46 passed in 3.62s

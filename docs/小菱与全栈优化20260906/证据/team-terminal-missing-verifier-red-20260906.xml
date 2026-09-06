@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="3" time="1.117" timestamp="2026-09-06T07:56:52.978443+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.services.test_agent_team_service" name="test_missing_verifier_drains_running_tasks_before_failing[True]" time="0.078"><failure message="AssertionError: assert ('failed' == 'running'&#10;  &#10;  - running&#10;  + failed)">tests/unit/services/test_agent_team_service.py:930: in test_missing_verifier_drains_running_tasks_before_failing
+    assert parent.status == "running" and parent.completed_at is None
+E   AssertionError: assert ('failed' == 'running'
+E     
+E     - running
+E     + failed)</failure></testcase><testcase classname="tests.unit.services.test_agent_team_service" name="test_missing_verifier_drains_running_tasks_before_failing[False]" time="0.044"><failure message="AssertionError: assert ('failed' == 'running'&#10;  &#10;  - running&#10;  + failed)">tests/unit/services/test_agent_team_service.py:930: in test_missing_verifier_drains_running_tasks_before_failing
+    assert parent.status == "running" and parent.completed_at is None
+E   AssertionError: assert ('failed' == 'running'
+E     
+E     - running
+E     + failed)</failure></testcase><testcase classname="tests.unit.services.test_agent_team_service" name="test_missing_verifier_without_running_tasks_still_fails_immediately" time="0.033" /></testsuite></testsuites>

@@ -1,0 +1,12 @@
+{
+  "checked_at": "2026-09-06T00:33:28.424Z",
+  "production": {
+    "pathname": "/login",
+    "title": "登录 - 棱镜 Prism"
+  },
+  "motion_preview": {
+    "heading": "先选画面，再复制调用码。",
+    "pathname": "/gallery/",
+    "title": "Code Liam Motion Index"
+  }
+}

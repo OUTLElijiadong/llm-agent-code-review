@@ -1,0 +1,7 @@
+started_at=2026-09-05T23:57:25.717089+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B /tmp/prism-readonly-20260905-tests/pytest_readonly.py -q -o addopts= -p no:cacheprovider -p pytest_asyncio.plugin --basetemp=/tmp/prism-readonly-20260905-tests/pytest/team-terminal-parent-green-20260906 --junitxml=/tmp/prism-readonly-20260905-tests/team-terminal-parent-green-20260906.xml --tb=short tests/unit/services/test_agent_team_service.py tests/unit/services/test_agent_mesh_dispatcher.py tests/unit/services/test_agent_team_dispatcher.py tests/unit/api/test_agent_teams_api.py
+........................................................................ [ 67%]
+...................................                                      [100%]
+- generated xml file: /tmp/prism-readonly-20260905-tests/team-terminal-parent-green-20260906.xml -
+107 passed in 5.30s

@@ -1,0 +1,990 @@
+{
+  "schema": "independent-dashboard-feedback-review-v1",
+  "generated_at_utc": "2026-09-05T23:58:46.201241+00:00",
+  "status": "需修改：3项可复现功能/校验缺口，另有测试覆盖退化",
+  "baseline_release": "343616d9d40c1e44e17c7da465c7173c418debb5",
+  "production_verification_in_this_task": false,
+  "patch_claimed_deployed": false,
+  "source_hashes": {
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue": {
+      "reviewed_sha256": "fe31c02451a634e9dd7442e129723074010218ccc62792900d16784889083a70",
+      "current_sha256": "fe31c02451a634e9dd7442e129723074010218ccc62792900d16784889083a70",
+      "unchanged": true
+    },
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts": {
+      "reviewed_sha256": "2721faf2ae2e7424d4eea3656f30a8d2016e77d893097474922129fec0fc303b",
+      "current_sha256": "2721faf2ae2e7424d4eea3656f30a8d2016e77d893097474922129fec0fc303b",
+      "unchanged": true
+    }
+  },
+  "source_snapshot_unchanged": true,
+  "findings": [
+    {
+      "id": "DASH-01",
+      "priority": "P2",
+      "type": "functional_gap",
+      "title": "真实四类全零风险响应仍进入普通饼图，而非零数据空态",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 140
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 378
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/dashboard_service.py",
+          "line": 165
+        }
+      ],
+      "test_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 88
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 166
+        }
+      ],
+      "counterexample": "风险接口按真实后端行为返回严重/高/中/低四行且count全部为0。当前riskData.length为4，因此渲染BaseChart，未进入暂无严重度数据。",
+      "observed": "隔离探针确认.chart-output存在。组件未设置stillShowZeroSum；已安装ECharts的PieSeries.js:144默认true，pieLayout.js:121在总和0时分配相等扇区。未执行真实Canvas视觉验收。",
+      "baseline_classification": "既有零值显示缺陷在本次空态修复中未覆盖，非新引入的日期竞态。HEAD原实现也仅按riskData.length判断。",
+      "remediation": "先验证计数合法，再区分成功且总计为0与真正非零分布；全零显示明确空态或无扇区的零值图，仍允许导出真实零统计，不把零判作错误。",
+      "required_tests": "用后端真实四行零计数替代仅[]的空态假设，断言无普通饼图且不伪造比例；保留[]兼容测试。",
+      "probe_title": "真实后端四类全零应显示空态而非普通饼图"
+    },
+    {
+      "id": "DASH-02",
+      "priority": "P2",
+      "type": "validation_gap",
+      "title": "图表非法值被标记为成功，使完整统计导出门禁失效",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 472
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 485
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 495
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 510
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 519
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 221
+        }
+      ],
+      "test_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 140
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 209
+        }
+      ],
+      "counterexample": "风险count=-1；维度count为字符串\"3\"；评分score=101；频次date为非法日期且count=-1。响应均为数组，所以map/聚合不抛错。",
+      "observed": "隔离探针四区均为success，exportDisabled=false。accept只转换不校验；维度0+字符串可能拼接，日期可能变为Invalid Date，越界评分进入百分比宽度。",
+      "baseline_classification": "旧实现已有图表载荷校验缺口；本次新增success状态及canExportCurrentData仍把请求返回成功等同于数据有效，因此本轮禁导出不完整/非法统计目标未闭合，不认定为生产新回归。",
+      "remediation": "在各accept写入响应式状态之前完整验证数组及成员：计数为非负安全整数、评分有限且在0至100、日期符合约定且有效、必需标识/标签类型正确；失败只把对应分区置error，不覆盖旧缓存、不静默把非法值转为0。",
+      "required_tests": "为四图分别添加null/负数/字符串/非有限/越界/非法日期矩阵；断言区块错误、其他成功分区保留、导出按钮和直接调用处理函数均拒绝。",
+      "probe_title": "四图非法字段应各自错误且不可导出"
+    },
+    {
+      "id": "DASH-03",
+      "priority": "P2",
+      "type": "validation_gap",
+      "title": "摘要仅验证recent_tasks为数组，非法成员仍在成功态触发渲染异常",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 461
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 426
+        }
+      ],
+      "test_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 140
+        }
+      ],
+      "counterexample": "摘要计数及均分全部合法，但recent_tasks=[null]。入口只做Array.isArray即赋值并置success，activityFeed访问成员id时抛错。",
+      "observed": "隔离Vue错误处理器捕获1次渲染异常，同时summaryState仍为success，而非摘要error。没有把合成输入当作真实生产数据。",
+      "baseline_classification": "旧活动流也直接访问任务成员，本补丁增加摘要校验后仍残留此洞；不是新增的数据删除或评分口径变化。",
+      "remediation": "在summary.value赋值之前按RecentTaskOut约定校验每个成员及用于渲染/HTML转义的字段；非法成员使摘要受控报错，不默默丢弃后仍称完整成功。",
+      "required_tests": "覆盖null成员、错误字段类型、非有限/越界分数，确认没有Vue渲染异常、摘要可重试、导出不可用。",
+      "probe_title": "摘要最近任务非法成员应被入口拒绝而非渲染异常"
+    }
+  ],
+  "test_gaps": [
+    {
+      "id": "TEST-01",
+      "priority": "P2",
+      "title": "导出改名令旧权限测试的DOM否定断言失效",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/permissionVisibility.regression.test.ts",
+          "line": 227
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 21
+        }
+      ],
+      "details": "旧断言仍检查不存在“导出周报”；现在按钮名为“导出统计报告”，即便错误渲染按钮该文字断言仍会通过。computed权限false断言依然有效，但不能替代模板可见性断言。",
+      "classification": "由本次改名引起的测试覆盖退化；当前v-if和处理函数权限守卫仍在，未发现权限绕过。",
+      "remediation": "按data-testid=export-dashboard断言不存在，并验证无权限直接调用处理函数不打开窗口；可在新的Dashboard.test.ts补齐，不需要本代理改动其他源文件。"
+    },
+    {
+      "id": "TEST-02",
+      "priority": "P3",
+      "title": "测试标题包含加载态禁导出，但该case只模拟拒绝",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 209
+        }
+      ],
+      "details": "该用例证明HTTP失败时按钮禁用，并未保留deferred请求验证loading，也未直接调用onWeeklyReport验证第二道守卫。追加两条导出测试覆盖null及抛错，不替代这两个入口状态。",
+      "remediation": "补deferred加载分支与直接调用处理函数，不构造浏览器窗口句柄，也不把请求打开等同于打开成功。"
+    },
+    {
+      "id": "TEST-03",
+      "priority": "P3",
+      "title": "原12例没有卸载后结算和已有数据再失败场景",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 94
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 181
+        }
+      ],
+      "details": "afterEach卸载不等于卸载后再resolve/reject。现有日期竞态两个用例真实覆盖风险图区的旧成功和旧失败；不应称为四图、摘要、卸载及SecurityPostureCard全部覆盖。",
+      "remediation": "把本次已通过的失败保留、摘要重叠、卸载保护探针纳入正式测试；如宣称四图竞态全覆盖，应参数化各key。"
+    }
+  ],
+  "verified_behaviors": [
+    {
+      "topic": "未知与真实零",
+      "assessment": "摘要首载/失败均不展示统计卡和完成数；review_count=0时均分为破折号且无风险徽标；成功审查真实0分仍显示0.0及极高风险。",
+      "method": "source_and_test_assertion_review",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 30
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 222
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 121
+        }
+      ]
+    },
+    {
+      "topic": "日期竞态",
+      "assessment": "loadCharts同步发起四请求、每区独立版本号；旧响应在accept前被挡住，旧失败也不能改变新状态。原两个风险图deferred测试确实命中两条分支。",
+      "method": "source_and_test_assertion_review",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 472
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 528
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 181
+        }
+      ]
+    },
+    {
+      "topic": "失败保留边界",
+      "assessment": "之前成功的图数据保留在内存，但新请求loading/error时隐藏；未失败的累计摘要继续展示；对应单图重试不重载摘要或其他图。",
+      "method": "isolated_probe_passed",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 138
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 472
+        }
+      ]
+    },
+    {
+      "topic": "摘要重叠刷新",
+      "assessment": "summaryVersion使较旧摘要不能覆盖最新摘要。",
+      "method": "isolated_probe_passed",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 455
+        }
+      ]
+    },
+    {
+      "topic": "卸载后的在途结果",
+      "assessment": "disposed拦截成功赋值和catch状态变更；卸载清除刷新timer并移除事件监听。探针分别结算成功摘要和失败风险请求，未观察到状态写入。",
+      "method": "isolated_probe_passed",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 460
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 477
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 628
+        }
+      ]
+    },
+    {
+      "topic": "统计口径与宣传",
+      "assessment": "概览是累计可见范围，recent_tasks为最近成功任务，评分是最近6条而非按分数TOP或所选日期区间。频次含未删除各状态任务，现标题为审查任务趋势；导出文本区分累计与区间。v3.4/1M/实时流式宣传已移除。",
+      "method": "source_and_backend_contract_review",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 510
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 568
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/dashboard_service.py",
+          "line": 95
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/dashboard_service.py",
+          "line": 122
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/dashboard_service.py",
+          "line": 206
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/dashboard_service.py",
+          "line": 238
+        }
+      ]
+    },
+    {
+      "topic": "复用reviewScore",
+      "assessment": "riskLevel和scoreColor复用既有reviewRiskLevel/reviewScoreColor；没有保留另一套90/75阈值。新测试验证真实0分，其余阈值未在本次重新执行。",
+      "method": "source_review",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 300
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 398
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/utils/reviewScore.ts",
+          "line": 11
+        }
+      ]
+    },
+    {
+      "topic": "追加导出错误反馈修复",
+      "assessment": "当前window.open保留noopener,noreferrer，不判断返回句柄；抛错时释放URL并error返回，未抛错时60秒回收且仅info已请求打开。该旧缺陷已从代码上修复，未宣称实际窗口打开成功。两条新测试分别断言null不即时回收/60秒后回收、throw时error与释放；公共setup清理fake timers和stub globals，未见此处测试污染。定向运行结果仍待主线程回执，本代理未重跑或构造窗口句柄。",
+      "method": "latest_diff_and_test_assertion_review",
+      "source_refs": [
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue",
+          "line": 588
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 230
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts",
+          "line": 249
+        },
+        {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/test/setup.ts",
+          "line": 63
+        }
+      ]
+    }
+  ],
+  "isolated_probe": {
+    "total": 6,
+    "counts": {
+      "failed": 3,
+      "passed": 3
+    },
+    "artifact": "/tmp/prism-optimization-20260906/dashboard-probe/probe-results.json",
+    "sha256": "277ceeabd6826732ad38e154cf5b5f55b9c9b62345c083b3649370f125dc0b5e",
+    "results": [
+      {
+        "title": "真实后端四类全零应显示空态而非普通饼图",
+        "status": "failed"
+      },
+      {
+        "title": "四图非法字段应各自错误且不可导出",
+        "status": "failed"
+      },
+      {
+        "title": "摘要最近任务非法成员应被入口拒绝而非渲染异常",
+        "status": "failed"
+      },
+      {
+        "title": "日期刷新失败隐藏旧图并保留未失败摘要且仅单图重试",
+        "status": "passed"
+      },
+      {
+        "title": "摘要重叠刷新仅保留最新请求结果",
+        "status": "passed"
+      },
+      {
+        "title": "卸载后在途成功和失败不写状态且移除事件监听",
+        "status": "passed"
+      }
+    ],
+    "source_snapshot_sha256": {
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue": "6613c70a649f7a00bc751f8bee7d6b9c9c7679487fcdd1343b533e4a342b4c10",
+      "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.test.ts": "aef3a0a3a7b956c090987f57833dac8fb569754ebacd4fdb5d6784852f95c7c5"
+    },
+    "latest_diff_boundary": "6个探针执行在追加导出2例之前；其涉及的三处输入/空态逻辑和请求生命周期代码在最新diff中未改，本次只静态复核新增导出分支，不把旧探针当成14例执行结果。",
+    "all_api_responses_mocked": true,
+    "executed_main_dashboard_cases": false,
+    "executed_permission_6_cases": false,
+    "included_in_main_suite_counts": false
+  },
+  "main_thread_results": {
+    "new_test_declarations": 14,
+    "permission_test_declarations": 6,
+    "permission_cases_directly_for_dashboard": 1,
+    "declaration_count_method": "原12例经TypeScript AST与文本计数交叉确认；追加2例源码复核后当前14例，非执行通过数",
+    "user_reported_status": "追加导出2回归先红2失败及1未处理错误，修复后定向测试进行中；计划重跑全量589",
+    "historical_12_case_phase_total": 587,
+    "historical_total_is_final": false,
+    "expected_full_suite_after_2_new_cases": 589,
+    "full_suite_final_count": null,
+    "full_suite_status": "等待主线程最终原始结果，不使用587封版，不将589预期冒充实测",
+    "typecheck_status": "等待主线程结果",
+    "build_status": "等待主线程结果",
+    "independent_final_recount_done": false
+  },
+  "project161_report_correction": {
+    "status": "已更正归因，仍阻塞",
+    "backup_completed": "JSON明确备份100行、161唯一一行、主键唯一、8列及基线提取规范化已完成",
+    "current_boundary": "当前行规范化受阻；current/field_comparison/row_fingerprint未持久化。当前schema/计数门控通过仅按SHA一致采集器控制流推导，不冒充备份聚合即当前库聚合。",
+    "collector_sha256_matches": true,
+    "new_json_path": "/tmp/prism-optimization-20260906/independent-project161-backup-comparison.json",
+    "new_md_path": "/tmp/prism-optimization-20260906/independent-project161-backup-comparison.md",
+    "backup_reopened": false
+  },
+  "limits": [
+    "不编辑主仓库源代码或测试，不触碰另一worker的team补丁",
+    "不访问生产、不再次读取备份、不认证、不调用真实模型",
+    "仅两文件及必要直接依赖/后端聚合口径/权限断言读取",
+    "BaseChart、计数动画、SecurityPostureCard为桩；没有声称真实Canvas、动画或安全态势组件全量验收",
+    "未重跑主线程14+6或全量测试；全量、类型和build须收到主线程原始结果后再计数"
+  ],
+  "addenda": [
+    {
+      "title": "追加：定向结果重计及R05单条件复核",
+      "observed_at_utc": "2026-09-06T00:08:07.515377+00:00",
+      "prior_report_sha256": {
+        "json": "0cc485b56dec5a2f05049be4bc653728994e28641ecdff345c39b01e7f641e8e",
+        "md": "e50b3ddd9ecd50d991da81c3d30dd0b14551d71dadd6d45b09913baf762c68ff"
+      },
+      "dashboard_findings_status": "原3项P2反例及测试缺口保留；新增导出修复代码复核通过，不重做全项目审查",
+      "frontend_targeted_green": {
+        "path": "/tmp/prism-release-20260906/dashboard-export-green.xml",
+        "sha256": "3a656b25a9f4e613e83161f06d9eccdb95ae71434333158527350f37fd6c0c55",
+        "bytes": 4956,
+        "stable": true,
+        "status": "已重计",
+        "total": 20,
+        "counts": {
+          "passed": 20
+        },
+        "groups": {
+          "src/views/permissionVisibility.regression.test.ts": 6,
+          "src/views/dashboard/Dashboard.test.ts": 14
+        },
+        "new_missing_verifier_cases": []
+      },
+      "frontend_export_red": {
+        "path": "/tmp/prism-release-20260906/dashboard-export-red.xml",
+        "sha256": "cc8dd10560ba4464b5926d6b3e337d21e7610bcefbb30d1a59d17f62c5dca962",
+        "bytes": 8521,
+        "stable": true,
+        "status": "已重计",
+        "total": 14,
+        "counts": {
+          "passed": 12,
+          "failures": 2
+        },
+        "groups": {
+          "src/views/dashboard/Dashboard.test.ts": 14
+        },
+        "new_missing_verifier_cases": []
+      },
+      "frontend_export_red_unhandled_error": {
+        "count": 1,
+        "included_in_junit_testcase_count": false,
+        "evidence": {
+          "path": "/tmp/prism-release-20260906/dashboard-export-red.log",
+          "sha256": "741613973b19139b79f7bed1f2fe9525591665a248d439e6a6e969f66b43ed38",
+          "bytes": 10882,
+          "stable": true
+        }
+      },
+      "team_targeted_green": {
+        "path": "/tmp/prism-readonly-20260905-tests/team-terminal-parent-green-20260906.xml",
+        "sha256": "b16639eced7f2235cffc2bc0369bd945ff4038bdd86ad1cbfd394d25f45e1527",
+        "bytes": 16858,
+        "stable": true,
+        "status": "已重计",
+        "total": 107,
+        "counts": {
+          "passed": 107
+        },
+        "groups": {
+          "tests.unit.services.test_agent_team_service": 61,
+          "tests.unit.services.test_agent_mesh_dispatcher": 11,
+          "tests.unit.services.test_agent_team_dispatcher": 30,
+          "tests.unit.api.test_agent_teams_api": 5
+        },
+        "new_missing_verifier_cases": [
+          {
+            "name": "test_missing_verifier_drains_running_tasks_before_failing[True]",
+            "passed": true
+          },
+          {
+            "name": "test_missing_verifier_drains_running_tasks_before_failing[False]",
+            "passed": true
+          },
+          {
+            "name": "test_missing_verifier_without_running_tasks_still_fails_immediately",
+            "passed": true
+          }
+        ]
+      },
+      "team_missing_verifier_red": {
+        "path": "/tmp/prism-readonly-20260905-tests/team-terminal-missing-verifier-red-20260906.xml",
+        "sha256": "3f3ef44637f5d45ac25a7bc17d667067905a19e569a55d27d6459efa31bac1df",
+        "bytes": 1515,
+        "stable": true,
+        "status": "已重计",
+        "total": 3,
+        "counts": {
+          "failures": 2,
+          "passed": 1
+        },
+        "groups": {
+          "tests.unit.services.test_agent_team_service": 3
+        },
+        "new_missing_verifier_cases": [
+          {
+            "name": "test_missing_verifier_drains_running_tasks_before_failing[True]",
+            "passed": false
+          },
+          {
+            "name": "test_missing_verifier_drains_running_tasks_before_failing[False]",
+            "passed": false
+          },
+          {
+            "name": "test_missing_verifier_without_running_tasks_still_fails_immediately",
+            "passed": true
+          }
+        ]
+      },
+      "execution_receipts": [
+        {
+          "path": "/tmp/prism-readonly-20260905-tests/team-terminal-parent-green-20260906.json",
+          "sha256": "1f2aff0f61d1b13a4d9945ebc29d8c27e15fee2712e4160f34af8575d8d0b56f",
+          "bytes": 3040,
+          "stable": true,
+          "kind": "execution_receipt_not_testcase_report",
+          "exit_code": 0
+        },
+        {
+          "path": "/tmp/prism-readonly-20260905-tests/team-terminal-missing-verifier-red-20260906.json",
+          "sha256": "380083d29c3c8a6ecaee8d50eb8072b2efddd112acde561fd58676de46394428",
+          "bytes": 2954,
+          "stable": true,
+          "kind": "execution_receipt_not_testcase_report",
+          "exit_code": 1
+        }
+      ],
+      "frontend_full_xml_at_sampling": {
+        "path": "/tmp/prism-release-20260906/continuation-frontend-tests.xml",
+        "sha256": "a01d5a9573fe3ec33e602c88619e136c95e9b84627588ddd39d04c4f46e48227",
+        "bytes": 177003,
+        "stable": true,
+        "status": "已重计",
+        "total": 587,
+        "counts": {
+          "passed": 587
+        },
+        "groups": {
+          "src/App.test.ts": 3,
+          "src/api/agentTeams.test.ts": 2,
+          "src/api/http.test.ts": 10,
+          "src/api/llmConfig.test.ts": 2,
+          "src/api/project.test.ts": 3,
+          "src/api/report.test.ts": 3,
+          "src/api/sandbox.test.ts": 2,
+          "src/composables/useAgentTeamEvents.test.ts": 3,
+          "src/composables/useCountUp.test.ts": 2,
+          "src/composables/useFloatingChatPosition.test.ts": 3,
+          "src/composables/useSecurityAlerts.test.ts": 7,
+          "src/composables/withFeedback.test.ts": 4,
+          "src/constants/adminGovernance.test.ts": 4,
+          "src/constants/pentest.test.ts": 3,
+          "src/stores/user.test.ts": 7,
+          "src/views/permissionVisibility.regression.test.ts": 6,
+          "src/utils/agentActivityPresentation.test.ts": 3,
+          "src/utils/agentChatSessions.test.ts": 21,
+          "src/utils/agentEventStream.test.ts": 3,
+          "src/utils/agentMeshBridge.test.ts": 6,
+          "src/utils/agentMeshTimeline.test.ts": 11,
+          "src/utils/agentNavigation.test.ts": 10,
+          "src/utils/autoValidation.test.ts": 1,
+          "src/utils/clarifyProjectOptions.test.ts": 6,
+          "src/utils/coreUtils.test.ts": 13,
+          "src/utils/discussionStream.test.ts": 5,
+          "src/utils/elementPlusContracts.test.ts": 1,
+          "src/utils/pageGuideTips.test.ts": 4,
+          "src/utils/responsesStream.test.ts": 9,
+          "src/utils/responsesTimeline.test.ts": 5,
+          "src/utils/reviewScore.test.ts": 2,
+          "src/utils/sandboxPresentation.test.ts": 4,
+          "src/utils/thinkingCityEngine.test.ts": 7,
+          "src/utils/thinkingCityMemory.test.ts": 4,
+          "src/utils/tilt.test.ts": 3,
+          "src/utils/toolDisplay.test.ts": 6,
+          "src/utils/xiaolingNavigation.test.ts": 3,
+          "src/router/guards.test.ts": 8,
+          "src/router/index.test.ts": 2,
+          "src/components/admin/AdminCopilot.test.ts": 25,
+          "src/components/admin/AdminLayout.test.ts": 1,
+          "src/components/common/TriEndUx.regression.test.ts": 4,
+          "src/components/issue/IssueDetailDrawer.test.ts": 3,
+          "src/components/layout/AppHeader.test.ts": 4,
+          "src/components/layout/AppSidebar.test.ts": 4,
+          "src/components/ai/AgentActivityBorder.test.ts": 1,
+          "src/components/ai/AgentChatDrawer.test.ts": 28,
+          "src/components/ai/AgentMemberWorkCard.regression.test.ts": 5,
+          "src/components/ai/AgentMemberWorkCard.test.ts": 5,
+          "src/components/ai/AgentNavLink.test.ts": 3,
+          "src/components/ai/AgentSessionSwitcher.test.ts": 23,
+          "src/components/ai/AgentTeamCard.test.ts": 2,
+          "src/components/ai/AgentTeamSidePanel.test.ts": 5,
+          "src/components/ai/AgentTeamTrace.test.ts": 6,
+          "src/components/ai/ProactivePageGuide.test.ts": 9,
+          "src/components/ai/VirtualCursor.test.ts": 6,
+          "src/components/ai/mobileInteraction.regression.test.ts": 4,
+          "src/components/security/SecurityPostureCard.test.ts": 8,
+          "src/components/security/SecurityScanModal.test.ts": 16,
+          "src/views/admin/AdminOverview.test.ts": 40,
+          "src/views/admin/AgentReleaseAdmin.test.ts": 3,
+          "src/views/admin/BetaCodeAdmin.responsive.test.ts": 1,
+          "src/views/admin/GovernanceWorkstation.scheduler.test.ts": 14,
+          "src/views/admin/LlmConfig.test.ts": 6,
+          "src/views/admin/RoleManage.test.ts": 2,
+          "src/views/dashboard/Dashboard.test.ts": 12,
+          "src/views/auth/Login.test.ts": 8,
+          "src/views/auth/Register.test.ts": 3,
+          "src/views/pentest/PentestStart.regression.test.ts": 7,
+          "src/views/profile/ChangePassword.test.ts": 1,
+          "src/views/project/ProjectList.test.ts": 15,
+          "src/views/rule/RuleConfig.test.ts": 2,
+          "src/views/report/ReportDetail.test.ts": 14,
+          "src/views/report/ReportList.test.ts": 3,
+          "src/views/review/ReviewStart.regression.test.ts": 32,
+          "src/views/review/ReviewTaskDetail.test.ts": 44,
+          "src/views/review/ReviewTaskList.polling.test.ts": 10,
+          "src/views/sandbox/SandboxWorkstation.test.ts": 7
+        },
+        "new_missing_verifier_cases": []
+      },
+      "frontend_full_json_at_sampling": {
+        "path": "/tmp/prism-release-20260906/continuation-frontend-tests.json",
+        "sha256": "8fa123742d2b5d62acd6e4f89abf5653642711fd6858825af63326f5809d377f",
+        "bytes": 202315,
+        "stable": true,
+        "status": "已重计",
+        "total": 587,
+        "counts": {
+          "passed": 587
+        },
+        "declared_total_matches": true,
+        "declared_passed_matches": true,
+        "success": true
+      },
+      "frontend_final_589_independently_confirmed": false,
+      "frontend_final_count": null,
+      "backend_full_at_sampling": {
+        "path": "/tmp/prism-readonly-20260905-tests/continuation-backend-20260906.xml",
+        "sha256": "149ff677eef412f80b3184d194650ffd739f9e9629db5d075359a34520eedb35",
+        "bytes": 418973,
+        "stable": true,
+        "status": "已重计",
+        "total": 2820,
+        "counts": {
+          "passed": 2820
+        },
+        "groups": {
+          "tests.fixtures.xiaoling_acceptance.test_main.HandlerContractTest": 1,
+          "tests.test_code_chunk_context": 5,
+          "tests.test_code_file_service.TestUploadMimeValidation": 6,
+          "tests.test_code_file_service.TestUploadMalwareScan": 4,
+          "tests.test_code_file_service.TestUploadBinaryFile": 3,
+          "tests.test_code_file_service.TestUploadTextFile": 3,
+          "tests.test_code_file_service.TestUploadArchive": 6,
+          "tests.test_code_file_service.TestSecurityChainOrder": 2,
+          "tests.test_code_file_service.TestEndToEnd": 3,
+          "tests.test_code_file_service": 2,
+          "tests.test_compliance_dict": 23,
+          "tests.test_finding_aggregator": 8,
+          "tests.test_issue_aggregation_workflow": 5,
+          "tests.test_issue_merger.TestEmptyInputs": 3,
+          "tests.test_issue_merger.TestSingleEngineOnly": 4,
+          "tests.test_issue_merger.TestHybridMerge": 7,
+          "tests.test_issue_merger.TestV3FieldsMerge": 3,
+          "tests.test_issue_merger.TestEdgeCases": 7,
+          "tests.test_malware_scanner.TestValidateMime": 28,
+          "tests.test_malware_scanner.TestMalwareScanner": 21,
+          "tests.test_observability": 11,
+          "tests.test_prism_sandbox_executor": 47,
+          "tests.test_project_lifecycle_guards": 12,
+          "tests.test_rbac_api": 1,
+          "tests.test_rbac_api.TestRbacAdminApi": 8,
+          "tests.test_rbac_api.TestRbacNormalUserForbidden": 7,
+          "tests.test_rbac_api.TestRoleCrud": 7,
+          "tests.test_rbac_api.TestPermissionAssignment": 4,
+          "tests.test_rbac_api.TestDataScopeAndUserAssignment": 4,
+          "tests.test_rbac_api.TestPermissionChange": 2,
+          "tests.test_rbac_api.TestBusinessRoutePermission": 10,
+          "tests.test_rbac_api.TestRuleRoutePermission": 4,
+          "tests.test_rbac_service.TestAssignRolesToUser": 5,
+          "tests.test_rbac_service.TestGetUserPermissions": 5,
+          "tests.test_rbac_service.TestCheckPermission": 7,
+          "tests.test_rbac_service.TestCheckDataScope": 6,
+          "tests.test_rbac_service.TestRoleManagement": 8,
+          "tests.test_rbac_service.TestPermissionAssignment": 3,
+          "tests.test_rbac_service.TestGetUserMenus": 4,
+          "tests.test_rbac_service.TestDataScopeManagement": 5,
+          "tests.test_rbac_service.TestGetUsersByRole": 2,
+          "tests.test_rbac_service.TestIsAdminUser": 4,
+          "tests.test_rbac_service.TestPermissionError": 3,
+          "tests.test_rbac_service.TestRbacDependency": 4,
+          "tests.test_rbac_service.TestPermissionCodes": 3,
+          "tests.test_report_api": 35,
+          "tests.test_report_exporter": 52,
+          "tests.test_result_parser": 42,
+          "tests.test_result_parser_contract": 4,
+          "tests.test_review_input_lifecycle": 13,
+          "tests.test_review_recovery_integrity": 13,
+          "tests.test_review_result_pipeline_regression": 32,
+          "tests.test_review_service_v3.TestIssueToReviewIssue": 4,
+          "tests.test_review_service_v3.TestFindingToReviewIssue": 1,
+          "tests.test_review_service_v3.TestReviewOneFileDualEngine": 5,
+          "tests.test_review_service_v3.TestAgentMapping": 3,
+          "tests.test_review_service_v3.TestAgentLogCall": 3,
+          "tests.test_review_service_v3.TestDualEngineFlowOrder": 2,
+          "tests.test_vulnerability_e2e": 12,
+          "tests.test_vulnerability_summary": 3,
+          "tests.unit.agents.test_agent_contracts": 6,
+          "tests.unit.agents.test_agent_project_quarantine": 18,
+          "tests.unit.agents.test_chat_agent_coverage": 29,
+          "tests.unit.agents.test_chat_planner_coverage": 20,
+          "tests.unit.agents.test_code_reviewer_agent.TestIssueToFinding": 3,
+          "tests.unit.agents.test_code_reviewer_agent.TestExecuteReview": 6,
+          "tests.unit.agents.test_discussion_gc.TestBusPurge": 6,
+          "tests.unit.agents.test_discussion_gc.TestWsRegistryPurge": 2,
+          "tests.unit.agents.test_event_bus_coverage": 24,
+          "tests.unit.agents.test_evolution_agent": 8,
+          "tests.unit.agents.test_finding_locate_evidence": 5,
+          "tests.unit.agents.test_metagpt.TestMessage": 4,
+          "tests.unit.agents.test_metagpt.TestRoleSubscription": 3,
+          "tests.unit.agents.test_metagpt.TestEnvironment": 8,
+          "tests.unit.agents.test_metagpt.TestRoleAdapter": 2,
+          "tests.unit.agents.test_metagpt.TestFactory": 4,
+          "tests.unit.agents.test_orchestrator_coverage": 19,
+          "tests.unit.agents.test_scan_entry_input_closure": 73,
+          "tests.unit.agents.test_security_sentinel_review.TestScanFileForReview": 7,
+          "tests.unit.agents.test_self_improvement_boundaries": 4,
+          "tests.unit.agents.test_tool_contracts": 44,
+          "tests.unit.agents.test_ws_discussion_coverage": 9,
+          "tests.unit.ai.test_deepseek_agent_label": 10,
+          "tests.unit.ai.test_deepseek_agent_response": 18,
+          "tests.unit.ai.test_multi_agent": 6,
+          "tests.unit.ai.test_prompt_builder": 2,
+          "tests.unit.ai.test_security_patterns": 18,
+          "tests.unit.ai.test_static_analyzer.TestScanBasic": 4,
+          "tests.unit.ai.test_static_analyzer.TestSecretScanning": 4,
+          "tests.unit.ai.test_static_analyzer.TestStaticRules": 8,
+          "tests.unit.ai.test_static_analyzer.TestScanFile": 3,
+          "tests.unit.ai.test_static_analyzer.TestVulnSamples": 5,
+          "tests.unit.ai.test_static_analyzer.TestFindingFields": 2,
+          "tests.unit.ai.test_static_analyzer.TestParamRoutingRules": 7,
+          "tests.unit.api.test_admin_copilot_api": 2,
+          "tests.unit.api.test_admin_overview": 2,
+          "tests.unit.api.test_admin_overview_activity": 5,
+          "tests.unit.api.test_agent_teams_api": 5,
+          "tests.unit.api.test_agents_api_coverage": 23,
+          "tests.unit.api.test_auth_rate_limit_api": 5,
+          "tests.unit.api.test_beta_invites_api": 5,
+          "tests.unit.api.test_mcp_governance_api": 1,
+          "tests.unit.api.test_pentest_api": 4,
+          "tests.unit.api.test_project_import_lifecycle_api": 2,
+          "tests.unit.api.test_project_source_download_audit": 3,
+          "tests.unit.api.test_responses_api": 8,
+          "tests.unit.api.test_security_monitor_api": 7,
+          "tests.unit.core.test_config_security": 18,
+          "tests.unit.core.test_login_rate_limit": 12,
+          "tests.unit.core.test_single_device_session": 7,
+          "tests.unit.scripts.test_project_contract_scripts": 4,
+          "tests.unit.scripts.test_quarantine_projects": 40,
+          "tests.unit.services.test_admin_capability_registry": 7,
+          "tests.unit.services.test_admin_copilot_service": 10,
+          "tests.unit.services.test_agent_cost_budget_service": 4,
+          "tests.unit.services.test_agent_governance_api_integration": 3,
+          "tests.unit.services.test_agent_governance_services": 28,
+          "tests.unit.services.test_agent_mesh_dispatcher": 11,
+          "tests.unit.services.test_agent_mesh_service": 12,
+          "tests.unit.services.test_agent_responses_admin_tools": 11,
+          "tests.unit.services.test_agent_responses_integration": 78,
+          "tests.unit.services.test_agent_runtime_v2": 10,
+          "tests.unit.services.test_agent_service": 3,
+          "tests.unit.services.test_agent_status_events": 3,
+          "tests.unit.services.test_agent_studio_service": 10,
+          "tests.unit.services.test_agent_team_dispatcher": 30,
+          "tests.unit.services.test_agent_team_service": 61,
+          "tests.unit.services.test_agent_test_cases": 6,
+          "tests.unit.services.test_ai_prompt_agent": 9,
+          "tests.unit.services.test_api_config_service.TestGetConfig": 3,
+          "tests.unit.services.test_api_config_service.TestSaveConfig": 3,
+          "tests.unit.services.test_api_config_service.TestDeleteConfig": 2,
+          "tests.unit.services.test_audit_service": 3,
+          "tests.unit.services.test_authorization_guards": 8,
+          "tests.unit.services.test_beta_invite_service": 8,
+          "tests.unit.services.test_change_password_tool": 15,
+          "tests.unit.services.test_chat_security_intent": 5,
+          "tests.unit.services.test_clarify_v2": 6,
+          "tests.unit.services.test_code_file_service_v2.TestBinaryFileUpload": 2,
+          "tests.unit.services.test_code_file_service_v2.TestGetFileBinary": 2,
+          "tests.unit.services.test_code_file_service_v2.TestGetBinaryContent": 2,
+          "tests.unit.services.test_code_file_service_v2.TestUpdateContentBinary": 1,
+          "tests.unit.services.test_code_file_service_v2.TestArchiveUpload": 2,
+          "tests.unit.services.test_code_file_service_v2.TestPermissionCheck": 2,
+          "tests.unit.services.test_community_service_coverage": 6,
+          "tests.unit.services.test_core_service_coverage": 10,
+          "tests.unit.services.test_decompilation_service": 17,
+          "tests.unit.services.test_deepseek_responses_runtime": 34,
+          "tests.unit.services.test_deepseek_responses_service": 22,
+          "tests.unit.services.test_domain_report_export_closure": 48,
+          "tests.unit.services.test_embedding_service": 4,
+          "tests.unit.services.test_eval_gate": 10,
+          "tests.unit.services.test_event_bus_v2": 4,
+          "tests.unit.services.test_evolution_service": 5,
+          "tests.unit.services.test_experience_service": 7,
+          "tests.unit.services.test_feedback_service": 4,
+          "tests.unit.services.test_frontend_api_contract": 3,
+          "tests.unit.services.test_fuzzy_project_resolve": 8,
+          "tests.unit.services.test_github_project_import": 36,
+          "tests.unit.services.test_jarvis_patrol_service": 7,
+          "tests.unit.services.test_knowledge_notebook_tools": 11,
+          "tests.unit.services.test_llm_config_runtime": 16,
+          "tests.unit.services.test_llm_endpoint_service": 7,
+          "tests.unit.services.test_managed_mcp_adapter": 7,
+          "tests.unit.services.test_mcp_governance_service": 16,
+          "tests.unit.services.test_mcp_tool_provider": 5,
+          "tests.unit.services.test_mesh_archive_and_team_normalize": 10,
+          "tests.unit.services.test_page_guide_service": 4,
+          "tests.unit.services.test_personalization_service_coverage": 8,
+          "tests.unit.services.test_project_agent_runs": 8,
+          "tests.unit.services.test_project_import_lifecycle": 16,
+          "tests.unit.services.test_project_import_tasks": 9,
+          "tests.unit.services.test_project_member_service.TestGetVisibleProjectIds": 3,
+          "tests.unit.services.test_project_member_service.TestIsProjectMember": 5,
+          "tests.unit.services.test_project_member_service.TestRequireProjectAccess": 6,
+          "tests.unit.services.test_project_member_service.TestRequireProjectAccessAudit": 5,
+          "tests.unit.services.test_project_member_service.TestMemberCRUD": 7,
+          "tests.unit.services.test_project_member_service.TestEnsureOwnerMember": 3,
+          "tests.unit.services.test_project_quarantine": 300,
+          "tests.unit.services.test_project_source_service": 20,
+          "tests.unit.services.test_published_agent_capability_search": 1,
+          "tests.unit.services.test_real_data_sources": 2,
+          "tests.unit.services.test_remote_archive_streaming": 3,
+          "tests.unit.services.test_report_dashboard_source_facts": 56,
+          "tests.unit.services.test_report_service": 4,
+          "tests.unit.services.test_review_dynamic_roles": 1,
+          "tests.unit.services.test_review_service_helpers": 5,
+          "tests.unit.services.test_review_service_state_coverage": 13,
+          "tests.unit.services.test_review_service_v2.TestGetAgentForProfile": 4,
+          "tests.unit.services.test_review_service_v2": 1,
+          "tests.unit.services.test_review_service_v2.TestFindingToReviewIssue": 4,
+          "tests.unit.services.test_review_service_v2.TestFindingFingerprint": 5,
+          "tests.unit.services.test_review_service_v2.TestReviewOneFileDoubleEngine": 4,
+          "tests.unit.services.test_sandbox_decompilation": 5,
+          "tests.unit.services.test_sandbox_multi_agent_review": 9,
+          "tests.unit.services.test_sandbox_optimizations": 4,
+          "tests.unit.services.test_sandbox_report_publish": 3,
+          "tests.unit.services.test_scheduler_configuration_closure": 37,
+          "tests.unit.services.test_scheduler_skill_contract": 24,
+          "tests.unit.services.test_security_hardening": 4,
+          "tests.unit.services.test_security_monitor_service": 26,
+          "tests.unit.services.test_security_sentinel_agent": 71,
+          "tests.unit.services.test_security_service_coverage": 6,
+          "tests.unit.services.test_server_ops_service": 19,
+          "tests.unit.services.test_skill_service_coverage": 7,
+          "tests.unit.services.test_strategy_learning_service": 10,
+          "tests.unit.services.test_supervised_mesh_dispatch": 9,
+          "tests.unit.services.test_surface_persona_separation": 6,
+          "tests.unit.services.test_system_config_api_key_rotation": 2,
+          "tests.unit.services.test_team_and_beta_permissions": 5,
+          "tests.unit.services.test_user_capability_registry": 18,
+          "tests.unit.services.test_xiaoling_slim_observability": 6,
+          "tests.unit.test_ac2_e2e_fixes.TestReviewIssueOwaspCweColumnSize": 5,
+          "tests.unit.test_ac2_e2e_fixes.TestAiLogSchemaHasAgentLabel": 6,
+          "tests.unit.test_ac2_e2e_fixes.TestAiLogServiceReturnsAgentLabel": 4,
+          "tests.unit.test_ac2_e2e_fixes.TestAlembicMigration009": 4,
+          "tests.unit.test_alembic_metadata_imports": 4,
+          "tests.unit.test_discussion_orchestrator_coverage": 26,
+          "tests.unit.test_export_agent_contracts": 17,
+          "tests.unit.test_json_field_serialization_check.TestReferencesJsonSerialization": 7,
+          "tests.unit.test_json_field_serialization_check.TestComplianceMappingSerialization": 7,
+          "tests.unit.test_json_field_serialization_check.TestNonJsonFieldsUnaffected": 2,
+          "tests.unit.test_migration_020_manager_admin_capability": 4,
+          "tests.unit.test_migration_021_project_import": 4,
+          "tests.unit.test_migration_022_unique_super_admin": 9,
+          "tests.unit.test_migration_023_agent_capabilities": 3,
+          "tests.unit.test_migration_024_source_archives": 3,
+          "tests.unit.test_migration_025_capability_aliases": 1,
+          "tests.unit.test_migration_026_source_binary_capacity": 2,
+          "tests.unit.test_migration_027_security_alert_fields": 3,
+          "tests.unit.test_migration_030_agent_mesh": 1,
+          "tests.unit.test_migration_031_agent_mesh_dispatch_lease": 1,
+          "tests.unit.test_migration_032_strategy_memory": 1,
+          "tests.unit.test_migration_033_agent_team": 2,
+          "tests.unit.test_migration_034_agent_draft_permissions": 3,
+          "tests.unit.test_migration_035_security_scan_user": 3,
+          "tests.unit.test_migration_036_performance_indexes": 3,
+          "tests.unit.test_migration_041_review_result_pipeline": 2,
+          "tests.unit.test_migration_041a_remote_import_tasks": 2,
+          "tests.unit.test_migration_042_merge_heads": 2,
+          "tests.unit.test_migration_043_remote_import_lifecycle": 1,
+          "tests.unit.test_migration_044_pentest": 1,
+          "tests.unit.test_migration_046_finding_aggregation": 2,
+          "tests.unit.test_migration_047_review_input_snapshot": 1,
+          "tests.unit.test_nginx_security_headers": 3,
+          "tests.unit.test_orchestrator_model_tiering": 10,
+          "tests.unit.test_pentest_service": 32,
+          "tests.unit.test_pure_logic_export_coverage": 9,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestR1IssueServiceListIssuesDictFields": 2,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestR2IssueOutSchemaFields": 5,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestR3CodeFileSchemaFields": 6,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestR4TaskDetailOutErrorMessage": 4,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestR5AgentProfileOutConfigJson": 6,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestR6UpdateTimeFields": 6,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestR7StatusFields": 4,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestR8MemberServiceUpdateTime": 1,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestSchemaOrmAlignment": 3,
+          "tests.unit.test_schema_field_coverage_r1_r8.TestPydanticFromAttributes": 2,
+          "tests.unit.test_seed_rules_security": 5,
+          "tests.unit.utils.test_api_resolver.TestEncryption": 10,
+          "tests.unit.utils.test_api_resolver.TestMaskApiKey": 4,
+          "tests.unit.utils.test_api_resolver.TestResolveApiConfig": 7,
+          "tests.unit.utils.test_api_url_security": 20,
+          "tests.unit.utils.test_archive_extractor.TestIsArchive": 13,
+          "tests.unit.utils.test_archive_extractor.TestExtractZip": 5,
+          "tests.unit.utils.test_archive_extractor.TestExtractTar": 3,
+          "tests.unit.utils.test_archive_extractor.TestSecurityChecks": 10,
+          "tests.unit.utils.test_pdf_exporter": 1
+        },
+        "new_missing_verifier_cases": [
+          {
+            "name": "test_missing_verifier_drains_running_tasks_before_failing[True]",
+            "passed": true
+          },
+          {
+            "name": "test_missing_verifier_drains_running_tasks_before_failing[False]",
+            "passed": true
+          },
+          {
+            "name": "test_missing_verifier_without_running_tasks_still_fails_immediately",
+            "passed": true
+          }
+        ]
+      },
+      "backend_final_count": 2820,
+      "backend_final_status": "2820通过，0失败/错误/跳过；XML读取稳定，执行JSON回执exit_code=0",
+      "backend_execution_receipt": {
+        "path": "/tmp/prism-readonly-20260905-tests/continuation-backend-20260906.json",
+        "exit_code": 0,
+        "sha256": "74b324b5a2c869737a9b5c1e8cf5d97f0b6f0f7d008c46f3b959b8b5719e5e41",
+        "kind": "execution_receipt_not_additional_testcases"
+      },
+      "r05_single_condition": {
+        "status": "通过限定代码复核",
+        "source": {
+          "path": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_service.py",
+          "sha256": "8a7a8c3992c62e51559f4cee8821ea74a5d58d009b2f54bf5604fd5d28d8e6a9",
+          "bytes": 103770,
+          "stable": true
+        },
+        "line": 1513,
+        "condition": "not verification and not running",
+        "semantics": [
+          "无verifier且仍有running时不提前终结父团队，后续elif running维持running",
+          "最后running收尾后即使成功也因缺verifier而failed，不误落入空集合all为真的completed路径",
+          "没有running时仍立即failed"
+        ],
+        "new_tests_source": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_team_service.py",
+        "new_tests_lines": [
+          920,
+          951
+        ],
+        "new_cases_green": 3,
+        "reviewed_other_58_cases": false
+      },
+      "limits": [
+        "未运行生产、真实登录、模型或MySQL多进程验证",
+        "未复跑测试，仅解析既有XML/JSON及读取指定一行条件和三条测试",
+        "107是局部service+两dispatcher+API结果，不替代后端全量",
+        "587只作为历史采样结果；未取得589完整终态前最终计数留空",
+        "不修改任何主仓库源码或测试，仅追加反馈报告"
+      ]
+    }
+  ]
+}

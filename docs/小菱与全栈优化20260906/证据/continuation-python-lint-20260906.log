@@ -1,0 +1,13 @@
+started_at=2026-09-06T00:13:18.905476+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B -m ruff check --no-cache app/services/agent_team_service.py tests/unit/services/test_agent_team_service.py scripts/export_agent_contracts.py tests/unit/test_export_agent_contracts.py
+E501 Line too long (140 > 120)
+   --> tests/unit/services/test_agent_team_service.py:948:121
+    |
+946 | … is not None
+947 | …am_id"], status="running").count() == 0
+948 | …eam_id"], event_type="team.status_changed", to_status="failed").count() == 1
+    |                                                          ^^^^^^^^^^^^^^^^^^^^
+    |
+
+Found 1 error.

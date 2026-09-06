@@ -1,0 +1,40 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --reporter=default --reporter=junit --outputFile.junit=/tmp/prism-release-20260906/dashboard-feedback-red.xml src/views/dashboard/Dashboard.test.ts
+
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts [ src/views/dashboard/Dashboard.test.ts ]
+Error: [vitest] No "createRouter" export is defined on the "vue-router" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+vi.mock(import("vue-router"), async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ src/router/index.ts:391:16
+    389| ]
+    390| 
+    391| const router = createRouter({
+       |                ^
+    392|   history: createWebHistory(),
+    393|   routes,
+ ❯ src/api/http.ts:3:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  07:28:49
+   Duration  1.11s (transform 326ms, setup 10ms, collect 0ms, tests 0ms, environment 242ms, prepare 43ms)
+
+JUNIT report written to /tmp/prism-release-20260906/dashboard-feedback-red.xml

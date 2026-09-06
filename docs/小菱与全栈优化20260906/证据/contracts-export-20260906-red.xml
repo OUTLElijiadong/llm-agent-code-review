@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="16" skipped="0" tests="17" time="0.331" timestamp="2026-09-06T04:10:21.601682+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.test_export_agent_contracts" name="test_markdown_counts_static_contracts_by_actual_fields" time="0.003"><failure message="AssertionError: assert '本目录包含 32 份静态职责契约，其中 2 份受保护、30 份受治理。' in '# Agent 职责边界、专属 Skill 与协作协议\n\n本文件由 `backend/scripts/export_agent_contracts.py` 从运行时唯一契约源生成。\n聊天助手 `chat_assistant` 与... summary, evidence, artifacts, errors, next_action。区分事实与推断并携带证据引用；无法完成时按原生格式明确表达 blocked 或 needs_clarification。\n```\n'">tests/unit/test_export_agent_contracts.py:72: in test_markdown_counts_static_contracts_by_actual_fields
+    assert (
+E   AssertionError: assert '本目录包含 32 份静态职责契约，其中 2 份受保护、30 份受治理。' in '# Agent 职责边界、专属 Skill 与协作协议\n\n本文件由 `backend/scripts/export_agent_contracts.py` 从运行时唯一契约源生成。\n聊天助手 `chat_assistant` 与... summary, evidence, artifacts, errors, next_action。区分事实与推断并携带证据引用；无法完成时按原生格式明确表达 blocked 或 needs_clarification。\n```\n'</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_markdown_adapts_to_new_modes_and_protection_flags[False]" time="0.003"><failure message="AssertionError: assert '本目录包含 3 份静态职责契约，其中 1 份受保护、2 份受治理。' in '# Agent 职责边界、专属 Skill 与协作协议\n\n本文件由 `backend/scripts/export_agent_contracts.py` 从运行时唯一契约源生成。\n聊天助手 `chat_assistant` 与... summary, evidence, artifacts, errors, next_action。区分事实与推断并携带证据引用；无法完成时按原生格式明确表达 blocked 或 needs_clarification。\n```\n'">tests/unit/test_export_agent_contracts.py:98: in test_markdown_adapts_to_new_modes_and_protection_flags
+    assert "本目录包含 3 份静态职责契约，其中 1 份受保护、2 份受治理。" in markdown
+E   AssertionError: assert '本目录包含 3 份静态职责契约，其中 1 份受保护、2 份受治理。' in '# Agent 职责边界、专属 Skill 与协作协议\n\n本文件由 `backend/scripts/export_agent_contracts.py` 从运行时唯一契约源生成。\n聊天助手 `chat_assistant` 与... summary, evidence, artifacts, errors, next_action。区分事实与推断并携带证据引用；无法完成时按原生格式明确表达 blocked 或 needs_clarification。\n```\n'</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_markdown_adapts_to_new_modes_and_protection_flags[True]" time="0.003"><failure message="AssertionError: assert '本目录包含 0 份静态职责契约，其中 0 份受保护、0 份受治理。' in '# Agent 职责边界、专属 Skill 与协作协议\n\n本文件由 `backend/scripts/export_agent_contracts.py` 从运行时唯一契约源生成。\n聊天助手 `chat_assistant` 与...a.trace_id` 在环境入口补齐。\n\n## Agent 总览\n\n| Agent | 名称 | 模式 | 专属 Skill 数 | 保护状态 |\n|---|---|---|---:|---|\n\n## 完整系统提示词\n'">tests/unit/test_export_agent_contracts.py:95: in test_markdown_adapts_to_new_modes_and_protection_flags
+    assert "本目录包含 0 份静态职责契约，其中 0 份受保护、0 份受治理。" in markdown
+E   AssertionError: assert '本目录包含 0 份静态职责契约，其中 0 份受保护、0 份受治理。' in '# Agent 职责边界、专属 Skill 与协作协议\n\n本文件由 `backend/scripts/export_agent_contracts.py` 从运行时唯一契约源生成。\n聊天助手 `chat_assistant` 与...a.trace_id` 在环境入口补齐。\n\n## Agent 总览\n\n| Agent | 名称 | 模式 | 专属 Skill 数 | 保护状态 |\n|---|---|---|---:|---|\n\n## 完整系统提示词\n'</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_json_protected_codes_follow_contract_fields" time="0.003"><failure message="AssertionError: assert ['chat_assistant', 'manager'] == ['alpha']&#10;  &#10;  At index 0 diff: 'chat_assistant' != 'alpha'&#10;  Left contains one more item: 'manager'&#10;  &#10;  Full diff:&#10;    [&#10;  -     'alpha',&#10;  +     'chat_assistant',&#10;  +     'manager',&#10;    ]">tests/unit/test_export_agent_contracts.py:113: in test_json_protected_codes_follow_contract_fields
+    assert payload["protected_agents"] == ["alpha"]
+E   AssertionError: assert ['chat_assistant', 'manager'] == ['alpha']
+E     
+E     At index 0 diff: 'chat_assistant' != 'alpha'
+E     Left contains one more item: 'manager'
+E     
+E     Full diff:
+E       [
+E     -     'alpha',
+E     +     'chat_assistant',
+E     +     'manager',
+E       ]</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_default_mode_keeps_existing_output_arguments" time="0.007" /><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_matching_outputs_never_writes" time="0.005"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 0">tests/unit/test_export_agent_contracts.py:145: in test_check_matching_outputs_never_writes
+    assert exit_code == 0, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 0</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_missing_outputs_does_not_create_parents" time="0.003"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:155: in test_check_missing_outputs_does_not_create_parents
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_detects_byte_drift_without_rewriting[extra_byte-0]" time="0.005"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:177: in test_check_detects_byte_drift_without_rewriting
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_detects_byte_drift_without_rewriting[extra_byte-1]" time="0.005"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:177: in test_check_detects_byte_drift_without_rewriting
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_detects_byte_drift_without_rewriting[crlf-0]" time="0.005"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:177: in test_check_detects_byte_drift_without_rewriting
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_detects_byte_drift_without_rewriting[crlf-1]" time="0.005"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:177: in test_check_detects_byte_drift_without_rewriting
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_detects_byte_drift_without_rewriting[invalid_utf8-0]" time="0.006"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:177: in test_check_detects_byte_drift_without_rewriting
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_detects_byte_drift_without_rewriting[invalid_utf8-1]" time="0.005"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:177: in test_check_detects_byte_drift_without_rewriting
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_one_missing_output_preserves_the_other[0]" time="0.005"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:191: in test_check_one_missing_output_preserves_the_other
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_check_one_missing_output_preserves_the_other[1]" time="0.005"><failure message="AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON&#10;  export_agent_contracts.py: error: unrecognized arguments: --check&#10;  &#10;assert 2 == 1">tests/unit/test_export_agent_contracts.py:191: in test_check_one_missing_output_preserves_the_other
+    assert exit_code == 1, stderr
+E   AssertionError: usage: export_agent_contracts.py [-h] --markdown MARKDOWN --json JSON
+E     export_agent_contracts.py: error: unrecognized arguments: --check
+E     
+E   assert 2 == 1</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_cli_check_exit_code_without_application_imports[False]" time="0.095"><failure message="AssertionError: Traceback (most recent call last):&#10;    File &quot;&lt;string&gt;&quot;, line 25, in &lt;module&gt;&#10;    File &quot;/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py&quot;, line 268, in run_path&#10;      return _run_module_code(code, init_globals, run_name,&#10;    File &quot;/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py&quot;, line 97, in _run_module_code&#10;      _run_code(code, mod_globals, init_globals,&#10;    File &quot;/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py&quot;, line 87, in _run_code&#10;      exec(code, run_globals)&#10;    File &quot;/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/scripts/export_agent_contracts.py&quot;, line 16, in &lt;module&gt;&#10;      from app.agents.contracts import CONTRACTS, PROTECTED_AGENT_CODES, validate_contract_catalog&#10;    File &quot;&lt;string&gt;&quot;, line 11, in isolated_import&#10;  AssertionError: Application import prohibited: app.agents.contracts&#10;  &#10;assert 1 == 0&#10; +  where 1 = CompletedProcess(args=['/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python', '-B', '-c', &quot;\nimport buil...  File &quot;&lt;string&gt;&quot;, line 11, in isolated_import\nAssertionError: Application import prohibited: app.agents.contracts\n').returncode&#10; +  and   0 = int(False)">tests/unit/test_export_agent_contracts.py:236: in test_cli_check_exit_code_without_application_imports
+    assert completed.returncode == int(drifted), completed.stderr
+E   AssertionError: Traceback (most recent call last):
+E       File "&lt;string&gt;", line 25, in &lt;module&gt;
+E       File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py", line 268, in run_path
+E         return _run_module_code(code, init_globals, run_name,
+E       File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py", line 97, in _run_module_code
+E         _run_code(code, mod_globals, init_globals,
+E       File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py", line 87, in _run_code
+E         exec(code, run_globals)
+E       File "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/scripts/export_agent_contracts.py", line 16, in &lt;module&gt;
+E         from app.agents.contracts import CONTRACTS, PROTECTED_AGENT_CODES, validate_contract_catalog
+E       File "&lt;string&gt;", line 11, in isolated_import
+E     AssertionError: Application import prohibited: app.agents.contracts
+E     
+E   assert 1 == 0
+E    +  where 1 = CompletedProcess(args=['/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python', '-B', '-c', "\nimport buil...  File "&lt;string&gt;", line 11, in isolated_import\nAssertionError: Application import prohibited: app.agents.contracts\n').returncode
+E    +  and   0 = int(False)</failure></testcase><testcase classname="tests.unit.test_export_agent_contracts" name="test_cli_check_exit_code_without_application_imports[True]" time="0.093"><failure message="json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)">tests/unit/test_export_agent_contracts.py:237: in test_cli_check_exit_code_without_application_imports
+    payload = json.loads(completed.stdout)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</failure></testcase></testsuite></testsuites>

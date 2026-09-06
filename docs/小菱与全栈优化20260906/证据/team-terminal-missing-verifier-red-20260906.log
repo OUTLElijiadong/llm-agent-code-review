@@ -1,0 +1,30 @@
+started_at=2026-09-05T23:56:52.029480+00:00
+cwd=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend
+command=/usr/bin/sandbox-exec -f /tmp/prism-readonly-20260905-tests/readonly.sb '/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python' -B /tmp/prism-readonly-20260905-tests/pytest_readonly.py -q -o addopts= -p no:cacheprovider -p pytest_asyncio.plugin --basetemp=/tmp/prism-readonly-20260905-tests/pytest/team-terminal-missing-verifier-red-20260906 --junitxml=/tmp/prism-readonly-20260905-tests/team-terminal-missing-verifier-red-20260906.xml --tb=short tests/unit/services/test_agent_team_service.py -k missing_verifier
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+_______ test_missing_verifier_drains_running_tasks_before_failing[True] ________
+tests/unit/services/test_agent_team_service.py:930: in test_missing_verifier_drains_running_tasks_before_failing
+    assert parent.status == "running" and parent.completed_at is None
+E   AssertionError: assert ('failed' == 'running'
+E     
+E     - running
+E     + failed)
+_______ test_missing_verifier_drains_running_tasks_before_failing[False] _______
+tests/unit/services/test_agent_team_service.py:930: in test_missing_verifier_drains_running_tasks_before_failing
+    assert parent.status == "running" and parent.completed_at is None
+E   AssertionError: assert ('failed' == 'running'
+E     
+E     - running
+E     + failed)
+- generated xml file: /tmp/prism-readonly-20260905-tests/team-terminal-missing-verifier-red-20260906.xml -
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_agent_team_service.py::test_missing_verifier_drains_running_tasks_before_failing[True] - AssertionError: assert ('failed' == 'running'
+  
+  - running
+  + failed)
+FAILED tests/unit/services/test_agent_team_service.py::test_missing_verifier_drains_running_tasks_before_failing[False] - AssertionError: assert ('failed' == 'running'
+  
+  - running
+  + failed)
+2 failed, 1 passed, 58 deselected in 1.12s

@@ -1,0 +1,8 @@
+[2026-09-05T20:17:41Z] INFO  在独立容器 cr_testdb 创建隔离恢复库: prism_verify_20260905201741_665
+[2026-09-05T20:18:33Z] INFO  独立恢复验证通过(container=cr_testdb, tables=89, alembic=047_review_input_snapshot)
+verified_backup=/opt/code-review/backups/code_review_20260905T201610Z_343616d9d40c.sql.gz
+backup_sha256=7bb99942cc0e571008743fc66b0d1cdd88fcf13640579b32fb493c0679d7dc6f
+{"changed_ids": [24, 25, 26, 27], "manifest_sha256": "d36ca7e949035d7310e563a96fd1919519d5a45fb95f2175d8abb4a21133b59a", "operation_id": "874c7f1be92b4c338c93d232389c1b2e", "state": "committed"}
+manifest=/opt/code-review/backups/release-20260906/quarantine-24-27/operation-20260905T201834Z.json
+d36ca7e949035d7310e563a96fd1919519d5a45fb95f2175d8abb4a21133b59a  /opt/code-review/backups/release-20260906/quarantine-24-27/operation-20260905T201834Z.json
+quarantine committed; no associated rows deleted

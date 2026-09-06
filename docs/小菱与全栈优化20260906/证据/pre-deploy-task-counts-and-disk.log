@@ -1,0 +1,30 @@
+source	status	total
+review_task	cancelled	5
+review_task	deleted	10
+review_task	failed	20
+review_task	success	111
+source	status	total
+agent_team	completed	42
+agent_team	failed	15
+agent_team	cancelled	6
+source	status	total
+agent_team_task	blocked	16
+agent_team_task	cancelled	14
+agent_team_task	completed	145
+agent_team_task	dead_letter	11
+agent_team_task	failed	9
+agent_team_task	queued	1
+agent_team_task	waiting_dependency	1
+source	status	total
+agent_job_run	failed	7748
+agent_job_run	success	46994
+TABLE_NAME	TABLE_COLLATION
+agent_job_run	utf8mb4_unicode_ci
+agent_team	utf8mb4_unicode_ci
+agent_team_task	utf8mb4_unicode_ci
+review_task	utf8mb4_0900_ai_ci
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          67        6         14.6GB    12.75GB (87%)
+Containers      7         7         8.271MB   0B (0%)
+Local Volumes   8         6         19.34GB   19.02kB (0%)
+Build Cache     384       0         18.01GB   18.01GB

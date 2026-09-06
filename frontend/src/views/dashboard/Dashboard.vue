@@ -5,9 +5,10 @@
       <div>
         <h1 class="page-title font-display">仪表盘</h1>
         <p class="page-sub">
-          {{ today }} · 最近
-          <b class="hl">{{ summary.recent_tasks?.length ?? 0 }}</b>
-          个审查任务
+          {{ today }}
+          <template v-if="summaryState === 'success' && summary"> · 最近
+            <b class="hl">{{ summary.recent_tasks.length }}</b> 个已完成审查
+          </template>
         </p>
       </div>
       <div class="page-actions">
@@ -16,38 +17,25 @@
           <el-option label="近 30 天" :value="30" />
           <el-option label="近 90 天" :value="90" />
         </el-select>
-        <el-button v-if="canExportWeeklyReport" @click="onWeeklyReport">导出周报</el-button>
+        <el-button :loading="loading" @click="loadDashboard">刷新数据</el-button>
+        <el-button v-if="canExportWeeklyReport" data-testid="export-dashboard" :disabled="!canExportCurrentData" @click="onWeeklyReport">导出统计报告</el-button>
         <el-button v-if="canStartReview" type="primary" @click="onNewReview">+ 新建审查</el-button>
       </div>
     </header>
 
-    <PrismLoading
-      v-if="loading"
-      label="正在加载仪表盘数据"
-      sublabel="正在汇总项目、审查任务和风险指标"
-    />
-
-    <template v-else>
-    <!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
-    <el-alert
-      v-if="showChangelog"
-      class="changelog-alert prism-rise"
-      type="info"
-      :closable="true"
-      @close="dismissChangelog"
-    >
-      <template #title>
-        <span class="changelog-title">v3.4 全链路源码审计已上线</span>
-      </template>
-      <div class="changelog-body">
-        四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 +
-        <b>真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。
-        <router-link v-if="canStartReview && canViewProjects" to="/projects" class="changelog-link">去发起全链路审计 →</router-link>
-      </div>
-    </el-alert>
+    <p class="load-feedback" role="status" aria-live="polite" data-testid="dashboard-progress">
+      {{ loading ? '正在读取仪表盘' : '仪表盘读取结束' }} · 已返回 {{ completedReads }} / 5 项
+      <span v-if="failedReads"> · {{ failedReads }} 项读取失败，请在对应分区重试</span>
+    </p>
+    <section data-section="summary" :data-state="summaryState" :aria-busy="summaryState === 'loading'">
+      <PrismLoading v-if="summaryState === 'loading'" label="正在读取摘要" sublabel="正在查询当前账号可见的项目与已完成审查" />
+      <p v-else-if="summaryState === 'error'" class="load-feedback error" role="alert">
+        摘要读取失败，无法确认统计数值。
+        <button class="link" type="button" @click="loadSummary">重试摘要</button>
+      </p>
 
     <!-- ============ 6 张统计卡 ============ -->
-    <section class="stat-grid prism-stagger">
+    <section v-if="summaryState === 'success'" class="stat-grid prism-stagger">
       <div v-for="card in statCards" :key="card.label" class="stat" :class="{ feature: card.feature }">
         <div v-if="card.feature" class="feature-spectrum"></div>
         <div class="stat-label">
@@ -60,16 +48,17 @@
           {{ card.value }}<span class="stat-unit">{{ card.unit }}</span>
         </div>
         <div v-if="card.delta" class="stat-delta" :class="card.deltaDir">{{ card.delta }}</div>
-        <div v-if="card.feature" class="stat-gauge">
+        <div v-if="card.feature && hasAverageScore" class="stat-gauge">
           <div class="gauge-track">
             <FluidProgress class="gauge-fluid" :progress="avgScoreAnim" :height="6" />
           </div>
           <div class="gauge-label">
             <span>风险等级 · {{ riskLevel }}</span>
-            <span>目标 90</span>
+            <span>已完成审查均分</span>
           </div>
         </div>
       </div>
+    </section>
     </section>
 
     <!-- ============ v2.1.1 安全态势卡 ============ -->
@@ -79,16 +68,18 @@
 
     <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
     <section class="chart-row two-col prism-stagger">
-      <article class="chart-card">
+      <article class="chart-card" data-section="dimension" :data-state="chartStates.dimension" :aria-busy="chartStates.dimension === 'loading'">
         <header class="chart-head">
           <div>
             <h3 class="font-display">8 维度问题分布 · 棱镜光谱</h3>
-            <p class="chart-desc">{{ timeRange }} 天内 {{ totalDimCount }} 个问题在 8 个维度上的分布</p>
+            <p class="chart-desc">{{ timeRange }} 天内的问题分布<span v-if="chartStates.dimension === 'success'"> · {{ totalDimCount }} 个</span></p>
           </div>
         </header>
-        <BaseChart v-if="dimChartReady" :option="dimPolarOption" height="320px" />
-        <EmptyState v-else description="正在汇总维度数据" compact />
-        <div class="legend-list">
+        <p v-if="chartStates.dimension === 'loading'" role="status">正在读取维度数据</p>
+        <p v-else-if="chartStates.dimension === 'error'" class="load-feedback error" role="alert">维度数据读取失败。<button class="link" type="button" @click="loadIssueTypeStatistics">重试维度数据</button></p>
+        <BaseChart v-else-if="dimChartReady" :option="dimPolarOption" height="320px" />
+        <EmptyState v-else description="暂无维度数据" compact />
+        <div v-if="chartStates.dimension === 'success' && dimChartReady" class="legend-list">
           <div v-for="d in dimSummary" :key="d.key" class="legend-item">
             <span class="dot" :style="{ background: d.color }"></span>
             <span class="name">{{ d.name }}</span>
@@ -100,12 +91,14 @@
       <article class="chart-card activity">
         <header class="chart-head">
           <div>
-            <h3 class="font-display">最近 Agent 审查活动</h3>
-            <p class="chart-desc">实时 · 流式</p>
+            <h3 class="font-display">最近已完成审查</h3>
+            <p class="chart-desc">最近记录 · 随摘要刷新</p>
           </div>
-          <a class="link" @click="goReviewList">全部 →</a>
+          <button class="link" type="button" @click="goReviewList">全部 →</button>
         </header>
-        <div class="activity-feed">
+        <p v-if="summaryState === 'loading'" role="status">正在读取最近审查</p>
+        <p v-else-if="summaryState === 'error'">最近审查读取失败，请重试摘要。</p>
+        <div v-else class="activity-feed">
           <div
             v-for="item in activityFeed"
             :key="item.id"
@@ -128,27 +121,33 @@
 
     <!-- ============ 3 个分析图 ============ -->
     <section class="chart-row three-col prism-stagger">
-      <article class="chart-card">
+      <article class="chart-card" data-section="frequency" :data-state="chartStates.frequency" :aria-busy="chartStates.frequency === 'loading'">
         <header class="chart-head">
           <h3 class="font-display">{{ timeRange }} 天审查任务趋势</h3>
         </header>
-        <BaseChart v-if="frequencyData.length" :option="trendOption" height="220px" />
+        <p v-if="chartStates.frequency === 'loading'" role="status">正在读取趋势数据</p>
+        <p v-else-if="chartStates.frequency === 'error'" class="load-feedback error" role="alert">趋势数据读取失败。<button class="link" type="button" @click="loadReviewFrequency">重试趋势数据</button></p>
+        <BaseChart v-else-if="frequencyData.length" :option="trendOption" height="220px" />
         <EmptyState v-else description="暂无趋势数据" compact />
       </article>
 
-      <article class="chart-card">
+      <article class="chart-card" data-section="risk" :data-state="chartStates.risk" :aria-busy="chartStates.risk === 'loading'">
         <header class="chart-head">
           <h3 class="font-display">严重度分布</h3>
         </header>
-        <BaseChart v-if="riskData.length" :option="severityOption" height="220px" />
+        <p v-if="chartStates.risk === 'loading'" role="status">正在读取严重度数据</p>
+        <p v-else-if="chartStates.risk === 'error'" class="load-feedback error" role="alert">严重度数据读取失败。<button class="link" type="button" @click="loadRiskDistribution">重试严重度数据</button></p>
+        <BaseChart v-else-if="riskData.some((item) => item.value > 0)" :option="severityOption" height="220px" />
         <EmptyState v-else description="暂无严重度数据" compact />
       </article>
 
-      <article class="chart-card">
+      <article class="chart-card" data-section="score" :data-state="chartStates.score" :aria-busy="chartStates.score === 'loading'">
         <header class="chart-head">
-          <h3 class="font-display">最近评分 TOP {{ scoreTrendData.length }}</h3>
+          <h3 class="font-display">最近完成评分</h3>
         </header>
-        <div v-if="scoreTrendData.length" class="score-bars">
+        <p v-if="chartStates.score === 'loading'" role="status">正在读取评分数据</p>
+        <p v-else-if="chartStates.score === 'error'" class="load-feedback error" role="alert">评分数据读取失败。<button class="link" type="button" @click="loadScoreTrend">重试评分数据</button></p>
+        <div v-else-if="scoreTrendData.length" class="score-bars">
           <div v-for="s in scoreTrendData" :key="s.name" class="score-bar">
             <div class="row">
               <span class="bar-name">{{ s.name }}</span>
@@ -168,12 +167,11 @@
         <EmptyState v-else description="暂无评分数据" compact />
       </article>
     </section>
-    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 
@@ -183,6 +181,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import FluidProgress from '@/components/common/FluidProgress.vue'
 import { useCountUp } from '@/composables/useCountUp'
+import { reviewRiskLevel, reviewScoreColor } from '@/utils/reviewScore'
 import SecurityPostureCard from '@/components/security/SecurityPostureCard.vue'
 import { PRISM_SEVERITY_COLORS } from '@/components/chart/prismTheme'
 import { severityClass, severityDisplayLabel } from '@/constants/severity'
@@ -201,43 +200,34 @@ import { useUserStore } from '@/stores/user'
 const router = useRouter()
 const userStore = useUserStore()
 const canStartReview = computed(() => userStore.hasPermission('review:start'))
-const canViewProjects = computed(() => userStore.hasPermission('project:view'))
 const canViewSecurity = computed(() => userStore.hasPermission('security:view'))
 const canExportWeeklyReport = computed(() => (
   userStore.hasPermission('report:export:html')
   || userStore.hasPermission('report:export:pdf')
 ))
 const timeRange = ref(30)
-const loading = ref(true)
-
-// v3.4 更新公告:每个用户只显示一次——本次展示后立即记录,之后不再出现
-const CHANGELOG_VERSION = 'v3.4'
-const CHANGELOG_KEY = 'prism_changelog_seen'
-const showChangelog = ref(localStorage.getItem(CHANGELOG_KEY) !== CHANGELOG_VERSION)
-if (showChangelog.value) {
-  localStorage.setItem(CHANGELOG_KEY, CHANGELOG_VERSION)
-}
-function dismissChangelog() {
-  showChangelog.value = false
-}
-
-const summary = ref<SummaryOut>({
-  project_count: 0,
-  file_count: 0,
-  review_count: 0,
-  total_issues: 0,
-  severe_issues: 0,
-  avg_score: 0,
-  recent_tasks: [],
-})
+type LoadState = 'loading' | 'success' | 'error'
+type ChartKey = 'risk' | 'dimension' | 'score' | 'frequency'
+const summary = ref<SummaryOut | null>(null)
+const summaryState = ref<LoadState>('loading')
+const chartStates = reactive<Record<ChartKey, LoadState>>({ risk: 'loading', dimension: 'loading', score: 'loading', frequency: 'loading' })
+const chartVersions: Record<ChartKey, number> = { risk: 0, dimension: 0, score: 0, frequency: 0 }
+let summaryVersion = 0
+let disposed = false
+const readStates = computed(() => [summaryState.value, ...Object.values(chartStates)])
+const loading = computed(() => readStates.value.includes('loading'))
+const completedReads = computed(() => readStates.value.filter((state) => state !== 'loading').length)
+const failedReads = computed(() => readStates.value.filter((state) => state === 'error').length)
+const canExportCurrentData = computed(() => readStates.value.every((state) => state === 'success'))
+const hasAverageScore = computed(() => Boolean(summary.value && summary.value.review_count > 0 && Number.isFinite(summary.value.avg_score)))
 
 /* 数字滚动:统计卡数值从旧值平滑滚动到新值 */
-const reviewCountSrc = computed(() => summary.value.review_count)
-const totalIssuesSrc = computed(() => summary.value.total_issues)
-const severeIssuesSrc = computed(() => summary.value.severe_issues)
-const avgScoreSrc = computed(() => Number(summary.value.avg_score || 0))
-const projectCountSrc = computed(() => summary.value.project_count)
-const fileCountSrc = computed(() => summary.value.file_count)
+const reviewCountSrc = computed(() => summary.value?.review_count ?? 0)
+const totalIssuesSrc = computed(() => summary.value?.total_issues ?? 0)
+const severeIssuesSrc = computed(() => summary.value?.severe_issues ?? 0)
+const avgScoreSrc = computed(() => summary.value?.avg_score ?? 0)
+const projectCountSrc = computed(() => summary.value?.project_count ?? 0)
+const fileCountSrc = computed(() => summary.value?.file_count ?? 0)
 const reviewCountAnim = useCountUp(reviewCountSrc)
 const totalIssuesAnim = useCountUp(totalIssuesSrc)
 const severeIssuesAnim = useCountUp(severeIssuesSrc)
@@ -259,14 +249,14 @@ const today = computed(() => {
 const dimMeta = DIM_META
 
 const statCards = computed(() => {
-  const hasReview = summary.value.review_count > 0
-  const hasIssue = summary.value.total_issues > 0
-  const hasSevere = summary.value.severe_issues > 0
-  const hasProject = summary.value.project_count > 0
-  const hasFile = summary.value.file_count > 0
+  const hasReview = reviewCountSrc.value > 0
+  const hasIssue = totalIssuesSrc.value > 0
+  const hasSevere = severeIssuesSrc.value > 0
+  const hasProject = projectCountSrc.value > 0
+  const hasFile = fileCountSrc.value > 0
   return [
     {
-      label: '累计审查任务', value: Math.round(reviewCountAnim.value), unit: '次', icon: 'DocumentChecked',
+      label: '累计成功审查', value: Math.round(reviewCountAnim.value), unit: '次', icon: 'DocumentChecked',
       iconStyle: { background: 'var(--brand-50)', color: 'var(--brand-600)' },
       delta: hasReview ? '持续积累中' : '— 暂无数据', deltaDir: 'flat',
       feature: false,
@@ -286,9 +276,9 @@ const statCards = computed(() => {
       feature: false,
     },
     {
-      label: '平均代码评分', value: avgScoreAnim.value.toFixed(1), unit: '/100', icon: 'TrendCharts',
+      label: '平均代码评分', value: hasAverageScore.value ? avgScoreAnim.value.toFixed(1) : '—', unit: '/100', icon: 'TrendCharts',
       iconStyle: { background: 'rgba(255,255,255,.16)', color: '#fff' },
-      delta: hasReview ? null : '— 暂无审查',
+      delta: hasReview ? null : '— 暂无已完成审查',
       deltaDir: 'flat',
       feature: true,
     },
@@ -307,14 +297,7 @@ const statCards = computed(() => {
   ]
 })
 
-const riskLevel = computed(() => {
-  const s = summary.value.avg_score || 0
-  if (s >= 90) return '优秀'
-  if (s >= 80) return '良好'
-  if (s >= 70) return '一般'
-  if (s >= 60) return '及格'
-  return '风险'
-})
+const riskLevel = computed(() => hasAverageScore.value ? reviewRiskLevel(summary.value?.avg_score) : '未知')
 
 const totalDimCount = computed(() => issueTypeData.value.reduce((s, x) => s + x.value, 0))
 
@@ -327,7 +310,7 @@ const dimSummary = computed(() => {
     .sort((a, b) => b.value - a.value)
 })
 
-const dimChartReady = computed(() => issueTypeData.value.length > 0 || totalDimCount.value > 0)
+const dimChartReady = computed(() => totalDimCount.value > 0)
 
 const dimPolarOption = computed<EChartsOption>(() => ({
   polar: { radius: ['18%', '78%'] },
@@ -394,6 +377,7 @@ const severityOption = computed<EChartsOption>(() => ({
   legend: { bottom: 0, icon: 'circle', textStyle: { fontSize: 11 } },
   series: [{
     type: 'pie',
+    stillShowZeroSum: false,
     radius: ['52%', '76%'],
     avoidLabelOverlap: true,
     itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
@@ -413,10 +397,7 @@ const severityOption = computed<EChartsOption>(() => ({
  * @returns 十六进制颜色值
  */
 function scoreColor(score: number): string {
-  if (score >= 85) return '#4FB87A'
-  if (score >= 70) return '#D9A857'
-  if (score >= 60) return '#E27C4A'
-  return '#DC4961'
+  return reviewScoreColor(score)
 }
 
 /**
@@ -444,7 +425,7 @@ interface ActivityItem {
 }
 
 const activityFeed = computed<ActivityItem[]>(() => {
-  const tasks = (summary.value.recent_tasks ?? []) as RecentTaskOut[]
+  const tasks = (summary.value?.recent_tasks ?? []) as RecentTaskOut[]
   return tasks.slice(0, 6).map((t, i) => {
     const id = t.id ?? i
     const score = t.score ?? 0
@@ -466,70 +447,143 @@ const activityFeed = computed<ActivityItem[]>(() => {
           ? `完成 <b>${safeDisplayName}</b>，评分 <b style="color: var(--status-fixed);">${score}</b>`
           : `<b>${safeDisplayName}</b> 检出问题`,
       meta: `状态：${status}${ok ? ` · 评分 ${score}` : ''}`,
-      when: created || '近期',
+      when: created || '时间未记录',
       live,
     }
   })
 })
 
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isScore(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+}
+
+function isText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number(value.slice(0, 4)) < 1) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+
+function isTimestamp(value: unknown): value is string {
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}[T ](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/.test(value)
+    && isCalendarDate(value.slice(0, 10)) && Number.isFinite(Date.parse(value))
+}
+
+function isRecentTask(value: unknown): value is RecentTaskOut {
+  if (!value || typeof value !== 'object') return false
+  const task = value as RecentTaskOut
+  return isCount(task.id) && task.id > 0 && isCount(task.project_id) && task.project_id > 0
+    && isText(task.task_name) && isText(task.project_name) && task.status === 'success'
+    && isScore(task.score) && (task.create_time === null || isTimestamp(task.create_time))
+}
+
+function assertRows(data: unknown, validate: (row: Record<string, unknown>) => boolean): void {
+  if (!Array.isArray(data) || !data.every((row) => row && typeof row === 'object' && !Array.isArray(row) && validate(row))) {
+    throw new Error('Invalid dashboard rows')
+  }
+}
+
 async function loadSummary() {
-  summary.value = await getSummary()
+  const version = ++summaryVersion
+  summaryState.value = 'loading'
+  try {
+    const data = await getSummary()
+    if (disposed || version !== summaryVersion) return
+    const counts = data && [data.project_count, data.file_count, data.review_count, data.total_issues, data.severe_issues]
+    if (!counts || !counts.every(isCount) || !isScore(data.avg_score)
+      || !Array.isArray(data.recent_tasks) || !data.recent_tasks.every(isRecentTask)) throw new Error('Invalid dashboard summary')
+    summary.value = data
+    summaryState.value = 'success'
+  } catch {
+    if (!disposed && version === summaryVersion) summaryState.value = 'error'
+  }
+}
+
+async function loadChart<Value>(key: ChartKey, request: () => Promise<Value>, accept: (value: Value) => void) {
+  const version = ++chartVersions[key]
+  chartStates[key] = 'loading'
+  try {
+    const data = await request()
+    if (disposed || version !== chartVersions[key]) return
+    accept(data)
+    chartStates[key] = 'success'
+  } catch {
+    if (!disposed && version === chartVersions[key]) chartStates[key] = 'error'
+  }
 }
 
 async function loadRiskDistribution() {
-  const data = await getRiskDistribution(timeRange.value)
-  riskData.value = data.map((item: RiskItem) => ({
-    severity: item.severity,
-    name: severityDisplayLabel(item.severity),
-    value: item.count,
-  }))
+  await loadChart('risk', () => getRiskDistribution(timeRange.value), (data) => {
+    assertRows(data, (row) => isText(row.severity) && isCount(row.count))
+    if (!isCount(data.reduce((total, item) => total + item.count, 0))) throw new Error('Invalid risk total')
+    riskData.value = data.map((item: RiskItem) => ({
+      severity: item.severity,
+      name: severityDisplayLabel(item.severity),
+      value: item.count,
+    }))
+  })
 }
 
 async function loadIssueTypeStatistics() {
-  const data = await getIssueTypeStatistics(timeRange.value)
-  const aggregate: Record<string, { key: string; name: string; value: number }> = {}
-  for (const item of data as IssueTypeItem[]) {
-    const norm = normalizeDimKey(item.issue_type)
-    const key = norm ?? '__other__'
-    const meta = dimMeta.find((d) => d.key === key)
-    const name = meta?.name ?? item.issue_type ?? '其他'
-    if (!aggregate[key]) aggregate[key] = { key, name, value: 0 }
-    aggregate[key].value += item.count
-  }
-  issueTypeData.value = Object.values(aggregate)
+  await loadChart('dimension', () => getIssueTypeStatistics(timeRange.value), (data) => {
+    assertRows(data, (row) => isText(row.issue_type) && isCount(row.count))
+    if (!isCount(data.reduce((total, item) => total + item.count, 0))) throw new Error('Invalid dimension total')
+    const aggregate: Record<string, { key: string; name: string; value: number }> = {}
+    for (const item of data as IssueTypeItem[]) {
+      const norm = normalizeDimKey(item.issue_type)
+      const key = norm ?? '__other__'
+      const meta = dimMeta.find((dimension) => dimension.key === key)
+      const name = meta?.name ?? item.issue_type ?? '其他'
+      if (!aggregate[key]) aggregate[key] = { key, name, value: 0 }
+      aggregate[key].value += item.count
+    }
+    issueTypeData.value = Object.values(aggregate)
+  })
 }
 
 async function loadScoreTrend() {
-  const data = await getScoreTrend(6)
-  scoreTrendData.value = data.map((item: ScoreTrendItem) => ({
-    name: `#${item.task_id}`,
-    value: item.score,
-  }))
+  await loadChart('score', () => getScoreTrend(6), (data) => {
+    assertRows(data, (row) => isCount(row.task_id) && row.task_id > 0 && isScore(row.score) && isTimestamp(row.create_time))
+    scoreTrendData.value = data.map((item: ScoreTrendItem) => ({
+      name: `#${item.task_id}`,
+      value: item.score,
+    }))
+  })
 }
 
 async function loadReviewFrequency() {
-  const data = await getReviewFrequency(timeRange.value)
-  frequencyData.value = data.map((item: FrequencyItem) => ({
-    name: dayjs(item.date).format('M/D'),
-    value: item.count,
-  }))
+  await loadChart('frequency', () => getReviewFrequency(timeRange.value), (data) => {
+    assertRows(data, (row) => isCalendarDate(row.date) && isCount(row.count))
+    frequencyData.value = data.map((item: FrequencyItem) => ({
+      name: dayjs(item.date).format('M/D'),
+      value: item.count,
+    }))
+  })
 }
 
 async function loadCharts() {
-  // 用 allSettled 让单个图表接口失败不拖垮整屏,失败的图表显示空态而非全空
-  const results = await Promise.allSettled([
+  await Promise.allSettled([
     loadRiskDistribution(),
     loadIssueTypeStatistics(),
     loadScoreTrend(),
     loadReviewFrequency(),
   ])
-  if (results.some((r) => r.status === 'rejected')) {
-    ElMessage.warning('部分图表数据加载失败,请稍后刷新重试')
-  }
 }
 
 function onWeeklyReport() {
   if (!canExportWeeklyReport.value) return
+  if (!canExportCurrentData.value || !summary.value) {
+    ElMessage.warning('请等待数据读取完成，并重试失败分区后再导出')
+    return
+  }
   const s = summary.value
   const esc = (v: unknown) => String(v ?? '').replace(/[&<>]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c))
@@ -543,7 +597,7 @@ function onWeeklyReport() {
     : '<tr><td colspan="5" style="color:#999">暂无审查记录</td></tr>'
 
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<title>棱镜 Prism 代码审查周报</title>
+<title>棱镜 Prism 代码审查统计报告</title>
 <style>
   body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#1f2452;margin:40px;line-height:1.6}
   h1{font-size:24px;margin:0 0 4px} .sub{color:#888;font-size:13px;margin-bottom:24px}
@@ -554,14 +608,14 @@ function onWeeklyReport() {
   th{color:#888;font-weight:600}
   @media print{body{margin:16px}}
 </style></head><body>
-  <h1>棱镜 Prism · 代码审查周报</h1>
-  <div class="sub">统计区间:近 ${esc(timeRange.value)} 天 · 生成时间:${esc(dayjs().format('YYYY-MM-DD HH:mm'))}</div>
-  <h2>总体概览</h2>
+  <h1>棱镜 Prism · 代码审查统计报告</h1>
+  <div class="sub">风险与问题类型图表区间:近 ${esc(timeRange.value)} 天；概览为累计值，最近审查不受区间限制。生成时间:${esc(dayjs().format('YYYY-MM-DD HH:mm'))}</div>
+  <h2>累计概览</h2>
   <div class="cards">
-    <div class="card"><div class="n">${esc(s.review_count)}</div><div class="l">累计审查任务</div></div>
+    <div class="card"><div class="n">${esc(s.review_count)}</div><div class="l">累计成功审查</div></div>
     <div class="card"><div class="n">${esc(s.total_issues)}</div><div class="l">累计发现问题</div></div>
     <div class="card"><div class="n">${esc(s.severe_issues)}</div><div class="l">严重问题</div></div>
-    <div class="card"><div class="n">${esc(s.avg_score)}</div><div class="l">平均代码评分</div></div>
+    <div class="card"><div class="n">${hasAverageScore.value ? esc(s.avg_score) : '暂无已完成审查'}</div><div class="l">平均代码评分</div></div>
     <div class="card"><div class="n">${esc(s.project_count)}</div><div class="l">活跃项目</div></div>
     <div class="card"><div class="n">${esc(s.file_count)}</div><div class="l">代码文件</div></div>
   </div>
@@ -575,15 +629,16 @@ function onWeeklyReport() {
   // 内容作为独立文档加载),且所有动态字段已经过 esc() 转义
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const url = window.URL.createObjectURL(blob)
-  const w = window.open(url, '_blank', 'noopener,noreferrer')
-  if (!w) {
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  } catch {
     window.URL.revokeObjectURL(url)
-    ElMessage.warning('请允许弹出窗口以导出周报')
+    ElMessage.error('无法打开统计报告，请检查浏览器设置后重试')
     return
   }
   // 延迟回收 URL,确保新窗口加载完成
   setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
-  ElMessage.success('周报已在新窗口打开,可通过浏览器打印保存为 PDF')
+  ElMessage.info('已请求打开统计报告；若未出现，请允许弹出窗口后重试。可在报告窗口打印保存为 PDF')
 }
 
 function onNewReview() {
@@ -606,16 +661,7 @@ function onAgentTaskComplete(): void {
 }
 
 async function loadDashboard(): Promise<void> {
-  loading.value = true
-  try {
-    // allSettled: 摘要或图表任一失败不影响另一方渲染
-    const results = await Promise.allSettled([loadSummary(), loadCharts()])
-    if (results[0]?.status === 'rejected') {
-      ElMessage.error('工作台摘要数据加载失败')
-    }
-  } finally {
-    loading.value = false
-  }
+  await Promise.allSettled([loadSummary(), loadCharts()])
 }
 
 onMounted(() => {
@@ -624,35 +670,30 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
   window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
 </script>
 
 <style scoped lang="scss">
-.changelog-alert {
-  margin-bottom: 4px;
-  border-radius: 8px;
-
-  :deep(.el-alert__content) { width: 100%; }
-}
-.changelog-title {
-  font-weight: 700;
-  font-size: 14px;
-}
-.changelog-body {
-  margin-top: 4px;
+.load-feedback {
+  color: var(--gray-500);
   font-size: 13px;
   line-height: 1.6;
-  color: var(--prism-text-secondary, #5c6672);
-}
-.changelog-link {
-  margin-left: 6px;
-  color: var(--prism-accent, #2f6bff);
-  text-decoration: none;
-  font-weight: 600;
+  margin: 0;
 
-  &:hover { text-decoration: underline; }
+  &.error { color: var(--sev-severe); }
+}
+
+button.link {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  padding: 4px 8px;
+
+  &:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
 }
 
 .dashboard-page {

@@ -1,0 +1,6 @@
+2026-09-05T19:49:26Z	/healthz	200
+2026-09-05T19:49:26Z	/readyz	200
+2026-09-05T19:49:26Z	/api/auth/me	401
+2026-09-05T19:49:26Z	/api/projects	401
+2026-09-05T19:49:27Z	/api/reports	401
+2026-09-05T19:49:27Z	/assets/index-CdsAD1Vq.js	200

@@ -1,0 +1,10 @@
+checked_at=2026-09-06T00:16:55Z
+
+--- /healthz ---
+{"status":"ok","version":"3.8.4","release":"343616d9d40c1e44e17c7da465c7173c418debb5"}
+
+--- /readyz ---
+{"status":"ready","version":"3.8.4","release":"343616d9d40c1e44e17c7da465c7173c418debb5"}
+
+--- anonymous auth status ---
+401

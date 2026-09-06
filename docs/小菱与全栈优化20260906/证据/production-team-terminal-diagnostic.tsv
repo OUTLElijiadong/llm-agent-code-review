@@ -1,0 +1,22 @@
+observed_at_utc	read_only	isolation_level
+2026-09-05 20:18:26.204916	1	REPEATABLE-READ
+task_id	team_id	child_status	parent_status
+11	5	queued	failed
+35	12	waiting_dependency	failed
+team_id	event_type	from_status	to_status	total_events
+5	task.blocked	waiting_dependency	blocked	1
+5	task.claimed	queued	running	2
+5	task.failed	running	failed	1
+5	task.retry_queued	running	queued	1
+5	task.runtime_resource_attached	NULL	NULL	1
+5	team.created	NULL	queued	1
+5	team.status_changed	queued	running	1
+5	team.status_changed	running	failed	1
+12	task.blocked	waiting_dependency	blocked	1
+12	task.claimed	queued	running	3
+12	task.dead_letter	running	dead_letter	1
+12	task.retry_queued	running	queued	2
+12	team.created	NULL	queued	1
+12	team.status_changed	queued	running	3
+12	team.status_changed	running	failed	1
+12	team.status_changed	running	queued	2

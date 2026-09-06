@@ -1,0 +1,1694 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --reporter=default --reporter=junit --outputFile.junit=/tmp/prism-release-20260906/dashboard-feedback-red-reproduction.xml src/views/dashboard/Dashboard.test.ts
+
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/dashboard/Dashboard.test.ts (12 tests | 12 failed) 84ms
+   × 成员仪表盘真实读取状态 > 首载未取得摘要时不显示零项任务或零分 18ms
+     → expected '2026 年 9 月 6 日 · 周日 · 最近 0 个审查任务' not to contain '0'
+   × 成员仪表盘真实读取状态 > 摘要失败显示可重试错误而不假报空业务 27ms
+     → Unable to get [data-section="summary"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无数据</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无审查</div>
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="0" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 风险</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+   × 成员仪表盘真实读取状态 > 真实全零保留零值，没有已完成审查时不判为风险或零分 6ms
+     → expected [ '0次', '0个', '0个', '0.0/100', …(2) ] to deeply equal [ '0次', '0个', '0个', '—/100', …(2) ]
+   × 成员仪表盘真实读取状态 > 已有成功审查的真实零分不被当成未知 4ms
+     → expected '风险等级 · 风险目标 90' to contain '极高风险'
+   × 成员仪表盘真实读取状态 > 畸形摘要不得变成可导出的统计事实 5ms
+     → Unable to get [data-section="summary"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无数据</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无审查</div>
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+   × 成员仪表盘真实读取状态 > 部分接口迟迟未返回时成功分区仍立即展示 1ms
+     → Cannot call text on an empty DOMWrapper.
+   × 成员仪表盘真实读取状态 > 维度接口成功且为空不再永远显示汇总中或八个假零 4ms
+     → Unable to get [data-section="dimension"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">4<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续积累中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+   × 成员仪表盘真实读取状态 > 单图失败与空态分开且仅重试失败图 6ms
+     → Unable to get [data-section="risk"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">4<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续积累中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+   × 成员仪表盘真实读取状态 > 切换日期时旧区间成功响应不得覆盖新图 2ms
+     → Unable to get [data-section="risk"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header>
+  <div data-v-1c6c8216="">正在加载仪表盘数据 正在汇总项目、审查任务和风险指标</div>
+</div>
+   × 成员仪表盘真实读取状态 > 旧区间失败不得覆盖新请求成功状态 4ms
+     → Unable to get [data-section="risk"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">4<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续积累中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">7 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">7 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+   × 成员仪表盘真实读取状态 > 读取失败或仍在加载时禁止导出不完整报告 3ms
+     → Unable to get [data-testid="export-dashboard"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">4<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续积累中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+   × 成员仪表盘真实读取状态 > 不展示写死的宣传、假直播标签和非周区间的周报文案 3ms
+     → expected '仪表盘2026 年 9 月 6 日 · 周日 · 最近 0 个审查任务 近…' not to contain 'v3.4 全链路源码审计已上线'
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 首载未取得摘要时不显示零项任务或零分
+AssertionError: expected '2026 年 9 月 6 日 · 周日 · 最近 0 个审查任务' not to contain '0'
+
+Expected: "0"
+Received: "2026 年 9 月 6 日 · 周日 · 最近 0 个审查任务"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:102:50
+    100|     await flushPromises()
+    101|     expect(wrapper.find('.stat-grid').exists()).toBe(false)
+    102|     expect(wrapper.find('.page-sub').text()).not.toContain('0')
+       |                                                  ^
+    103|     expect(section(wrapper, 'summary').attributes('aria-busy')).toBe('…
+    104|     expect(wrapper.get('[data-testid="dashboard-progress"]').text()).t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要失败显示可重试错误而不假报空业务
+Error: Unable to get [data-section="summary"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无数据</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无审查</div>
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="0" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 风险</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+    7277|             return result;
+    7278|         }
+    7279|         throw new Error("Unable to get ".concat(selector, " within: ")…
+       |               ^
+    7280|     };
+    7281|     BaseWrapper.prototype.getComponent = function (selector) {
+ ❯ section src/views/dashboard/Dashboard.test.ts:75:18
+ ❯ src/views/dashboard/Dashboard.test.ts:111:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 真实全零保留零值，没有已完成审查时不判为风险或零分
+AssertionError: expected [ '0次', '0个', '0个', '0.0/100', …(2) ] to deeply equal [ '0次', '0个', '0个', '—/100', …(2) ]
+
+- Expected
++ Received
+
+  [
+    "0次",
+    "0个",
+    "0个",
+-   "—/100",
++   "0.0/100",
+    "0个",
+    "0份",
+  ]
+
+ ❯ src/views/dashboard/Dashboard.test.ts:127:69
+    125|     const wrapper = mountPage()
+    126|     await flushPromises()
+    127|     expect(wrapper.findAll('.stat-num').map((item) => item.text())).to…
+       |                                                                     ^
+    128|     expect(wrapper.find('.stat-gauge').exists()).toBe(false)
+    129|     expect(wrapper.text()).toContain('暂无已完成审查')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 已有成功审查的真实零分不被当成未知
+AssertionError: expected '风险等级 · 风险目标 90' to contain '极高风险'
+
+Expected: "极高风险"
+Received: "风险等级 · 风险目标 90"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:137:48
+    135|     await flushPromises()
+    136|     expect(wrapper.findAll('.stat-num')[3].text()).toBe('0.0/100')
+    137|     expect(wrapper.find('.stat-gauge').text()).toContain('极高风险')
+       |                                                ^
+    138|   })
+    139| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 畸形摘要不得变成可导出的统计事实
+Error: Unable to get [data-section="summary"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">0<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无数据</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">— 暂无审查</div>
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+    7277|             return result;
+    7278|         }
+    7279|         throw new Error("Unable to get ".concat(selector, " within: ")…
+       |               ^
+    7280|     };
+    7281|     BaseWrapper.prototype.getComponent = function (selector) {
+ ❯ section src/views/dashboard/Dashboard.test.ts:75:18
+ ❯ src/views/dashboard/Dashboard.test.ts:144:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 部分接口迟迟未返回时成功分区仍立即展示
+Error: Cannot call text on an empty DOMWrapper.
+ ❯ Object.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:1574:27
+    1572|                     return function () { return false; };
+    1573|                 default:
+    1574|                     throw new Error("Cannot call ".concat(String(prop)…
+       |                           ^
+    1575|             }
+    1576|         }
+ ❯ src/views/dashboard/Dashboard.test.ts:153:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 维度接口成功且为空不再永远显示汇总中或八个假零
+Error: Unable to get [data-section="dimension"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">4<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续积累中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+    7277|             return result;
+    7278|         }
+    7279|         throw new Error("Unable to get ".concat(selector, " within: ")…
+       |               ^
+    7280|     };
+    7281|     BaseWrapper.prototype.getComponent = function (selector) {
+ ❯ section src/views/dashboard/Dashboard.test.ts:75:18
+ ❯ src/views/dashboard/Dashboard.test.ts:161:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 单图失败与空态分开且仅重试失败图
+Error: Unable to get [data-section="risk"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">4<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续积累中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+    7277|             return result;
+    7278|         }
+    7279|         throw new Error("Unable to get ".concat(selector, " within: ")…
+       |               ^
+    7280|     };
+    7281|     BaseWrapper.prototype.getComponent = function (selector) {
+ ❯ section src/views/dashboard/Dashboard.test.ts:75:18
+ ❯ src/views/dashboard/Dashboard.test.ts:170:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 切换日期时旧区间成功响应不得覆盖新图
+Error: Unable to get [data-section="risk"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header>
+  <div data-v-1c6c8216="">正在加载仪表盘数据 正在汇总项目、审查任务和风险指标</div>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+    7277|             return result;
+    7278|         }
+    7279|         throw new Error("Unable to get ".concat(selector, " within: ")…
+       |               ^
+    7280|     };
+    7281|     BaseWrapper.prototype.getComponent = function (selector) {
+ ❯ section src/views/dashboard/Dashboard.test.ts:75:18
+ ❯ src/views/dashboard/Dashboard.test.ts:188:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 旧区间失败不得覆盖新请求成功状态
+Error: Unable to get [data-section="risk"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">4<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续积累中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">7 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">7 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+    7277|             return result;
+    7278|         }
+    7279|         throw new Error("Unable to get ".concat(selector, " within: ")…
+       |               ^
+    7280|     };
+    7281|     BaseWrapper.prototype.getComponent = function (selector) {
+ ❯ section src/views/dashboard/Dashboard.test.ts:75:18
+ ❯ src/views/dashboard/Dashboard.test.ts:205:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 读取失败或仍在加载时禁止导出不完整报告
+Error: Unable to get [data-testid="export-dashboard"] within: <div data-v-1c6c8216="" class="dashboard-page prism-page-shell">
+  <!-- ============ 页头 ============ -->
+  <header data-v-1c6c8216="" class="page-head prism-page-head prism-rise">
+    <div data-v-1c6c8216="">
+      <h1 data-v-1c6c8216="" class="page-title font-display">仪表盘</h1>
+      <p data-v-1c6c8216="" class="page-sub">2026 年 9 月 6 日 · 周日 · 最近 <b data-v-1c6c8216="" class="hl">0</b> 个审查任务 </p>
+    </div>
+    <div data-v-1c6c8216="" class="page-actions"><select data-v-1c6c8216="" size="0" style="width: 110px;">
+        <option data-v-1c6c8216="" value="7">近 7 天</option>
+        <option data-v-1c6c8216="" value="30">近 30 天</option>
+        <option data-v-1c6c8216="" value="90">近 90 天</option>
+      </select><button data-v-1c6c8216="">导出周报</button><button data-v-1c6c8216="" type="submit">+ 新建审查</button></div>
+  </header><!-- ============ v3.4 更新公告(可关闭,关闭后本地记住) ============ -->
+  <div data-v-1c6c8216="" class="changelog-alert prism-rise" type="info" closable="true"><span data-v-1c6c8216="" class="changelog-title">v3.4 全链路源码审计已上线</span>
+    <div data-v-1c6c8216="" class="changelog-body"> 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + <b data-v-1c6c8216="">真实沙箱 PoC 实测</b>（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。 <router-link-stub data-v-1c6c8216="" to="/projects" class="changelog-link"></router-link-stub>
+    </div>
+  </div><!-- ============ 6 张统计卡 ============ -->
+  <section data-v-1c6c8216="" class="stat-grid prism-stagger">
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: var(--brand-50); color: var(--brand-600);"><span data-v-1c6c8216=""><documentchecked data-v-1c6c8216=""></documentchecked></span></span> 累计审查任务</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">4<span data-v-1c6c8216="" class="stat-unit">次</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续积累中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(226, 92, 115, 0.1); color: var(--dim-bug);"><span data-v-1c6c8216=""><warning data-v-1c6c8216=""></warning></span></span> 累计发现问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">9<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">共 2 个严重</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(220, 73, 97, 0.1); color: var(--sev-severe);"><span data-v-1c6c8216=""><circleclose data-v-1c6c8216=""></circleclose></span></span> 严重问题</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">2<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta down">需优先处理</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat feature">
+      <div data-v-1c6c8216="" class="feature-spectrum"></div>
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(255, 255, 255, 0.16); color: rgb(255, 255, 255);"><span data-v-1c6c8216=""><trendcharts data-v-1c6c8216=""></trendcharts></span></span> 平均代码评分</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">81.0<span data-v-1c6c8216="" class="stat-unit">/100</span></div>
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-gauge">
+        <div data-v-1c6c8216="" class="gauge-track">
+          <fluid-progress-stub data-v-1c6c8216="" progress="81" indeterminate="false" height="6" speed="1" class="gauge-fluid"></fluid-progress-stub>
+        </div>
+        <div data-v-1c6c8216="" class="gauge-label"><span data-v-1c6c8216="">风险等级 · 良好</span><span data-v-1c6c8216="">目标 90</span></div>
+      </div>
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(75, 155, 255, 0.1); color: var(--dim-naming);"><span data-v-1c6c8216=""><folderopened data-v-1c6c8216=""></folderopened></span></span> 活跃项目</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">3<span data-v-1c6c8216="" class="stat-unit">个</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+    <div data-v-1c6c8216="" class="stat">
+      <!--v-if-->
+      <div data-v-1c6c8216="" class="stat-label"><span data-v-1c6c8216="" class="stat-ico" style="background: rgba(61, 188, 217, 0.12); color: var(--accent-600);"><span data-v-1c6c8216=""><document data-v-1c6c8216=""></document></span></span> 代码文件</div>
+      <div data-v-1c6c8216="" class="stat-num prism-number font-display">12<span data-v-1c6c8216="" class="stat-unit">份</span></div>
+      <div data-v-1c6c8216="" class="stat-delta flat">持续更新中</div>
+      <!--v-if-->
+    </div>
+  </section><!-- ============ v2.1.1 安全态势卡 ============ -->
+  <!--v-if-->
+  <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
+  <section data-v-1c6c8216="" class="chart-row two-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+          <p data-v-1c6c8216="" class="chart-desc">30 天内 0 个问题在 8 个维度上的分布</p>
+        </div>
+      </header>
+      <p data-v-1c6c8216="" compact="">正在汇总维度数据</p>
+      <div data-v-1c6c8216="" class="legend-list">
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(107, 124, 255);"></span><span data-v-1c6c8216="" class="name">代码规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(75, 155, 255);"></span><span data-v-1c6c8216="" class="name">命名规范</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(43, 191, 185);"></span><span data-v-1c6c8216="" class="name">注释完整性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(79, 184, 122);"></span><span data-v-1c6c8216="" class="name">可维护性</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(212, 165, 58);"></span><span data-v-1c6c8216="" class="name">性能问题</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(224, 134, 72);"></span><span data-v-1c6c8216="" class="name">异常处理</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(226, 92, 115);"></span><span data-v-1c6c8216="" class="name">潜在 Bug</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+        <div data-v-1c6c8216="" class="legend-item"><span data-v-1c6c8216="" class="dot" style="background: rgb(184, 90, 196);"></span><span data-v-1c6c8216="" class="name">安全漏洞</span><span data-v-1c6c8216="" class="val font-mono">0</span></div>
+      </div>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card activity">
+      <header data-v-1c6c8216="" class="chart-head">
+        <div data-v-1c6c8216="">
+          <h3 data-v-1c6c8216="" class="font-display">最近 Agent 审查活动</h3>
+          <p data-v-1c6c8216="" class="chart-desc">实时 · 流式</p>
+        </div><a data-v-1c6c8216="" class="link">全部 →</a>
+      </header>
+      <div data-v-1c6c8216="" class="activity-feed">
+        <p data-v-1c6c8216="" compact="">暂无最近活动</p>
+      </div>
+    </article>
+  </section><!-- ============ 3 个分析图 ============ -->
+  <section data-v-1c6c8216="" class="chart-row three-col prism-stagger">
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">30 天审查任务趋势</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无趋势数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">严重度分布</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无严重度数据</p>
+    </article>
+    <article data-v-1c6c8216="" class="chart-card">
+      <header data-v-1c6c8216="" class="chart-head">
+        <h3 data-v-1c6c8216="" class="font-display">最近评分 TOP 0</h3>
+      </header>
+      <p data-v-1c6c8216="" compact="">暂无评分数据</p>
+    </article>
+  </section>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+    7277|             return result;
+    7278|         }
+    7279|         throw new Error("Unable to get ".concat(selector, " within: ")…
+       |               ^
+    7280|     };
+    7281|     BaseWrapper.prototype.getComponent = function (selector) {
+ ❯ src/views/dashboard/Dashboard.test.ts:214:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/12]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 不展示写死的宣传、假直播标签和非周区间的周报文案
+AssertionError: expected '仪表盘2026 年 9 月 6 日 · 周日 · 最近 0 个审查任务 近…' not to contain 'v3.4 全链路源码审计已上线'
+
+Expected: "v3.4 全链路源码审计已上线"
+Received: "仪表盘2026 年 9 月 6 日 · 周日 · 最近 0 个审查任务 近 7 天近 30 天近 90 天导出周报+ 新建审查v3.4 全链路源码审计已上线 四大角色协同（侦察/分析/验证/报告）+ PHP 安全知识库压误报 + 真实沙箱 PoC 实测（替代推理验证）+ 对抗复检。审计上下文已扩容至 1M 档。  累计审查任务4次持续积累中 累计发现问题9个共 2 个严重 严重问题2个需优先处理 平均代码评分81.0/100风险等级 · 良好目标 90 活跃项目3个持续更新中 代码文件12份持续更新中8 维度问题分布 · 棱镜光谱30 天内 0 个问题在 8 个维度上的分布正在汇总维度数据代码规范0命名规范0注释完整性0可维护性0性能问题0异常处理0潜在 Bug0安全漏洞0最近 Agent 审查活动实时 · 流式全部 →暂无最近活动30 天审查任务趋势暂无趋势数据严重度分布暂无严重度数据最近评分 TOP 0暂无评分数据"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:222:32
+    220|     const wrapper = mountPage()
+    221|     await flushPromises()
+    222|     expect(wrapper.text()).not.toContain('v3.4 全链路源码审计已上线')
+       |                                ^
+    223|     expect(wrapper.text()).not.toContain('1M')
+    224|     expect(wrapper.text()).not.toContain('实时 · 流式')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/12]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  12 failed (12)
+   Start at  07:29:24
+   Duration  1.04s (transform 278ms, setup 10ms, collect 558ms, tests 84ms, environment 203ms, prepare 39ms)
+
+JUNIT report written to /tmp/prism-release-20260906/dashboard-feedback-red-reproduction.xml

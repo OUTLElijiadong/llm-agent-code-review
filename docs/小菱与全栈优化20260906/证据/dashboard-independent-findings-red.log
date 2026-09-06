@@ -1,0 +1,212 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --reporter=default --reporter=junit --outputFile.junit=/tmp/prism-release-20260906/dashboard-independent-findings-red.xml src/views/dashboard/Dashboard.test.ts
+
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend
+
+stderr | src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员null被入口拒绝而非渲染崩溃
+[Vue warn]: Unhandled error during execution of render function 
+  at <Dashboard ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+[Vue warn]: Unhandled error during execution of component update 
+  at <Dashboard ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ❯ src/views/dashboard/Dashboard.test.ts (45 tests | 24 failed) 172ms
+   ✓ 成员仪表盘真实读取状态 > 首载未取得摘要时不显示零项任务或零分 20ms
+   ✓ 成员仪表盘真实读取状态 > 摘要失败显示可重试错误而不假报空业务 16ms
+   ✓ 成员仪表盘真实读取状态 > 真实全零保留零值，没有已完成审查时不判为风险或零分 4ms
+   ✓ 成员仪表盘真实读取状态 > 已有成功审查的真实零分不被当成未知 4ms
+   ✓ 成员仪表盘真实读取状态 > 畸形摘要不得变成可导出的统计事实 2ms
+   ✓ 成员仪表盘真实读取状态 > 部分接口迟迟未返回时成功分区仍立即展示 3ms
+   ✓ 成员仪表盘真实读取状态 > 维度接口成功且为空不再永远显示汇总中或八个假零 3ms
+   ✓ 成员仪表盘真实读取状态 > 单图失败与空态分开且仅重试失败图 5ms
+   ✓ 成员仪表盘真实读取状态 > 切换日期时旧区间成功响应不得覆盖新图 8ms
+   ✓ 成员仪表盘真实读取状态 > 旧区间失败不得覆盖新请求成功状态 4ms
+   ✓ 成员仪表盘真实读取状态 > 读取失败或仍在加载时禁止导出不完整报告 2ms
+   ✓ 成员仪表盘真实读取状态 > 不展示写死的宣传、假直播标签和非周区间的周报文案 2ms
+   ✓ 成员仪表盘真实读取状态 > noopener返回null不被误报为拦截，也不立即回收已请求打开的报告 4ms
+   ✓ 成员仪表盘真实读取状态 > 打开报告抛错时给出失败反馈并释放临时URL 3ms
+   × 成员仪表盘真实读取状态 > 后端真实四类零计数不画出虚假的等分饼图且允许导出真实零 5ms
+     → expected true to be false // Object.is equality
+   ✓ 成员仪表盘真实读取状态 > risk非法载荷null不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > risk非法载荷[null]不能作为成功数据或导出来源 3ms
+   × 成员仪表盘真实读取状态 > risk非法载荷[{"severity":"严重","count":-1}]不能作为成功数据或导出来源 7ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > risk非法载荷[{"severity":null,"count":1}]不能作为成功数据或导出来源 3ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > risk非法载荷[{"severity":"严重","count":null}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":"3"}]不能作为成功数据或导出来源 10ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":null}]不能作为成功数据或导出来源 3ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":42,"count":2}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":null}]不能作为成功数据或导出来源 3ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":101,"create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > score非法载荷[{"task_id":null,"score":50,"create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":"50","create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":50,"create_time":"2026-02-30T12:00:00"}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"invalid","count":1}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-02-30","count":1}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-09-05","count":-1}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-09-05","count":"2"}]不能作为成功数据或导出来源 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > 摘要非法任务成员null被入口拒绝而非渲染崩溃 7ms
+     → expected 'loading' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > 摘要非法任务成员{"id":"2"}被入口拒绝而非渲染崩溃 4ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > 摘要非法任务成员{"task_name":2}被入口拒绝而非渲染崩溃 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > 摘要非法任务成员{"project_name":null}被入口拒绝而非渲染崩溃 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > 摘要非法任务成员{"score":null}被入口拒绝而非渲染崩溃 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > 摘要非法任务成员{"score":101}被入口拒绝而非渲染崩溃 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > 摘要非法任务成员{"status":"pending"}被入口拒绝而非渲染崩溃 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   × 成员仪表盘真实读取状态 > 摘要非法任务成员{"create_time":"2026-02-30T12:00:00"}被入口拒绝而非渲染崩溃 2ms
+     → expected 'success' to be 'error' // Object.is equality
+   ✓ 成员仪表盘真实读取状态 > 无导出权限时按钮不可见且直接调用也不能打开报告 2ms
+   ✓ 成员仪表盘真实读取状态 > 加载中时按钮和直接导出调用均拒绝 2ms
+   ✓ 成员仪表盘真实读取状态 > 摘要重叠刷新不被旧请求覆盖 3ms
+   ✓ 成员仪表盘真实读取状态 > 刷新失败隐藏旧图，成功摘要保留，单图重试恢复 5ms
+   ✓ 成员仪表盘真实读取状态 > 卸载后成功和失败都不写状态或留下任务刷新监听 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 24 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 后端真实四类零计数不画出虚假的等分饼图且允许导出真实零
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/views/dashboard/Dashboard.test.ts:271:69
+    269|     await flushPromises()
+    270|     expect(section(wrapper, 'risk').attributes('data-state')).toBe('su…
+    271|     expect(section(wrapper, 'risk').find('.chart-output').exists()).to…
+       |                                                                     ^
+    272|     expect(section(wrapper, 'risk').text()).toContain('暂无严重度数据')
+    273|     expect(wrapper.get('[data-testid="export-dashboard"]').attributes(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/24]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > risk非法载荷[{"severity":"严重","count":-1}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > risk非法载荷[{"severity":null,"count":1}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > risk非法载荷[{"severity":"严重","count":null}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":"3"}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":null}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":42,"count":2}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":null}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":101,"create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > score非法载荷[{"task_id":null,"score":50,"create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":"50","create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":50,"create_time":"2026-02-30T12:00:00"}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"invalid","count":1}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-02-30","count":1}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-09-05","count":-1}]不能作为成功数据或导出来源
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-09-05","count":"2"}]不能作为成功数据或导出来源
+AssertionError: expected 'success' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "success"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:293:68
+    291|     const wrapper = mountPage()
+    292|     await flushPromises()
+    293|     expect(section(wrapper, String(key)).attributes('data-state')).toB…
+       |                                                                    ^
+    294|     expect(section(wrapper, String(key)).find('.chart-output').exists(…
+    295|     expect(wrapper.find('.stat-grid').exists()).toBe(true)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/24]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员null被入口拒绝而非渲染崩溃
+AssertionError: expected 'loading' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "loading"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:315:66
+    313|     const wrapper = mountPage()
+    314|     await flushPromises()
+    315|     expect(section(wrapper, 'summary').attributes('data-state')).toBe(…
+       |                                                                  ^
+    316|     expect(wrapper.find('.stat-grid').exists()).toBe(false)
+    317|     expect(wrapper.get('[data-testid="export-dashboard"]').attributes(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/24]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员{"id":"2"}被入口拒绝而非渲染崩溃
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员{"task_name":2}被入口拒绝而非渲染崩溃
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员{"project_name":null}被入口拒绝而非渲染崩溃
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员{"score":null}被入口拒绝而非渲染崩溃
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员{"score":101}被入口拒绝而非渲染崩溃
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员{"status":"pending"}被入口拒绝而非渲染崩溃
+ FAIL  src/views/dashboard/Dashboard.test.ts > 成员仪表盘真实读取状态 > 摘要非法任务成员{"create_time":"2026-02-30T12:00:00"}被入口拒绝而非渲染崩溃
+AssertionError: expected 'success' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "success"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:315:66
+    313|     const wrapper = mountPage()
+    314|     await flushPromises()
+    315|     expect(section(wrapper, 'summary').attributes('data-state')).toBe(…
+       |                                                                  ^
+    316|     expect(wrapper.find('.stat-grid').exists()).toBe(false)
+    317|     expect(wrapper.get('[data-testid="export-dashboard"]').attributes(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/24]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot read properties of null (reading 'id')
+ ❯ src/views/dashboard/Dashboard.vue:429:18
+    427|   const tasks = (summary.value?.recent_tasks ?? []) as RecentTaskOut[]
+    428|   return tasks.slice(0, 6).map((t, i) => {
+    429|     const id = t.id ?? i
+       |                  ^
+    430|     const score = t.score ?? 0
+    431|     const status = t.status || 'pending'
+ ❯ ComputedRefImpl.fn src/views/dashboard/Dashboard.vue:428:28
+ ❯ refreshComputed node_modules/@vue/reactivity/dist/reactivity.cjs.js:418:28
+ ❯ ComputedRefImpl.get value [as value] node_modules/@vue/reactivity/dist/reactivity.cjs.js:1739:5
+ ❯ unref node_modules/@vue/reactivity/dist/reactivity.cjs.js:1564:45
+ ❯ Object.get node_modules/@vue/reactivity/dist/reactivity.cjs.js:1570:64
+ ❯ Proxy._sfc_render src/views/dashboard/Dashboard.vue:103:28
+ ❯ renderComponentRoot node_modules/@vue/runtime-core/dist/runtime-core.cjs.js:4543:16
+ ❯ ReactiveEffect.componentUpdateFn [as fn] node_modules/@vue/runtime-core/dist/runtime-core.cjs.js:6148:26
+
+This error originated in "src/views/dashboard/Dashboard.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "摘要非法任务成员null被入口拒绝而非渲染崩溃". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  24 failed | 21 passed (45)
+     Errors  1 error
+   Start at  08:05:50
+   Duration  1.20s (transform 290ms, setup 9ms, collect 589ms, tests 172ms, environment 238ms, prepare 32ms)
+
+JUNIT report written to /tmp/prism-release-20260906/dashboard-independent-findings-red.xml

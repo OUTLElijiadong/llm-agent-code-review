@@ -1,0 +1,102 @@
+{
+  "schema": "independent-project161-backup-comparison-v1",
+  "started_at_utc": "2026-09-05T23:29:45.891643+00:00",
+  "status": "阻塞",
+  "target_id": 161,
+  "release_sha_present_matches": true,
+  "backup": {
+    "path": "/opt/code-review/backups/code_review_20260905T201610Z_343616d9d40c.sql.gz",
+    "bytes": 402726075,
+    "sha256": "7bb99942cc0e571008743fc66b0d1cdd88fcf13640579b32fb493c0679d7dc6f",
+    "expected_sha_matches": true,
+    "stable_during_read": true,
+    "file_open_count": 1,
+    "project_section_bytes": 13494,
+    "project_block_complete": true
+  },
+  "parser": {
+    "format": "strict_mysqldump_project_insert",
+    "complete_columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": false
+      },
+      {
+        "name": "user_id",
+        "type": "bigint",
+        "nullable": false
+      },
+      {
+        "name": "project_name",
+        "type": "varchar(100)",
+        "nullable": false
+      },
+      {
+        "name": "description",
+        "type": "varchar(500)",
+        "nullable": true
+      },
+      {
+        "name": "language",
+        "type": "varchar(50)",
+        "nullable": true
+      },
+      {
+        "name": "status",
+        "type": "varchar(20)",
+        "nullable": false
+      },
+      {
+        "name": "create_time",
+        "type": "datetime",
+        "nullable": false
+      },
+      {
+        "name": "update_time",
+        "type": "datetime",
+        "nullable": false
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "primary_keys_unique": true,
+    "project_rows": 100,
+    "target_rows": 1,
+    "insert_statements": 1,
+    "utf8mb4_confirmed": true,
+    "no_auto_value_on_zero_confirmed": true,
+    "sql_from_backup_executed": false,
+    "non_project_tables_parsed": 0
+  },
+  "blocker": "datetime_format_or_precision",
+  "blocker_explanation": "归因更正：JSON中的parser对象已证明备份DDL、100行、唯一主键及161唯一行的解析和规范化完成。collector SHA一致的脚本在写入parser之后才调用current_project，并在当前161行normalize处因严格DATETIME格式门控阻塞；不是备份解析未完成。未保存原值，不猜测具体格式，也不据此认定业务字段不同。",
+  "incomplete_checks": ["当前161行规范化", "备份与当前161完整字段相等比较", "逐字段及整行规范化SHA输出"],
+  "evidence_attribution": {
+    "backup_json_facts": {"source": "parser", "project_rows": 100, "target_rows": 1, "primary_keys_unique": true, "ddl_column_count": 8, "target_extracted_and_normalized_in_server_memory": true},
+    "current_json_facts": {"current_object_persisted": false, "field_comparison_persisted": false, "row_fingerprint_persisted": false},
+    "current_control_flow_inference": "collector SHA验证一致；current_project中schema/nullable/字符集/精度和行数门控先于normalize。可按控制流判断这些门控未抛错，但JSON未持久化current聚合，不将parser的备份计数当作当前库计数。",
+    "collector_reference": "/tmp/prism-optimization-20260906/compare_project161_backup_readonly.py:236",
+    "normalization_reference": "/tmp/prism-optimization-20260906/compare_project161_backup_readonly.py:260",
+    "correction_uses_existing_local_artifacts_only": true,
+    "backup_reopened_for_correction": false
+  },
+  "retry_performed": false,
+  "finished_at_utc": "2026-09-05T23:29:50.755543+00:00",
+  "elapsed_seconds": 4.864,
+  "collector_sha256": "a09342ffa2531bdcbad4392f044cbed8c7e831d23803949b661fcb4d1e0a4062",
+  "existing_reports_unchanged": true,
+  "scope": {
+    "single_backup_open": true,
+    "backup_transferred_to_local": false,
+    "database_created_or_restored": false,
+    "dump_sql_executed": false,
+    "raw_fields_returned": false,
+    "main_repository_modified": false,
+    "production_business_writes": false,
+    "real_model_called": false,
+    "local_R05_code_used": false,
+    "normalization": "UTF-8 JSON ordered [column,type,value] arrays; integer exact base10; DATETIME(0) validated without timezone conversion; NULL distinct from text; no whitespace or Unicode normalization."
+  }
+}
