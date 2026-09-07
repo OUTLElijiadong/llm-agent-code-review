@@ -1,0 +1,31 @@
+{
+  "reviewer": "permission_matrix",
+  "review_type": "independent_readonly_code_review_and_local_injected_command_tests",
+  "conclusion": "no_blocking_issue_for_reviewed_readonly_collection",
+  "production_executed_by_this_review": false,
+  "business_writes": false,
+  "source_sha256": {
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_release_readonly.py": "6a4b90538b7c307e6bbac71463ef76cf8d51b8b206288f8c51e5a9792c2a8759",
+    "backend/tests/test_release_readonly_collector.py": "a641d9c996e95620e56bf3c911bf396b5c02927bc1e40bb4ccc8e5407922d882",
+    "backend/Dockerfile": "614111263691a000b5ecc9ce672143236d23085820c089b16b3399fcf75adbc5",
+    "frontend/Dockerfile": "3b3b03fd3088d039fed3d815e492da44f2289d41ec76ae3d6c6f8fe0572c3698",
+    "frontend/docker-entrypoint.d/30-retain-versioned-assets.sh": "e94c02c2ce357b89481a1db0e847079c511eaa9191b0e796c967ded4a5d03311",
+    "deploy/docker-compose.yml": "6eee6652c8c24ed5a22c54193bd63906ad1b934774469b490365e8dcb5098517"
+  },
+  "test_result": {
+    "tests": 17,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "test_evidence": "证据/发布只读取证独立复跑.xml",
+  "checks": [
+    "frontend final nginx无APP_RELEASE环境变量符合Dockerfile；通过发布账本与实际镜像身份绑定版本",
+    "指定Git提交、current.env组件版本与镜像ID、实际容器Image及健康状态一致",
+    "后端5文件绑定git show提交内容；frontend镜像dist与服务目录所有当前文件逐一SHA比对",
+    "SQL只读一致性事务及ROLLBACK；7表乘6归因字段共42个精确外键契约",
+    "采集前后账本、Git HEAD、容器ID/Image/StartedAt复核，防止跨发布混证据",
+    "不输出环境值、命令原始错误或敏感凭据；固定错误码非零退出"
+  ],
+  "boundary": "17项测试以命令输出注入验证契约，不是实际生产Docker/MySQL执行证据。"
+}

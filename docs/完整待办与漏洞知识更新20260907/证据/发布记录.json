@@ -1,0 +1,36 @@
+{
+  "release_sha": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+  "version": "3.8.6",
+  "bundle_file": "prism-0a14b5359a44-full.bundle",
+  "bundle_bytes": 266403299,
+  "bundle_sha256": "4b1942cc79829146a26cc1a687cff6afb6ab5d288ea07acb5f8ef33cc88b86cb",
+  "bundle_complete_history_verified": true,
+  "git_remote_pushed": false,
+  "deployment_status": "deployed_and_runtime_verified",
+  "transfer_method": "verified rsync parts reassembled into complete Git bundle; imported only after full SHA-256 match",
+  "deployed_at_utc": "2026-09-07T09:01:57Z",
+  "alembic_revision": "048_ai_usage_attribution",
+  "production_url": "https://lijiadong.cn",
+  "runtime_evidence": "生产发布运行态与048核验.json",
+  "independent_review": "新版生产数据独立复核.json",
+  "source_control_note": "Application commit deployed; later evidence-only commit is not a new production release.",
+  "backup": {
+    "file": "code_review_20260907T085623Z_0a14b5359a44.sql.gz",
+    "bytes": 404458323,
+    "sha256": "1fadbcde8e2a3cb2e77d220f5cb8ee053abcd8392e718d03af8ba82b4c1772f6"
+  },
+  "frontend_expected_files_verified": 269,
+  "frontend_total_served_files": 3709,
+  "qa_closeout": {
+    "account_ids": [
+      103,
+      104,
+      105,
+      106
+    ],
+    "status": "disabled_and_sessions_rejected",
+    "evidence": "生产QA账号收尾执行v2.json",
+    "model_calls": 0,
+    "review_tasks": 0
+  }
+}

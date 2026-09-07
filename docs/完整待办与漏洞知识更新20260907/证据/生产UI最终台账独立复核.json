@@ -1,0 +1,69 @@
+{
+  "status": "passed",
+  "reviewed_at_utc": "2026-09-07T09:37:58.567349+00:00",
+  "production_requests": 0,
+  "production_writes": false,
+  "tests_rerun": false,
+  "source_vue_files": 104,
+  "controls": 610,
+  "buttons_or_links": 446,
+  "roles": 5,
+  "rows": 3050,
+  "statuses": {
+    "untested": 2405,
+    "partially_tested": 11,
+    "passed": 12,
+    "observed": 12,
+    "blocked": 610
+  },
+  "per_role": {
+    "administrator": {
+      "blocked": 610
+    },
+    "owner_b": {
+      "untested": 610
+    },
+    "member_a": {
+      "untested": 581,
+      "partially_tested": 10,
+      "passed": 9,
+      "observed": 10
+    },
+    "owner_a": {
+      "untested": 610
+    },
+    "no_permission": {
+      "untested": 604,
+      "passed": 3,
+      "partially_tested": 1,
+      "observed": 2
+    }
+  },
+  "json_csv_every_exported_cell_equal": true,
+  "source_hashes_current": true,
+  "source_batches": 7,
+  "observations": 91,
+  "observed_rows": 35,
+  "supplemental_observations": 24,
+  "historical_rows": 20,
+  "historical_observations": 21,
+  "base_sha256_unchanged": true,
+  "boundaries": [
+    "复核的是主代理真实操作转录与台账映射，本复核未重新点击浏览器。",
+    "12 passed 仅对应所列静态场景；11 partial 仅对应已测动态实例/事件。",
+    "隐藏、只读或未点击链接只算 observed；610管理员阻塞不升级。",
+    "91观察不是91个唯一按钮；完整3050格尚未全部实测。"
+  ],
+  "evidence_sha256": {
+    "生产3.8.6真实UI观察.json": "4cb842ae641fdac726caabcae2e9114411bfaddf3fca4728759add57c1afa957",
+    "生产3.8.6-全部控件逐角色验收台账.json": "01b3c825fc75120fd7d5c54d9abae8a46e48319209a452a4c7782a64120e9bc8",
+    "生产3.8.6-全部控件逐角色验收台账.csv": "4fdfff8cf50a325c0101cfb1a1fcb7967e3ebf5c57135cca2317a30d26375697",
+    "生产3.8.6-全部控件逐角色验收汇总.json": "5719dc897b6e3f4be06032e2c3e62be6c2d29aec297f93c3c270bfe2bae6a8bb",
+    "追加修复后-全部控件逐角色验收台账.json": "6d1f6f8a59a4ecd4d56e5b1f7e797c538f717475fb702dc9d855ee7961d98ff8",
+    "全部按钮与交互源码清单-追加修复后.json": "87ef31b00b93064f792ecf7b8eb709e01868bed64b9f1c01fdf5d8b9c7dbc4aa",
+    "生产3.8.6UI台账冻结核对.json": "d71b3db6f2b0fd694ea9193b077833aef3b3d9f9ccce88496db4305e0ab331da",
+    "merge_production_ui_observations.py": "40f001a0fccda7a511d27edf525a38fc2194a8ce9c2d93a52a679f3debf7969d",
+    "生产发布运行态与048核验.json": "12a964853e175cb9e7ae92721d85113f9440e7a6d1d6f4b5af8b338622be82c0"
+  },
+  "reviewer_script_sha256": "564a9247e3892575c0d29ce0ed92bf9985e14b8dc5e9d6f480699e9db729b6e7"
+}

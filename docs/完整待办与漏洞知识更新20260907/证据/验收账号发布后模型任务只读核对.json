@@ -1,0 +1,41 @@
+{
+  "captured_at_utc": "2026-09-07T09:08:46.611096+00:00",
+  "account_ids": [
+    103,
+    104,
+    105,
+    106
+  ],
+  "accounts": [
+    {
+      "id": 103,
+      "username": "qa_20260907_owner_a",
+      "status": 1
+    },
+    {
+      "id": 104,
+      "username": "qa_20260907_member_a",
+      "status": 1
+    },
+    {
+      "id": 105,
+      "username": "qa_20260907_owner_b",
+      "status": 1
+    },
+    {
+      "id": 106,
+      "username": "qa_20260907_no_permission",
+      "status": 1
+    }
+  ],
+  "read_only": true,
+  "counts": {
+    "ai_call_log": 0,
+    "review_task": 0,
+    "project": 2
+  },
+  "file_ids": [
+    1892,
+    1893
+  ]
+}

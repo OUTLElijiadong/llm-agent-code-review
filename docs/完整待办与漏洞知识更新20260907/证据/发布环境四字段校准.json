@@ -1,0 +1,1 @@
+{"status": "calibrated", "release": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29", "version": "3.8.6", "keys": ["APP_RELEASE", "APP_VERSION", "BACKEND_RELEASE", "FRONTEND_RELEASE"], "backup": "/opt/code-review/deploy/.env.before-0a14b5359a44-20260907T090256Z", "unrelated_lines_preserved": true}

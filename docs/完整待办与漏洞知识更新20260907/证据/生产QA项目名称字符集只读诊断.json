@@ -1,0 +1,25 @@
+{
+  "状态": "只读字符集诊断",
+  "business_writes": false,
+  "rows": [
+    {
+      "client_charset": "latin1",
+      "results_charset": "latin1",
+      "connection_charset": "latin1"
+    },
+    {
+      "id": 162,
+      "name_sha256": "a6a6a355f017bbb55a54d9b80dbd8e5f86a7bcaac5906a6fc7d777e4a183277a",
+      "exact_utf8_name": true
+    },
+    {
+      "id": 163,
+      "name_sha256": "de514bbcfc8587a334e8c7f649ef423debb709dc98666b5e9307080d27372687",
+      "exact_utf8_name": true
+    }
+  ],
+  "expected_name_sha256": [
+    "a6a6a355f017bbb55a54d9b80dbd8e5f86a7bcaac5906a6fc7d777e4a183277a",
+    "de514bbcfc8587a334e8c7f649ef423debb709dc98666b5e9307080d27372687"
+  ]
+}

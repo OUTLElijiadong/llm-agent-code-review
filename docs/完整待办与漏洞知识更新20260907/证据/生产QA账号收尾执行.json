@@ -1,0 +1,10 @@
+{
+  "status": "failed",
+  "stage": "read_manifest",
+  "marker": "20260907",
+  "accounts": [],
+  "script_sha256": "ced133ed30eecebb55498f87b88648368147213c3261c4e610c5cd38e58d3913",
+  "error_code": "qa_project_identity_changed",
+  "error_type": "FinalizationError",
+  "remote_process_exit_code": 1
+}

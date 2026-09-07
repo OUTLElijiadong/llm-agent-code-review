@@ -1,0 +1,34 @@
+{
+  "source_actions": 610,
+  "source_buttons_or_links": 446,
+  "roles": 5,
+  "total_role_control_rows": 3050,
+  "current_release_statuses": {
+    "untested": 2405,
+    "partially_tested": 11,
+    "passed": 12,
+    "observed": 12,
+    "blocked": 610
+  },
+  "rows_with_historical_observations": 20,
+  "historical_observations": 21,
+  "note": "源码节点×角色台账，不是运行时唯一按钮实例数；共享组件多宿主、列表重复行、原生组件内建关闭/确认和未绑定事件的输入需在浏览器补场景。旧版可见/禁用/校验不能当成点击成功或新版通过。 新版 passed 仅表示所列静态控件场景已有最终结果；动态实例或多事件只完成一部分记 partially_tested；隐藏/只读仅观察记 observed；等待最终结果不升级。",
+  "rows_with_current_observations": 35,
+  "current_observations": 91,
+  "supplemental_or_unmapped_observations": 24,
+  "environment": {
+    "url": "https://lijiadong.cn",
+    "version": "3.8.6",
+    "release": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+    "release_evidence": {
+      "file": "生产发布运行态与048核验.json",
+      "sha256": "12a964853e175cb9e7ae92721d85113f9440e7a6d1d6f4b5af8b338622be82c0",
+      "version_and_release_equal": true,
+      "boundary": "只读运行态取证绑定，浏览器操作仍以主代理实际观察转录为来源。"
+    }
+  },
+  "ledger_sha256": "01b3c825fc75120fd7d5c54d9abae8a46e48319209a452a4c7782a64120e9bc8",
+  "csv_sha256": "4fdfff8cf50a325c0101cfb1a1fcb7967e3ebf5c57135cca2317a30d26375697",
+  "base_unchanged": true,
+  "base_sha256": "6d1f6f8a59a4ecd4d56e5b1f7e797c538f717475fb702dc9d855ee7961d98ff8"
+}

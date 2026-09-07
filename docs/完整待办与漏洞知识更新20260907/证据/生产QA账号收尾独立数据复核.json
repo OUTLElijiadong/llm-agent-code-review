@@ -1,0 +1,83 @@
+{
+  "status": "passed",
+  "reviewed_at_utc": "2026-09-07T09:41:23.743758+00:00",
+  "production_requests": 0,
+  "production_writes": false,
+  "tests_rerun": false,
+  "disabled_accounts": [
+    103,
+    104,
+    105,
+    106
+  ],
+  "all_status_zero": true,
+  "versions": [
+    {
+      "id": 103,
+      "token_version_before": 4,
+      "token_version_after": 5
+    },
+    {
+      "id": 104,
+      "token_version_before": 7,
+      "token_version_after": 8
+    },
+    {
+      "id": 105,
+      "token_version_before": 4,
+      "token_version_after": 5
+    },
+    {
+      "id": 106,
+      "token_version_before": 6,
+      "token_version_after": 7
+    }
+  ],
+  "login_version_delta": 1,
+  "disable_version_delta": 1,
+  "http_requests_in_execution_evidence": 12,
+  "normal_logins_200": 4,
+  "before_me_200": 4,
+  "old_token_me_403_40301": 4,
+  "auth_contract_status_check_precedes_token_version": true,
+  "model_and_review_counts": {
+    "ai_call_log": 0,
+    "review_task": 0
+  },
+  "two_project_eight_field_row_hashes_unchanged": true,
+  "v1_prewrite_failure_preserved": true,
+  "v2_only_charset_and_receipt_path_changes": true,
+  "archived_xml_recounts": {
+    "v1": {
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "v2": {
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "scope": "独立核对现有HTTP与数据库回执及执行源码，不重新登录、禁用或重跑测试；0用量仅指QA四账号范围。",
+  "evidence_sha256": {
+    "生产QA账号收尾执行.json": "9ccf870714b5f6bdde6ade349d909a1c839acc46c3f7ea85658e475acd9eea37",
+    "生产QA账号收尾执行v2.json": "d6f30b88234562ea749a82028ebd200c5ab213e0baf123d9bb12c91cb1e6be8e",
+    "生产QA收尾v2只读门禁验证.json": "c3c1cc327931534c864092d181dcfcf4be0cfdc1f8e8f63646568fd711a7611c",
+    "生产QA账号收尾脚本与测试指纹.json": "3becd4e707ab0ba4b622198d365616972780f819dca5c89c692a85a053f3188a",
+    "生产QA收尾初始门禁只读诊断.json": "5504c4dc1eed016fb725a662ddd50b59fc9abc1b0d87227ba0ad31c108338e7e",
+    "生产QA项目名称字符集只读诊断.json": "d5e1f6abb0869dfa4bcd7bae13d2aa6061836243090a33049883aa1105185cea",
+    "生产QA账号收尾脚本v1.py": "ced133ed30eecebb55498f87b88648368147213c3261c4e610c5cd38e58d3913",
+    "生产QA账号收尾本地测试v1.py": "54999ff9c306dac0cea7f2dce326a8d203b7d3534be4b313dba3f3e930879d1e",
+    "生产QA账号收尾本地测试v1.xml": "fca547e7e73356d465b74b418f7aa8f21ab5eb165795bb0f89c4cc7477c5d408",
+    "生产QA账号收尾准备v1.json": "f718476726e31f5346cc916078fc77afe85585fc28fc1901bd01d3181c02f816",
+    "生产QA账号收尾脚本v2.py": "feb5ce03154d027feb9a87b145e75e1a6c8efc50ad374a82252fb636a4fd9f2b",
+    "生产QA账号收尾本地测试v2.py": "00bcf97ee72984878132120abbf465f49c82553771c235ad765aca90ee28597f",
+    "生产QA账号收尾本地测试v2.xml": "502e4165c1d96504a18c9ae8110a220f572f8c1480e7b6a593a468e9b5e6ff50",
+    "backend/scripts/prepare_permission_acceptance.py": "18d5ccb87620c9366afd185bf4b416aa906bed434a670323ca6c2bd9fc1f03b9",
+    "backend/app/core/dependencies.py": "b75be1117e45d543d52fcae4bcadee16d1b93d214369beb7fd6e0a1c124f1709"
+  },
+  "reviewer_script_sha256": "1b9cda6fdc20086b50f2498326fa176be66ee8f96b148c79c1346946264596f0"
+}

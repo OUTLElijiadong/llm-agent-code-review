@@ -1,0 +1,17 @@
+{
+  "raw_log_sha256": "2e58a27851f7842986b0da334f50bbb0b71ef894c9502d7706039264e2f5a7db",
+  "raw_log_bytes": 32352,
+  "remote_raw_log": "/root/prism-release-0a14b5359a44/deploy.log",
+  "selected_events": [
+    "[2026-09-07T08:56:23Z] INFO  发布预检通过(target=all, version=3.8.6, sha=0a14b5359a446ab7b447e10c061b1ebbe6d15e29)",
+    "[2026-09-07T08:57:57Z] INFO  在独立容器 cr_testdb 创建隔离恢复库: prism_verify_20260907085757_27224",
+    "[2026-09-07T08:58:50Z] INFO  独立恢复验证通过(container=cr_testdb, tables=89, alembic=047_review_input_snapshot)",
+    "[2026-09-07T08:58:50Z] INFO  发布前备份已完成",
+    "INFO  [alembic.runtime.migration] Context impl MySQLImpl.",
+    "INFO  [alembic.runtime.migration] Will assume non-transactional DDL.",
+    "INFO  [alembic.runtime.migration] Running upgrade 047_review_input_snapshot -> 048_ai_usage_attribution, Add exact usage lineage without guessing or rewriting historical records.",
+    "[2026-09-07T08:59:36Z] INFO  Backend API 冒烟通过(version=3.8.6, release=0a14b5359a446ab7b447e10c061b1ebbe6d15e29)",
+    "[2026-09-07T09:01:57Z] INFO  HTTP→HTTPS 与同源 health/ready 冒烟通过(domain=lijiadong.cn)",
+    "[2026-09-07T09:01:57Z] INFO  发布完成(target=all, sha=0a14b5359a446ab7b447e10c061b1ebbe6d15e29, alembic=048_ai_usage_attribution)"
+  ]
+}

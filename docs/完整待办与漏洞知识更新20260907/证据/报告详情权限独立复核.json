@@ -1,0 +1,20 @@
+{
+  "reviewer": "permission_matrix",
+  "source_sha256": {
+    "frontend/src/views/report/ReportDetail.vue": "5a8bb29d7768f2bef84a0cdef0e30f43d33d61042b31e46d04e129db03b9c42a",
+    "frontend/src/views/report/ReportDetail.test.ts": "13721491c11f919633b55cc18f3d267480831e2913e634e8361c0ca9f40d22a2",
+    "frontend/src/views/report/ReportDetail.permissionMounted.test.ts": "84924d8f8cc3ebd622b523f740f2c11cd1f95b9f538d80f5497234fd2cd0f5d2",
+    "backend/app/api/v1/reports.py": "31c4e760f05875ee2e31fc8c0e29b564819e1679e60127dcbe47c5abb9757fce"
+  },
+  "tests": {
+    "tests": 24,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "real_element_plus_pinia_mounted_tests": 5,
+  "shallow_mounted_tests": 19,
+  "production_clicks_in_this_review": 0,
+  "test_evidence": "证据/报告详情权限独立复跑.xml",
+  "conclusion": "no_blocking_issue_for_reviewed_report_detail_permission_change"
+}

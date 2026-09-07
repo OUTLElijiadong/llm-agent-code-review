@@ -1,0 +1,62 @@
+{
+  "status": "passed",
+  "reviewed_at_utc": "2026-09-07T09:43:18.671955+00:00",
+  "production_requests": 0,
+  "production_writes": false,
+  "tests_rerun": false,
+  "release": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+  "application_backend_frontend_deploy_version_diff_from_release_empty": true,
+  "final_document_data_matches_verified_evidence": true,
+  "ui_counts": {
+    "untested": 2405,
+    "partially_tested": 11,
+    "passed": 12,
+    "observed": 12,
+    "blocked": 610
+  },
+  "qa_disabled_accounts": [
+    103,
+    104,
+    105,
+    106
+  ],
+  "old_token_expected_contract": "HTTP403/business40301",
+  "qa_model_and_review_counts": {
+    "ai_call_log": 0,
+    "review_task": 0
+  },
+  "raw_deploy_log": {
+    "path": "/tmp/prism-release-20260907-3.8.6/deploy-success.log",
+    "bytes": 32352,
+    "sha256": "2e58a27851f7842986b0da334f50bbb0b71ef894c9502d7706039264e2f5a7db",
+    "selected_events": 10,
+    "source_line_numbers": [
+      1,
+      6,
+      7,
+      8,
+      67,
+      68,
+      69,
+      76,
+      430,
+      431
+    ],
+    "order_equal": true,
+    "backup_047_89_and_runtime_048_consistent": true
+  },
+  "corrected_document_wording": "仅成员104/无权限106已实证浏览器退出，其后四QA统一禁用；不冒称ownerA/B浏览器实测。",
+  "completion_boundary": "发布与已列修复完成；全站逐控件2405未测/610管理员阻塞、实际客户端下载保存、生产动效仍未完成。harness result_status通过仅指知识库闭环。",
+  "document_sha256": {
+    "FINAL_完整待办与漏洞知识更新.md": "b7fd52ea49ef25c8c3a60f35aa10cbc69a75a904814fa641020212cf06de4584",
+    "TODO_完整待办与漏洞知识更新.md": "32fbd0f7967b5ed79d35edf63852bdfbf89a4c60c9b3297488d457619a3a8546",
+    "ACCEPTANCE_完整待办与漏洞知识更新.md": "efd256c6ed733cf049499e800a1c1b1eaab41ac1cf2d424f776ab4813f1da2e3",
+    "权限按钮验收.md": "0136029cc34766521b4439cfaffd2f398fe3c7c3d96cb1d55e4333b17e024d50",
+    "证据/发布记录.json": "d754d63673040577a477d803c359268271f52462b6c7a26d077f57b9c4619b9e",
+    "证据/发布日志关键事件.json": "e5a7d0d27d2b0bf52e3de05b26b170528f2f7760ce6ca3da7c59ac02edc4be58",
+    "证据/新版生产数据独立复核.json": "bec9568c50466927ad4625821bda07a469a7aaf1711479a7071e48a58168b545",
+    "证据/生产UI最终台账独立复核.json": "f8384d00b6d38c06e39a3ea9f2ed7dda00777b61953252d71f6eac041ce7f0b3",
+    "证据/生产QA账号收尾独立数据复核.json": "389ee257dd7ca14bab9607582d4bdbe5b1548f2c93e37aa53b95f8e88ff7390a",
+    "证据/知识库收尾结果.txt": "c2ab38e832fab2df9d2dcb1423a9bec0f4da9aa6caf9f9758ff025c89adb497e"
+  }
+}

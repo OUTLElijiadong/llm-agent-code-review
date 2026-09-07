@@ -1,0 +1,29 @@
+{
+  "reviewer": "permission_matrix",
+  "status": "passed",
+  "source_sha256": {
+    "生产前端逐文件与本轮备份只读核验.json": "0ae4adcb406d4fe1c49644a99b69dfb21f128c25c1c2829f8856be8f5cdb9c0c",
+    "collect_release_assets_backup_readonly.py": "b5a93736a03243d7a5ad1cd7dbafeb4f36090264b253ec4d5a5631acee5da046",
+    "collect_release_readonly.py": "6a4b90538b7c307e6bbac71463ef76cf8d51b8b206288f8c51e5a9792c2a8759",
+    "生产发布运行态与048核验.json": "12a964853e175cb9e7ae92721d85113f9440e7a6d1d6f4b5af8b338622be82c0",
+    "发布日志关键事件.json": "e5a7d0d27d2b0bf52e3de05b26b170528f2f7760ce6ca3da7c59ac02edc4be58"
+  },
+  "recomputed": {
+    "expected_map_count": 269,
+    "served_expected_map_count": 269,
+    "dual_maps_equal": true,
+    "canonical_manifest_sha256": "a9ac32a5400e48aa7b23f2674671fe6a7e4acf0dc8dee9cc86c061d4ac508ea5",
+    "manifest_matches_earlier_runtime": true,
+    "frontend_container_identity_and_ledger_match": true,
+    "served_total_count_from_captured_runtime": 3709,
+    "backup_bytes_from_remote_stat": 404458323,
+    "backup_sha256": "1fadbcde8e2a3cb2e77d220f5cb8ee053abcd8392e718d03af8ba82b4c1772f6",
+    "backup_meta_sha_matches_remote_file_hash": true,
+    "checksum_sidecar_sha256_recomputed": true,
+    "metadata_revision": "047_review_input_snapshot",
+    "metadata_table_count": 89,
+    "restore_log_revision_and_count_agree": true
+  },
+  "scope": "独立完整读取采集器和已采集JSON，重算269双map及规范化manifest、校验备份白名单契约和checksum sidecar SHA；没有重新SSH、下载或解压SQL，没有重新恢复或逐表计数。原始metadata字节不在本地，不能本地重算其原字节SHA。",
+  "code_review": "备份压缩字节流仅计算SHA，不解析SQL正文；BACKUP_FILE限定backups路径及文件名，meta字段白名单和格式校验，不输出环境原文；复用已审只读helper核验资源和容器，采集后复核容器与文件stat。无生产变更语句。"
+}

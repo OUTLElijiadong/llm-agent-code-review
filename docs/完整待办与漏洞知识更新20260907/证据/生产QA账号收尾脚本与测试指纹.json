@@ -1,0 +1,47 @@
+{
+  "说明": "原始源码/本地伪凭据测试逐字节归档，不含生产凭据或JWT；v1失败保留，v2仅客户端字符集与独立回执路径修复",
+  "文件": [
+    {
+      "原始路径": "/tmp/prism_finalize_qa_20260907.py",
+      "归档文件": "生产QA账号收尾脚本v1.py",
+      "SHA256": "ced133ed30eecebb55498f87b88648368147213c3261c4e610c5cd38e58d3913",
+      "字节数": 15034
+    },
+    {
+      "原始路径": "/tmp/test_prism_finalize_qa_20260907.py",
+      "归档文件": "生产QA账号收尾本地测试v1.py",
+      "SHA256": "54999ff9c306dac0cea7f2dce326a8d203b7d3534be4b313dba3f3e930879d1e",
+      "字节数": 9574
+    },
+    {
+      "原始路径": "/tmp/prism_finalize_qa_20260907_tests.xml",
+      "归档文件": "生产QA账号收尾本地测试v1.xml",
+      "SHA256": "fca547e7e73356d465b74b418f7aa8f21ab5eb165795bb0f89c4cc7477c5d408",
+      "字节数": 2570
+    },
+    {
+      "原始路径": "/tmp/prism_finalize_qa_20260907_preparation.json",
+      "归档文件": "生产QA账号收尾准备v1.json",
+      "SHA256": "f718476726e31f5346cc916078fc77afe85585fc28fc1901bd01d3181c02f816",
+      "字节数": 1161
+    },
+    {
+      "原始路径": "/tmp/prism_finalize_qa_20260907_v2.py",
+      "归档文件": "生产QA账号收尾脚本v2.py",
+      "SHA256": "feb5ce03154d027feb9a87b145e75e1a6c8efc50ad374a82252fb636a4fd9f2b",
+      "字节数": 15069
+    },
+    {
+      "原始路径": "/tmp/test_prism_finalize_qa_20260907_v2.py",
+      "归档文件": "生产QA账号收尾本地测试v2.py",
+      "SHA256": "00bcf97ee72984878132120abbf465f49c82553771c235ad765aca90ee28597f",
+      "字节数": 10831
+    },
+    {
+      "原始路径": "/tmp/prism_finalize_qa_20260907_v2_tests.xml",
+      "归档文件": "生产QA账号收尾本地测试v2.xml",
+      "SHA256": "502e4165c1d96504a18c9ae8110a220f572f8c1480e7b6a593a468e9b5e6ff50",
+      "字节数": 2783
+    }
+  ]
+}

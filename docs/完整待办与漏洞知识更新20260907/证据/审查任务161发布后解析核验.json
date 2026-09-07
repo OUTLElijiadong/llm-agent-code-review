@@ -1,0 +1,27 @@
+{
+  "utc": "2026-09-07 09:07:59.923267",
+  "status": "success",
+  "task_id": 161,
+  "updated": "2026-08-19 02:23:00.000000",
+  "read_only": 1,
+  "stored_total": 16,
+  "report_md_sha256": "431b70ea13309a291f8483c3e8ab645d70d613305fa3206f1c62197c19d7a43a",
+  "helper_sha256": "2a2b5bf89ea4617d4d8457d9a87febb04497ff887bb0c45744f250eb2a04b044",
+  "summary": {
+    "source": "sandbox_report",
+    "basis": "report_headings",
+    "total": 4,
+    "severity_counts": {
+      "严重": 0,
+      "高": 0,
+      "中": 0,
+      "低": 0
+    },
+    "unclassified": 4
+  },
+  "collector_sha256": "2a317387550ac5cd24dc6f230991d149067e8680cd1d9b55df76100105aecd46",
+  "query_sha256": "e83ea3b3bb995b71721e2f0bb10d6495cfc8fb032017b478c16b25c7a29f9eea",
+  "collected_at_utc": "2026-09-07T09:07:59.461386+00:00",
+  "business_writes": false,
+  "actual_model_http_sent": false
+}

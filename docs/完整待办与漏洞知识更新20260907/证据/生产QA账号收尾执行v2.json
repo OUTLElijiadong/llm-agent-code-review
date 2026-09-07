@@ -1,0 +1,81 @@
+{
+  "status": "passed",
+  "stage": "finished",
+  "marker": "20260907",
+  "accounts": [
+    {
+      "id": 103,
+      "login_http": 200,
+      "before_me_http": 200,
+      "status": 0,
+      "token_version_before": 4,
+      "token_version_after": 5,
+      "token_version_delta": 1,
+      "old_token_me_http": 403,
+      "old_token_me_business_code": 40301
+    },
+    {
+      "id": 104,
+      "login_http": 200,
+      "before_me_http": 200,
+      "status": 0,
+      "token_version_before": 7,
+      "token_version_after": 8,
+      "token_version_delta": 1,
+      "old_token_me_http": 403,
+      "old_token_me_business_code": 40301
+    },
+    {
+      "id": 105,
+      "login_http": 200,
+      "before_me_http": 200,
+      "status": 0,
+      "token_version_before": 4,
+      "token_version_after": 5,
+      "token_version_delta": 1,
+      "old_token_me_http": 403,
+      "old_token_me_business_code": 40301
+    },
+    {
+      "id": 106,
+      "login_http": 200,
+      "before_me_http": 200,
+      "status": 0,
+      "token_version_before": 6,
+      "token_version_after": 7,
+      "token_version_delta": 1,
+      "old_token_me_http": 403,
+      "old_token_me_business_code": 40301
+    }
+  ],
+  "script_sha256": "feb5ce03154d027feb9a87b145e75e1a6c8efc50ad374a82252fb636a4fd9f2b",
+  "model_and_review_counts": {
+    "ai_call_log": 0,
+    "review_task": 0
+  },
+  "retained_projects": [
+    {
+      "id": 162,
+      "status": "active",
+      "user_id": 103,
+      "row_sha256": "ebd493e6ef8f6e807d9cb6d364ae0a776f58ce3a09b3216f581c481cfea990ff",
+      "marker_match": true
+    },
+    {
+      "id": 163,
+      "status": "active",
+      "user_id": 105,
+      "row_sha256": "3c5d0485de6ef2bb4d47a5f16a3051e1c798314c0a9dbac1a2eee06aaf94f8f5",
+      "marker_match": true
+    }
+  ],
+  "credentials_logged": false,
+  "model_requests": 0,
+  "disabled_account_ids": [
+    103,
+    104,
+    105,
+    106
+  ],
+  "remote_process_exit_code": 0
+}

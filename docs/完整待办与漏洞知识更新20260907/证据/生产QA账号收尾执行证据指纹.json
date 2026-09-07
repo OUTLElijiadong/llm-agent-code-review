@@ -1,0 +1,14 @@
+{
+  "status": "v2_passed_v1_failed_preserved",
+  "automatic_replay": false,
+  "source_sha256": {
+    "生产QA收尾v2只读门禁验证.json": "c3c1cc327931534c864092d181dcfcf4be0cfdc1f8e8f63646568fd711a7611c",
+    "生产QA收尾初始门禁只读诊断.json": "5504c4dc1eed016fb725a662ddd50b59fc9abc1b0d87227ba0ad31c108338e7e",
+    "生产QA账号收尾准备v1.json": "f718476726e31f5346cc916078fc77afe85585fc28fc1901bd01d3181c02f816",
+    "生产QA账号收尾执行.json": "9ccf870714b5f6bdde6ade349d909a1c839acc46c3f7ea85658e475acd9eea37",
+    "生产QA账号收尾执行v2.json": "d6f30b88234562ea749a82028ebd200c5ab213e0baf123d9bb12c91cb1e6be8e",
+    "生产QA账号收尾独立数据复核.json": "389ee257dd7ca14bab9607582d4bdbe5b1548f2c93e37aa53b95f8e88ff7390a",
+    "生产QA账号收尾脚本与测试指纹.json": "3becd4e707ab0ba4b622198d365616972780f819dca5c89c692a85a053f3188a",
+    "生产QA项目名称字符集只读诊断.json": "d5e1f6abb0869dfa4bcd7bae13d2aa6061836243090a33049883aa1105185cea"
+  }
+}

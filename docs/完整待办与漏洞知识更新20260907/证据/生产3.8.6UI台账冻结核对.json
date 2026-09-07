@@ -1,0 +1,62 @@
+{
+  "status": "frozen_awaiting_independent_recount",
+  "release": {
+    "url": "https://lijiadong.cn",
+    "version": "3.8.6",
+    "release": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+    "release_evidence": {
+      "file": "生产发布运行态与048核验.json",
+      "sha256": "12a964853e175cb9e7ae92721d85113f9440e7a6d1d6f4b5af8b338622be82c0",
+      "version_and_release_equal": true,
+      "boundary": "只读运行态取证绑定，浏览器操作仍以主代理实际观察转录为来源。"
+    }
+  },
+  "source_batches": 7,
+  "detailed_observations": 91,
+  "source_actions": 610,
+  "role_control_rows": 3050,
+  "statuses": {
+    "untested": 2405,
+    "passed": 12,
+    "partially_tested": 11,
+    "observed": 12,
+    "blocked": 610
+  },
+  "statuses_by_role": {
+    "owner_a": {
+      "untested": 610
+    },
+    "member_a": {
+      "untested": 581,
+      "partially_tested": 10,
+      "passed": 9,
+      "observed": 10
+    },
+    "owner_b": {
+      "untested": 610
+    },
+    "no_permission": {
+      "untested": 604,
+      "passed": 3,
+      "partially_tested": 1,
+      "observed": 2
+    },
+    "administrator": {
+      "blocked": 610
+    }
+  },
+  "rows_with_current_observations": 35,
+  "original_ledger_unchanged": true,
+  "original_history_cells": 20,
+  "original_history_observations": 21,
+  "sha256": {
+    "生产3.8.6真实UI观察.json": "4cb842ae641fdac726caabcae2e9114411bfaddf3fca4728759add57c1afa957",
+    "生产3.8.6-全部控件逐角色验收台账.json": "01b3c825fc75120fd7d5c54d9abae8a46e48319209a452a4c7782a64120e9bc8",
+    "生产3.8.6-全部控件逐角色验收台账.csv": "4fdfff8cf50a325c0101cfb1a1fcb7967e3ebf5c57135cca2317a30d26375697",
+    "生产3.8.6-全部控件逐角色验收汇总.json": "5719dc897b6e3f4be06032e2c3e62be6c2d29aec297f93c3c270bfe2bae6a8bb",
+    "merge_production_ui_observations.py": "40f001a0fccda7a511d27edf525a38fc2194a8ce9c2d93a52a679f3debf7969d",
+    "追加修复后-全部控件逐角色验收台账.json": "6d1f6f8a59a4ecd4d56e5b1f7e797c538f717475fb702dc9d855ee7961d98ff8",
+    "全部按钮与交互源码清单-追加修复后.json": "87ef31b00b93064f792ecf7b8eb709e01868bed64b9f1c01fdf5d8b9c7dbc4aa"
+  },
+  "boundary": "35格有新版记录：12所列静态场景、11部分实例或事件、12仅状态/显隐；91细分记录并非91唯一按钮；管理员610阻塞，ownerA/B各610未测。导出工具限制保持，不绕过下载。"
+}

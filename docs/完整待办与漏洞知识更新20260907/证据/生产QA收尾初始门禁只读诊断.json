@@ -1,0 +1,46 @@
+{
+  "status": "read_only_diagnostic",
+  "business_writes": false,
+  "users": [
+    {
+      "id": 103,
+      "status": 1,
+      "token_version": 3
+    },
+    {
+      "id": 104,
+      "status": 1,
+      "token_version": 6
+    },
+    {
+      "id": 105,
+      "status": 1,
+      "token_version": 3
+    },
+    {
+      "id": 106,
+      "status": 1,
+      "token_version": 5
+    }
+  ],
+  "projects": [
+    {
+      "id": 162,
+      "status": "active",
+      "user_id": 103,
+      "row_sha256": "ebd493e6ef8f6e807d9cb6d364ae0a776f58ce3a09b3216f581c481cfea990ff",
+      "marker_match": false
+    },
+    {
+      "id": 163,
+      "status": "active",
+      "user_id": 105,
+      "row_sha256": "3c5d0485de6ef2bb4d47a5f16a3051e1c798314c0a9dbac1a2eee06aaf94f8f5",
+      "marker_match": false
+    }
+  ],
+  "counts": {
+    "ai_call_log": 0,
+    "review_task": 0
+  }
+}

@@ -1,0 +1,1272 @@
+{
+  "status": "passed",
+  "base_url": "https://lijiadong.cn",
+  "marker": "20260907",
+  "phase": "post_release_readonly",
+  "started_at": "2026-09-07T09:07:58.011563+00:00",
+  "requests": [
+    {
+      "account": "owner_a",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-a50e80bc70784f58b4721535b1acdc1a",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 461,
+      "response_sha256": "9dce9cf917869af6194176cc46ecbc1fc7a9434394740c30a597cd62d0123d0d",
+      "response_request_id": "eaaffa7757ffb1afb3b7f9e3f7343580",
+      "elapsed_ms": 341
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/rbac/users/103/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-52fc5191fcc24cd99424d4caa7972f70",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "013aa653970dff224d9e1d680ee1921032b874ef784bde35be76bce68b167b30",
+      "response_request_id": "d59273ea332594bff76d71decba914eb",
+      "elapsed_ms": 35
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/rbac/users/103/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-df6f93c0fbf043cb8044e82a7d4ea7a0",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "9b29f9c1aa795d8621bc266b17fc1f08",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "member_a",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-ecfbac33d28d426180ceeea882166b34",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 463,
+      "response_sha256": "09178480e737a2fd1c0cfec894566121ad7fef00ccf9f9e681db09da0cf05940",
+      "response_request_id": "7aaff7814577edae96a5171d8cc9ca1e",
+      "elapsed_ms": 317
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/rbac/users/104/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-1d29b0c5c6cd453fb1748b979b48b512",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "013aa653970dff224d9e1d680ee1921032b874ef784bde35be76bce68b167b30",
+      "response_request_id": "54186027a91613fa3cad1e5ced1d65fe",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/rbac/users/104/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-ee9c77d7a9024c149f730d5725546d3d",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "99d48c41b8a299fc37fb525cec966663",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "owner_b",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-e0a4289569374760bd049052d10509b2",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 461,
+      "response_sha256": "6dd640ee9d26ca37853b96aa5efa1419908ec65ba3ff5b84a9d711ad759b3b74",
+      "response_request_id": "c68d49e4588f379d82a7e0c2b7f4544e",
+      "elapsed_ms": 310
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/rbac/users/105/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-e96d3249bb8a41578daffb027c57c34b",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "013aa653970dff224d9e1d680ee1921032b874ef784bde35be76bce68b167b30",
+      "response_request_id": "bd470081920be4dfa71e7843aeb1b32a",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/rbac/users/105/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-3ca7a943f59a4aea999c6b1cffe027f6",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "7550b9c6b69a8d9b83f6c0450b603557",
+      "elapsed_ms": 38
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-dd6a14a0ec9c4260a6fb0a7f908d135c",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 473,
+      "response_sha256": "12ebe5162c143f710830a7e89c1c986e668940fcc4bfc76e8144b989613f14d2",
+      "response_request_id": "94209a4ce017e38ec0a9dc79a165b18e",
+      "elapsed_ms": 313
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/106/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-51e8ad2123f64809bc1c58325c089891",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 35,
+      "response_sha256": "f139e4295f71dc13b09f52f38526a00e06b1f5ddcc7cbe39c3ff4f314ddb9a24",
+      "response_request_id": "e869efd785e79d6aab4383a6df07d701",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/106/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-3b6251c37f0a430aaf8a360b8229fcb9",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 35,
+      "response_sha256": "f139e4295f71dc13b09f52f38526a00e06b1f5ddcc7cbe39c3ff4f314ddb9a24",
+      "response_request_id": "77780036bd556d0b1441b1d9f6d0fdd6",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects",
+      "expected": 200,
+      "purpose": "重启后隔离与数据持久性",
+      "request_id": "qa-994005917944413db179d5a107cef5d9",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 475,
+      "response_sha256": "b31b9d23909d34f389bbf5842451173c99898e6c53cb0613088ca9e15a7c2112",
+      "response_request_id": "17f2744fd130a1d228cb48a734dd5ca9",
+      "elapsed_ms": 62
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/projects",
+      "expected": 200,
+      "purpose": "重启后隔离与数据持久性",
+      "request_id": "qa-fc21b535e8014110bc4b0d37c7b7848c",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 477,
+      "response_sha256": "707e09d759333fa8b8571123228eadaea0d013ccf9e8095357be7fe4f4942359",
+      "response_request_id": "dfb2b37cba7871636fabb7f8fe856d3b",
+      "elapsed_ms": 37
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects",
+      "expected": 200,
+      "purpose": "重启后隔离与数据持久性",
+      "request_id": "qa-21fa600c242b460b9f4f72d1bb55f772",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 478,
+      "response_sha256": "ddcd681eea5e8877df8f443ba0a8407468243e87924062b4b3dbbe3cc71a235f",
+      "response_request_id": "cd67342d26af009cd2e8a27d0caffe35",
+      "elapsed_ms": 33
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/162",
+      "expected": 200,
+      "purpose": "",
+      "request_id": "qa-4978ee78ae6641d9ac3a2e22b3854d21",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 434,
+      "response_sha256": "9a6111aaaacd45967c98aa44dfe9f8682f98771a5f63c976cb1dc72613505030",
+      "response_request_id": "e3f931e0b3b7071d04c1d7d86939880a",
+      "elapsed_ms": 48
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1892",
+      "expected": 200,
+      "purpose": "",
+      "request_id": "qa-5fc5cd1622f049bc9892dee03a3c23ef",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 411,
+      "response_sha256": "79154bf20c6075506f95f8617e716bc84ef2e3098d008e3a180258174891f8a5",
+      "response_request_id": "0095eddc9991718c37e3798de75fcd19",
+      "elapsed_ms": 34
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/projects/162",
+      "expected": 200,
+      "purpose": "",
+      "request_id": "qa-268ee4386e1e43a898f786f7cee94cf4",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 436,
+      "response_sha256": "d7bd4df92b4f6a21a8f69198286fbd8bd5475ded23e3322ab5383396cb6cc008",
+      "response_request_id": "7e0ae44fc26c626942dd88d0d3943bb2",
+      "elapsed_ms": 81
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files/1892",
+      "expected": 200,
+      "purpose": "",
+      "request_id": "qa-ab5151d1d6da4ee1ad017263ce78b1d2",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 411,
+      "response_sha256": "79154bf20c6075506f95f8617e716bc84ef2e3098d008e3a180258174891f8a5",
+      "response_request_id": "5d70d864916cb2892bb03adddf0e6f0c",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects/162",
+      "expected": 404,
+      "purpose": "跨主体项目隐藏",
+      "request_id": "qa-a1759c3353b54e22b375f67cd7037a8e",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "0242b7fe38bb6bbf350020db8bf49ce47ad5843be3a5aef103c195c2ca275dff",
+      "response_request_id": "a78bf89db26bab3461d00794718278e1",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/projects/163",
+      "expected": 404,
+      "purpose": "跨主体项目隐藏",
+      "request_id": "qa-e0805f8e297141058b6ad06aabf7741a",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "719418f8cb9f5a4a5b516abbb2a18cb5db1444c8a0fa4385acd3f609f78e83c6",
+      "response_request_id": "094ea7b53fe31580300bf14ecd7d323f",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/projects/162",
+      "expected": 403,
+      "purpose": "无权限禁止读取真实测试资源",
+      "request_id": "qa-696b3218c6874a7d896f556d65a861bd",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 176,
+      "response_sha256": "44584e7a8c8b18bc8d0e8b637e22954df7fbec63b3e758985b187b281d3f9f64",
+      "response_request_id": "20b5e988026e86b0361005a1b0a3537b",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/security/checklist",
+      "expected": 200,
+      "purpose": "生产安全清单真实读取",
+      "request_id": "qa-b2901e523575468a8fb65b2d544b7dd2",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 17141,
+      "response_sha256": "5d48fe8f1777031bced51ddf531ad09c467332231075e891f98edf620bb4c956",
+      "response_request_id": "49b25791e415edad71fe3401175f4508",
+      "elapsed_ms": 29
+    }
+  ],
+  "assertions": [
+    {
+      "check": "owner_a身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_a仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "owner_a权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "member_a身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "member_a仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "member_a权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "owner_b身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_b仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "owner_b权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "no_permission身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "无权限账号无任何角色和权限",
+      "passed": true
+    },
+    {
+      "check": "owner_a只可见本主体项目",
+      "passed": true
+    },
+    {
+      "check": "member_a只可见本主体项目",
+      "passed": true
+    },
+    {
+      "check": "owner_b只可见本主体项目",
+      "passed": true
+    },
+    {
+      "check": "owner_a服务端资源权限",
+      "passed": true
+    },
+    {
+      "check": "owner_a文件归属与名称持久性",
+      "passed": true
+    },
+    {
+      "check": "owner_a版本二内容持久性",
+      "passed": true
+    },
+    {
+      "check": "member_a服务端资源权限",
+      "passed": true
+    },
+    {
+      "check": "member_a文件归属与名称持久性",
+      "passed": true
+    },
+    {
+      "check": "member_a版本二内容持久性",
+      "passed": true
+    },
+    {
+      "check": "生产安全清单版本与官方快照一致",
+      "passed": true
+    },
+    {
+      "check": "十个官方分类完整",
+      "passed": true
+    },
+    {
+      "check": "A01名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A02名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A03名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A04名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A05名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A06名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A07名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A08名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A09名称排序映射与来源一致",
+      "passed": true
+    },
+    {
+      "check": "A10名称排序映射与来源一致",
+      "passed": true
+    }
+  ],
+  "resources": {},
+  "blocked": [],
+  "plan_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+  "expected_release": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+  "catalog": {
+    "owasp_top10": [
+      {
+        "code": "A01",
+        "name": "失效的访问控制",
+        "owasp": "A01:2025-Broken Access Control",
+        "cwe": "",
+        "description": "Broken Access Control",
+        "cwe_refs": [
+          "CWE-22",
+          "CWE-23",
+          "CWE-36",
+          "CWE-59",
+          "CWE-61",
+          "CWE-65",
+          "CWE-200",
+          "CWE-201",
+          "CWE-219",
+          "CWE-276",
+          "CWE-281",
+          "CWE-282",
+          "CWE-283",
+          "CWE-284",
+          "CWE-285",
+          "CWE-352",
+          "CWE-359",
+          "CWE-377",
+          "CWE-379",
+          "CWE-402",
+          "CWE-424",
+          "CWE-425",
+          "CWE-441",
+          "CWE-497",
+          "CWE-538",
+          "CWE-540",
+          "CWE-548",
+          "CWE-552",
+          "CWE-566",
+          "CWE-601",
+          "CWE-615",
+          "CWE-639",
+          "CWE-668",
+          "CWE-732",
+          "CWE-749",
+          "CWE-862",
+          "CWE-863",
+          "CWE-918",
+          "CWE-922",
+          "CWE-1275"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A01_2025-Broken_Access_Control/"
+      },
+      {
+        "code": "A02",
+        "name": "安全配置错误",
+        "owasp": "A02:2025-Security Misconfiguration",
+        "cwe": "",
+        "description": "Security Misconfiguration",
+        "cwe_refs": [
+          "CWE-5",
+          "CWE-11",
+          "CWE-13",
+          "CWE-15",
+          "CWE-16",
+          "CWE-260",
+          "CWE-315",
+          "CWE-489",
+          "CWE-526",
+          "CWE-547",
+          "CWE-611",
+          "CWE-614",
+          "CWE-776",
+          "CWE-942",
+          "CWE-1004",
+          "CWE-1174"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A02_2025-Security_Misconfiguration/"
+      },
+      {
+        "code": "A03",
+        "name": "软件供应链失败",
+        "owasp": "A03:2025-Software Supply Chain Failures",
+        "cwe": "",
+        "description": "Software Supply Chain Failures",
+        "cwe_refs": [
+          "CWE-447",
+          "CWE-1035",
+          "CWE-1104",
+          "CWE-1329",
+          "CWE-1357",
+          "CWE-1395"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"
+      },
+      {
+        "code": "A04",
+        "name": "加密失败",
+        "owasp": "A04:2025-Cryptographic Failures",
+        "cwe": "",
+        "description": "Cryptographic Failures",
+        "cwe_refs": [
+          "CWE-261",
+          "CWE-296",
+          "CWE-319",
+          "CWE-320",
+          "CWE-321",
+          "CWE-322",
+          "CWE-323",
+          "CWE-324",
+          "CWE-325",
+          "CWE-326",
+          "CWE-327",
+          "CWE-328",
+          "CWE-329",
+          "CWE-330",
+          "CWE-331",
+          "CWE-332",
+          "CWE-334",
+          "CWE-335",
+          "CWE-336",
+          "CWE-337",
+          "CWE-338",
+          "CWE-340",
+          "CWE-342",
+          "CWE-347",
+          "CWE-523",
+          "CWE-757",
+          "CWE-759",
+          "CWE-760",
+          "CWE-780",
+          "CWE-916",
+          "CWE-1240",
+          "CWE-1241"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A04_2025-Cryptographic_Failures/"
+      },
+      {
+        "code": "A05",
+        "name": "注入",
+        "owasp": "A05:2025-Injection",
+        "cwe": "",
+        "description": "Injection",
+        "cwe_refs": [
+          "CWE-20",
+          "CWE-74",
+          "CWE-76",
+          "CWE-77",
+          "CWE-78",
+          "CWE-79",
+          "CWE-80",
+          "CWE-83",
+          "CWE-86",
+          "CWE-88",
+          "CWE-89",
+          "CWE-90",
+          "CWE-91",
+          "CWE-93",
+          "CWE-94",
+          "CWE-95",
+          "CWE-96",
+          "CWE-97",
+          "CWE-98",
+          "CWE-99",
+          "CWE-103",
+          "CWE-104",
+          "CWE-112",
+          "CWE-113",
+          "CWE-114",
+          "CWE-115",
+          "CWE-116",
+          "CWE-129",
+          "CWE-159",
+          "CWE-470",
+          "CWE-493",
+          "CWE-500",
+          "CWE-564",
+          "CWE-610",
+          "CWE-643",
+          "CWE-644",
+          "CWE-917"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A05_2025-Injection/"
+      },
+      {
+        "code": "A06",
+        "name": "不安全的设计",
+        "owasp": "A06:2025-Insecure Design",
+        "cwe": "",
+        "description": "Insecure Design",
+        "cwe_refs": [
+          "CWE-73",
+          "CWE-183",
+          "CWE-256",
+          "CWE-266",
+          "CWE-269",
+          "CWE-286",
+          "CWE-311",
+          "CWE-312",
+          "CWE-313",
+          "CWE-316",
+          "CWE-362",
+          "CWE-382",
+          "CWE-419",
+          "CWE-434",
+          "CWE-436",
+          "CWE-444",
+          "CWE-451",
+          "CWE-454",
+          "CWE-472",
+          "CWE-501",
+          "CWE-522",
+          "CWE-525",
+          "CWE-539",
+          "CWE-598",
+          "CWE-602",
+          "CWE-628",
+          "CWE-642",
+          "CWE-646",
+          "CWE-653",
+          "CWE-656",
+          "CWE-657",
+          "CWE-676",
+          "CWE-693",
+          "CWE-799",
+          "CWE-807",
+          "CWE-841",
+          "CWE-1021",
+          "CWE-1022",
+          "CWE-1125"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A06_2025-Insecure_Design/"
+      },
+      {
+        "code": "A07",
+        "name": "身份验证失败",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "",
+        "description": "Authentication Failures",
+        "cwe_refs": [
+          "CWE-258",
+          "CWE-259",
+          "CWE-287",
+          "CWE-288",
+          "CWE-289",
+          "CWE-290",
+          "CWE-291",
+          "CWE-293",
+          "CWE-294",
+          "CWE-295",
+          "CWE-297",
+          "CWE-298",
+          "CWE-299",
+          "CWE-300",
+          "CWE-302",
+          "CWE-303",
+          "CWE-304",
+          "CWE-305",
+          "CWE-306",
+          "CWE-307",
+          "CWE-308",
+          "CWE-309",
+          "CWE-346",
+          "CWE-350",
+          "CWE-384",
+          "CWE-521",
+          "CWE-613",
+          "CWE-620",
+          "CWE-640",
+          "CWE-798",
+          "CWE-940",
+          "CWE-941",
+          "CWE-1390",
+          "CWE-1391",
+          "CWE-1392",
+          "CWE-1393"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A07_2025-Authentication_Failures/"
+      },
+      {
+        "code": "A08",
+        "name": "软件或数据完整性失败",
+        "owasp": "A08:2025-Software or Data Integrity Failures",
+        "cwe": "",
+        "description": "Software or Data Integrity Failures",
+        "cwe_refs": [
+          "CWE-345",
+          "CWE-353",
+          "CWE-426",
+          "CWE-427",
+          "CWE-494",
+          "CWE-502",
+          "CWE-506",
+          "CWE-509",
+          "CWE-565",
+          "CWE-784",
+          "CWE-829",
+          "CWE-830",
+          "CWE-915",
+          "CWE-926"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A08_2025-Software_or_Data_Integrity_Failures/"
+      },
+      {
+        "code": "A09",
+        "name": "安全日志与告警失败",
+        "owasp": "A09:2025-Security Logging & Alerting Failures",
+        "cwe": "",
+        "description": "Security Logging & Alerting Failures",
+        "cwe_refs": [
+          "CWE-117",
+          "CWE-221",
+          "CWE-223",
+          "CWE-532",
+          "CWE-778"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A09_2025-Security_Logging_and_Alerting_Failures/"
+      },
+      {
+        "code": "A10",
+        "name": "异常条件处理不当",
+        "owasp": "A10:2025-Mishandling of Exceptional Conditions",
+        "cwe": "",
+        "description": "Mishandling of Exceptional Conditions",
+        "cwe_refs": [
+          "CWE-209",
+          "CWE-215",
+          "CWE-234",
+          "CWE-235",
+          "CWE-248",
+          "CWE-252",
+          "CWE-274",
+          "CWE-280",
+          "CWE-369",
+          "CWE-390",
+          "CWE-391",
+          "CWE-394",
+          "CWE-396",
+          "CWE-397",
+          "CWE-460",
+          "CWE-476",
+          "CWE-478",
+          "CWE-484",
+          "CWE-550",
+          "CWE-636",
+          "CWE-703",
+          "CWE-754",
+          "CWE-755",
+          "CWE-756"
+        ],
+        "source_url": "https://owasp.org/Top10/2025/A10_2025-Mishandling_of_Exceptional_Conditions/"
+      }
+    ],
+    "secret_patterns": [
+      {
+        "code": "openai_api_key",
+        "name": "OpenAI API Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "OpenAI 平台 API 密钥",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "aws_access_key",
+        "name": "AWS Access Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "AWS IAM 访问密钥 ID",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "aws_secret_access_key",
+        "name": "AWS Secret Access Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "AWS Secret Access Key",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "github_personal_token",
+        "name": "GitHub Personal Token",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "GitHub Personal Access Token",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "jwt_token",
+        "name": "JWT Token",
+        "owasp": "A06:2025-Insecure Design",
+        "cwe": "CWE-522",
+        "description": "JSON Web Token (含 header.payload.signature 三段)",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "rsa_private_key",
+        "name": "RSA Private Key",
+        "owasp": "A04:2025-Cryptographic Failures",
+        "cwe": "CWE-321",
+        "description": "非对称加密私钥 PEM 头部",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "hardcoded_password",
+        "name": "Hardcoded Password",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-259",
+        "description": "硬编码明文密码赋值(含 DB_PASSWORD / USER_PASSWORD 等蛇形命名)",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "generic_api_key",
+        "name": "Generic API Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "通用 API Key/Access Token/Secret Key 硬编码",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "slack_bot_token",
+        "name": "Slack Bot Token",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Slack Bot / App Token",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "google_api_key",
+        "name": "Google API Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Google API Key",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "stripe_secret_key",
+        "name": "Stripe Secret Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Stripe 支付密钥",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "database_url_with_credentials",
+        "name": "Database URL with Credentials",
+        "owasp": "A06:2025-Insecure Design",
+        "cwe": "CWE-522",
+        "description": "包含明文账号密码的数据库连接串",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "gitlab_personal_token",
+        "name": "GitLab Personal Token",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "GitLab Personal Access Token",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "heroku_api_key",
+        "name": "Heroku API Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Heroku API Key (UUID 形态)",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "discord_bot_token",
+        "name": "Discord Bot Token",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Discord Bot Token",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "telegram_bot_token",
+        "name": "Telegram Bot Token",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Telegram Bot Token",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "sendgrid_api_key",
+        "name": "SendGrid API Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "SendGrid 邮件服务 API Key",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "twilio_api_key",
+        "name": "Twilio API Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Twilio API Key SID",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "mailgun_api_key",
+        "name": "Mailgun API Key",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Mailgun 邮件 API Key",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "square_oauth_secret",
+        "name": "Square OAuth Secret",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-798",
+        "description": "Square OAuth Access/Client Secret",
+        "cwe_refs": [],
+        "source_url": ""
+      }
+    ],
+    "static_rules": [
+      {
+        "code": "weak_md5",
+        "name": "弱加密算法 MD5",
+        "owasp": "A04:2025-Cryptographic Failures",
+        "cwe": "CWE-327",
+        "description": "使用 MD5 做哈希,该算法已被破解,不应再用于密码/签名/完整性校验。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "weak_sha1",
+        "name": "弱加密算法 SHA-1",
+        "owasp": "A04:2025-Cryptographic Failures",
+        "cwe": "CWE-327",
+        "description": "SHA-1 已被实际碰撞,不应再用于数字签名或证书。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "weak_des",
+        "name": "DES 加密算法",
+        "owasp": "A04:2025-Cryptographic Failures",
+        "cwe": "CWE-327",
+        "description": "DES 密钥长度仅 56 bit,可在数小时内被穷举破解。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "aes_ecb_mode",
+        "name": "AES 使用 ECB 模式",
+        "owasp": "A04:2025-Cryptographic Failures",
+        "cwe": "CWE-327",
+        "description": "ECB 模式相同明文块产生相同密文块,会泄露数据规律。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "ssl_verify_disabled",
+        "name": "SSL 证书校验被禁用",
+        "owasp": "A07:2025-Authentication Failures",
+        "cwe": "CWE-295",
+        "description": "禁用 SSL/TLS 证书校验等同于明文传输,中间人可以任意篡改。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "pickle_load",
+        "name": "不安全的反序列化 pickle.loads",
+        "owasp": "A08:2025-Software or Data Integrity Failures",
+        "cwe": "CWE-502",
+        "description": "pickle.loads 可执行任意构造代码,加载不可信数据等于 RCE。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "eval_user_input",
+        "name": "eval 用于动态执行",
+        "owasp": "A05:2025-Injection",
+        "cwe": "CWE-95",
+        "description": "eval / exec 直接执行字符串,若拼接外部输入将导致代码执行漏洞。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "insecure_random",
+        "name": "安全场景使用非加密随机数",
+        "owasp": "A04:2025-Cryptographic Failures",
+        "cwe": "CWE-330",
+        "description": "random.random / Math.random 是伪随机,不可用于 token/密码/密钥生成。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "sql_string_concat",
+        "name": "SQL 语句字符串拼接",
+        "owasp": "A05:2025-Injection",
+        "cwe": "CWE-89",
+        "description": "使用字符串拼接 / f-string / 格式化 / + 拼接构造 SQL 语句,存在 SQL 注入风险。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "xxe_processing",
+        "name": "XML 外部实体注入风险 (XXE)",
+        "owasp": "A02:2025-Security Misconfiguration",
+        "cwe": "CWE-611",
+        "description": "使用标准 XML 解析器(lxml/etree/xml.sax/DocumentBuilder)但未明确禁用外部实体。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "open_redirect",
+        "name": "开放重定向",
+        "owasp": "A01:2025-Broken Access Control",
+        "cwe": "CWE-601",
+        "description": "重定向目标 URL 直接取自用户输入,未做白名单校验,可被用于钓鱼攻击。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "path_traversal_user_input",
+        "name": "路径遍历使用用户输入",
+        "owasp": "A01:2025-Broken Access Control",
+        "cwe": "CWE-22",
+        "description": "文件路径拼接了用户输入(如 ../ ),攻击者可读取任意文件。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "log_injection",
+        "name": "日志注入风险",
+        "owasp": "A09:2025-Security Logging & Alerting Failures",
+        "cwe": "CWE-117",
+        "description": "用户输入直接写入日志,可能注入换行伪造日志条目或注入控制字符污染终端。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "python_command_injection",
+        "name": "Python 命令注入",
+        "owasp": "A05:2025-Injection",
+        "cwe": "CWE-78",
+        "description": "动态外部输入进入系统命令或 shell=True 子进程,可导致任意命令执行。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "cookie_no_httponly",
+        "name": "Cookie 缺少 HttpOnly 标志",
+        "owasp": "A02:2025-Security Misconfiguration",
+        "cwe": "CWE-1004",
+        "description": "设置 Cookie 时未指定 HttpOnly,JavaScript 可读取该 Cookie,放大 XSS 危害。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "cookie_no_secure",
+        "name": "Cookie 缺少 Secure 标志",
+        "owasp": "A02:2025-Security Misconfiguration",
+        "cwe": "CWE-614",
+        "description": "设置 Cookie 时未指定 Secure,在 HTTPS 连接下该 Cookie 可能通过 HTTP 明文传输。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "missing_hsts",
+        "name": "缺失 HSTS 安全头",
+        "owasp": "A04:2025-Cryptographic Failures",
+        "cwe": "CWE-319",
+        "description": "未配置 Strict-Transport-Security,浏览器可被降级到 HTTP 中间人攻击。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "missing_csp",
+        "name": "缺失 Content-Security-Policy",
+        "owasp": "A06:2025-Insecure Design",
+        "cwe": "CWE-693",
+        "description": "未配置 CSP,无法限制脚本来源,放大 XSS 影响面。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "missing_x_frame_options",
+        "name": "缺失 X-Frame-Options",
+        "owasp": "A06:2025-Insecure Design",
+        "cwe": "CWE-1021",
+        "description": "未配置 X-Frame-Options,页面可被任意网站 iframe 嵌入,导致点击劫持。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "missing_x_content_type_options",
+        "name": "缺失 X-Content-Type-Options",
+        "owasp": "A06:2025-Insecure Design",
+        "cwe": "CWE-693",
+        "description": "未配置 X-Content-Type-Options,浏览器可能根据内容猜测 MIME,放大 XSS。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "cors_wildcard_with_credentials",
+        "name": "CORS 配置错误: 通配符 + 携带凭据",
+        "owasp": "A02:2025-Security Misconfiguration",
+        "cwe": "CWE-942",
+        "description": "同时设置 Access-Control-Allow-Origin: * 与 Allow-Credentials: true 违反 CORS 规范,任何站点可携带凭据请求。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "orderby_raw_concat",
+        "name": "排序参数直连 SQL(ORDER BY 注入)",
+        "owasp": "A05:2025-Injection",
+        "cwe": "CWE-89",
+        "description": "orderBy/sort/sortDir 等排序参数未经白名单校验直接拼进 SQL。排序位置不能用普通占位符,是最常见的注入遗漏点。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "user_url_fetch",
+        "name": "用户可控 URL 发起请求(SSRF)",
+        "owasp": "A01:2025-Broken Access Control",
+        "cwe": "CWE-918",
+        "description": "url/callback/webhook/imageUrl 等参数直接进入 HTTP 请求。攻击者可传入内网地址(如云元数据 169.254.169.254)读取凭证或打内网服务。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "path_param_file_read",
+        "name": "路径参数直连文件读写(目录穿越)",
+        "owasp": "A01:2025-Broken Access Control",
+        "cwe": "CWE-22",
+        "description": "file/filePath/filename/path/download 等参数未经规范化校验直接进入文件操作,攻击者可用 ../../ 读取任意文件(配置、密钥、源码)。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "sensitive_to_log",
+        "name": "敏感参数写入日志(凭证泄露)",
+        "owasp": "A09:2025-Security Logging & Alerting Failures",
+        "cwe": "CWE-532",
+        "description": "token/password/secret 等敏感字段被完整打印进日志,日志一旦被读取即泄露凭证。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "role_from_request",
+        "name": "角色/权限取自请求参数(提权风险)",
+        "owasp": "A06:2025-Insecure Design",
+        "cwe": "CWE-269",
+        "description": "role/permission/isAdmin 等权限字段来自请求并直接生效。攻击者改一个参数就能把自己提为管理员,是垂直越权的最常见根源。",
+        "cwe_refs": [],
+        "source_url": ""
+      },
+      {
+        "code": "password_plaintext_compare",
+        "name": "明文密码比较",
+        "owasp": "A06:2025-Insecure Design",
+        "cwe": "CWE-256",
+        "description": "密码以明文形式参与比较或存储,库一旦拖走全部凭证立即泄露。",
+        "cwe_refs": [],
+        "source_url": ""
+      }
+    ],
+    "catalog_metadata": {
+      "owasp_version": "2025",
+      "owasp_release": "Final",
+      "owasp_source_url": "https://owasp.org/Top10/2025/",
+      "cwe_version": "4.20",
+      "cwe_release_date": "2026-04-30",
+      "cwe_source_url": "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip",
+      "cwe_source_sha256": "3976f599e5e5200219a3108bb896d06e2a88fbb293369e1883cb423a5e9d7d50",
+      "cwe_weakness_count": 944,
+      "mapped_cwe_count": 249,
+      "mapped_weakness_count": 246,
+      "verified_at": "2026-09-07",
+      "mapping_note": "OWASP 各分类页面合计列出 249 个 CWE 标识；按 MITRE 4.20 类型核对为 246 个 Weakness 和 3 个 Category（16、320、1035）。官网介绍页另称 248，本库按可复核列表计数。",
+      "cve_scope": "已核验 41 条 PHP 生态 CVE 参考记录；不代表全量 CVE/NVD 数据库，也不代表项目已命中漏洞。",
+      "licenses": [
+        "OWASP CC BY 3.0",
+        "MITRE CWE Terms of Use: https://cwe.mitre.org/about/termsofuse.html"
+      ],
+      "cve_reference_count": 41,
+      "cve_reference_sha256": "c3bd2185d9505a1eb2d5a0c94059afaaeaf6161ec424ae334cdd37556c39681c",
+      "cve_sources": [
+        "https://cveawg.mitre.org/api/cve/",
+        "https://www.php.net/ChangeLog-8.php",
+        "https://github.com/laravel/framework/security/advisories/",
+        "https://github.com/php/php-src/security/advisories/"
+      ]
+    }
+  }
+}

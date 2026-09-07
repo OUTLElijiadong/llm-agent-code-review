@@ -1,0 +1,210 @@
+{
+  "status": "passed",
+  "reviewed_at_utc": "2026-09-07T09:42:24.219726+00:00",
+  "release": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+  "version": "3.8.6",
+  "reviewer_production_writes": false,
+  "tests_rerun": false,
+  "checks": {
+    "containers": {
+      "count": 2,
+      "release_image_version_health_match": true
+    },
+    "migration": {
+      "revision": "048_ai_usage_attribution",
+      "foreign_keys": 42,
+      "tables": 7,
+      "all_targets_types_nullable_set_null_match_ast": true,
+      "running_source_hashes": 5
+    },
+    "https_matrix": {
+      "requests": 550,
+      "login_and_self_access": 12,
+      "anonymous_401": 299,
+      "no_permission_403": 239,
+      "plan_rows_exactly_matched": true,
+      "blocked_plan_rows_not_executed": 88
+    },
+    "manual_anonymous": {
+      "requests": 8,
+      "all_401": true,
+      "plan_matches": true
+    },
+    "persistence_and_catalog": {
+      "requests": 23,
+      "login_posts": 4,
+      "gets": 19,
+      "assertions": 32,
+      "passed": true,
+      "catalog_whole_schema_equal": true,
+      "owasp_categories": 10,
+      "secret_patterns": 20,
+      "static_rules": 27
+    },
+    "historical": {
+      "task11_team5_unchanged": true,
+      "task35_team12_unchanged": true,
+      "tool_ledger_total": 2576,
+      "orphan_tools_unchanged": 7,
+      "executing_tools_unchanged": 3,
+      "history_groups_exactly_equal": 9,
+      "global_ops_success_before": 42660,
+      "global_ops_success_after": 42900,
+      "global_ops_count_changed": 240,
+      "global_ops_change_cause_verified": false
+    },
+    "project_161": {
+      "full_schema_fields": 8,
+      "all_field_hashes_equal": true,
+      "row_hash_equal": true,
+      "target_rows": 1,
+      "historical_backup_not_reread": true
+    },
+    "review_task_161": {
+      "stored_total_unchanged": 16,
+      "status_unchanged": "success",
+      "updated_unchanged": "2026-08-19 02:23:00.000000",
+      "report_hash_unchanged": true,
+      "parsed_report_entries": 4,
+      "unclassified": 4,
+      "parser_collector_and_query_hashes_verified": true
+    },
+    "qa_accounts": {
+      "ids": [
+        103,
+        104,
+        105,
+        106
+      ],
+      "ai_call_log": 0,
+      "review_task": 0,
+      "projects": 2,
+      "files": [
+        1892,
+        1893
+      ],
+      "account_status_at_capture": "active; later disable not covered"
+    },
+    "release_backup": {
+      "file": "code_review_20260907T085623Z_0a14b5359a44.sql.gz",
+      "directory_scope": "/opt/code-review/backups",
+      "release_ledger_backup_file_matches": true,
+      "bytes": 404458323,
+      "sha256": "1fadbcde8e2a3cb2e77d220f5cb8ee053abcd8392e718d03af8ba82b4c1772f6",
+      "metadata_sha256": "205227569087c3b957283f0dc1812e79ecda2bdb3498c009b4a944759b02cb90",
+      "checksum_sidecar_sha256": "b793b225b8e6f02656b973ed3bca58c7f569e2a76fc91b83580b3c938d45d758",
+      "metadata": {
+        "alembic_revision": "047_review_input_snapshot",
+        "created_at_utc": "20260907T085623Z",
+        "file": "code_review_20260907T085623Z_0a14b5359a44.sql.gz",
+        "git_sha": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+        "reason": "pre_deploy",
+        "sha256": "1fadbcde8e2a3cb2e77d220f5cb8ee053abcd8392e718d03af8ba82b4c1772f6",
+        "table_count": 89
+      },
+      "actual_file_meta_and_sidecar_sha_equal": true,
+      "restore_rerun": false,
+      "gzip_test_rerun": false
+    },
+    "qa_finalization": {
+      "disabled_accounts": [
+        103,
+        104,
+        105,
+        106
+      ],
+      "all_status_zero": true,
+      "versions": [
+        {
+          "id": 103,
+          "token_version_before": 4,
+          "token_version_after": 5
+        },
+        {
+          "id": 104,
+          "token_version_before": 7,
+          "token_version_after": 8
+        },
+        {
+          "id": 105,
+          "token_version_before": 4,
+          "token_version_after": 5
+        },
+        {
+          "id": 106,
+          "token_version_before": 6,
+          "token_version_after": 7
+        }
+      ],
+      "old_token_me_403_40301": 4,
+      "model_and_review_counts": {
+        "ai_call_log": 0,
+        "review_task": 0
+      },
+      "two_project_eight_field_row_hashes_unchanged": true,
+      "v1_prewrite_failure_preserved": true
+    },
+    "final_ui_ledger": {
+      "controls": 610,
+      "buttons_or_links": 446,
+      "roles": 5,
+      "rows": 3050,
+      "statuses": {
+        "untested": 2405,
+        "partially_tested": 11,
+        "passed": 12,
+        "observed": 12,
+        "blocked": 610
+      },
+      "observations": 91,
+      "observed_rows": 35,
+      "supplemental_observations": 24,
+      "json_csv_every_exported_cell_equal": true
+    }
+  },
+  "frontend_assets": {
+    "expected_image_files": 269,
+    "served_total_files": 3709,
+    "collector_reports_all_expected_equal": true,
+    "individual_file_manifest_available": true,
+    "independent_recount_pending": false,
+    "local_dist_is_not_production_build_reference": true,
+    "independent_recount_passed": true,
+    "expected_and_served_sha256_maps_equal": true,
+    "manifest_sha256": "a9ac32a5400e48aa7b23f2674671fe6a7e4acf0dc8dee9cc86c061d4ac508ea5",
+    "runtime_manifest_and_container_identity_match": true,
+    "second_reviewer_independent_check": "生产前端与备份补采独立复核.json"
+  },
+  "boundaries": [
+    "登录会更新专用账号会话和审计；不宣称生产HTTPS全程零写。",
+    "HTTP拒绝矩阵不等同全部按钮实际点击通过。",
+    "历史目标字段未变不等同全系统账本总量不变。",
+    "生产镜像269个预期资源逐路径SHA已独立重算并全部匹配；服务目录共3709文件包含其他旧资源，不能表述为生产总文件269。",
+    "补采仅对已存在的压缩备份做流式哈希并读白名单元数据；未读取SQL正文，未重做备份、恢复或迁移。"
+  ],
+  "evidence_sha256": {
+    "生产发布运行态与048核验.json": "12a964853e175cb9e7ae92721d85113f9440e7a6d1d6f4b5af8b338622be82c0",
+    "生产HTTPS权限矩阵发布后.json": "fefe2541cd602e47a6bfaf00326623cbd494b6d7379fcad77ed168dfd8d52a6c",
+    "生产手工鉴权匿名补充发布后.json": "09932982d34f65046ab146d659626dcb182000046dd21079bd55ac26fac08f0b",
+    "生产重启数据持久性与安全清单.json": "cbde9febdcef5585b64e66043c3bc4ad129c30900bbf86248ed7d2ddd7721d91",
+    "历史任务与孤儿账本发布后复核.json": "dc0e96a8ccf20428ca990caa4097666b2c640593e210016c0d1ad1f5fb6edf77",
+    "项目161发布后完整字段复核.json": "0c7e766fb7d5fbaee1ce6d86be26919947add1ecb7e7b224a4fc45e4151a07a9",
+    "审查任务161发布后解析核验.json": "670646b91ddfd1070ba4583ef34f3b46e51f3f6366b11eae57dc5a6f8cf15041",
+    "验收账号发布后模型任务只读核对.json": "4038d12f4cd564e06903768f71c9864987367d8fdc150b1c6c7659eea384153e",
+    "历史任务与孤儿账本复核.json": "967911bce292fa99ff4c182f8129e2b2b64362014a65b08b766574754f6860a0",
+    "项目161完整字段比较.json": "95cf1f72edfd732723980600e52edf0953fb999612b2aec39fcff5eed6ca5bbf",
+    "项目161发布前再次核对.json": "172fa8872f8aa2f97e0f68a61b5f40a628d8954f0f2b3ab638553de194f1cf8d",
+    "审查任务161真实报告解析核验.json": "9f7a5e15de172ff3fa4b9505d1d491bee6c8eda198518034e66b3a17cebc5751",
+    "生产HTTP安全拒绝计划-发布候选.json": "9ec5759004818bdb331260ee3f721dc94c50f0e37a190ee3bae44a6e049c309a",
+    "手动鉴权匿名补充计划-发布候选.json": "d7fe2cb55fd3eaeef7f2ff08a5bcdc9234a760c8c8830372590aa4102a034a69",
+    "生产前端逐文件与本轮备份只读核验.json": "0ae4adcb406d4fe1c49644a99b69dfb21f128c25c1c2829f8856be8f5cdb9c0c",
+    "collect_release_assets_backup_readonly.py": "b5a93736a03243d7a5ad1cd7dbafeb4f36090264b253ec4d5a5631acee5da046",
+    "collect_release_readonly.py": "6a4b90538b7c307e6bbac71463ef76cf8d51b8b206288f8c51e5a9792c2a8759",
+    "生产QA账号收尾执行v2.json": "d6f30b88234562ea749a82028ebd200c5ab213e0baf123d9bb12c91cb1e6be8e",
+    "生产QA账号收尾独立数据复核.json": "389ee257dd7ca14bab9607582d4bdbe5b1548f2c93e37aa53b95f8e88ff7390a",
+    "生产UI最终台账独立复核.json": "f8384d00b6d38c06e39a3ea9f2ed7dda00777b61953252d71f6eac041ce7f0b3",
+    "生产前端与备份补采独立复核.json": "5d0a910de3e67df14d898754443eac1b5e9cfa018f23325d72614e8e26ddc9ab"
+  },
+  "reviewer_production_https_requests": 0,
+  "reviewer_production_ssh_sessions": 1
+}

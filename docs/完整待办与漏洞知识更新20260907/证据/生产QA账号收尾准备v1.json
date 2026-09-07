@@ -1,0 +1,26 @@
+{
+  "状态": "准备完成，未执行生产",
+  "账号ID": [
+    103,
+    104,
+    105,
+    106
+  ],
+  "保留项目ID": [
+    162,
+    163
+  ],
+  "禁用后旧令牌HTTP": 403,
+  "禁用后旧令牌业务码": 40301,
+  "测试数": 21,
+  "失败数": 0,
+  "错误数": 0,
+  "真实本地验证": "隔离 SQLite + 真实 auth 路由正常登录 + 现有 prepare_permission_acceptance.py --disable；4账号 token_version 6→7 且 status 0，旧 token 40301，其余账号未变，模型账本/审查任务0",
+  "生产执行": false,
+  "来源SHA256": {
+    "/tmp/prism_finalize_qa_20260907.py": "ced133ed30eecebb55498f87b88648368147213c3261c4e610c5cd38e58d3913",
+    "/tmp/test_prism_finalize_qa_20260907.py": "54999ff9c306dac0cea7f2dce326a8d203b7d3534be4b313dba3f3e930879d1e",
+    "/tmp/prism_finalize_qa_20260907_tests.xml": "fca547e7e73356d465b74b418f7aa8f21ab5eb165795bb0f89c4cc7477c5d408"
+  },
+  "执行边界": "只能在主代理明确通知浏览器验收结束后，生产宿主 root 运行 --execute；无重试，结果 O_EXCL 防重复，失败先查阶段。原凭据不复制出服务器；容器内私有临时副本正常退出删除。"
+}
