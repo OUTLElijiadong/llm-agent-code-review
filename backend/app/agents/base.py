@@ -33,9 +33,11 @@ class AgentResult:
     error: Optional[str] = None
     model: str = ""
     duration_ms: int = 0
-    tokens: Dict[str, int] = field(default_factory=dict)
+    tokens: Dict[str, Optional[int]] = field(default_factory=dict)
     failure_kind: str = ""
     finish_reason: str = ""
+    usage_log_ids: list[int] = field(default_factory=list)
+    http_attempts: Optional[int] = None
 
 
 class BaseAgent:
@@ -115,6 +117,16 @@ class BaseAgent:
         truncated = user_message[:keep] + "\n\n…[输入按 1M 上下文窗口投影截断]"
         return truncated, True
 
+    def bind_usage_source(self, db, user) -> None:
+        """Bind only a trusted Engine-backed factory; never share the request Session with workers."""
+        from sqlalchemy.orm import Session, sessionmaker
+
+        self._usage_source = None
+        if isinstance(db, Session):
+            bind = db.get_bind()
+            self._usage_source = (int(user.id) if user is not None else None,
+                                  sessionmaker(bind=getattr(bind, "engine", bind), expire_on_commit=False))
+
     def call(self, user_message: str, ctx: Optional[AgentContext] = None,
              json_mode: bool = False,
              api_config: Optional["ApiConfig"] = None,
@@ -186,6 +198,8 @@ class BaseAgent:
         last_failure_kind = "upstream_error"
         last_finish_reason = ""
         attempts_used = 0
+        usage_log_ids: list[int] = []
+        http_attempts = 0
         for attempt in range(max_retries + 1):
             if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
                 last_error = "模型调用超过语义审计全局时限"
@@ -198,6 +212,12 @@ class BaseAgent:
             attempts_used += 1
             t0 = time.time()
             retryable = True
+            request_sent = False
+            attempt_usage = None
+            attempt_text = ""
+            attempt_model = model
+            attempt_error = ""
+            attempt_success = False
             try:
                 target = pin_public_http_url(f"{base_url}/chat/completions")
                 request_timeout = float(timeout)
@@ -207,6 +227,8 @@ class BaseAgent:
                         max(0.1, deadline_monotonic - time.monotonic()),
                     )
                 with httpx.Client(timeout=request_timeout, trust_env=False) as client:
+                    request_sent = True
+                    http_attempts += 1
                     resp = client.post(
                         target.request_url,
                         headers={
@@ -219,17 +241,29 @@ class BaseAgent:
                     )
                 duration_ms = int((time.time() - t0) * 1000)
 
-                if resp.status_code == 200:
+                try:
                     body = resp.json()
+                except (TypeError, ValueError):
+                    body = {}
+                if isinstance(body, dict):
+                    attempt_usage = body.get("usage")
+                    attempt_model = str(body.get("model") or model)
+                if resp.status_code == 200:
                     choice = body["choices"][0]
                     message_body = choice.get("message") or {}
                     finish_reason = str(choice.get("finish_reason") or "unknown")
                     last_finish_reason = finish_reason
-                    usage = body.get("usage", {})
+                    from app.services.ai_usage_context import usage_tokens
+
+                    raw_usage = body.get("usage")
+                    usage = {key: usage_tokens(raw_usage, key) for key in
+                             ("prompt_tokens", "completion_tokens", "total_tokens")}
                     # reasoning_content 是模型内部推理，不是面向用户的答复。
                     # 任何 length 终止都是不完整输出，即使 content 恰好是可解析 JSON
                     # 也不得接纳，更不能原样重试同一超大请求。
                     if finish_reason == "length":
+                        retryable = False
+                        attempt_error = "模型输出被截断(finish_reason=length)"
                         error = "模型输出因长度上限被截断(finish_reason=length)"
                         logger.warning(f"[{self.name}] {error}")
                         self._emit(
@@ -248,19 +282,22 @@ class BaseAgent:
                             },
                         )
                         return AgentResult(
+                            usage_log_ids=usage_log_ids, http_attempts=http_attempts,
                             success=False,
                             error=f"[{self.name}] {error}",
-                            model=body.get("model", self._model),
+                            model=body.get("model", model),
                             duration_ms=duration_ms,
                             tokens={
-                                "prompt": usage.get("prompt_tokens", 0),
-                                "completion": usage.get("completion_tokens", 0),
-                                "total": usage.get("total_tokens", 0),
+                                "prompt": usage.get("prompt_tokens"),
+                                "completion": usage.get("completion_tokens"),
+                                "total": usage.get("total_tokens"),
                             },
                             failure_kind="output_truncated",
                             finish_reason=finish_reason,
                         )
                     if finish_reason != "stop":
+                        retryable = False
+                        attempt_error = f"模型以不完整终态结束(finish_reason={finish_reason})"
                         error = f"模型以不完整终态结束(finish_reason={finish_reason})"
                         logger.warning(f"[{self.name}] {error}")
                         self._emit(
@@ -278,14 +315,15 @@ class BaseAgent:
                             },
                         )
                         return AgentResult(
+                            usage_log_ids=usage_log_ids, http_attempts=http_attempts,
                             success=False,
                             error=f"[{self.name}] {error}",
-                            model=body.get("model", self._model),
+                            model=body.get("model", model),
                             duration_ms=duration_ms,
                             tokens={
-                                "prompt": usage.get("prompt_tokens", 0),
-                                "completion": usage.get("completion_tokens", 0),
-                                "total": usage.get("total_tokens", 0),
+                                "prompt": usage.get("prompt_tokens"),
+                                "completion": usage.get("completion_tokens"),
+                                "total": usage.get("total_tokens"),
                             },
                             failure_kind="incomplete_response",
                             finish_reason=finish_reason,
@@ -297,6 +335,8 @@ class BaseAgent:
                         raise RuntimeError(
                             f"模型未返回最终内容(finish_reason={finish_reason})"
                         )
+                    attempt_success = True
+                    attempt_text = content
                     logger.debug(
                         f"[{self.name}] 调用成功 duration={duration_ms}ms "
                         f"tokens={usage.get('total_tokens', '?')}"
@@ -307,17 +347,18 @@ class BaseAgent:
                                    message=f"{self.name} 调用完成",
                                    payload={
                                        "duration_ms": duration_ms,
-                                       "total_tokens": usage.get("total_tokens", 0),
+                                       "total_tokens": usage.get("total_tokens"),
                                    })
                     return AgentResult(
+                        usage_log_ids=usage_log_ids, http_attempts=http_attempts,
                         success=True,
                         data=content,
-                        model=body.get("model", self._model),
+                        model=body.get("model", model),
                         duration_ms=duration_ms,
                         tokens={
-                            "prompt": usage.get("prompt_tokens", 0),
-                            "completion": usage.get("completion_tokens", 0),
-                            "total": usage.get("total_tokens", 0),
+                            "prompt": usage.get("prompt_tokens"),
+                            "completion": usage.get("completion_tokens"),
+                            "total": usage.get("total_tokens"),
                         },
                         finish_reason=finish_reason,
                     )
@@ -347,6 +388,24 @@ class BaseAgent:
                 duration_ms = int((time.time() - t0) * 1000)
                 retryable = False
 
+            finally:
+                if request_sent:
+                    from app.services.ai_usage_context import record_usage_attempt
+
+                    log_id = record_usage_attempt(
+                        model_name=attempt_model, agent_label=self.name, usage=attempt_usage,
+                        status=("success" if attempt_success else
+                                "retry" if retryable and attempt < max_retries else "failed"),
+                        error="" if attempt_success else attempt_error or (last_error or ""),
+                        duration_ms=int((time.time() - t0) * 1000),
+                        prompt=projected_message, response=attempt_text,
+                        user_id=ctx.user_id if ctx else getattr(getattr(self, "_user", None), "id", None),
+                        task_id=ctx.task_id if ctx else None, file_id=ctx.file_id if ctx else None,
+                        db=getattr(self, "_db", None), source=getattr(self, "_usage_source", None),
+                    )
+                    if log_id is not None:
+                        usage_log_ids.append(log_id)
+
             logger.warning(f"[{self.name}] 第 {attempt+1} 次尝试失败: {last_error}")
             if retryable and attempt < max_retries:
                 retry_delay = float(2 ** (attempt + 1))
@@ -371,6 +430,7 @@ class BaseAgent:
             payload={"error": last_error, "failure_kind": last_failure_kind},
         )
         return AgentResult(
+            usage_log_ids=usage_log_ids, http_attempts=http_attempts,
             success=False,
             error=f"[{self.name}] 调用失败({attempts_used} 次尝试): {last_error}",
             failure_kind=last_failure_kind,
@@ -417,6 +477,7 @@ class BaseAgent:
                 model=result.model,
                 duration_ms=result.duration_ms,
                 tokens=result.tokens,
+                usage_log_ids=result.usage_log_ids, http_attempts=result.http_attempts,
                 failure_kind="invalid_json",
                 finish_reason=result.finish_reason,
             )
@@ -432,7 +493,7 @@ class BaseAgent:
             ),
             payload={
                 "duration_ms": result.duration_ms,
-                "total_tokens": result.tokens.get("total", 0),
+                "total_tokens": result.tokens.get("total"),
                 "awaiting_contract_validation": recover_truncation,
             },
         )
@@ -454,8 +515,8 @@ class BaseAgent:
     ) -> None:
         """将本次 Agent 调用写入 ai_call_log 表,agent_label 填充为 self.name
 
-        BaseAgent.call() 本身不写日志,调用方(如 review_service)在 Agent 调用
-        完成后调用此方法补写 AiCallLog,实现 Agent 调用归因(AC6)。
+        BaseAgent.call() 在每次实际请求后独立提交日志；此处按已记录 ID
+        补充审查元数据。仅未绑定数据库的兼容调用需要补录。
         agent_label 字段固定为 self.name(如 code_reviewer / security_sentinel),
         使 SkillRegistry / 运维面板能按 Agent 维度统计调用情况。
 
@@ -475,6 +536,13 @@ class BaseAgent:
             None
         """
         from app.models.ai_call_log import AiCallLog
+        from app.services.ai_usage_context import enrich_recorded_usage, log_attribution, usage_tokens
+
+        if getattr(result, "http_attempts", None) == 0:
+            return
+        if enrich_recorded_usage(db, user_id, getattr(result, "usage_log_ids", None), task_id=task_id,
+                                 file_id=file_id, chunk_index=chunk_index, status=status, error=error or ""):
+            return
 
         tokens_dict: Dict[str, int] = {}
         if result is not None and getattr(result, "tokens", None):
@@ -484,6 +552,7 @@ class BaseAgent:
         duration_ms = (getattr(result, "duration_ms", None) if result else None) or 0
 
         rec = AiCallLog(
+            **log_attribution(db, user_id, task_id),
             task_id=task_id,
             user_id=user_id,
             file_id=file_id,
@@ -494,9 +563,9 @@ class BaseAgent:
             response=(response_text or "")[:200_000] or None,
             status=status,
             error_message=error,
-            prompt_tokens=tokens_dict.get("prompt", 0) if tokens_dict else None,
-            completion_tokens=tokens_dict.get("completion", 0) if tokens_dict else None,
-            total_tokens=tokens_dict.get("total", 0) if tokens_dict else None,
+            prompt_tokens=usage_tokens(tokens_dict, "prompt"),
+            completion_tokens=usage_tokens(tokens_dict, "completion"),
+            total_tokens=usage_tokens(tokens_dict, "total"),
             duration_ms=duration_ms,
             create_time=datetime.now(timezone.utc),
         )

@@ -1,0 +1,32 @@
+{
+  "reviewer": "permission_matrix",
+  "review": "完整4文件及现有依赖核验，定向测试独立复跑，无生产错误密码请求",
+  "source_sha256": {
+    "backend/app/api/v1/auth.py": "105c3da0477957c6d0c6ec3a6b157ea83662b8d4519aa813b7192c623a712585",
+    "backend/app/core/error_handlers.py": "ff39b307cc34d46e9253c7bfc7d20372d22919e1ab29072dc28ccf69b40531d7",
+    "frontend/src/api/http.ts": "e9d12bc0bf54a4f168fc2dbbd440a9797d125ff6966cca88192022bc8d9e03a2",
+    "frontend/src/views/auth/Login.vue": "f6a1545bfb98d40cddf6737ebc7f2c9a64f54d263dcd609bccfa0a6bd9ab0448",
+    "backend/app/core/rate_limit.py": "705ae025df36222aa54ee73f62b04855dd699cf5b29cecc4927e5b64f4de0ea2",
+    "backend/app/core/exceptions.py": "42f41fbae9af4b40cfa0aa81a1d58d2e57d14e5f6642b9df4396b44c562aff01",
+    "backend/tests/unit/api/test_auth_rate_limit_api.py": "8f45ce7cc1d53e8e6349ffa0ed74ac2d43d57184ec9403a3defe050118ac08b4",
+    "backend/tests/unit/core/test_login_rate_limit.py": "b1f1b4d2ff84f4cdbf580fca73b8b53b9612f4bf34ffd50fbd6b6ff2b0138a5f",
+    "frontend/src/api/http.test.ts": "936ade759474fe17316169aca56aec637752a90a7557ddaed7fcff064f11c1b5",
+    "frontend/src/views/auth/Login.test.ts": "139e93cbf9ebb3850581909f220a724b8aaac32cdddd1495e6712049f9765451"
+  },
+  "tests": {
+    "后端": {
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xml_sha256": "225e969a3be03c730c6713210b247d4562e4c48bc1f1a22f55ded70b0f0bd6e5"
+    },
+    "前端": {
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xml_sha256": "fc876035ecc25467fafe20c044aaa022fbbd14f4da335580a8bb950a539e5fbe"
+    }
+  }
+}

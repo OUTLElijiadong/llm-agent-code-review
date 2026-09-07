@@ -16,6 +16,14 @@ from app.services.mcp_tool_provider import McpToolProvider
 from app.utils.api_resolver import _derive_fernet_key, decrypt_api_key_with_metadata
 
 
+def _stub_owned_embeddings(monkeypatch, expected_user_id):
+    def embed(_db, values, *, user_id):
+        assert user_id == expected_user_id
+        return ([[0.0] * 8 for _ in values], "test")
+
+    monkeypatch.setattr(capability_catalog_service.embedding_service, "embed_texts", embed)
+
+
 def _checksum(schema: dict) -> str:
     payload = json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -226,11 +234,7 @@ def test_alias_query_happens_after_authorization_and_ordinary_admin_never_sees_m
     )
     db.add(unauthorized)
     db.commit()
-    monkeypatch.setattr(
-        capability_catalog_service.embedding_service,
-        "embed_texts",
-        lambda _db, values: ([[0.0] * 8 for _ in values], "test"),
-    )
+    _stub_owned_embeddings(monkeypatch, admin_user.id)
 
     rows = capability_catalog_service.search_capabilities(db, admin_user, "秘密远程能力", 20)
 
@@ -250,11 +254,7 @@ def test_superadmin_can_find_authorized_mcp_via_alias(db, super_admin_user, monk
     )
     db.add(alias)
     db.commit()
-    monkeypatch.setattr(
-        capability_catalog_service.embedding_service,
-        "embed_texts",
-        lambda _db, values: ([[0.0] * 8 for _ in values], "test"),
-    )
+    _stub_owned_embeddings(monkeypatch, super_admin_user.id)
 
     rows = capability_catalog_service.search_capabilities(db, super_admin_user, "帮我看文档", 5)
 
@@ -274,11 +274,7 @@ def test_superadmin_can_find_real_managed_source_download_by_synonym(
 ) -> None:
     mcp_governance_service.seed_recommended_servers(db, super_admin_user)
     _persist_aliases(db, "mcp:prism-code:download_project_source", (query,))
-    monkeypatch.setattr(
-        capability_catalog_service.embedding_service,
-        "embed_texts",
-        lambda _db, values: ([[0.0] * 8 for _ in values], "test"),
-    )
+    _stub_owned_embeddings(monkeypatch, super_admin_user.id)
 
     rows = capability_catalog_service.search_capabilities(db, super_admin_user, query, 5)
 
@@ -300,11 +296,7 @@ def test_managed_source_catalog_follows_app_permissions_without_server_access(
         "mcp:prism-code:download_project_source",
         ("远程下载代码",),
     )
-    monkeypatch.setattr(
-        capability_catalog_service.embedding_service,
-        "embed_texts",
-        lambda _db, values: ([[0.0] * 8 for _ in values], "test"),
-    )
+    _stub_owned_embeddings(monkeypatch, admin_user.id)
 
     rows = capability_catalog_service.search_capabilities(db, admin_user, "远程下载代码", 20)
 
@@ -334,11 +326,7 @@ def test_persistent_alias_exposes_existing_sandbox_extend_capability(
         )
     )
     db.commit()
-    monkeypatch.setattr(
-        capability_catalog_service.embedding_service,
-        "embed_texts",
-        lambda _db, values: ([[0.0] * 8 for _ in values], "test"),
-    )
+    _stub_owned_embeddings(monkeypatch, admin_user.id)
 
     rows = capability_catalog_service.search_capabilities(db, admin_user, "测试环境续期", 5)
 

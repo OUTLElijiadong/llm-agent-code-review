@@ -77,6 +77,7 @@ import http, {
 
 /** 重置 Axios 测试桩的返回行为。 */
 function resetHttpHarness(): void {
+  delete window.__prismAuthExpiredHandled
   harness.getToken.mockReturnValue(null)
   harness.isCancel.mockReturnValue(false)
   harness.instance.get.mockReset()
@@ -206,4 +207,70 @@ describe('http convenience functions', () => {
       responseType: 'blob',
     })
   })
+})
+
+describe('登录冷却响应', () => {
+  it('登录错密由表单显示，不触发会话过期、跳转或重复 toast', async () => {
+    const data = { code: 40001, message: '用户名或密码错误', data: null }
+    await expect(harness.state.responseRejected!({
+      config: { url: '/auth/login' }, response: { status: 401, data },
+    })).rejects.toBe(data)
+    expect(harness.clearToken).not.toHaveBeenCalled()
+    expect(harness.routerReplace).not.toHaveBeenCalled()
+    expect(harness.messageError).not.toHaveBeenCalled()
+  })
+
+  it('应用 429 保留 Retry-After 剩余秒并由登录表单唯一提示', async () => {
+    await expect(harness.state.responseRejected!({
+      config: { url: '/auth/login' },
+      response: { status: 429, data: { code: 42900, message: '稍后再试' }, headers: { 'retry-after': '37' } },
+    })).rejects.toMatchObject({ code: 42900, message: '稍后再试', retry_after_seconds: 37 })
+    expect(harness.messageError).not.toHaveBeenCalled()
+    expect(harness.routerReplace).not.toHaveBeenCalled()
+  })
+
+  it('代理 HTML 429 解析 HTTP-date，使用服务器 Date 避免本机时钟偏差', async () => {
+    await expect(harness.state.responseRejected!({
+      config: { url: '/auth/login' },
+      response: { status: 429, data: '<html>Too Many Requests</html>', headers: {
+        'retry-after': 'Mon, 07 Sep 2026 08:01:00 GMT', date: 'Mon, 07 Sep 2026 08:00:15 GMT',
+      } },
+    })).rejects.toMatchObject({ code: 42900, retry_after_seconds: 45, message: '登录请求过于频繁，请等待后重试' })
+    expect(harness.messageError).not.toHaveBeenCalled()
+  })
+
+  it.each(['invalid', '-3', '1.5', ''])('无效 Retry-After %s 不捏造倒计时，允许读取应用剩余秒', async (value) => {
+    await expect(harness.state.responseRejected!({
+      config: { url: '/auth/login' },
+      response: { status: 429, data: { code: 42900, message: '限流', retry_after_seconds: 12 }, headers: { 'retry-after': value } },
+    })).rejects.toMatchObject({ retry_after_seconds: 12 })
+  })
+
+  it('代理无剩余值时只说明稍后重试，不编造 60 秒', async () => {
+    const failure = await harness.state.responseRejected!({
+      config: { url: '/auth/login' }, response: { status: 429, data: '<html>limited</html>' },
+    }).catch((error) => error)
+    expect(failure.message).toBe('登录请求过于频繁，请等待后重试')
+    expect(failure.retry_after_seconds).toBeUndefined()
+  })
+})
+
+
+it('代理 503 的 Retry-After 也交给登录页，不假装密码错误', async () => {
+  await expect(harness.state.responseRejected!({
+    config: { url: '/auth/login' },
+    response: { status: 503, data: '<html>unavailable</html>', headers: { 'Retry-After': '90' } },
+  })).rejects.toMatchObject({ code: 50301, retry_after_seconds: 90 })
+  expect(harness.messageError).not.toHaveBeenCalled()
+})
+
+it('Retry-After 的零秒与已过去 HTTP-date 都不会被改成默认冷却', async () => {
+  for (const headers of [
+    { 'retry-after': '0' },
+    { 'retry-after': 'Mon, 07 Sep 2026 08:00:00 GMT', date: 'Mon, 07 Sep 2026 08:00:15 GMT' },
+  ]) {
+    await expect(harness.state.responseRejected!({
+      config: { url: '/auth/login' }, response: { status: 429, data: {}, headers },
+    })).rejects.toMatchObject({ retry_after_seconds: 0 })
+  }
 })

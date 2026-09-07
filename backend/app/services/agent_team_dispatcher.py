@@ -13,6 +13,7 @@ from app.core.database import SessionLocal
 from app.models.agent_team import AgentTeam
 from app.models.user import User
 from app.services import agent_team_service
+from app.services.ai_usage_context import model_attribution, usage_context
 
 _scheduler = None
 
@@ -92,13 +93,20 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
             # 只有持有团队租约的内部调度链可执行受治理沙箱 Agent。
             from app.services.agent_mesh_dispatcher import _handle
 
-            _, result = _handle(
-                db,
-                user,
-                claimed["address"],
-                _task_message(team, claimed),
-                trusted_team_execution=True,
-            )
+            fields = {
+                **model_attribution(team),
+                "agent_team_id": int(team.id),
+                "agent_team_task_id": int(claimed["task_id"]),
+                "agent_execution_event_id": claimed.get("execution_event_id"),
+            }
+            with usage_context(int(user.id), fields, db=db):
+                _, result = _handle(
+                    db,
+                    user,
+                    claimed["address"],
+                    _task_message(team, claimed),
+                    trusted_team_execution=True,
+                )
             success = str(result.get("status") or "") == "completed"
             agent_team_service.complete_task(
                 db,

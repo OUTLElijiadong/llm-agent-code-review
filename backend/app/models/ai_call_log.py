@@ -8,13 +8,14 @@ from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
 from app.models.base import IdMixin
+from app.models.usage_attribution import UsageAttributionMixin
 
 
 def _utcnow():
     return datetime.now(timezone.utc)
 
 
-class AiCallLog(Base, IdMixin):
+class AiCallLog(Base, UsageAttributionMixin, IdMixin):
     __tablename__ = "ai_call_log"
     __table_args__ = (
         Index("ix_ai_call_log_task", "task_id"),

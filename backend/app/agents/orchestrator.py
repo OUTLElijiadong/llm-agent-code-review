@@ -195,6 +195,9 @@ class Orchestrator(BaseAgent):
             a.inject(db, user=user)
         self._db = db
         self._user = user
+        for agent in [self, *vars(self).values()]:
+            if isinstance(agent, BaseAgent):
+                agent.bind_usage_source(db, user)
 
         # v3.1: 自动解析用户 API 配置
         cfg = resolve_api_config(db, user.id)

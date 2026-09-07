@@ -220,6 +220,7 @@ def create_agent_knowledge_doc(
     row = agent_knowledge_service.add_document(
         db,
         agent_code=payload.agent_code,
+        user_id=_.id,
         title=payload.title,
         content=payload.content,
         source_type=payload.source_type,
@@ -327,7 +328,7 @@ def crawl_agent_knowledge_sources(
     Returns:
         Resp[dict]: 抓取结果。
     """
-    return Resp(data=agent_knowledge_service.crawl_enabled_sources(db, agent_code=agent_code))
+    return Resp(data=agent_knowledge_service.crawl_enabled_sources(db, agent_code=agent_code, user_id=_.id))
 
 
 @router.get("/approvals", response_model=Resp[list[ApprovalItemOut]])

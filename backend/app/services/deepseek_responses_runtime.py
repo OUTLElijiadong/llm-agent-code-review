@@ -58,6 +58,18 @@ COMPLETION_GUARD_RETRY_LIMIT = 2
 _COMPLETION_GUARD_CORRECTION_PREFIX = "[runtime_completion_guard]"
 
 
+class ObservedResponseError(RuntimeError):
+    """Transport failure carrying provider metadata already observed before the failure."""
+
+    def __init__(self, message: str, response: Mapping[str, Any]):
+        super().__init__(message)
+        self.observed_response = copy.deepcopy(dict(response))
+
+
+class RoundAccountingError(RuntimeError):
+    """Logging failure must never trigger another paid provider request."""
+
+
 class RunNotFoundError(LookupError):
     """请求续跑的检查点不存在。"""
 
@@ -773,13 +785,29 @@ class DeepSeekResponsesRuntime:
             await self._store.save(checkpoint)
 
             async def _run_model_round() -> tuple[Dict[str, Any], List[Mapping[str, Any]]]:
-                output = await _invoke_transport(self._transport, payload)
-                response, turn_events = await _collect_response(output)
+                try:
+                    output = await _invoke_transport(self._transport, payload)
+                    response, turn_events = await _collect_response(output)
+                except (Exception, asyncio.CancelledError) as exc:
+                    observed = getattr(exc, "observed_response", {})
+                    observed = dict(observed) if isinstance(observed, Mapping) else {}
+                    failed_response = {
+                        **(dict(observed) if isinstance(observed, Mapping) else {}),
+                        "status": FAILED, "model": observed.get("model") or payload["model"], "error": str(exc),
+                    }
+                    if self._on_round is not None:
+                        try:
+                            self._on_round(failed_response)
+                        except Exception as log_error:
+                            if isinstance(exc, asyncio.CancelledError):
+                                raise exc from log_error
+                            raise RoundAccountingError("模型请求已执行，但该轮用量记账失败") from log_error
+                    raise
                 if self._on_round is not None:
                     try:
                         self._on_round(response)
-                    except Exception:  # noqa: BLE001 - 调用日志失败不影响主流程
-                        pass
+                    except Exception as log_error:
+                        raise RoundAccountingError("模型请求已执行，但该轮用量记账失败") from log_error
                 return response, turn_events
 
             try:
@@ -1544,6 +1572,8 @@ def _is_model_unavailable_error(exc: BaseException) -> bool:
     只有错误文本点名模型不存在/非法,或直接点名默认编排模型时才会回退;
     普通超时、限流、连接错误即使包含 model 字样也不触发回退。
     """
+    if isinstance(exc, RoundAccountingError):
+        return False
     text = str(exc).lower()
     if "deepseek-v4-pro" in text:
         return True
@@ -1627,16 +1657,34 @@ async def _collect_response(output: TransportOutput) -> Tuple[Dict[str, Any], Li
 
     events: List[Mapping[str, Any]] = []
     if hasattr(output, "__aiter__"):
-        async for event in output:  # type: ignore[union-attr]
-            if isinstance(event, Mapping):
-                events.append(copy.deepcopy(dict(event)))
+        try:
+            async for event in output:  # type: ignore[union-attr]
+                if isinstance(event, Mapping):
+                    events.append(copy.deepcopy(dict(event)))
+        except asyncio.CancelledError as exc:
+            observed = _response_from_events(events) if events else {}
+            extra = getattr(exc, "observed_response", None)
+            if isinstance(extra, Mapping):
+                observed.update(dict(extra))
+            exc.observed_response = observed
+            raise
+        except Exception as exc:
+            if events:
+                observed = _response_from_events(events)
+                extra = getattr(exc, "observed_response", None)
+                if isinstance(extra, Mapping):
+                    observed.update(dict(extra))
+                raise ObservedResponseError(str(exc), observed) from exc
+            raise
     elif isinstance(output, Sequence):
         events.extend(copy.deepcopy(dict(event)) for event in output if isinstance(event, Mapping))
     else:
         raise TypeError("transport 返回值必须是响应对象或 Responses 事件流")
     terminal_types = {"response.completed", "response.incomplete", "response.failed"}
     if not any(str(event.get("type") or "") in terminal_types for event in events):
-        raise IncompleteResponseStreamError("Responses 事件流在终止帧之前结束")
+        error = IncompleteResponseStreamError("Responses 事件流在终止帧之前结束")
+        error.observed_response = _response_from_events(events)
+        raise error
     return _response_from_events(events), events
 
 
@@ -1645,9 +1693,13 @@ def _response_from_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]
     items: Dict[Union[int, str], Dict[str, Any]] = {}
     text_deltas: List[str] = []
     status = ""
+    observed_metadata: Dict[str, Any] = {}
 
     for event in events:
         event_type = str(event.get("type") or "")
+        candidate_metadata = event.get("response")
+        if isinstance(candidate_metadata, Mapping):
+            observed_metadata.update(copy.deepcopy(dict(candidate_metadata)))
         if event_type in {"response.completed", "response.incomplete", "response.failed"}:
             candidate = event.get("response")
             if isinstance(candidate, Mapping):
@@ -1672,7 +1724,7 @@ def _response_from_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]
                 text_deltas.append(delta)
 
     if completed_response is not None and completed_response.get("output") is not None:
-        return completed_response
+        return {**observed_metadata, **completed_response}
 
     ordered_items = list(items.values())
     if text_deltas and not _extract_output_text(ordered_items):
@@ -1683,7 +1735,7 @@ def _response_from_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]
                 "content": [{"type": "output_text", "text": "".join(text_deltas)}],
             }
         )
-    return {"object": "response", "status": status, "output": ordered_items}
+    return {**observed_metadata, "object": "response", "status": status, "output": ordered_items}
 
 
 def _extract_tool_calls(output_items: Sequence[Mapping[str, Any]]) -> List[ToolCall]:

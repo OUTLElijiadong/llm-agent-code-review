@@ -15,6 +15,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.models.user import User
 from app.services import agent_studio_service, capability_catalog_service, rbac_service
+from app.services.ai_usage_context import current_attribution, usage_context
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 from app.utils.api_resolver import resolve_api_config
 
@@ -45,6 +46,7 @@ def search_published_agents(
         catalog,
         query,
         aliases_by_code=aliases_by_code,
+        user_id=user.id,
         limit=max(1, min(int(limit), 20)),
     )
     candidates = [
@@ -128,13 +130,14 @@ def invoke_published_agent(
         f"{system_prompt}"
     )
     client = DeepSeekAgent(api_config=resolve_api_config(db, user.id))
-    raw, meta = client.call_raw(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        agent_label=profile.code,
-        temperature=profile.temperature,
-        max_tokens=profile.max_tokens,
-    )
+    with usage_context(int(user.id), current_attribution(int(user.id)), db=db):
+        raw, meta = client.call_raw(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            agent_label=profile.code,
+            temperature=profile.temperature,
+            max_tokens=profile.max_tokens,
+        )
     result = parse(raw)
     client.log_deferred(db, user_id=user.id, meta=meta)
     db.commit()
@@ -146,9 +149,9 @@ def invoke_published_agent(
         "score": result.score,
         "issues": [asdict(issue) for issue in result.issues],
         "usage": {
-            "prompt_tokens": meta.get("prompt_tokens", 0),
-            "completion_tokens": meta.get("completion_tokens", 0),
-            "total_tokens": meta.get("total_tokens", 0),
+            "prompt_tokens": meta.get("prompt_tokens"),
+            "completion_tokens": meta.get("completion_tokens"),
+            "total_tokens": meta.get("total_tokens"),
             "duration_ms": meta.get("duration_ms", 0),
         },
     }

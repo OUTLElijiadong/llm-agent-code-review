@@ -129,3 +129,71 @@ def test_login_route_allows_five_failures_then_rejects_sixth(monkeypatch) -> Non
 
     with pytest.raises(TooManyRequestsError):
         auth_api.login(LoginIn(username="user", password="bad-secret"), _request(), object())
+
+
+def test_real_login_http_cooldown_counts_down_and_correct_password_cannot_bypass(monkeypatch, tmp_path):
+    """实际路由、密码校验和数据库；只控制限流时钟，不冲击生产登录。"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core import rate_limit
+    from app.core.database import Base, get_db
+    from app.core.error_handlers import register_handlers
+    from app.core.security import hash_password
+
+    now = [1000.0]
+    monkeypatch.setattr(rate_limit, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(
+        auth_api, "login_failure_limiter", LoginFailureLimiter(redis_url="", limit=5, window_seconds=60),
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'login.sqlite'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as db:
+        db.add(User(username="cooldown-user", password=hash_password("correct-password"), role="user", status=1))
+        db.commit()
+    app = FastAPI()
+    app.include_router(auth_api.router, prefix="/api/auth")
+    register_handlers(app)
+
+    def database():
+        with factory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = database
+    original_login = auth_api.auth_service.login
+    authentication_calls = []
+
+    def login(*args, **kwargs):
+        authentication_calls.append(True)
+        return original_login(*args, **kwargs)
+
+    monkeypatch.setattr(auth_api.auth_service, "login", login)
+    with TestClient(app) as client:
+        for index in range(5):
+            now[0] = 1000.0 + index * 2
+            failure = client.post("/api/auth/login", json={"username": "cooldown-user", "password": "wrong-password"})
+            assert failure.status_code == 401 and failure.json()["message"] == "用户名或密码错误"
+        now[0] = 1010.0
+        sixth = client.post("/api/auth/login", json={"username": "cooldown-user", "password": "wrong-password"})
+        assert sixth.status_code == 429
+        assert sixth.headers["Retry-After"] == "50"
+        assert sixth.json()["retry_after_seconds"] == 50
+        assert sixth.json()["retryable"] is True
+        assert "50" in sixth.json()["message"]
+        now[0] = 1030.0
+        correct_but_blocked = client.post(
+            "/api/auth/login", json={"username": "cooldown-user", "password": "correct-password"},
+        )
+        assert correct_but_blocked.status_code == 429
+        assert correct_but_blocked.headers["Retry-After"] == "30"
+        assert correct_but_blocked.json()["retry_after_seconds"] == 30
+        assert len(authentication_calls) == 5
+        now[0] = 1060.01
+        restored = client.post("/api/auth/login", json={"username": "cooldown-user", "password": "correct-password"})
+        assert restored.status_code == 200 and restored.json()["data"]["access_token"]
+        assert len(authentication_calls) == 6
+        assert "Retry-After" not in restored.headers
+    engine.dispose()

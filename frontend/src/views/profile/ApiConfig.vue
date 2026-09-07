@@ -53,6 +53,7 @@
             <template #append>
               <el-button
                 :icon="showKey ? 'View' : 'Hide'"
+                :aria-label="showKey ? '隐藏 API Key' : '显示 API Key'"
                 @click="showKey = !showKey"
                 text
               />
@@ -145,7 +146,7 @@
             <ul>
               <li>API Key 使用 AES-128-CBC + HMAC 加密存储，密钥由平台 JWT_SECRET 派生。</li>
               <li>页面中显示的 Key 始终脱敏（仅显示前 5 位和后 4 位）。</li>
-              <li>测试连接不会存储任何数据，仅验证连通性和认证。</li>
+              <li>测试连接不会保存 API 配置或 API Key；实际模型请求会记录调用用量，用于核对消耗。</li>
               <li>为防止 SSRF，默认禁止 API 端点指向 localhost、内网或链路本地地址；如需内网模型服务，请由管理员显式配置后端开关。</li>
               <li>删除配置后立即恢复使用平台默认 API，加密存储的 Key 从数据库彻底删除。</li>
             </ul>

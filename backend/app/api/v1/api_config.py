@@ -63,11 +63,12 @@ def delete_config(
 @router.post("/test", response_model=Resp[ApiConfigTestOut])
 def test_connection(
     payload: ApiConfigTestIn,
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """测试 API 连接
 
-    发送最小化请求验证连通性和认证，不存储任何数据。
+    发送最小化请求验证连通性和认证，不保存 API 配置，记录实际调用用量。
     """
-    result = api_config_service.test_connection(payload)
+    result = api_config_service.test_connection(payload, db=db, user_id=user.id)
     return Resp(data=result, code=0 if result.success else -1, message=result.message)

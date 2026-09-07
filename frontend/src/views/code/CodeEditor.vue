@@ -55,7 +55,7 @@
               </el-descriptions-item>
             </el-descriptions>
             <div class="binary-actions">
-              <el-button type="primary" :icon="Download" :loading="downloading" @click="handleDownload">
+              <el-button v-if="canDownload" type="primary" :icon="Download" :loading="downloading" @click="handleDownload">
                 下载文件
               </el-button>
             </div>
@@ -99,6 +99,7 @@ import { Document, Download } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import MonacoEditor from '@/components/editor/MonacoEditor.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import { getProjectDetail } from '@/api/project'
 import { getDetail, update, downloadBinary } from '@/api/codeFile'
 import type { CodeFileDetailOut } from '@/types/project'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -107,7 +108,9 @@ import { useUserStore } from '@/stores/user'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const canEdit = computed(() => userStore.hasPermission('file:edit'))
+const projectWritable = ref(false)
+const canEdit = computed(() => projectWritable.value && userStore.hasPermission('file:edit'))
+const canDownload = computed(() => userStore.hasPermission('file:download'))
 
 const fileId = Number(route.params.fileId)
 
@@ -189,10 +192,18 @@ function formatDateTime(dateStr: string): string {
  * v3: 二进制文件 content 由后端置空,前端不读取 base64,直接展示元信息卡片
  */
 async function fetchDetail(): Promise<void> {
+  projectWritable.value = false
+  if (!userStore.hasPermission('file:view')) return
   loading.value = true
   try {
     const detail = await getDetail(fileId)
     fileDetail.value = detail
+    if (userStore.hasPermission('project:view') && userStore.hasPermission('file:edit')) {
+      try {
+        const project = await getProjectDetail(detail.project_id)
+        projectWritable.value = project.id === detail.project_id && project.can_update
+      } catch { /* 资源授权未确认时保留只读查看。 */ }
+    }
     // v3: 仅文本文件将 content 注入编辑器;二进制文件 content 已被后端置空,跳过
     if (detail.is_binary !== 1) {
       codeContent.value = detail.content
@@ -227,7 +238,7 @@ async function handleSave(): Promise<void> {
  * 下载二进制文件(触发浏览器下载)
  */
 async function handleDownload(): Promise<void> {
-  if (downloading.value || !fileDetail.value) return
+  if (!canDownload.value || downloading.value || !fileDetail.value) return
   downloading.value = true
   try {
     const blob = await downloadBinary(fileId)

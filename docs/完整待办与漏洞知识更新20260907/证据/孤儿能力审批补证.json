@@ -1,0 +1,73 @@
+{
+  "sql_sha256": "ee437eabd77f2eec376ec03c526a6c1433e1401ca1c48c6463214c38c4979fcc",
+  "rows": [
+    {
+      "id": 2580,
+      "kind": "orphan_capability",
+      "action": null,
+      "capability": "beta_codes.generate",
+      "output_keys": [
+        "data",
+        "page",
+        "capability",
+        "status_code"
+      ],
+      "result_keys": [
+        "error",
+        "output",
+        "status",
+        "failure_kind"
+      ],
+      "arguments_keys": [
+        "params",
+        "capability"
+      ],
+      "capability_code": null
+    },
+    {
+      "id": 2581,
+      "kind": "orphan_capability",
+      "action": null,
+      "capability": "beta_codes.generate",
+      "output_keys": [
+        "data",
+        "page",
+        "capability",
+        "status_code"
+      ],
+      "result_keys": [
+        "error",
+        "output",
+        "status",
+        "failure_kind"
+      ],
+      "arguments_keys": [
+        "params",
+        "capability"
+      ],
+      "capability_code": null
+    },
+    {
+      "id": 231,
+      "kind": "approval",
+      "action": "responses.admin_execute_capability",
+      "status": "approved",
+      "created": "2026-08-31 01:02:57.000000",
+      "tool_id": 2580,
+      "updated": "2026-08-31 01:02:57.000000",
+      "risk_level": "critical",
+      "resource_sha256": "b834c0e46ca4bca3d4cc344df3433ce32a8c98d160b2e548c83d8d55d10ef77d"
+    },
+    {
+      "id": 232,
+      "kind": "approval",
+      "action": "responses.admin_execute_capability",
+      "status": "approved",
+      "created": "2026-08-31 01:04:15.000000",
+      "tool_id": 2581,
+      "updated": "2026-08-31 01:04:15.000000",
+      "risk_level": "critical",
+      "resource_sha256": "db75cd836d289a7271ad7f6a1e649540e45b1bd2fe58e3fb6b4584ce1912bb33"
+    }
+  ]
+}

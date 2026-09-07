@@ -151,6 +151,8 @@ class TestAiLogServiceReturnsAgentLabel:
     def mock_log_with_label(self):
         """构造带 agent_label 的 AiCallLog mock 对象"""
         return SimpleNamespace(
+            root_agent_run_id=None, agent_run_id=None, tool_execution_id=None,
+            agent_team_id=None, agent_team_task_id=None, agent_execution_event_id=None,
             id=100,
             task_id=50,
             user_id=1,
@@ -173,6 +175,8 @@ class TestAiLogServiceReturnsAgentLabel:
     def mock_log_without_label(self):
         """构造 agent_label=None 的 AiCallLog mock 对象"""
         return SimpleNamespace(
+            root_agent_run_id=None, agent_run_id=None, tool_execution_id=None,
+            agent_team_id=None, agent_team_task_id=None, agent_execution_event_id=None,
             id=101,
             task_id=50,
             user_id=1,

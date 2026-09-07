@@ -246,6 +246,7 @@ def rank_rows(
     *,
     aliases_by_code: Mapping[str, Sequence[tuple[str, float]]] | None = None,
     limit: int = 10,
+    user_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """对已授权候选做别名、词法和 embedding 重排。"""
 
@@ -306,7 +307,7 @@ def rank_rows(
     if not prepared:
         return []
     if query_normalized:
-        vectors, _ = embedding_service.embed_texts(db, [query, *documents])
+        vectors, _ = embedding_service.embed_texts(db, [query, *documents], user_id=user_id)
         query_vector = vectors[0] if vectors else []
         doc_vectors = vectors[1:] if len(vectors) > 1 else [[] for _ in documents]
     else:
@@ -360,4 +361,4 @@ def search_capabilities(
 ) -> list[dict[str, Any]]:
     rows = authorized_catalog(db, user)
     aliases = authorized_aliases(db, [row["code"] for row in rows])
-    return rank_rows(db, rows, query, aliases_by_code=aliases, limit=limit)
+    return rank_rows(db, rows, query, aliases_by_code=aliases, limit=limit, user_id=user.id)

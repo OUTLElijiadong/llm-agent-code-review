@@ -14,13 +14,14 @@ import json
 import math
 import re
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.services import system_config_service
+from app.services.ai_usage_context import UsageAccountingError, record_usage_attempt
 from app.services.system_config_service import get_embedding_config
 from app.utils.api_resolver import validate_ai_base_url
 from app.utils.public_http import pin_public_http_url
@@ -64,7 +65,9 @@ def _l2_normalize(vec: List[float]) -> List[float]:
 # ──────────────────────────────────────────────────────────
 # 远端 API(OpenAI 兼容 /embeddings)
 # ──────────────────────────────────────────────────────────
-def _api_embed(texts: List[str], cfg: dict) -> List[List[float]]:
+def _api_embed(
+    texts: List[str], cfg: dict, *, db: Optional[Session] = None, user_id: Optional[int] = None,
+) -> List[List[float]]:
     import httpx
 
     base_url = str(cfg["base_url"]).rstrip("/")
@@ -94,14 +97,41 @@ def _api_embed(texts: List[str], cfg: dict) -> List[List[float]]:
     with httpx.Client(timeout=settings.embedding_timeout, trust_env=False) as client:
         for i in range(0, len(texts), batch):
             chunk = texts[i:i + batch]
-            resp = client.post(request_url, headers=headers, json={
-                "model": cfg["model"], "input": chunk,
-            }, extensions=extensions)
-            resp.raise_for_status()
-            body = resp.json()
-            # 按 index 排序,保证与输入顺序一致
-            items = sorted(body["data"], key=lambda d: d.get("index", 0))
-            out.extend([_l2_normalize([float(x) for x in it["embedding"]]) for it in items])
+            body = None
+            resp = None
+            error = ""
+            started = time.monotonic()
+            try:
+                resp = client.post(request_url, headers=headers, json={
+                    "model": cfg["model"], "input": chunk,
+                }, extensions=extensions)
+                # 非 2xx 也可能报告真实消耗，先保存 usage 再沿用失败降级。
+                try:
+                    body = resp.json()
+                except (ValueError, TypeError):
+                    pass
+                resp.raise_for_status()
+                # 按 index 排序,保证与输入顺序一致
+                items = sorted(body["data"], key=lambda d: d.get("index", 0))
+                out.extend([_l2_normalize([float(x) for x in it["embedding"]]) for it in items])
+            except BaseException as exc:
+                error = type(exc).__name__
+                raise
+            finally:
+                # 到达此处即发生一次 HTTP 尝试；不存输入、向量、端点或 Key。
+                # 独立审计失败必须冒泡，不能被降级或重嵌重试吞掉后再次收费。
+                payload = body if isinstance(body, dict) else {}
+                model_name = str(payload.get("model") or cfg["model"])
+                api_key = str(cfg.get("api_key") or "")
+                if api_key:
+                    model_name = model_name.replace(api_key, "[redacted]")
+                model_name = re.sub(r"[\x00-\x1f\x7f]", "", model_name)[:50]
+                record_usage_attempt(
+                    db=db, user_id=user_id, model_name=model_name,
+                    agent_label="embedding", usage=payload.get("usage"),
+                    status="failed" if error else "success", error=error,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                )
     return out
 
 
@@ -128,7 +158,9 @@ def _is_private_url(url: str) -> bool:
 # ──────────────────────────────────────────────────────────
 # 对外 API
 # ──────────────────────────────────────────────────────────
-def embed_texts(db: Session, texts: List[str]) -> Tuple[List[List[float]], str]:
+def embed_texts(
+    db: Session, texts: List[str], *, user_id: Optional[int] = None,
+) -> Tuple[List[List[float]], str]:
     """批量嵌入文本
 
     Returns:
@@ -142,17 +174,19 @@ def embed_texts(db: Session, texts: List[str]) -> Tuple[List[List[float]], str]:
     cfg = system_config_service.get_embedding_config(db)
     if cfg.get("enabled"):
         try:
-            vecs = _api_embed(texts, cfg)
+            vecs = _api_embed(texts, cfg, db=db, user_id=user_id)
             return vecs, f"api:{cfg['model']}"
-        except Exception as e:  # noqa: BLE001 — 任何失败都降级,绝不阻塞
-            logger.warning(f"[embedding] API 调用失败,降级为本地向量: {e}")
+        except UsageAccountingError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — 上游失败保留已有哈希降级
+            logger.warning(f"[embedding] API 调用失败,降级为本地向量: {type(exc).__name__}")
 
     dim = settings.embedding_dim
     return [_hash_embed(t, dim) for t in texts], FALLBACK_TAG
 
 
-def embed_one(db: Session, text: str) -> Tuple[List[float], str]:
-    vecs, tag = embed_texts(db, [text])
+def embed_one(db: Session, text: str, *, user_id: Optional[int] = None) -> Tuple[List[float], str]:
+    vecs, tag = embed_texts(db, [text], user_id=user_id)
     return (vecs[0] if vecs else []), tag
 
 
@@ -184,7 +218,10 @@ _REEMBED_MAX_BATCH_BYTES = 512 * 1024  # 单批字节预算(Tei/网关 413 防�
 _REEMBED_MAX_PIECE_BYTES = 256 * 1024  # 单条切片截断上限
 
 
-def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int, expected_tag: str = "") -> None:
+def _reembed_model(
+    db: Session, model, label: str, stats: dict, batch_size: int, expected_tag: str = "",
+    *, user_id: Optional[int] = None,
+) -> None:
     """按 id 游标分批重建单域切片向量并即时提交。
 
     批同时受条数与字节预算约束: 大切片(如长代码段)按字节提前切批,
@@ -220,9 +257,11 @@ def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int,
         # 嵌入端点高负载下存在瞬态超时, 失败批重试后再降级
         for attempt in range(3):
             try:
-                vectors, tag = embed_texts(db, pieces)
+                vectors, tag = embed_texts(db, pieces, user_id=user_id)
                 if not remote_on or tag != FALLBACK_TAG:
                     break
+            except UsageAccountingError:
+                raise
             except Exception:  # noqa: BLE001
                 vectors = None
             logger.warning(f"[embedding.reembed] {label} 批次第 {attempt + 1} 次失败, 重试 (last_id={last_id})")
@@ -243,7 +282,7 @@ def _reembed_model(db: Session, model, label: str, stats: dict, batch_size: int,
         logger.info(f"[embedding.reembed] {label} 重建至 id={last_id} (累计 {stats[label]})")
 
 
-def reembed_all_stores(db: Session, batch_size: int = 64) -> dict:
+def reembed_all_stores(db: Session, batch_size: int = 64, *, user_id: Optional[int] = None) -> dict:
     """按当前嵌入配置重建两域存量切片向量(个人 KB + Agent 知识库)。
 
     切换嵌入模型/端点后, 存量向量维度不一致会在检索中被判不可比(cosine=-1),
@@ -256,6 +295,6 @@ def reembed_all_stores(db: Session, batch_size: int = 64) -> dict:
     expected_tag = ""
     if is_remote_enabled(db):
         expected_tag = f"api:{get_embedding_config(db)['model']}"
-    _reembed_model(db, KnowledgeChunk, "kb_chunks", stats, batch_size, expected_tag)
-    _reembed_model(db, AgentKnowledgeChunk, "agent_chunks", stats, batch_size, expected_tag)
+    _reembed_model(db, KnowledgeChunk, "kb_chunks", stats, batch_size, expected_tag, user_id=user_id)
+    _reembed_model(db, AgentKnowledgeChunk, "agent_chunks", stats, batch_size, expected_tag, user_id=user_id)
     return stats

@@ -10,6 +10,7 @@ export interface AgentEvent {
   message: string
   payload: Record<string, unknown>
   timestamp: string
+  user_id?: number | null
 }
 
 export interface ClarifyQuestion {

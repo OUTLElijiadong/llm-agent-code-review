@@ -6,6 +6,7 @@ import threading
 from types import SimpleNamespace
 from typing import Any, AsyncIterator
 
+import httpx
 import pytest
 
 from app.agents import event_bus as module
@@ -343,7 +344,7 @@ def test_base_agent_still_retries_rate_limit_then_accepts_stop_response(
 ) -> None:
     """429 仍属于可恢复错误，但只接纳 stop 终止的完整响应。"""
     responses = [
-        SimpleNamespace(status_code=429, text="rate limited"),
+        httpx.Response(429, text="rate limited"),
         SimpleNamespace(
             status_code=200,
             text="",
@@ -472,7 +473,7 @@ def test_base_agent_does_not_sleep_past_shared_audit_deadline(
         def post(self, *args, **kwargs):
             nonlocal post_calls
             post_calls += 1
-            return SimpleNamespace(status_code=429, text="rate limited")
+            return httpx.Response(429, text="rate limited")
 
     monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
     monkeypatch.setattr("app.agents.base.time.monotonic", lambda: 100.0)

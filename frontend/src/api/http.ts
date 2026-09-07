@@ -12,6 +12,7 @@ export interface Resp<T = unknown> {
   detail?: unknown
   retryable?: boolean
   next_action?: string
+  retry_after_seconds?: number
 }
 
 declare global {
@@ -37,6 +38,33 @@ function isSilent(config: AxiosRequestConfig | undefined, data: Resp | undefined
   if (!codes?.length) return false
   const code = data?.code
   return typeof code === 'number' && codes.includes(code)
+}
+
+/** 登录失败由表单唯一提示，错密 401 不代表已有会话过期。 */
+function isLoginRequest(config: AxiosRequestConfig | undefined): boolean {
+  return (config?.url ?? '').split('?')[0].replace(/\/$/, '').endsWith('/auth/login')
+}
+
+/** Retry-After 支持秒数与 HTTP-date；优先服务器 Date，避免本机时钟偏差。 */
+function retryAfterSeconds(headers: AxiosResponse['headers'] | undefined, body: unknown): number | undefined {
+  const readHeader = (name: string) => {
+    if (typeof headers?.get === 'function') return headers.get(name)
+    return headers?.[name.toLowerCase()] ?? headers?.[name]
+  }
+  const raw = readHeader('Retry-After')
+  const value = typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() : ''
+  let seconds: number | undefined
+  if (/^\d+$/.test(value)) seconds = Number(value)
+  else if (/[a-z]/i.test(value)) {
+    const deadline = Date.parse(value)
+    const serverDate = Date.parse(String(readHeader('Date') ?? ''))
+    if (Number.isFinite(deadline)) {
+      const now = Number.isFinite(serverDate) ? serverDate : Date.now()
+      seconds = Math.max(0, Math.ceil((deadline - now) / 1000))
+    }
+  }
+  if (seconds !== undefined && Number.isSafeInteger(seconds) && seconds >= 0) return seconds
+  return typeof body === 'number' && Number.isSafeInteger(body) && body >= 0 ? body : undefined
 }
 
 async function readBlobText(blob: Blob): Promise<string> {
@@ -84,7 +112,7 @@ http.interceptors.response.use(
       window.__prismAuthExpiredHandled = false
       return resp
     }
-    if (!(data instanceof Blob) && !isSilent(resp.config, data)) {
+    if (!(data instanceof Blob) && !isLoginRequest(resp.config) && !isSilent(resp.config, data)) {
       ElMessage.error(data?.message || '请求失败')
     }
     return Promise.reject(data)
@@ -93,8 +121,21 @@ http.interceptors.response.use(
     // 主动取消属于正常交互，不弹全局错误，也不触发鉴权跳转。
     if (axios.isCancel(err)) return Promise.reject(err)
     const status = err.response?.status
-    const data = await parseBlobError(err.response?.data)
-    if (status === 401) {
+    const parsed = await parseBlobError(err.response?.data)
+    let data = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined
+    const retryAfter = retryAfterSeconds(err.response?.headers, data?.retry_after_seconds)
+    const loginRequest = isLoginRequest(err.config)
+    if (status === 429 || (status === 503 && retryAfter !== undefined)) {
+      data = {
+        code: status === 429 ? 42900 : 50301,
+        message: loginRequest ? '登录请求过于频繁，请等待后重试' : '请求暂时受限，请等待后重试',
+        data: null,
+        retryable: true,
+        ...data,
+        ...(retryAfter !== undefined ? { retry_after_seconds: retryAfter } : {}),
+      }
+    }
+    if (status === 401 && !loginRequest) {
       // 并发请求可能同时 401,只处理一次:清 token、跳登录、弹一次错,
       // 避免"缺少token"等错误消息反复弹出刷屏。
       if (!window.__prismAuthExpiredHandled) {
@@ -110,7 +151,7 @@ http.interceptors.response.use(
       }
       return Promise.reject(data || err)
     }
-    if (!isSilent(err.config, data)) {
+    if (!loginRequest && !isSilent(err.config, data)) {
       const message = data?.message || err.message || '网络错误'
       ElMessage.error(message)
     }

@@ -28,6 +28,7 @@ import asyncio
 import json
 import time
 import traceback
+from contextvars import copy_context
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -59,6 +60,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.services.issue_merger import merge_findings_and_issues
 from app.services.review_input_service import freeze_task_inputs, validate_review_input
+from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 
 # 讨论画像 code → 注册中心 BaseAgent code(与 review_service 保持一致),
 # 用于向 Agent 办公室广播事件时点亮正确的工位卡。
@@ -290,6 +292,7 @@ class DiscussionOrchestrator:
         origin_session_key: str = "",
         continuation_context: str = "",
         continued_from_session_id: str = "",
+        usage_origin: Optional[dict[str, int]] = None,
     ):
         bus = self._bus
         session = bus.get_session(session_id)
@@ -360,12 +363,14 @@ class DiscussionOrchestrator:
         # ── 讨论开始即创建 ReviewTask(running),拿到 task_id 供日志/问题/报告 ──
         task_id = 0
         cancelled = False
+        usage_origin = usage_origin if usage_origin is not None else current_attribution(user_id)
         create_future = loop.run_in_executor(
-            None,
+            None, copy_context().run,
             lambda: _create_review_task(
                 user_id=user_id, project_id=project_id, file_name=file_name,
                 file_id=file_id, review_type=review_type,
                 code=code, language=language, model_name=agent.model, profiles=profiles,
+                usage_origin=usage_origin,
             ),
         )
         try:
@@ -377,7 +382,7 @@ class DiscussionOrchestrator:
             except Exception:
                 task_id = 0
             if task_id:
-                await loop.run_in_executor(None, lambda: _cancel_review_task(task_id))
+                await loop.run_in_executor(None, copy_context().run, lambda: _cancel_review_task(task_id))
             self._publish_terminal(session_id, task_id, "cancelled", "圆桌讨论已取消")
             raise
         except Exception as exc:
@@ -538,7 +543,7 @@ class DiscussionOrchestrator:
             stopped = False
             self._emit(AgentEventType.THINKING, "orchestrator", "主持人正在汇总讨论共识")
             summary_text, summary_meta = await loop.run_in_executor(
-                None,
+                None, copy_context().run,
                 lambda: self._summarize(
                     all_turns, code, language, file_name, agent, stopped,
                 ),
@@ -593,13 +598,13 @@ class DiscussionOrchestrator:
                 try:
                     if cancelled:
                         report_task_id = await loop.run_in_executor(
-                            None,
+                            None, copy_context().run,
                             lambda: _cancel_review_task(task_id),
                         )
                     else:
                         stopped = session.status != "active"
                         finalize_future = loop.run_in_executor(
-                            None,
+                            None, copy_context().run,
                             lambda: _finalize_review(
                                 task_id=task_id,
                                 user_id=user_id,
@@ -616,13 +621,13 @@ class DiscussionOrchestrator:
                             ),
                         )
                         report_task_id = await asyncio.shield(finalize_future)
-                    state = await loop.run_in_executor(None, lambda: _review_task_state(task_id))
+                    state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
                     final_status = state["status"]
                     final_error = state.get("error") or ""
                 except asyncio.CancelledError:
                     cancelled_during_finalization = True
-                    report_task_id = await loop.run_in_executor(None, lambda: _cancel_review_task(task_id))
-                    state = await loop.run_in_executor(None, lambda: _review_task_state(task_id))
+                    report_task_id = await loop.run_in_executor(None, copy_context().run, lambda: _cancel_review_task(task_id))
+                    state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
                     final_status = state["status"]
                     final_error = state.get("error") or "圆桌讨论已取消，丢弃未完成的报告结果"
                 except Exception as exc:
@@ -656,7 +661,7 @@ class DiscussionOrchestrator:
         session = self._bus.get_session(self._session_id)
         if not session or session.status != "active":
             raise _DiscussionInactive("cancelled")
-        await asyncio.get_running_loop().run_in_executor(None, lambda: _ensure_running(self._task_id))
+        await asyncio.get_running_loop().run_in_executor(None, copy_context().run, lambda: _ensure_running(self._task_id))
 
     def _publish_terminal(self, session_id: str, task_id: int, status: str, error: str = "") -> None:
         """复用发言和 done 控制帧发布可见失败原因，再关闭会话。"""
@@ -753,13 +758,14 @@ class DiscussionOrchestrator:
         def call_speaker():
             if self._task_id:
                 _ensure_running(self._task_id)
-            return agent.call_raw(
+            return _call_raw_for_task(agent, self._task_id, self._user_id,
+                usage_file_id=self._file_id, usage_chunk_index=round_idx * 100 + speaker_idx,
                 system_prompt=system, user_prompt=user_prompt,
                 agent_label=profile.code, json_mode=True,
             )
 
         try:
-            content, meta = await loop.run_in_executor(None, call_speaker)
+            content, meta = await loop.run_in_executor(None, copy_context().run, call_speaker)
             if not isinstance(content, str) or not content.strip():
                 raise RuntimeError("模型返回空内容，未完成本轮审查")
             return _parse_speaker_decision(content), meta, True
@@ -819,7 +825,8 @@ class DiscussionOrchestrator:
         try:
             if self._task_id:
                 _ensure_running(self._task_id)
-            raw, meta = agent.call_raw(
+            raw, meta = _call_raw_for_task(agent, self._task_id, self._user_id,
+                usage_file_id=self._file_id, usage_chunk_index=9000,
                 system_prompt=(
                     "你是代码审查圆桌讨论的主持人。请用简洁的中文自然语言汇总各位专家的发言,"
                     "形成一份结论性总结(不要输出 JSON)。要求:\n"
@@ -999,10 +1006,31 @@ class DiscussionOrchestrator:
 
 # ════════════════ 报告沉淀(同步,运行在线程池) ════════════════
 
+def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
+                       usage_file_id: Optional[int] = None, usage_chunk_index: Optional[int] = None, **kwargs):
+    """线程池从持久任务恢复来源；独立提交用量，不被报告解析失败回滚。"""
+    if not task_id:
+        return agent.call_raw(**kwargs)
+    log_db = SessionLocal()
+    try:
+        task = log_db.get(ReviewTask, task_id)
+        if task is None or task.user_id != user_id:
+            raise RuntimeError("圆桌模型调用缺少可信任务来源")
+        fields = {**model_attribution(task), "_review_task_id": task_id, "_file_id": usage_file_id, "_chunk_index": usage_chunk_index}
+        with usage_context(user_id, fields, db=log_db):
+            try:
+                return agent.call_raw(**kwargs)
+            finally:
+                log_db.commit()
+    finally:
+        log_db.close()
+
+
 def _create_review_task(
     *, user_id: int, project_id: int, file_id: int, file_name: str,
     code: str, language: str, review_type: str, model_name: str,
     profiles: tuple[ReviewAgentProfile, ...],
+    usage_origin: Optional[dict[str, int]] = None,
 ) -> int:
     """把实际输入匹配的历史版本与 running 任务原子保存，禁止改用新内容。"""
     db = SessionLocal()
@@ -1026,6 +1054,7 @@ def _create_review_task(
         )
         task = ReviewTask(
             user_id=user_id,
+            **(usage_origin if usage_origin is not None else current_attribution(user_id)),
             project_id=project_id,
             task_name=f"{file_name} · 圆桌讨论审",
             review_type="discuss",
@@ -1264,7 +1293,8 @@ def _extract_issues(all_turns, code, language, file_name, agent, db,
         f"## 讨论记录\n{history}\n\n请抽取共识问题为 JSON。"
     )
     try:
-        raw, meta = agent.call_raw(
+        raw, meta = _call_raw_for_task(agent, task_id, user_id,
+            usage_file_id=file_id, usage_chunk_index=9100,
             system_prompt=system, user_prompt=user_prompt,
             agent_label="general", json_mode=True,
         )

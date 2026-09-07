@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+from app.constants.security_catalog import owasp_reference
+
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -489,5 +491,5 @@ def _build_references(cwe: str, owasp: str) -> List[str]:
         cwe_num = cwe.replace("CWE-", "")
         refs.append(f"https://cwe.mitre.org/data/definitions/{cwe_num}.html")
     if owasp:
-        refs.append("https://owasp.org/Top10/")
+        refs.append(owasp_reference(owasp))
     return refs

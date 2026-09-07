@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import re
+
+from app.constants.security_catalog import owasp_for_cwe
 from dataclasses import dataclass
 from typing import List, Optional, Pattern
 
@@ -32,21 +34,21 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="OpenAI API Key",
         cwe="CWE-798",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"sk-(?:proj-)?[A-Za-z0-9_\-]{20,}"),
         description="OpenAI 平台 API 密钥",
     ),
     SecretPattern(
         name="AWS Access Key",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
         description="AWS IAM 访问密钥 ID",
     ),
     SecretPattern(
         name="AWS Secret Access Key",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(
             r"""(?ix)
             (?:aws[_-]?(?:secret|sk))\s*[:=]\s*["']?
@@ -59,14 +61,14 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="GitHub Personal Token",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),
         description="GitHub Personal Access Token",
     ),
     SecretPattern(
         name="JWT Token",
         cwe="CWE-522",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-522"),
         regex=re.compile(
             r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b",
         ),
@@ -75,7 +77,7 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="RSA Private Key",
         cwe="CWE-321",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-321"),
         regex=re.compile(
             r"-----BEGIN (?:RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY-----",
         ),
@@ -84,7 +86,7 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="Hardcoded Password",
         cwe="CWE-259",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-259"),
         regex=re.compile(
             r"""(?ix)
             # v3 补丁: 允许 _ 前缀,覆盖 DB_PASSWORD / USER_PASSWORD 等大写蛇形命名
@@ -98,7 +100,7 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="Generic API Key",
         cwe="CWE-798",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(
             r"""(?ix)
             (?:^|[^A-Za-z0-9_])(?:api[_-]?key|access[_-]?token|secret[_-]?key)\s*[:=]\s*
@@ -110,28 +112,28 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="Slack Bot Token",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b"),
         description="Slack Bot / App Token",
     ),
     SecretPattern(
         name="Google API Key",
         cwe="CWE-798",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"),
         description="Google API Key",
     ),
     SecretPattern(
         name="Stripe Secret Key",
         cwe="CWE-798",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{24,}\b"),
         description="Stripe 支付密钥",
     ),
     SecretPattern(
         name="Database URL with Credentials",
         cwe="CWE-522",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-522"),
         regex=re.compile(
             r"\b(?:mysql|postgres(?:ql)?|mongodb)://[^\s:@]+:[^\s:@/]+@[^\s/]+",
         ),
@@ -141,14 +143,14 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="GitLab Personal Token",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bglpat-[A-Za-z0-9_\-]{20,}\b"),
         description="GitLab Personal Access Token",
     ),
     SecretPattern(
         name="Heroku API Key",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(
             r"""(?ix)
             heroku.{0,30}["']([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']
@@ -159,7 +161,7 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="Discord Bot Token",
         cwe="CWE-798",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(
             r"\b[MN][A-Za-z0-9_-]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}\b",
         ),
@@ -168,35 +170,35 @@ _PATTERNS: tuple[SecretPattern, ...] = (
     SecretPattern(
         name="Telegram Bot Token",
         cwe="CWE-798",
-        owasp="A02:2021-Cryptographic Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b"),
         description="Telegram Bot Token",
     ),
     SecretPattern(
         name="SendGrid API Key",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b"),
         description="SendGrid 邮件服务 API Key",
     ),
     SecretPattern(
         name="Twilio API Key",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bSK[a-z0-9]{32}\b"),
         description="Twilio API Key SID",
     ),
     SecretPattern(
         name="Mailgun API Key",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bkey-[a-z0-9]{32}\b"),
         description="Mailgun 邮件 API Key",
     ),
     SecretPattern(
         name="Square OAuth Secret",
         cwe="CWE-798",
-        owasp="A07:2021-Identification and Authentication Failures",
+        owasp=owasp_for_cwe("CWE-798"),
         regex=re.compile(r"\bsq0(?:at|cs)p-[A-Za-z0-9_\-]{22,43}\b"),
         description="Square OAuth Access/Client Secret",
     ),

@@ -9,7 +9,7 @@ v2.4: 提供项目成员关系的 CRUD 接口
 
 权限规则:
     - admin: 全部操作
-    - owner: 可读写本项目成员
+    - owner: 需 project:view 读取成员、project:member:manage 管理成员；与项目角色求交
     - reviewer: 可读成员列表,不可写
 """
 from fastapi import APIRouter, Depends
@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.permission_codes import PermissionCode
+from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import Resp
 from app.schemas.project_member import MemberAddIn, MemberOut, MemberRoleUpdateIn
@@ -25,7 +27,8 @@ from app.services import audit_service, project_member_service
 router = APIRouter()
 
 
-@router.get("", response_model=Resp[list[MemberOut]])
+@router.get("", response_model=Resp[list[MemberOut]],
+            dependencies=[Depends(require_permission(PermissionCode.PROJECT_VIEW))])
 def list_members(
     project_id: int,
     db: Session = Depends(get_db),
@@ -46,7 +49,8 @@ def list_members(
     return Resp(data=[MemberOut(**m) for m in members])
 
 
-@router.post("", response_model=Resp[MemberOut])
+@router.post("", response_model=Resp[MemberOut],
+               dependencies=[Depends(require_permission(PermissionCode.PROJECT_MEMBER_MANAGE))])
 def add_member(
     project_id: int,
     payload: MemberAddIn,
@@ -91,7 +95,8 @@ def add_member(
     ))
 
 
-@router.put("/{user_id}", response_model=Resp[None])
+@router.put("/{user_id}", response_model=Resp[None],
+               dependencies=[Depends(require_permission(PermissionCode.PROJECT_MEMBER_MANAGE))])
 def update_member_role(
     project_id: int,
     user_id: int,
@@ -123,7 +128,8 @@ def update_member_role(
     return Resp(data=None)
 
 
-@router.delete("/{user_id}", response_model=Resp[None])
+@router.delete("/{user_id}", response_model=Resp[None],
+               dependencies=[Depends(require_permission(PermissionCode.PROJECT_MEMBER_MANAGE))])
 def remove_member(
     project_id: int,
     user_id: int,

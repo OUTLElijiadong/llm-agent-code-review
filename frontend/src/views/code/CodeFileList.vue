@@ -76,14 +76,14 @@
       <el-table-column label="操作" width="220" align="center" fixed="right">
         <template #default="{ row }">
           <template v-if="row.is_binary === 1">
-            <el-button link type="primary" :loading="downloadingId === row.id" @click="handleDownload(row)">
+            <el-button v-if="canDownload" link type="primary" :loading="downloadingId === row.id" @click="handleDownload(row)">
               <el-icon><Download /></el-icon>下载
             </el-button>
-            <el-button link type="info" @click="handleView(row)">查看元信息</el-button>
+            <el-button v-if="canView" link type="info" @click="handleView(row)">查看元信息</el-button>
           </template>
           <template v-else>
-            <el-button link type="primary" @click="handleView(row)">查看代码</el-button>
-            <el-button link type="primary" @click="handleHistory(row)">版本历史</el-button>
+            <el-button v-if="canView" link type="primary" @click="handleView(row)">查看代码</el-button>
+            <el-button v-if="canView" link type="primary" @click="handleHistory(row)">版本历史</el-button>
           </template>
         </template>
       </el-table-column>
@@ -114,8 +114,9 @@
  *  - 添加文件类型徽章(文本/图片/压缩包/二进制)
  *  - 修复:确保压缩包上传后内部文件正常显示,不显示 base64 内容
  */
-import { ref, onMounted, type Component } from 'vue'
+import { ref, computed, onMounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 
 import { Picture, Files, Document, Download } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
@@ -140,6 +141,9 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const userStore = useUserStore()
+const canView = computed(() => userStore.hasPermission('file:view'))
+const canDownload = computed(() => userStore.hasPermission('file:download'))
 
 const loading = ref(false)
 const files = ref<CodeFileOut[]>([])
@@ -211,6 +215,7 @@ function fileCategory(row: CodeFileOut): FileCategory {
  * 获取文件列表
  */
 async function fetchFiles(): Promise<void> {
+  if (!canView.value) return
   loading.value = true
   try {
     const params: Record<string, unknown> = {
@@ -245,6 +250,7 @@ function handleFilterChange(): void {
  * @param row - 文件项
  */
 function handleView(row: CodeFileOut): void {
+  if (!canView.value) return
   router.push(`/code/${props.projectId}/file/${row.id}`)
 }
 
@@ -253,6 +259,7 @@ function handleView(row: CodeFileOut): void {
  * @param row - 文件项
  */
 function handleHistory(row: CodeFileOut): void {
+  if (!canView.value) return
   router.push(`/code/${props.projectId}/file/${row.id}/versions`)
 }
 
@@ -263,7 +270,7 @@ function handleHistory(row: CodeFileOut): void {
  * @param row - 文件项
  */
 async function handleDownload(row: CodeFileOut): Promise<void> {
-  if (downloadingId.value !== null) return
+  if (!canDownload.value || downloadingId.value !== null) return
   downloadingId.value = row.id
   try {
     const blob = await downloadBinary(row.id)

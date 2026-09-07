@@ -7,6 +7,8 @@ ReviewService 根据这些画像多次构造 Prompt,复用现有 DeepSeekAgent�
 from dataclasses import dataclass
 from typing import Optional
 
+from app.constants.security_catalog import owasp_prompt_context
+
 
 @dataclass(frozen=True)
 class ReviewAgentProfile:
@@ -46,7 +48,7 @@ SECURITY_AGENT = ReviewAgentProfile(
     name="安全审查代理",
     focus="重点识别注入、越权、敏感信息泄露、不安全反序列化和输入校验缺失。",
     issue_types=("安全漏洞", "异常处理", "其他"),
-    instruction="只报告有明确安全影响或异常处理风险的问题,不要泛化为普通代码风格建议。",
+    instruction="只报告有明确安全影响或异常处理风险的问题,不要泛化为普通代码风格建议。\n" + owasp_prompt_context(),
 )
 
 PERFORMANCE_AGENT = ReviewAgentProfile(

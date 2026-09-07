@@ -29,6 +29,14 @@ class AiLogOut(BaseModel):
     chunk_index: Optional[int] = None
     model_name: str
     agent_label: Optional[str] = None
+    root_agent_run_id: Optional[int] = None
+    root_agent_run_key: Optional[str] = None
+    agent_run_id: Optional[int] = None
+    tool_execution_id: Optional[int] = None
+    agent_team_id: Optional[int] = None
+    agent_team_task_id: Optional[int] = None
+    agent_execution_event_id: Optional[int] = None
+    usage_state: str = "unknown"
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
@@ -55,6 +63,14 @@ class AiLogDetailOut(BaseModel):
     chunk_index: Optional[int] = None
     model_name: str
     agent_label: Optional[str] = None
+    root_agent_run_id: Optional[int] = None
+    root_agent_run_key: Optional[str] = None
+    agent_run_id: Optional[int] = None
+    tool_execution_id: Optional[int] = None
+    agent_team_id: Optional[int] = None
+    agent_team_task_id: Optional[int] = None
+    agent_execution_event_id: Optional[int] = None
+    usage_state: str = "unknown"
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None

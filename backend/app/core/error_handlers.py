@@ -38,7 +38,9 @@ def register_handlers(app: FastAPI) -> None:
         headers = {"X-Request-Id": request_id}
         retry_after = getattr(exc, "retry_after", None)
         if retry_after is not None:
-            headers["Retry-After"] = str(max(1, int(retry_after)))
+            seconds = max(1, int(retry_after))
+            headers["Retry-After"] = str(seconds)
+            content["retry_after_seconds"] = seconds
         # request_id 是用户与值班人员关联日志的恢复入口；生产仅收敛内部 detail。
         if not _is_prod():
             content["detail"] = exc.detail

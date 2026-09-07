@@ -55,6 +55,7 @@ class AdminCopilotAgent(BaseAgent):
             ensure_ascii=False,
             default=str,
         )
+        self.bind_usage_source(db, admin)
         api_config = resolve_api_config(db, None)
         result = self.call_json(prompt, ctx, api_config=api_config)
         if not result.success and result.failure_kind in {"invalid_json", "output_truncated"}:
@@ -113,6 +114,7 @@ class DelegatedAdminAgent(BaseAgent):
             "不得输出分析过程、思维链或 reasoning_content。\n\n"
             f"任务：{task}\n事实快照：{json.dumps(snapshot, ensure_ascii=False, default=str)}"
         )
+        self.bind_usage_source(db, admin)
         result = self.call(prompt, ctx, api_config=resolve_api_config(db, None))
         self._log_call(
             db,

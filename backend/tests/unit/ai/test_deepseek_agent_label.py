@@ -309,5 +309,5 @@ def test_log_sequential_call_result_none_on_exception(db):
     assert row.agent_label == "security_sentinel"
     assert row.status == "failed"
     assert row.error_message == "Agent 执行异常"
-    assert row.prompt_tokens == 0
+    assert row.prompt_tokens is None
     assert row.duration_ms == 0

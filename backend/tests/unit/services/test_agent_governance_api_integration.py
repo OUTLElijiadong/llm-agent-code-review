@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
+from app.core.config import settings
 from app.core.dependencies import require_admin, require_super_admin
 from app.core.security import create_access_token
 from app.main import app
@@ -18,12 +19,14 @@ from app.models.user import User
 
 
 @pytest.fixture
-def admin_api_client():
+def admin_api_client(monkeypatch):
     """创建共享内存 SQLite 的管理端 API 测试客户端。
 
     Yields:
         tuple[TestClient, Session]: 测试客户端和数据库会话。
     """
+    # 权限/业务测试不启动应用 lifespan；调度不可用的拒绝行为另有专项覆盖。
+    monkeypatch.setattr(settings, "agent_governance_scheduler_enabled", False)
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -119,6 +122,7 @@ def test_frontend_admin_governance_api_paths_match_backend_routes():
 
 def test_external_knowledge_source_api_requires_unique_super_admin(monkeypatch):
     """普通管理员可读来源，但不能保存或抓取；唯一 admin 超管可执行。"""
+    monkeypatch.setattr(settings, "agent_governance_scheduler_enabled", False)
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},

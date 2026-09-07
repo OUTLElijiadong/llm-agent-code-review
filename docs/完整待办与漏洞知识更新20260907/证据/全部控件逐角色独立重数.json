@@ -1,0 +1,16 @@
+{
+  "status": "passed_independent_recount",
+  "rows": 3050,
+  "unique_controls_per_role": 610,
+  "statuses": {
+    "untested": 2440,
+    "blocked": 610,
+    "passed": 0
+  },
+  "historical_cells": 20,
+  "historical_observations": 21,
+  "source_hashes_match": true,
+  "historical_lines_match": true,
+  "source_ledger_sha256": "bc0fa69f7ef3a69750723a618cca473dea1e856d38cbb3d2f9a35116e024b755",
+  "new_release_clicks_proven": 0
+}

@@ -1,0 +1,10 @@
+{
+  "database": "prism_acceptance_048_64f18a2e28e6",
+  "environment": "local-isolated-mysql",
+  "production_connected": false,
+  "started_at_utc": "2026-09-07T06:40:46.992624+00:00",
+  "status": "failed",
+  "error": "upgrade 047_review_input_snapshot failed; see redacted log",
+  "isolated_database_removed": true,
+  "finished_at_utc": "2026-09-07T06:40:50.548922+00:00"
+}

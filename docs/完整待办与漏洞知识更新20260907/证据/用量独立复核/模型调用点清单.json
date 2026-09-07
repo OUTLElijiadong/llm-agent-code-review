@@ -1,0 +1,444 @@
+{
+  "inspection_date": "2026-09-07",
+  "method": "Python AST enumerates actual expressions, excluding MCP tool dispatch and string/docstring examples; direct HTTP boundaries and accounting sinks separately enumerated. Static inventory is not a runtime pass claim.",
+  "call_sites": [
+    {
+      "path": "backend/app/agents/admin_copilot_agent.py",
+      "line": 60,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/admin_copilot_agent.py",
+      "line": 72,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/admin_copilot_agent.py",
+      "line": 77,
+      "call": "self._log_call",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/agents/admin_copilot_agent.py",
+      "line": 118,
+      "call": "self.call",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/admin_copilot_agent.py",
+      "line": 119,
+      "call": "self._log_call",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/agents/ai_prompt_agent.py",
+      "line": 245,
+      "call": "self.call",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/base.py",
+      "line": 447,
+      "call": "self.call",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/chat_agent.py",
+      "line": 1320,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/chat_planner.py",
+      "line": 238,
+      "call": "self._agent.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/deployment_coordinator_agent.py",
+      "line": 69,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/evolution_agent.py",
+      "line": 322,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/fullchain_audit_agent.py",
+      "line": 249,
+      "call": "self._sentinel.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/fullchain_audit_agent.py",
+      "line": 384,
+      "call": "self._sentinel.call",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/language_agent.py",
+      "line": 52,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/metagpt/role_adapter.py",
+      "line": 103,
+      "call": "self._agent.call",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/operations_agent.py",
+      "line": 80,
+      "call": "self.call",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/operations_agent.py",
+      "line": 81,
+      "call": "self._log_call",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/agents/project_agent.py",
+      "line": 67,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/review_agent.py",
+      "line": 84,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/review_agent.py",
+      "line": 141,
+      "call": "self.call",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/security_sentinel_agent.py",
+      "line": 248,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/security_sentinel_agent.py",
+      "line": 2688,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/security_sentinel_agent.py",
+      "line": 2892,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/security_sentinel_agent.py",
+      "line": 2978,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/security_sentinel_agent.py",
+      "line": 3427,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/syntax_repair_agent.py",
+      "line": 106,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/test_case_generator_agent.py",
+      "line": 260,
+      "call": "self.call_json",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/agents/test_review_reporter_agent.py",
+      "line": 157,
+      "call": "self.call",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/ai/discussion_orchestrator.py",
+      "line": 1013,
+      "call": "agent.call_raw",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/ai/discussion_orchestrator.py",
+      "line": 1022,
+      "call": "agent.call_raw",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/ai/discussion_orchestrator.py",
+      "line": 1154,
+      "call": "DeepSeekAgent.log_deferred",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/ai/discussion_orchestrator.py",
+      "line": 1304,
+      "call": "DeepSeekAgent.log_deferred",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/api/v1/ai_chat.py",
+      "line": 136,
+      "call": "orch.chat",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/services/eval_gate.py",
+      "line": 296,
+      "call": "agent.chat",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/services/pentest_service.py",
+      "line": 981,
+      "call": "agent.chat",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/services/personalization_service.py",
+      "line": 113,
+      "call": "agent.chat",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/services/published_agent_tools.py",
+      "line": 134,
+      "call": "client.call_raw",
+      "kind": "model_or_agent_entry"
+    },
+    {
+      "path": "backend/app/services/published_agent_tools.py",
+      "line": 142,
+      "call": "client.log_deferred",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/services/review_service.py",
+      "line": 1023,
+      "call": "agent._log_call",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/services/review_service.py",
+      "line": 1060,
+      "call": "DeepSeekAgent.log_deferred",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/services/review_service.py",
+      "line": 1210,
+      "call": "DeepSeekAgent.log_deferred",
+      "kind": "existing_log_sink"
+    },
+    {
+      "path": "backend/app/services/review_service.py",
+      "line": 1444,
+      "call": "agent.call_raw",
+      "kind": "model_or_agent_entry"
+    }
+  ],
+  "direct_model_http_boundaries": [
+    {
+      "path": "backend/app/agents/base.py",
+      "line": 232,
+      "call": "client.post",
+      "endpoint_scope": "actual model HTTP boundary"
+    },
+    {
+      "path": "backend/app/agents/chat_agent.py",
+      "line": 1741,
+      "call": "client.post",
+      "endpoint_scope": "actual model HTTP boundary"
+    },
+    {
+      "path": "backend/app/ai/deepseek_agent.py",
+      "line": 231,
+      "call": "client.post",
+      "endpoint_scope": "actual model HTTP boundary"
+    },
+    {
+      "path": "backend/app/services/agent_responses_service.py",
+      "line": 618,
+      "call": "client.stream",
+      "endpoint_scope": "actual model HTTP boundary"
+    },
+    {
+      "path": "backend/app/services/api_config_service.py",
+      "line": 218,
+      "call": "request",
+      "endpoint_scope": "POST ping only; GET models excluded"
+    },
+    {
+      "path": "backend/app/services/embedding_service.py",
+      "line": 105,
+      "call": "client.post",
+      "endpoint_scope": "actual model HTTP boundary"
+    }
+  ],
+  "accounting_helper_sites": [
+    {
+      "path": "backend/app/agents/base.py",
+      "line": 395,
+      "call": "record_usage_attempt"
+    },
+    {
+      "path": "backend/app/agents/chat_agent.py",
+      "line": 1785,
+      "call": "record_usage_attempt"
+    },
+    {
+      "path": "backend/app/ai/deepseek_agent.py",
+      "line": 302,
+      "call": "record_usage_attempt"
+    },
+    {
+      "path": "backend/app/ai/deepseek_agent.py",
+      "line": 323,
+      "call": "record_usage_attempt"
+    },
+    {
+      "path": "backend/app/ai/deepseek_agent.py",
+      "line": 567,
+      "call": "record_usage_attempt"
+    },
+    {
+      "path": "backend/app/services/agent_responses_service.py",
+      "line": 2571,
+      "call": "record_usage_attempt"
+    },
+    {
+      "path": "backend/app/services/api_config_service.py",
+      "line": 255,
+      "call": "record_usage_attempt"
+    },
+    {
+      "path": "backend/app/services/embedding_service.py",
+      "line": 129,
+      "call": "record_usage_attempt"
+    }
+  ],
+  "embedding_and_ranking_sites": [
+    {
+      "path": "backend/app/api/v1/knowledge.py",
+      "line": 95,
+      "call": "embedding_service.reembed_all_stores"
+    },
+    {
+      "path": "backend/app/services/agent_knowledge_service.py",
+      "line": 112,
+      "call": "embedding_service.embed_texts"
+    },
+    {
+      "path": "backend/app/services/agent_knowledge_service.py",
+      "line": 744,
+      "call": "embedding_service.embed_one"
+    },
+    {
+      "path": "backend/app/services/capability_catalog_service.py",
+      "line": 310,
+      "call": "embedding_service.embed_texts"
+    },
+    {
+      "path": "backend/app/services/capability_catalog_service.py",
+      "line": 364,
+      "call": "rank_rows"
+    },
+    {
+      "path": "backend/app/services/embedding_service.py",
+      "line": 177,
+      "call": "_api_embed"
+    },
+    {
+      "path": "backend/app/services/embedding_service.py",
+      "line": 189,
+      "call": "embed_texts"
+    },
+    {
+      "path": "backend/app/services/embedding_service.py",
+      "line": 260,
+      "call": "embed_texts"
+    },
+    {
+      "path": "backend/app/services/embedding_service.py",
+      "line": 298,
+      "call": "_reembed_model"
+    },
+    {
+      "path": "backend/app/services/embedding_service.py",
+      "line": 299,
+      "call": "_reembed_model"
+    },
+    {
+      "path": "backend/app/services/knowledge_service.py",
+      "line": 106,
+      "call": "embedding_service.embed_texts"
+    },
+    {
+      "path": "backend/app/services/knowledge_service.py",
+      "line": 134,
+      "call": "embedding_service.embed_one"
+    },
+    {
+      "path": "backend/app/services/published_agent_tools.py",
+      "line": 44,
+      "call": "capability_catalog_service.rank_rows"
+    }
+  ],
+  "source_sha256": {
+    "backend/app/agents/admin_copilot_agent.py": "463d301fc1c8f6586afb04580be42b320a7eb69dd4dcc1e8bdf095439f74ef26",
+    "backend/app/agents/ai_prompt_agent.py": "8a32ba3521f33b41b41411273928e976e496531e1ea778aaf4d9662514bb20fb",
+    "backend/app/agents/base.py": "70c602e23c9e6705fa2b21745d1fba3334ea204553acab4b973184b17dafc9be",
+    "backend/app/agents/chat_agent.py": "e218d61c2c900098f022004f0a2de02900d7bf8a44252d6d271a94562c540e51",
+    "backend/app/agents/chat_planner.py": "ca58a2fd22fb574e2eb8757c8f37d9a746c7d302b6a235fb9cf8a35aed3a1610",
+    "backend/app/agents/deployment_coordinator_agent.py": "9af13fa4cbbf550de6a382039277fe8a0519f32c0977479b7fcfc239469ab672",
+    "backend/app/agents/evolution_agent.py": "60b53177293559cb02474df57668c0b1fc57189a548e1298c5ba55754d28ed70",
+    "backend/app/agents/fullchain_audit_agent.py": "fd99348080d289b19046d07c5313f955c214346272959560c6752e4ba4415802",
+    "backend/app/agents/language_agent.py": "11d911552df1a5ec9ef90f09fd527e09a60b948435d584876cc3034a503f104c",
+    "backend/app/agents/metagpt/role_adapter.py": "fb75f68bf03a53ba8af79b2a556e514790184867bd86291b42e66528fbeeb04b",
+    "backend/app/agents/operations_agent.py": "f078d5504c07705671734e5a2b4b3d5f60b6003c824cfcbc146a0d42a6d97e73",
+    "backend/app/agents/project_agent.py": "2fdbff6ac8b389aa6e8f44d6f6827dd9586abcd3a828d4d205b824d9f262b8bd",
+    "backend/app/agents/review_agent.py": "90119d7951683a64d7437057ffe7288141e391761d7a2b29d229413637644779",
+    "backend/app/agents/security_sentinel_agent.py": "324fb35d85fe97e023de8565328a3a4fe331b362a4deafe68b76f0f3f42aa9e5",
+    "backend/app/agents/syntax_repair_agent.py": "d7dd585318eef542a27be2ff59bf9247d6cf11e415bf7cdc414f0ad02469a7d6",
+    "backend/app/agents/test_case_generator_agent.py": "e9780bb8c102b9fa0ee3ae8aafab9591351475ff48c2b9d701d4a03071e54701",
+    "backend/app/agents/test_review_reporter_agent.py": "fe39f8d764d2393740585f3f8d7e4ce19b84f436b3da59834bf2652662ec4f5d",
+    "backend/app/ai/deepseek_agent.py": "7bcc5723303ad47d9dcc5cf26f0d33a193fe596fe96b17d86326980cd56f2077",
+    "backend/app/ai/discussion_orchestrator.py": "7eefed3a5c105c9ce0105a6f86746dd14cc24c518f4e81501e38398fd8145f34",
+    "backend/app/api/v1/ai_chat.py": "6fd7038a38ea008a43eddd1c1e2c1d3caffbcbb540e1d70f8cd0bba7548a804e",
+    "backend/app/api/v1/knowledge.py": "b3c6153d6beec9e5ec88e15d8219f4baeb5ef81a7c545d2b7096ad37a4457087",
+    "backend/app/services/agent_knowledge_service.py": "5e5a6f73482e9b4220b0323b8fb938efa8219ba9b3179d07e7c0455e8dc50811",
+    "backend/app/services/agent_responses_service.py": "2e833e782681b851c41982d0a127a3bd408458b3467363bc5a987a8c1e725499",
+    "backend/app/services/api_config_service.py": "ac0226c77767d3dba5349dd6341b1123ab638083be1a56b5e1b8f1bb30ee4f90",
+    "backend/app/services/capability_catalog_service.py": "0570c303355a2b026a14b5cebe4b6f97e53c37476ba51e49ca9987ac10157ad7",
+    "backend/app/services/embedding_service.py": "6934866517f3df99946e699374fbdbf9bff29b5ca099a58f4c9006d0693a30d6",
+    "backend/app/services/eval_gate.py": "1793e56a39772e1216ed1da6507bcc7f1f1dba6e42674b467e4c4dbde9884d5e",
+    "backend/app/services/knowledge_service.py": "fb1024d613bd9762ab46b6ff1baa45718c15b44a5451994a658bd1bcf234ec2e",
+    "backend/app/services/pentest_service.py": "41f188644855c7e3537d41ad7b06b008c1a9612047b440f73009df4015af528e",
+    "backend/app/services/personalization_service.py": "62c47e93460b5aeec4712c43b3ec97a89488448a84772d2cc5c41ec899d6a2ff",
+    "backend/app/services/published_agent_tools.py": "c4bc65f6a238d20ba7b58ae3ab8b2656ba8a5ad608828199ce910d947c241895",
+    "backend/app/services/review_service.py": "e9af692157baa52603f9e19a1a01c6014266ba443c14346f90eba013277d8340"
+  },
+  "explicit_boundaries": {
+    "metagpt": "RoleAdapter present as library, production API only metadata preview; no Environment.run production caller found.",
+    "responses_gateway": "/v1/responses is caller upstream Bearer passthrough without platform identity; does not guess owner/root from credential.",
+    "local_embedding": "fallback hash has no model HTTP and creates no log."
+  }
+}

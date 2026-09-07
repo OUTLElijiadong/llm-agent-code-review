@@ -1,0 +1,2656 @@
+{
+  "verified_at": "2026-09-07",
+  "scope": "原 PHP 生态 CVE 参考集逐条复核，加 PHP 官方 2026 年变更日志全部 18 个 CVE 标识及 Laravel 2024—2026 新公告。",
+  "sources": [
+    "https://cveawg.mitre.org/api/cve/",
+    "https://www.php.net/ChangeLog-8.php",
+    "https://github.com/laravel/framework/security/advisories/",
+    "https://github.com/php/php-src/security/advisories/"
+  ],
+  "records": [
+    {
+      "id": "CVE-2026-48019",
+      "title": "CRLF injection in Laravel's default email rule enables SMTP smuggling and spoofed-mail relay",
+      "description": "Laravel is a web application framework. Prior to versions 12.60.0 and 13.10.0, a CRLF injection vulnerability in Laravel's email validation, in combination with how Symfony Mailer and Symfony Mime handle certain character sequences, may allow an unauthenticated attacker to interfere with outbound email processing in applications that send mail to user-supplied addresses. This issue has been patched in versions 12.60.0 and 13.10.0.",
+      "affected_summary": "laravel / framework：>= 13.0.0, < 13.10.0；< 12.60.0",
+      "affected": [
+        {
+          "vendor": "laravel",
+          "product": "framework",
+          "versions": [
+            {
+              "version": ">= 13.0.0, < 13.10.0",
+              "status": "affected"
+            },
+            {
+              "version": "< 12.60.0",
+              "status": "affected"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-48019",
+      "source_sha256": "b99fb49b94afd64323ecadf51d7e633a259e41f21172541e6c14f354473b8131",
+      "updated_at": "2026-09-04T22:11:40.811Z",
+      "published_at": "2026-09-04T22:11:40.811Z",
+      "references": [
+        {
+          "name": "https://github.com/laravel/framework/security/advisories/GHSA-5vg9-5847-vvmq",
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/laravel/framework/security/advisories/GHSA-5vg9-5847-vvmq"
+        },
+        {
+          "name": "https://github.com/laravel/framework/pull/60151",
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/laravel/framework/pull/60151"
+        },
+        {
+          "name": "https://github.com/laravel/framework/commit/96e9a663db657cf37ef26cd794fda8ff60eaa451",
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/laravel/framework/commit/96e9a663db657cf37ef26cd794fda8ff60eaa451"
+        },
+        {
+          "name": "https://github.com/laravel/framework/commit/f336ba79e744257f84ebf0d096b0ebc62e8e1a4d",
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/laravel/framework/commit/f336ba79e744257f84ebf0d096b0ebc62e8e1a4d"
+        },
+        {
+          "name": "https://github.com/laravel/framework/releases/tag/v12.60.0",
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/laravel/framework/releases/tag/v12.60.0"
+        },
+        {
+          "name": "https://github.com/laravel/framework/releases/tag/v13.10.0",
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/laravel/framework/releases/tag/v13.10.0"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-7260",
+      "title": "Stack overflow in phar with circular symlinks",
+      "description": "Circular symbolic links in phar archives could lead to unbounded recursion, exhausting the C stack and crashing the PHP process, in PHP versions from 8.2.* before 8.2.33, from 8.3.* before 8.3.33, from 8.4.* before 8.4.24, and from 8.5.* before 8.5.9.",
+      "affected_summary": "PHP Group / PHP / ext-phar：8.2.* 至 < 8.2.33；8.3.* 至 < 8.3.33；8.4.* 至 < 8.4.24；8.5.* 至 < 8.5.9",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "ext-phar",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.33",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.33",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.24",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.9",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "unaffected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7260",
+      "source_sha256": "376599eef96f9f7f52648f8b011ac295d239d817d2eaa29c59aa12b1a119e583",
+      "updated_at": "2026-07-30T12:15:22.862Z",
+      "published_at": "2026-07-30T11:22:53.918Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-vc5h-9ppw-p5f3",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-17544",
+      "title": "Out-of-bounds write in bccomp() via crafted operand and scale",
+      "description": "Attacker-provided inputs to bccomp() could lead to an out-of-bounds write with stack and heap corruption in PHP versions from 8.4.* before 8.4.24 and from 8.5.* before 8.5.9.",
+      "affected_summary": "PHP Group / PHP / ext-bcmath：8.4.* 至 < 8.4.24；8.5.* 至 < 8.5.9",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "ext-bcmath",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.24",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.9",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "unaffected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-17544",
+      "source_sha256": "25723e1e99f2013a9f67d0c1705806db1fa2709ec5a87dd3d55b240f20881e16",
+      "updated_at": "2026-07-31T03:55:47.261Z",
+      "published_at": "2026-07-30T11:22:24.023Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-x692-q9x7-8c3f",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-17543",
+      "title": "SQL injection in ext-pgsql via E'...' backslash breakout",
+      "description": "Improper escaping of backslashes in attacker-provided parameters would allow for trivial SQL injection in PHP versions from 8.2.* before 8.2.33, from 8.3.* before 8.3.33, from 8.4.* before 8.4.24, and from 8.5.* before 8.5.9.",
+      "affected_summary": "PHP Group / PHP / ext-pgsql：8.2.* 至 < 8.2.33；8.3.* 至 < 8.3.33；8.4.* 至 < 8.4.24；8.5.* 至 < 8.5.9",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "ext-pgsql",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.33",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.33",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.24",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.9",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "unaffected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-17543",
+      "source_sha256": "c95c72ef5bf16fd1b49e37a5db93ae047737634b425c9c1e32a5655c2b057f37",
+      "updated_at": "2026-07-31T03:55:46.475Z",
+      "published_at": "2026-07-30T11:22:04.549Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-7qpv-r5mr-78m4",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-9672",
+      "title": "PHP 更新所捆绑的 libgd",
+      "description": "PHP 官方变更日志明确列出通过升级 libgd 修复此 CVE。该发布说明没有提供完整 libgd 受影响版本范围，不能从 PHP 版本或扩展存在直接判断可利用。",
+      "affected_summary": "libgd / PHP GD：以部署环境实际 libgd 版本及上游安全补丁为准；PHP 8.2.33、8.3.33、8.4.24、8.5.9 变更日志列出该修复。",
+      "source_url": "https://www.php.net/ChangeLog-8.php",
+      "published_at": "2026-07-30",
+      "source_sha256": "77eb3b29967032607f3da1244faa152ce94a1ba0db7c3c6ae29ad9bd0a2f0ade",
+      "source_kind": "组件维护者官方公告（中文摘要）",
+      "updated_at": null,
+      "affected": []
+    },
+    {
+      "id": "CVE-2026-14355",
+      "title": "ext/openssl: Memory corruption in openssl_encrypt with AES-WRAP-PAD",
+      "description": "In PHP versions 8.2.* before 8.2.32, 8.3.* before 8.3.32, 8.4.* before 8.4.23, 8.5.* before 8.5.8, the AES-WRAP-PAD algorithm implementation in OpenSSL extension contains a buffer allocation flaw. The output buffer for the AES key-wrap-with-padding operation is sized from the plaintext length without accounting for RFC 5649 expansion. This may cause OpenSSL to write beyond allocated memory, corrupting heap metadata and triggering application abort.",
+      "affected_summary": "php / php / openssl：8.2.0 至 < 8.2.32；8.3.0 至 < 8.3.32；8.4.0 至 < 8.4.23；8.5.0 至 < 8.5.8",
+      "affected": [
+        {
+          "vendor": "php",
+          "product": "php",
+          "collectionURL": "https://www.php.net/",
+          "packageName": "openssl",
+          "modules": [
+            "ext/openssl"
+          ],
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.0",
+              "lessThan": "8.2.32",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.0",
+              "lessThan": "8.3.32",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.0",
+              "lessThan": "8.4.23",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.0",
+              "lessThan": "8.5.8",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "affected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-14355",
+      "source_sha256": "ae58619921a53b89e3213aa841a0fadf4d85e47bc969083621da7f50de7f4ca5",
+      "updated_at": "2026-07-06T13:57:58.387Z",
+      "published_at": "2026-07-03T20:57:31.958Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-7jrw-539f-x6vr",
+          "name": "GitHub Security Advisory GHSA-7jrw-539f-x6vr",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-12184",
+      "title": "Failure to setup TLS with a remote server can result in a remote DoS",
+      "description": "PHP HTTP 流在 TLS 加密初始化失败后关闭流，但随后清理仍访问该流，可能触发进程崩溃。需核对 TLS 失败路径与 PHP 运行方式。",
+      "affected_summary": "PHP：维护者公告按分支列 <8.3.32、<8.4.21、<8.5.6；修复分别为 8.3.32、8.4.21、8.5.6。",
+      "source_url": "https://github.com/php/php-src/security/advisories/GHSA-mhmq-mmqj-2v39",
+      "published_at": "2026-07-02",
+      "source_sha256": "47fca21867484e504f512ec25d4a8949f6600d05c46008d55cd66ec955104538",
+      "source_kind": "组件维护者官方公告（中文摘要）",
+      "updated_at": null,
+      "affected": []
+    },
+    {
+      "id": "CVE-2026-48041",
+      "title": "Temporary Signed URL Path Confusion",
+      "description": "Laravel 本地文件系统临时签名 URL 的解析歧义可能使请求访问非预期资源或绕过过期校验；上传 URL 也可能写入非预期目标。需验证是否使用相关签名 URL 流程。",
+      "affected_summary": "laravel/framework：官方公告分别列出 <13.12.0、<12.61.1；修复为 13.12.0、12.61.1。须按主版本分支核对。",
+      "source_url": "https://github.com/laravel/framework/security/advisories/GHSA-crmm-hgp2-wgrp",
+      "published_at": "2026-06-08",
+      "source_sha256": "7e5e9da2bf6a50cf4e2af9205db3c6234b06985fa419b4a1e2a204f5a535c5f8",
+      "source_kind": "组件维护者官方公告（中文摘要）",
+      "updated_at": null,
+      "affected": []
+    },
+    {
+      "id": "CVE-2026-7263",
+      "title": "DoS attack via DOMNode::C14N()",
+      "description": "In PHP versions 8.4.* before 8.4.21 and 8.5.* before 8.5.6, DOMNode::C14N() method may process the XML data incorrectly, causing a circular linked list in the data structure representing the XML document. This may cause subsequent processing of the XML document to enter infinite loop, causing denial of service in the processing application.",
+      "affected_summary": "PHP Group / PHP / dom：8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "dom",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "unaffected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7263",
+      "source_sha256": "4c62be7ff5f0a5ee68678aac0765f0ce97c111c35437e6fd8a782bd686c53f7f",
+      "updated_at": "2026-07-15T00:40:16.236Z",
+      "published_at": "2026-05-10T04:43:04.483Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-4jhr-8w89-j733",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-6104",
+      "title": "Global buffer over-read in mb_convert_encoding() with attacker-supplied encoding",
+      "description": "In PHP versions 8.4.* before 8.4.21 and 8.5.* before 8.5.6, when an encoding name containing an embedded NUL byte is passed to mb_convert_encoding() or related mbstring functions, the code incorrectly assumes that when strncasecmp() returns 0 it means the strings have the same length. This can lead to out-of-bounds read of global memory, potentially causing a crash or information disclosure or crash. Affected functions include mb_convert_encoding(), mb_detect_encoding(), mb_convert_variables(), and mb_detect_order(), as well as the mbstring.detect_order and mbstring.http_output INI settings.",
+      "affected_summary": "PHP Group / PHP / mbstring：8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "mbstring",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "unaffected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-6104",
+      "source_sha256": "aab9b733cba43c03019360004a0aafafae2ce034ce973fd5cdd4382823027ee2",
+      "updated_at": "2026-07-15T00:41:42.455Z",
+      "published_at": "2026-05-10T04:35:17.328Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-74r9-qxhc-fx53",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-7258",
+      "title": "Out-of-bounds read in urldecode() on NetBSD",
+      "description": "In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, some functions, including urldecode(), pass signed char to ctype functions (like isxdigit()). On the systems with default signed char and optimized table-lookup ctype functions - such as NetBSD - this can lead to accessing array with negative offset, which can trigger a denial of service.",
+      "affected_summary": "PHP Group / PHP：8.2.* 至 < 8.2.31；8.3.* 至 < 8.3.31；8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "platforms": [
+            "NetBSD"
+          ],
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "affected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7258",
+      "source_sha256": "d3fd7a09c8caa5ee5893a61961d8c06ce853b0dc9fd45065c64968459ad4571b",
+      "updated_at": "2026-05-11T13:06:10.908Z",
+      "published_at": "2026-05-10T04:28:14.520Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-m8rr-4c36-8gq4",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-6722",
+      "title": "Use-After-Free in SOAP using Apache map",
+      "description": "In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the SOAP extension's object deduplication mechanism stores pointers to PHP objects in a global map without incrementing their reference counts. When an apache:Map node contains duplicate keys, processing the second entry overwrites the first in the temporary result map, freeing the original PHP object while its stale pointer remains in the map. A subsequent href reference to the freed node can copy the dangling pointer into the result. As PHP string allocations can reclaim the freed memory region, an attacker with control over the SOAP request body can exploit this use-after-free to achieve remote code execution.",
+      "affected_summary": "PHP Group / PHP / soap：8.2.* 至 < 8.2.31；8.3.* 至 < 8.3.31；8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "soap",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "affected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-6722",
+      "source_sha256": "b53165c1f8b3e31521c78fc5129eb095f0785bc9525245055c3696bc11614645",
+      "updated_at": "2026-07-23T12:08:11.781Z",
+      "published_at": "2026-05-10T04:19:15.288Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-85c2-q967-79q5",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-7259",
+      "title": "Null pointer dereference in php_mb_check_encoding() via mb_ereg_search_init()",
+      "description": "In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, a mismatch between encoding lists in Oniguruma and mbfl leads to  a NULL pointer dereference, resulting in a segmentation fault and denial of service. The vulnerability is exploitable when user-controlled input can influence the encoding passed to mb_regex_encoding().",
+      "affected_summary": "PHP Group / PHP / mbstring：8.2.* 至 < 8.2.31；8.3.* 至 < 8.3.31；8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "mbstring",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "affected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7259",
+      "source_sha256": "0d3aaf84576a047290bb148f29ccb835a62c119128d131c28ab91cb65699449a",
+      "updated_at": "2026-05-11T13:13:50.416Z",
+      "published_at": "2026-05-10T04:13:26.766Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-wm6j-2649-pv75",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-7261",
+      "title": "SoapServer session-persisted object use-after-free via SOAP header fault",
+      "description": "In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, when SoapServer is configured with SOAP_PERSISTENCE_SESSION, the handler object is persisted across requests via session storage. However, in the case SOAP requests results in an error, the persistance is handled incorrectly, resulting in freeing the object while keeping a pointer to it, which may lead to use-after-free. This may lead to memory corruption, information disclosure, or process crashes, with confidentiality, integrity, and availability impact on the vulnerable system.",
+      "affected_summary": "PHP Group / PHP / soap：8.2.* 至 < 8.2.31；8.3.* 至 < 8.3.31；8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "soap",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "affected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7261",
+      "source_sha256": "c2d00244202ceb0242bf72b8f3fa37e659f3d5c7725a2929f107eff392bfbf2b",
+      "updated_at": "2026-05-11T13:14:26.451Z",
+      "published_at": "2026-05-10T04:07:25.484Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-m33r-qmcv-p97q",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-7262",
+      "title": "NULL pointer dereference in SOAP apache:Map decoder with missing <value>",
+      "description": "In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, when a SOAP server has a typemap configured, the decoding process contains a mistake which checks the wrong variable in case of missing value element.  This leads to dereferences a NULL pointer, causing a segmentation fault. This allows a remote unauthenticated attacker to crash the PHP SOAP server process, resulting in denial of service.",
+      "affected_summary": "PHP Group / PHP / soap：8.2.* 至 < 8.2.31；8.3.* 至 < 8.3.31；8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "packageName": "soap",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "affected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7262",
+      "source_sha256": "ebd4b8bbf65042c21a9feb6847e8b8193551979ace4add62d5495a4bea7abb1a",
+      "updated_at": "2026-07-15T00:40:18.277Z",
+      "published_at": "2026-05-10T04:00:09.382Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-hmxp-6pc4-f3vv",
+          "tags": [
+            "vendor-advisory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-7568",
+      "title": "Signed integer overflow in metaphone()",
+      "description": "In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the metaphone() function in ext/standard/metaphone.c uses a signed int variable to track the current position within the input string. If a string longer than 2,147,483,647 bytes is passed, a signed integer overflow occurs, resulting in undefined behavior. This can lead to an out-of-bounds read, causing a segmentation fault or access to unrelated memory, and may affect the availability of the PHP process.",
+      "affected_summary": "PHP Group / PHP：8.2.* 至 < 8.2.31；8.3.* 至 < 8.3.31；8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "affected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7568",
+      "source_sha256": "fce6934940a800acfc00e5543e5083535410f7c46a2840880a949bed1e7319c3",
+      "updated_at": "2026-07-15T00:39:53.392Z",
+      "published_at": "2026-05-10T03:42:36.433Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-96wq-48vp-hh57"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-6735",
+      "title": "XSS within PHP-FPM status endpoint",
+      "description": "In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, 8.5.* before 8.5.6, due to improper sanitation of user data, it allows an attacker to compose an URL, which will cause the target to execute arbitrary JavaScript code (XSS) on the target's machine when the target is viewing the PHP-FPM status page.",
+      "affected_summary": "PHP Group / PHP：8.2.* 至 < 8.2.31；8.3.* 至 < 8.3.31；8.4.* 至 < 8.4.21；8.5.* 至 < 8.5.6",
+      "affected": [
+        {
+          "vendor": "PHP Group",
+          "product": "PHP",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "8.2.*",
+              "lessThan": "8.2.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.3.*",
+              "lessThan": "8.3.31",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.4.*",
+              "lessThan": "8.4.21",
+              "versionType": "semver"
+            },
+            {
+              "status": "affected",
+              "version": "8.5.*",
+              "lessThan": "8.5.6",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "affected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-6735",
+      "source_sha256": "459aacee798741f57940c8b81df819868b9524957e2bf85efacdb602c12d06eb",
+      "updated_at": "2026-05-11T13:25:54.957Z",
+      "published_at": "2026-05-10T03:27:00.607Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-7qg2-v9fj-4mwv"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-44928",
+      "title": "In uriparser before 1.0.2, the function family EqualsUri can misclassify two unequal URIs as equal.",
+      "description": "In uriparser before 1.0.2, the function family EqualsUri can misclassify two unequal URIs as equal.",
+      "affected_summary": "uriparser / uriparser：0 至 < 1.0.2",
+      "affected": [
+        {
+          "defaultStatus": "unaffected",
+          "product": "uriparser",
+          "vendor": "uriparser",
+          "versions": [
+            {
+              "lessThan": "1.0.2",
+              "status": "affected",
+              "version": "0",
+              "versionType": "semver"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-44928",
+      "source_sha256": "fed30a0384f6d32600d08a2ae0d3010efe3213e1c0cabf2e72a6ad32444c3559",
+      "updated_at": "2026-05-10T05:45:32.602Z",
+      "published_at": "2026-05-08T07:15:28.378Z",
+      "references": [
+        {
+          "url": "https://github.com/uriparser/uriparser/pull/305"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-44927",
+      "title": "In uriparser before 1.0.2, there is pointer difference truncation to int in various places.",
+      "description": "In uriparser before 1.0.2, there is pointer difference truncation to int in various places.",
+      "affected_summary": "uriparser / uriparser：0 至 < 1.0.2",
+      "affected": [
+        {
+          "defaultStatus": "unaffected",
+          "product": "uriparser",
+          "vendor": "uriparser",
+          "versions": [
+            {
+              "lessThan": "1.0.2",
+              "status": "affected",
+              "version": "0",
+              "versionType": "semver"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-44927",
+      "source_sha256": "27ee30ec964703042d47001e01e003fd63dae123aaff4392ba6d0d94e8ee0609",
+      "updated_at": "2026-05-10T05:46:18.606Z",
+      "published_at": "2026-05-08T07:13:04.720Z",
+      "references": [
+        {
+          "url": "https://github.com/uriparser/uriparser/pull/304"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2026-42371",
+      "title": "uriparser before 1.0.1 has numeric truncation in text range comparison, if an application accepts URIs with a length in gigabytes.",
+      "description": "uriparser before 1.0.1 has numeric truncation in text range comparison, if an application accepts URIs with a length in gigabytes.",
+      "affected_summary": "uriparser / uriparser：0 至 < 1.0.1",
+      "affected": [
+        {
+          "defaultStatus": "unaffected",
+          "product": "uriparser",
+          "vendor": "uriparser",
+          "versions": [
+            {
+              "lessThan": "1.0.1",
+              "status": "affected",
+              "version": "0",
+              "versionType": "semver"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-42371",
+      "source_sha256": "d471a55385a27aeb829313138df20f390f6dd1a3455226ef8b892cb47556af63",
+      "updated_at": "2026-04-27T14:41:22.410Z",
+      "published_at": "2026-04-27T05:50:36.185Z",
+      "references": [
+        {
+          "url": "https://github.com/uriparser/uriparser/pull/298"
+        },
+        {
+          "url": "https://uriparser.github.io"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2024-13919",
+      "title": "Laravel Reflected XSS via Route Parameter in Debug-Mode Error Page",
+      "description": "The Laravel framework versions between 11.9.0 and 11.35.1 are susceptible to reflected cross-site scripting due to an improper encoding of route parameters in the debug-mode error page.",
+      "affected_summary": "Laravel Holdings Inc. / Laravel Framework：11.9.0 至 ≤ 11.35.1",
+      "affected": [
+        {
+          "defaultStatus": "unaffected",
+          "product": "Laravel Framework",
+          "repo": "https://github.com/laravel/framework",
+          "vendor": "Laravel Holdings Inc.",
+          "versions": [
+            {
+              "lessThanOrEqual": "11.35.1",
+              "status": "affected",
+              "version": "11.9.0",
+              "versionType": "custom"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2024-13919",
+      "source_sha256": "8902a9fc35a93c6ee4c3197b6c653bef9e3c188d5cbb0789e0ba8380c3411446",
+      "updated_at": "2025-03-10T17:02:42.335Z",
+      "published_at": "2025-03-10T10:03:01.374Z",
+      "references": [
+        {
+          "tags": [
+            "third-party-advisory"
+          ],
+          "url": "https://github.com/sbaresearch/advisories/tree/public/2024/SBA-ADV-20241209-02_Laravel_Reflected_XSS_via_Route_Parameter_in_Debug-Mode_Error_Page"
+        },
+        {
+          "tags": [
+            "patch"
+          ],
+          "url": "https://github.com/laravel/framework/pull/53869"
+        },
+        {
+          "tags": [
+            "release-notes"
+          ],
+          "url": "https://github.com/laravel/framework/releases/tag/v11.36.0"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2024-13918",
+      "title": "Laravel Reflected XSS via Request Parameter in Debug-Mode Error Page",
+      "description": "The Laravel framework versions between 11.9.0 and 11.35.1 are susceptible to reflected cross-site scripting due to an improper encoding of request parameters in the debug-mode error page.",
+      "affected_summary": "Laravel Holdings Inc. / Laravel Framework：11.9.0 至 ≤ 11.35.1",
+      "affected": [
+        {
+          "defaultStatus": "unaffected",
+          "product": "Laravel Framework",
+          "repo": "https://github.com/laravel/framework",
+          "vendor": "Laravel Holdings Inc.",
+          "versions": [
+            {
+              "lessThanOrEqual": "11.35.1",
+              "status": "affected",
+              "version": "11.9.0",
+              "versionType": "custom"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2024-13918",
+      "source_sha256": "694a6d3dd15bfd0223239d13f5b282335066bc8f50b9e2d4ccf3d459cc71bec9",
+      "updated_at": "2025-03-10T17:02:40.794Z",
+      "published_at": "2025-03-10T10:02:29.530Z",
+      "references": [
+        {
+          "tags": [
+            "third-party-advisory"
+          ],
+          "url": "https://github.com/sbaresearch/advisories/tree/public/2024/SBA-ADV-20241209-01_Laravel_Reflected_XSS_via_Request_Parameter_in_Debug-Mode_Error_Page"
+        },
+        {
+          "tags": [
+            "patch"
+          ],
+          "url": "https://github.com/laravel/framework/pull/53869"
+        },
+        {
+          "tags": [
+            "release-notes"
+          ],
+          "url": "https://github.com/laravel/framework/releases/tag/v11.36.0"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2025-27515",
+      "title": "Laravel has a File Validation Bypass",
+      "description": "Laravel is a web application framework. When using wildcard validation to validate a given file or image field (`files.*`), a user-crafted malicious request could potentially bypass the validation rules. This vulnerability is fixed in 11.44.1 and 12.1.1.",
+      "affected_summary": "laravel / framework：>= 12.0.0, < 12.1.1；< 11.44.1",
+      "affected": [
+        {
+          "vendor": "laravel",
+          "product": "framework",
+          "versions": [
+            {
+              "version": ">= 12.0.0, < 12.1.1",
+              "status": "affected"
+            },
+            {
+              "version": "< 11.44.1",
+              "status": "affected"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2025-27515",
+      "source_sha256": "967255e3a2a0b3dd628b3bd3ce0afca86e53a67aa459cc44d57f0fa1c2f81dcb",
+      "updated_at": "2025-03-05T18:59:49.627Z",
+      "published_at": "2025-03-05T18:45:50.101Z",
+      "references": [
+        {
+          "name": "https://github.com/laravel/framework/security/advisories/GHSA-78fx-h6xr-vch4",
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/laravel/framework/security/advisories/GHSA-78fx-h6xr-vch4"
+        },
+        {
+          "name": "https://github.com/laravel/framework/commit/2d133034fefddfb047838f4caca3687a3ba811a5",
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/laravel/framework/commit/2d133034fefddfb047838f4caca3687a3ba811a5"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2024-52301",
+      "title": "Laravel allows environment manipulation via query string",
+      "description": "Laravel is a web application framework. When the register_argc_argv php directive is set to on , and users call any URL with a special crafted query string, they are able to change the environment used by the framework when handling the request. The vulnerability fixed in 6.20.45, 7.30.7, 8.83.28, 9.52.17, 10.48.23, and 11.31.0. The framework now ignores argv values for environment detection on non-cli SAPIs.",
+      "affected_summary": "laravel / framework：< 6.20.45；>= 7.0.0, < 7.30.7；>= 8.0.0, < 8.83.28；>= 9.0.0, < 9.52.17；>= 10.0.0, < 10.48.23；>= 11.0.0, < 11.31.0",
+      "affected": [
+        {
+          "vendor": "laravel",
+          "product": "framework",
+          "versions": [
+            {
+              "version": "< 6.20.45",
+              "status": "affected"
+            },
+            {
+              "version": ">= 7.0.0, < 7.30.7",
+              "status": "affected"
+            },
+            {
+              "version": ">= 8.0.0, < 8.83.28",
+              "status": "affected"
+            },
+            {
+              "version": ">= 9.0.0, < 9.52.17",
+              "status": "affected"
+            },
+            {
+              "version": ">= 10.0.0, < 10.48.23",
+              "status": "affected"
+            },
+            {
+              "version": ">= 11.0.0, < 11.31.0",
+              "status": "affected"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2024-52301",
+      "source_sha256": "06a926020ef3122f4e291afe60d54d300b631c49147b50420cf7ba74760e43fa",
+      "updated_at": "2024-12-21T17:02:39.839Z",
+      "published_at": "2024-11-12T19:32:14.415Z",
+      "references": [
+        {
+          "name": "https://github.com/laravel/framework/security/advisories/GHSA-gv7v-rgg6-548h",
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/laravel/framework/security/advisories/GHSA-gv7v-rgg6-548h"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2024-4577",
+      "title": "Argument Injection in PHP-CGI",
+      "description": "In PHP versions 8.1.* before 8.1.29, 8.2.* before 8.2.20, 8.3.* before 8.3.8, when using Apache and PHP-CGI on Windows, if the system is set up to use certain code pages, Windows may use \"Best-Fit\" behavior to replace characters in command line given to Win32 API functions. PHP CGI module may misinterpret those characters as PHP options, which may allow a malicious user to pass options to PHP binary being run, and thus reveal the source code of scripts, run arbitrary PHP code on the server, etc.",
+      "affected_summary": "PHP Group / PHP：8.1.* 至 < 8.1.29；8.2.* 至 < 8.2.20；8.3.* 至 < 8.3.8",
+      "affected": [
+        {
+          "defaultStatus": "affected",
+          "modules": [
+            "CGI"
+          ],
+          "platforms": [
+            "Windows"
+          ],
+          "product": "PHP",
+          "repo": "https://github.com/php/php-src",
+          "vendor": "PHP Group",
+          "versions": [
+            {
+              "lessThan": "8.1.29",
+              "status": "affected",
+              "version": "8.1.*",
+              "versionType": "semver"
+            },
+            {
+              "lessThan": "8.2.20",
+              "status": "affected",
+              "version": "8.2.*",
+              "versionType": "semver"
+            },
+            {
+              "lessThan": "8.3.8",
+              "status": "affected",
+              "version": "8.3.*",
+              "versionType": "semver"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2024-4577",
+      "source_sha256": "e8cc1b1dcd1a3333776e9a0f08cd4543bc662e0ee60fc094bda0820f84b114eb",
+      "updated_at": "2025-10-21T23:05:16.089Z",
+      "published_at": "2024-06-09T19:42:36.464Z",
+      "references": [
+        {
+          "url": "https://github.com/php/php-src/security/advisories/GHSA-3qgc-jrrr-25jv"
+        },
+        {
+          "url": "https://blog.orange.tw/2024/06/cve-2024-4577-yet-another-php-rce.html"
+        },
+        {
+          "url": "https://devco.re/blog/2024/06/06/security-alert-cve-2024-4577-php-cgi-argument-injection-vulnerability-en/"
+        },
+        {
+          "url": "https://arstechnica.com/security/2024/06/php-vulnerability-allows-attackers-to-run-malicious-code-on-windows-servers/"
+        },
+        {
+          "url": "https://www.imperva.com/blog/imperva-protects-against-critical-php-vulnerability-cve-2024-4577/"
+        },
+        {
+          "url": "https://github.com/11whoami99/CVE-2024-4577"
+        },
+        {
+          "url": "https://github.com/xcanwin/CVE-2024-4577-PHP-RCE"
+        },
+        {
+          "url": "https://github.com/rapid7/metasploit-framework/pull/19247"
+        },
+        {
+          "url": "https://labs.watchtowr.com/no-way-php-strikes-again-cve-2024-4577/"
+        },
+        {
+          "url": "https://github.com/watchtowrlabs/CVE-2024-4577"
+        },
+        {
+          "url": "https://www.php.net/ChangeLog-8.php#8.1.29"
+        },
+        {
+          "url": "https://www.php.net/ChangeLog-8.php#8.2.20"
+        },
+        {
+          "url": "https://www.php.net/ChangeLog-8.php#8.3.8"
+        },
+        {
+          "url": "https://cert.be/en/advisory/warning-php-remote-code-execution-patch-immediately"
+        },
+        {
+          "url": "https://isc.sans.edu/diary/30994"
+        },
+        {
+          "url": "http://www.openwall.com/lists/oss-security/2024/06/07/1"
+        },
+        {
+          "url": "https://lists.fedoraproject.org/archives/list/package-announce@lists.fedoraproject.org/message/PKGTQUOA2NTZ3RXN22CSAUJPIRUYRB4B/"
+        },
+        {
+          "url": "https://lists.fedoraproject.org/archives/list/package-announce@lists.fedoraproject.org/message/W45DBOH56NQDRTOM2DN2LNA2FZIMC3PK/"
+        },
+        {
+          "url": "https://security.netapp.com/advisory/ntap-20240621-0008/"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2023-2745",
+      "title": "WordPress Core < 6.2.1 - Directory Traversal",
+      "description": "WordPress Core is vulnerable to Directory Traversal in versions up to, and including, 6.2, via the ‘wp_lang’ parameter. This allows unauthenticated attackers to access and load arbitrary translation files. In cases where an attacker is able to upload a crafted translation file onto the site, such as via an upload form, this could be also used to perform a Cross-Site Scripting attack.",
+      "affected_summary": "WordPress Foundation / WordPress：0 至 < 4.1.38；4.2 至 < 4.2.35；4.3 至 < 4.3.31；4.4 至 < 4.4.30；4.5 至 < 4.5.29；4.6 至 < 4.6.26；4.7 至 < 4.7.26；4.8 至 < 4.8.22；4.9 至 < 4.9.23；5.0 至 < 5.0.19；5.1 至 < 5.1.16；5.2 至 < 5.2.18；5.3 至 < 5.3.15；5.4 至 < 5.4.13；5.5 至 < 5.5.12；5.6 至 < 5.6.11；5.7 至 < 5.7.9；5.8 至 < 5.8.7；5.9 至 < 5.9.6；6.0 至 < 6.0.4；6.1 至 < 6.1.2；6.2 至 < 6.2.1",
+      "affected": [
+        {
+          "vendor": "WordPress Foundation",
+          "product": "WordPress",
+          "versions": [
+            {
+              "version": "0",
+              "status": "affected",
+              "lessThan": "4.1.38",
+              "versionType": "semver"
+            },
+            {
+              "version": "4.2",
+              "status": "affected",
+              "lessThan": "4.2.35",
+              "versionType": "semver"
+            },
+            {
+              "version": "4.3",
+              "status": "affected",
+              "lessThan": "4.3.31",
+              "versionType": "semver"
+            },
+            {
+              "version": "4.4",
+              "status": "affected",
+              "lessThan": "4.4.30",
+              "versionType": "semver"
+            },
+            {
+              "version": "4.5",
+              "status": "affected",
+              "lessThan": "4.5.29",
+              "versionType": "semver"
+            },
+            {
+              "version": "4.6",
+              "status": "affected",
+              "lessThan": "4.6.26",
+              "versionType": "semver"
+            },
+            {
+              "version": "4.7",
+              "status": "affected",
+              "lessThan": "4.7.26",
+              "versionType": "semver"
+            },
+            {
+              "version": "4.8",
+              "status": "affected",
+              "lessThan": "4.8.22",
+              "versionType": "semver"
+            },
+            {
+              "version": "4.9",
+              "status": "affected",
+              "lessThan": "4.9.23",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.0",
+              "status": "affected",
+              "lessThan": "5.0.19",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.1",
+              "status": "affected",
+              "lessThan": "5.1.16",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.2",
+              "status": "affected",
+              "lessThan": "5.2.18",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.3",
+              "status": "affected",
+              "lessThan": "5.3.15",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.4",
+              "status": "affected",
+              "lessThan": "5.4.13",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.5",
+              "status": "affected",
+              "lessThan": "5.5.12",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.6",
+              "status": "affected",
+              "lessThan": "5.6.11",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.7",
+              "status": "affected",
+              "lessThan": "5.7.9",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.8",
+              "status": "affected",
+              "lessThan": "5.8.7",
+              "versionType": "semver"
+            },
+            {
+              "version": "5.9",
+              "status": "affected",
+              "lessThan": "5.9.6",
+              "versionType": "semver"
+            },
+            {
+              "version": "6.0",
+              "status": "affected",
+              "lessThan": "6.0.4",
+              "versionType": "semver"
+            },
+            {
+              "version": "6.1",
+              "status": "affected",
+              "lessThan": "6.1.2",
+              "versionType": "semver"
+            },
+            {
+              "version": "6.2",
+              "status": "affected",
+              "lessThan": "6.2.1",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "unaffected"
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2023-2745",
+      "source_sha256": "08678817b4fb96fc86f2718799450c2f490dde6fd859fb03f5466ed9a60e5e94",
+      "updated_at": "2026-04-08T17:31:40.202Z",
+      "published_at": "2023-05-17T08:36:44.034Z",
+      "references": [
+        {
+          "url": "https://www.wordfence.com/threat-intel/vulnerabilities/id/edcf46b6-368e-49c0-b2c3-99bf6e2d358f?source=cve"
+        },
+        {
+          "url": "https://wordpress.org/news/2023/05/wordpress-6-2-1-maintenance-security-release/"
+        },
+        {
+          "url": "https://core.trac.wordpress.org/changeset?sfp_email=&sfph_mail=&reponame=&old=55765%40%2F&new=55765%40%2F&sfp_email=&sfph_mail="
+        },
+        {
+          "url": "https://www.wordfence.com/blog/2023/05/wordpress-core-6-2-1-security-maintenance-release-what-you-need-to-know/"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2022-31043",
+      "title": "Fix failure to strip Authorization header on HTTP downgrade in Guzzle",
+      "description": "Guzzle is an open source PHP HTTP client. In affected versions `Authorization` headers on requests are sensitive information. On making a request using the `https` scheme to a server which responds with a redirect to a URI with the `http` scheme, we should not forward the `Authorization` header on. This is much the same as to how we don't forward on the header if the host changes. Prior to this fix, `https` to `http` downgrades did not result in the `Authorization` header being removed, only changes to the host. Affected Guzzle 7 users should upgrade to Guzzle 7.4.4 as soon as possible. Affected users using any earlier series of Guzzle should upgrade to Guzzle 6.5.7 or 7.4.4. Users unable to upgrade may consider an alternative approach which would be to use their own redirect middleware. Alternately users may simply disable redirects all together if redirects are not expected or required.",
+      "affected_summary": "guzzle / guzzle：< 6.5.7；>=7.0.0, < 7.4.4",
+      "affected": [
+        {
+          "vendor": "guzzle",
+          "product": "guzzle",
+          "versions": [
+            {
+              "version": "< 6.5.7",
+              "status": "affected"
+            },
+            {
+              "version": ">=7.0.0, < 7.4.4",
+              "status": "affected"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2022-31043",
+      "source_sha256": "f9977b8109fe5f3828e243ad184c7f17605e4c2fa16f6d2fd1ae315e1b367be5",
+      "updated_at": "2025-04-23T18:18:11.546Z",
+      "published_at": "2022-06-09T00:00:00.000Z",
+      "references": [
+        {
+          "url": "https://github.com/guzzle/guzzle/commit/e3ff079b22820c2029d4c2a87796b6a0b8716ad8"
+        },
+        {
+          "url": "https://www.rfc-editor.org/rfc/rfc9110.html#name-redirection-3xx"
+        },
+        {
+          "url": "https://github.com/guzzle/guzzle/security/advisories/GHSA-w248-ffj2-4v5q"
+        },
+        {
+          "url": "https://www.drupal.org/sa-core-2022-011"
+        },
+        {
+          "name": "DSA-5246",
+          "tags": [
+            "vendor-advisory"
+          ],
+          "url": "https://www.debian.org/security/2022/dsa-5246"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2022-31042",
+      "title": "Failure to strip the Cookie header on change in host or HTTP downgrade in Guzzle",
+      "description": "Guzzle is an open source PHP HTTP client. In affected versions the `Cookie` headers on requests are sensitive information. On making a request using the `https` scheme to a server which responds with a redirect to a URI with the `http` scheme, or on making a request to a server which responds with a redirect to a a URI to a different host, we should not forward the `Cookie` header on. Prior to this fix, only cookies that were managed by our cookie middleware would be safely removed, and any `Cookie` header manually added to the initial request would not be stripped. We now always strip it, and allow the cookie middleware to re-add any cookies that it deems should be there. Affected Guzzle 7 users should upgrade to Guzzle 7.4.4 as soon as possible. Affected users using any earlier series of Guzzle should upgrade to Guzzle 6.5.7 or 7.4.4. Users unable to upgrade may consider an alternative approach to use your own redirect middleware, rather than ours. If you do not require or expect redirects to be followed, one should simply disable redirects all together.",
+      "affected_summary": "guzzle / guzzle：< 6.5.7；>=7.0.0, < 7.4.4",
+      "affected": [
+        {
+          "vendor": "guzzle",
+          "product": "guzzle",
+          "versions": [
+            {
+              "version": "< 6.5.7",
+              "status": "affected"
+            },
+            {
+              "version": ">=7.0.0, < 7.4.4",
+              "status": "affected"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2022-31042",
+      "source_sha256": "fdfb09f71352d322388ad4e2a1a4bc7b1238fd5c966683a20d996a34bb5a4050",
+      "updated_at": "2025-04-23T18:18:20.749Z",
+      "published_at": "2022-06-09T00:00:00.000Z",
+      "references": [
+        {
+          "url": "https://github.com/guzzle/guzzle/security/advisories/GHSA-f2wf-25xc-69c9"
+        },
+        {
+          "url": "https://github.com/guzzle/guzzle/commit/e3ff079b22820c2029d4c2a87796b6a0b8716ad8"
+        },
+        {
+          "url": "https://www.rfc-editor.org/rfc/rfc9110.html#name-redirection-3xx"
+        },
+        {
+          "url": "https://www.drupal.org/sa-core-2022-011"
+        },
+        {
+          "name": "DSA-5246",
+          "tags": [
+            "vendor-advisory"
+          ],
+          "url": "https://www.debian.org/security/2022/dsa-5246"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2022-29248",
+      "title": "Cross-domain cookie leakage in Guzzle",
+      "description": "Guzzle is a PHP HTTP client. Guzzle prior to versions 6.5.6 and 7.4.3 contains a vulnerability with the cookie middleware. The vulnerability is that it is not checked if the cookie domain equals the domain of the server which sets the cookie via the Set-Cookie header, allowing a malicious server to set cookies for unrelated domains. The cookie middleware is disabled by default, so most library consumers will not be affected by this issue. Only those who manually add the cookie middleware to the handler stack or construct the client with ['cookies' => true] are affected. Moreover, those who do not use the same Guzzle client to call multiple domains and have disabled redirect forwarding are not affected by this vulnerability. Guzzle versions 6.5.6 and 7.4.3 contain a patch for this issue. As a workaround, turn off the cookie middleware.",
+      "affected_summary": "guzzle / guzzle：< 6.5.6；>= 7.0.0, < 7.4.3",
+      "affected": [
+        {
+          "vendor": "guzzle",
+          "product": "guzzle",
+          "versions": [
+            {
+              "version": "< 6.5.6",
+              "status": "affected"
+            },
+            {
+              "version": ">= 7.0.0, < 7.4.3",
+              "status": "affected"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2022-29248",
+      "source_sha256": "1ca4611279c3297c0223e28d2de93ebebfa3cf7d312c36567e603791e19243f9",
+      "updated_at": "2025-04-23T18:21:56.089Z",
+      "published_at": "2022-05-25T00:00:00.000Z",
+      "references": [
+        {
+          "url": "https://github.com/guzzle/guzzle/security/advisories/GHSA-cwmx-hcrq-mhc3"
+        },
+        {
+          "url": "https://github.com/guzzle/guzzle/pull/3018"
+        },
+        {
+          "url": "https://github.com/guzzle/guzzle/commit/74a8602c6faec9ef74b7a9391ac82c5e65b1cdab"
+        },
+        {
+          "url": "https://www.drupal.org/sa-core-2022-010"
+        },
+        {
+          "name": "DSA-5246",
+          "tags": [
+            "vendor-advisory"
+          ],
+          "url": "https://www.debian.org/security/2022/dsa-5246"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2022-21661",
+      "title": "SQL injection in WordPress",
+      "description": "WordPress is a free and open-source content management system written in PHP and paired with a MariaDB database. Due to improper sanitization in WP_Query, there can be cases where SQL injection is possible through plugins or themes that use it in a certain way. This has been patched in WordPress version 5.8.3. Older affected versions are also fixed via security release, that go back till 3.7.37. We strongly recommend that you keep auto-updates enabled. There are no known workarounds for this vulnerability.",
+      "affected_summary": "WordPress / wordpress-develop：< 5.8.3",
+      "affected": [
+        {
+          "product": "wordpress-develop",
+          "vendor": "WordPress",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "< 5.8.3"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2022-21661",
+      "source_sha256": "5dda67c7b24739c59fdb66ea0172738fdc39d154160ce67dfade8eb870172226",
+      "updated_at": "2024-09-09T14:13:15.875Z",
+      "published_at": "2022-01-06T22:50:11.000Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/WordPress/wordpress-develop/security/advisories/GHSA-6676-cqfm-gw84"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/WordPress/wordpress-develop/commit/17efac8c8ec64555eff5cf51a3eff81e06317214"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://wordpress.org/news/2022/01/wordpress-5-8-3-security-release/"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://www.zerodayinitiative.com/advisories/ZDI-22-020/"
+        },
+        {
+          "name": "DSA-5039",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_DEBIAN"
+          ],
+          "url": "https://www.debian.org/security/2022/dsa-5039"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://www.exploit-db.com/exploits/50663"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/165540/WordPress-Core-5.8.2-SQL-Injection.html"
+        },
+        {
+          "name": "FEDORA-2022-8472dd59ff",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_FEDORA"
+          ],
+          "url": "https://lists.fedoraproject.org/archives/list/package-announce%40lists.fedoraproject.org/message/DM6XPH3JN6V4NF4WBOJTOXZIVE6VKKE3/"
+        },
+        {
+          "name": "FEDORA-2022-e37e1e6c7a",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_FEDORA"
+          ],
+          "url": "https://lists.fedoraproject.org/archives/list/package-announce%40lists.fedoraproject.org/message/CV4UNEC63UU5GEU47IIR4RMTZAHNEOJG/"
+        },
+        {
+          "name": "[debian-lts-announce] 20220123 [SECURITY] [DLA 2884-1] wordpress security update",
+          "tags": [
+            "mailing-list",
+            "x_refsource_MLIST"
+          ],
+          "url": "https://lists.debian.org/debian-lts-announce/2022/01/msg00019.html"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2021-21705",
+      "title": "Incorrect URL validation in FILTER_VALIDATE_URL",
+      "description": "In PHP versions 7.3.x below 7.3.29, 7.4.x below 7.4.21 and 8.0.x below 8.0.8, when using URL validation functionality via filter_var() function with FILTER_VALIDATE_URL parameter, an URL with invalid password field can be accepted as valid. This can lead to the code incorrectly parsing the URL and potentially leading to other security implications - like contacting a wrong server or making a wrong access decision.",
+      "affected_summary": "PHP Group / PHP：7.3.x 至 < 7.3.29；7.4.x 至 < 7.4.21；8.0.X 至 < 8.0.8",
+      "affected": [
+        {
+          "product": "PHP",
+          "vendor": "PHP Group",
+          "versions": [
+            {
+              "lessThan": "7.3.29",
+              "status": "affected",
+              "version": "7.3.x",
+              "versionType": "custom"
+            },
+            {
+              "lessThan": "7.4.21",
+              "status": "affected",
+              "version": "7.4.x",
+              "versionType": "custom"
+            },
+            {
+              "lessThan": "8.0.8",
+              "status": "affected",
+              "version": "8.0.X",
+              "versionType": "custom"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-21705",
+      "source_sha256": "0e4cd195f7680cb09430c287500ab74988efc2f5a67fc25a56abe2533126a5c1",
+      "updated_at": "2024-09-17T04:09:29.556Z",
+      "published_at": "2021-10-04T04:00:15.654Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://bugs.php.net/bug.php?id=81122"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://www.oracle.com/security-alerts/cpujan2022.html"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://security.netapp.com/advisory/ntap-20211029-0006/"
+        },
+        {
+          "name": "GLSA-202209-20",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_GENTOO"
+          ],
+          "url": "https://security.gentoo.org/glsa/202209-20"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2021-21702",
+      "title": "Null Dereference in SoapClient",
+      "description": "In PHP versions 7.3.x below 7.3.27, 7.4.x below 7.4.15 and 8.0.x below 8.0.2, when using SOAP extension to connect to a SOAP server, a malicious SOAP server could return malformed XML data as a response that would cause PHP to access a null pointer and thus cause a crash.",
+      "affected_summary": "PHP Group / PHP：7.3.x 至 < 7.3.27；7.4.x 至 < 7.4.15；8.0.X 至 < 8.0.2",
+      "affected": [
+        {
+          "product": "PHP",
+          "vendor": "PHP Group",
+          "versions": [
+            {
+              "lessThan": "7.3.27",
+              "status": "affected",
+              "version": "7.3.x",
+              "versionType": "custom"
+            },
+            {
+              "lessThan": "7.4.15",
+              "status": "affected",
+              "version": "7.4.x",
+              "versionType": "custom"
+            },
+            {
+              "lessThan": "8.0.2",
+              "status": "affected",
+              "version": "8.0.X",
+              "versionType": "custom"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-21702",
+      "source_sha256": "a11261946f63d42df72e9b5201ed37927f76972fdde6ab3edf9d8dc90fc7c116",
+      "updated_at": "2024-09-16T17:34:26.201Z",
+      "published_at": "2021-02-15T04:10:16.837Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://bugs.php.net/bug.php?id=80672"
+        },
+        {
+          "name": "DSA-4856",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_DEBIAN"
+          ],
+          "url": "https://www.debian.org/security/2021/dsa-4856"
+        },
+        {
+          "name": "GLSA-202105-23",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_GENTOO"
+          ],
+          "url": "https://security.gentoo.org/glsa/202105-23"
+        },
+        {
+          "name": "[debian-lts-announce] 20210715 [SECURITY] [DLA 2708-1] php7.0 security update",
+          "tags": [
+            "mailing-list",
+            "x_refsource_MLIST"
+          ],
+          "url": "https://lists.debian.org/debian-lts-announce/2021/07/msg00008.html"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://www.oracle.com/security-alerts/cpuoct2021.html"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://www.tenable.com/security/tns-2021-14"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://security.netapp.com/advisory/ntap-20210312-0005/"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2021-21263",
+      "title": "Query Binding Exploitation in Laravel",
+      "description": "Laravel is a web application framework. Versions of Laravel before 6.20.11, 7.30.2 and 8.22.1 contain a query binding exploitation. This same exploit applies to the illuminate/database package which is used by Laravel. If a request is crafted where a field that is normally a non-array value is an array, and that input is not validated or cast to its expected type before being passed to the query builder, an unexpected number of query bindings can be added to the query. In some situations, this will simply lead to no results being returned by the query builder; however, it is possible certain queries could be affected in a way that causes the query to return unexpected results.",
+      "affected_summary": "laravel / framework：>= 6.0.0, < 6.20.11；>= 7.0.0, < 7.30.2；>= 8.0.0, < 8.22.1",
+      "affected": [
+        {
+          "product": "framework",
+          "vendor": "laravel",
+          "versions": [
+            {
+              "status": "affected",
+              "version": ">= 6.0.0, < 6.20.11"
+            },
+            {
+              "status": "affected",
+              "version": ">= 7.0.0, < 7.30.2"
+            },
+            {
+              "status": "affected",
+              "version": ">= 8.0.0, < 8.22.1"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-21263",
+      "source_sha256": "87e8a9da09189e98d9cca5ddab09e4e53f91235179007169327e9594695f2a0a",
+      "updated_at": "2024-08-03T18:09:14.909Z",
+      "published_at": "2021-01-19T19:40:18.000Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/laravel/framework/security/advisories/GHSA-3p32-j457-pg5x"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/laravel/framework/pull/35865"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://blog.laravel.com/security-laravel-62011-7302-8221-released"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://packagist.org/packages/laravel/framework"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://packagist.org/packages/illuminate/database"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2021-3129",
+      "title": "Ignition before 2.5.2, as used in Laravel and other products, allows unauthenticated remote attackers to execute arbitrary code because of insecure usage of file_get_contents() and file_put_contents()",
+      "description": "Ignition before 2.5.2, as used in Laravel and other products, allows unauthenticated remote attackers to execute arbitrary code because of insecure usage of file_get_contents() and file_put_contents(). This is exploitable on sites using debug mode with Laravel before 8.4.2.",
+      "affected_summary": "：以官方描述中的版本和前提为准",
+      "affected": [
+        {
+          "product": "n/a",
+          "vendor": "n/a",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "n/a"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-3129",
+      "source_sha256": "fc5a48adaa37ea33335f68f0cd88089a145d157552ece8e9493eeab88f4cc684",
+      "updated_at": "2025-10-21T23:35:30.227Z",
+      "published_at": "2021-01-12T14:07:38.000Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://www.ambionics.io/blog/laravel-debug-rce"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/facade/ignition/pull/334"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/162094/Ignition-2.5.1-Remote-Code-Execution.html"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/165999/Ignition-Remote-Code-Execution.html"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2019-11043",
+      "title": "Underflow in PHP-FPM can lead to RCE",
+      "description": "In PHP versions 7.1.x below 7.1.33, 7.2.x below 7.2.24 and 7.3.x below 7.3.11 in certain configurations of FPM setup it is possible to cause FPM module to write past allocated buffers into the space reserved for FCGI protocol data, thus opening the possibility of remote code execution.",
+      "affected_summary": "PHP / PHP：7.1.x 至 < 7.1.33；7.2.x 至 < 7.2.24；7.3.x 至 < 7.3.11",
+      "affected": [
+        {
+          "product": "PHP",
+          "vendor": "PHP",
+          "versions": [
+            {
+              "lessThan": "7.1.33",
+              "status": "affected",
+              "version": "7.1.x",
+              "versionType": "custom"
+            },
+            {
+              "lessThan": "7.2.24",
+              "status": "affected",
+              "version": "7.2.x",
+              "versionType": "custom"
+            },
+            {
+              "lessThan": "7.3.11",
+              "status": "affected",
+              "version": "7.3.x",
+              "versionType": "custom"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2019-11043",
+      "source_sha256": "e32115c5b48bca1c90fab5a125d64f9067e728bb3ac6e13939ee0886d267e526",
+      "updated_at": "2025-10-21T23:45:28.408Z",
+      "published_at": "2019-10-28T14:19:04.252Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/neex/phuip-fpizdam"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://bugs.php.net/bug.php?id=78599"
+        },
+        {
+          "name": "USN-4166-1",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_UBUNTU"
+          ],
+          "url": "https://usn.ubuntu.com/4166-1/"
+        },
+        {
+          "name": "DSA-4552",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_DEBIAN"
+          ],
+          "url": "https://www.debian.org/security/2019/dsa-4552"
+        },
+        {
+          "name": "DSA-4553",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_DEBIAN"
+          ],
+          "url": "https://www.debian.org/security/2019/dsa-4553"
+        },
+        {
+          "name": "USN-4166-2",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_UBUNTU"
+          ],
+          "url": "https://usn.ubuntu.com/4166-2/"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://support.f5.com/csp/article/K75408500?utm_source=f5support&amp%3Butm_medium=RSS"
+        },
+        {
+          "name": "FEDORA-2019-4adc49a476",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_FEDORA"
+          ],
+          "url": "https://lists.fedoraproject.org/archives/list/package-announce%40lists.fedoraproject.org/message/T62LF4ZWVV7OMMIZFO6IFO5QLZKK7YRD/"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://security.netapp.com/advisory/ntap-20191031-0003/"
+        },
+        {
+          "name": "RHSA-2019:3286",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/errata/RHSA-2019:3286"
+        },
+        {
+          "name": "RHSA-2019:3287",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/errata/RHSA-2019:3287"
+        },
+        {
+          "name": "RHSA-2019:3299",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/errata/RHSA-2019:3299"
+        },
+        {
+          "name": "RHSA-2019:3300",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/errata/RHSA-2019:3300"
+        },
+        {
+          "name": "FEDORA-2019-187ae3128d",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_FEDORA"
+          ],
+          "url": "https://lists.fedoraproject.org/archives/list/package-announce%40lists.fedoraproject.org/message/3W23TP6X4H7LB645FYZLUPNIRD5W3EPU/"
+        },
+        {
+          "name": "FEDORA-2019-7bb07c3b02",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_FEDORA"
+          ],
+          "url": "https://lists.fedoraproject.org/archives/list/package-announce%40lists.fedoraproject.org/message/FSNBUSPKMLUHHOADROKNG5GDWDCRHT5M/"
+        },
+        {
+          "name": "openSUSE-SU-2019:2441",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_SUSE"
+          ],
+          "url": "http://lists.opensuse.org/opensuse-security-announce/2019-11/msg00011.html"
+        },
+        {
+          "name": "RHSA-2019:3724",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/errata/RHSA-2019:3724"
+        },
+        {
+          "name": "RHSA-2019:3735",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/errata/RHSA-2019:3735"
+        },
+        {
+          "name": "RHSA-2019:3736",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/errata/RHSA-2019:3736"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://www.synology.com/security/advisory/Synology_SA_19_36"
+        },
+        {
+          "name": "openSUSE-SU-2019:2457",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_SUSE"
+          ],
+          "url": "http://lists.opensuse.org/opensuse-security-announce/2019-11/msg00014.html"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://support.apple.com/kb/HT210919"
+        },
+        {
+          "name": "20200129 APPLE-SA-2020-1-28-2 macOS Catalina 10.15.3, Security Update 2020-001 Mojave, Security Update 2020-001 High Sierra",
+          "tags": [
+            "mailing-list",
+            "x_refsource_BUGTRAQ"
+          ],
+          "url": "https://seclists.org/bugtraq/2020/Jan/44"
+        },
+        {
+          "name": "20200131 APPLE-SA-2020-1-28-2 macOS Catalina 10.15.3, Security Update 2020-001 Mojave, Security Update 2020-001 High Sierra",
+          "tags": [
+            "mailing-list",
+            "x_refsource_FULLDISC"
+          ],
+          "url": "http://seclists.org/fulldisclosure/2020/Jan/40"
+        },
+        {
+          "name": "RHSA-2020:0322",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/errata/RHSA-2020:0322"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/156642/PHP-FPM-7.x-Remote-Code-Execution.html"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://www.tenable.com/security/tns-2021-14"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2019-8942",
+      "title": "WordPress before 4.9.9 and 5.x before 5.0.1 allows remote code execution because an _wp_attached_file Post Meta entry can be changed to an arbitrary string, such as one ending with a .jpg?file.php substring",
+      "description": "WordPress before 4.9.9 and 5.x before 5.0.1 allows remote code execution because an _wp_attached_file Post Meta entry can be changed to an arbitrary string, such as one ending with a .jpg?file.php substring. An attacker with author privileges can execute arbitrary code by uploading a crafted image containing PHP code in the Exif metadata. Exploitation can leverage CVE-2019-8943.",
+      "affected_summary": "：以官方描述中的版本和前提为准",
+      "affected": [
+        {
+          "product": "n/a",
+          "vendor": "n/a",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "n/a"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2019-8942",
+      "source_sha256": "31c775b9e3ab1a34603a672b1de106529424b42747190c49a6d5158e7b82aa66",
+      "updated_at": "2024-08-04T21:31:37.541Z",
+      "published_at": "2019-02-20T03:00:00.000Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://wpvulndb.com/vulnerabilities/9222"
+        },
+        {
+          "name": "46511",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/46511/"
+        },
+        {
+          "name": "107088",
+          "tags": [
+            "vdb-entry",
+            "x_refsource_BID"
+          ],
+          "url": "http://www.securityfocus.com/bid/107088"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://blog.ripstech.com/2019/wordpress-image-remote-code-execution/"
+        },
+        {
+          "name": "DSA-4401",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_DEBIAN"
+          ],
+          "url": "https://www.debian.org/security/2019/dsa-4401"
+        },
+        {
+          "name": "[debian-lts-announce] 20190331 [SECURITY] [DLA 1742-1] wordpress security update",
+          "tags": [
+            "mailing-list",
+            "x_refsource_MLIST"
+          ],
+          "url": "https://lists.debian.org/debian-lts-announce/2019/03/msg00044.html"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/152396/WordPress-5.0.0-crop-image-Shell-Upload.html"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://www.rapid7.com/db/modules/exploit/multi/http/wp_crop_rce"
+        },
+        {
+          "name": "46662",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/46662/"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2018-15133",
+      "title": "In Laravel Framework through 5.5.40 and 5.6.x through 5.6.29, remote code execution might occur as a result of an unserialize call on a potentially untrusted X-XSRF-TOKEN value",
+      "description": "In Laravel Framework through 5.5.40 and 5.6.x through 5.6.29, remote code execution might occur as a result of an unserialize call on a potentially untrusted X-XSRF-TOKEN value. This involves the decrypt method in Illuminate/Encryption/Encrypter.php and PendingBroadcast in gadgetchains/Laravel/RCE/3/chain.php in phpggc. The attacker must know the application key, which normally would never occur, but could happen if the attacker previously had privileged access or successfully accomplished a previous attack.",
+      "affected_summary": "：以官方描述中的版本和前提为准",
+      "affected": [
+        {
+          "product": "n/a",
+          "vendor": "n/a",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "n/a"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2018-15133",
+      "source_sha256": "8139d768b1108ee661d370b3c689cc7937ed9b407836a36b4726970dad5bf913",
+      "updated_at": "2025-10-21T23:45:49.105Z",
+      "published_at": "2018-08-09T19:00:00.000Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://laravel.com/docs/5.6/upgrade#upgrade-5.6.30"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/153641/PHP-Laravel-Framework-Token-Unserialize-Remote-Command-Execution.html"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2017-9841",
+      "title": "Util/PHP/eval-stdin.php in PHPUnit before 4.8.28 and 5.x before 5.6.3 allows remote attackers to execute arbitrary PHP code via HTTP POST data beginning with a \"<?php \" substring, as demonstrated by an attack on a site with an exposed /vendor folder, i.e., external access to the /vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php URI.",
+      "description": "Util/PHP/eval-stdin.php in PHPUnit before 4.8.28 and 5.x before 5.6.3 allows remote attackers to execute arbitrary PHP code via HTTP POST data beginning with a \"<?php \" substring, as demonstrated by an attack on a site with an exposed /vendor folder, i.e., external access to the /vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php URI.",
+      "affected_summary": "：以官方描述中的版本和前提为准",
+      "affected": [
+        {
+          "product": "n/a",
+          "vendor": "n/a",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "n/a"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2017-9841",
+      "source_sha256": "77f7339cd34629fe76b2f0667d7f32c23f3f10a305a802565e4377b41de0e7ed",
+      "updated_at": "2025-10-21T23:55:39.301Z",
+      "published_at": "2017-06-27T17:00:00.000Z",
+      "references": [
+        {
+          "name": "101798",
+          "tags": [
+            "vdb-entry",
+            "x_refsource_BID"
+          ],
+          "url": "http://www.securityfocus.com/bid/101798"
+        },
+        {
+          "name": "1039812",
+          "tags": [
+            "vdb-entry",
+            "x_refsource_SECTRACK"
+          ],
+          "url": "http://www.securitytracker.com/id/1039812"
+        },
+        {
+          "name": "GLSA-201711-15",
+          "tags": [
+            "vendor-advisory",
+            "x_refsource_GENTOO"
+          ],
+          "url": "https://security.gentoo.org/glsa/201711-15"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://www.oracle.com/security-alerts/cpuoct2021.html"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/sebastianbergmann/phpunit/commit/284a69fb88a2d0845d23f42974a583d8f59bf5a5"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://github.com/sebastianbergmann/phpunit/pull/1956"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://web.archive.org/web/20170701212357/http://phpunit.vulnbusters.com/"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2017-1001000",
+      "title": "The register_routes function in wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php in the REST API in WordPress 4.7.x before 4.7.2 does not require an integer identifier, which allows remote attackers to modify arbitrary pages via a request for wp-json/wp/v2/posts followed by a numeric value and a non-numeric value, as demonstrated by the wp-json/wp/v2/posts/123?id=123helloworld URI.",
+      "description": "The register_routes function in wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php in the REST API in WordPress 4.7.x before 4.7.2 does not require an integer identifier, which allows remote attackers to modify arbitrary pages via a request for wp-json/wp/v2/posts followed by a numeric value and a non-numeric value, as demonstrated by the wp-json/wp/v2/posts/123?id=123helloworld URI.",
+      "affected_summary": "：以官方描述中的版本和前提为准",
+      "affected": [
+        {
+          "product": "n/a",
+          "vendor": "n/a",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "n/a"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2017-1001000",
+      "source_sha256": "55d4e870423993ee558e62f7342702805f0d65deb822de480eeb578ad87251cd",
+      "updated_at": "2024-08-05T22:00:41.671Z",
+      "published_at": "2017-04-03T01:00:00.000Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://codex.wordpress.org/Version_4.7.2"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://make.wordpress.org/core/2017/02/01/disclosure-of-additional-security-fix-in-wordpress-4-7-2/"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://blogs.akamai.com/2017/02/wordpress-web-api-vulnerability.html"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://gist.github.com/leonjza/2244eb15510a0687ed93160c623762ab"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://blog.sucuri.net/2017/02/content-injection-vulnerability-wordpress-rest-api.html"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/WordPress/WordPress/commit/e357195ce303017d517aff944644a7a1232926f7"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://wordpress.org/news/2017/01/wordpress-4-7-2-security-release/"
+        },
+        {
+          "name": "[oss-security] 20170210 Re: Asking for a CVE id for the WordPress Privilege Escalation vulnerability (4.7/4.7.1)",
+          "tags": [
+            "mailing-list",
+            "x_refsource_MLIST"
+          ],
+          "url": "http://www.openwall.com/lists/oss-security/2017/02/10/16"
+        },
+        {
+          "name": "1037731",
+          "tags": [
+            "vdb-entry",
+            "x_refsource_SECTRACK"
+          ],
+          "url": "http://www.securitytracker.com/id/1037731"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2016-10045",
+      "title": "The isMail transport in PHPMailer before 5.2.20 might allow remote attackers to pass extra parameters to the mail command and consequently execute arbitrary code by leveraging improper interaction between the escapeshellarg function and internal escaping performed in the mail function in PHP",
+      "description": "The isMail transport in PHPMailer before 5.2.20 might allow remote attackers to pass extra parameters to the mail command and consequently execute arbitrary code by leveraging improper interaction between the escapeshellarg function and internal escaping performed in the mail function in PHP. NOTE: this vulnerability exists because of an incorrect fix for CVE-2016-10033.",
+      "affected_summary": "：以官方描述中的版本和前提为准",
+      "affected": [
+        {
+          "product": "n/a",
+          "vendor": "n/a",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "n/a"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2016-10045",
+      "source_sha256": "d9a59e727492840d861b39fe55d860e8ee5779e0e8e579c8686d0f7ca66ed80f",
+      "updated_at": "2024-08-06T03:07:32.139Z",
+      "published_at": "2016-12-30T19:00:00.000Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/140286/PHPMailer-Remote-Code-Execution.html"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/140350/PHPMailer-Sendmail-Argument-Injection.html"
+        },
+        {
+          "name": "42221",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/42221/"
+        },
+        {
+          "name": "40969",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/40969/"
+        },
+        {
+          "name": "20161228 PHPMailer < 5.2.20 Remote Code Execution PoC 0day Exploit (CVE-2016-10045) (Bypass of the CVE-2016-1033 patch)",
+          "tags": [
+            "mailing-list",
+            "x_refsource_BUGTRAQ"
+          ],
+          "url": "http://www.securityfocus.com/archive/1/539967/100/0/threaded"
+        },
+        {
+          "name": "[oss-security] 20161228 Re: PHPMailer < 5.2.18 Remote Code Execution [updated advisory] [CVE-2016-10033]",
+          "tags": [
+            "mailing-list",
+            "x_refsource_MLIST"
+          ],
+          "url": "http://openwall.com/lists/oss-security/2016/12/28/1"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/PHPMailer/PHPMailer/wiki/About-the-CVE-2016-10033-and-CVE-2016-10045-vulnerabilities"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/PHPMailer/PHPMailer/releases/tag/v5.2.20"
+        },
+        {
+          "name": "40986",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/40986/"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://www.rapid7.com/db/modules/exploit/multi/http/phpmailer_arg_injection"
+        },
+        {
+          "name": "95130",
+          "tags": [
+            "vdb-entry",
+            "x_refsource_BID"
+          ],
+          "url": "http://www.securityfocus.com/bid/95130"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://legalhackers.com/advisories/PHPMailer-Exploit-Remote-Code-Exec-CVE-2016-10045-Vuln-Patch-Bypass.html"
+        },
+        {
+          "name": "20161227 PHPMailer < 5.2.20 Remote Code Execution PoC 0day Exploit (CVE-2016-10045) (Bypass of the CVE-2016-1033 patch)",
+          "tags": [
+            "mailing-list",
+            "x_refsource_FULLDISC"
+          ],
+          "url": "http://seclists.org/fulldisclosure/2016/Dec/81"
+        },
+        {
+          "name": "1037533",
+          "tags": [
+            "vdb-entry",
+            "x_refsource_SECTRACK"
+          ],
+          "url": "http://www.securitytracker.com/id/1037533"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://developer.joomla.org/security-centre/668-20161205-phpmailer-security-advisory.html"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2016-10033",
+      "title": "The mailSend function in the isMail transport in PHPMailer before 5.2.18 might allow remote attackers to pass extra parameters to the mail command and consequently execute arbitrary code via a \\\" (backslash double quote) in a crafted Sender property.",
+      "description": "The mailSend function in the isMail transport in PHPMailer before 5.2.18 might allow remote attackers to pass extra parameters to the mail command and consequently execute arbitrary code via a \\\" (backslash double quote) in a crafted Sender property.",
+      "affected_summary": "：以官方描述中的版本和前提为准",
+      "affected": [
+        {
+          "product": "n/a",
+          "vendor": "n/a",
+          "versions": [
+            {
+              "status": "affected",
+              "version": "n/a"
+            }
+          ]
+        }
+      ],
+      "source_kind": "CVE 官方记录（CNA）",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2016-10033",
+      "source_sha256": "f70ba17e955975440c2a8b59105817076cb23e4bb81cf6eec8f3a6fd3f831eb5",
+      "updated_at": "2025-10-21T23:55:47.202Z",
+      "published_at": "2016-12-30T19:00:00.000Z",
+      "references": [
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/140350/PHPMailer-Sendmail-Argument-Injection.html"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://www.drupal.org/psa-2016-004"
+        },
+        {
+          "name": "42221",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/42221/"
+        },
+        {
+          "name": "40969",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/40969/"
+        },
+        {
+          "name": "41962",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/41962/"
+        },
+        {
+          "name": "40968",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/40968/"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "https://legalhackers.com/advisories/PHPMailer-Exploit-Remote-Code-Exec-CVE-2016-10033-Vuln.html"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/PHPMailer/PHPMailer/releases/tag/v5.2.18"
+        },
+        {
+          "name": "20161227 PHPMailer < 5.2.18 Remote Code Execution [updated advisory] [CVE-2016-10033]",
+          "tags": [
+            "mailing-list",
+            "x_refsource_BUGTRAQ"
+          ],
+          "url": "http://www.securityfocus.com/archive/1/539963/100/0/threaded"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://github.com/PHPMailer/PHPMailer/wiki/About-the-CVE-2016-10033-and-CVE-2016-10045-vulnerabilities"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://packetstormsecurity.com/files/140291/PHPMailer-Remote-Code-Execution.html"
+        },
+        {
+          "name": "40974",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/40974/"
+        },
+        {
+          "name": "40986",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/40986/"
+        },
+        {
+          "name": "40970",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/40970/"
+        },
+        {
+          "tags": [
+            "x_refsource_MISC"
+          ],
+          "url": "http://www.rapid7.com/db/modules/exploit/multi/http/phpmailer_arg_injection"
+        },
+        {
+          "name": "41996",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/41996/"
+        },
+        {
+          "name": "20161227 PHPMailer < 5.2.18 Remote Code Execution [CVE-2016-10033]",
+          "tags": [
+            "mailing-list",
+            "x_refsource_FULLDISC"
+          ],
+          "url": "http://seclists.org/fulldisclosure/2016/Dec/78"
+        },
+        {
+          "name": "95108",
+          "tags": [
+            "vdb-entry",
+            "x_refsource_BID"
+          ],
+          "url": "http://www.securityfocus.com/bid/95108"
+        },
+        {
+          "name": "1037533",
+          "tags": [
+            "vdb-entry",
+            "x_refsource_SECTRACK"
+          ],
+          "url": "http://www.securitytracker.com/id/1037533"
+        },
+        {
+          "tags": [
+            "x_refsource_CONFIRM"
+          ],
+          "url": "https://developer.joomla.org/security-centre/668-20161205-phpmailer-security-advisory.html"
+        },
+        {
+          "name": "42024",
+          "tags": [
+            "exploit",
+            "x_refsource_EXPLOIT-DB"
+          ],
+          "url": "https://www.exploit-db.com/exploits/42024/"
+        }
+      ]
+    }
+  ]
+}

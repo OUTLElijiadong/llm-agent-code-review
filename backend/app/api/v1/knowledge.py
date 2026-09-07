@@ -92,7 +92,7 @@ def reembed_all(db: Session = Depends(get_db),
     """按当前嵌入配置重建全部存量切片向量(个人 KB + Agent 知识库, 唯一超管)。"""
     from app.services import embedding_service
 
-    stats = embedding_service.reembed_all_stores(db)
+    stats = embedding_service.reembed_all_stores(db, user_id=admin.id)
     audit_service.log(
         db, admin, "embedding_reembed_all",
         target_type="system_config", target_id="embedding",

@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from app.core.config import settings
-from app.core.exceptions import ForbiddenError
+from app.core.exceptions import ForbiddenError, ServiceUnavailableError
 from app.models.agent_governance import AgentAlert, AgentJob, AgentJobRun, AgentProfile
 from app.models.ai_call_log import AiCallLog
 from app.models.rbac import Role, UserRole
@@ -824,6 +824,8 @@ def test_unhealthy_ops_budget_blocks_model_diagnosis(db: Any, monkeypatch: Any) 
 
 
 def test_only_unique_super_admin_can_control_or_run_ops_health_job(db: Any, monkeypatch: Any) -> None:
+    # 此处验证授权契约，不启动后台调度线程。
+    monkeypatch.setattr(settings, "agent_governance_scheduler_enabled", False)
     job = AgentJob(
         job_code="ops_health_check",
         job_type="ops_health_check",
@@ -853,6 +855,7 @@ def test_only_unique_super_admin_can_control_or_run_ops_health_job(db: Any, monk
 
 def test_only_unique_super_admin_can_control_or_run_crawl_job(db: Any, monkeypatch: Any) -> None:
     """外部知识抓取与服务器巡检一样属于受限调度动作。"""
+    monkeypatch.setattr(settings, "agent_governance_scheduler_enabled", False)
     job = AgentJob(
         job_code="daily_agent_knowledge_crawl",
         job_type="crawl",
@@ -878,3 +881,22 @@ def test_only_unique_super_admin_can_control_or_run_crawl_job(db: Any, monkeypat
     monkeypatch.setattr(scheduler_service, "_execute_job", lambda _db, _job: {"doc_count": 1})
     assert scheduler_service.run_job(db, job.id, actor=super_user).status == "success"
     assert scheduler_service.run_job(db, job.id, system_scheduled=True).status == "success"
+
+
+def test_unavailable_scheduler_rejects_and_rolls_back_configuration(db: Any, monkeypatch: Any) -> None:
+    """生产启用调度但运行时缺失时，配置不得被悄悄保存。"""
+    from app.services import agent_scheduler_runtime
+
+    monkeypatch.setattr(settings, "agent_governance_scheduler_enabled", True)
+    monkeypatch.setattr(agent_scheduler_runtime, "_scheduler", None)
+    job = AgentJob(job_code="qa_scheduler_gate", job_type="skill_evolution",
+                   agent_code="security_sentinel", schedule="interval@5m", status="enabled")
+    db.add(job)
+    db.commit()
+    job_id = job.id
+
+    with pytest.raises(ServiceUnavailableError, match="任务配置未保存"):
+        scheduler_service.update_job(db, job_id, {"status": "disabled"})
+
+    db.expire_all()
+    assert db.get(AgentJob, job_id).status == "enabled"

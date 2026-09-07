@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="19" failures="4" errors="0" time="0.16561725">
+    <testsuite name="src/views/report/ReportDetail.test.ts" timestamp="2026-09-07T08:18:38.358Z" hostname="lijiadongdeMacBook-Air-7.local" tests="19" failures="4" errors="0" skipped="0" time="0.16561725">
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 沙箱4个未分级报告条目不展示四级全零和虚构修复进度" time="0.047204084">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 领域报告只显示真实 JSON 出口并隐藏非等价导出和预览" time="0.009752042">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 导出请求期间重复调用只发出一次，并且错误不会保存文件" time="0.010331583">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 导出错误展示后端message和next_action并提供重试操作" time="0.010117167">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 兼容后端 task.name 字段并展示真实任务名" time="0.004865083">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 顶部 Word 和 PDF 按钮统一调用新导出接口并传递当前模板" time="0.0094975">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 风险文案和颜色按最终分数计算，不受动画中间值影响" time="0.00501675">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; CVSS 缺失时显示未评分" time="0.00486425">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 只有 score 没有有效向量时不计入分布并显示未评分" time="0.008253709">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 在网络等待前同步预开窗口，导航开始后才提示成功" time="0.005594083">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 弹窗被拦截时显示带 sandbox 的页内预览，不误报新窗口成功并在关闭后恢复焦点" time="0.0076325">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 无法切断 opener 时关闭预开窗口并回退到页内预览" time="0.005505">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 预览接口失败时关闭预开窗口并且只显示错误" time="0.004552958">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 详细修复方案 &gt; 点击后平滑滚动到真实详情区域并转移键盘焦点" time="0.006964792">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 详细修复方案 &gt; 用户开启减少动效时改为即时滚动" time="0.004758083">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 只读账号保留打印和预览，隐藏下载入口且直接调用也不发送导出请求" time="0.012956708">
+            <system-err>
+Error: Not implemented: navigation (except hash changes)
+    at module.exports (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/browser/not-implemented.js:9:17)
+    at navigateFetch (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/window/navigation.js:77:3)
+    at exports.navigate (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/window/navigation.js:55:3)
+    at Timeout._onTimeout (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/nodes/HTMLHyperlinkElementUtils-impl.js:80:7)
+    at listOnTimeout (node:internal/timers:605:17)
+    at processTimers (node:internal/timers:541:7) undefined
+
+            </system-err>
+            <failure message="expected &apos;返回列表 审查报告打印 导出 Word 导出 PDF 模板类型生成 JSO…&apos; not to contain &apos;生成 JSON&apos;" type="AssertionError">
+AssertionError: expected &apos;返回列表 审查报告打印 导出 Word 导出 PDF 模板类型生成 JSO…&apos; not to contain &apos;生成 JSON&apos;
+
+Expected: &quot;生成 JSON&quot;
+Received: &quot;返回列表 审查报告打印 导出 Word 导出 PDF 模板类型生成 JSON生成 HTML生成 PDF生成 Word预览 HTML 导出报告 JSONHTMLPDFWordPRISM REPORT · #42-PROJECT测试项目安全审查 · 安全审查typescript1 文件—0 规则0/ 100极高风险严重度分布危急1高0中0低0修复进度0%已修复 0 / 1代码规模总文件1问题1耗时—规则08 维度评分雷达代码规范 / 命名 / 注释 / 维护 / 性能 / 异常 / Bug / 安全审查文件 (0)文件名语言问题严重评分CVSS 评分分布 基于 CVSS 3.x 基础评分的四档分布(共 1 个有评分的问题)危急 (9.0-10.0)1高 (7.0-8.9)0中 (4.0-6.9)0低 (0-3.9)0合规映射概览 ISO 27001 / GDPR / PCI DSS / HIPAA 四大标准命中条目数Top 10 高危漏洞 按 CVSS 评分降序排列,点击行查看详细修复方案#漏洞标题CVSSCWE严重度操作1命令注入src/auth.ts:189.8security危急查看修复方案详细修复方案 命令注入  · CVSS 9.8  · AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H移除 shell=True建议使用 argv 列表 PRISM v1.0 · 基于大模型智能体的代码质量审查管理系统 · 生成于 2026-09-07 16:18&quot;
+
+ ❯ src/views/report/ReportDetail.test.ts:429:32
+            </failure>
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; JSON 权限只开放 JSON 生成与导出" time="0.003954916">
+            <failure message="expected &apos;返回列表 审查报告打印 导出 Word 导出 PDF 模板类型生成 JSO…&apos; not to contain &apos;生成 HTML&apos;" type="AssertionError">
+AssertionError: expected &apos;返回列表 审查报告打印 导出 Word 导出 PDF 模板类型生成 JSO…&apos; not to contain &apos;生成 HTML&apos;
+
+Expected: &quot;生成 HTML&quot;
+Received: &quot;返回列表 审查报告打印 导出 Word 导出 PDF 模板类型生成 JSON生成 HTML生成 PDF生成 Word预览 HTML 导出报告 JSONHTMLPDFWordPRISM REPORT · #42-PROJECT测试项目安全审查 · 安全审查typescript1 文件—0 规则0/ 100极高风险严重度分布危急1高0中0低0修复进度0%已修复 0 / 1代码规模总文件1问题1耗时—规则08 维度评分雷达代码规范 / 命名 / 注释 / 维护 / 性能 / 异常 / Bug / 安全审查文件 (0)文件名语言问题严重评分CVSS 评分分布 基于 CVSS 3.x 基础评分的四档分布(共 1 个有评分的问题)危急 (9.0-10.0)1高 (7.0-8.9)0中 (4.0-6.9)0低 (0-3.9)0合规映射概览 ISO 27001 / GDPR / PCI DSS / HIPAA 四大标准命中条目数Top 10 高危漏洞 按 CVSS 评分降序排列,点击行查看详细修复方案#漏洞标题CVSSCWE严重度操作1命令注入src/auth.ts:189.8security危急查看修复方案详细修复方案 命令注入  · CVSS 9.8  · AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H移除 shell=True建议使用 argv 列表 PRISM v1.0 · 基于大模型智能体的代码质量审查管理系统 · 生成于 2026-09-07 16:18&quot;
+
+ ❯ src/views/report/ReportDetail.test.ts:452:32
+            </failure>
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 自动生成等待报告来源就绪，领域报告不会发送 HTML 请求" time="0.001700334">
+            <failure message="expected &quot;spy&quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      42,
+      &quot;html&quot;,
+      &quot;detailed&quot;,
+    ]
+
+
+Number of calls: 1
+" type="AssertionError">
+AssertionError: expected &quot;spy&quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      42,
+      &quot;html&quot;,
+      &quot;detailed&quot;,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/report/ReportDetail.test.ts:466:42
+            </failure>
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 报告读取失败不自动生成，也不开放任何报告操作" time="0.001527209">
+            <system-err>
+Error: Not implemented: navigation (except hash changes)
+    at module.exports (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/browser/not-implemented.js:9:17)
+    at navigateFetch (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/window/navigation.js:77:3)
+    at exports.navigate (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/window/navigation.js:55:3)
+    at Timeout._onTimeout (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/nodes/HTMLHyperlinkElementUtils-impl.js:80:7)
+    at listOnTimeout (node:internal/timers:605:17)
+    at processTimers (node:internal/timers:541:7) undefined
+
+            </system-err>
+            <failure message="expected &quot;spy&quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      42,
+      &quot;html&quot;,
+      &quot;detailed&quot;,
+    ]
+
+
+Number of calls: 1
+" type="AssertionError">
+AssertionError: expected &quot;spy&quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      42,
+      &quot;html&quot;,
+      &quot;detailed&quot;,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/report/ReportDetail.test.ts:479:42
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

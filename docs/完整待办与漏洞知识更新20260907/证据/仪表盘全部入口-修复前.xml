@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="10" failures="2" errors="0" time="0.063241875">
+    <testsuite name="src/views/permissionVisibility.regression.test.ts" timestamp="2026-09-07T07:05:01.962Z" hostname="lijiadongdeMacBook-Air-7.local" tests="10" failures="2" errors="0" skipped="0" time="0.063241875">
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只读审查账号看不到启动、停止或删除审查入口" time="0.01957375">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只读问题账号看不到状态修改和批量处理" time="0.004181125">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只有 file:view 时编辑器为只读且不显示保存" time="0.0014705">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只有 security:view 时不显示扫描操作" time="0.004758916">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 报告导出格式按各自权限点二次拦截" time="0.002089084">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 报告删除要求 review:cancel，权限恢复后才允许执行" time="0.005036625">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘不向缺少 review:start 的账号显示新建审查" time="0.013819208">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘缺少 review:view 时不显示或执行全部审查跳转（权限：%j）" time="0.002264542">
+            <failure message="Cannot read properties of undefined (reading &apos;forEach&apos;)" type="TypeError">
+TypeError: Cannot read properties of undefined (reading &apos;forEach&apos;)
+ ❯ src/views/permissionVisibility.regression.test.ts:255:11
+            </failure>
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘缺少 review:view 时不显示或执行全部审查跳转（权限：&quot;review:start&quot;）" time="0.000217541">
+            <failure message="codes.forEach is not a function" type="TypeError">
+TypeError: codes.forEach is not a function
+ ❯ src/views/permissionVisibility.regression.test.ts:255:11
+            </failure>
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘仅有 review:view 的普通账号点击全部可进入审查列表" time="0.009420459">
+        </testcase>
+    </testsuite>
+</testsuites>

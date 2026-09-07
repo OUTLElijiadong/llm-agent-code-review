@@ -165,6 +165,8 @@ class SecurityChecklistItem(BaseModel):
     owasp: str = ""
     cwe: str = ""
     description: str = ""
+    cwe_refs: List[str] = Field(default_factory=list)
+    source_url: str = ""
 
 
 class SecurityChecklistOut(BaseModel):
@@ -173,6 +175,7 @@ class SecurityChecklistOut(BaseModel):
     owasp_top10: List[SecurityChecklistItem] = Field(default_factory=list)
     secret_patterns: List[SecurityChecklistItem] = Field(default_factory=list)
     static_rules: List[SecurityChecklistItem] = Field(default_factory=list)
+    catalog_metadata: dict = Field(default_factory=dict)
 
 
 # ---- Dashboard 安全态势 (v2.1.1) ----

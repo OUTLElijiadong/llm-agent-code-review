@@ -133,7 +133,7 @@ def test_save_and_test_connection_reject_private_dns_alias(db, admin_user, monke
 
     with pytest.raises(ValidationError, match="内网或保留地址"):
         api_config_service.save_config(db, admin_user.id, payload)
-    tested = api_config_service.test_connection(ApiConfigTestIn(**payload.model_dump()))
+    tested = api_config_service.test_connection(ApiConfigTestIn(**payload.model_dump()), db=db, user_id=admin_user.id)
     assert tested.success is False
     assert "内网或保留地址" in tested.message
     assert posted is False

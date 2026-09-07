@@ -39,11 +39,11 @@ def test_persisted_alias_selects_published_agent(db, admin_user, monkeypatch) ->
     db.commit()
     monkeypatch.setattr(published_agent_tools, "_require_invoke_permission", lambda *_args: None)
     monkeypatch.setattr(published_agent_tools.agent_studio_service, "list_catalog", lambda _db: catalog)
-    monkeypatch.setattr(
-        capability_catalog_service.embedding_service,
-        "embed_texts",
-        lambda _db, values: ([[0.0] * 8 for _ in values], "test"),
-    )
+    def embed(_db, values, *, user_id):
+        assert user_id == admin_user.id
+        return ([[0.0] * 8 for _ in values], "test")
+
+    monkeypatch.setattr(capability_catalog_service.embedding_service, "embed_texts", embed)
 
     result = published_agent_tools.search_published_agents(
         db,

@@ -107,9 +107,9 @@ class AgentRuntimeSummaryOut(BaseModel):
 
 class AgentSituationOut(BaseModel):
     """v2.0 态势感知面板数据"""
-    online: int = Field(..., description="当前在岗 Agent 数")
-    working: int = Field(0, description="工作中数量(M2 阶段接入)")
-    idle: int = Field(0, description="空闲数量")
+    online: int = Field(..., description="与当前办公室列表一致的可见 Agent 数，不代表在线进程")
+    working: int = Field(0, description="当前可见集合中近90秒事件处于执行态的数量")
+    idle: int = Field(0, description="可见集合中非执行态数量，不作为存活判定")
     today_calls: int = Field(0, description="今日累计调用数")
     spectrum: list[dict] = Field(default_factory=list, description="近 N 分钟调用波形")
     hotspots: list[dict] = Field(default_factory=list, description="近期热点 Agent")

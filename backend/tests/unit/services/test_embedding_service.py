@@ -109,11 +109,12 @@ def test_reembed_all_stores_rebuilds_both_domains(db, monkeypatch):
                                 content="旧内容乙", embedding="[]", embed_model="fallback:hash"))
     db.commit()
 
-    def fake_embed_texts(session, texts):
+    def fake_embed_texts(session, texts, *, user_id):
+        assert session is db and user_id == 7
         return ([[0.5, 0.5] for _ in texts], "api:test-model")
 
     monkeypatch.setattr(embedding_service, "embed_texts", fake_embed_texts)
-    stats = embedding_service.reembed_all_stores(db, batch_size=2)
+    stats = embedding_service.reembed_all_stores(db, batch_size=2, user_id=7)
     assert stats == {"kb_chunks": 1, "agent_chunks": 1, "failed_batches": 0}
     kb = db.query(KnowledgeChunk).one()
     assert json.loads(kb.embedding) == [0.5, 0.5]

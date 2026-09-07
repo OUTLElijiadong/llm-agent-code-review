@@ -5,9 +5,10 @@ from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
+from app.models.usage_attribution import UsageAttributionMixin
 
 
-class AgentResponseRun(Base, IdMixin, TimestampMixin):
+class AgentResponseRun(Base, UsageAttributionMixin, IdMixin, TimestampMixin):
     """按用户和会话隔离的完整 Responses 工具循环状态。"""
 
     __tablename__ = "agent_response_run"

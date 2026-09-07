@@ -1,0 +1,18 @@
+{
+  "status": "passed_static_review",
+  "executed": false,
+  "credentials_read": false,
+  "expected_requests": 23,
+  "login_posts": 4,
+  "get_requests": 19,
+  "account_ids": [
+    103,
+    104,
+    105,
+    106
+  ],
+  "source_sha256": {
+    "docs/完整待办与漏洞知识更新20260907/证据/verify_post_release_readonly.py": "8d81839adc883cce93fec0675ea54c7f109653d3c0c79479e4f5765a9b067ed6",
+    "backend/scripts/verify_permission_acceptance_https.py": "f9238c4dd2b966f653e94dfd44b914134e6aaeb29dbaaceda78001aaac086cc2"
+  }
+}

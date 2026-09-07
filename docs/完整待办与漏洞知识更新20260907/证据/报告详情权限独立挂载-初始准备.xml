@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="20" failures="1" errors="0" time="0.25154925">
+    <testsuite name="src/views/report/ReportDetail.permissionMounted.test.ts" timestamp="2026-09-07T08:23:20.456Z" hostname="lijiadongdeMacBook-Air-7.local" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/views/report/ReportDetail.permissionMounted.test.ts" name="src/views/report/ReportDetail.permissionMounted.test.ts" time="0">
+            <failure message="[vitest] No &quot;createRouter&quot; export is defined on the &quot;vue-router&quot; mock. Did you forget to return it from &quot;vi.mock&quot;?
+If you need to partially mock a module, you can use &quot;importOriginal&quot; helper inside:
+" type="Error">
+Error: [vitest] No &quot;createRouter&quot; export is defined on the &quot;vue-router&quot; mock. Did you forget to return it from &quot;vi.mock&quot;?
+If you need to partially mock a module, you can use &quot;importOriginal&quot; helper inside:
+
+vi.mock(import(&quot;vue-router&quot;), async (importOriginal) =&gt; {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ src/router/index.ts:391:16
+ ❯ src/api/http.ts:3:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/views/report/ReportDetail.test.ts" timestamp="2026-09-07T08:23:20.459Z" hostname="lijiadongdeMacBook-Air-7.local" tests="19" failures="0" errors="0" skipped="0" time="0.25154925">
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 沙箱4个未分级报告条目不展示四级全零和虚构修复进度" time="0.073192125">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 领域报告只显示真实 JSON 出口并隐藏非等价导出和预览" time="0.01362475">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 导出请求期间重复调用只发出一次，并且错误不会保存文件" time="0.016815041">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 导出错误展示后端message和next_action并提供重试操作" time="0.018228792">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 兼容后端 task.name 字段并展示真实任务名" time="0.008307125">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 顶部 Word 和 PDF 按钮统一调用新导出接口并传递当前模板" time="0.014682708">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 风险文案和颜色按最终分数计算，不受动画中间值影响" time="0.01012325">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; CVSS 缺失时显示未评分" time="0.007856541">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 只有 score 没有有效向量时不计入分布并显示未评分" time="0.011034291">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 在网络等待前同步预开窗口，导航开始后才提示成功" time="0.009149375">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 弹窗被拦截时显示带 sandbox 的页内预览，不误报新窗口成功并在关闭后恢复焦点" time="0.011910334">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 无法切断 opener 时关闭预开窗口并回退到页内预览" time="0.009716583">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 预览接口失败时关闭预开窗口并且只显示错误" time="0.007861167">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 详细修复方案 &gt; 点击后平滑滚动到真实详情区域并转移键盘焦点" time="0.010863583">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 详细修复方案 &gt; 用户开启减少动效时改为即时滚动" time="0.008000375">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 只读账号保留打印和预览，隐藏下载入口且直接调用也不发送导出请求" time="0.007925542">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; JSON 权限只开放 JSON 生成与导出" time="0.004941083">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 自动生成等待报告来源就绪，领域报告不会发送 HTML 请求" time="0.004784792">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 报告读取失败不自动生成，也不开放任何报告操作" time="0.001381875">
+        </testcase>
+    </testsuite>
+</testsuites>

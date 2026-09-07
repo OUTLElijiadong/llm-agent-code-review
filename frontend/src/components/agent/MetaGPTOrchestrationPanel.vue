@@ -265,7 +265,7 @@ watch(mode, () => {
             <el-descriptions-item label="角色数">
               {{ preview.roles.length }}
             </el-descriptions-item>
-            <el-descriptions-item label="已注册 Agent">
+            <el-descriptions-item label="内置可适配 Agent">
               {{ preview.registered_agent_count }}
             </el-descriptions-item>
             <el-descriptions-item label="默认参与">
@@ -364,9 +364,9 @@ watch(mode, () => {
     <!-- 底部:可适配 Agent 列表 -->
     <section v-if="adaptableAgents.length" class="adaptable-section">
       <header class="section-head">
-        <h3 class="section-title">可适配 Agent 池</h3>
+        <h3 class="section-title">内置可适配 Agent 池</h3>
         <p class="section-sub">
-          共 {{ adaptableAgents.length }} 个 Agent 可通过 RoleAdapter 加入 Environment
+          共 {{ adaptableAgents.length }} 个内置 Agent 可通过 RoleAdapter 加入 Environment；不含已发布自定义 Agent 和历史审查画像
         </p>
       </header>
       <div class="adaptable-grid">

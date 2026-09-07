@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="21" failures="5" errors="0" time="0.298911292">
+    <testsuite name="src/components/security/SecurityScanModal.test.ts" timestamp="2026-09-07T07:27:02.632Z" hostname="lijiadongdeMacBook-Air-7.local" tests="21" failures="5" errors="0" skipped="0" time="0.298911292">
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次可见且自动启动时，file 只使用原有请求契约" time="0.038898459">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次可见且自动启动时，task 只使用原有请求契约" time="0.006413083">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次可见且自动启动时，project 只使用原有请求契约" time="0.0091935">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次可见且自动启动时，all-projects 只使用原有请求契约" time="0.005773708">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 等待状态不显示假阶段/百分比，配置锁定且重复操作不重复发请求" time="0.024172916">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 失败展示后端原因和排查编号，明确重试不等于取消前次请求" time="0.023080083">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 后端明确禁止重试时，不提供可执行的重复请求" time="0.005530709">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 关闭只关闭窗口，重新打开继续等待同一个请求" time="0.010692416">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 真实对话框过渡及焦点建立后，Escape 关闭窗口但不取消扫描" time="0.109409833">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 范围改变后迟到的结果不能成为新范围的结果" time="0.009524375">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 卸载后不发布迟到的完成事件" time="0.003708791">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次打开已保存结果不再次扫描，并标明结果来源" time="0.006174542">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 任务复审说明真实的标签整理行为，不声称进行 LLM 深度扫描" time="0.003521833">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 缺少目标时给出页面内错误且不调用扫描接口" time="0.004751708">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 下载报告使用已返回结果，不触发新扫描" time="0.0063325">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 空响应进入失败态而不是发布完成事件" time="0.004766375">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; file 无扫描权限时自动启动、按钮与直接处理函数均不发送请求" time="0.010438875">
+            <failure message="expected [] to have a length of 2 but got +0" type="AssertionError">
+AssertionError: expected [] to have a length of 2 but got +0
+
+- Expected
++ Received
+
+- 2
++ 0
+
+ ❯ src/components/security/SecurityScanModal.test.ts:232:20
+            </failure>
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; task 无扫描权限时自动启动、按钮与直接处理函数均不发送请求" time="0.003609542">
+            <failure message="expected [] to have a length of 2 but got +0" type="AssertionError">
+AssertionError: expected [] to have a length of 2 but got +0
+
+- Expected
++ Received
+
+- 2
++ 0
+
+ ❯ src/components/security/SecurityScanModal.test.ts:232:20
+            </failure>
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; project 无扫描权限时自动启动、按钮与直接处理函数均不发送请求" time="0.004929375">
+            <failure message="expected [] to have a length of 2 but got +0" type="AssertionError">
+AssertionError: expected [] to have a length of 2 but got +0
+
+- Expected
++ Received
+
+- 2
++ 0
+
+ ❯ src/components/security/SecurityScanModal.test.ts:232:20
+            </failure>
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; all-projects 无扫描权限时自动启动、按钮与直接处理函数均不发送请求" time="0.003711334">
+            <failure message="expected [] to have a length of 2 but got +0" type="AssertionError">
+AssertionError: expected [] to have a length of 2 but got +0
+
+- Expected
++ Received
+
+- 2
++ 0
+
+ ❯ src/components/security/SecurityScanModal.test.ts:232:20
+            </failure>
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; 失败后撤销扫描权限，重试不可执行；恢复权限可真实重试" time="0.003740208">
+            <failure message="expected undefined to be defined" type="AssertionError">
+AssertionError: expected undefined to be defined
+ ❯ src/components/security/SecurityScanModal.test.ts:249:51
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -126,7 +126,7 @@ def test_config(payload: LlmTestIn, db: Session = Depends(get_db),
             data=ApiConfigTestOut(success=False, message="请先填写端点、模型与 API Key"),
             message="配置不完整",
         )
-    result = api_config_service.test_connection(ApiConfigTestIn(**draft))
+    result = api_config_service.test_connection(ApiConfigTestIn(**draft), db=db, user_id=admin.id)
     return Resp(data=result, message=result.message)
 
 

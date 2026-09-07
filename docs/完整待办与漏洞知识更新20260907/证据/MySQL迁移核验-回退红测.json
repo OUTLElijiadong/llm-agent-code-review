@@ -1,0 +1,12 @@
+{
+  "database": "prism_acceptance_048_21381398d36c",
+  "environment": "local-isolated-mysql",
+  "production_connected": false,
+  "started_at_utc": "2026-09-07T06:41:39.508111+00:00",
+  "orphan_fk_rejected": true,
+  "delete_preserves_log_and_nulls_fk": true,
+  "status": "failed",
+  "error": "downgrade 047_review_input_snapshot failed; see redacted log",
+  "isolated_database_removed": true,
+  "finished_at_utc": "2026-09-07T06:41:47.571118+00:00"
+}

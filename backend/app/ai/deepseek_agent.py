@@ -3,7 +3,7 @@ DeepSeek Agent: HTTP调用、重试、日志记录
 
 统一入口:
   chat()      — 主线程使用, 自带 AiCallLog 写入 (需要 db Session)
-  call_raw()  — 并行线程使用, 不带 db, 返回 meta 供主线程事后 log_deferred() 补录
+  call_raw()  — 并行线程使用可信作用域独立记账，返回 ID 供 log_deferred() 补充元数据
   两种方法共用同一套 HTTP/重试/超时/模型参数。
 
 时区约定: 所有 create_time 均为 timezone-aware UTC (datetime.now(timezone.utc))。
@@ -20,6 +20,13 @@ from sqlalchemy.orm import Session
 from app.ai.exceptions import AiServiceError
 from app.core.config import settings
 from app.models.ai_call_log import AiCallLog
+from app.services.ai_usage_context import (
+    attribution_snapshot,
+    enrich_recorded_usage,
+    log_attribution,
+    record_usage_attempt,
+    usage_tokens,
+)
 from app.utils.public_http import pin_public_http_url
 
 if TYPE_CHECKING:
@@ -233,7 +240,7 @@ class DeepSeekAgent:
                 client.close()
         return resp, int((time.time() - t0) * 1000)
 
-    # ── 并行线程调用 (不带 db, 返回 meta 供事后补录) ──
+    # ── 并行线程调用 (作用域内独立记账，返回 ID 与元数据) ──
 
     def call_raw(
         self,
@@ -244,10 +251,10 @@ class DeepSeekAgent:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> tuple:
-        """线程安全的 DeepSeek 调用 — 不写 AiCallLog
+        """线程安全的 DeepSeek 调用；受信作用域中每个请求独立记账。
 
-        返回 (response_text, meta_dict)。
-        meta_dict 可直接传入 log_deferred() 在主线程补写日志。
+        返回 (response_text, meta_dict)。meta_dict 携带已提交日志 ID；
+        log_deferred() 只补充审查元数据，未绑定数据库的兼容路径才补录。
 
         Args:
             system_prompt: 系统提示
@@ -275,28 +282,83 @@ class DeepSeekAgent:
         if max_tokens is not None:
             payload["max_tokens"] = max(128, min(8192, int(max_tokens)))
 
+        usage_log_ids: list[int] = []
+        http_attempts = 0
+
+        def failure(message):
+            error = RuntimeError(message)
+            error.usage_log_ids = list(usage_log_ids)
+            error.http_attempts = http_attempts
+            return error
+
+        def raw_attempt(attempt):
+            nonlocal http_attempts
+            started = time.time()
+            try:
+                response, duration = self._do_request(url, headers, payload)
+                http_attempts += 1
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                http_attempts += 1
+                log_id = record_usage_attempt(
+                    model_name=self.model, agent_label=agent_label,
+                    status="retry" if attempt < self.max_retries else "failed", error=str(exc),
+                    duration_ms=int((time.time() - started) * 1000), prompt=user_prompt,
+                )
+                if log_id is not None:
+                    usage_log_ids.append(log_id)
+                raise
+            try:
+                body = response.json()
+            except (TypeError, ValueError):
+                body = {}
+            if not isinstance(body, dict):
+                body = {}
+            choices = body.get("choices")
+            choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+            content = choice.get("message", {})
+            content = content.get("content") if isinstance(content, dict) else None
+            success = (response.status_code == 200 and choice.get("finish_reason") == "stop"
+                       and isinstance(content, str) and bool(content.strip()))
+            retryable = response.status_code == 429 or response.status_code >= 500
+            log_id = record_usage_attempt(
+                model_name=str(body.get("model") or self.model), agent_label=agent_label, usage=body.get("usage"),
+                status="success" if success else "retry" if retryable and attempt < self.max_retries else "failed",
+                error="" if success else f"HTTP {response.status_code}; finish_reason={choice.get('finish_reason')}",
+                duration_ms=duration, prompt=user_prompt, response=content if isinstance(content, str) else "",
+            )
+            if log_id is not None:
+                usage_log_ids.append(log_id)
+            return response, duration
+
         for attempt in range(self.max_retries + 1):
             try:
-                resp, duration_ms = self._do_request(url, headers, payload)
+                resp, duration_ms = raw_attempt(attempt)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 err = f"DeepSeek 网络请求失败: {exc}"
                 logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} {err}")
                 if attempt >= self.max_retries:
-                    raise RuntimeError(
+                    raise failure(
                         f"[call_raw] {agent_label} 全部 {self.max_retries+1} 次重试均失败: {err}",
                     ) from exc
                 time.sleep(min(60, 2 ** (attempt + 1)))
                 continue
 
             if resp.status_code == 200:
-                content, usage, finish_reason = _parse_completion_response(resp)
+                try:
+                    content, usage, finish_reason = _parse_completion_response(resp)
+                except DeepSeekResponseError as exc:
+                    exc.usage_log_ids = list(usage_log_ids)
+                    raise
                 return content, {
+                    "_usage_attribution": attribution_snapshot(),
+                    "_usage_log_ids": list(usage_log_ids),
+                    "_http_attempts": http_attempts,
                     "model_tag": model_tag,
                     "model_name": self.model,
                     "agent_label": agent_label,
-                    "prompt_tokens": usage.get("prompt_tokens", 0),
-                    "completion_tokens": usage.get("completion_tokens", 0),
-                    "total_tokens": usage.get("total_tokens", 0),
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
                     "duration_ms": duration_ms,
                     "finish_reason": finish_reason,
                     "user_prompt": user_prompt,
@@ -311,16 +373,16 @@ class DeepSeekAgent:
             else:
                 err = f"DeepSeek {resp.status_code}: {resp.text[:200]}"
                 logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} {err}")
-                raise RuntimeError(f"[call_raw] {agent_label} 确定性请求失败: {err}")
+                raise failure(f"[call_raw] {agent_label} 确定性请求失败: {err}")
             logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} {err}")
 
             if attempt >= self.max_retries:
-                raise RuntimeError(
+                raise failure(
                     f"[call_raw] {agent_label} 全部 {self.max_retries+1} 次重试均失败: {err}",
                 )
             time.sleep(min(60, 2 ** (attempt + 1)))
 
-        raise RuntimeError(f"[call_raw] {agent_label} 未知错误")  # unreachable
+        raise failure(f"[call_raw] {agent_label} 未知错误")  # unreachable
 
     # ── 主线程调用 (含 AiCallLog 写入) ──
 
@@ -369,6 +431,14 @@ class DeepSeekAgent:
                 attempt += 1
                 continue
 
+            try:
+                response_body = resp.json()
+            except (TypeError, ValueError):
+                response_body = {}
+            raw_usage = response_body.get("usage") if isinstance(response_body, dict) else None
+            reported_usage = {key: usage_tokens(raw_usage, key) for key in
+                              ("prompt_tokens", "completion_tokens", "total_tokens")}
+
             if resp.status_code == 200:
                 try:
                     content, usage, finish_reason = _parse_completion_response(resp)
@@ -378,6 +448,7 @@ class DeepSeekAgent:
                         chunk_index=chunk_index, prompt=user_prompt, response=None,
                         status="failed", error=str(exc)[:500],
                         meta={
+                            **reported_usage,
                             "duration_ms": duration_ms,
                             "finish_reason": exc.finish_reason,
                         },
@@ -423,7 +494,7 @@ class DeepSeekAgent:
                 chunk_index=chunk_index, prompt=user_prompt, response=None,
                 status="retry" if retryable and attempt < self.max_retries else "failed",
                 error=str(err)[:500],
-                meta={"duration_ms": duration_ms},
+                meta={**reported_usage, "duration_ms": duration_ms},
                 model_name=model_tag,
                 agent_label=agent_label,
             )
@@ -456,7 +527,13 @@ class DeepSeekAgent:
         meta 由 call_raw() 返回, 包含 create_time / model_tag / tokens / agent_label 全量信息。
         agent_label 从 meta 中读取并写入 AiCallLog.agent_label,实现 Agent 调用归因。
         """
+        if meta.get("_http_attempts") == 0:
+            return
+        if enrich_recorded_usage(db, user_id, meta.get("_usage_log_ids"), task_id=task_id,
+                                 file_id=file_id, chunk_index=chunk_index, status=status, error=error or ""):
+            return
         rec = AiCallLog(
+            **log_attribution(db, user_id, task_id, meta.get("_usage_attribution")),
             task_id=task_id,
             user_id=user_id,
             file_id=file_id,
@@ -467,9 +544,9 @@ class DeepSeekAgent:
             response=(meta.get("response") or "")[:200_000],
             status=status,
             error_message=error,
-            prompt_tokens=meta.get("prompt_tokens"),
-            completion_tokens=meta.get("completion_tokens"),
-            total_tokens=meta.get("total_tokens"),
+            prompt_tokens=usage_tokens(meta, "prompt_tokens"),
+            completion_tokens=usage_tokens(meta, "completion_tokens"),
+            total_tokens=usage_tokens(meta, "total_tokens"),
             duration_ms=meta.get("duration_ms"),
             create_time=meta.get("create_time", datetime.now(timezone.utc)),
         )
@@ -487,7 +564,16 @@ class DeepSeekAgent:
         Args:
             agent_label: Agent 标识码,写入 AiCallLog.agent_label 实现 Agent 调用归因
         """
+        log_id = record_usage_attempt(
+            db=db, user_id=user_id, task_id=task_id, file_id=file_id, chunk_index=chunk_index,
+            model_name=model_name, agent_label=agent_label, usage=meta, status=status, error=error or "",
+            duration_ms=meta.get("duration_ms"), prompt=prompt or "", response=response or "",
+        )
+        if log_id is not None:
+            meta["_usage_log_ids"] = [log_id]
+            return
         rec = AiCallLog(
+            **log_attribution(db, user_id, task_id, meta.get("_usage_attribution")),
             task_id=task_id, user_id=user_id, file_id=file_id,
             chunk_index=chunk_index,
             agent_label=agent_label or None,
@@ -496,9 +582,9 @@ class DeepSeekAgent:
             response=response[:200_000] if response else None,
             status=status,
             error_message=error,
-            prompt_tokens=meta.get("prompt_tokens"),
-            completion_tokens=meta.get("completion_tokens"),
-            total_tokens=meta.get("total_tokens"),
+            prompt_tokens=usage_tokens(meta, "prompt_tokens"),
+            completion_tokens=usage_tokens(meta, "completion_tokens"),
+            total_tokens=usage_tokens(meta, "total_tokens"),
             duration_ms=meta.get("duration_ms"),
             create_time=datetime.now(timezone.utc),
         )

@@ -1,0 +1,53 @@
+{
+  "status": "passed",
+  "verified_at_utc": "2026-09-07T08:28:10.432301+00:00",
+  "tests": {
+    "backend": {
+      "tests": 3922,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "47b0a16e96c04eb750de4ff92c414f46da3a65a6c4bdcf245d35c8ffaa0a883a"
+    },
+    "frontend": {
+      "tests": 994,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "419e52343877a4c49b2bcdf0f679b731d5d869ccac62c2f511676b8ae84112a2"
+    },
+    "collector_addon": {
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "c743c2b101bc74e01cbf3fbbff82c0177d4d936e02f2916024f4c2edc5af7d01"
+    }
+  },
+  "frontend_lint_exit": 0,
+  "frontend_build_exit": 0,
+  "tested_existing_sources_unchanged": false,
+  "backend_addon_separately_tested": "backend/tests/test_release_readonly_collector.py",
+  "backend_coverage": {
+    "covered_lines": 31000,
+    "num_statements": 39672,
+    "percent_covered": 78.14075418431135,
+    "percent_covered_display": "78",
+    "missing_lines": 8672,
+    "excluded_lines": 110
+  },
+  "notes": [
+    "首次前端994中2项5000ms超时，32项独立复跑通过；降低并发后994全过，未放宽超时。",
+    "原始JUnit失败证据保留工具输出空白字符，非XML源文件diff whitespace检查通过。"
+  ],
+  "backend_post_suite_tool_changes": [
+    "backend/scripts/verify_permission_acceptance_https.py",
+    "backend/tests/test_production_permission_acceptance_runner.py"
+  ],
+  "backend_tool_additional_tests": {
+    "xml": "HTTP计划可移植性-最终.xml",
+    "tests": 16,
+    "sha256": "3d24c5aa7fc27f63f98771157abf0e4fff78372667d6aba1f1311adda346a81f"
+  },
+  "application_sources_unchanged_after_full_tests": true
+}

@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-09-07T14:40:42.910234+08:00",
+  "host": "81.70.251.90",
+  "database": "code_review",
+  "production_version_before": "3.8.5 / f1ab668",
+  "transaction": "SET TRANSACTION READ ONLY; START TRANSACTION WITH CONSISTENT SNAPSHOT; ...; ROLLBACK;",
+  "counts": {
+    "agent_knowledge_doc": 39,
+    "agent_knowledge_chunk": 347,
+    "knowledge_doc": 312,
+    "knowledge_chunk": 1938,
+    "agent_knowledge_source": 1
+  },
+  "match_patterns": [
+    "known_cves",
+    "audit_knowledge",
+    "CVE-2021-21381",
+    "OWASP.{0,20}2021"
+  ],
+  "agent_doc_matches": [],
+  "user_doc_matches": [],
+  "agent_source_matches": [],
+  "mutation_count": 0,
+  "conclusion": "已扫描文档元数据、知识来源与切片正文，未发现内置旧安全库副本；文件直接注入，发布重启刷新缓存，无需数据库索引重建。"
+}

@@ -26,10 +26,17 @@ from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.agents.contracts import compose_system_prompt
 from app.agents.events import AgentEventType
 from app.ai.code_chunker import chunk_code_with_context
-from app.ai.result_parser import normalize_severity
+from app.ai.result_parser import _infer_owasp_cwe, normalize_severity
 from app.ai.scoring import compute_score_breakdown
 from app.ai.security_patterns import list_patterns, scan_secrets
 from app.ai.security_static_rules import apply_static_rules, list_static_rules
+from app.constants.security_catalog import (
+    OWASP_CATEGORIES,
+    catalog_metadata,
+    owasp_for_cwe,
+    owasp_prompt_context,
+    owasp_reference,
+)
 from app.core.config import settings
 from app.core.exceptions import AppError, ConflictError, ValidationError
 from app.models.code_file import CodeFile
@@ -48,7 +55,7 @@ if TYPE_CHECKING:
 
 SYSTEM_PROMPT = (
     "你是 PRISM 棱镜平台的网络安全审计 Agent,"
-    "具备 OWASP Top10、CWE、SANS Top25、等保 2.0 的完整知识。\n"
+    "参考 OWASP Top10:2025 Final 与 MITRE CWE 4.20 的官方分类。\n"
     "工作目标:在用户提供的代码中识别**确定的、可解释、可演示**的网络安全漏洞。\n\n"
     "约束:\n"
     "1. 严格 JSON 输出,字段见用户消息中的 schema\n"
@@ -58,20 +65,6 @@ SYSTEM_PROMPT = (
     "5. 不输出风格、命名、注释类问题(那是 code_reviewer 的领域)\n"
 )
 
-
-# OWASP Top10 2021 检查清单(供 GET /api/security/checklist 用)
-_OWASP_TOP10_2021: Tuple[Tuple[str, str, str], ...] = (
-    ("A01", "Broken Access Control", "失效的访问控制"),
-    ("A02", "Cryptographic Failures", "加密失败 / 敏感数据泄露"),
-    ("A03", "Injection", "注入(SQL/Command/LDAP/XPath/模板)"),
-    ("A04", "Insecure Design", "不安全的设计"),
-    ("A05", "Security Misconfiguration", "安全配置错误"),
-    ("A06", "Vulnerable and Outdated Components", "易受攻击和过时的组件"),
-    ("A07", "Identification and Authentication Failures", "身份识别和身份验证失败"),
-    ("A08", "Software and Data Integrity Failures", "软件和数据完整性失败"),
-    ("A09", "Security Logging and Monitoring Failures", "安全日志和监控失败"),
-    ("A10", "Server-Side Request Forgery (SSRF)", "服务端请求伪造"),
-)
 
 
 # 严重度扣分(沿用 app/ai/scoring.py 模型)
@@ -263,6 +256,7 @@ class SecuritySentinelAgent(BaseAgent):
                 model=result.model,
                 duration_ms=result.duration_ms,
                 tokens=result.tokens,
+                usage_log_ids=result.usage_log_ids, http_attempts=result.http_attempts,
             )
 
         # 3. 解析 findings 数组,转换为 Finding 列表
@@ -274,6 +268,7 @@ class SecuritySentinelAgent(BaseAgent):
                 model=result.model,
                 duration_ms=result.duration_ms,
                 tokens=result.tokens,
+                usage_log_ids=result.usage_log_ids, http_attempts=result.http_attempts,
             )
 
         findings: List[Finding] = []
@@ -310,6 +305,7 @@ class SecuritySentinelAgent(BaseAgent):
             model=result.model,
             duration_ms=result.duration_ms,
             tokens=result.tokens,
+                usage_log_ids=result.usage_log_ids, http_attempts=result.http_attempts,
         )
 
     def _ensure_db(self) -> Optional[AgentResult]:
@@ -379,13 +375,12 @@ class SecuritySentinelAgent(BaseAgent):
     def get_checklist(self) -> dict:
         owasp = [
             {
-                "code": code,
-                "name": cn,
-                "owasp": f"{code}:2021-{en}",
-                "cwe": "",
-                "description": en,
+                "code": category["code"], "name": category["name_zh"],
+                "owasp": category["owasp"], "cwe": "",
+                "description": category["name_en"],
+                "cwe_refs": list(category["cwe_refs"]), "source_url": category["source_url"],
             }
-            for code, en, cn in _OWASP_TOP10_2021
+            for category in OWASP_CATEGORIES
         ]
         secret_items = [
             {
@@ -408,6 +403,7 @@ class SecuritySentinelAgent(BaseAgent):
             for r in list_static_rules()
         ]
         return {
+            "catalog_metadata": catalog_metadata(),
             "owasp_top10": owasp,
             "secret_patterns": secret_items,
             "static_rules": static_items,
@@ -549,7 +545,9 @@ class SecuritySentinelAgent(BaseAgent):
         )
         findings: List[dict] = []
         for issue in rows:
-            owasp, cwe = self._infer_owasp_cwe(issue.title or "", issue.description or "")
+            inferred_owasp, inferred_cwe = self._infer_owasp_cwe(issue.title or "", issue.description or "")
+            cwe = issue.cwe or inferred_cwe
+            owasp = issue.owasp or owasp_for_cwe(cwe) or inferred_owasp
             findings.append({
                 "title": issue.title or "安全问题",
                 "category": "安全漏洞",
@@ -2219,8 +2217,8 @@ class SecuritySentinelAgent(BaseAgent):
                     "立即轮换该凭据,并将本文件加入 .gitignore 或扫描白名单。"
                 ),
                 "references": [
-                    "https://cwe.mitre.org/data/definitions/798.html",
-                    "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/",
+                    f"https://cwe.mitre.org/data/definitions/{m.cwe.removeprefix('CWE-')}.html",
+                    owasp_reference(m.owasp),
                 ],
                 "confidence": 0.99,
                 "source": "regex",
@@ -2259,7 +2257,7 @@ class SecuritySentinelAgent(BaseAgent):
                 "references": [
                     f"https://cwe.mitre.org/data/definitions/{m.cwe.replace('CWE-', '')}.html"
                     if m.cwe else "",
-                    f"https://owasp.org/Top10/{m.owasp.split(':')[0]}_2021/"
+                    owasp_reference(m.owasp)
                     if m.owasp else "",
                 ],
                 "confidence": 0.95,
@@ -2665,7 +2663,7 @@ class SecuritySentinelAgent(BaseAgent):
             "严格输出 JSON，结构为：\n"
             '{"output_limited":false,'
             '"findings":[{"file_path":"源码中的精确路径","title":"...","category":"...",'
-            '"owasp":"A03:2021-Injection","cwe":"CWE-89","severity":"严重|高|中|低",'
+            '"owasp":"A05:2025-Injection","cwe":"CWE-89","severity":"严重|高|中|低",'
             '"line_start":1,"line_end":1,"evidence":"源码原文","exploit_scenario":"...",'
             '"fix_suggestion":"...","references":[],"confidence":0.9}],'
             '"entry_points":[{"file_path":"精确路径","name":"...","line":1,'
@@ -2906,26 +2904,16 @@ class SecuritySentinelAgent(BaseAgent):
         return (
             "请对以下代码做系统化网络安全审查,尽量把每一类真实存在的风险都找全,"
             "宁可多给低置信度线索,也不要漏报。\n\n"
-            "## 覆盖面:逐项对照 OWASP Top10 2021 排查(命中才报,不适用就跳过,不硬凑)\n"
-            "- A01 失效的访问控制:水平/垂直越权、IDOR、路径遍历、强制浏览、CORS 过宽\n"
-            "- A02 加密失败:明文存储、弱哈希(MD5/SHA1)、弱算法(DES/ECB)、硬编码密钥、"
-            "证书不校验、随机数不安全\n"
-            "- A03 注入:SQL/NoSQL/命令/LDAP/XPath/模板注入、XSS、HTTP 响应拆分、Open Redirect\n"
-            "- A04 不安全设计:缺少限流/风控、可被滥用的业务流程、TOCTOU 竞态\n"
-            "- A05 安全配置错误:调试开关、默认口令、目录列举、危险 CORS/安全头缺失、错误堆栈泄露\n"
-            "- A06 易受攻击与过时组件:已知漏洞依赖、过时框架、危险反序列化库\n"
-            "- A07 认证与会话失败:弱口令策略、会话固定、JWT 缺陷(alg=none/弱密钥)、"
-            "验证码绕过、越权重置\n"
-            "- A08 软件与数据完整性失败:不受信反序列化、未校验的自动更新/插件、CI 供应链\n"
-            "- A09 日志与监控失败:关键操作无审计、日志泄露 PII/凭据\n"
-            "- A10 SSRF:用户可控 URL 发起请求、云元数据地址(169.254.169.254)可达\n"
-            "另含业务逻辑漏洞:整数溢出、价格/数量篡改、条件竞争。\n\n"
+            + owasp_prompt_context()
+            + "逐项排查：访问控制与 SSRF、配置、依赖与构建供应链、加密、注入、业务设计、"
+            "认证与会话、反序列化与制品完整性、日志与告警、错误处理与失败放行。"
+            "只报告有代码证据的风险；没有组件版本和公告适用前提，不得断言命中 CVE。\n\n"
             "## 严格按此 JSON Schema 输出(只输出 JSON,无其他文字):\n"
             "{\n"
             '  "findings": [{\n'
             '    "title": "...",\n'
             '    "category": "...",\n'
-            '    "owasp": "A03:2021-Injection",\n'
+            '    "owasp": "A05:2025-Injection",\n'
             '    "cwe": "CWE-89",\n'
             '    "severity": "严重|高|中|低",\n'
             '    "line_start": 12,    // 必填:问题起始行(当前代码块相对行号)\n'
@@ -3127,36 +3115,7 @@ class SecuritySentinelAgent(BaseAgent):
 
     def _infer_owasp_cwe(self, title: str, description: str) -> tuple[str, str]:
         """基于关键词推断 OWASP/CWE(任务复审用,无 LLM 调用)"""
-        text = f"{title} {description}".lower()
-        rules: tuple[tuple[tuple[str, ...], str, str], ...] = (
-            (("sql 注入", "sql注入", "sql injection"),
-             "A03:2021-Injection", "CWE-89"),
-            (("命令注入", "command injection"),
-             "A03:2021-Injection", "CWE-78"),
-            (("xss", "跨站脚本"),
-             "A03:2021-Injection", "CWE-79"),
-            (("ssrf", "服务端请求伪造"),
-             "A10:2021-Server-Side Request Forgery", "CWE-918"),
-            (("csrf", "跨站请求伪造"),
-             "A01:2021-Broken Access Control", "CWE-352"),
-            (("反序列化", "deserialization"),
-             "A08:2021-Software and Data Integrity Failures", "CWE-502"),
-            (("路径遍历", "path traversal", "directory traversal"),
-             "A01:2021-Broken Access Control", "CWE-22"),
-            (("越权", "idor", "broken access"),
-             "A01:2021-Broken Access Control", "CWE-639"),
-            (("硬编码", "hardcoded", "明文密码"),
-             "A07:2021-Identification and Authentication Failures", "CWE-798"),
-            (("弱加密", "md5", "sha1", "des", "ecb"),
-             "A02:2021-Cryptographic Failures", "CWE-327"),
-            (("jwt"), "A07:2021-Identification and Authentication Failures", "CWE-522"),
-        )
-        for keywords, owasp, cwe in rules:
-            if isinstance(keywords, str):
-                keywords = (keywords,)
-            if any(k in text for k in keywords):
-                return owasp, cwe
-        return "", ""
+        return _infer_owasp_cwe(title, description)
 
     def _coerce_int(self, v, default: int = 0) -> int:
         try:

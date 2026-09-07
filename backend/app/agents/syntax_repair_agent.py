@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextvars import copy_context
 from typing import Any, Optional
 
 from app.agents.base import AgentContext, BaseAgent
@@ -114,7 +115,10 @@ class SyntaxRepairAgent(BaseAgent):
         cleaned: dict[str, str] = {}
         last_error = ""
         with ThreadPoolExecutor(max_workers=min(2, len(files))) as pool:
-            futures = {pool.submit(_repair_one, path, content): path for path, content in files.items()}
+            futures = {
+                pool.submit(copy_context().run, _repair_one, path, content): path
+                for path, content in files.items()
+            }
             for fut in futures:
                 path = futures[fut]
                 try:

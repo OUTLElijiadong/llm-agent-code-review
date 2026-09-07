@@ -1,0 +1,15 @@
+{
+  "purpose": "台账生成器可选路径与已实测证据防覆盖验证；临时当前源码不是最终交付清单",
+  "new_prefix_json_csv_match": true,
+  "five_role_cartesian_product": true,
+  "no_fabricated_current_passes": true,
+  "existing_baseline_unchanged": true,
+  "refuses_overwriting_actual_evidence": true,
+  "old_baseline_sha256": {
+    "全部按钮与交互源码清单-最终.json": "884138c0ba8c78c3f265246f782a63cea8a38f2be59d260f8f30165c9c106d68",
+    "全部控件逐角色验收台账.json": "bc0fa69f7ef3a69750723a618cca473dea1e856d38cbb3d2f9a35116e024b755",
+    "全部控件逐角色验收台账.csv": "d518804ad7dba82b36f749ea9007420745baad8b064cba54127a8e0b12e397ec",
+    "全部控件逐角色验收汇总.json": "aaf4e21ba24e7888ddba7c379cf6254163d4f8c3653c66ecb489c2d56c6e4615"
+  },
+  "script_sha256": "820e82bb012abe364cf76868d47ef4a442c894b5ef141db52e9399cdca2176c2"
+}

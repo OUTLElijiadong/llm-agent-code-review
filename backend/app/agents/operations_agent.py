@@ -76,6 +76,7 @@ class OperationsAgent(BaseAgent):
             extra={"trace_id": trace_id, "source": "ops_diagnose"},
         )
         prompt = json.dumps(facts, ensure_ascii=False, default=str)
+        self.bind_usage_source(db, actor)
         result = self.call(prompt, ctx, api_config=resolve_api_config(db, None))
         self._log_call(
             db,

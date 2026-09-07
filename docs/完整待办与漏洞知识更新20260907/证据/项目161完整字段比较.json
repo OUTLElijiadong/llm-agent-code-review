@@ -1,0 +1,141 @@
+{
+  "schema": "project161-backup-comparison-v2",
+  "started_at_utc": "2026-09-07T06:29:05.019015+00:00",
+  "status": "通过",
+  "target_id": 161,
+  "release_sha_present_matches": true,
+  "backup": {
+    "path": "/opt/code-review/backups/code_review_20260905T201610Z_343616d9d40c.sql.gz",
+    "bytes": 402726075,
+    "sha256": "7bb99942cc0e571008743fc66b0d1cdd88fcf13640579b32fb493c0679d7dc6f",
+    "expected_sha_matches": true,
+    "stable_during_read": true,
+    "file_open_count": 1,
+    "project_section_bytes": 13494,
+    "project_block_complete": true
+  },
+  "parser": {
+    "format": "strict_mysqldump_project_insert",
+    "complete_columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": false
+      },
+      {
+        "name": "user_id",
+        "type": "bigint",
+        "nullable": false
+      },
+      {
+        "name": "project_name",
+        "type": "varchar(100)",
+        "nullable": false
+      },
+      {
+        "name": "description",
+        "type": "varchar(500)",
+        "nullable": true
+      },
+      {
+        "name": "language",
+        "type": "varchar(50)",
+        "nullable": true
+      },
+      {
+        "name": "status",
+        "type": "varchar(20)",
+        "nullable": false
+      },
+      {
+        "name": "create_time",
+        "type": "datetime",
+        "nullable": false
+      },
+      {
+        "name": "update_time",
+        "type": "datetime",
+        "nullable": false
+      }
+    ],
+    "primary_key": [
+      "id"
+    ],
+    "primary_keys_unique": true,
+    "project_rows": 100,
+    "target_rows": 1,
+    "insert_statements": 1,
+    "utf8mb4_confirmed": true,
+    "no_auto_value_on_zero_confirmed": true,
+    "sql_from_backup_executed": false,
+    "non_project_tables_parsed": 0
+  },
+  "current": {
+    "kind": "counts",
+    "read_only": 1,
+    "target_rows": 1,
+    "project_rows": 100,
+    "observed_at_utc": "2026-09-07 06:29:14.458156"
+  },
+  "schema_matches": true,
+  "datetime_normalization": "DATE_FORMAT preserves DATETIME(0) seconds after schema precision=0 verification; JSON serialization previously added .000000.",
+  "field_comparison": [
+    {
+      "field": "id",
+      "equal": true,
+      "backup_normalized_sha256": "199544bc7dab55aef31c05638b48f3d01adf4844715cef65602298ab8a9389ec",
+      "current_normalized_sha256": "199544bc7dab55aef31c05638b48f3d01adf4844715cef65602298ab8a9389ec"
+    },
+    {
+      "field": "user_id",
+      "equal": true,
+      "backup_normalized_sha256": "cda5a1ba35745edc34db68ca4b10db94066ab5ec660f1792772f3ee56c3c82df",
+      "current_normalized_sha256": "cda5a1ba35745edc34db68ca4b10db94066ab5ec660f1792772f3ee56c3c82df"
+    },
+    {
+      "field": "project_name",
+      "equal": true,
+      "backup_normalized_sha256": "42f8daeac5c7c6fe88548d11719bff2a305a3b6530f87d4da564a7747fd15d27",
+      "current_normalized_sha256": "42f8daeac5c7c6fe88548d11719bff2a305a3b6530f87d4da564a7747fd15d27"
+    },
+    {
+      "field": "description",
+      "equal": true,
+      "backup_normalized_sha256": "d5c2d953549d12397106b3c70f291b35f6b317e25341fb60e1e960324fe8beb1",
+      "current_normalized_sha256": "d5c2d953549d12397106b3c70f291b35f6b317e25341fb60e1e960324fe8beb1"
+    },
+    {
+      "field": "language",
+      "equal": true,
+      "backup_normalized_sha256": "b1dc63940482e6e34df0909ba17de3342a61d3a26a4a39b3dfd3b30165c3ff75",
+      "current_normalized_sha256": "b1dc63940482e6e34df0909ba17de3342a61d3a26a4a39b3dfd3b30165c3ff75"
+    },
+    {
+      "field": "status",
+      "equal": true,
+      "backup_normalized_sha256": "9fb86d9bbd1698923250f1da4aa03315d807974b5b0d9a88db922495cf6771fd",
+      "current_normalized_sha256": "9fb86d9bbd1698923250f1da4aa03315d807974b5b0d9a88db922495cf6771fd"
+    },
+    {
+      "field": "create_time",
+      "equal": true,
+      "backup_normalized_sha256": "ff3fe06e86fdc6c97d6b5a86bc399d6e35ce31f610ad67886e051ac9af3a4fc7",
+      "current_normalized_sha256": "ff3fe06e86fdc6c97d6b5a86bc399d6e35ce31f610ad67886e051ac9af3a4fc7"
+    },
+    {
+      "field": "update_time",
+      "equal": true,
+      "backup_normalized_sha256": "241660b02b00824b6a05e62eb70830ad046206b5d9d5887c8a53358f50ab6b9f",
+      "current_normalized_sha256": "241660b02b00824b6a05e62eb70830ad046206b5d9d5887c8a53358f50ab6b9f"
+    }
+  ],
+  "row_fingerprint": {
+    "backup_normalized_sha256": "9e49ca15c51357ed0fc9c71703c8371ab9b67593e493b8385b4e753826131194",
+    "current_normalized_sha256": "9e49ca15c51357ed0fc9c71703c8371ab9b67593e493b8385b4e753826131194",
+    "equal": true
+  },
+  "all_eight_fields_equal": true,
+  "finished_at_utc": "2026-09-07T06:29:14.469800+00:00",
+  "elapsed_seconds": 9.451,
+  "collector_sha256": "15b7ab41017cabe1eadea7ea508aa7289f4b1444c854809218f38a081b5471ee"
+}

@@ -1,0 +1,599 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="295" failures="0" errors="0" time="0.147536708">
+    <testsuite name="src/views/permissionVisibility.regression.test.ts" timestamp="2026-09-07T06:34:06.752Z" hostname="lijiadongdeMacBook-Air-7.local" tests="7" failures="0" errors="0" skipped="0" time="0.05885875">
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只读审查账号看不到启动、停止或删除审查入口" time="0.019994041">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只读问题账号看不到状态修改和批量处理" time="0.005654625">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只有 file:view 时编辑器为只读且不显示保存" time="0.001796459">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只有 security:view 时不显示扫描操作" time="0.005801625">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 报告导出格式按各自权限点二次拦截" time="0.002705459">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 报告删除要求 review:cancel，权限恢复后才允许执行" time="0.004525333">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘不向缺少 review:start 的账号显示新建审查" time="0.017811708">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/router/permissionMatrix.test.ts" timestamp="2026-09-07T06:34:06.754Z" hostname="lijiadongdeMacBook-Air-7.local" tests="285" failures="0" errors="0" skipped="0" time="0.036886">
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/rbac/roles&apos; 保留原地址并跳转登录" time="0.003446834">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/rbac/permissions&apos; 保留原地址并跳转登录" time="0.000848375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/rbac/users&apos; 保留原地址并跳转登录" time="0.000275333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/reviews/start&apos; 保留原地址并跳转登录" time="0.000256125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/pentests/start&apos; 保留原地址并跳转登录" time="0.000237459">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/report/templates&apos; 保留原地址并跳转登录" time="0.000206375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/forum/new&apos; 保留原地址并跳转登录" time="0.00018625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/support/maintenance&apos; 保留原地址并跳转登录" time="0.000164541">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/support/feedback&apos; 保留原地址并跳转登录" time="0.000164125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/profile/personalization&apos; 保留原地址并跳转登录" time="0.000179541">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/profile/password&apos; 保留原地址并跳转登录" time="0.000158875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/profile/api-config&apos; 保留原地址并跳转登录" time="0.000137792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/overview&apos; 保留原地址并跳转登录" time="0.000121917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/agents&apos; 保留原地址并跳转登录" time="0.000118875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/approvals&apos; 保留原地址并跳转登录" time="0.000124708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/agent-releases&apos; 保留原地址并跳转登录" time="0.000116708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/beta-codes&apos; 保留原地址并跳转登录" time="0.000110541">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/policies&apos; 保留原地址并跳转登录" time="0.000118083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/tools&apos; 保留原地址并跳转登录" time="0.000113333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/knowledge&apos; 保留原地址并跳转登录" time="0.000115875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/jobs&apos; 保留原地址并跳转登录" time="0.000105208">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/observability&apos; 保留原地址并跳转登录" time="0.000113083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/rewards&apos; 保留原地址并跳转登录" time="0.000111458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/rollback&apos; 保留原地址并跳转登录" time="0.000126416">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/users&apos; 保留原地址并跳转登录" time="0.0001025">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/ai-logs&apos; 保留原地址并跳转登录" time="0.000097958">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/report-templates&apos; 保留原地址并跳转登录" time="0.000088041">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/audit&apos; 保留原地址并跳转登录" time="0.000095208">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/evolution&apos; 保留原地址并跳转登录" time="0.000092958">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/skills&apos; 保留原地址并跳转登录" time="0.000095792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/embedding&apos; 保留原地址并跳转登录" time="0.000096542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/mcp-workers&apos; 保留原地址并跳转登录" time="0.000096042">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/admin/llm&apos; 保留原地址并跳转登录" time="0.000113209">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/code/:projectId/file/:fileId/versions&apos; 保留原地址并跳转登录" time="0.000126875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/code/:projectId/file/:fileId&apos; 保留原地址并跳转登录" time="0.000110875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/forum/:id/edit&apos; 保留原地址并跳转登录" time="0.000107708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/projects/:id&apos; 保留原地址并跳转登录" time="0.000095083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/reviews/:id&apos; 保留原地址并跳转登录" time="0.0000955">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/pentests/:publicId&apos; 保留原地址并跳转登录" time="0.000090375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/reports/:id&apos; 保留原地址并跳转登录" time="0.000190458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/code/:projectId&apos; 保留原地址并跳转登录" time="0.000335708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/forum/:id&apos; 保留原地址并跳转登录" time="0.000235125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/dashboard&apos; 保留原地址并跳转登录" time="0.000212292">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/projects&apos; 保留原地址并跳转登录" time="0.000155584">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/reviews&apos; 保留原地址并跳转登录" time="0.000123833">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/pentests&apos; 保留原地址并跳转登录" time="0.000112458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/rules&apos; 保留原地址并跳转登录" time="0.000107583">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/security&apos; 保留原地址并跳转登录" time="0.000106459">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/reports&apos; 保留原地址并跳转登录" time="0.000298542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/code&apos; 保留原地址并跳转登录" time="0.000257125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/issues&apos; 保留原地址并跳转登录" time="0.000198417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/agents&apos; 保留原地址并跳转登录" time="0.000158917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/sandboxes&apos; 保留原地址并跳转登录" time="0.000136">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/agent-studio&apos; 保留原地址并跳转登录" time="0.000120875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/forum&apos; 保留原地址并跳转登录" time="0.000107708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/knowledge&apos; 保留原地址并跳转登录" time="0.00011625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 未登录访问 &apos;/profile&apos; 保留原地址并跳转登录" time="0.000120458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/rbac/roles&apos; 按页面真实契约拒绝或开放" time="0.00048475">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/rbac/permissions&apos; 按页面真实契约拒绝或开放" time="0.000152625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/rbac/users&apos; 按页面真实契约拒绝或开放" time="0.000340334">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/reviews/start&apos; 按页面真实契约拒绝或开放" time="0.000376125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/pentests/start&apos; 按页面真实契约拒绝或开放" time="0.000139083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/report/templates&apos; 按页面真实契约拒绝或开放" time="0.000135917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/forum/new&apos; 按页面真实契约拒绝或开放" time="0.0001255">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/support/maintenance&apos; 按页面真实契约拒绝或开放" time="0.000098708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/support/feedback&apos; 按页面真实契约拒绝或开放" time="0.00009675">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/profile/personalization&apos; 按页面真实契约拒绝或开放" time="0.000100542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/profile/password&apos; 按页面真实契约拒绝或开放" time="0.000097333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/profile/api-config&apos; 按页面真实契约拒绝或开放" time="0.0001135">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/overview&apos; 按页面真实契约拒绝或开放" time="0.000105541">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/agents&apos; 按页面真实契约拒绝或开放" time="0.000110334">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/approvals&apos; 按页面真实契约拒绝或开放" time="0.000094834">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/agent-releases&apos; 按页面真实契约拒绝或开放" time="0.000095792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/beta-codes&apos; 按页面真实契约拒绝或开放" time="0.000108791">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/policies&apos; 按页面真实契约拒绝或开放" time="0.0000895">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/tools&apos; 按页面真实契约拒绝或开放" time="0.000088958">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/knowledge&apos; 按页面真实契约拒绝或开放" time="0.000099375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/jobs&apos; 按页面真实契约拒绝或开放" time="0.000096666">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/observability&apos; 按页面真实契约拒绝或开放" time="0.000094375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/rewards&apos; 按页面真实契约拒绝或开放" time="0.000084458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/rollback&apos; 按页面真实契约拒绝或开放" time="0.000084166">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/users&apos; 按页面真实契约拒绝或开放" time="0.000092167">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/ai-logs&apos; 按页面真实契约拒绝或开放" time="0.000090041">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/report-templates&apos; 按页面真实契约拒绝或开放" time="0.000083125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/audit&apos; 按页面真实契约拒绝或开放" time="0.000082042">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/evolution&apos; 按页面真实契约拒绝或开放" time="0.000093625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/skills&apos; 按页面真实契约拒绝或开放" time="0.000094292">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/embedding&apos; 按页面真实契约拒绝或开放" time="0.000117625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/mcp-workers&apos; 按页面真实契约拒绝或开放" time="0.000184791">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/admin/llm&apos; 按页面真实契约拒绝或开放" time="0.000384917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/code/:projectId/file/:fileId/versions&apos; 按页面真实契约拒绝或开放" time="0.000141792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/code/:projectId/file/:fileId&apos; 按页面真实契约拒绝或开放" time="0.000099042">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/forum/:id/edit&apos; 按页面真实契约拒绝或开放" time="0.000090125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/projects/:id&apos; 按页面真实契约拒绝或开放" time="0.000088542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/reviews/:id&apos; 按页面真实契约拒绝或开放" time="0.00009">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/pentests/:publicId&apos; 按页面真实契约拒绝或开放" time="0.000087833">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/reports/:id&apos; 按页面真实契约拒绝或开放" time="0.000108917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/code/:projectId&apos; 按页面真实契约拒绝或开放" time="0.000107083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/forum/:id&apos; 按页面真实契约拒绝或开放" time="0.000083083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/dashboard&apos; 按页面真实契约拒绝或开放" time="0.000085625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/projects&apos; 按页面真实契约拒绝或开放" time="0.000085125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/reviews&apos; 按页面真实契约拒绝或开放" time="0.000100958">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/pentests&apos; 按页面真实契约拒绝或开放" time="0.000092125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/rules&apos; 按页面真实契约拒绝或开放" time="0.000085459">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/security&apos; 按页面真实契约拒绝或开放" time="0.000085">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/reports&apos; 按页面真实契约拒绝或开放" time="0.000082542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/code&apos; 按页面真实契约拒绝或开放" time="0.000083625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/issues&apos; 按页面真实契约拒绝或开放" time="0.000086625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/agents&apos; 按页面真实契约拒绝或开放" time="0.000083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/sandboxes&apos; 按页面真实契约拒绝或开放" time="0.000079417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/agent-studio&apos; 按页面真实契约拒绝或开放" time="0.000118792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/forum&apos; 按页面真实契约拒绝或开放" time="0.0000945">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/knowledge&apos; 按页面真实契约拒绝或开放" time="0.000081292">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 无权限账号访问 &apos;/profile&apos; 按页面真实契约拒绝或开放" time="0.000078333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/rbac/roles&apos;：成员业务正向放行、管理页面拒绝" time="0.000143375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/rbac/permissions&apos;：成员业务正向放行、管理页面拒绝" time="0.000092125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/rbac/users&apos;：成员业务正向放行、管理页面拒绝" time="0.000086333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/reviews/start&apos;：成员业务正向放行、管理页面拒绝" time="0.00008425">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/pentests/start&apos;：成员业务正向放行、管理页面拒绝" time="0.000083167">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/report/templates&apos;：成员业务正向放行、管理页面拒绝" time="0.000082708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/forum/new&apos;：成员业务正向放行、管理页面拒绝" time="0.000086084">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/support/maintenance&apos;：成员业务正向放行、管理页面拒绝" time="0.000080042">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/support/feedback&apos;：成员业务正向放行、管理页面拒绝" time="0.000079833">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/profile/personalization&apos;：成员业务正向放行、管理页面拒绝" time="0.000097042">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/profile/password&apos;：成员业务正向放行、管理页面拒绝" time="0.000082417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/profile/api-config&apos;：成员业务正向放行、管理页面拒绝" time="0.000103542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/overview&apos;：成员业务正向放行、管理页面拒绝" time="0.0001155">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/agents&apos;：成员业务正向放行、管理页面拒绝" time="0.000116209">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/approvals&apos;：成员业务正向放行、管理页面拒绝" time="0.000098125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/agent-releases&apos;：成员业务正向放行、管理页面拒绝" time="0.000093375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/beta-codes&apos;：成员业务正向放行、管理页面拒绝" time="0.0000825">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/policies&apos;：成员业务正向放行、管理页面拒绝" time="0.000095459">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/tools&apos;：成员业务正向放行、管理页面拒绝" time="0.000087875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/knowledge&apos;：成员业务正向放行、管理页面拒绝" time="0.000080542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/jobs&apos;：成员业务正向放行、管理页面拒绝" time="0.000080458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/observability&apos;：成员业务正向放行、管理页面拒绝" time="0.000091333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/rewards&apos;：成员业务正向放行、管理页面拒绝" time="0.000080041">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/rollback&apos;：成员业务正向放行、管理页面拒绝" time="0.000079458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/users&apos;：成员业务正向放行、管理页面拒绝" time="0.000090292">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/ai-logs&apos;：成员业务正向放行、管理页面拒绝" time="0.000090458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/report-templates&apos;：成员业务正向放行、管理页面拒绝" time="0.000096875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/audit&apos;：成员业务正向放行、管理页面拒绝" time="0.000104833">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/evolution&apos;：成员业务正向放行、管理页面拒绝" time="0.000098583">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/skills&apos;：成员业务正向放行、管理页面拒绝" time="0.000086375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/embedding&apos;：成员业务正向放行、管理页面拒绝" time="0.000095166">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/mcp-workers&apos;：成员业务正向放行、管理页面拒绝" time="0.000092583">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/admin/llm&apos;：成员业务正向放行、管理页面拒绝" time="0.000086083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/code/:projectId/file/:fileId/versions&apos;：成员业务正向放行、管理页面拒绝" time="0.0000975">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/code/:projectId/file/:fileId&apos;：成员业务正向放行、管理页面拒绝" time="0.000092458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/forum/:id/edit&apos;：成员业务正向放行、管理页面拒绝" time="0.000089875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/projects/:id&apos;：成员业务正向放行、管理页面拒绝" time="0.000101791">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/reviews/:id&apos;：成员业务正向放行、管理页面拒绝" time="0.000112">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/pentests/:publicId&apos;：成员业务正向放行、管理页面拒绝" time="0.00011">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/reports/:id&apos;：成员业务正向放行、管理页面拒绝" time="0.000086875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/code/:projectId&apos;：成员业务正向放行、管理页面拒绝" time="0.000104584">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/forum/:id&apos;：成员业务正向放行、管理页面拒绝" time="0.000085541">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/dashboard&apos;：成员业务正向放行、管理页面拒绝" time="0.000083709">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/projects&apos;：成员业务正向放行、管理页面拒绝" time="0.000086417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/reviews&apos;：成员业务正向放行、管理页面拒绝" time="0.000116417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/pentests&apos;：成员业务正向放行、管理页面拒绝" time="0.000143542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/rules&apos;：成员业务正向放行、管理页面拒绝" time="0.000087209">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/security&apos;：成员业务正向放行、管理页面拒绝" time="0.000094583">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/reports&apos;：成员业务正向放行、管理页面拒绝" time="0.0005175">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/code&apos;：成员业务正向放行、管理页面拒绝" time="0.000206417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/issues&apos;：成员业务正向放行、管理页面拒绝" time="0.000102875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/agents&apos;：成员业务正向放行、管理页面拒绝" time="0.000098125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/sandboxes&apos;：成员业务正向放行、管理页面拒绝" time="0.00009475">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/agent-studio&apos;：成员业务正向放行、管理页面拒绝" time="0.00011125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/forum&apos;：成员业务正向放行、管理页面拒绝" time="0.000101917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/knowledge&apos;：成员业务正向放行、管理页面拒绝" time="0.00010375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通成员访问 &apos;/profile&apos;：成员业务正向放行、管理页面拒绝" time="0.0001125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/rbac/roles&apos; 仍受超级管理员限制" time="0.000129208">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/rbac/permissions&apos; 仍受超级管理员限制" time="0.0000875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/rbac/users&apos; 仍受超级管理员限制" time="0.000082125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/reviews/start&apos; 仍受超级管理员限制" time="0.000104167">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/pentests/start&apos; 仍受超级管理员限制" time="0.000086542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/report/templates&apos; 仍受超级管理员限制" time="0.000079709">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/forum/new&apos; 仍受超级管理员限制" time="0.00007875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/support/maintenance&apos; 仍受超级管理员限制" time="0.0000785">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/support/feedback&apos; 仍受超级管理员限制" time="0.000080708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/profile/personalization&apos; 仍受超级管理员限制" time="0.000095041">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/profile/password&apos; 仍受超级管理员限制" time="0.000080041">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/profile/api-config&apos; 仍受超级管理员限制" time="0.0000795">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/overview&apos; 仍受超级管理员限制" time="0.00008575">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/agents&apos; 仍受超级管理员限制" time="0.000077208">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/approvals&apos; 仍受超级管理员限制" time="0.000082583">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/agent-releases&apos; 仍受超级管理员限制" time="0.000214667">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/beta-codes&apos; 仍受超级管理员限制" time="0.00012075">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/policies&apos; 仍受超级管理员限制" time="0.000095417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/tools&apos; 仍受超级管理员限制" time="0.000131542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/knowledge&apos; 仍受超级管理员限制" time="0.000082375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/jobs&apos; 仍受超级管理员限制" time="0.000080292">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/observability&apos; 仍受超级管理员限制" time="0.000077417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/rewards&apos; 仍受超级管理员限制" time="0.000077708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/rollback&apos; 仍受超级管理员限制" time="0.000084875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/users&apos; 仍受超级管理员限制" time="0.000087667">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/ai-logs&apos; 仍受超级管理员限制" time="0.00007775">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/report-templates&apos; 仍受超级管理员限制" time="0.000076916">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/audit&apos; 仍受超级管理员限制" time="0.000078042">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/evolution&apos; 仍受超级管理员限制" time="0.000077208">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/skills&apos; 仍受超级管理员限制" time="0.0000785">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/embedding&apos; 仍受超级管理员限制" time="0.000087">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/mcp-workers&apos; 仍受超级管理员限制" time="0.000083333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/admin/llm&apos; 仍受超级管理员限制" time="0.0000815">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/code/:projectId/file/:fileId/versions&apos; 仍受超级管理员限制" time="0.000085375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/code/:projectId/file/:fileId&apos; 仍受超级管理员限制" time="0.000114167">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/forum/:id/edit&apos; 仍受超级管理员限制" time="0.000094333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/projects/:id&apos; 仍受超级管理员限制" time="0.000084833">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/reviews/:id&apos; 仍受超级管理员限制" time="0.000092959">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/pentests/:publicId&apos; 仍受超级管理员限制" time="0.000085542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/reports/:id&apos; 仍受超级管理员限制" time="0.000084458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/code/:projectId&apos; 仍受超级管理员限制" time="0.000091208">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/forum/:id&apos; 仍受超级管理员限制" time="0.000086416">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/dashboard&apos; 仍受超级管理员限制" time="0.000084458">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/projects&apos; 仍受超级管理员限制" time="0.000080125">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/reviews&apos; 仍受超级管理员限制" time="0.000095916">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/pentests&apos; 仍受超级管理员限制" time="0.000078917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/rules&apos; 仍受超级管理员限制" time="0.000077541">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/security&apos; 仍受超级管理员限制" time="0.000077417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/reports&apos; 仍受超级管理员限制" time="0.000077041">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/code&apos; 仍受超级管理员限制" time="0.000078708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/issues&apos; 仍受超级管理员限制" time="0.000076417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/agents&apos; 仍受超级管理员限制" time="0.00007625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/sandboxes&apos; 仍受超级管理员限制" time="0.000077167">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/agent-studio&apos; 仍受超级管理员限制" time="0.000077583">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/forum&apos; 仍受超级管理员限制" time="0.0000845">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/knowledge&apos; 仍受超级管理员限制" time="0.000076666">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 普通管理员访问 &apos;/profile&apos; 仍受超级管理员限制" time="0.000077958">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/rbac/roles&apos; 正向放行" time="0.00019275">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/rbac/permissions&apos; 正向放行" time="0.000081292">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/rbac/users&apos; 正向放行" time="0.000078">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/reviews/start&apos; 正向放行" time="0.000076417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/pentests/start&apos; 正向放行" time="0.000076583">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/report/templates&apos; 正向放行" time="0.000085917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/forum/new&apos; 正向放行" time="0.000082375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/support/maintenance&apos; 正向放行" time="0.000076791">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/support/feedback&apos; 正向放行" time="0.000081792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/profile/personalization&apos; 正向放行" time="0.000089542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/profile/password&apos; 正向放行" time="0.000080083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/profile/api-config&apos; 正向放行" time="0.000076042">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/overview&apos; 正向放行" time="0.000073792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/agents&apos; 正向放行" time="0.000074167">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/approvals&apos; 正向放行" time="0.000075041">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/agent-releases&apos; 正向放行" time="0.000074333">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/beta-codes&apos; 正向放行" time="0.000073875">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/policies&apos; 正向放行" time="0.000073542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/tools&apos; 正向放行" time="0.000073375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/knowledge&apos; 正向放行" time="0.00007375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/jobs&apos; 正向放行" time="0.000074">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/observability&apos; 正向放行" time="0.000073542">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/rewards&apos; 正向放行" time="0.0000755">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/rollback&apos; 正向放行" time="0.000073959">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/users&apos; 正向放行" time="0.000081667">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/ai-logs&apos; 正向放行" time="0.000081625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/report-templates&apos; 正向放行" time="0.000110792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/audit&apos; 正向放行" time="0.000166417">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/evolution&apos; 正向放行" time="0.000085666">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/skills&apos; 正向放行" time="0.0000765">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/embedding&apos; 正向放行" time="0.000115166">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/mcp-workers&apos; 正向放行" time="0.000263833">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/admin/llm&apos; 正向放行" time="0.000193208">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/code/:projectId/file/:fileId/versions&apos; 正向放行" time="0.000222375">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/code/:projectId/file/:fileId&apos; 正向放行" time="0.000109708">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/forum/:id/edit&apos; 正向放行" time="0.000083167">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/projects/:id&apos; 正向放行" time="0.00008725">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/reviews/:id&apos; 正向放行" time="0.000118166">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/pentests/:publicId&apos; 正向放行" time="0.000084084">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/reports/:id&apos; 正向放行" time="0.000093792">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/code/:projectId&apos; 正向放行" time="0.00008225">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/forum/:id&apos; 正向放行" time="0.00008025">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/dashboard&apos; 正向放行" time="0.000075083">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/projects&apos; 正向放行" time="0.000088917">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/reviews&apos; 正向放行" time="0.000073583">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/pentests&apos; 正向放行" time="0.000075791">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/rules&apos; 正向放行" time="0.000074625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/security&apos; 正向放行" time="0.000072791">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/reports&apos; 正向放行" time="0.000078">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/code&apos; 正向放行" time="0.00007325">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/issues&apos; 正向放行" time="0.000072625">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/agents&apos; 正向放行" time="0.00007475">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/sandboxes&apos; 正向放行" time="0.000074459">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/agent-studio&apos; 正向放行" time="0.000073042">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/forum&apos; 正向放行" time="0.000083959">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/knowledge&apos; 正向放行" time="0.000091959">
+        </testcase>
+        <testcase classname="src/router/permissionMatrix.test.ts" name="全部已注册私有页面的真实路由守卫与用户 store 矩阵 &gt; 超级管理员访问 &apos;/profile&apos; 正向放行" time="0.000075959">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/views/report/ReportList.test.ts" timestamp="2026-09-07T06:34:06.769Z" hostname="lijiadongdeMacBook-Air-7.local" tests="3" failures="0" errors="0" skipped="0" time="0.051791958">
+        <testcase classname="src/views/report/ReportList.test.ts" name="报告列表领域导出 &gt; 领域报告只显示真实 JSON 出口，不展示非等价 HTML/PDF/Word" time="0.034259">
+        </testcase>
+        <testcase classname="src/views/report/ReportList.test.ts" name="报告列表领域导出 &gt; 领域 JSON 可达并反馈成功，列表导出按钮在请求期间防重复" time="0.006943083">
+        </testcase>
+        <testcase classname="src/views/report/ReportList.test.ts" name="报告列表领域导出 &gt; 错误 JSON 不触发下载，显示message和next_action并提供重试入口" time="0.009746417">
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -363,6 +363,7 @@ def get_metagpt_info(
 
     return Resp(data={
         "version": "v2.4",
+        "catalog_scope": "builtin_registry",
         "description": "MetaGPT 风格的多 Agent 编排层,提供 Environment/Role/Message 抽象",
         "components": {
             "Environment": Environment.__doc__.split("\n")[0] if Environment.__doc__ else "",
@@ -424,7 +425,8 @@ def preview_metagpt_environment(
         "trace_id": env.trace_id,
         "max_depth": env._max_depth,
         "roles": roles_info,
-        "registered_agent_count": len(registry.list()),
+        "registered_agent_count": len(registry.list_runtime()),
+        "catalog_scope": "builtin_registry",
     })
 
 

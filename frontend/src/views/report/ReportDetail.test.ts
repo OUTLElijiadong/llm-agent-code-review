@@ -10,9 +10,11 @@ const reportApi = vi.hoisted(() => ({
   exportReport: vi.fn(),
 }))
 const reviewApi = vi.hoisted(() => ({ getTaskIssues: vi.fn() }))
+const permissions = vi.hoisted(() => new Set<string>())
 const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 
 vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => router }))
+vi.mock('@/stores/user', () => ({ useUserStore: () => ({ hasPermission: (code: string) => permissions.has(code) }) }))
 vi.mock('@/api/report', () => reportApi)
 vi.mock('@/api/review', () => reviewApi)
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
@@ -73,6 +75,8 @@ function mountPage(): VueWrapper {
 beforeEach(() => {
   vi.clearAllMocks()
   route.query = {}
+  permissions.clear()
+  for (const code of ['report:view', 'issue:view', ...['json', 'html', 'pdf', 'word'].map(format => `report:export:${format}`)]) permissions.add(code)
   reportApi.getReportDetail.mockResolvedValue({
     project: { project_name: '测试项目', language: 'typescript' },
     task: { task_name: '安全审查', review_type: 'security', total_files: 1 },
@@ -94,6 +98,27 @@ beforeEach(() => {
 })
 
 describe('ReportDetail 报告口径', () => {
+  it('沙箱4个未分级报告条目不展示四级全零和虚构修复进度', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '沙箱项目' },
+      task: { task_name: '沙箱报告', review_type: 'sandbox_test', total_files: 1 },
+      stats: { score: 100, total_issues: 4, severe: 0, high: 0, medium: 0, low: 0, severity: { 未分级: 4 } },
+      files: [], rules_snapshot: [],
+      source: { type: 'sandbox_test', stats_basis: 'report_headings',
+        report_issue_summary: { total: 4, unclassified: 4 } },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('条目数不代表已确认漏洞数')
+    expect(wrapper.text()).toContain('报告条目')
+    expect(wrapper.text()).toContain('未分级')
+    expect(wrapper.find('.fix-gauge').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="report-risk-level"]').text()).toContain('安全风险未评定')
+    expect(wrapper.get('[data-testid="report-risk-level"]').text()).not.toContain('低风险')
+    expect(setupState(wrapper).severityRows).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('领域报告只显示真实 JSON 出口并隐藏非等价导出和预览', async () => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: { project_name: '渗透项目', language: 'unknown' },
@@ -387,6 +412,74 @@ describe('ReportDetail 详细修复方案', () => {
     await setupState(wrapper).selectRemediation(issue.id)
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' })
+    wrapper.unmount()
+  })
+})
+
+
+describe('ReportDetail 格式权限', () => {
+  it('只读账号保留打印和预览，隐藏下载入口且直接调用也不发送导出请求', async () => {
+    permissions.clear()
+    permissions.add('report:view')
+    route.query = { generate: '1' }
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('打印')
+    expect(wrapper.find('[data-testid="report-preview-button"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('生成 JSON')
+    expect(wrapper.text()).not.toContain('导出报告')
+    expect(wrapper.find('[data-testid="report-export-word"]').exists()).toBe(false)
+    const vm = setupState(wrapper)
+    for (const format of ['json', 'html', 'pdf', 'word']) {
+      await vm.handleGenerate(format)
+      await vm.handleExport(format)
+    }
+    await vm.downloadWord()
+    await vm.downloadPdf()
+    expect(reportApi.generateReport).not.toHaveBeenCalled()
+    expect(reportApi.exportReport).not.toHaveBeenCalled()
+    expect(reviewApi.getTaskIssues).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('JSON 权限只开放 JSON 生成与导出', async () => {
+    permissions.clear()
+    permissions.add('report:view')
+    permissions.add('report:export:json')
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('生成 JSON')
+    expect(wrapper.text()).not.toContain('生成 HTML')
+    expect(wrapper.find('[data-testid="report-export-pdf"]').exists()).toBe(false)
+    await setupState(wrapper).handleExport('json')
+    await setupState(wrapper).handleExport('pdf')
+    expect(reportApi.exportReport).toHaveBeenCalledExactlyOnceWith(42, 'json', 'detailed')
+    wrapper.unmount()
+  })
+
+  it('自动生成等待报告来源就绪，领域报告不会发送 HTML 请求', async () => {
+    route.query = { generate: '1' }
+    let resolveReport!: (value: unknown) => void
+    reportApi.getReportDetail.mockReturnValueOnce(new Promise(resolve => { resolveReport = resolve }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(reportApi.generateReport).not.toHaveBeenCalled()
+    resolveReport({ project: {}, task: {}, stats: {}, files: [], rules_snapshot: [], source: { type: 'sandbox_test' } })
+    await flushPromises()
+    expect(reportApi.generateReport).not.toHaveBeenCalled()
+    expect(router.replace).toHaveBeenCalledWith({ query: {} })
+    wrapper.unmount()
+  })
+
+  it('报告读取失败不自动生成，也不开放任何报告操作', async () => {
+    route.query = { generate: '1' }
+    reportApi.getReportDetail.mockRejectedValueOnce(new Error('not found'))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(reportApi.generateReport).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="report-export-pdf"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('打印')
     wrapper.unmount()
   })
 })

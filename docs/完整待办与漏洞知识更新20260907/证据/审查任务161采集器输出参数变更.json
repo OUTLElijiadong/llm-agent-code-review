@@ -1,0 +1,9 @@
+{
+  "previous_collector_sha256": "314deeebd53b0b873dc7da22f0c00a93cea6de244ae8260246bdfc67f577ea6b",
+  "previous_collector_archive": "docs/完整待办与漏洞知识更新20260907/证据/collect_review161_summary_readonly_before_output.py",
+  "current_collector_sha256": "2a317387550ac5cd24dc6f230991d149067e8680cd1d9b55df76100105aecd46",
+  "query_unchanged": true,
+  "query_sha256": "e83ea3b3bb995b71721e2f0bb10d6495cfc8fb032017b478c16b25c7a29f9eea",
+  "helper_unchanged": true,
+  "network_requests_during_verification": 0
+}

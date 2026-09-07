@@ -540,7 +540,9 @@ def test_preview_metagpt_environment_uses_mode_factory_and_enriches_roles(
     assert response.data["mode"] == mode
     assert response.data["trace_id"] == trace_id
     assert response.data["max_depth"] == 3
-    assert response.data["registered_agent_count"] == 2
+    # FakeRegistry.list() 有2个条目，但可适配的 list_runtime() 只有1个。
+    assert response.data["registered_agent_count"] == len(FakeRegistry().list_runtime()) == 1
+    assert response.data["catalog_scope"] == "builtin_registry"
     assert [item["name"] for item in response.data["roles"]] == ["reviewer", "plain"]
     reviewer = response.data["roles"][0]
     assert reviewer["agent_icon"] == "shield"

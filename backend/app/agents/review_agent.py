@@ -156,6 +156,7 @@ class CodeReviewerAgent(BaseAgent):
                 model=result.model,
                 duration_ms=result.duration_ms,
                 tokens=result.tokens,
+                usage_log_ids=result.usage_log_ids, http_attempts=result.http_attempts,
             )
 
         # 4. 转换 Issue → Finding(统一数据结构,便于 review_service 合并去重)
@@ -173,6 +174,7 @@ class CodeReviewerAgent(BaseAgent):
             model=result.model,
             duration_ms=result.duration_ms,
             tokens=result.tokens,
+                usage_log_ids=result.usage_log_ids, http_attempts=result.http_attempts,
         )
 
 

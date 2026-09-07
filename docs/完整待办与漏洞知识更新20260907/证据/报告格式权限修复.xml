@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="19" failures="0" errors="0" time="0.1296845">
+    <testsuite name="src/views/report/ReportDetail.test.ts" timestamp="2026-09-07T08:20:48.119Z" hostname="lijiadongdeMacBook-Air-7.local" tests="19" failures="0" errors="0" skipped="0" time="0.1296845">
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 沙箱4个未分级报告条目不展示四级全零和虚构修复进度" time="0.032718292">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 领域报告只显示真实 JSON 出口并隐藏非等价导出和预览" time="0.007327791">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 导出请求期间重复调用只发出一次，并且错误不会保存文件" time="0.006274167">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 导出错误展示后端message和next_action并提供重试操作" time="0.009009958">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 兼容后端 task.name 字段并展示真实任务名" time="0.004556416">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 顶部 Word 和 PDF 按钮统一调用新导出接口并传递当前模板" time="0.008906">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 风险文案和颜色按最终分数计算，不受动画中间值影响" time="0.005098666">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; CVSS 缺失时显示未评分" time="0.004464">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 报告口径 &gt; 只有 score 没有有效向量时不计入分布并显示未评分" time="0.006968459">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 在网络等待前同步预开窗口，导航开始后才提示成功" time="0.005473917">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 弹窗被拦截时显示带 sandbox 的页内预览，不误报新窗口成功并在关闭后恢复焦点" time="0.006602167">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 无法切断 opener 时关闭预开窗口并回退到页内预览" time="0.005511917">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail HTML 预览 &gt; 预览接口失败时关闭预开窗口并且只显示错误" time="0.004474166">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 详细修复方案 &gt; 点击后平滑滚动到真实详情区域并转移键盘焦点" time="0.00608775">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 详细修复方案 &gt; 用户开启减少动效时改为即时滚动" time="0.004656">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 只读账号保留打印和预览，隐藏下载入口且直接调用也不发送导出请求" time="0.004833917">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; JSON 权限只开放 JSON 生成与导出" time="0.002841625">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 自动生成等待报告来源就绪，领域报告不会发送 HTML 请求" time="0.002463959">
+        </testcase>
+        <testcase classname="src/views/report/ReportDetail.test.ts" name="ReportDetail 格式权限 &gt; 报告读取失败不自动生成，也不开放任何报告操作" time="0.0007965">
+        </testcase>
+    </testsuite>
+</testsuites>

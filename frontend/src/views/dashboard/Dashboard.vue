@@ -94,7 +94,7 @@
             <h3 class="font-display">最近已完成审查</h3>
             <p class="chart-desc">最近记录 · 随摘要刷新</p>
           </div>
-          <button class="link" type="button" @click="goReviewList">全部 →</button>
+          <button v-if="canViewReviews" class="link" type="button" @click="goReviewList">全部 →</button>
         </header>
         <p v-if="summaryState === 'loading'" role="status">正在读取最近审查</p>
         <p v-else-if="summaryState === 'error'">最近审查读取失败，请重试摘要。</p>
@@ -199,12 +199,10 @@ import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const userStore = useUserStore()
+const canViewReviews = computed(() => userStore.hasPermission('review:view'))
 const canStartReview = computed(() => userStore.hasPermission('review:start'))
 const canViewSecurity = computed(() => userStore.hasPermission('security:view'))
-const canExportWeeklyReport = computed(() => (
-  userStore.hasPermission('report:export:html')
-  || userStore.hasPermission('report:export:pdf')
-))
+const canExportWeeklyReport = computed(() => userStore.hasPermission('report:export:html'))
 const timeRange = ref(30)
 type LoadState = 'loading' | 'success' | 'error'
 type ChartKey = 'risk' | 'dimension' | 'score' | 'frequency'
@@ -629,20 +627,27 @@ function onWeeklyReport() {
   <p style="margin-top:32px;color:#aaa;font-size:12px">— 由棱镜 Prism 智能代码审查平台生成 —</p>
 </body></html>`
 
-  // 用 Blob URL 承载周报 HTML,比 document.write 更安全(不经过父文档解析,
-  // 内容作为独立文档加载),且所有动态字段已经过 esc() 转义
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-  const url = window.URL.createObjectURL(blob)
+  // 沿用报告页的文件下载方式；所有动态字段已转义，不依赖弹出窗口。
+  let url: string | undefined
+  let link: HTMLAnchorElement | undefined
   try {
-    window.open(url, '_blank', 'noopener,noreferrer')
+    url = window.URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
+    link = document.createElement('a')
+    link.href = url
+    link.download = `prism-statistics-${timeRange.value}d-${dayjs().format('YYYYMMDD-HHmmss')}.html`
+    document.body.appendChild(link)
+    link.click()
   } catch {
-    window.URL.revokeObjectURL(url)
-    ElMessage.error('无法打开统计报告，请检查浏览器设置后重试')
+    if (url) window.URL.revokeObjectURL(url)
+    ElMessage.error('无法下载统计报告，请检查浏览器下载设置后重试')
     return
+  } finally {
+    link?.remove()
   }
-  // 延迟回收 URL,确保新窗口加载完成
-  setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
-  ElMessage.info('已请求打开统计报告；若未出现，请允许弹出窗口后重试。可在报告窗口打印保存为 PDF')
+  // 延迟回收 URL，给浏览器时间接管下载。
+  const downloadUrl = url
+  setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 60_000)
+  ElMessage.info('已请求下载统计报告（HTML），请查看浏览器下载列表。打开文件后可打印保存为 PDF')
 }
 
 function onNewReview() {
@@ -651,6 +656,7 @@ function onNewReview() {
 }
 
 function goReviewList() {
+  if (!canViewReviews.value) return
   router.push('/reviews')
 }
 

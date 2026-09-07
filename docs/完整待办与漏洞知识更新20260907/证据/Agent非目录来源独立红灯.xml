@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="0.439" timestamp="2026-09-07T16:11:30.758750+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.services.test_agent_count_explicit_source" name="test_explicit_non_catalog_source_does_not_create_fake_agent_history[api_connection_test]" time="0.059"><failure message="AssertionError: assert [{'call_count...E27C4A', ...}] == []&#10;  &#10;  Left contains one more item: {'call_count': 1, 'category': 'reviewer', 'code': 'code_reviewer', 'color': '#E27C4A', ...}&#10;  Use -v to get more diff">db = &lt;sqlalchemy.orm.session.Session object at 0x10e64c370&gt;
+admin_user = &lt;app.models.user.User object at 0x10e6bd640&gt;
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10e91fa90&gt;
+label = 'api_connection_test'
+
+    @pytest.mark.parametrize('label', ['api_connection_test', 'embedding'])
+    def test_explicit_non_catalog_source_does_not_create_fake_agent_history(db, admin_user, monkeypatch, label):
+        monkeypatch.setattr(AgentRegistry, '_instance', AgentRegistry())
+        monkeypatch.setattr(SkillRegistry, '_instance', SkillRegistry())
+        Orchestrator()
+        db.add(AiCallLog(user_id=admin_user.id, agent_label=label, model_name='provider-model', status='success'))
+        db.commit()
+&gt;       assert agent_service.get_runtime_agents(db, admin_user.id) == []
+E       AssertionError: assert [{'call_count...E27C4A', ...}] == []
+E         
+E         Left contains one more item: {'call_count': 1, 'category': 'reviewer', 'code': 'code_reviewer', 'color': '#E27C4A', ...}
+E         Use -v to get more diff
+
+tests/unit/services/test_agent_count_explicit_source.py:18: AssertionError</failure></testcase><testcase classname="tests.unit.services.test_agent_count_explicit_source" name="test_explicit_non_catalog_source_does_not_create_fake_agent_history[embedding]" time="0.022"><failure message="AssertionError: assert [{'call_count...E27C4A', ...}] == []&#10;  &#10;  Left contains one more item: {'call_count': 1, 'category': 'reviewer', 'code': 'code_reviewer', 'color': '#E27C4A', ...}&#10;  Use -v to get more diff">db = &lt;sqlalchemy.orm.session.Session object at 0x10ed092e0&gt;
+admin_user = &lt;app.models.user.User object at 0x10ed09640&gt;
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10ed09b20&gt;
+label = 'embedding'
+
+    @pytest.mark.parametrize('label', ['api_connection_test', 'embedding'])
+    def test_explicit_non_catalog_source_does_not_create_fake_agent_history(db, admin_user, monkeypatch, label):
+        monkeypatch.setattr(AgentRegistry, '_instance', AgentRegistry())
+        monkeypatch.setattr(SkillRegistry, '_instance', SkillRegistry())
+        Orchestrator()
+        db.add(AiCallLog(user_id=admin_user.id, agent_label=label, model_name='provider-model', status='success'))
+        db.commit()
+&gt;       assert agent_service.get_runtime_agents(db, admin_user.id) == []
+E       AssertionError: assert [{'call_count...E27C4A', ...}] == []
+E         
+E         Left contains one more item: {'call_count': 1, 'category': 'reviewer', 'code': 'code_reviewer', 'color': '#E27C4A', ...}
+E         Use -v to get more diff
+
+tests/unit/services/test_agent_count_explicit_source.py:18: AssertionError</failure></testcase></testsuite></testsuites>

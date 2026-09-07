@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="7.248" timestamp="2026-09-07T14:27:34.810283+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.services.test_ai_usage_attribution" name="test_logs_expose_foreign_keys_for_each_execution_layer" time="0.002"><failure message="AssertionError: root_agent_run_id&#10;assert None is not None">def test_logs_expose_foreign_keys_for_each_execution_layer():
+        expected = {
+            "root_agent_run_id": "agent_response_run.id",
+            "agent_run_id": "agent_response_run.id",
+            "tool_execution_id": "agent_tool_execution.id",
+            "agent_team_id": "agent_team.id",
+            "agent_team_task_id": "agent_team_task.id",
+            "agent_execution_event_id": "agent_team_event.id",
+        }
+        for name, target in expected.items():
+            column = AiCallLog.__table__.columns.get(name)
+&gt;           assert column is not None, name
+E           AssertionError: root_agent_run_id
+E           assert None is not None
+
+backend/tests/unit/services/test_ai_usage_attribution.py:19: AssertionError</failure></testcase><testcase classname="tests.unit.services.test_ai_usage_attribution" name="test_raw_missing_usage_stays_unknown" time="0.006"><failure message="assert (0, 0, 0) == (None, None, None)&#10;  &#10;  At index 0 diff: 0 != None&#10;  Use -v to get more diff">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x1090c38e0&gt;
+
+    def test_raw_missing_usage_stays_unknown(monkeypatch):
+        agent = DeepSeekAgent(api_key="unit-only", model="unit-model", max_retries=0)
+        response = httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": "ok"}}]})
+        monkeypatch.setattr(agent, "_do_request", lambda *_args: (response, 3))
+        _, meta = agent.call_raw(system_prompt="unit", user_prompt="unit")
+&gt;       assert (meta["prompt_tokens"], meta["completion_tokens"], meta["total_tokens"]) == (None, None, None)
+E       assert (0, 0, 0) == (None, None, None)
+E         
+E         At index 0 diff: 0 != None
+E         Use -v to get more diff
+
+backend/tests/unit/services/test_ai_usage_attribution.py:29: AssertionError</failure></testcase></testsuite></testsuites>

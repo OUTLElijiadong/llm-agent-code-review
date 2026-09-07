@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="49" failures="0" errors="0" time="1.061435041">
+    <testsuite name="src/views/permissionVisibility.regression.test.ts" timestamp="2026-09-07T07:33:32.311Z" hostname="lijiadongdeMacBook-Air-7.local" tests="10" failures="0" errors="0" skipped="0" time="0.075316708">
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只读审查账号看不到启动、停止或删除审查入口" time="0.018395208">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只读问题账号看不到状态修改和批量处理" time="0.004987125">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只有 file:view 时编辑器为只读且不显示保存" time="0.002291">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只有 security:view 时不显示扫描操作" time="0.005863125">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 报告导出格式按各自权限点二次拦截" time="0.003336458">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 报告删除要求 review:cancel，权限恢复后才允许执行" time="0.00671125">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘不向缺少 review:start 的账号显示新建审查" time="0.015166625">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘缺少 review:view 时不显示或执行全部审查跳转（权限：[]）" time="0.006959875">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘缺少 review:view 时不显示或执行全部审查跳转（权限：[ &apos;review:start&apos; ]）" time="0.005383">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘仅有 review:view 的普通账号点击全部可进入审查列表" time="0.005727083">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/components/security/SecurityScanModal.test.ts" timestamp="2026-09-07T07:33:32.313Z" hostname="lijiadongdeMacBook-Air-7.local" tests="22" failures="0" errors="0" skipped="0" time="0.363517333">
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次可见且自动启动时，file 只使用原有请求契约" time="0.049372958">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次可见且自动启动时，task 只使用原有请求契约" time="0.00892275">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次可见且自动启动时，project 只使用原有请求契约" time="0.013518334">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次可见且自动启动时，all-projects 只使用原有请求契约" time="0.010535375">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 等待状态不显示假阶段/百分比，配置锁定且重复操作不重复发请求" time="0.019605375">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 失败展示后端原因和排查编号，明确重试不等于取消前次请求" time="0.015946125">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 后端明确禁止重试时，不提供可执行的重复请求" time="0.0063325">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 关闭只关闭窗口，重新打开继续等待同一个请求" time="0.017184917">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 真实对话框过渡及焦点建立后，Escape 关闭窗口但不取消扫描" time="0.117978459">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 范围改变后迟到的结果不能成为新范围的结果" time="0.011533125">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 卸载后不发布迟到的完成事件" time="0.004298292">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 首次打开已保存结果不再次扫描，并标明结果来源" time="0.00679525">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 任务复审说明真实的标签整理行为，不声称进行 LLM 深度扫描" time="0.00559225">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 缺少目标时给出页面内错误且不调用扫描接口" time="0.006696959">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 下载报告使用已返回结果，不触发新扫描" time="0.011606125">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="同步安全扫描真实交互 &gt; 空响应进入失败态而不是发布完成事件" time="0.007027291">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; file 无扫描权限时自动启动、按钮与直接处理函数均不发送请求" time="0.008098167">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; task 无扫描权限时自动启动、按钮与直接处理函数均不发送请求" time="0.005607083">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; project 无扫描权限时自动启动、按钮与直接处理函数均不发送请求" time="0.015130875">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; all-projects 无扫描权限时自动启动、按钮与直接处理函数均不发送请求" time="0.005707542">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; 失败后撤销扫描权限，重试不可执行；恢复权限可真实重试" time="0.008872084">
+        </testcase>
+        <testcase classname="src/components/security/SecurityScanModal.test.ts" name="扫描权限防御 &gt; 旧范围请求结束时权限已撤销，不自动发起新范围扫描" time="0.0064905">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/views/project/ProjectResourcePermission.test.ts" timestamp="2026-09-07T07:33:32.313Z" hostname="lijiadongdeMacBook-Air-7.local" tests="17" failures="0" errors="0" skipped="0" time="0.622601">
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="项目详情资源角色与 RBAC 求交 &gt; reviewer 隐藏全部写入口，保留合法下载和 AI 修复手册，直接调用写 handler 无效" time="0.158700375">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="项目详情资源角色与 RBAC 求交 &gt; owner 具备对应权限时真实按钮能上传、添加成员、修改角色和移除" time="0.1841985">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="项目详情资源角色与 RBAC 求交 &gt; owner 被撤回动作权限也不可管理成员、上传、下载或删除副本" time="0.020948584">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="项目详情资源角色与 RBAC 求交 &gt; owner 可以上传文件夹、空项目审计包，以及确认删除自己的源码修复副本" time="0.05174825">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="项目详情资源角色与 RBAC 求交 &gt; 确认框打开期间撤销成员权限，确认后不再发送删除请求" time="0.062896584">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="项目详情资源角色与 RBAC 求交 &gt; 无权限账号不主动读取项目、文件或成员" time="0.002450292">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="项目详情资源角色与 RBAC 求交 &gt; 有 scan 权限的 reviewer 可以打开扫描，不因没有 security:view 调取保存结果" time="0.047294584">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; 资源元信息返回之前及失败时保持只读" time="0.003794833">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; 资源元信息返回之前及失败时保持只读" time="0.00756175">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; reviewer 即使有 file:edit，编辑器只读且 Ctrl+S/处理函数不保存" time="0.003131458">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; owner 授权后保存真实内容并更新版本" time="0.003602125">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; reviewer 能查看历史，但恢复按钮和处理函数均拒绝" time="0.011744708">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; owner 可以确认恢复历史版本" time="0.022915167">
+            <system-err>
+[Vue warn]: Invalid event arguments: event validation failed for event &quot;confirm&quot;.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; owner 没有 file:edit 时不可保存或恢复" time="0.003217458">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; owner 没有 file:edit 时不可保存或恢复" time="0.006738625">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; 二进制编辑器无下载权限时按钮和处理函数均拒绝" time="0.004507916">
+        </testcase>
+        <testcase classname="src/views/project/ProjectResourcePermission.test.ts" name="文件编辑与版本恢复真实项目授权 &gt; 文件列表无下载权限不提供二进制下载" time="0.026589875">
+        </testcase>
+    </testsuite>
+</testsuites>

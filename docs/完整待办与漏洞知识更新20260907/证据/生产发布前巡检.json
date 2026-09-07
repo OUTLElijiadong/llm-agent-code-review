@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "status": "ok",
+  "can_continue": true,
+  "summary": "全部生产关键检查通过",
+  "actions": [],
+  "blocking_checks": [],
+  "checked_at_utc": "2026-09-07T06:46:46Z",
+  "checks": {
+    "release": {"ok": true, "status": "ok", "message": "发布账本、运行镜像和默认环境一致"},
+    "containers": {"ok": true, "status": "ok", "services": {"mysql":"healthy","redis":"healthy","clamav":"healthy","backend":"healthy","frontend":"healthy"}},
+    "disk": {"ok": true, "status": "ok", "used_percent": 75, "max_percent": 85, "critical_percent": 95},
+    "memory": {"ok": true, "status": "ok", "used_percent": 38, "max_percent": 90, "critical_percent": 98},
+    "backup": {"ok": true, "status": "ok", "file": "code_review_20260907T034652Z_f1ab6684e86c.sql.gz", "age_hours": 2, "max_age_hours": 30, "gzip_ok": true, "checksum_ok": true},
+    "alembic": {"ok": true, "status": "ok", "current": "047_review_input_snapshot", "head": "047_review_input_snapshot"},
+    "https": {"ok": true, "status": "ok", "mode": "required", "http_redirect_code": "308", "health": "ok"}
+  }
+}

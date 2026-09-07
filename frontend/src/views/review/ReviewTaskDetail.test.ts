@@ -319,6 +319,38 @@ describe('审查输入快照预览', () => {
 })
 
 describe('审查详情真实执行状态', () => {
+  it('沙箱历史16字段行按报告4条展示，未分级不伪造零风险', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      id: 161, review_type: 'sandbox_test', status: 'success', total_files: 1, processed_files: 1,
+      total_issues: 4, model_name: null, coverage: null,
+      report_issue_summary: { source: 'sandbox_report', basis: 'report_headings', total: 4, unclassified: 4,
+        severity_counts: { 严重: 0, 高: 0, 中: 0, 低: 0 }, structured_issues: 0 },
+    }))
+    await renderDetail()
+    const panel = wrapper.get('[aria-label="执行阶段与覆盖"]')
+    expect(panel.text()).toContain('已完成')
+    expect(panel.text()).toContain('1 / 1')
+    expect(panel.text()).not.toContain('未知')
+    expect(wrapper.get('.head-tally').text()).toContain('4未分级')
+    expect(wrapper.get('.head-tally').text()).toContain('4报告条目')
+    expect(wrapper.get('.head-tally').text()).not.toContain('0危急')
+    expect(wrapper.text()).toContain('条目数不代表已确认漏洞数')
+    expect(wrapper.text()).toContain('没有结构化问题明细')
+    expect(wrapper.get('.score-status').text()).toContain('不代表安全风险评级')
+    expect(wrapper.find('.workbench').exists()).toBe(false)
+  })
+
+  it('沙箱报告缺少问题清单时保留未知条目数，不显示旧占位16或0', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      review_type: 'sandbox_test', status: 'success', total_issues: 16, coverage: null,
+      report_issue_summary: { source: 'sandbox_report', basis: 'unavailable', total: null, unclassified: null,
+        severity_counts: { 严重: 0, 高: 0, 中: 0, 低: 0 }, structured_issues: 0 },
+    }))
+    await renderDetail()
+    expect(wrapper.get('.head-tally').text()).toContain('—报告条目')
+    expect(wrapper.get('.head-tally').text()).not.toContain('16')
+  })
+
   it('只显示 coverage 返回的阶段、文件和分片计数，不推算百分比', async () => {
     await renderDetail()
     const panel = wrapper.get('[aria-label="执行阶段与覆盖"]')

@@ -1,0 +1,34 @@
+{
+  "scope": "Agent数量口径定向回归与冻结源码，非生产实测",
+  "source_sha256": {
+    "backend/app/services/agent_service.py": "be9ebbb8848e463c1ba93d4e1b772b90fa34305e66112760ec68f5963c5fad32",
+    "backend/app/api/v1/agents.py": "19562d2447e92dc9155c52c148dff4a3403060304c217c000b42baf4da1fe264",
+    "backend/app/schemas/agent.py": "b8f0b6774264279df1a6bc586a4a37f9cabb400396354f31e5e6c332c8b001c2",
+    "backend/tests/unit/services/test_agent_count_scope.py": "cb76effe49a64e3dd7f79f283ac2f28a4cfadb15bf91db33a4a50cb1cd63a5c1",
+    "backend/tests/unit/api/test_agents_api_coverage.py": "73a5f0911ef7c3aff208bc465b585bfa55782f29ccbe802e541287ea7384fcfb",
+    "frontend/src/views/agent/AgentCenter.vue": "cd979619ca5c592c78c147d7e4240afd7724ecadacd8e43ab581d6f8dec6e392",
+    "frontend/src/components/agent/SituationPanel.vue": "503d516eb52fae2a4fe651a38edcdfd29a9e2831b580378deafadc1989b81f0e",
+    "frontend/src/components/agent/MetaGPTOrchestrationPanel.vue": "126f66c281e8641bd63b6f7a017a7e43271aeb2acd8a489d37b3ca4465cc8b1d",
+    "frontend/src/types/agent.ts": "c39a7e75818baf308f855d1117718a1bce624c38e2e6d9807c00d44ae57e3b47",
+    "frontend/src/types/agentEvent.ts": "cc1adda1e8e03c88cacfd4f5d9455beff3bc1fb581568fa893186d28e865c7c1",
+    "frontend/src/views/agent/AgentCountScope.test.ts": "04d74a9d1552cdbdd8b02dd4f2996768d1773b8d06626e57c3c89ed83a79a232"
+  },
+  "tests": {
+    "backend": {
+      "tests": 50,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "source": "Agent数量口径-修复后.xml",
+      "sha256": "24f191443ff079b8f0593b794617238de82129da270b5282b79090b96a4c7613"
+    },
+    "frontend": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "source": "Agent数量前端-修复后.xml",
+      "sha256": "4a6627d690e5e47fc39b3ce6d858a82f2cfcc8c62b451de49d08594ec6bb1dae"
+    }
+  }
+}

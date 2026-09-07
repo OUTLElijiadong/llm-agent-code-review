@@ -73,7 +73,12 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="total_issues" label="问题数" width="80" sortable />
+        <el-table-column prop="total_issues" label="问题 / 报告条目" width="140" sortable>
+          <template #default="{ row }">
+            <span v-if="row.source?.type === 'sandbox_test'">{{ row.source.report_issue_summary?.total ?? '—' }} 条报告条目</span>
+            <span v-else>{{ row.total_issues }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="create_time" label="创建时间" width="170" sortable>
           <template #default="{ row }">
             {{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}
@@ -104,7 +109,7 @@
                   <el-dropdown-item v-if="canExport('html') && !isDomainReport(row)" :command="'export:html'">导出 HTML</el-dropdown-item>
                   <el-dropdown-item v-if="canExport('pdf') && !isDomainReport(row)" :command="'export:pdf'">导出 PDF</el-dropdown-item>
                   <el-dropdown-item v-if="canExport('word') && !isDomainReport(row)" :command="'export:word'">导出 Word</el-dropdown-item>
-                  <el-dropdown-item :command="'delete'" divided>
+                  <el-dropdown-item v-if="canDeleteReport" :command="'delete'" divided>
                     <span class="danger-item">删除报告</span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
@@ -157,6 +162,7 @@ const filterProjectId = ref<number | null>(null)
 /** 空态文案依据:是否筛选了项目。 */
 const hasFilter = computed(() => Boolean(filterProjectId.value))
 const canStartReview = computed(() => userStore.hasPermission('review:start'))
+const canDeleteReport = computed(() => userStore.hasPermission('review:cancel'))
 const dateRange = ref<[string, string] | null>(null)
 /** 当前正在导出的任务 ID(用于导出按钮 loading 态),null 表示无操作 */
 const exportingTaskId = ref<number | null>(null)
@@ -290,6 +296,7 @@ function retryExport(): void {
  * @param row - 报告行数据
  */
 async function handleDelete(row: ReportListItem) {
+  if (!canDeleteReport.value) return
   const ok = await confirmDanger({ target: `删除报告「${row.task_name || `审查 #${row.task_id}`}」` })
   if (!ok) return
   try {

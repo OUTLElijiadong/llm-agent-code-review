@@ -68,6 +68,7 @@ from app.services.admin_capability_registry import (
 from app.services.admin_capability_registry import (
     READ as CAPABILITY_READ,
 )
+from app.services.ai_usage_context import current_attribution, run_attribution, usage_context, usage_tokens
 from app.services.deepseek_responses_runtime import (
     CANCELLED,
     COMPLETED,
@@ -422,6 +423,7 @@ class DatabaseCheckpointStore:
             return False
         self._db.add(
             AgentResponseRun(
+                **current_attribution(self._user_id),
                 run_id=checkpoint.run_id,
                 user_id=self._user_id,
                 surface=self._surface,
@@ -443,6 +445,7 @@ class DatabaseCheckpointStore:
         if row is None:
             self._db.add(
                 AgentResponseRun(
+                    **current_attribution(self._user_id),
                     run_id=checkpoint.run_id,
                     user_id=self._user_id,
                     surface=self._surface,
@@ -602,11 +605,28 @@ class NativeResponsesTransport:
         }
         timeout_seconds = self._config.timeout_seconds or settings.deepseek_timeout
         timeout = httpx.Timeout(float(timeout_seconds), read=float(timeout_seconds))
+        async def emit_observed(event):
+            try:
+                await _emit(self._event_sink, event)
+            except (Exception, asyncio.CancelledError) as exc:
+                observed = event.get("response")
+                if isinstance(observed, Mapping):
+                    exc.observed_response = dict(observed)
+                raise
+
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             async with client.stream("POST", url, headers=headers, json=dict(payload)) as response:
                 if response.status_code >= 400:
                     raw = (await response.aread()).decode("utf-8", errors="replace")
-                    raise RuntimeError(_upstream_error(raw, response.status_code))
+                    from app.services.deepseek_responses_runtime import ObservedResponseError
+
+                    try:
+                        observed = json.loads(raw)
+                    except (TypeError, ValueError):
+                        observed = {}
+                    raise ObservedResponseError(
+                        _upstream_error(raw, response.status_code), observed if isinstance(observed, Mapping) else {},
+                    )
                 event_name = ""
                 data_lines: list[str] = []
                 async for line in response.aiter_lines():
@@ -615,7 +635,7 @@ class NativeResponsesTransport:
                         event_name, data_lines = "", []
                         if event is None:
                             continue
-                        await _emit(self._event_sink, event)
+                        await emit_observed(event)
                         yield event
                         continue
                     if line.startswith(":"):
@@ -626,7 +646,7 @@ class NativeResponsesTransport:
                         data_lines.append(line[5:].lstrip())
                 event = _decode_sse_event(event_name, data_lines)
                 if event is not None:
-                    await _emit(self._event_sink, event)
+                    await emit_observed(event)
                     yield event
 
 
@@ -1281,6 +1301,7 @@ class PrismToolExecutor:
         row = agent_knowledge_service.add_document(
             self._db,
             agent_code=self._knowledge_agent_code(),
+            user_id=int(self._user.id),
             title=str(call.arguments["title"]),
             content=str(call.arguments["content"]),
             source_type="manual",
@@ -1848,9 +1869,12 @@ class PrismToolExecutor:
             # 登录版本可能在占位账本提交后变化；真正触发任何外部副作用前
             # 必须再次校验，旧设备不能利用校验与执行之间的窗口。
             self._assert_session_active()
-            raw_result = operation()
-            if inspect.isawaitable(raw_result):
-                raw_result = await raw_result
+            fields = {**run_attribution(self._db, int(self._user.id), self._run_id),
+                      "tool_execution_id": int(row.id)}
+            with usage_context(int(self._user.id), fields, db=self._db):
+                raw_result = operation()
+                if inspect.isawaitable(raw_result):
+                    raw_result = await raw_result
             result = (
                 raw_result if isinstance(raw_result, ToolExecutionResult) else ToolExecutionResult.success(raw_result)
             )
@@ -2533,23 +2557,23 @@ class AgentResponsesService:
             模型名优先取上游 response.model,否则与 _runtime 的 fallback_model
             保持同步,确保日志记录的是总调度者模型而不是子 Agent 的 flash 默认值。
             """
-            from app.models.ai_call_log import AiCallLog
+            from app.services.ai_usage_context import record_usage_attempt
 
             usage = response.get("usage") if isinstance(response.get("usage"), Mapping) else {}
+            normalized_usage = {
+                "prompt_tokens": usage_tokens(usage, "input_tokens", "prompt_tokens"),
+                "completion_tokens": usage_tokens(usage, "output_tokens", "completion_tokens"),
+                "total_tokens": usage_tokens(usage, "total_tokens"),
+            }
             upstream_status = str(response.get("status") or "")
             error_value = response.get("error")
-            log = AiCallLog(
-                user_id=int(self._user.id),
-                agent_label=agent_label,
-                model_name=str(response.get("model") or fallback_model),
-                prompt_tokens=_to_int(usage.get("input_tokens") or usage.get("prompt_tokens")),
-                completion_tokens=_to_int(usage.get("output_tokens") or usage.get("completion_tokens")),
-                total_tokens=_to_int(usage.get("total_tokens")),
-                status="success" if upstream_status == COMPLETED else "failed",
-                error_message=(str(error_value) if error_value else None)[:500] if error_value else None,
-            )
-            self._db.add(log)
-            self._db.commit()
+            with usage_context(int(self._user.id), run_attribution(self._db, int(self._user.id), run_id), db=self._db):
+                record_usage_attempt(
+                    user_id=int(self._user.id), agent_label=agent_label,
+                    model_name=str(response.get("model") or fallback_model), usage=normalized_usage,
+                    status="success" if upstream_status == COMPLETED else "failed",
+                    error=str(error_value) if error_value else "",
+                )
 
         runtime = DeepSeekResponsesRuntime(
             transport=NativeResponsesTransport(config, transport_sink),

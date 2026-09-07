@@ -10,7 +10,7 @@ import type {
   SecurityDashboardSummaryOut,
 } from '@/types/security'
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
-import { OWASP_TOP10, type OwaspDoc } from './owasp-knowledge'
+import { OWASP_TOP10, SECURITY_CATALOG_METADATA, type OwaspDoc } from './owasp-knowledge'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
@@ -229,9 +229,20 @@ onMounted(() => {
     <!-- ========== OWASP Top 10 ========== -->
     <section class="block">
       <header class="block-head">
-        <h3 class="block-title">OWASP Top 10 · 2021</h3>
+        <h3 class="block-title">OWASP Top 10 · {{ SECURITY_CATALOG_METADATA.owasp_version }}</h3>
         <p class="block-sub">
-          OWASP 基金会评选的 Web 应用最危险 10 类风险,棱镜围绕这 10 项展开扫描。
+          OWASP 最终版应用安全风险分类，点击查看中文说明与防范示例。
+          CWE {{ SECURITY_CATALOG_METADATA.cwe_version }} · 官方弱点 {{ SECURITY_CATALOG_METADATA.cwe_weakness_count }} 项 ·
+          核验于 {{ SECURITY_CATALOG_METADATA.verified_at }}。
+          <a :href="SECURITY_CATALOG_METADATA.owasp_source_url" target="_blank" rel="noopener noreferrer">OWASP 官方来源</a>
+          · <a href="https://cwe.mitre.org/data/index.html" target="_blank" rel="noopener noreferrer">CWE 官方来源</a>
+        </p>
+        <p class="block-sub">
+          {{ SECURITY_CATALOG_METADATA.mapping_note }}
+          历史报告保留生成时的版本标签。
+        </p>
+        <p class="block-sub">
+          {{ SECURITY_CATALOG_METADATA.cve_scope }}
           点击任一项目可查看中文详解 + 防范代码示例。
         </p>
       </header>
@@ -248,6 +259,7 @@ onMounted(() => {
           role="button"
           @click="openOwaspDetail(owasp)"
           @keyup.enter="openOwaspDetail(owasp)"
+          @keydown.space.prevent="openOwaspDetail(owasp)"
         >
           <div class="owasp-code">{{ owasp.code }}</div>
           <div class="owasp-name-zh">{{ owasp.name_zh }}</div>
@@ -414,6 +426,7 @@ onMounted(() => {
     >
       <div v-if="selectedOwasp" class="owasp-detail">
         <div class="detail-subtitle">{{ selectedOwasp.name_en }}</div>
+        <a :href="selectedOwasp.source_url" target="_blank" rel="noopener noreferrer">查看 {{ selectedOwasp.owasp }} 官方原文</a>
 
         <section class="detail-section">
           <h4>定义</h4>

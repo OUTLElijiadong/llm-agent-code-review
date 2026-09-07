@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="59" failures="0" errors="0" time="0.88896325">
+    <testsuite name="src/views/report/ReportList.test.ts" timestamp="2026-09-07T08:14:34.229Z" hostname="lijiadongdeMacBook-Air-7.local" tests="3" failures="0" errors="0" skipped="0" time="0.033743708">
+        <testcase classname="src/views/report/ReportList.test.ts" name="报告列表领域导出 &gt; 领域报告只显示真实 JSON 出口，不展示非等价 HTML/PDF/Word" time="0.021728917">
+        </testcase>
+        <testcase classname="src/views/report/ReportList.test.ts" name="报告列表领域导出 &gt; 领域 JSON 可达并反馈成功，列表导出按钮在请求期间防重复" time="0.005775958">
+        </testcase>
+        <testcase classname="src/views/report/ReportList.test.ts" name="报告列表领域导出 &gt; 错误 JSON 不触发下载，显示message和next_action并提供重试入口" time="0.0057295">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/views/review/ReviewTaskDetail.test.ts" timestamp="2026-09-07T08:14:34.230Z" hostname="lijiadongdeMacBook-Air-7.local" tests="46" failures="0" errors="0" skipped="0" time="0.531383125">
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 当前文件已是 v2 时仍读取并校验任务 v1，使用冻结的名称和语言" time="0.062077875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 有快照摘要但服务端校验为 false 时阻断，不能当作旧任务回退" time="0.016345292">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 有快照摘要但服务端校验为 undefined 时阻断，不能当作旧任务回退" time="0.007659541">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{&quot;content_sha256&quot;:null}" time="0.007613208">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{&quot;content_sha256&quot;:&quot;&quot;}" time="0.009485583">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{&quot;content_sha256&quot;:&quot;broken&quot;}" time="0.006200209">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{&quot;version_no&quot;:0}" time="0.00652275">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{}" time="0.006975958">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 服务端快照校验失败后重试先重新读取任务记录，恢复后才读取历史内容" time="0.060406959">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 重新确认失败快照时任务接口断线，保留阻断和明确重试错误" time="0.01001125">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 已知快照的元数据在重试中消失时仍阻断，多次重试也不能降级为旧任务" time="0.012047167">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 只有没有快照元数据的旧任务才显示带历史未知警告的当前文件：{&quot;snapshot_verified&quot;:false,&quot;content_sha256&quot;:null}" time="0.007120417">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 只有没有快照元数据的旧任务才显示带历史未知警告的当前文件：{}" time="0.0063425">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 即使历史接口返回成功，UTF-8 内容摘要不符也不展示" time="0.010931875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 缺少 crypto 时明确无法校验，不把服务端标记当作浏览器验证" time="0.005259667">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 缺少 TextEncoder 时明确无法校验，不把服务端标记当作浏览器验证" time="0.005042875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 浏览器摘要计算异常显示错误而不是信任未验证内容" time="0.005761292">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 版本接口返回的身份或内容无效时拒绝展示：{&quot;file_id&quot;:99}" time="0.00588575">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 版本接口返回的身份或内容无效时拒绝展示：{&quot;version_no&quot;:2}" time="0.0064825">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 版本接口返回的身份或内容无效时拒绝展示：{}" time="0.00890175">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 软删除或历史版本 404 明确无法读取原始输入，重试仍读取同一历史版本" time="0.05959325">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 历史请求未完成时反馈忙态，不宣称已校验，同一文件键盘连按不重复请求" time="0.059787833">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 源码编辑入口明确编辑当前版本，导航不冒充快照编辑" time="0.006144166">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 切换文件后忽略旧历史请求的迟到 resolve，不覆盖新内容或错误" time="0.008648334">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 切换文件后忽略旧历史请求的迟到 reject，不覆盖新内容或错误" time="0.012334041">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 摘要计算期间切换任务，旧摘要完成后不能污染新任务预览" time="0.0118235">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 沙箱历史16字段行按报告4条展示，未分级不伪造零风险" time="0.004125333">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 沙箱报告缺少问题清单时保留未知条目数，不显示旧占位16或0" time="0.002308625">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 只显示 coverage 返回的阶段、文件和分片计数，不推算百分比" time="0.004168666">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; pending 即使携带 100 分也不显示风险评级和满分动画" time="0.005668916">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; running 即使携带 100 分也不显示风险评级和满分动画" time="0.004393459">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; failed 即使携带 100 分也不显示风险评级和满分动画" time="0.006257166">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; cancelled 即使携带 100 分也不显示风险评级和满分动画" time="0.004660833">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 成功且评分有效时显示服务端原值，不经动画制造中间评分" time="0.003956916">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 历史或非法 coverage 标未知，不借用任务总数" time="0.003973625">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 历史或非法 coverage 标未知，不借用任务总数" time="0.003460667">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 历史或非法 coverage 标未知，不借用任务总数" time="0.00452375">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 真实零计数保留为零，而不是未知或虚构完成" time="0.003924834">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 失败展示真实覆盖缺口和服务端错误，不伪装为未发现问题" time="0.003639333">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 初次连接失败有原因和重试入口，重试只读取原任务" time="0.008076875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 轮询失败保留上次数据、停止静默重试，手动重连成功后继续到终态" time="0.012785">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 问题接口失败不显示空成功态，可独立重试" time="0.0063195">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 忙态重试只发一次读取，卸载后的迟到响应不会重启轮询" time="0.002599416">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 切换任务后丢弃旧任务的迟到响应" time="0.004123834">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 代码连接错误可重试，文件行支持键盘选择" time="0.007630875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 迟到的问题筛选响应不能覆盖较新的筛选结果" time="0.008262459">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/views/review/ReviewTaskList.polling.test.ts" timestamp="2026-09-07T08:14:34.232Z" hostname="lijiadongdeMacBook-Air-7.local" tests="10" failures="0" errors="0" skipped="0" time="0.323836417">
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; R8 轮询错误保留最后结果和错误提示，网络恢复后自动重试" time="0.081504083">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 待排队任务同样持续轮询" time="0.035974666">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 首次加载失败不伪报空数据并可以立即重试" time="0.023562875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 卸载后在途响应不得重新启动轮询" time="0.018584792">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 慢轮询不能覆盖用户刚切换的筛选结果" time="0.0250985">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 连续失败以4/8/16/30秒退避并封顶，成功后恢复4秒间隔" time="0.025164833">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 相同筛选的慢请求不可叠加定时轮询或手动刷新" time="0.020238959">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 缺少错误文字的拒绝仍显示错误并安排恢复，不伪报空列表" time="0.0232305">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 旧筛选的失败响应不能覆盖新筛选成功状态或重启重试" time="0.019533334">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskList.polling.test.ts" name="任务列表轮询恢复 &gt; 真实表格只把success评分作为风险评级，失败历史100分和失败0分均显示未形成评分" time="0.050416791">
+        </testcase>
+    </testsuite>
+</testsuites>

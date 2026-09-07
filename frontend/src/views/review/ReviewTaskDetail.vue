@@ -22,16 +22,20 @@
       <div class="execution-status" role="status" aria-live="polite" aria-atomic="true">
         <div class="execution-heading">
           <strong>{{ stageLabel }}</strong>
-          <span>{{ modelLabel }}</span>
+          <span v-if="!isSandboxReport || task.model_name">{{ modelLabel }}</span>
           <span v-if="detailError" class="stale-note">上次成功获取的数据；当前连接已中断</span>
           <span v-else-if="refreshing">正在获取最新状态…</span>
         </div>
-        <dl class="coverage-grid">
+        <dl v-if="isSandboxReport" class="coverage-grid">
+          <div><dt>已处理范围 / 总范围</dt><dd>{{ coverageCount(task.processed_files) }} / {{ coverageCount(task.total_files) }}</dd></div>
+        </dl>
+        <dl v-else class="coverage-grid">
           <div><dt>当前文件</dt><dd>{{ task.coverage?.current_file || '未知（接口未提供）' }}</dd></div>
           <div><dt>已完成文件 / 总文件</dt><dd>{{ coverageCount(task.coverage?.completed_files) }} / {{ coverageCount(task.coverage?.total_files) }}</dd></div>
           <div><dt>当前 / 最近文件分片</dt><dd>{{ coverageCount(task.coverage?.completed_chunks) }} / {{ coverageCount(task.coverage?.total_chunks) }}</dd></div>
         </dl>
-        <p class="coverage-note">仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。</p>
+        <p v-if="isSandboxReport" class="coverage-note">沙箱测试按任务范围记录完成情况；逐文件、分片和模型信息以报告中已保存的证据为准。</p>
+        <p v-else class="coverage-note">仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。</p>
       </div>
       <div v-if="taskFailure" class="execution-error" role="alert">{{ taskFailure }}</div>
     </section>
@@ -52,8 +56,8 @@
         <h1 class="font-display">{{ task?.task_name || `审查任务 #${taskId}` }}</h1>
         <div class="head-meta font-mono">
           <span>{{ reviewTypeLabel(task?.review_type) }}</span>
-          <span class="dot">·</span>
-          <span>{{ modelLabel }}</span>
+          <template v-if="!isSandboxReport || task?.model_name"><span class="dot">·</span>
+          <span>{{ modelLabel }}</span></template>
           <span class="dot">·</span>
           <span>{{ formatDuration(Number(task?.duration_ms ?? 0)) }}</span>
         </div>
@@ -75,7 +79,7 @@
           <span class="score-out font-mono">/100</span>
         </div>
         <div class="score-meta">
-          <div class="score-label">代码质量</div>
+          <div class="score-label">{{ isSandboxReport ? '测试评分' : '代码质量' }}</div>
           <div class="score-status" :style="{ color: scoreFlatColor(displayScore) }">{{ riskLevel }}</div>
         </div>
       </div>
@@ -83,25 +87,28 @@
 
       <div class="head-tally">
         <div class="tally-item">
-          <span class="t-val font-display" :style="{ color: 'var(--sev-severe)' }">{{ task?.severe_issues ?? 0 }}</span>
+          <span class="t-val font-display" :style="{ color: 'var(--sev-severe)' }">{{ tallyCount('严重', task?.severe_issues) }}</span>
           <span class="t-label">危急</span>
         </div>
         <div class="tally-item">
-          <span class="t-val font-display" :style="{ color: 'var(--sev-high)' }">{{ task?.high_issues ?? 0 }}</span>
+          <span class="t-val font-display" :style="{ color: 'var(--sev-high)' }">{{ tallyCount('高', task?.high_issues) }}</span>
           <span class="t-label">高</span>
         </div>
         <div class="tally-item">
-          <span class="t-val font-display" :style="{ color: 'var(--sev-medium)' }">{{ task?.medium_issues ?? 0 }}</span>
+          <span class="t-val font-display" :style="{ color: 'var(--sev-medium)' }">{{ tallyCount('中', task?.medium_issues) }}</span>
           <span class="t-label">中</span>
         </div>
         <div class="tally-item">
-          <span class="t-val font-display" :style="{ color: 'var(--sev-low)' }">{{ task?.low_issues ?? 0 }}</span>
+          <span class="t-val font-display" :style="{ color: 'var(--sev-low)' }">{{ tallyCount('低', task?.low_issues) }}</span>
           <span class="t-label">低</span>
+        </div>
+        <div v-if="isSandboxReport && task?.report_issue_summary?.unclassified" class="tally-item">
+          <span class="t-val font-display">{{ task.report_issue_summary.unclassified }}</span><span class="t-label">未分级</span>
         </div>
         <div class="tally-divider"></div>
         <div class="tally-item">
-          <span class="t-val font-display">{{ task?.total_issues ?? 0 }}</span>
-          <span class="t-label">总计</span>
+          <span class="t-val font-display">{{ isSandboxReport ? (task?.report_issue_summary?.total ?? '—') : (task?.total_issues ?? 0) }}</span>
+          <span class="t-label">{{ isSandboxReport ? '报告条目' : '总计' }}</span>
         </div>
       </div>
 
@@ -117,7 +124,7 @@
           🛡 安全复审
         </el-button>
         <el-button
-          v-if="task?.total_issues && task.total_issues > 0"
+          v-if="!isSandboxReport && task?.total_issues && task.total_issues > 0"
           :icon="MagicStick"
           size="small"
           type="primary"
@@ -131,6 +138,12 @@
         </span>
       </div>
     </header>
+
+    <section v-if="isSandboxReport" class="coverage-note" role="note">
+      <p v-if="task?.report_issue_summary?.total != null">按报告“问题清单”的独立条目统计，严重度仅采用报告明示标签；条目数不代表已确认漏洞数。</p>
+      <p v-else>报告未保存可识别的问题清单，条目数与严重度未确定。</p>
+      <p v-if="!task?.report_issue_summary?.structured_issues">该报告没有结构化问题明细，请在报告中查看发现、证据和修复建议。</p>
+    </section>
 
     <section v-if="task?.aggregation_summary?.aggregated" class="trust-strip" aria-label="可信聚合状态">
       <span class="trust-title">可信聚合</span>
@@ -166,7 +179,7 @@
     />
 
     <!-- ============ 三栏工作台 ============ -->
-    <section class="workbench">
+    <section v-if="!isSandboxReport || task?.report_issue_summary?.structured_issues" class="workbench">
       <!-- 左：文件树 -->
       <aside class="pane pane-files">
         <header class="pane-head">
@@ -390,12 +403,20 @@ const snapshotFileIds = new Set<number>()
 let detailRequest: { generation: number; promise: Promise<void> } | null = null
 let issueRequest: { key: string; promise: Promise<void> } | null = null
 const task = ref<TaskDetailOut | null>(null)
+const isSandboxReport = computed(() => task.value?.review_type === 'sandbox_test')
+function tallyCount(level: string, fallback: number | undefined): number | string {
+  if (!isSandboxReport.value) return fallback ?? 0
+  const summary = task.value?.report_issue_summary
+  if (summary?.total == null || summary.total === summary.unclassified && summary.total > 0) return '—'
+  return summary.severity_counts[level] ?? 0
+}
 const displayScore = computed(() => {
   const value = task.value?.score
   return task.value?.status === 'success' && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
 })
 const modelLabel = computed(() => task.value?.model_name?.trim() || '模型未知（接口未提供）')
 const stageLabel = computed(() => {
+  if (isSandboxReport.value) return statusLabels[task.value?.status ?? ''] || '状态未记录'
   const stage = task.value?.coverage?.stage
   const labels: Record<string, string> = {
     queued: '等待执行', analyzing: '分析中', complete: '执行完成',
@@ -480,6 +501,7 @@ const severityChips = computed(() => {
 const dimChips = computed(() => dimMeta)
 
 const riskLevel = computed(() => {
+  if (isSandboxReport.value) return '测试得分不代表安全风险评级'
   const score = displayScore.value
   if (score === null) return ''
   if (score >= 90) return '优秀 · 以审查范围为准'

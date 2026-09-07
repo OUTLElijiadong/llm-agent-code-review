@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="1.396" timestamp="2026-09-07T16:29:20.406542+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.test_production_permission_acceptance_runner" name="test_plan_is_portable_to_deployment_without_local_virtualenv" time="0.118"><failure message="assert False&#10; +  where False = all(&lt;generator object test_plan_is_portable_to_deployment_without_local_virtualenv.&lt;locals&gt;.&lt;genexpr&gt; at 0x1119cccf0&gt;)">tmp_path = PosixPath('/private/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/pytest-of-li/pytest-177/test_plan_is_portable_to_deplo0')
+
+    def test_plan_is_portable_to_deployment_without_local_virtualenv(tmp_path):
+        plan = runner_module.build_plan()
+&gt;       assert all(name.startswith('app/') for name in plan['source_sha256'])
+E       assert False
+E        +  where False = all(&lt;generator object test_plan_is_portable_to_deployment_without_local_virtualenv.&lt;locals&gt;.&lt;genexpr&gt; at 0x1119cccf0&gt;)
+
+tests/test_production_permission_acceptance_runner.py:66: AssertionError</failure></testcase></testsuite></testsuites>

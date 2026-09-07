@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="63" failures="0" errors="0" time="0.292487875">
+    <testsuite name="src/views/permissionVisibility.regression.test.ts" timestamp="2026-09-07T07:59:54.115Z" hostname="lijiadongdeMacBook-Air-7.local" tests="10" failures="0" errors="0" skipped="0" time="0.06516">
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只读审查账号看不到启动、停止或删除审查入口" time="0.015784667">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只读问题账号看不到状态修改和批量处理" time="0.004174791">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只有 file:view 时编辑器为只读且不显示保存" time="0.001592125">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 只有 security:view 时不显示扫描操作" time="0.006033458">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 报告导出格式按各自权限点二次拦截" time="0.00282">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 报告删除要求 review:cancel，权限恢复后才允许执行" time="0.003961458">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘不向缺少 review:start 的账号显示新建审查" time="0.013888167">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘缺少 review:view 时不显示或执行全部审查跳转（权限：[]）" time="0.005800459">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘缺少 review:view 时不显示或执行全部审查跳转（权限：[ &apos;review:start&apos; ]）" time="0.006471">
+        </testcase>
+        <testcase classname="src/views/permissionVisibility.regression.test.ts" name="细粒度权限的页内操作可见性 &gt; 仪表盘仅有 review:view 的普通账号点击全部可进入审查列表" time="0.004170375">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/components/layout/AppHeader.test.ts" timestamp="2026-09-07T07:59:54.116Z" hostname="lijiadongdeMacBook-Air-7.local" tests="4" failures="0" errors="0" skipped="0" time="0.028367333">
+        <testcase classname="src/components/layout/AppHeader.test.ts" name="AppHeader navigation visibility &gt; uses the same permission gate for search results" time="0.017449125">
+        </testcase>
+        <testcase classname="src/components/layout/AppHeader.test.ts" name="AppHeader navigation visibility &gt; renders accessible top navigation with active underline state" time="0.006262041">
+        </testcase>
+        <testcase classname="src/components/layout/AppHeader.test.ts" name="AppHeader navigation visibility &gt; 缺少 agent:chat 时不显示小菱按钮和搜索入口" time="0.002316833">
+        </testcase>
+        <testcase classname="src/components/layout/AppHeader.test.ts" name="AppHeader navigation visibility &gt; 审查员拥有项目权限时不被静态角色规则误隐藏" time="0.001968333">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/views/dashboard/Dashboard.test.ts" timestamp="2026-09-07T07:59:54.117Z" hostname="lijiadongdeMacBook-Air-7.local" tests="49" failures="0" errors="0" skipped="0" time="0.198960542">
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 未知维度不得从图表和图例消失，分项合计应等于真实总数" time="0.044652458">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 全部问题未归类时显示真实数量而不是全零光谱" time="0.006068542">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 首载未取得摘要时不显示零项任务或零分" time="0.003825084">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要失败显示可重试错误而不假报空业务" time="0.005513458">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 真实全零保留零值，没有已完成审查时不判为风险或零分" time="0.004329458">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 已有成功审查的真实零分不被当成未知" time="0.003790625">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 畸形摘要不得变成可导出的统计事实" time="0.002136167">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 部分接口迟迟未返回时成功分区仍立即展示" time="0.005705167">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 维度接口成功且为空不再永远显示汇总中或八个假零" time="0.003157208">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 单图失败与空态分开且仅重试失败图" time="0.004526291">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 切换日期时旧区间成功响应不得覆盖新图" time="0.00542125">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 旧区间失败不得覆盖新请求成功状态" time="0.004265041">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 读取失败或仍在加载时禁止导出不完整报告" time="0.003037167">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 不展示写死的宣传、假直播标签和非周区间的周报文案" time="0.003579625">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 点击导出下载有文件名的HTML报告并反馈，不依赖弹出窗口" time="0.007071042">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 触发下载失败时给出反馈并清理临时链接与URL" time="0.003372917">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 下载内容保留真实统计范围与数值，项目标题按文本转义" time="0.013170083">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 后端真实四类零计数不画出虚假的等分饼图且允许导出真实零" time="0.002969292">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷null不能作为成功数据或导出来源" time="0.002676625">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷[null]不能作为成功数据或导出来源" time="0.003076625">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷[{&quot;severity&quot;:&quot;严重&quot;,&quot;count&quot;:-1}]不能作为成功数据或导出来源" time="0.002420083">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷[{&quot;severity&quot;:null,&quot;count&quot;:1}]不能作为成功数据或导出来源" time="0.002274834">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷[{&quot;severity&quot;:&quot;严重&quot;,&quot;count&quot;:null}]不能作为成功数据或导出来源" time="0.002253708">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; dimension非法载荷[{&quot;issue_type&quot;:&quot;安全漏洞&quot;,&quot;count&quot;:&quot;3&quot;}]不能作为成功数据或导出来源" time="0.0023315">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; dimension非法载荷[{&quot;issue_type&quot;:&quot;安全漏洞&quot;,&quot;count&quot;:null}]不能作为成功数据或导出来源" time="0.0023525">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; dimension非法载荷[{&quot;issue_type&quot;:42,&quot;count&quot;:2}]不能作为成功数据或导出来源" time="0.002493417">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; dimension非法载荷[{&quot;issue_type&quot;:&quot;安全漏洞&quot;,&quot;count&quot;:null}]不能作为成功数据或导出来源" time="0.002472625">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; score非法载荷[{&quot;task_id&quot;:1,&quot;score&quot;:101,&quot;create_time&quot;:&quot;2026-09-05T12:00:00&quot;}]不能作为成功数据或导出来源" time="0.002275667">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; score非法载荷[{&quot;task_id&quot;:null,&quot;score&quot;:50,&quot;create_time&quot;:&quot;2026-09-05T12:00:00&quot;}]不能作为成功数据或导出来源" time="0.00230275">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; score非法载荷[{&quot;task_id&quot;:1,&quot;score&quot;:&quot;50&quot;,&quot;create_time&quot;:&quot;2026-09-05T12:00:00&quot;}]不能作为成功数据或导出来源" time="0.002503917">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; score非法载荷[{&quot;task_id&quot;:1,&quot;score&quot;:50,&quot;create_time&quot;:&quot;2026-02-30T12:00:00&quot;}]不能作为成功数据或导出来源" time="0.00523025">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; frequency非法载荷[{&quot;date&quot;:&quot;invalid&quot;,&quot;count&quot;:1}]不能作为成功数据或导出来源" time="0.002704791">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; frequency非法载荷[{&quot;date&quot;:&quot;2026-02-30&quot;,&quot;count&quot;:1}]不能作为成功数据或导出来源" time="0.002143292">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; frequency非法载荷[{&quot;date&quot;:&quot;2026-09-05&quot;,&quot;count&quot;:-1}]不能作为成功数据或导出来源" time="0.002249708">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; frequency非法载荷[{&quot;date&quot;:&quot;2026-09-05&quot;,&quot;count&quot;:&quot;2&quot;}]不能作为成功数据或导出来源" time="0.002256166">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员null被入口拒绝而非渲染崩溃" time="0.001200167">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;id&quot;:&quot;2&quot;}被入口拒绝而非渲染崩溃" time="0.001056917">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;task_name&quot;:2}被入口拒绝而非渲染崩溃" time="0.001149833">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;project_name&quot;:null}被入口拒绝而非渲染崩溃" time="0.001277625">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;score&quot;:null}被入口拒绝而非渲染崩溃" time="0.001095708">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;score&quot;:101}被入口拒绝而非渲染崩溃" time="0.000999125">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;status&quot;:&quot;pending&quot;}被入口拒绝而非渲染崩溃" time="0.0010475">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;create_time&quot;:&quot;2026-02-30T12:00:00&quot;}被入口拒绝而非渲染崩溃" time="0.000986666">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 无导出权限时按钮不可见且直接调用也不能打开报告" time="0.00212325">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 只有PDF导出权限时不能下载HTML格式" time="0.001949667">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 加载中时按钮和直接导出调用均拒绝" time="0.001828958">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要重叠刷新不被旧请求覆盖" time="0.001915333">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 刷新失败隐藏旧图，成功摘要保留，单图重试恢复" time="0.009515125">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 卸载后成功和失败都不写状态或留下任务刷新监听" time="0.001439875">
+        </testcase>
+    </testsuite>
+</testsuites>

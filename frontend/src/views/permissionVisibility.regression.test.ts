@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
   routerPush: vi.fn(),
+  confirmDanger: vi.fn(),
 }))
 
 const reviewApi = vi.hoisted(() => ({
@@ -59,7 +60,7 @@ vi.mock('@/api/dashboard', () => dashboardApi)
 vi.mock('@/components/editor/MonacoEditor.vue', () => ({
   default: { name: 'MonacoEditor', template: '<div class="monaco-editor-stub" />' },
 }))
-vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: vi.fn().mockResolvedValue(true) }))
+vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: state.confirmDanger }))
 vi.mock('element-plus/es/components/message-box/index', () => ({
   ElMessageBox: { confirm: vi.fn().mockResolvedValue(true) },
 }))
@@ -118,6 +119,7 @@ function mountView(component: object) {
 beforeEach(() => {
   state.permissions.clear()
   state.routerPush.mockReset()
+  state.confirmDanger.mockReset().mockResolvedValue(true)
   window.localStorage.setItem('prism_changelog_seen', 'v3.4')
 
   reviewApi.getReviewTasks.mockResolvedValue({ items: [], total: 0 })
@@ -135,6 +137,7 @@ beforeEach(() => {
     update_time: '2026-08-28T00:00:00Z',
   })
   reportApi.getReports.mockResolvedValue({ items: [], total: 0 })
+  reportApi.deleteReport.mockReset().mockResolvedValue(undefined)
   securityApi.getSecurityChecklist.mockResolvedValue({ secret_patterns: [], static_rules: [] })
   securityApi.getSecurityDashboard.mockResolvedValue({
     project_count: 0,
@@ -219,6 +222,25 @@ describe('细粒度权限的页内操作可见性', () => {
     expect(reportApi.exportReport).not.toHaveBeenCalled()
   })
 
+  it('报告删除要求 review:cancel，权限恢复后才允许执行', async () => {
+    const wrapper = mountView(ReportList)
+    await flushPromises()
+    const row = { task_id: 8, task_name: '只读报告' }
+
+    expect((wrapper.vm as any).canDeleteReport).toBe(false)
+    await (wrapper.vm as any).handleDelete(row)
+    expect(reportApi.deleteReport).not.toHaveBeenCalled()
+    wrapper.unmount()
+
+    state.permissions.add('review:cancel')
+    const writable = mountView(ReportList)
+    await flushPromises()
+    expect((writable.vm as any).canDeleteReport).toBe(true)
+    await (writable.vm as any).handleDelete(row)
+    expect(reportApi.deleteReport).toHaveBeenCalledExactlyOnceWith(8)
+    writable.unmount()
+  })
+
   it('仪表盘不向缺少 review:start 的账号显示新建审查', async () => {
     const wrapper = mountView(Dashboard)
     await flushPromises()
@@ -227,5 +249,29 @@ describe('细粒度权限的页内操作可见性', () => {
     expect(wrapper.text()).not.toContain('导出周报')
     expect((wrapper.vm as any).canStartReview).toBe(false)
     expect((wrapper.vm as any).canExportWeeklyReport).toBe(false)
+  })
+
+  it.each([{ codes: [] }, { codes: ['review:start'] }])('仪表盘缺少 review:view 时不显示或执行全部审查跳转（权限：$codes）', async ({ codes }) => {
+    codes.forEach((code) => state.permissions.add(code))
+    const wrapper = mountView(Dashboard)
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((button) => button.text() === '全部 →')).toBe(false)
+    ;(wrapper.vm as any).goReviewList()
+    expect(state.routerPush).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('仪表盘仅有 review:view 的普通账号点击全部可进入审查列表', async () => {
+    state.permissions.add('review:view')
+    const wrapper = mountView(Dashboard)
+    await flushPromises()
+
+    const button = wrapper.findAll('button').find((item) => item.text() === '全部 →')
+    expect(button).toBeDefined()
+    await button!.trigger('click')
+    expect(state.routerPush).toHaveBeenCalledExactlyOnceWith('/reviews')
+    expect(wrapper.text()).not.toContain('新建审查')
+    wrapper.unmount()
   })
 })

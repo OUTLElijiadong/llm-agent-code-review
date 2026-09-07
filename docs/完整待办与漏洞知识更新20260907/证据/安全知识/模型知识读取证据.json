@@ -1,0 +1,11 @@
+{
+  "role": "recon",
+  "context_chars": 9699,
+  "context_sha256": "56f97657e5638cae444f1ca5135082c87b1f1fa2effcb9448a9caa72914afbbd",
+  "latest_record_present": true,
+  "count_disclosure_present": false,
+  "loader_file": "backend/app/ai/audit_knowledge_loader.py",
+  "source_file": "backend/app/ai/audit_knowledge/known_cves.md",
+  "source_sha256": "5ba55d4fd674c882f1801f7fc9c5d25cfeae92c06a67c3c3a4a5f1c6cab79869",
+  "sql_or_embedding_involved": false
+}

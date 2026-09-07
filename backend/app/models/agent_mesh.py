@@ -5,6 +5,7 @@ from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
+from app.models.usage_attribution import UsageAttributionMixin
 
 
 class AgentMeshConversation(Base, IdMixin, TimestampMixin):
@@ -27,7 +28,7 @@ class AgentMeshConversation(Base, IdMixin, TimestampMixin):
     last_message_at = Column(DateTime, nullable=True)
 
 
-class AgentMeshMessage(Base, IdMixin, TimestampMixin):
+class AgentMeshMessage(Base, UsageAttributionMixin, IdMixin, TimestampMixin):
     """标准化消息信封及其当前投递状态。"""
 
     __tablename__ = "agent_mesh_message"

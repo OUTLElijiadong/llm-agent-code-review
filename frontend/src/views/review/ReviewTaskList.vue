@@ -105,7 +105,12 @@
             <span v-else>未形成评分</span>
           </template>
         </el-table-column>
-        <el-table-column prop="total_issues" label="问题数" width="80" sortable />
+        <el-table-column prop="total_issues" label="问题 / 报告条目" width="140" sortable>
+          <template #default="{ row }">
+            <span v-if="row.review_type === 'sandbox_test'">{{ row.report_issue_summary?.total ?? '—' }} 条报告条目</span>
+            <span v-else>{{ row.total_issues }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="duration_ms" label="耗时" width="100">
           <template #default="{ row }">
             {{ formatDuration(row.duration_ms) }}

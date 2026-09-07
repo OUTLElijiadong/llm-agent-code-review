@@ -1,0 +1,68 @@
+{
+  "生产数据库连接次数": 0,
+  "运行代码写入次数": 0,
+  "检查": {
+    "快照ZIP与来源清单": {
+      "状态": "通过",
+      "压缩成员数": 55,
+      "官方原始下载文件": 54,
+      "本地规范化派生文件": [
+        "verified_advisories.json"
+      ]
+    },
+    "XML与HTML独立解析重算": {
+      "状态": "通过",
+      "XML条目总数": 1450,
+      "有效弱点": 944,
+      "各分类映射数": {
+        "A01": 40,
+        "A02": 16,
+        "A03": 6,
+        "A04": 32,
+        "A05": 37,
+        "A06": 39,
+        "A07": 36,
+        "A08": 14,
+        "A09": 5,
+        "A10": 24
+      },
+      "映射总数": 249,
+      "映射实体类型": {
+        "Weakness": 246,
+        "Category": 3
+      },
+      "类别标识": [
+        "CWE-16",
+        "CWE-320",
+        "CWE-1035"
+      ]
+    },
+    "生成器及前后端一致性": "通过；调用只返回字典的build函数，未运行写入main",
+    "CVE逐条原始记录和Markdown重核": {
+      "状态": "通过",
+      "活动参考条数": 41,
+      "来源类型": {
+        "CVE 官方记录（CNA）": 38,
+        "组件维护者官方公告（中文摘要）": 3
+      },
+      "2026编号": 20,
+      "PHP日志2026编号全覆盖": 18,
+      "旧误归属已移除": "CVE-2021-21381实际属于Flatpak；原始记录保留作纠错证据"
+    },
+    "维护者公告人工核验": {
+      "CVE-2026-48041": "Laravel公告对应<13.12.0/<12.61.1及Jun 8 2026，与中文摘要一致",
+      "CVE-2026-12184": "PHP公告对应<8.3.32/<8.4.21/<8.5.6及Jul 2 2026，与中文摘要一致",
+      "CVE-2026-9672": "PHP日志明确GD Upgrade libgd，摘要没有编造完整受影响范围"
+    }
+  },
+  "范围": "PHP生态41条参考集，不是完整CVE/NVD库；哈希证明快照/制品一致，不证明项目实际受漏洞影响。",
+  "输入摘要": {
+    "docs/完整待办与漏洞知识更新20260907/证据/安全知识/官方原始快照20260907.zip": "49e1eb8eafe9da839f54526830141ecf58e3b0fe4db95013c6e605adf64297a7",
+    "docs/完整待办与漏洞知识更新20260907/证据/安全知识/来源哈希清单.json": "8eaaea9557b861b8b534fc3820f9efa9a28b7000fb08622ae4815388b6308974",
+    "backend/scripts/build_security_catalog.py": "766ffb91bbc76a624e9a386ff230436f1f1e23a4ed9f958ec06408d4ba2d97dc",
+    "backend/app/constants/data/security_catalog.json": "5e2a836bbcb5866c8f096f54dc5f411a606861a8a6eb9c48547fd53a8ef33e90",
+    "frontend/src/views/security/security-catalog.json": "5faa862c6536c691674a57bbbae60c345deb96b49c52a43ea0c3af85ea718d6c",
+    "backend/app/constants/data/verified_advisories.json": "c3bd2185d9505a1eb2d5a0c94059afaaeaf6161ec424ae334cdd37556c39681c",
+    "backend/app/ai/audit_knowledge/known_cves.md": "5ba55d4fd674c882f1801f7fc9c5d25cfeae92c06a67c3c3a4a5f1c6cab79869"
+  }
+}

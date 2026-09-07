@@ -1,0 +1,95 @@
+{
+  "passed": true,
+  "reviewer": "permission_matrix",
+  "independent_structure_counts": {
+    "findings": 4,
+    "field_bullets": 16,
+    "explicit_severity_labels": 0
+  },
+  "original_task_state_preserved_in_collected_evidence": true,
+  "same_helper_collector_and_readonly_query_fingerprints": true,
+  "source_sha256": {
+    "审查任务161生产只读复现.json": "a443debbde6c167fe8686dd1b6cc944438dbf33844ca22a5877f0d39666708a7",
+    "审查任务161报告结构只读复现.json": "ddd96a626082662465c0b5c5da2f09cdbeb368f40723bf066addb3cd07127bbe",
+    "审查任务161真实报告解析核验.json": "9f7a5e15de172ff3fa4b9505d1d491bee6c8eda198518034e66b3a17cebc5751",
+    "审查报告边界独立反例.json": "794fe3cf48c0236040d32624ffadea555ee46ab27669787174fadd99a34cd07b",
+    "collect_review161_summary_readonly.py": "314deeebd53b0b873dc7da22f0c00a93cea6de244ae8260246bdfc67f577ea6b"
+  },
+  "helper_sha256": "2a2b5bf89ea4617d4d8457d9a87febb04497ff887bb0c45744f250eb2a04b044",
+  "reviewer_script_sha256": "5ea064f215be4a7da2bd5707f6e2ebc5e780841b307ffa51bc8d36fa1ffa8baf",
+  "boundary_rechecks": [
+    {
+      "name": "字段小标题精确名",
+      "before_total": 1,
+      "expected_total": 1,
+      "after": {
+        "source": "sandbox_report",
+        "basis": "report_headings",
+        "total": 1,
+        "severity_counts": {
+          "严重": 0,
+          "高": 0,
+          "中": 0,
+          "低": 0
+        },
+        "unclassified": 1
+      },
+      "passed": true
+    },
+    {
+      "name": "字段小标题含序号",
+      "before_total": 2,
+      "expected_total": 1,
+      "after": {
+        "source": "sandbox_report",
+        "basis": "report_headings",
+        "total": 1,
+        "severity_counts": {
+          "严重": 0,
+          "高": 0,
+          "中": 0,
+          "低": 0
+        },
+        "unclassified": 1
+      },
+      "passed": true
+    },
+    {
+      "name": "空清单缺少零发现声明",
+      "before_total": 0,
+      "expected_total": null,
+      "after": {
+        "source": "sandbox_report",
+        "basis": "unavailable",
+        "total": null,
+        "severity_counts": {
+          "严重": 0,
+          "高": 0,
+          "中": 0,
+          "低": 0
+        },
+        "unclassified": null
+      },
+      "passed": true
+    },
+    {
+      "name": "字段小标题带值",
+      "before_total": 2,
+      "expected_total": 1,
+      "after": {
+        "source": "sandbox_report",
+        "basis": "report_headings",
+        "total": 1,
+        "severity_counts": {
+          "严重": 0,
+          "高": 0,
+          "中": 0,
+          "低": 0
+        },
+        "unclassified": 1
+      },
+      "passed": true
+    }
+  ],
+  "limits": "报告原文未复制到本地，无法在本地重算原文SHA；独立重数的是已采集结构，并核对生产同版解析器指纹与只读事务。未再次查询生产库。"
+}

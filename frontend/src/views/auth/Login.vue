@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import { User, Lock } from '@element-plus/icons-vue'
@@ -17,6 +17,50 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 const loginError = ref('')
 const loginStatus = ref('输入账号与密码，进入对应角色的工作台。')
+
+const cooldownStorageKey = 'prism:login-cooldown-until'
+const cooldownUntil = ref(0)
+const currentTime = ref(Date.now())
+const cooldownRemaining = computed(() => Math.max(0, Math.ceil((cooldownUntil.value - currentTime.value) / 1000)))
+const statusText = computed(() => cooldownRemaining.value > 0
+  ? `登录冷却中，还需等待 ${cooldownRemaining.value} 秒。冷却期间提交正确密码也会被拒绝。`
+  : loginStatus.value)
+let cooldownTimer: ReturnType<typeof setInterval> | undefined
+
+function stopCooldownTimer(): void {
+  if (cooldownTimer !== undefined) clearInterval(cooldownTimer)
+  cooldownTimer = undefined
+}
+
+function refreshCooldown(): void {
+  currentTime.value = Date.now()
+  if (cooldownRemaining.value === 0 && cooldownUntil.value > 0) {
+    cooldownUntil.value = 0
+    stopCooldownTimer()
+    try { sessionStorage.removeItem(cooldownStorageKey) } catch { /* 存储不可用不影响服务端限流。 */ }
+    loginError.value = ''
+    loginStatus.value = '等待时间已结束，可以重新登录。'
+  }
+}
+
+function startCooldown(until: number): void {
+  stopCooldownTimer()
+  cooldownUntil.value = until
+  refreshCooldown()
+  if (cooldownRemaining.value > 0) {
+    try { sessionStorage.setItem(cooldownStorageKey, String(until)) } catch { /* 仅保存等待截止时间。 */ }
+    cooldownTimer = setInterval(refreshCooldown, 1000)
+  }
+}
+
+onMounted(() => {
+  try {
+    const until = Number(sessionStorage.getItem(cooldownStorageKey))
+    if (Number.isSafeInteger(until) && until > 0) startCooldown(until)
+  } catch { /* 浏览器禁用存储时仍显示本次响应的倒计时。 */ }
+})
+onBeforeUnmount(stopCooldownTimer)
+
 
 const form = reactive({
   username: '',
@@ -39,7 +83,8 @@ const rules: FormRules = {
  * @returns Promise<void>
  */
 async function handleLogin(): Promise<void> {
-  if (!formRef.value || loading.value) return
+  refreshCooldown()
+  if (!formRef.value || loading.value || cooldownRemaining.value > 0) return
   loading.value = true
   loginError.value = ''
   loginStatus.value = '正在校验登录信息…'
@@ -55,11 +100,19 @@ async function handleLogin(): Promise<void> {
     ElMessage.success('登录成功')
     await router.replace(getRoleHomePath(userStore.profile?.role))
   } catch (error: unknown) {
-    const failure = error as { message?: unknown } | null
+    const failure = error as { message?: unknown; retry_after_seconds?: unknown } | null
     loginError.value = typeof failure?.message === 'string' && failure.message.trim()
       ? failure.message
       : '登录失败，请检查网络连接后重试。'
     loginStatus.value = '登录未完成，请查看错误提示。'
+    const seconds = failure?.retry_after_seconds
+    if (typeof seconds === 'number' && Number.isSafeInteger(seconds) && seconds > 0) {
+      const until = Date.now() + seconds * 1000
+      if (Number.isSafeInteger(until)) {
+        loginError.value = '当前登录入口暂时受限，请等待倒计时结束后再试。'
+        startCooldown(until)
+      }
+    }
   } finally {
     loading.value = false
   }
@@ -151,15 +204,15 @@ async function handleLogin(): Promise<void> {
             type="submit"
             class="btn-login font-display"
             :class="{ loading }"
-            :disabled="loading"
+            :disabled="loading || cooldownRemaining > 0"
           >
-            <span>{{ loading ? '正在登录…' : loginError ? '重新登录' : '进入棱镜' }}</span>
+            <span>{{ cooldownRemaining > 0 ? `等待 ${cooldownRemaining} 秒` : loading ? '正在登录…' : loginError ? '重新登录' : '进入棱镜' }}</span>
             <span v-if="loading" class="login-dots" aria-hidden="true"><span></span><span></span><span></span></span>
             <span v-else class="arrow font-mono" aria-hidden="true">→</span>
           </button>
         </el-form>
 
-        <p class="login-status" role="status" aria-live="polite" aria-atomic="true">{{ loginStatus }}</p>
+        <p class="login-status" role="status" aria-live="polite" aria-atomic="true">{{ statusText }}</p>
         <div v-if="loginError" class="login-error" role="alert">{{ loginError }}</div>
 
         <div class="footer-mini font-mono">© 2026 Prism · 棱镜智能代码审查</div>

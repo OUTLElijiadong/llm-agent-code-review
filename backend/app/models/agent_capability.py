@@ -6,6 +6,7 @@ from sqlalchemy.orm import deferred
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
+from app.models.usage_attribution import UsageAttributionMixin
 
 
 class McpServer(Base, IdMixin, TimestampMixin):
@@ -108,7 +109,7 @@ class SandboxWorker(Base, IdMixin, TimestampMixin):
     fingerprint_json = Column(Text)
 
 
-class SandboxEnvironment(Base, IdMixin, TimestampMixin):
+class SandboxEnvironment(Base, IdMixin, TimestampMixin, UsageAttributionMixin):
     __tablename__ = "sandbox_environment"
     __table_args__ = (
         Index("ix_sandbox_environment_public", "public_id", unique=True),

@@ -1,0 +1,3550 @@
+{
+  "routes": 313,
+  "authentication_required": 307,
+  "dependency_authenticated": 299,
+  "manual_authenticated": 8,
+  "public_backend_routes": 6,
+  "explicit_permission_routes": 239,
+  "other_authenticated_contracts": 68,
+  "classification": [
+    {
+      "method": "GET",
+      "path": "/api/auth/captcha",
+      "endpoint": ".venv/lib/python3.9/site-packages/slowapi/extension.py",
+      "line": 27,
+      "authentication": "公开登录入口或健康指标（后端路由层）",
+      "authorization": "不适用账号RBAC",
+      "generic_no_permission_403": "不适用"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "endpoint": ".venv/lib/python3.9/site-packages/slowapi/extension.py",
+      "line": 36,
+      "authentication": "公开登录入口或健康指标（后端路由层）",
+      "authorization": "不适用账号RBAC",
+      "generic_no_permission_403": "不适用"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "endpoint": "app/api/v1/auth.py",
+      "line": 56,
+      "authentication": "公开登录入口或健康指标（后端路由层）",
+      "authorization": "不适用账号RBAC",
+      "generic_no_permission_403": "不适用"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "endpoint": "app/api/v1/auth.py",
+      "line": 113,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/change-password",
+      "endpoint": "app/api/v1/auth.py",
+      "line": 119,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "endpoint": "app/api/v1/auth.py",
+      "line": 137,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users",
+      "endpoint": "app/api/v1/users.py",
+      "line": 24,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/{user_id}/reset-password",
+      "endpoint": "app/api/v1/users.py",
+      "line": 39,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/{user_id}/toggle-status",
+      "endpoint": "app/api/v1/users.py",
+      "line": 53,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/{user_id}/role",
+      "endpoint": "app/api/v1/users.py",
+      "line": 68,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/{user_id}",
+      "endpoint": "app/api/v1/users.py",
+      "line": 83,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 61,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 77,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:create"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/import-remote",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 86,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:import"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/remote-imports",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 110,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:import"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/remote-imports/{task_id}",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 140,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:import"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/remote-imports/{task_id}/cancel",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 156,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:import"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 178,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:view"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{project_id}/source-revisions/{revision_id}",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 187,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:delete"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}/source-archive",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 205,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:download",
+        "project:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{project_id}/audit-source-archive",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 258,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:upload"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}/audit-source-archive",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 280,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}/audit-source-archive/result",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 294,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:view",
+        "security:view"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{project_id}",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 311,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:update"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{project_id}",
+      "endpoint": "app/api/v1/projects.py",
+      "line": 320,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:delete"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}/members",
+      "endpoint": "app/api/v1/project_members.py",
+      "line": 30,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{project_id}/members",
+      "endpoint": "app/api/v1/project_members.py",
+      "line": 52,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:member:manage"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{project_id}/members/{user_id}",
+      "endpoint": "app/api/v1/project_members.py",
+      "line": 98,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:member:manage"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{project_id}/members/{user_id}",
+      "endpoint": "app/api/v1/project_members.py",
+      "line": 131,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "project:member:manage"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-files",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 31,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-files/upload",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 50,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:upload"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-files/upload-folder",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 78,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:upload"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-files",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 135,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:upload"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-files/{file_id}",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 144,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-files/{file_id}/meta",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 153,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:view"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/code-files/{file_id}",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 174,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:edit"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-files/{file_id}/rename",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 183,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:edit"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/code-files/{file_id}",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 192,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:delete"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-files/{file_id}/versions",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 201,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-files/{file_id}/versions/{version_no}",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 211,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-files/{file_id}/versions/{version_no}/restore",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 220,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:edit"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-files/{file_id}/download",
+      "endpoint": "app/api/v1/code_files.py",
+      "line": 229,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "file:download"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rules",
+      "endpoint": "app/api/v1/rules.py",
+      "line": 25,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "rule:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rules/{rule_id}/toggle",
+      "endpoint": "app/api/v1/rules.py",
+      "line": 35,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "rule:update"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rules",
+      "endpoint": "app/api/v1/rules.py",
+      "line": 50,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "rule:create"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rules/{rule_id}",
+      "endpoint": "app/api/v1/rules.py",
+      "line": 64,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "rule:update"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rules/{rule_id}",
+      "endpoint": "app/api/v1/rules.py",
+      "line": 79,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "rule:delete"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/review/start",
+      "endpoint": "app/api/v1/review.py",
+      "line": 19,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "review:start"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/review/tasks",
+      "endpoint": "app/api/v1/review.py",
+      "line": 28,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "review:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/review/tasks/{task_id}",
+      "endpoint": "app/api/v1/review.py",
+      "line": 45,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "review:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/review/tasks/{task_id}/issues",
+      "endpoint": "app/api/v1/review.py",
+      "line": 54,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "issue:view"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/review/tasks/{task_id}",
+      "endpoint": "app/api/v1/review.py",
+      "line": 72,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "review:cancel"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/review/tasks/{task_id}/cancel",
+      "endpoint": "app/api/v1/review.py",
+      "line": 86,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "review:cancel"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/issues",
+      "endpoint": "app/api/v1/issues.py",
+      "line": 27,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "issue:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/issues/{issue_id}",
+      "endpoint": "app/api/v1/issues.py",
+      "line": 48,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "issue:view"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/issues/{issue_id}/status",
+      "endpoint": "app/api/v1/issues.py",
+      "line": 57,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "issue:handle"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/issues/{issue_id}/review-decision",
+      "endpoint": "app/api/v1/issues.py",
+      "line": 66,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "issue:handle"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/issues/batch-status",
+      "endpoint": "app/api/v1/issues.py",
+      "line": 89,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "issue:batch"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/reports/generate",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 193,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "report:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/tasks/{task_id}",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 255,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "report:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/tasks/{task_id}/export",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 302,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "_require_report_export_permission"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/templates",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 370,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "report:template_manage"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/reports/templates",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 390,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "report:template_manage"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/reports/templates/{template_id}",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 415,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "report:template_manage"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/reports/templates/{template_id}",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 445,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "report:template_manage"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/reports/{task_id}",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 483,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "review:cancel"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 497,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "report:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/{task_id}",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 513,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "report:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/{task_id}/export/word",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 522,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/{task_id}/export/pdf",
+      "endpoint": "app/api/v1/reports.py",
+      "line": 540,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/summary",
+      "endpoint": "app/api/v1/dashboard.py",
+      "line": 17,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/risk-distribution",
+      "endpoint": "app/api/v1/dashboard.py",
+      "line": 25,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/issue-type-statistics",
+      "endpoint": "app/api/v1/dashboard.py",
+      "line": 33,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/score-trend",
+      "endpoint": "app/api/v1/dashboard.py",
+      "line": 41,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/review-frequency",
+      "endpoint": "app/api/v1/dashboard.py",
+      "line": 49,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai-logs",
+      "endpoint": "app/api/v1/ai_logs.py",
+      "line": 17,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai-logs/{log_id}",
+      "endpoint": "app/api/v1/ai_logs.py",
+      "line": 42,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat",
+      "endpoint": "app/api/v1/ai_chat.py",
+      "line": 126,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/detect-language",
+      "endpoint": "app/api/v1/ai_chat.py",
+      "line": 175,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analyze-folder",
+      "endpoint": "app/api/v1/ai_chat.py",
+      "line": 191,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/agents",
+      "endpoint": "app/api/v1/ai_chat.py",
+      "line": 207,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai-prompt/tools",
+      "endpoint": "app/api/v1/ai_prompt.py",
+      "line": 31,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai-prompt/issue",
+      "endpoint": "app/api/v1/ai_prompt.py",
+      "line": 39,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai-prompt/task",
+      "endpoint": "app/api/v1/ai_prompt.py",
+      "line": 58,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai-prompt/project",
+      "endpoint": "app/api/v1/ai_prompt.py",
+      "line": 78,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/security/checklist",
+      "endpoint": "app/api/v1/security.py",
+      "line": 36,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "security:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/security/scan-file",
+      "endpoint": "app/api/v1/security.py",
+      "line": 48,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "security:scan"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/security/scan-task",
+      "endpoint": "app/api/v1/security.py",
+      "line": 70,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "security:scan"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/security/scan-project",
+      "endpoint": "app/api/v1/security.py",
+      "line": 90,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "security:scan"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/security/fullchain-audit",
+      "endpoint": "app/api/v1/security.py",
+      "line": 114,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "security:scan"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/security/scan-all-projects",
+      "endpoint": "app/api/v1/security.py",
+      "line": 145,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "security:scan"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/security/findings",
+      "endpoint": "app/api/v1/security.py",
+      "line": 167,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "security:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/security/dashboard-summary",
+      "endpoint": "app/api/v1/security.py",
+      "line": 185,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "security:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes/workers",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 28,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/workers",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 36,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/sandboxes/workers/{worker_id}",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 46,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/workers/{worker_id}/health",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 57,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/workers/seed-production",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 66,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes/capabilities/search",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 75,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 86,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 95,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes/{public_id}",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 106,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/stop",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 115,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/extend",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 124,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes/{public_id}/artifacts/{artifact_id}",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 134,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/preview-session",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 159,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "authentication": "专用preview Cookie",
+      "authorization": "独立凭据或归属契约",
+      "generic_no_permission_403": "不适用平台RBAC统一403断言"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "authentication": "专用preview Cookie",
+      "authorization": "独立凭据或归属契约",
+      "generic_no_permission_403": "不适用平台RBAC统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "endpoint": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "authentication": "专用preview Cookie",
+      "authorization": "独立凭据或归属契约",
+      "generic_no_permission_403": "不适用平台RBAC统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 58,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/type-mappings",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 65,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/usage",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 72,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/overview",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 84,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/runtime",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 99,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/runtime/summary",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 114,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/situation",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 125,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/events",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 174,
+      "authentication": "平台JWT手动校验",
+      "authorization": "独立凭据或归属契约",
+      "generic_no_permission_403": "不适用平台RBAC统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/clarify",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 281,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/metagpt/info",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 332,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/metagpt/preview",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 384,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_name}/skills",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 436,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agent_name}/skills/{skill_name}/invoke",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 463,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/skill-records",
+      "endpoint": "app/api/v1/agents.py",
+      "line": 528,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evolution/feedback",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 44,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evolution/experiences",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 51,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evolution/eval-cases",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 59,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evolution/run",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 66,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evolution/proposals",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 74,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evolution/proposals/{proposal_id}",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 82,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evolution/proposals/{proposal_id}/evaluate",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 90,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evolution/proposals/{proposal_id}/approve",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 98,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evolution/proposals/{proposal_id}/reject",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 106,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evolution/proposals/{proposal_id}/rollback",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 115,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evolution/trigger",
+      "endpoint": "app/api/v1/evolution.py",
+      "line": 127,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/audit",
+      "endpoint": "app/api/v1/audit.py",
+      "line": 19,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/api-config",
+      "endpoint": "app/api/v1/api_config.py",
+      "line": 22,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/api-config",
+      "endpoint": "app/api/v1/api_config.py",
+      "line": 36,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/api-config",
+      "endpoint": "app/api/v1/api_config.py",
+      "line": 50,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/api-config/test",
+      "endpoint": "app/api/v1/api_config.py",
+      "line": 63,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance",
+      "endpoint": "app/api/v1/maintenance.py",
+      "line": 17,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance",
+      "endpoint": "app/api/v1/maintenance.py",
+      "line": 25,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/stats",
+      "endpoint": "app/api/v1/maintenance.py",
+      "line": 40,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/{ticket_id}",
+      "endpoint": "app/api/v1/maintenance.py",
+      "line": 46,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/maintenance/{ticket_id}/handle",
+      "endpoint": "app/api/v1/maintenance.py",
+      "line": 53,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/{ticket_id}/close",
+      "endpoint": "app/api/v1/maintenance.py",
+      "line": 61,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/feedback",
+      "endpoint": "app/api/v1/feedback.py",
+      "line": 17,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/feedback",
+      "endpoint": "app/api/v1/feedback.py",
+      "line": 25,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/feedback/stats",
+      "endpoint": "app/api/v1/feedback.py",
+      "line": 41,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/feedback/{feedback_id}",
+      "endpoint": "app/api/v1/feedback.py",
+      "line": 47,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/feedback/{feedback_id}/reply",
+      "endpoint": "app/api/v1/feedback.py",
+      "line": 54,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/forum/posts",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 25,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forum/posts",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 39,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forum/posts/{post_id}",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 47,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/forum/posts/{post_id}",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 54,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/forum/posts/{post_id}",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 62,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/forum/posts/{post_id}/pin",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 70,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forum/posts/{post_id}/replies",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 78,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/forum/replies/{reply_id}",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 86,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forum/assist",
+      "endpoint": "app/api/v1/forum.py",
+      "line": 94,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/profile",
+      "endpoint": "app/api/v1/user_profile.py",
+      "line": 17,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/me/profile",
+      "endpoint": "app/api/v1/user_profile.py",
+      "line": 24,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/profile/relearn",
+      "endpoint": "app/api/v1/user_profile.py",
+      "line": 32,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/docs",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 32,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/docs",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 45,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/knowledge/docs/{doc_id}",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 54,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/search",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 62,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sync",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 70,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/stats",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 77,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/embedding-config",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 83,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/embedding-config/reembed",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 89,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/knowledge/embedding-config",
+      "endpoint": "app/api/v1/knowledge.py",
+      "line": 105,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/llm/config",
+      "endpoint": "app/api/v1/llm_config.py",
+      "line": 95,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/llm/config",
+      "endpoint": "app/api/v1/llm_config.py",
+      "line": 101,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/llm/test",
+      "endpoint": "app/api/v1/llm_config.py",
+      "line": 119,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/llm/models",
+      "endpoint": "app/api/v1/llm_config.py",
+      "line": 133,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/mcp/servers",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 21,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/mcp/servers/recommended",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 29,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/mcp/servers",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 37,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/mcp/servers/{server_id}",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 47,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/mcp/servers/{server_id}",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 63,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/mcp/servers/{server_id}/health",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 73,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/mcp/servers/{server_id}/sync",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 82,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/mcp/tools",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 92,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/mcp/tools/{tool_id}",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 101,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/mcp/bindings",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 119,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/mcp/bindings",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 128,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/mcp/bindings/{binding_id}",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 144,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/mcp/aliases",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 154,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/mcp/aliases",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 163,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/mcp/aliases/{alias_id}",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 173,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/mcp/aliases/{alias_id}",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 189,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/mcp/capabilities/search",
+      "endpoint": "app/api/v1/mcp_governance.py",
+      "line": 199,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/governance/overview",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 69,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/governance/agents",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 84,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/governance/agents/{agent_code}",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 99,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/governance/agents/{agent_code}",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 115,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/governance/agents/{agent_code}/memory",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 137,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/governance/agents/{agent_code}/memory",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 153,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/governance/agents/{agent_code}/knowledge",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 188,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/governance/knowledge/docs",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 204,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/governance/knowledge/docs/{doc_id}/activate",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 239,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/governance/knowledge/sources",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 264,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/governance/knowledge/sources",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 284,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/governance/knowledge/crawl",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 315,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/approvals",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 334,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/approvals/{item_id}/approve",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 354,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/approvals/{item_id}/reject",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 376,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/policies",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 398,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/policies",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 413,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/policies/evaluate",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 477,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/policies/decisions",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 506,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/tools/calls",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 521,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/tools/permissions",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 536,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/tools/permissions",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 551,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/jobs",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 589,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/jobs/{job_id}",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 606,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/jobs/{job_id}/run",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 633,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/jobs/runs",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 660,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/observability/overview",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 686,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/observability/alerts",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 700,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/observability/alerts/{alert_id}/resolve",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 720,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/observability/alerts/unread",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 741,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/observability/alerts/{alert_id}/read",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 769,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/observability/security/run-monitor",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 803,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/observability/security/status",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 821,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/rollback/versions",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 843,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/rollback/versions",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 865,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/rollback/versions/{version_id}/rollback",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 893,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/rewards/events",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 914,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/rewards/events",
+      "endpoint": "app/api/v1/agent_governance.py",
+      "line": 936,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/copilot/chat",
+      "endpoint": "app/api/v1/admin_copilot.py",
+      "line": 59,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/copilot/history",
+      "endpoint": "app/api/v1/admin_copilot.py",
+      "line": 73,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/overview/system",
+      "endpoint": "app/api/v1/admin_overview.py",
+      "line": 289,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_super_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/overview/security",
+      "endpoint": "app/api/v1/admin_overview.py",
+      "line": 295,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/overview/geo",
+      "endpoint": "app/api/v1/admin_overview.py",
+      "line": 301,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/overview/agents-activity",
+      "endpoint": "app/api/v1/admin_overview.py",
+      "line": 307,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-studio/agents",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 34,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:update_own"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-studio/agents",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 43,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:create"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-studio/agents/{agent_id}/versions",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 67,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:update_own"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-studio/agent-versions/{version_id}",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 84,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:update_own"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-studio/agents/{agent_id}/versions",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 113,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:update_own"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-studio/agent-versions/{version_id}/skills",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 132,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:update_own"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-studio/bindings/{binding_id}",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 157,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:update_own"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-studio/agent-versions/{version_id}/test",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 167,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:test"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-studio/agent-versions/{version_id}/submit",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 178,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:submit"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-studio/agent-versions/{version_id}/withdraw",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 189,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:submit"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-studio/skills",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 200,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "skill_asset:update_own"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-studio/skills",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 209,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "skill_asset:create"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-studio/skills/{skill_id}/versions",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 233,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "skill_asset:update_own"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-studio/skill-versions/{version_id}",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 250,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "skill_asset:update_own"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-studio/skills/{skill_id}/versions",
+      "endpoint": "app/api/v1/agent_studio.py",
+      "line": 267,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "skill_asset:update_own"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-responses/session",
+      "endpoint": "app/api/v1/agent_responses.py",
+      "line": 138,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-responses/stream",
+      "endpoint": "app/api/v1/agent_responses.py",
+      "line": 810,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-mesh/conversations/heartbeat",
+      "endpoint": "app/api/v1/agent_mesh.py",
+      "line": 47,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-mesh/conversations/archive",
+      "endpoint": "app/api/v1/agent_mesh.py",
+      "line": 74,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-mesh/agents",
+      "endpoint": "app/api/v1/agent_mesh.py",
+      "line": 98,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-mesh/messages",
+      "endpoint": "app/api/v1/agent_mesh.py",
+      "line": 110,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-mesh/inbox",
+      "endpoint": "app/api/v1/agent_mesh.py",
+      "line": 135,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-mesh/messages/{message_id}/ack",
+      "endpoint": "app/api/v1/agent_mesh.py",
+      "line": 162,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-mesh/traces/{trace_id}",
+      "endpoint": "app/api/v1/agent_mesh.py",
+      "line": 191,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-teams",
+      "endpoint": "app/api/v1/agent_teams.py",
+      "line": 31,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-teams",
+      "endpoint": "app/api/v1/agent_teams.py",
+      "line": 50,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-teams/{team_id}",
+      "endpoint": "app/api/v1/agent_teams.py",
+      "line": 77,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-teams/{team_id}/events",
+      "endpoint": "app/api/v1/agent_teams.py",
+      "line": 92,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-teams/{team_id}/messages",
+      "endpoint": "app/api/v1/agent_teams.py",
+      "line": 119,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-teams/{team_id}/cancel",
+      "endpoint": "app/api/v1/agent_teams.py",
+      "line": 146,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-teams/{team_id}/retry",
+      "endpoint": "app/api/v1/agent_teams.py",
+      "line": 170,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-teams/{team_id}/archive",
+      "endpoint": "app/api/v1/agent_teams.py",
+      "line": 199,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent:chat"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-catalog",
+      "endpoint": "app/api/v1/agent_catalog.py",
+      "line": 17,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "custom_agent:invoke"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-catalog/{agent_code}/invoke",
+      "endpoint": "app/api/v1/agent_catalog.py",
+      "line": 25,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "custom_agent:invoke"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/agent-releases",
+      "endpoint": "app/api/v1/admin_agent_releases.py",
+      "line": 60,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:approve"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/agent-releases/agents",
+      "endpoint": "app/api/v1/admin_agent_releases.py",
+      "line": 121,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:approve"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/agent-releases/{approval_id}/revise",
+      "endpoint": "app/api/v1/admin_agent_releases.py",
+      "line": 138,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:approve"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/agent-releases/{approval_id}/approve",
+      "endpoint": "app/api/v1/admin_agent_releases.py",
+      "line": 157,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:publish"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/agent-releases/{approval_id}/reject",
+      "endpoint": "app/api/v1/admin_agent_releases.py",
+      "line": 169,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:approve"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/agent-releases/agents/{agent_id}/disable",
+      "endpoint": "app/api/v1/admin_agent_releases.py",
+      "line": 180,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:disable"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/agent-releases/agents/{agent_id}/rollback/{release_id}",
+      "endpoint": "app/api/v1/admin_agent_releases.py",
+      "line": 189,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "agent_asset:rollback"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/beta-codes",
+      "endpoint": "app/api/v1/beta_invites.py",
+      "line": 29,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/beta-codes",
+      "endpoint": "app/api/v1/beta_invites.py",
+      "line": 56,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/beta-codes/{invite_id}/revoke",
+      "endpoint": "app/api/v1/beta_invites.py",
+      "line": 78,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/beta-codes/{invite_id}",
+      "endpoint": "app/api/v1/beta_invites.py",
+      "line": 100,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rbac/users/{user_id}/roles",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 148,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/users/{user_id}/roles",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 178,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/users/{user_id}/permissions",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 202,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/users/{user_id}/menus",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 230,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/users/{user_id}/data-scope",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 255,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/roles",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 297,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rbac/roles",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 325,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rbac/roles/{role_id}",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 354,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rbac/roles/{role_id}",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 385,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/roles/{role_id}/permissions",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 428,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rbac/roles/{role_id}/permissions",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 452,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rbac/roles/{role_id}/data-scope",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 482,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/roles/{role_id}/data-scope",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 518,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/roles/{role_code}/users",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 530,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/permissions",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 570,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rbac/menus",
+      "endpoint": "app/api/v1/rbac.py",
+      "line": 592,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "require_admin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/pentest/rules",
+      "endpoint": "app/api/v1/pentest.py",
+      "line": 33,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "pentest:view"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/pentest/engagements",
+      "endpoint": "app/api/v1/pentest.py",
+      "line": 43,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "pentest:start"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/pentest/engagements/{public_id}/authorize",
+      "endpoint": "app/api/v1/pentest.py",
+      "line": 58,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "pentest:start"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/pentest/engagements/{public_id}/start",
+      "endpoint": "app/api/v1/pentest.py",
+      "line": 86,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "pentest:start"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/pentest/engagements/{public_id}/cancel",
+      "endpoint": "app/api/v1/pentest.py",
+      "line": 113,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "pentest:start"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/pentest/engagements",
+      "endpoint": "app/api/v1/pentest.py",
+      "line": 140,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "pentest:view"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/pentest/engagements/{public_id}",
+      "endpoint": "app/api/v1/pentest.py",
+      "line": 156,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "pentest:view"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/pentest/engagements/{public_id}",
+      "endpoint": "app/api/v1/pentest.py",
+      "line": 175,
+      "authentication": "平台JWT依赖",
+      "authorization": "显式RBAC或管理身份",
+      "generic_no_permission_403": "适用",
+      "permission_guards": [
+        "pentest:start"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/responses",
+      "endpoint": "app/api/responses.py",
+      "line": 78,
+      "authentication": "调用者上游Bearer",
+      "authorization": "独立凭据或归属契约",
+      "generic_no_permission_403": "不适用平台RBAC统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/responses/{response_id}",
+      "endpoint": "app/api/responses.py",
+      "line": 128,
+      "authentication": "调用者上游Bearer",
+      "authorization": "独立凭据或归属契约",
+      "generic_no_permission_403": "不适用平台RBAC统一403断言"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/responses/{response_id}",
+      "endpoint": "app/api/responses.py",
+      "line": 142,
+      "authentication": "调用者上游Bearer",
+      "authorization": "独立凭据或归属契约",
+      "generic_no_permission_403": "不适用平台RBAC统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/responses/{response_id}/input_items",
+      "endpoint": "app/api/responses.py",
+      "line": 156,
+      "authentication": "调用者上游Bearer",
+      "authorization": "独立凭据或归属契约",
+      "generic_no_permission_403": "不适用平台RBAC统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/api/discuss/start",
+      "endpoint": "app/api/v1/discussion.py",
+      "line": 34,
+      "authentication": "平台JWT依赖",
+      "authorization": "仅登录及资源归属等具体契约",
+      "generic_no_permission_403": "不适用统一403断言"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "endpoint": "app/main.py",
+      "line": 253,
+      "authentication": "公开登录入口或健康指标（后端路由层）",
+      "authorization": "不适用账号RBAC",
+      "generic_no_permission_403": "不适用"
+    },
+    {
+      "method": "GET",
+      "path": "/readyz",
+      "endpoint": "app/main.py",
+      "line": 267,
+      "authentication": "公开登录入口或健康指标（后端路由层）",
+      "authorization": "不适用账号RBAC",
+      "generic_no_permission_403": "不适用"
+    },
+    {
+      "method": "GET",
+      "path": "/metrics",
+      "endpoint": "app/main.py",
+      "line": 295,
+      "authentication": "公开登录入口或健康指标（后端路由层）",
+      "authorization": "不适用账号RBAC",
+      "generic_no_permission_403": "不适用"
+    }
+  ],
+  "scope": "本轮追加修复后源码重新绑定；313方法路径组合，307需认证=299依赖+8手动，6公共；239显式403，另68仅登录/资源/专用凭据不适用统一RBAC403。计划不是生产请求证据。",
+  "source_plan_sha256": "77ef13ec1570bec57bbe50d39656cfd66b1c36b478e99e24bc2dd1da7af7322b",
+  "manual_plan_sha256": "50d9d3ff8205c42f1e233ce2e96c50be8f0054ceeeb20b1d2e4bcbedb64b8210"
+}

@@ -27,6 +27,7 @@ class TaskOut(BaseModel):
     status: str
     total_files: int
     total_issues: int
+    report_issue_summary: Optional[dict] = None
     severe_issues: int
     high_issues: int
     medium_issues: int
@@ -94,6 +95,7 @@ class TaskDetailOut(BaseModel):
     # R4 修复:任务失败时返回错误原因,对齐 ReviewTask.error_message
     error_message: Optional[str] = None
     coverage: Optional[dict] = None
+    report_issue_summary: Optional[dict] = None
     files: list[TaskFileOut] = Field(default_factory=list)
     agent_releases: list[dict[str, Any]] = Field(default_factory=list)
     aggregation_summary: AggregationSummaryOut = Field(default_factory=AggregationSummaryOut)

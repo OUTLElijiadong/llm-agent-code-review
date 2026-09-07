@@ -101,7 +101,7 @@ function toggleSidebar(): void {
 }
 
 /**
- * 打开全局搜索面板
+ * 打开功能导航面板
  * @returns void
  */
 function openSearch(): void {
@@ -110,7 +110,7 @@ function openSearch(): void {
 }
 
 /**
- * 关闭全局搜索面板
+ * 关闭功能导航面板
  * @returns void
  */
 function closeSearch(): void {
@@ -118,7 +118,7 @@ function closeSearch(): void {
 }
 
 /**
- * 执行全局搜索结果对应的导航或动作
+ * 执行功能导航结果对应的导航或动作
  * @param item - 用户选择的搜索结果
  * @returns void
  */
@@ -142,7 +142,7 @@ function goTopNav(path: string): void {
 }
 
 /**
- * 监听 Cmd/Ctrl + K 快捷键并打开全局搜索
+ * 监听 Cmd/Ctrl + K 快捷键并打开功能导航
  * @param event - 键盘事件
  * @returns void
  */
@@ -228,9 +228,9 @@ onBeforeUnmount(() => {
     </nav>
 
     <div class="header-right">
-      <button class="search-trigger" type="button" aria-label="打开全局搜索" @click="openSearch">
+      <button class="search-trigger" type="button" aria-label="打开功能导航" @click="openSearch">
         <el-icon><Search /></el-icon>
-        <span class="search-label">全局搜索</span>
+        <span class="search-label">功能导航</span>
         <span class="search-kbd font-mono">⌘K</span>
       </button>
 
@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
 
   <el-dialog
     v-model="searchVisible"
-    title="全局搜索"
+    title="功能导航"
     width="560px"
     class="command-dialog"
     append-to-body
@@ -275,8 +275,8 @@ onBeforeUnmount(() => {
     <div class="command-panel">
       <el-input
         v-model="searchKeyword"
-        placeholder="搜索页面、功能或 Agent 助手"
-        aria-label="全局搜索"
+        placeholder="查找功能页面或 Agent 助手"
+        aria-label="功能导航"
         clearable
         autofocus
         :prefix-icon="Search"
@@ -293,7 +293,7 @@ onBeforeUnmount(() => {
           <span class="command-desc">{{ item.description }}</span>
         </button>
         <div v-if="filteredSearchItems.length === 0" class="command-empty">
-          没有匹配的功能
+          没有匹配的功能页面；项目名称请在“项目管理”中搜索。
         </div>
       </div>
     </div>

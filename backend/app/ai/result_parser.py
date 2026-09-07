@@ -21,6 +21,7 @@ from loguru import logger
 from app.ai.cvss import normalize_cvss, normalize_cvss_vector
 from app.ai.exceptions import ResultParseError
 from app.constants.compliance import get_compliance_mapping
+from app.constants.security_catalog import owasp_for_cwe
 
 ALLOWED_TYPES = {
     "代码规范", "潜在Bug", "安全漏洞", "性能问题",
@@ -302,34 +303,34 @@ def _infer_owasp_cwe(title: str, description: str) -> Tuple[str, str]:
         Tuple[str, str]: (owasp, cwe) 元组;未匹配则返回 ("", "")
     """
     text = f"{title} {description}".lower()
-    rules: Tuple[Tuple[Tuple[str, ...], str, str], ...] = (
+    rules: Tuple[Tuple[Tuple[str, ...], str], ...] = (
         (("sql 注入", "sql注入", "sql injection"),
-         "A03:2021-Injection", "CWE-89"),
+         "CWE-89"),
         (("命令注入", "command injection"),
-         "A03:2021-Injection", "CWE-78"),
+         "CWE-78"),
         (("xss", "跨站脚本"),
-         "A03:2021-Injection", "CWE-79"),
+         "CWE-79"),
         (("ssrf", "服务端请求伪造"),
-         "A10:2021-Server-Side Request Forgery", "CWE-918"),
+         "CWE-918"),
         (("csrf", "跨站请求伪造"),
-         "A01:2021-Broken Access Control", "CWE-352"),
+         "CWE-352"),
         (("反序列化", "deserialization"),
-         "A08:2021-Software and Data Integrity Failures", "CWE-502"),
+         "CWE-502"),
         (("路径遍历", "path traversal", "directory traversal"),
-         "A01:2021-Broken Access Control", "CWE-22"),
+         "CWE-22"),
         (("越权", "idor", "broken access"),
-         "A01:2021-Broken Access Control", "CWE-639"),
+         "CWE-639"),
         (("硬编码", "hardcoded", "明文密码"),
-         "A07:2021-Identification and Authentication Failures", "CWE-798"),
+         "CWE-798"),
         (("弱加密", "md5", "sha1", "des", "ecb"),
-         "A02:2021-Cryptographic Failures", "CWE-327"),
-        (("jwt"), "A07:2021-Identification and Authentication Failures", "CWE-522"),
+         "CWE-327"),
+        (("jwt",), "CWE-522"),
     )
-    for keywords, owasp, cwe in rules:
+    for keywords, cwe in rules:
         if isinstance(keywords, str):
             keywords = (keywords,)
         if any(k in text for k in keywords):
-            return owasp, cwe
+            return owasp_for_cwe(cwe), cwe
     return "", ""
 
 
@@ -376,6 +377,9 @@ def _normalize_issue(raw: dict) -> Issue:
             owasp = inferred_owasp
         if not cwe:
             cwe = inferred_cwe
+
+    if issue_type == "安全漏洞" and cwe and not owasp:
+        owasp = owasp_for_cwe(cwe)
 
     # 基于 cwe 反查 4 大合规标准映射(LLM 不输出 compliance_mapping)
     compliance_mapping = _build_compliance_mapping(cwe) if cwe else {}

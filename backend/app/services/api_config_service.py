@@ -22,6 +22,7 @@ from app.schemas.api_config import (
     ApiConfigTestOut,
 )
 from app.schemas.llm_config import LlmModelsIn, LlmModelsOut
+from app.services.ai_usage_context import record_usage_attempt
 from app.utils.api_resolver import (
     decrypt_api_key_with_metadata,
     encrypt_api_key,
@@ -178,6 +179,8 @@ def _request_with_retries(
     timeout_seconds: int,
     max_retries: int,
     json_body: Optional[dict] = None,
+    usage_db: Optional[Session] = None,
+    usage_user_id: Optional[int] = None,
 ) -> _RequestOutcome:
     """向固定公网目标发请求，仅对瞬时故障执行有限重试。"""
     target = pin_public_http_url(url)
@@ -198,6 +201,10 @@ def _request_with_retries(
                 duration_ms=int((time.monotonic() - started) * 1000),
                 attempts=max(0, attempts - 1),
             )
+        request_sent = False
+        response = None
+        transport_error = None
+        attempt_started = time.monotonic()
         try:
             with httpx.Client(timeout=max(0.1, remaining_seconds), trust_env=False) as client:
                 request = client.get if method == "GET" else client.post
@@ -207,8 +214,10 @@ def _request_with_retries(
                 }
                 if json_body is not None:
                     kwargs["json"] = json_body
+                request_sent = True
                 response = request(target.request_url, **kwargs)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
+            transport_error = exc
             if attempt >= max_retries:
                 return _RequestOutcome(
                     response=None,
@@ -223,6 +232,39 @@ def _request_with_retries(
                     error=None,
                     duration_ms=int((time.monotonic() - started) * 1000),
                     attempts=attempts,
+                )
+        finally:
+            # GET /models 和校验阶段未发送的请求都不产生模型用量。
+            # 独立审计事务异常向外传播，禁止把记账失败当上游故障重发请求。
+            if request_sent and method == "POST" and usage_db is not None and usage_user_id is not None:
+                body = {}
+                if response is not None:
+                    try:
+                        body = response.json()
+                    except (TypeError, ValueError):
+                        pass
+                if not isinstance(body, dict):
+                    body = {}
+                status_code = response.status_code if response is not None else None
+                success = status_code == 200 and isinstance(body.get("choices"), list)
+                retryable = transport_error is not None or status_code in _TRANSIENT_STATUS_CODES
+                can_retry = retryable and attempt < max_retries and time.monotonic() - started < timeout_seconds
+                model = body.get("model") if isinstance(body.get("model"), str) else (json_body or {}).get("model", "")
+                # 不持久化上游原文/异常消息/地址或密钥，避免认证错误回显泄漏。
+                safe_model = re.sub(r"[\x00-\x1f\x7f]", "", str(model)).replace(api_key, "[redacted]")[:50]
+                record_usage_attempt(
+                    db=usage_db,
+                    user_id=usage_user_id,
+                    agent_label="api_connection_test",
+                    model_name=safe_model,
+                    usage=body.get("usage"),
+                    status="success" if success else "retry" if can_retry else "failed",
+                    error=(
+                        "" if success else type(transport_error).__name__ if transport_error is not None
+                        else f"HTTP {status_code}; 响应未通过连接校验"
+                    ),
+                    duration_ms=int((time.monotonic() - attempt_started) * 1000),
+                    prompt="ping",
                 )
         remaining_seconds = timeout_seconds - (time.monotonic() - started)
         if remaining_seconds > 0:
@@ -389,8 +431,8 @@ def fetch_models(payload: LlmModelsIn) -> LlmModelsOut:
     )
 
 
-def test_connection(payload: ApiConfigTestIn) -> ApiConfigTestOut:
-    """发送最小 Chat Completions 请求并返回可恢复的结构化结果。"""
+def test_connection(payload: ApiConfigTestIn, *, db: Session, user_id: int) -> ApiConfigTestOut:
+    """不保存 API 配置；每个实际模型请求以真实登录用户记录调用用量。"""
     try:
         base_url = normalize_ai_base_url(
             payload.base_url,
@@ -410,6 +452,8 @@ def test_connection(payload: ApiConfigTestIn) -> ApiConfigTestOut:
             api_key=payload.api_key,
             timeout_seconds=payload.timeout_seconds,
             max_retries=payload.max_retries,
+            usage_db=db,
+            usage_user_id=user_id,
             json_body={
                 "model": payload.model,
                 "messages": [{"role": "user", "content": "ping"}],

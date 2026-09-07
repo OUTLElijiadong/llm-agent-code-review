@@ -356,7 +356,7 @@ def test_add_document_persists_embeddings_and_replaces_existing_source(db, monke
     """
     embed_calls: list[list[str]] = []
 
-    def fake_embed_texts(_db, texts: list[str]) -> tuple[list[list[float]], str]:
+    def fake_embed_texts(_db, texts: list[str], *, user_id: int) -> tuple[list[list[float]], str]:
         """为每个文本返回确定性二维向量。
 
         Args:
@@ -366,6 +366,7 @@ def test_add_document_persists_embeddings_and_replaces_existing_source(db, monke
         Returns:
             tuple[list[list[float]], str]: 与文本等长的向量和模型标签。
         """
+        assert user_id == 1
         embed_calls.append(texts)
         return [[1.0, float(index)] for index, _ in enumerate(texts)], "fake:embedding"
 
@@ -426,7 +427,7 @@ def test_retrieve_list_delete_and_stats_enforce_knowledge_isolation(db, monkeypa
     _make_chunk(db, deleted, "已删除内容", "[1.0, 0.0]")
     _make_chunk(db, foreign, "他人内容", "[1.0, 0.0]")
 
-    def fake_embed_one(_db, text: str) -> tuple[list[float], str]:
+    def fake_embed_one(_db, text: str, *, user_id: int) -> tuple[list[float], str]:
         """按查询内容返回正常或空查询向量。
 
         Args:
@@ -436,6 +437,7 @@ def test_retrieve_list_delete_and_stats_enforce_knowledge_isolation(db, monkeypa
         Returns:
             tuple[list[float], str]: 测试查询向量和模型标签。
         """
+        assert user_id == 1
         return ([], "fake") if text == "no-vector" else ([1.0, 0.0], "fake")
 
     monkeypatch.setattr(knowledge_service.embedding_service, "embed_one", fake_embed_one)

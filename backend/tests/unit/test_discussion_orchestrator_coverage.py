@@ -772,6 +772,14 @@ async def test_wait_if_paused_rearms_event_until_resumed() -> None:
     await orchestrator._wait_if_paused("session-1")
 
 
+@pytest.fixture(autouse=True)
+def isolate_model_accounting_boundary(monkeypatch):
+    # 本文件用 FakeAgent 隔离模型/数据库；真实独立日志事务在来源集成测试覆盖。
+    def call(agent, _task, _user, *, usage_file_id=None, usage_chunk_index=None, **kwargs):
+        return agent.call_raw(**kwargs)
+    monkeypatch.setattr(module, "_call_raw_for_task", call)
+
+
 def test_create_review_task_persists_task_and_file_link(
     db: Any,
     monkeypatch: pytest.MonkeyPatch,

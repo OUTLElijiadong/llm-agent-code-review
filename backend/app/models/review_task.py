@@ -5,9 +5,10 @@ from sqlalchemy import JSON, BigInteger, Column, DateTime, Index, Integer, Strin
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
+from app.models.usage_attribution import UsageAttributionMixin
 
 
-class ReviewTask(Base, IdMixin, TimestampMixin):
+class ReviewTask(Base, UsageAttributionMixin, IdMixin, TimestampMixin):
     __tablename__ = "review_task"
     __table_args__ = (
         Index("ix_review_task_user_create", "user_id", "create_time"),

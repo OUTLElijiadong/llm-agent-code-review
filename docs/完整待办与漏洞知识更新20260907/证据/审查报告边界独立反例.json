@@ -1,0 +1,78 @@
+{
+  "scope": "独立脱敏协议边界复现，不含生产正文",
+  "source_sha256": "000b76b256b35b6ea911f24fe50ffcd70fa0096a096f136893cde6237ed7f630",
+  "cases": [
+    {
+      "name": "字段小标题精确名",
+      "report": "## 问题清单\n### 1. 发现A\n#### 漏洞位置\nx\n#### 修复建议\ny\n",
+      "expected_total": 1,
+      "actual": {
+        "source": "sandbox_report",
+        "basis": "report_headings",
+        "total": 1,
+        "severity_counts": {
+          "严重": 0,
+          "高": 0,
+          "中": 0,
+          "低": 0
+        },
+        "unclassified": 1
+      },
+      "passed": true
+    },
+    {
+      "name": "字段小标题含序号",
+      "report": "## 问题清单\n### 1. 发现A\n#### 1. 漏洞位置\nx\n#### 2. 修复建议\ny\n",
+      "expected_total": 1,
+      "actual": {
+        "source": "sandbox_report",
+        "basis": "report_headings",
+        "total": 2,
+        "severity_counts": {
+          "严重": 0,
+          "高": 0,
+          "中": 0,
+          "低": 0
+        },
+        "unclassified": 2
+      },
+      "passed": false
+    },
+    {
+      "name": "空清单缺少零发现声明",
+      "report": "## 问题清单\n\n## 下一步建议\n稍后补充\n",
+      "expected_total": null,
+      "actual": {
+        "source": "sandbox_report",
+        "basis": "report_list",
+        "total": 0,
+        "severity_counts": {
+          "严重": 0,
+          "高": 0,
+          "中": 0,
+          "低": 0
+        },
+        "unclassified": 0
+      },
+      "passed": false
+    },
+    {
+      "name": "字段小标题带值",
+      "report": "## 问题清单\n### 1. 发现A\n#### 漏洞位置：示例路径\nx\n#### 修复建议：示例写法\ny\n",
+      "expected_total": 1,
+      "actual": {
+        "source": "sandbox_report",
+        "basis": "report_headings",
+        "total": 2,
+        "severity_counts": {
+          "严重": 0,
+          "高": 0,
+          "中": 0,
+          "低": 0
+        },
+        "unclassified": 2
+      },
+      "passed": false
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="32" failures="0" errors="0" time="6.315225458">
+    <testsuite name="src/views/review/ReviewStart.regression.test.ts" timestamp="2026-09-07T08:26:44.472Z" hostname="lijiadongdeMacBook-Air-7.local" tests="32" failures="0" errors="0" skipped="0" time="6.315225458">
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 只有全部项目范围显示批量项目摘要" time="0.200016166">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R1 快速切换时旧响应不能覆盖新项目文件" time="0.065043958">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 旧请求先结束时不能解除新请求的加载锁" time="0.064652834">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 重置使在途文件请求失效" time="0.048999834">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R2 完整读取501文件，整个项目超限时明确阻断而非截断" time="0.047903334">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 第二页失败不得把第一页当成完整范围；可以重试" time="0.053416709">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R5 全部项目读取101个而不是第一页100个" time="0.055757459">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 项目第二页失败时禁止使用残缺项目范围，显示重试入口" time="0.04220025">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R3 已知空白、二进制或未验证文件不能进入扫描 {&quot;size_bytes&quot;:0,&quot;is_reviewable&quot;:false}" time="0.038624583">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R3 已知空白、二进制或未验证文件不能进入扫描 {&quot;size_bytes&quot;:3,&quot;is_reviewable&quot;:false}" time="0.03983425">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R3 已知空白、二进制或未验证文件不能进入扫描 {&quot;size_bytes&quot;:10,&quot;is_reviewable&quot;:true,&quot;is_binary&quot;:1}" time="0.044839042">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R3 已知空白、二进制或未验证文件不能进入扫描 {&quot;size_bytes&quot;:10}" time="0.04035525">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 保留空标记文件展示，但全选只包含有效非空文件" time="0.049866334">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 后端标识纯Unicode空白不可审查时按原布尔字段排除，并明确保留存储原因" time="0.050964084">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 手动选择超限或旧项目文件ID必须阻断，不能切片或过滤后提交" time="0.043585625">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R4 选择圆桌时转为显式单选并清除旧多选，不默认取第一项" time="0.080095042">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 绕过UI的多文件圆桌调用也不得静默取第一项" time="0.04405575">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 提交校验和慢请求期间阻止重复提交、锁定输入并只显示真实提交阶段" time="0.051797292">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; R6 批量空项目、请求失败、成功均推进数量并保留各自原因" time="0.3204775">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 旧项目请求失败不会污染新项目的文件或错误状态" time="0.54505575">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 异常分页必须阻断，不能去重或忽略缺失项后假称完整 0" time="0.644963583">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 异常分页必须阻断，不能去重或忽略缺失项后假称完整 1" time="0.073993125">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 异常分页必须阻断，不能去重或忽略缺失项后假称完整 2" time="0.091314041">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 异常分页必须阻断，不能去重或忽略缺失项后假称完整 3" time="0.080711542">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 500个有效文件加一个空标记仍完整翻页并提交全部500个有效文件" time="0.120168958">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 超过500个可选文件时仍可明确选择后续页文件，不自动截取前500项" time="1.058349792">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 全部项目实际提交包含第101个项目，不只修正显示计数" time="1.677796">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 批量超限项目计为失败，空项目计为跳过，均不创建残缺任务" time="0.099175708">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 只重试未提交过的读取失败项目，保留原始参数且不重复提交成功或结果未知的项目" time="0.172515791">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 取消批量确认不会读取文件或创建任务" time="0.090741875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 离开页面使文件分页和后续批量提交失效" time="0.120666125">
+        </testcase>
+        <testcase classname="src/views/review/ReviewStart.regression.test.ts" name="审查扫描范围失败回归 &gt; 完成的批量结果不会因另一次单项目提交而冒充仍在处理" time="0.155695541">
+        </testcase>
+    </testsuite>
+</testsuites>

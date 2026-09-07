@@ -1,0 +1,14 @@
+{
+  "tests": 24,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "changes": [
+    "仅使用真实 httpx.Response 替换两处缺 json() 的 429 SimpleNamespace",
+    "429 重试、stop 成功和共享截止时间的原断言未改",
+    "生产代码未变"
+  ],
+  "source_sha256": {
+    "backend/tests/unit/agents/test_event_bus_coverage.py": "79ddf0c6cdbc91c3464db2d8e06195fe7233a6844465fb48a77e7ac8be60327e"
+  }
+}

@@ -74,6 +74,7 @@ def add_document(
     source_ref: str = "",
     risk_level: str = "low",
     confidence: float = 1.0,
+    user_id: Optional[int] = None,
 ) -> AgentKnowledgeDoc:
     """新增 Agent 知识文档并生成切片向量。
 
@@ -108,7 +109,7 @@ def add_document(
 
     pieces = chunk_text(content)
     if pieces:
-        vectors, tag = embedding_service.embed_texts(db, pieces)
+        vectors, tag = embedding_service.embed_texts(db, pieces, user_id=user_id)
         for seq, piece in enumerate(pieces):
             vec = vectors[seq] if seq < len(vectors) else []
             db.add(AgentKnowledgeChunk(
@@ -227,7 +228,7 @@ def list_sources(db: Session, agent_code: str = "") -> list[AgentKnowledgeSource
     return q.order_by(AgentKnowledgeSource.id.desc()).all()
 
 
-def crawl_enabled_sources(db: Session, agent_code: str = "") -> dict:
+def crawl_enabled_sources(db: Session, agent_code: str = "", *, user_id: Optional[int] = None) -> dict:
     """抓取启用的 Agent 知识来源并沉淀文档。
 
     Args:
@@ -258,6 +259,7 @@ def crawl_enabled_sources(db: Session, agent_code: str = "") -> dict:
             doc = add_document(
                 db,
                 agent_code=source.agent_code,
+                user_id=user_id,
                 title=item["title"],
                 content=item["content"],
                 source_type=source.source_type,
@@ -739,7 +741,7 @@ def unified_retrieve(db: Session, *, user_id: int, agent_code: str, query: str, 
     for item in hits:
         item["owner_type"] = "user"
 
-    qvec, _ = embedding_service.embed_one(db, query)
+    qvec, _ = embedding_service.embed_one(db, query, user_id=user_id)
     rows = (
         db.query(AgentKnowledgeChunk, AgentKnowledgeDoc.title, AgentKnowledgeDoc.source_type)
         .join(AgentKnowledgeDoc, AgentKnowledgeChunk.doc_id == AgentKnowledgeDoc.id)

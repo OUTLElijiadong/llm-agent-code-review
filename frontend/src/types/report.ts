@@ -11,10 +11,13 @@ export type ReportTemplateType = 'simple' | 'detailed' | 'compliance' | 'custom'
 /** 报告导出格式(json/html/pdf/word) */
 export type ReportFormat = 'json' | 'html' | 'pdf' | 'word'
 
+import type { TaskDetailOut } from './review'
+
 export interface ReportSource {
   type?: string
   stats_basis?: string
   detail_api?: string
+  report_issue_summary?: TaskDetailOut['report_issue_summary']
   [key: string]: unknown
 }
 

@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="47" failures="2" errors="0" time="0.474900333">
+    <testsuite name="src/views/dashboard/Dashboard.test.ts" timestamp="2026-09-07T07:51:37.619Z" hostname="lijiadongdeMacBook-Air-7.local" tests="47" failures="2" errors="0" skipped="0" time="0.474900333">
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 未知维度不得从图表和图例消失，分项合计应等于真实总数" time="0.053213167">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 全部问题未归类时显示真实数量而不是全零光谱" time="0.005663333">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 首载未取得摘要时不显示零项任务或零分" time="0.003129625">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要失败显示可重试错误而不假报空业务" time="0.010126458">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 真实全零保留零值，没有已完成审查时不判为风险或零分" time="0.011496542">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 已有成功审查的真实零分不被当成未知" time="0.006706209">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 畸形摘要不得变成可导出的统计事实" time="0.002469042">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 部分接口迟迟未返回时成功分区仍立即展示" time="0.009653125">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 维度接口成功且为空不再永远显示汇总中或八个假零" time="0.008730666">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 单图失败与空态分开且仅重试失败图" time="0.008202292">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 切换日期时旧区间成功响应不得覆盖新图" time="0.012700125">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 旧区间失败不得覆盖新请求成功状态" time="0.009645125">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 读取失败或仍在加载时禁止导出不完整报告" time="0.007352125">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 不展示写死的宣传、假直播标签和非周区间的周报文案" time="0.008209084">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 点击导出下载有文件名的HTML报告并反馈，不依赖弹出窗口" time="0.013152458">
+            <failure message="expected &quot;bound &quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st bound  call:
+
+    Array [
+      &quot;blob:https://review.example/report-test&quot;,
+      &quot;_blank&quot;,
+      &quot;noopener,noreferrer&quot;,
+    ]
+
+
+Number of calls: 1
+" type="AssertionError">
+AssertionError: expected &quot;bound &quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st bound  call:
+
+    Array [
+      &quot;blob:https://review.example/report-test&quot;,
+      &quot;_blank&quot;,
+      &quot;noopener,noreferrer&quot;,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/dashboard/Dashboard.test.ts:273:22
+            </failure>
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 触发下载失败时给出反馈并清理临时链接与URL" time="0.01484475">
+            <system-err>
+Error: Not implemented: window.open
+    at module.exports (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/browser/not-implemented.js:9:17)
+    at /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/browser/Window.js:960:7
+    at onWeeklyReport (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/src/views/dashboard/Dashboard.vue:638:12)
+    at callWithErrorHandling (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/@vue/runtime-core/dist/runtime-core.cjs.js:200:19)
+    at Object.callWithAsyncErrorHandling (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/@vue/runtime-core/dist/runtime-core.cjs.js:207:17)
+    at HTMLButtonElement.invoker (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/@vue/runtime-dom/dist/runtime-dom.cjs.js:680:17)
+    at HTMLButtonElement.callTheUserObjectsOperation (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/generated/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:350:25)
+    at invokeEventListeners (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:286:3)
+    at HTMLButtonElementImpl._dispatch (/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/frontend/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:233:9) undefined
+
+            </system-err>
+            <failure message="expected &quot;spy&quot; to be called with arguments: [ StringContaining &quot;无法下载统计报告&quot; ]
+
+Number of calls: 0
+" type="AssertionError">
+AssertionError: expected &quot;spy&quot; to be called with arguments: [ StringContaining &quot;无法下载统计报告&quot; ]
+
+Number of calls: 0
+
+ ❯ src/views/dashboard/Dashboard.test.ts:293:33
+            </failure>
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 后端真实四类零计数不画出虚假的等分饼图且允许导出真实零" time="0.016809709">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷null不能作为成功数据或导出来源" time="0.010307458">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷[null]不能作为成功数据或导出来源" time="0.004641083">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷[{&quot;severity&quot;:&quot;严重&quot;,&quot;count&quot;:-1}]不能作为成功数据或导出来源" time="0.019269208">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷[{&quot;severity&quot;:null,&quot;count&quot;:1}]不能作为成功数据或导出来源" time="0.005357917">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; risk非法载荷[{&quot;severity&quot;:&quot;严重&quot;,&quot;count&quot;:null}]不能作为成功数据或导出来源" time="0.016859167">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; dimension非法载荷[{&quot;issue_type&quot;:&quot;安全漏洞&quot;,&quot;count&quot;:&quot;3&quot;}]不能作为成功数据或导出来源" time="0.004084541">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; dimension非法载荷[{&quot;issue_type&quot;:&quot;安全漏洞&quot;,&quot;count&quot;:null}]不能作为成功数据或导出来源" time="0.0039325">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; dimension非法载荷[{&quot;issue_type&quot;:42,&quot;count&quot;:2}]不能作为成功数据或导出来源" time="0.016352542">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; dimension非法载荷[{&quot;issue_type&quot;:&quot;安全漏洞&quot;,&quot;count&quot;:null}]不能作为成功数据或导出来源" time="0.007351666">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; score非法载荷[{&quot;task_id&quot;:1,&quot;score&quot;:101,&quot;create_time&quot;:&quot;2026-09-05T12:00:00&quot;}]不能作为成功数据或导出来源" time="0.01172775">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; score非法载荷[{&quot;task_id&quot;:null,&quot;score&quot;:50,&quot;create_time&quot;:&quot;2026-09-05T12:00:00&quot;}]不能作为成功数据或导出来源" time="0.007852667">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; score非法载荷[{&quot;task_id&quot;:1,&quot;score&quot;:&quot;50&quot;,&quot;create_time&quot;:&quot;2026-09-05T12:00:00&quot;}]不能作为成功数据或导出来源" time="0.00326275">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; score非法载荷[{&quot;task_id&quot;:1,&quot;score&quot;:50,&quot;create_time&quot;:&quot;2026-02-30T12:00:00&quot;}]不能作为成功数据或导出来源" time="0.002989375">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; frequency非法载荷[{&quot;date&quot;:&quot;invalid&quot;,&quot;count&quot;:1}]不能作为成功数据或导出来源" time="0.023431459">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; frequency非法载荷[{&quot;date&quot;:&quot;2026-02-30&quot;,&quot;count&quot;:1}]不能作为成功数据或导出来源" time="0.0074705">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; frequency非法载荷[{&quot;date&quot;:&quot;2026-09-05&quot;,&quot;count&quot;:-1}]不能作为成功数据或导出来源" time="0.007626875">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; frequency非法载荷[{&quot;date&quot;:&quot;2026-09-05&quot;,&quot;count&quot;:&quot;2&quot;}]不能作为成功数据或导出来源" time="0.013381">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员null被入口拒绝而非渲染崩溃" time="0.003566583">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;id&quot;:&quot;2&quot;}被入口拒绝而非渲染崩溃" time="0.003193542">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;task_name&quot;:2}被入口拒绝而非渲染崩溃" time="0.0141825">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;project_name&quot;:null}被入口拒绝而非渲染崩溃" time="0.006292833">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;score&quot;:null}被入口拒绝而非渲染崩溃" time="0.003278625">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;score&quot;:101}被入口拒绝而非渲染崩溃" time="0.00686175">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;status&quot;:&quot;pending&quot;}被入口拒绝而非渲染崩溃" time="0.007103958">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要非法任务成员{&quot;create_time&quot;:&quot;2026-02-30T12:00:00&quot;}被入口拒绝而非渲染崩溃" time="0.005649917">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 无导出权限时按钮不可见且直接调用也不能打开报告" time="0.009662375">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 加载中时按钮和直接导出调用均拒绝" time="0.008537959">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 摘要重叠刷新不被旧请求覆盖" time="0.009534792">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 刷新失败隐藏旧图，成功摘要保留，单图重试恢复" time="0.023624167">
+        </testcase>
+        <testcase classname="src/views/dashboard/Dashboard.test.ts" name="成员仪表盘真实读取状态 &gt; 卸载后成功和失败都不写状态或留下任务刷新监听" time="0.004381333">
+        </testcase>
+    </testsuite>
+</testsuites>

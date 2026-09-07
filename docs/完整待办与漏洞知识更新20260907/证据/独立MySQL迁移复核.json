@@ -1,0 +1,37 @@
+{
+  "status": "passed",
+  "production_connections": 0,
+  "database_connections": 0,
+  "tested_database": "prism_acceptance_048_7bea65b5e022",
+  "tested_started_at_utc": "2026-09-07T07:41:52.284706+00:00",
+  "tested_finished_at_utc": "2026-09-07T07:42:14.816498+00:00",
+  "runtime_source_files_verified": 9,
+  "all_source_files_verified": 15,
+  "source_unchanged_during_run_and_matches_checkout": true,
+  "foreign_key_count": 42,
+  "foreign_keys_per_table": {
+    "agent_response_run": 6,
+    "agent_team": 6,
+    "review_task": 6,
+    "ai_call_log": 6,
+    "agent_mesh_message": 6,
+    "pentest_engagement": 6,
+    "sandbox_environment": 6
+  },
+  "foreign_key_targets_match_migration": true,
+  "isolation": "本机127.0.0.1:3307随机prism_acceptance_048库；采集器明确传递DB环境给alembic；独立复核未重连。",
+  "preservation_scope": "7张来源表及工具表的合成本地夹具；048新增归因全NULL，旧字段保持，旧executing孤儿保持；不是生产历史全库比较。",
+  "fk_behavior_scope": "42约束结构全部检查；实际错误FK拒绝及父删除SET NULL行为在ai_call_log.root_agent_run_id上代表性验证。",
+  "migration_roundtrip": "047→048→047→048，降级后旧schema精确恢复，原字段比较保持；本地测试删除的根行属于验证夹具。",
+  "independent_audit_transaction": "business先flush合成User987655，直接调用record_usage_attempt写0/7/7 tokens后rollback；另建Session确认用量在而业务User不存在，证明独立事务未暗中提交业务。",
+  "provider_http": "未发送；本次7 tokens是明确标记的合成输入，只测试真实MySQL事务，不作真实模型用量声明。",
+  "source_sha256": {
+    "docs/完整待办与漏洞知识更新20260907/证据/MySQL迁移核验.json": "f0c22cc8c94e4f06609d3bf7b7010cc3731fddbbffe45148870652ac64bfd60b",
+    "docs/完整待办与漏洞知识更新20260907/证据/verify_usage_migration_mysql.py": "6fe09382d6524196d5e97ea6efd72b63493a6b62d677eeabfaee9a69e3e97083",
+    "backend/alembic/versions/048_ai_usage_attribution.py": "a2c2e32e42246a6d08a3d66d82799d19a5c54077d8628ad7f00e43403eaa0968",
+    "backend/alembic/env.py": "72424ec975bc0d0171212575b7c97d078a9c399dc645203a5d3bdfac7331db67",
+    "backend/app/core/config.py": "c8ff0c93bc3388b9c6c1cbcf1ccdacf192425c295e57dc52f2e8aff2c207a413",
+    "deploy/mysql/seed.sql": "9fc5c521537a5be054d64e63b976bbc49e2f74de06876a2f024d242e2eb7c47e",
+    "backend/app/services/ai_usage_context.py": "ee0436b4e07bd8529c90133b56b01c9eaaa401b04b3049584ca3b1b38c38631f"
+  }
+}

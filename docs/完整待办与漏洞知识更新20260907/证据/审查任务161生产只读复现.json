@@ -1,0 +1,57 @@
+{
+  "queried_at_utc": "2026-09-07T07:55:24.246891+00:00",
+  "read_only": true,
+  "query_sha256": "a34f3fbb9192c8a663a679f27291f9a7b6752bebe92c790ea53b9f3fd7ee79fc",
+  "exit_code": 0,
+  "rows": [
+    {
+      "utc": "2026-09-07 07:55:24.341883",
+      "kind": "transaction",
+      "read_only": 1
+    },
+    {
+      "id": 161,
+      "kind": "task",
+      "status": "success",
+      "end_time": "2026-08-19 02:23:00.000000",
+      "low_issues": 0,
+      "project_id": 157,
+      "start_time": "2026-08-19 02:21:51.000000",
+      "duration_ms": 69198,
+      "high_issues": 0,
+      "review_type": "sandbox_test",
+      "total_files": 1,
+      "update_time": "2026-08-19 02:23:00.000000",
+      "total_chunks": null,
+      "total_issues": 16,
+      "coverage_keys": null,
+      "medium_issues": 0,
+      "model_present": false,
+      "severe_issues": 0,
+      "coverage_stage": null,
+      "completed_files": null,
+      "processed_files": 1,
+      "completed_chunks": null,
+      "coverage_total_files": null,
+      "current_file_present": false
+    },
+    {
+      "keys": [
+        "source",
+        "evidence",
+        "public_id",
+        "report_md"
+      ],
+      "kind": "report_structure",
+      "count": 1,
+      "source": "sandbox_test",
+      "severity_counts": null,
+      "issues_array_length": null
+    },
+    {
+      "kind": "input_files",
+      "count": 0,
+      "snapshot_count": 0
+    }
+  ]
+}

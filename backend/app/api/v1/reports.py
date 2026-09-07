@@ -480,7 +480,8 @@ def delete_template(
 
 # ============ 既有路由(参数路由 /{task_id},仅匹配 int) ============
 
-@router.delete("/{task_id}", response_model=Resp[None])
+@router.delete("/{task_id}", response_model=Resp[None],
+               dependencies=[Depends(require_permission(PermissionCode.REVIEW_CANCEL))])
 def delete_report(task_id: int, db: Session = Depends(get_db),
                   user: User = Depends(get_current_user)):
     """删除报告"""
@@ -493,7 +494,8 @@ def delete_report(task_id: int, db: Session = Depends(get_db),
     return Resp(data=None)
 
 
-@router.get("", response_model=Resp[PageOut[ReportListItem]])
+@router.get("", response_model=Resp[PageOut[ReportListItem]],
+            dependencies=[Depends(require_permission(PermissionCode.REPORT_VIEW))])
 def list_reports(
     project_id: int = Query(None),
     start: str = Query(""),
@@ -508,7 +510,8 @@ def list_reports(
     return Resp(data=PageOut(**result))
 
 
-@router.get("/{task_id}", response_model=Resp[ReportDetailOut])
+@router.get("/{task_id}", response_model=Resp[ReportDetailOut],
+            dependencies=[Depends(require_permission(PermissionCode.REPORT_VIEW))])
 def get_report(task_id: int, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
     """报告详情"""

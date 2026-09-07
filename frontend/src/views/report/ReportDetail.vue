@@ -7,11 +7,11 @@
       </el-button>
       <h1 class="font-display">审查报告</h1>
       <div class="head-actions">
-        <el-button @click="onPrint">
+        <el-button v-if="canViewReport" @click="onPrint">
           <el-icon><Printer /></el-icon>打印
         </el-button>
         <el-button
-          v-if="!isDomainReport"
+          v-if="canExport('word')"
           :loading="exportingWord"
           data-testid="report-export-word"
           @click="downloadWord"
@@ -19,7 +19,7 @@
           <el-icon><Document /></el-icon>导出 Word
         </el-button>
         <el-button
-          v-if="!isDomainReport"
+          v-if="canExport('pdf')"
           type="primary"
           :loading="exportingPdf"
           data-testid="report-export-pdf"
@@ -46,31 +46,32 @@
       <div class="toolbar-right">
         <el-button-group>
           <el-button
+            v-if="canExport('json')"
             size="small"
             :loading="generatingFormat === 'json'"
             @click="handleGenerate('json')"
           >生成 JSON</el-button>
           <el-button
-            v-if="!isDomainReport"
+            v-if="canExport('html')"
             size="small"
             :loading="generatingFormat === 'html'"
             @click="handleGenerate('html')"
           >生成 HTML</el-button>
           <el-button
-            v-if="!isDomainReport"
+            v-if="canExport('pdf')"
             size="small"
             :loading="generatingFormat === 'pdf'"
             @click="handleGenerate('pdf')"
           >生成 PDF</el-button>
           <el-button
-            v-if="!isDomainReport"
+            v-if="canExport('word')"
             size="small"
             :loading="generatingFormat === 'word'"
             @click="handleGenerate('word')"
           >生成 Word</el-button>
         </el-button-group>
         <el-button
-          v-if="!isDomainReport"
+          v-if="canViewReport && !isDomainReport"
           ref="previewButtonRef"
           size="small"
           :loading="previewing"
@@ -79,27 +80,32 @@
         >
           <el-icon><View /></el-icon>预览 HTML
         </el-button>
-        <el-dropdown trigger="click" @command="handleExport">
+        <el-dropdown v-if="hasExportFormat" trigger="click" @command="handleExport">
           <el-button size="small" :loading="exportingFormat !== null">
             <el-icon><Download /></el-icon>导出报告
             <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item :command="'json'">JSON</el-dropdown-item>
-              <el-dropdown-item v-if="!isDomainReport" :command="'html'">HTML</el-dropdown-item>
-              <el-dropdown-item v-if="!isDomainReport" :command="'pdf'">PDF</el-dropdown-item>
-              <el-dropdown-item v-if="!isDomainReport" :command="'word'">Word</el-dropdown-item>
+              <el-dropdown-item v-if="canExport('json')" :command="'json'">JSON</el-dropdown-item>
+              <el-dropdown-item v-if="canExport('html')" :command="'html'">HTML</el-dropdown-item>
+              <el-dropdown-item v-if="canExport('pdf')" :command="'pdf'">PDF</el-dropdown-item>
+              <el-dropdown-item v-if="canExport('word')" :command="'word'">Word</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
       </div>
     </section>
 
+    <section v-if="isSandboxReport" class="card" role="note">
+      <p>沙箱报告按“问题清单”的独立条目统计；条目数不代表已确认漏洞数，严重度仅采用报告明示标签。</p>
+      <p v-if="report?.source?.report_issue_summary?.total == null">未保存可识别的问题清单，无法确定条目数；历史记录数保留在来源信息中。</p>
+    </section>
+
     <section v-if="exportErrorMessage" class="report-export-error no-print" role="alert">
       <strong>{{ exportErrorMessage }}</strong>
       <span v-if="exportErrorNextAction">{{ exportErrorNextAction }}</span>
-      <el-button v-if="retryExportFormat" size="small" @click="retryExport">重试导出</el-button>
+      <el-button v-if="retryExportFormat && canExport(retryExportFormat)" size="small" @click="retryExport">重试导出</el-button>
     </section>
 
     <div v-if="report" class="report-paper">
@@ -177,7 +183,7 @@
           </div>
         </div>
 
-        <div class="rg-card">
+        <div v-if="!isSandboxReport" class="rg-card">
           <div class="rg-title font-display">修复进度</div>
           <div class="fix-gauge">
             <svg viewBox="0 0 120 70" width="100%">
@@ -209,8 +215,8 @@
               <span class="font-display scale-val">{{ totalFiles }}</span>
             </div>
             <div class="scale-row">
-              <span class="font-mono scale-label">问题</span>
-              <span class="font-display scale-val">{{ totalIssues }}</span>
+              <span class="font-mono scale-label">{{ isSandboxReport ? '报告条目' : '问题' }}</span>
+              <span class="font-display scale-val">{{ isSandboxReport && report?.source?.report_issue_summary?.total == null ? '—' : totalIssues }}</span>
             </div>
             <div class="scale-row">
               <span class="font-mono scale-label">耗时</span>
@@ -467,6 +473,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 
 import { ArrowLeft, ArrowDown, Document, Download, Printer, View } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
@@ -491,6 +498,7 @@ import { useCountUp } from '@/composables/useCountUp'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 const taskId = Number(route.params.id)
 
 const loading = ref(true)
@@ -551,6 +559,13 @@ const isDomainReport = computed(() => {
   const sourceType = report.value?.source?.type
   return sourceType === 'sandbox_test' || sourceType === 'pentest'
 })
+const canViewReport = computed(() => !!report.value && userStore.hasPermission('report:view'))
+function canExport(format: ReportFormat): boolean {
+  return canViewReport.value && userStore.hasPermission(`report:export:${format}`)
+    && (!isDomainReport.value || format === 'json')
+}
+const hasExportFormat = computed(() => (['json', 'html', 'pdf', 'word'] as ReportFormat[]).some(canExport))
+const isSandboxReport = computed(() => report.value?.source?.type === 'sandbox_test')
 
 // AI 总结:封面用纯文本(剥离 markdown 符号),AI 总结卡片用消毒后的 markdown 渲染
 const summaryText = computed(() => stripMarkdown((report.value?.summary as string) ?? ''))
@@ -588,12 +603,17 @@ const fixedPercent = computed(() => totalIssues.value > 0 ? Math.round((fixedCou
 
 const severityRows = computed(() => {
   const total = Math.max(1, totalIssues.value)
-  return [
+  const rows = [
     { key: 'severe', label: '危急', value: severeCount.value, percent: (severeCount.value / total) * 100, color: PRISM_SEVERITY_COLORS.severe },
     { key: 'high',   label: '高',   value: highCount.value,   percent: (highCount.value   / total) * 100, color: PRISM_SEVERITY_COLORS.high   },
     { key: 'medium', label: '中',   value: mediumCount.value, percent: (mediumCount.value / total) * 100, color: PRISM_SEVERITY_COLORS.medium },
     { key: 'low',    label: '低',   value: lowCount.value,    percent: (lowCount.value    / total) * 100, color: PRISM_SEVERITY_COLORS.low    },
   ]
+  if (!isSandboxReport.value) return rows
+  const unclassified = Number((stats.value.severity as Record<string, number>)?.['未分级'] ?? 0)
+  if (unclassified) rows.push({ key: 'unclassified', label: '未分级', value: unclassified,
+    percent: (unclassified / total) * 100, color: 'var(--gray-500)' })
+  return rows.filter((row) => row.value > 0)
 })
 
 import { DIM_KEYS, DIM_LABELS, normalizeDimKey } from '@/constants/dim'
@@ -643,7 +663,7 @@ const radarOption = computed<EChartsOption>(() => ({
   color: PRISM_DIM_COLORS,
 }))
 
-const riskLevel = computed(() => reviewRiskLevel(score.value))
+const riskLevel = computed(() => isSandboxReport.value ? '安全风险未评定（测试得分不代表风险）' : reviewRiskLevel(score.value))
 
 function formatDate(s?: string): string {
   if (!s) return '-'
@@ -670,6 +690,9 @@ async function loadReport() {
   loading.value = true
   try {
     report.value = await getReportDetail(taskId)
+  } catch {
+    report.value = null
+    ElMessage.error('报告加载失败，请返回列表重试')
   } finally {
     loading.value = false
   }
@@ -687,6 +710,7 @@ function downloadBlob(response: Blob, filename: string) {
 }
 
 async function downloadWord() {
+  if (!canExport('word') || exportingWord.value) return
   exportingWord.value = true
   try {
     const response = await apiExportReport(taskId, 'word', templateType.value)
@@ -700,6 +724,7 @@ async function downloadWord() {
 }
 
 async function downloadPdf() {
+  if (!canExport('pdf') || exportingPdf.value) return
   exportingPdf.value = true
   try {
     const response = await apiExportReport(taskId, 'pdf', templateType.value)
@@ -713,6 +738,7 @@ async function downloadPdf() {
 }
 
 function onPrint() {
+  if (!canViewReport.value) return
   window.print()
 }
 
@@ -723,6 +749,7 @@ function onPrint() {
  * 后端报告详情不含 issues,需单独调用 review API 获取。
  */
 async function loadIssues(): Promise<void> {
+  if (!userStore.hasPermission('issue:view')) return
   issuesLoading.value = true
   try {
     // 一次取足够多,Top10 与分布统计需要全量数据
@@ -862,13 +889,7 @@ function cvssSeverityColor(score?: number | null): string {
  * @param format - 报告格式
  */
 async function handleGenerate(format: ReportFormat): Promise<void> {
-  if (generatingFormat.value !== null) return
-  if (isDomainReport.value && format !== 'json') {
-    exportErrorMessage.value = `领域报告不支持 ${format.toUpperCase()}`
-    exportErrorNextAction.value = '请生成真实领域 JSON'
-    retryExportFormat.value = 'json'
-    return
-  }
+  if (!canExport(format) || generatingFormat.value !== null) return
   generatingFormat.value = format
   try {
     const result = await apiGenerateReport(taskId, format, templateType.value)
@@ -955,6 +976,7 @@ function preopenPreviewWindow(): Window | null {
  * 弹窗被拦截或在等待期间被关闭时，改用 sandbox iframe 页内预览。
  */
 async function handlePreview(): Promise<void> {
+  if (!canViewReport.value || previewing.value) return
   if (isDomainReport.value) {
     exportErrorMessage.value = '领域报告不支持 HTML 预览'
     exportErrorNextAction.value = '请导出真实领域 JSON'
@@ -1000,15 +1022,7 @@ async function handlePreview(): Promise<void> {
  * @param format - 导出格式
  */
 async function handleExport(format: ReportFormat): Promise<void> {
-  if (exportingFormat.value !== null) return
-  if (isDomainReport.value && format !== 'json') {
-    showExportError({
-      code: 40941,
-      message: `领域报告不支持 ${format.toUpperCase()}`,
-      next_action: '请导出真实领域 JSON',
-    }, format, '导出')
-    return
-  }
+  if (!canExport(format) || exportingFormat.value !== null) return
   exportingFormat.value = format
   exportErrorMessage.value = ''
   exportErrorNextAction.value = ''
@@ -1063,14 +1077,13 @@ async function selectRemediation(id: number): Promise<void> {
   }
 }
 
-onMounted(() => {
-  loadReport()
-  loadIssues()
+onMounted(async () => {
+  const shouldGenerate = route.query.generate === '1'
+  if (shouldGenerate) void router.replace({ query: {} })
+  await Promise.all([loadReport(), loadIssues()])
   // 报告列表"生成报告"按钮跳转携带 ?generate=1,此处消费该 query 自动触发生成
-  if (route.query.generate === '1') {
-    // 消费后立即清掉 query,避免刷新/前进后退时重复触发生成
-    router.replace({ query: {} })
-    handleGenerate('html')
+  if (shouldGenerate && canExport('html')) {
+    await handleGenerate('html')
   }
 })
 

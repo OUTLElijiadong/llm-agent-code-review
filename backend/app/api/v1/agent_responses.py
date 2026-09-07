@@ -32,6 +32,7 @@ from app.services.agent_responses_service import (
     redact_agent_output_text,
     terminal_event,
 )
+from app.services.ai_usage_context import model_attribution, usage_context
 from app.utils.api_resolver import resolve_api_config
 
 router = APIRouter()
@@ -884,6 +885,7 @@ async def stream_agent_response(
                     session_key=payload.session_id,
                 )
                 mesh_message_id = ""
+                source_attribution = {}
                 if payload.action == "start":
                     messages = [item.model_dump() for item in payload.messages if item.content.strip()]
                     if payload.mesh_message_id:
@@ -896,6 +898,11 @@ async def stream_agent_response(
                             session_key=payload.session_id,
                         )
                         messages = [system_input]
+                        source_message = run_db.query(AgentMeshMessage).filter(
+                            AgentMeshMessage.message_id == mesh_message_id,
+                            AgentMeshMessage.user_id == run_user.id,
+                        ).first()
+                        source_attribution = model_attribution(source_message)
                 else:
                     active_row = (
                         run_db.query(AgentResponseRun)
@@ -930,7 +937,8 @@ async def stream_agent_response(
                         except Exception:  # noqa: BLE001
                             pass
                     if payload.action == "start":
-                        result = await service.start(messages, run_id=run_id, event_sink=sink)
+                        with usage_context(int(run_user.id), source_attribution):
+                            result = await service.start(messages, run_id=run_id, event_sink=sink)
                     elif payload.action == "cancel":
                         result = await service.cancel(run_id=run_id, reason=payload.cancel_reason)
                     else:

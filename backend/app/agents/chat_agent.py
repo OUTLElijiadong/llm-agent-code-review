@@ -1722,12 +1722,22 @@ class ChatAssistantAgent(BaseAgent):
 
         import httpx
 
+        from app.services.ai_usage_context import record_usage_attempt, usage_tokens
+
         last_error = None
+        usage_log_ids = []
+        http_attempts = 0
         for attempt in range(self._max_retries + 1):
             t0 = time.time()
+            request_sent = False
+            body = {}
+            content = ""
+            success = False
             try:
                 target = pin_public_http_url(f"{self._base_url}/chat/completions")
                 with httpx.Client(timeout=self._timeout, trust_env=False) as client:
+                    request_sent = True
+                    http_attempts += 1
                     resp = client.post(
                         target.request_url,
                         headers={
@@ -1744,13 +1754,23 @@ class ChatAssistantAgent(BaseAgent):
                         extensions=target.request_extensions,
                     )
                 duration_ms = int((time.time() - t0) * 1000)
+                try:
+                    raw_body = resp.json()
+                    body = raw_body if isinstance(raw_body, dict) else {}
+                except (TypeError, ValueError):
+                    body = {}
                 if resp.status_code == 200:
-                    body = resp.json()
+                    content = body["choices"][0]["message"]["content"]
+                    success = True
                     return AgentResult(
-                        success=True,
-                        data=body["choices"][0]["message"]["content"],
-                        model=body.get("model", self._model),
-                        duration_ms=duration_ms,
+                        success=True, data=content,
+                        model=body.get("model", self._model), duration_ms=duration_ms,
+                        tokens={
+                            "prompt": usage_tokens(body.get("usage"), "prompt_tokens"),
+                            "completion": usage_tokens(body.get("usage"), "completion_tokens"),
+                            "total": usage_tokens(body.get("usage"), "total_tokens"),
+                        },
+                        usage_log_ids=usage_log_ids, http_attempts=http_attempts,
                     )
                 if resp.status_code == 429:
                     last_error = "请求过于频繁"
@@ -1760,7 +1780,22 @@ class ChatAssistantAgent(BaseAgent):
                     last_error = f"调用失败({resp.status_code})"
             except Exception as e:
                 last_error = str(e)
+            finally:
+                if request_sent:
+                    log_id = record_usage_attempt(
+                        model_name=str(body.get("model") or self._model), agent_label=self.name,
+                        usage=body.get("usage"),
+                        status="success" if success else "retry" if attempt < self._max_retries else "failed",
+                        error="" if success else str(last_error or ""), duration_ms=int((time.time() - t0) * 1000),
+                        prompt=json_lib.dumps(history, ensure_ascii=False),
+                        response=content if isinstance(content, str) else "",
+                        user_id=ctx.user_id if ctx else None, task_id=ctx.task_id if ctx else None,
+                        file_id=ctx.file_id if ctx else None, source=getattr(self, "_usage_source", None),
+                    )
+                    if log_id is not None:
+                        usage_log_ids.append(log_id)
             if attempt < self._max_retries:
                 time.sleep(2 ** (attempt + 1))
 
-        return AgentResult(success=False, error=f"聊天失败: {last_error}")
+        return AgentResult(success=False, error=f"聊天失败: {last_error}",
+                           usage_log_ids=usage_log_ids, http_attempts=http_attempts)

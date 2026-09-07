@@ -286,7 +286,7 @@ def _add_issue_stats(stats: dict, severity: str, kind: str, status: str, count: 
 def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: datetime | None = None) -> dict[int, dict]:
     """批量读取已授权任务的来源事实，不创建虚拟问题或重新运行领域服务。
 
-    标准/圆桌使用 ReviewIssue；沙箱使用发布时的问题清单计数，未提供严重度
+    标准/圆桌使用 ReviewIssue；沙箱解析报告的问题清单条目，未提供严重度
     时明确标为未分级。渗透优先读取归属一致的领域发现，全部发现计入总数，
     refuted 仅单列而不进入风险分布；旧任务缺少领域关联时保留发布快照。
     since 对明细按发现时间过滤；汇总使用任务完成时间，旧记录回退报告创建时间。
@@ -336,8 +336,23 @@ def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: dateti
             continue
         total = _count(task.total_issues)
         if task.review_type == "sandbox_test":
-            if total:
-                _add_issue_stats(item, "未分级", "沙箱测试", "", total)
+            from app.services.sandbox_report_summary import summarize_sandbox_report
+
+            summary = summarize_sandbox_report(content.get("report_md"))
+            item["source"]["report_issue_summary"] = summary
+            if summary["total"] is None:
+                # 不回填或把旧快照归零；该分支只能证明历史记录数，不能证明发现条目数。
+                item["source"]["stats_basis"] = "legacy_task_snapshot"
+                item["source"]["legacy_recorded_total"] = total
+                if total:
+                    _add_issue_stats(item, "未分级", "沙箱测试", "", total)
+            else:
+                item["source"]["stats_basis"] = summary["basis"]
+                for level, count in summary["severity_counts"].items():
+                    if count:
+                        _add_issue_stats(item, level, "沙箱测试", "", count)
+                if summary["unclassified"]:
+                    _add_issue_stats(item, "未分级", "沙箱测试", "", summary["unclassified"])
             continue
         severity = content.get("severity_counts")
         has_severity_snapshot = isinstance(severity, dict)

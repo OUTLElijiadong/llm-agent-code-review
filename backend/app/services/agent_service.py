@@ -270,6 +270,7 @@ def _derive_runtime_statuses(
     agent_codes: set[str],
     active_window_seconds: int = 90,
     error_window_seconds: int = 6,
+    user_id: Optional[int] = None,
 ) -> dict[str, str]:
     """根据每个 Agent 的最新事件推导当前运行状态。
 
@@ -284,6 +285,8 @@ def _derive_runtime_statuses(
     now = datetime.now(timezone.utc)
     latest: dict[str, tuple[datetime, str]] = {}
     for ev in AgentEventBus.instance().recent(limit=500):
+        if user_id is not None and ev.user_id != user_id:
+            continue
         if ev.agent not in agent_codes:
             continue
         event_type = _event_type_value(ev.type)
@@ -325,9 +328,8 @@ def _aggregate_log_stats(
         # 优先按 agent_label 精确归因(小菱等 Responses 调用直接写注册码);
         # 旧记录无 label 时按 model_name 反推。
         matched = (
-            {agent_label}
-            if agent_label and agent_label in codes
-            else _agent_codes_from_model_name(model_name, codes)
+            ({agent_label} if agent_label in codes else set())
+            if agent_label else _agent_codes_from_model_name(model_name, codes)
         )
         for code in matched:
             slot = stats[code]
@@ -344,9 +346,9 @@ def _aggregate_log_stats(
 
 
 def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]:
-    """返回内置运行时与已发布自定义 Agent 的唯一可调用目录。
+    """按账号可见范围返回内置与已发布自定义 Agent 运行目录。
 
-    保证前端看到的 Agent 数量 / 名称 / 描述与后端实际注册的 BaseAgent 完全一致。
+    目录数量不是进程存活证明，普通账号仅显示本人账本关联且有权调用的项。
 
     Args:
         db: 数据库会话
@@ -358,7 +360,7 @@ def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]
     runtime = get_runtime_catalog(db)
     codes = {r["code"] for r in runtime}
     stats = _aggregate_log_stats(db, user_id, codes)
-    statuses = _derive_runtime_statuses(codes)
+    statuses = _derive_runtime_statuses(codes, user_id=user_id)
     if user_id is not None:
         # 普通成员工作台只显示自己实际运转过的 Agent(有调用记录),没运行过的不占工位;
         # 管理/内部调度 Agent 即使有记录也隐藏;无自定义 Agent 调用权限时不展示已发布自定义 Agent。
@@ -413,15 +415,7 @@ def get_runtime_catalog(db: Session) -> list[dict]:
 
 def get_runtime_summary(db: Session, user_id: Optional[int] = None) -> dict:
     """可调用 Agent 目录汇总：总数与 category 分桶(普通成员只统计运转过的 Agent)。"""
-    runtime = get_runtime_catalog(db)
-    if user_id is not None:
-        codes = {r["code"] for r in runtime}
-        stats = _aggregate_log_stats(db, user_id, codes)
-        runtime = [
-            item for item in runtime
-            if item.get("code") not in USER_HIDDEN_BUILTIN
-            and (stats.get(item["code"]) or {}).get("call_count", 0) > 0
-        ]
+    runtime = get_runtime_agents(db, user_id)
     by_category: dict[str, int] = defaultdict(int)
     for item in runtime:
         by_category[str(item.get("category") or "general")] += 1
@@ -438,8 +432,8 @@ def get_situation(db: Session, user_id: Optional[int] = None,
                   minutes: int = 60) -> dict:
     """v2.0 态势感知数据
 
-    通过 EventBus 近 60s 事件判断 Agent 是否正在工作,
-    不再硬编码 working=0。
+    使用与办公室相同的可见集合；近90秒本人事件表示近期执行，
+    管理员观察全平台事件。没有事件不代表进程在线或离线。
 
     Args:
         db: 数据库会话
@@ -449,14 +443,11 @@ def get_situation(db: Session, user_id: Optional[int] = None,
     Returns:
         dict: 符合 AgentSituationOut Schema
     """
-    runtime = get_runtime_catalog(db)
-    online = len(runtime)
-    agent_codes = {r["code"] for r in runtime}
-
-    # 通过 EventBus 最新事件判断哪些 Agent 仍处于执行态。
-    statuses = _derive_runtime_statuses(agent_codes)
-    working = sum(1 for status in statuses.values() if status in _ACTIVE_RUNTIME_STATUSES)
-    idle = max(0, online - working)
+    # 与办公室列表复用同一可见集合；目录大小不代表进程在线或在岗。
+    runtime = get_runtime_agents(db, user_id)
+    online = len(runtime)  # 保留兼容字段名，含义为当前可见目录项。
+    working = sum(1 for item in runtime if item["status"] in _ACTIVE_RUNTIME_STATUSES)
+    idle = max(0, online - working)  # 非执行态，包括等待回填/错误；不是存活判定。
 
     # 今日调用数 + 热点 Agent
     today_start = datetime.now(timezone.utc).replace(
@@ -467,9 +458,12 @@ def get_situation(db: Session, user_id: Optional[int] = None,
 
     codes = {r["code"] for r in runtime}
     hotspot_counts: dict[str, int] = defaultdict(int)
-    for row in rows_today:
-        model_name = row[0]
-        for code in _agent_codes_from_model_name(model_name, codes):
+    for model_name, _status, _created, agent_label in rows_today:
+        matched = (
+            ({agent_label} if agent_label in codes else set())
+            if agent_label else _agent_codes_from_model_name(model_name, codes)
+        )
+        for code in matched:
             hotspot_counts[code] += 1
     name_by_code = {r["code"]: r["name"] for r in runtime}
     hotspots = [

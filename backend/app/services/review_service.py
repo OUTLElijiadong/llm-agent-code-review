@@ -11,6 +11,7 @@ import concurrent.futures
 import threading
 import time
 import uuid
+from contextvars import copy_context
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -50,6 +51,7 @@ from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.schemas.review import ReviewStartIn
+from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 from app.services.issue_merger import finding_to_issue, merge_findings_and_issues
 from app.services.review_input_service import (
     freeze_task_inputs,
@@ -165,6 +167,7 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
     agent = DeepSeekAgent(api_config=_api_cfg)
 
     task = ReviewTask(
+        **current_attribution(int(user.id)),
         user_id=user.id,
         project_id=project.id,
         task_name=payload.task_name or f"{project.project_name}-审查",
@@ -403,18 +406,19 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
         collab_agent = DeepSeekAgent(api_config=api_config)
         files = load_task_inputs(db, task.id)
 
-        _execute_review(
-            db,
-            collab_agent,
-            api_config,
-            task,
-            user,
-            files,
-            rules,
-            profiles,
-            experience_section,
-            execution_token=active_token,
-        )
+        with usage_context(int(user.id), model_attribution(task), db=db):
+            _execute_review(
+                db,
+                collab_agent,
+                api_config,
+                task,
+                user,
+                files,
+                rules,
+                profiles,
+                experience_section,
+                execution_token=active_token,
+            )
     except (TaskCancelledError, TaskSupersededError):
         db.rollback()
     except Exception as e:
@@ -880,6 +884,7 @@ def _review_chunk_sequential(
             agent_code=target_agent,
         )
 
+        result = None
         try:
             # 通过真实 Agent 调用 LLM(安全画像用 SecuritySentinelAgent,其他用 CodeReviewerAgent)
             if profile.code == "security" and hasattr(agent, "scan_file_for_review"):
@@ -919,7 +924,7 @@ def _review_chunk_sequential(
                     f"[{profile.name}] 审查失败: {result.error}",
                     agent_code=target_agent,
                 )
-                # 补写 AiCallLog(失败):BaseAgent.call() 不写日志,这里补写实现 Agent 归因
+                # 按已记账调用 ID 补充审查元数据及失败信息，兼容未绑定数据库的旧调用。
                 _log_sequential_call(
                     db, task, user, code_file, chunk_idx, agent_idx,
                     target_agent, result, status="failed",
@@ -936,7 +941,7 @@ def _review_chunk_sequential(
             if invalid_count:
                 failures.append(f"{profile.name}: {invalid_count} 条模型结果未通过解析校验")
 
-            # 补写 AiCallLog(成功):BaseAgent.call() 不写日志,这里补写实现 Agent 归因
+            # 按已记账调用 ID 补充审查元数据，避免重复累计实际模型用量。
             _log_sequential_call(
                 db, task, user, code_file, chunk_idx, agent_idx,
                 target_agent, result, status="failed" if invalid_count else "success",
@@ -958,11 +963,13 @@ def _review_chunk_sequential(
                 f"[{profile.name}] 审查异常: {e}",
                 agent_code=target_agent,
             )
-            # 异常时也补写一条失败日志(若有 result)
+            # 实际 HTTP 已由 BaseAgent 记账；仅补充已有结果，避免异常重复造账。
+            if result is None and isinstance(agent, BaseAgent):
+                continue
             try:
                 _log_sequential_call(
                     db, task, user, code_file, chunk_idx, agent_idx,
-                    target_agent, None, status="failed",
+                    target_agent, result, status="failed",
                     error=str(e)[:500],
                     agent=agent,
                 )
@@ -1025,6 +1032,8 @@ def _log_sequential_call(
             )
             return
         except Exception as e:
+            if getattr(result, "usage_log_ids", None):
+                raise
             logger.debug(f"[review] agent._log_call 失败,降级到 log_deferred: {e}")
 
     # 降级路径:DeepSeekAgent.log_deferred()(兼容 agent 未传入的场景)
@@ -1033,14 +1042,16 @@ def _log_sequential_call(
         tokens_dict = result.tokens if isinstance(result.tokens, dict) else {}
 
     meta = {
+        "_usage_log_ids": getattr(result, "usage_log_ids", []),
+        "_http_attempts": getattr(result, "http_attempts", None),
         "agent_label": agent_label,
         "model_name": (getattr(result, "model", None) if result else None) or "",
         "model_tag": (getattr(result, "model", None) if result else None) or "",
         "user_prompt": "",  # BaseAgent.call 路径不暴露 prompt,留空
         "response": "" if status != "success" else "",
-        "prompt_tokens": tokens_dict.get("prompt", 0) if tokens_dict else 0,
-        "completion_tokens": tokens_dict.get("completion", 0) if tokens_dict else 0,
-        "total_tokens": tokens_dict.get("total", 0) if tokens_dict else 0,
+        "prompt_tokens": tokens_dict.get("prompt"),
+        "completion_tokens": tokens_dict.get("completion"),
+        "total_tokens": tokens_dict.get("total"),
         "duration_ms": (getattr(result, "duration_ms", None) if result else None) or 0,
         "create_time": datetime.now(timezone.utc),
     }
@@ -1113,12 +1124,16 @@ def _review_chunk_collaborative(
     ) as pool:
         future_map: dict[concurrent.futures.Future, ReviewAgentProfile] = {}
         for profile in profiles:
-            future = pool.submit(
-                _call_single_agent,
-                profile, chunk.text, language, file_name, rules, line_offset,
-                experience_section, getattr(chunk, "context", ""),
-                api_config,
-            )
+            with usage_context(int(user.id), {
+                **model_attribution(task), "_review_task_id": task.id, "_file_id": code_file.id,
+                "_chunk_index": chunk_idx * 100 + list(profiles).index(profile),
+            }, db=db):
+                future = pool.submit(
+                    copy_context().run, _call_single_agent,
+                    profile, chunk.text, language, file_name, rules, line_offset,
+                    experience_section, getattr(chunk, "context", ""),
+                    api_config,
+                )
             future_map[future] = profile
 
         for future, profile in future_map.items():
@@ -1513,16 +1528,24 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
         p.id: p
         for p in db.query(Project).filter(Project.id.in_(project_ids)).all()
     } if project_ids else {}
+    sandbox_tasks = [row for row in rows if row.review_type == "sandbox_test"]
+    from app.services.report_service import load_task_issue_stats
+
+    sandbox_stats = load_task_issue_stats(db, sandbox_tasks)
 
     items = []
     for row in rows:
         project = projects.get(row.project_id)
+        summary = sandbox_stats.get(row.id, {}).get("source", {}).get("report_issue_summary")
+        report_total = summary.get("total") if summary else None
         items.append({
             "id": row.id, "task_name": row.task_name,
             "project_id": row.project_id,
             "project_name": project.project_name if project else "",
             "review_type": row.review_type, "status": row.status,
-            "total_files": row.total_files, "total_issues": row.total_issues,
+            "total_files": row.total_files,
+            "total_issues": report_total if report_total is not None else row.total_issues,
+            "report_issue_summary": summary,
             "severe_issues": row.severe_issues, "high_issues": row.high_issues,
             "medium_issues": row.medium_issues, "low_issues": row.low_issues,
             "score": row.score, "duration_ms": row.duration_ms,
@@ -1556,13 +1579,28 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     # v2.4: 用 project_member 关系校验,reviewer 可读同项目任务
     require_project_access(db, task.project_id, user, need_write=False)
     project = db.get(Project, task.project_id)
+    report_issue_summary = None
+    if task.review_type == "sandbox_test":
+        from app.models.review_report import ReviewReport
+        from app.services.sandbox_report_summary import summarize_sandbox_report
+
+        report = db.query(ReviewReport).filter(
+            ReviewReport.task_id == task.id, ReviewReport.user_id == task.user_id,
+        ).one_or_none()
+        content = report.content_json if report and isinstance(report.content_json, dict) else {}
+        if content.get("source") != "sandbox_test":
+            content = {}
+        report_issue_summary = summarize_sandbox_report(content.get("report_md"))
+        report_issue_summary["structured_issues"] = db.query(ReviewIssue).filter(ReviewIssue.task_id == task.id).count()
+    report_total = report_issue_summary.get("total") if report_issue_summary else None
     return {
         "id": task.id, "task_name": task.task_name,
         "project_id": task.project_id,
         "project_name": project.project_name if project else "",
         "review_type": task.review_type, "status": task.status,
         "total_files": task.total_files, "processed_files": task.processed_files,
-        "total_issues": task.total_issues,
+        "total_issues": report_total if report_total is not None else task.total_issues,
+        "report_issue_summary": report_issue_summary,
         "severe_issues": task.severe_issues, "high_issues": task.high_issues,
         "medium_issues": task.medium_issues, "low_issues": task.low_issues,
         "score": task.score, "summary": task.summary,

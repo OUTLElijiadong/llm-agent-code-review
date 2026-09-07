@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "verified_at_utc": "2026-09-07T07:45:15.188938+00:00",
+  "source_fingerprint": "07c8e0e435a90d4ed5390ae5cec9202483653dc70cde3cd93c913a81f53bfa65",
+  "source_files": 914,
+  "sources_unchanged": true,
+  "tests": {
+    "backend": {
+      "total": 3897,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xml_sha256": "af140b305f09ed665e61f3db979a3e2f8132d459f24a0682b1cb6107dfc5da87"
+    },
+    "frontend": {
+      "total": 962,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xml_sha256": "fbbcbb20bd818f4ae79f0af505dabb0b32ce731dd5ca975c5f4fd01105d04764"
+    }
+  },
+  "frontend_lint_exit": 0,
+  "frontend_build_exit": 0,
+  "backend_coverage": {
+    "covered_lines": 30841,
+    "num_statements": 39543,
+    "percent_covered": 77.99357661280125,
+    "percent_covered_display": "78",
+    "missing_lines": 8702,
+    "excluded_lines": 110
+  }
+}

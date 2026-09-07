@@ -1,0 +1,20 @@
+{
+  "tests": 34,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "reviewer": "usage_attribution 子代理对 security_catalog 的独立只读复核",
+  "sha256": {
+    "backend/app/services/api_config_service.py": "ac0226c77767d3dba5349dd6341b1123ab638083be1a56b5e1b8f1bb30ee4f90",
+    "backend/app/services/embedding_service.py": "6934866517f3df99946e699374fbdbf9bff29b5ca099a58f4c9006d0693a30d6",
+    "backend/app/services/knowledge_service.py": "fb1024d613bd9762ab46b6ff1baa45718c15b44a5451994a658bd1bcf234ec2e",
+    "backend/app/services/agent_knowledge_service.py": "5e5a6f73482e9b4220b0323b8fb938efa8219ba9b3179d07e7c0455e8dc50811",
+    "backend/app/services/capability_catalog_service.py": "0570c303355a2b026a14b5cebe4b6f97e53c37476ba51e49ca9987ac10157ad7",
+    "backend/app/api/v1/knowledge.py": "b3c6153d6beec9e5ec88e15d8219f4baeb5ef81a7c545d2b7096ad37a4457087",
+    "backend/app/api/v1/api_config.py": "c2ef7e9f3fadadac505bb15b6349c2545cfb71920e869292c4466676daf99d54",
+    "backend/app/api/v1/agent_governance.py": "90e6c67903841c6bb261d8d0dd8d4f7b7499883700de3c84681cbca2d4014caf",
+    "backend/tests/unit/services/test_embedding_usage_recording.py": "62b07d6ca426433503b96f40f336885ddb99c6e2b40088a34bbd07ffaa3ba6a7",
+    "backend/tests/unit/services/test_llm_endpoint_service.py": "8769f437b9987d9433523007698de39b968db153551b1d5120cabf5b12caa6c8",
+    "backend/tests/unit/services/test_api_config_service.py": "09c26ffd2524e5a42410c5b31826e4b2f78e867809e6ee6b5d68e3889067a0e7"
+  }
+}

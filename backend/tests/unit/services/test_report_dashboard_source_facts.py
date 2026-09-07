@@ -506,6 +506,7 @@ def source_api_client():
     from app.core.database import Base, get_db
     from app.core.dependencies import get_current_user
     from app.core.error_handlers import register_handlers
+    from app.models.rbac import Permission, Role, RolePermission, UserRole
 
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
@@ -514,6 +515,15 @@ def source_api_client():
     other = User(username="source-api-other", password="x", role="user", status=1)
     db.add_all([owner, other])
     db.flush()
+    # 外部账号具有报告查看权限，确保后续 404 实际验证资源归属隔离。
+    report_reader = Role(name="来源接口报告读者", code="source_report_reader", status="active")
+    report_view = Permission(code="report:view", name="报告查看", module="report", type="api")
+    db.add_all([report_reader, report_view])
+    db.flush()
+    db.add_all([
+        RolePermission(role_id=report_reader.id, permission_id=report_view.id),
+        UserRole(user_id=other.id, role_id=report_reader.id),
+    ])
     project = Project(user_id=owner.id, project_name="来源接口", status="active")
     db.add(project)
     db.commit()

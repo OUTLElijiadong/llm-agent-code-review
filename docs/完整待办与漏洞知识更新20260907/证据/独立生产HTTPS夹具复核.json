@@ -1,0 +1,30 @@
+{
+  "status": "passed",
+  "http_requests_sent": 0,
+  "recounted_requests": 92,
+  "status_counts": {
+    "200": 57,
+    "404": 27,
+    "403": 7,
+    "401": 1
+  },
+  "assertions_passed": 38,
+  "resources": {
+    "a": {
+      "project_id": 162,
+      "project_name": "QA权限验收-20260907-a",
+      "file_id": 1892,
+      "content_sha256": "96242d17c7ca31b4c7ee447578b51f3074a002600e77eb9959447f160f665d09",
+      "reviewer_user_id": 104,
+      "file_name": "permission_renamed.py"
+    },
+    "b": {
+      "project_id": 163,
+      "project_name": "QA权限验收-20260907-b",
+      "file_id": 1893,
+      "content_sha256": "f71f6bb27c09066090d4bd7c7ec64937d1b68741bf327e06ecdbd55ded7e14a6"
+    }
+  },
+  "scope": "生产fixtures阶段：正向/跨项目/同项目reviewer/旧JWT拒绝；无权限账号此阶段只有登录和自身RBAC读取，完整403矩阵须发布后另验。",
+  "source_sha256": "ae5a006b75d9f1876989c84e96b260c67cc5bee4894bc2e72ab12f55bb405377"
+}

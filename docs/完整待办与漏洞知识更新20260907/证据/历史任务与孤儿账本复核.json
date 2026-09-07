@@ -1,0 +1,781 @@
+{
+  "schema": "historical-ledger-readonly-v1",
+  "started_at_utc": "2026-09-07T06:33:10.965292+00:00",
+  "query_sha256": "08482a217080dbe6c87ea684f8ab870f58716998182f8f724e8bbde3dc5157d9",
+  "business_writes": false,
+  "transaction": [
+    {
+      "utc": "2026-09-07 06:33:11.060030",
+      "isolation": "REPEATABLE-READ",
+      "read_only": 1
+    }
+  ],
+  "status_counts": [
+    {
+      "count": 25,
+      "table": "agent_response_run",
+      "status": "cancelled"
+    },
+    {
+      "count": 519,
+      "table": "agent_response_run",
+      "status": "completed"
+    },
+    {
+      "count": 233,
+      "table": "agent_response_run",
+      "status": "failed"
+    },
+    {
+      "count": 1,
+      "table": "agent_response_run",
+      "status": "max_rounds_exceeded"
+    },
+    {
+      "count": 3,
+      "table": "agent_tool_execution",
+      "status": "executing"
+    },
+    {
+      "count": 344,
+      "table": "agent_tool_execution",
+      "status": "failed"
+    },
+    {
+      "count": 2229,
+      "table": "agent_tool_execution",
+      "status": "success"
+    },
+    {
+      "count": 42,
+      "table": "agent_team",
+      "status": "completed"
+    },
+    {
+      "count": 15,
+      "table": "agent_team",
+      "status": "failed"
+    },
+    {
+      "count": 6,
+      "table": "agent_team",
+      "status": "cancelled"
+    },
+    {
+      "count": 16,
+      "table": "agent_team_task",
+      "status": "blocked"
+    },
+    {
+      "count": 14,
+      "table": "agent_team_task",
+      "status": "cancelled"
+    },
+    {
+      "count": 145,
+      "table": "agent_team_task",
+      "status": "completed"
+    },
+    {
+      "count": 11,
+      "table": "agent_team_task",
+      "status": "dead_letter"
+    },
+    {
+      "count": 9,
+      "table": "agent_team_task",
+      "status": "failed"
+    },
+    {
+      "count": 1,
+      "table": "agent_team_task",
+      "status": "queued"
+    },
+    {
+      "count": 1,
+      "table": "agent_team_task",
+      "status": "waiting_dependency"
+    },
+    {
+      "count": 18,
+      "table": "agent_team_member",
+      "status": "reclaimed"
+    },
+    {
+      "count": 136,
+      "table": "agent_team_member",
+      "status": "completed"
+    },
+    {
+      "count": 32,
+      "table": "agent_team_member",
+      "status": "failed"
+    },
+    {
+      "count": 2,
+      "table": "agent_team_member",
+      "status": "queued"
+    },
+    {
+      "count": 1,
+      "table": "agent_team_member",
+      "status": "running"
+    },
+    {
+      "count": 531,
+      "table": "agent_mesh_message",
+      "status": "completed"
+    },
+    {
+      "count": 117,
+      "table": "agent_mesh_message",
+      "status": "failed"
+    },
+    {
+      "count": 183,
+      "table": "agent_mesh_message",
+      "status": "dead_letter"
+    },
+    {
+      "count": 11,
+      "table": "agent_mesh_message",
+      "status": "queued"
+    },
+    {
+      "count": 6,
+      "table": "agent_mesh_message",
+      "status": "delivered"
+    },
+    {
+      "count": 2,
+      "table": "agent_mesh_message",
+      "status": "processing"
+    },
+    {
+      "count": 43173,
+      "table": "ops_execution",
+      "status": "failed"
+    },
+    {
+      "count": 7,
+      "table": "ops_execution",
+      "status": "running"
+    },
+    {
+      "count": 42660,
+      "table": "ops_execution",
+      "status": "success"
+    }
+  ],
+  "relationship": [
+    {
+      "name": "tool_run",
+      "missing": 7
+    },
+    {
+      "name": "tool_user",
+      "missing": 0
+    },
+    {
+      "name": "run_user",
+      "missing": 0
+    },
+    {
+      "name": "team_user",
+      "missing": 0
+    },
+    {
+      "name": "task_team",
+      "missing": 0
+    },
+    {
+      "name": "task_member",
+      "missing": 0
+    },
+    {
+      "name": "member_team",
+      "missing": 0
+    },
+    {
+      "name": "event_team",
+      "missing": 0
+    },
+    {
+      "name": "event_task",
+      "missing": 0
+    },
+    {
+      "name": "event_member",
+      "missing": 0
+    },
+    {
+      "name": "mesh_event_message",
+      "missing": 0
+    },
+    {
+      "name": "run_mesh_message",
+      "missing": 0
+    }
+  ],
+  "tool_integrity": [
+    {
+      "total": 2576,
+      "invalid_arguments": 0,
+      "terminal_missing_result": 0,
+      "request_binding_mismatch": 0
+    }
+  ],
+  "owner_mismatch": [
+    {
+      "count": 0
+    }
+  ],
+  "task_member_team_mismatch": [
+    {
+      "count": 0
+    }
+  ],
+  "historical_task": [
+    {
+      "created": "2026-08-12 09:43:22.000000",
+      "task_id": 11,
+      "team_id": 5,
+      "updated": "2026-08-12 09:43:28.000000",
+      "member_id": 11,
+      "started_at": "2026-08-12 09:43:23.000000",
+      "task_status": "queued",
+      "team_status": "failed",
+      "completed_at": null,
+      "error_sha256": "fd6185ca03654457cb6a84fe8e32d1e9514a3657fbf4c0449277635bcc532a52",
+      "attempt_count": 1,
+      "lease_present": false,
+      "member_status": "queued",
+      "result_sha256": "40b91aad0be222195bca533c6120d3ba1f366ed08fdd01380b939565cebf8257",
+      "dependency_keys": [],
+      "lease_expires_at": null,
+      "team_completed_at": "2026-08-12 09:45:24.000000",
+      "team_error_sha256": "6ac328ab6bce2dd5bfb1f32c7edc75f3d76c982413116adf04e9cf1f70af9f00"
+    },
+    {
+      "created": "2026-08-12 11:46:07.000000",
+      "task_id": 35,
+      "team_id": 12,
+      "updated": "2026-08-12 11:46:07.000000",
+      "member_id": 35,
+      "started_at": null,
+      "task_status": "waiting_dependency",
+      "team_status": "failed",
+      "completed_at": null,
+      "error_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "attempt_count": 0,
+      "lease_present": false,
+      "member_status": "queued",
+      "result_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "dependency_keys": [
+        "summarize_health"
+      ],
+      "lease_expires_at": null,
+      "team_completed_at": "2026-08-12 11:46:10.000000",
+      "team_error_sha256": "f6c1d33ae044df6766a607190366de34deebb1c8e805c423afacabec7b35fbd1"
+    }
+  ],
+  "historical_team_tasks": [
+    {
+      "status": "queued",
+      "created": "2026-08-12 09:43:22.000000",
+      "task_id": 11,
+      "team_id": 5,
+      "updated": "2026-08-12 09:43:28.000000",
+      "attempts": 1,
+      "member_id": 11,
+      "dependency_keys": []
+    },
+    {
+      "status": "failed",
+      "created": "2026-08-12 09:43:22.000000",
+      "task_id": 12,
+      "team_id": 5,
+      "updated": "2026-08-12 09:45:24.000000",
+      "attempts": 1,
+      "member_id": 12,
+      "dependency_keys": []
+    },
+    {
+      "status": "blocked",
+      "created": "2026-08-12 09:43:22.000000",
+      "task_id": 13,
+      "team_id": 5,
+      "updated": "2026-08-12 09:45:24.000000",
+      "attempts": 0,
+      "member_id": 13,
+      "dependency_keys": [
+        "analyze_current_state",
+        "verify_recent_tests"
+      ]
+    },
+    {
+      "status": "dead_letter",
+      "created": "2026-08-12 11:46:07.000000",
+      "task_id": 33,
+      "team_id": 12,
+      "updated": "2026-08-12 11:46:10.000000",
+      "attempts": 3,
+      "member_id": 33,
+      "dependency_keys": []
+    },
+    {
+      "status": "blocked",
+      "created": "2026-08-12 11:46:07.000000",
+      "task_id": 34,
+      "team_id": 12,
+      "updated": "2026-08-12 11:46:10.000000",
+      "attempts": 0,
+      "member_id": 34,
+      "dependency_keys": [
+        "inspect_metrics"
+      ]
+    },
+    {
+      "status": "waiting_dependency",
+      "created": "2026-08-12 11:46:07.000000",
+      "task_id": 35,
+      "team_id": 12,
+      "updated": "2026-08-12 11:46:07.000000",
+      "attempts": 0,
+      "member_id": 35,
+      "dependency_keys": [
+        "summarize_health"
+      ]
+    }
+  ],
+  "historical_event": [
+    {
+      "id": 57,
+      "created": "2026-08-12 09:43:22.000000",
+      "task_id": null,
+      "team_id": 5,
+      "member_id": null,
+      "to_status": "queued",
+      "event_type": "team.created",
+      "from_status": null,
+      "detail_sha256": "d969a2280b32303fa0feae246f21c5f2082dcc9ceae70b1e99d62d6e9c70463f"
+    },
+    {
+      "id": 58,
+      "created": "2026-08-12 09:43:23.000000",
+      "task_id": 11,
+      "team_id": 5,
+      "member_id": 11,
+      "to_status": "running",
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "detail_sha256": "52b9d52738b411875c8fa0233e4e2cabe4579f9609b84bfc58671eae2055df4e"
+    },
+    {
+      "id": 59,
+      "created": "2026-08-12 09:43:23.000000",
+      "task_id": null,
+      "team_id": 5,
+      "member_id": null,
+      "to_status": "running",
+      "event_type": "team.status_changed",
+      "from_status": "queued",
+      "detail_sha256": "a2f8ca384be8cc37d6238ceb317bbeedde7ff8c25b5f412cbefc8a01524e6bc1"
+    },
+    {
+      "id": 60,
+      "created": "2026-08-12 09:43:23.000000",
+      "task_id": 12,
+      "team_id": 5,
+      "member_id": 12,
+      "to_status": "running",
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "detail_sha256": "52b9d52738b411875c8fa0233e4e2cabe4579f9609b84bfc58671eae2055df4e"
+    },
+    {
+      "id": 61,
+      "created": "2026-08-12 09:43:23.000000",
+      "task_id": 12,
+      "team_id": 5,
+      "member_id": 12,
+      "to_status": null,
+      "event_type": "task.runtime_resource_attached",
+      "from_status": null,
+      "detail_sha256": "667986beb5a38058fa3c19a7da387c43a331f8b05a1fdb2f61638aadc6f3a7cc"
+    },
+    {
+      "id": 62,
+      "created": "2026-08-12 09:43:28.000000",
+      "task_id": 11,
+      "team_id": 5,
+      "member_id": 11,
+      "to_status": "queued",
+      "event_type": "task.retry_queued",
+      "from_status": "running",
+      "detail_sha256": "82a8d695b677763a3f1e55f9e900346f2a74a7f6b56b58d1cefecf2e3ef592a0"
+    },
+    {
+      "id": 63,
+      "created": "2026-08-12 09:45:24.000000",
+      "task_id": 12,
+      "team_id": 5,
+      "member_id": 12,
+      "to_status": "failed",
+      "event_type": "task.failed",
+      "from_status": "running",
+      "detail_sha256": "c801e1fa5b52a3b5b8b8001d56f8d031fa8d562de7dabeb003411631673ff4b1"
+    },
+    {
+      "id": 64,
+      "created": "2026-08-12 09:45:24.000000",
+      "task_id": 13,
+      "team_id": 5,
+      "member_id": null,
+      "to_status": "blocked",
+      "event_type": "task.blocked",
+      "from_status": "waiting_dependency",
+      "detail_sha256": "e4b6371ee9dfcc55844310f9a6306fac88e17976b3f0a40e7678b824a5bebca2"
+    },
+    {
+      "id": 65,
+      "created": "2026-08-12 09:45:24.000000",
+      "task_id": null,
+      "team_id": 5,
+      "member_id": null,
+      "to_status": "failed",
+      "event_type": "team.status_changed",
+      "from_status": "running",
+      "detail_sha256": "480c3acd8ad086236d6a9e1365943250cfc10ec0ed3618dccd87cc19fd222248"
+    },
+    {
+      "id": 153,
+      "created": "2026-08-12 11:46:07.000000",
+      "task_id": null,
+      "team_id": 12,
+      "member_id": null,
+      "to_status": "queued",
+      "event_type": "team.created",
+      "from_status": null,
+      "detail_sha256": "646947624719e293b3645df5d5170aa3474e7743966c03baaee45a08d93ab99d"
+    },
+    {
+      "id": 154,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": 33,
+      "team_id": 12,
+      "member_id": 33,
+      "to_status": "running",
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "detail_sha256": "52b9d52738b411875c8fa0233e4e2cabe4579f9609b84bfc58671eae2055df4e"
+    },
+    {
+      "id": 155,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": null,
+      "team_id": 12,
+      "member_id": null,
+      "to_status": "running",
+      "event_type": "team.status_changed",
+      "from_status": "queued",
+      "detail_sha256": "a2f8ca384be8cc37d6238ceb317bbeedde7ff8c25b5f412cbefc8a01524e6bc1"
+    },
+    {
+      "id": 156,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": 33,
+      "team_id": 12,
+      "member_id": 33,
+      "to_status": "queued",
+      "event_type": "task.retry_queued",
+      "from_status": "running",
+      "detail_sha256": "36d6daa6f0d47c7d45b1da4340270671c9802dedfd5119ba43a812883b8a1da3"
+    },
+    {
+      "id": 157,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": null,
+      "team_id": 12,
+      "member_id": null,
+      "to_status": "queued",
+      "event_type": "team.status_changed",
+      "from_status": "running",
+      "detail_sha256": "688b5e78577ddd4625ac2951b12fe7890f5617e85e1594064c320966ce6fbbc7"
+    },
+    {
+      "id": 158,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": 33,
+      "team_id": 12,
+      "member_id": 33,
+      "to_status": "running",
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "detail_sha256": "e0f1187249029ffdcf94ee815429ce36d5217fcc6ddd3b1a95fc416a1c8792a1"
+    },
+    {
+      "id": 159,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": null,
+      "team_id": 12,
+      "member_id": null,
+      "to_status": "running",
+      "event_type": "team.status_changed",
+      "from_status": "queued",
+      "detail_sha256": "a2f8ca384be8cc37d6238ceb317bbeedde7ff8c25b5f412cbefc8a01524e6bc1"
+    },
+    {
+      "id": 160,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": 33,
+      "team_id": 12,
+      "member_id": 33,
+      "to_status": "queued",
+      "event_type": "task.retry_queued",
+      "from_status": "running",
+      "detail_sha256": "81cab9aabb7de507c913a97080e4206b8ebc798cfa8fd4d3cbf10721c830d184"
+    },
+    {
+      "id": 161,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": null,
+      "team_id": 12,
+      "member_id": null,
+      "to_status": "queued",
+      "event_type": "team.status_changed",
+      "from_status": "running",
+      "detail_sha256": "688b5e78577ddd4625ac2951b12fe7890f5617e85e1594064c320966ce6fbbc7"
+    },
+    {
+      "id": 162,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": 33,
+      "team_id": 12,
+      "member_id": 33,
+      "to_status": "running",
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "detail_sha256": "f32dddf9749a0fafa675b5c0df9916be24c08efd63719364120ec67371faf522"
+    },
+    {
+      "id": 163,
+      "created": "2026-08-12 11:46:09.000000",
+      "task_id": null,
+      "team_id": 12,
+      "member_id": null,
+      "to_status": "running",
+      "event_type": "team.status_changed",
+      "from_status": "queued",
+      "detail_sha256": "a2f8ca384be8cc37d6238ceb317bbeedde7ff8c25b5f412cbefc8a01524e6bc1"
+    },
+    {
+      "id": 164,
+      "created": "2026-08-12 11:46:10.000000",
+      "task_id": 33,
+      "team_id": 12,
+      "member_id": 33,
+      "to_status": "dead_letter",
+      "event_type": "task.dead_letter",
+      "from_status": "running",
+      "detail_sha256": "d9a66fb9fc193228d10674e4e0bd38c4c3dd71ec7c48c9d8db8da21f6d89be58"
+    },
+    {
+      "id": 165,
+      "created": "2026-08-12 11:46:10.000000",
+      "task_id": 34,
+      "team_id": 12,
+      "member_id": null,
+      "to_status": "blocked",
+      "event_type": "task.blocked",
+      "from_status": "waiting_dependency",
+      "detail_sha256": "8be363451289060def4437475b15c16fa83f3c8f66d57e82f5356cace580b274"
+    },
+    {
+      "id": 166,
+      "created": "2026-08-12 11:46:10.000000",
+      "task_id": null,
+      "team_id": 12,
+      "member_id": null,
+      "to_status": "failed",
+      "event_type": "team.status_changed",
+      "from_status": "running",
+      "detail_sha256": "480c3acd8ad086236d6a9e1365943250cfc10ec0ed3618dccd87cc19fd222248"
+    }
+  ],
+  "orphan_tool": [
+    {
+      "id": 125,
+      "status": "success",
+      "created": "2026-08-03 13:37:14.000000",
+      "updated": "2026-08-03 13:37:14.000000",
+      "user_id": 1,
+      "ops_count": 0,
+      "tool_name": "list_projects",
+      "run_sha256": "c297eb23586b0fa0657141e7770d5966761dc53e3145f02a12a45440f330f52f",
+      "error_sha256": null,
+      "result_valid": true,
+      "gateway_count": 0,
+      "result_sha256": "4184123957b8ed1825f258df51a8367cc62ac3e53ce373d5e4bcbceac66b6529",
+      "result_status": "success",
+      "approval_count": 0,
+      "arguments_valid": true,
+      "arguments_sha256": "55efc9eb99b66709f037740f0fc718f7833701d188e800a7a7eb5dc0e1f978b4",
+      "request_binding_matches": true
+    },
+    {
+      "id": 126,
+      "status": "success",
+      "created": "2026-08-03 13:38:54.000000",
+      "updated": "2026-08-03 13:38:54.000000",
+      "user_id": 1,
+      "ops_count": 0,
+      "tool_name": "admin_list_users",
+      "run_sha256": "cae3e0f685ba7a3d07363dac94694454e834d96b74d3984e994db593d0336621",
+      "error_sha256": null,
+      "result_valid": true,
+      "gateway_count": 0,
+      "result_sha256": "73e160f2d81df554d1ea421961fa1c9a428b010fec4298cfe3f62cd8c3574b82",
+      "result_status": "success",
+      "approval_count": 0,
+      "arguments_valid": true,
+      "arguments_sha256": "19cf92fd8c7e88b639b8e6c14c4c91d737f435eefc2a7994772d9f6acf55b089",
+      "request_binding_matches": true
+    },
+    {
+      "id": 127,
+      "status": "success",
+      "created": "2026-08-03 13:38:54.000000",
+      "updated": "2026-08-03 13:38:54.000000",
+      "user_id": 1,
+      "ops_count": 0,
+      "tool_name": "admin_list_roles",
+      "run_sha256": "cae3e0f685ba7a3d07363dac94694454e834d96b74d3984e994db593d0336621",
+      "error_sha256": null,
+      "result_valid": true,
+      "gateway_count": 0,
+      "result_sha256": "250221ae850aa847e86f5748fc58d5dabd107ba45197fe2257e976d9a73964f6",
+      "result_status": "success",
+      "approval_count": 0,
+      "arguments_valid": true,
+      "arguments_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "request_binding_matches": true
+    },
+    {
+      "id": 128,
+      "status": "success",
+      "created": "2026-08-03 13:39:59.000000",
+      "updated": "2026-08-03 13:39:59.000000",
+      "user_id": 1,
+      "ops_count": 0,
+      "tool_name": "admin_list_users",
+      "run_sha256": "dda932fb2a420e895d49c608732c4bef01bb5e02627eb62eb51a86e276d5d314",
+      "error_sha256": null,
+      "result_valid": true,
+      "gateway_count": 0,
+      "result_sha256": "73e160f2d81df554d1ea421961fa1c9a428b010fec4298cfe3f62cd8c3574b82",
+      "result_status": "success",
+      "approval_count": 0,
+      "arguments_valid": true,
+      "arguments_sha256": "a1c382c28a9b440fc0b001a91a617cf918330f9de35532d44672bd0da1d9053a",
+      "request_binding_matches": true
+    },
+    {
+      "id": 129,
+      "status": "success",
+      "created": "2026-08-03 13:39:59.000000",
+      "updated": "2026-08-03 13:40:00.000000",
+      "user_id": 1,
+      "ops_count": 0,
+      "tool_name": "admin_describe_capabilities",
+      "run_sha256": "dda932fb2a420e895d49c608732c4bef01bb5e02627eb62eb51a86e276d5d314",
+      "error_sha256": null,
+      "result_valid": true,
+      "gateway_count": 0,
+      "result_sha256": "970054dc1d10443718180fc3ab0b6f2059cac2628ad17a3f9c16178b5b818bb4",
+      "result_status": "success",
+      "approval_count": 0,
+      "arguments_valid": true,
+      "arguments_sha256": "71529535fbde2578b5bc1e218c35d196f3baf88b59a3226a5e198958b2172fe8",
+      "request_binding_matches": true
+    },
+    {
+      "id": 2580,
+      "status": "success",
+      "created": "2026-08-31 01:02:57.000000",
+      "updated": "2026-08-31 01:02:57.000000",
+      "user_id": 1,
+      "ops_count": 0,
+      "tool_name": "admin_execute_capability",
+      "run_sha256": "2e450fd0992db9bd7f8d1d690903adfb5fc81356319fd1e2e2f5591795aa7f6b",
+      "error_sha256": null,
+      "result_valid": true,
+      "gateway_count": 0,
+      "result_sha256": "bf1e14ef066795e3e3dfd77e04a94268003e4e63b2f0a97a00645fc29ec5b915",
+      "result_status": "success",
+      "approval_count": 1,
+      "arguments_valid": true,
+      "arguments_sha256": "d2aded589ff51a1c5d567b950932b6920ebb4fdd1ee652a82c1d3d8765b47872",
+      "request_binding_matches": true
+    },
+    {
+      "id": 2581,
+      "status": "success",
+      "created": "2026-08-31 01:04:15.000000",
+      "updated": "2026-08-31 01:04:15.000000",
+      "user_id": 1,
+      "ops_count": 0,
+      "tool_name": "admin_execute_capability",
+      "run_sha256": "90cb0864a16e8fee6ef81cd1f653e981f7963ba181cf9e974024bef4a354f14f",
+      "error_sha256": null,
+      "result_valid": true,
+      "gateway_count": 0,
+      "result_sha256": "9c2c83d32ca3374f052d9c6b4f463603a11f3bb42b4bb06be338bcd6e8c14855",
+      "result_status": "success",
+      "approval_count": 1,
+      "arguments_valid": true,
+      "arguments_sha256": "28d41154d949b658092facd402476f8cf9794b0fc4f2272e3650649034c1edc8",
+      "request_binding_matches": true
+    }
+  ],
+  "unresolved_tool": [
+    {
+      "id": 472,
+      "status": "executing",
+      "created": "2026-08-06 03:29:52.000000",
+      "updated": "2026-08-06 03:29:52.000000",
+      "run_db_id": 124,
+      "tool_name": "audit_security_for_project",
+      "run_status": "failed",
+      "result_sha256": null
+    },
+    {
+      "id": 634,
+      "status": "executing",
+      "created": "2026-08-11 09:11:16.000000",
+      "updated": "2026-08-11 09:11:16.000000",
+      "run_db_id": 179,
+      "tool_name": "run_full_project_validation",
+      "run_status": "failed",
+      "result_sha256": null
+    },
+    {
+      "id": 2286,
+      "status": "executing",
+      "created": "2026-08-19 09:00:20.000000",
+      "updated": "2026-08-19 09:00:20.000000",
+      "run_db_id": 579,
+      "tool_name": "run_full_project_validation",
+      "run_status": "failed",
+      "result_sha256": null
+    }
+  ],
+  "snapshot_end": [
+    {
+      "utc": "2026-09-07 06:33:11.183331",
+      "read_only": 1
+    }
+  ],
+  "finished_at_utc": "2026-09-07T06:33:11.189606+00:00",
+  "collector_sha256": "37ffc5a773c422edc437050c275b8c1381d2fe37111e24625f2682a799bb0eb4"
+}

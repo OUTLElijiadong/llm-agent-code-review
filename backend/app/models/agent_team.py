@@ -5,11 +5,12 @@ from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
+from app.models.usage_attribution import UsageAttributionMixin
 
 _JSON = LONGTEXT().with_variant(Text, "sqlite")
 
 
-class AgentTeam(Base, IdMixin, TimestampMixin):
+class AgentTeam(Base, UsageAttributionMixin, IdMixin, TimestampMixin):
     """同一账户内一次动态子 Agent 协作运行。"""
 
     __tablename__ = "agent_team"

@@ -4,9 +4,8 @@
       <div>
         <h2 class="page-title font-display">Agent 办公室</h2>
         <p class="page-sub">
-          注册中心实时同步 ·
-          <b class="hl">{{ runtime.length }}</b> 个 Agent 在岗 ·
-          数据与后端 AgentRegistry 严格一致
+          <b class="hl">{{ runtime.length }}</b> 个{{ isAdmin ? '全平台内置及已发布 Agent' : '本账号运行过的可见 Agent' }}
+          · 目录数量与当前列表一致
         </p>
       </div>
       <div class="page-actions">
@@ -32,12 +31,12 @@
 
     <el-tabs v-model="activeTab" class="agent-tabs">
       <el-tab-pane label="Agent 办公室" name="office">
-        <SituationPanel :data="situation" :loading="loading" />
+        <SituationPanel :data="situation" :loading="loading" :scope-label="isAdmin ? '全平台目录' : '本账号记录'" />
 
         <PrismLoading
           v-if="loading && !runtime.length"
           label="正在同步 Agent 办公室"
-          sublabel="正在从 AgentRegistry 拉取实时元数据"
+          sublabel="正在读取当前账号可见目录"
         />
 
         <template v-else>
@@ -69,7 +68,8 @@
           </section>
 
           <section class="type-mapping-card">
-            <h3 class="block-title">审查类型 → 代理组合映射</h3>
+            <h3 class="block-title">审查类型 → 审查画像组合</h3>
+            <p class="page-sub">画像表示审查视角，同一执行器可承载多个画像，不计为独立 Agent。</p>
             <el-descriptions :column="1" border size="small">
               <el-descriptions-item
                 v-for="m in typeMappings"
@@ -237,7 +237,6 @@ import { subscribeAgentEvents } from '@/utils/agentEventStream'
 import type { AgentEvent, AgentEventType } from '@/types/agentEvent'
 import {
   listRuntimeAgents,
-  getRuntimeSummary,
   getSituation,
   listTypeMappings,
   listAgentSkills,
@@ -248,7 +247,6 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 import { agentCodeText } from '@/constants/adminGovernance'
 import type {
   AgentRuntimeOut,
-  AgentRuntimeSummaryOut,
   AgentSituationOut,
   AgentStatus,
   ReviewTypeMappingOut,
@@ -262,7 +260,12 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const runtime = ref<AgentRuntimeOut[]>([])
-const summary = ref<AgentRuntimeSummaryOut>({ total: 0, by_category: [] })
+// 分类与页首基于同一列表快照，避免独立请求/刷新瞬间形成不同分母。
+const summary = computed(() => {
+  const counts = new Map<string, number>()
+  for (const agent of runtime.value) counts.set(agent.category, (counts.get(agent.category) || 0) + 1)
+  return { total: runtime.value.length, by_category: [...counts].map(([category, count]) => ({ category, count })) }
+})
 const situation = ref<AgentSituationOut | null>(null)
 const typeMappings = ref<ReviewTypeMappingOut[]>([])
 const filterCategory = ref<string>('')
@@ -277,7 +280,7 @@ const selectedAgent = ref<AgentRuntimeOut | null>(null)
 const agentSkills = ref<SkillMetaOut[]>([])
 const skillsLoading = ref(false)
 const triggering = ref(false)
-const isAdmin = computed(() => userStore.profile?.role === 'admin')
+const isAdmin = computed(() => ['admin', 'super_admin'].includes(userStore.profile?.role || ''))
 
 /**
  * Skill 类型中文标签
@@ -417,15 +420,14 @@ function goRules(): void {
 async function loadAll(): Promise<void> {
   loading.value = true
   try {
-    const [r, s, sit, tm] = await Promise.all([
+    const [r, sit, tm] = await Promise.all([
       listRuntimeAgents(),
-      getRuntimeSummary(),
       getSituation(60),
       listTypeMappings(),
     ])
     runtime.value = r
-    summary.value = s
     situation.value = sit
+    syncSituationActivityCounts()
     typeMappings.value = tm
   } catch {
     ElMessage.error('加载 Agent 办公室数据失败')
@@ -460,7 +462,7 @@ let stream: ReturnType<typeof subscribeAgentEvents> | null = null
 
 function syncSituationActivityCounts(): void {
   if (!situation.value) return
-  const online = situation.value.online || runtime.value.length
+  const online = runtime.value.length
   const working = runtime.value.filter((x) => EXECUTION_STATUSES.has(x.status)).length
   situation.value = {
     ...situation.value,
@@ -491,9 +493,15 @@ function clearErrorTimer(code: string): void {
 function handleAgentEvent(ev: AgentEvent): void {
   // 安全告警为系统级事件,不更新任何 agent 工位状态
   if (ev.type === 'admin_alert') return
+  if (!isAdmin.value && ev.user_id !== userStore.profile?.id) return
   if (!ev.agent) return
-  const nextStatus = STATUS_BY_EVENT[ev.type]
+  let nextStatus = STATUS_BY_EVENT[ev.type]
   if (!nextStatus) return
+  const timestamp = Date.parse(ev.timestamp)
+  if (!Number.isFinite(timestamp)) return
+  const age = Math.max(0, Date.now() - timestamp)
+  if ((EXECUTION_STATUSES.has(nextStatus) || nextStatus === 'blocked') && age > 90_000) nextStatus = 'idle'
+  if (nextStatus === 'error' && age > ERROR_TIMEOUT_MS) nextStatus = 'idle'
   clearErrorTimer(ev.agent)
   setAgentStatus(ev.agent, nextStatus)
   if (nextStatus === 'error') {

@@ -22,6 +22,7 @@ from app.schemas.common import Resp
 from app.services import rule_service
 from app.services.project_member_service import require_project_access
 from app.services.review_input_service import validate_review_input
+from app.services.ai_usage_context import current_attribution
 
 router = APIRouter()
 
@@ -98,6 +99,7 @@ def start_discussion(
         review_type=review_type,
         max_rounds=rounds,
         session_token_version=int(getattr(user, "token_version", 0) or 0),
+        usage_origin=current_attribution(int(user.id)),
         # 小菱在会话内启动时记录来源会话,讨论结束后把结论回投给该会话自动汇报。
         origin_surface=str(origin_surface or "")[:24],
         origin_session_key=str(origin_session_key or "")[:128],

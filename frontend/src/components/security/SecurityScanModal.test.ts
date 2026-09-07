@@ -1,5 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
+import { createPinia, setActivePinia } from 'pinia'
+import { useUserStore } from '@/stores/user'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SecurityScanOut } from '@/types/security'
 
@@ -32,12 +34,13 @@ function deferredResult() {
 }
 
 let wrapper: VueWrapper
+let pinia: ReturnType<typeof createPinia>
 
 async function renderModal(props: Record<string, unknown> = {}, realTransition = false) {
   wrapper = mount(SecurityScanModal, {
     props: { modelValue: true, source: 'project', refId: 7, refName: '测试项目', ...props },
     attachTo: document.body,
-    global: { plugins: [ElementPlus], stubs: { transition: !realTransition } },
+    global: { plugins: [ElementPlus, pinia], stubs: { transition: !realTransition } },
   })
   await flushPromises()
   return wrapper
@@ -50,6 +53,9 @@ function button(label: string) {
 }
 
 beforeEach(() => {
+  pinia = createPinia()
+  setActivePinia(pinia)
+  useUserStore().permissions = new Set(['security:scan'])
   for (const request of Object.values(api)) request.mockResolvedValue(scanResult())
 })
 
@@ -215,4 +221,50 @@ describe('同步安全扫描真实交互', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('未返回有效结果')
     expect(wrapper.emitted('completed')).toBeUndefined()
   })
+})
+
+
+describe('扫描权限防御', () => {
+  it.each(['file', 'task', 'project', 'all-projects'])('%s 无扫描权限时自动启动、按钮与直接处理函数均不发送请求', async (source) => {
+    useUserStore().permissions = new Set()
+    await renderModal({ source, autoStart: true })
+    const starts = wrapper.findAll('button').filter(item => item.text() === '开始扫描')
+    expect(starts).toHaveLength(2)
+    for (const start of starts) {
+      expect(start.attributes('disabled')).toBeDefined()
+      await start.trigger('click')
+    }
+    await (wrapper.vm as unknown as { runScan(): Promise<void> }).runScan()
+    await wrapper.setProps({ refId: 8 })
+    await flushPromises()
+    for (const request of Object.values(api)) expect(request).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('当前账号没有安全扫描权限')
+  })
+
+  it('失败后撤销扫描权限，重试不可执行；恢复权限可真实重试', async () => {
+    api.scanProject.mockRejectedValueOnce({ message: '暂时失败' })
+    await renderModal({ autoStart: true })
+    useUserStore().permissions = new Set()
+    await flushPromises()
+    expect(button('重试扫描').attributes('disabled')).toBeDefined()
+    await (wrapper.vm as unknown as { runScan(): Promise<void> }).runScan()
+    expect(api.scanProject).toHaveBeenCalledOnce()
+    useUserStore().permissions = new Set(['security:scan'])
+    await flushPromises()
+    await button('重试扫描').trigger('click')
+    await flushPromises()
+    expect(api.scanProject).toHaveBeenCalledTimes(2)
+  })
+  it('旧范围请求结束时权限已撤销，不自动发起新范围扫描', async () => {
+    const pending = deferredResult()
+    api.scanProject.mockReturnValueOnce(pending.promise)
+    await renderModal({ autoStart: true })
+    useUserStore().permissions = new Set()
+    await wrapper.setProps({ refId: 8 })
+    pending.resolve(scanResult())
+    await flushPromises()
+    expect(api.scanProject).toHaveBeenCalledOnce()
+    expect(wrapper.emitted('completed')).toBeUndefined()
+  })
+
 })

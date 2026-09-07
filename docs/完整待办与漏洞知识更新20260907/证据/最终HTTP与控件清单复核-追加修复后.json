@@ -1,0 +1,40 @@
+{
+  "passed": true,
+  "vue_files": 104,
+  "controls": 610,
+  "buttons_or_links": 446,
+  "role_control_rows": 3050,
+  "current_statuses": {
+    "untested": 2440,
+    "blocked": 610,
+    "passed": 0
+  },
+  "historical_observations": 21,
+  "routes": 313,
+  "authenticated_routes": 307,
+  "public_routes": 6,
+  "dependency_anonymous_401_plan": 299,
+  "explicit_no_permission_403_plan": 239,
+  "manual_anonymous_401_plan": 8,
+  "planned_negative_requests": 546,
+  "requests_sent_by_export": 0,
+  "old_baseline_sha256_preserved": {
+    "全部按钮与交互源码清单-最终.json": "884138c0ba8c78c3f265246f782a63cea8a38f2be59d260f8f30165c9c106d68",
+    "全部控件逐角色验收台账.json": "bc0fa69f7ef3a69750723a618cca473dea1e856d38cbb3d2f9a35116e024b755",
+    "全部控件逐角色验收台账.csv": "d518804ad7dba82b36f749ea9007420745baad8b064cba54127a8e0b12e397ec",
+    "全部控件逐角色验收汇总.json": "aaf4e21ba24e7888ddba7c379cf6254163d4f8c3653c66ecb489c2d56c6e4615"
+  },
+  "artifact_sha256": {
+    "全部按钮与交互源码清单-追加修复后.json": "87ef31b00b93064f792ecf7b8eb709e01868bed64b9f1c01fdf5d8b9c7dbc4aa",
+    "追加修复后-全部控件逐角色验收台账.json": "6d1f6f8a59a4ecd4d56e5b1f7e797c538f717475fb702dc9d855ee7961d98ff8",
+    "追加修复后-全部控件逐角色验收台账.csv": "37fe75b4f95123954276115a86ac938e48870e704017d0907a5e93bad9ad9573",
+    "生产HTTP安全拒绝计划-追加修复后.json": "77ef13ec1570bec57bbe50d39656cfd66b1c36b478e99e24bc2dd1da7af7322b",
+    "手动鉴权匿名补充计划-追加修复后.json": "50d9d3ff8205c42f1e233ce2e96c50be8f0054ceeeb20b1d2e4bcbedb64b8210",
+    "完整HTTP鉴权契约分类-追加修复后.json": "c41eaa5cd374e2ad64bb26a74ef36f7018c52746cd006229f5cf953519f31007"
+  },
+  "exporter_sha256": {
+    "frontend/scripts/export-ui-action-inventory.mjs": "14b21d775790217a817f685bbf1449721c79554c9af6d545439f2285c597ad61",
+    "frontend/scripts/build-role-control-ledger.mjs": "6bd8ff7728e5a20134481a5ba49d23f69571defa4a5e68be6a2e65ba577279ae"
+  },
+  "note": "源码枚举/矩阵计划/旧版观察不等同新版浏览器逐控件通过；管理员仍需真实登录。"
+}

@@ -12,6 +12,7 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -97,7 +98,7 @@ class ChatPlanner:
         # 注:BaseAgent.call_json 内部 httpx 已有 timeout,但 LLM 可能因网络抖动卡死,
         # 这里加第二层保护,超时即抛 TimeoutError 触发双层调度降级。
         with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(self._call_llm_for_plan, prompt, ctx)
+            future = pool.submit(copy_context().run, self._call_llm_for_plan, prompt, ctx)
             try:
                 raw = future.result(timeout=self.TIMEOUT_SECONDS)
             except FutureTimeoutError as e:

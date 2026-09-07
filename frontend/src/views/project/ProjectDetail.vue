@@ -7,7 +7,7 @@
         </template>
         <template #extra>
           <el-button
-            v-if="project && (project.file_count ?? 0) > 0"
+            v-if="canScan && project && (project.file_count ?? 0) > 0"
             type="danger"
             plain
             :icon="Lock"
@@ -16,7 +16,7 @@
             🛡 安全审计
           </el-button>
           <el-button
-            v-if="project && (project.file_count ?? 0) > 0"
+            v-if="canDownloadSource && project && (project.file_count ?? 0) > 0"
             plain
             :icon="Download"
             :loading="downloadingSource"
@@ -25,11 +25,11 @@
             下载源码
           </el-button>
           <el-button
-            v-if="project && (project.file_count ?? 0) > 0"
+            v-if="canViewProject && project && (project.file_count ?? 0) > 0"
             type="primary"
             plain
             :icon="MagicStick"
-            @click="aiPromptVisible = true"
+            @click="openAiPrompt"
           >
             AI 修复手册
           </el-button>
@@ -90,7 +90,7 @@
               <h3>代码文件</h3>
               <div class="section-actions">
                 <el-button
-                  v-if="project.file_count > 0"
+                  v-if="canDownloadSource && project.file_count > 0"
                   size="small"
                   plain
                   :icon="Download"
@@ -98,24 +98,24 @@
                   @click="handleDownloadSource"
                 >下载源码</el-button>
                 <el-button
-                  v-if="project.source_mode !== 'audit_archive'"
+                  v-if="canUpload && project.source_mode !== 'audit_archive'"
                   size="small"
                   @click="handleUploadFile"
                 >上传文件</el-button>
                 <el-button
-                  v-if="project.source_mode !== 'audit_archive'"
+                  v-if="canUpload && project.source_mode !== 'audit_archive'"
                   type="primary"
                   size="small"
                   @click="handleUploadFolder"
                 >上传文件夹</el-button>
                 <el-button
-                  v-if="project.file_count === 0 && project.source_mode !== 'audit_archive'"
+                  v-if="canUpload && project.file_count === 0 && project.source_mode !== 'audit_archive'"
                   type="warning"
                   plain
                   size="small"
                   :icon="Lock"
                   :loading="uploadingAudit"
-                  @click="auditArchiveInputRef?.click()"
+                  @click="handleUploadAuditArchive"
                 >上传审计包</el-button>
               </div>
             </div>
@@ -171,7 +171,7 @@
                 </el-table-column>
                 <el-table-column label="操作" width="90">
                   <template #default="{ row }">
-                    <el-button size="small" type="danger" plain :disabled="deletingRevisionId === row.id" @click="removeRevision(row)">
+                    <el-button v-if="canDeleteRevision" size="small" type="danger" plain :disabled="deletingRevisionId === row.id" @click="removeRevision(row)">
                       {{ deletingRevisionId === row.id ? '删除中' : '删除' }}
                     </el-button>
                   </template>
@@ -179,7 +179,7 @@
               </el-table>
             </div>
             <CodeFileList
-              v-else
+              v-else-if="canViewFiles"
               :project-id="projectId"
               :key="fileListKey"
               @uploaded="onFileUploaded"
@@ -239,6 +239,7 @@
               <h3>项目成员</h3>
               <div class="section-actions">
                 <el-button
+                  v-if="canManageMembers"
                   type="primary"
                   size="small"
                   :icon="Plus"
@@ -280,7 +281,7 @@
               <el-table-column label="操作" width="200" align="center">
                 <template #default="{ row }">
                   <el-select
-                    v-if="row.role_in_project !== 'owner'"
+                    v-if="canManageMembers && row.role_in_project !== 'owner'"
                     :model-value="row.role_in_project"
                     size="small"
                     style="width: 100px; margin-right: 8px"
@@ -290,7 +291,7 @@
                     <el-option label="负责人" value="owner" />
                   </el-select>
                   <el-button
-                    v-if="row.role_in_project !== 'owner'"
+                    v-if="canManageMembers && row.role_in_project !== 'owner'"
                     type="danger"
                     size="small"
                     link
@@ -368,9 +369,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
+import { useUserStore } from '@/stores/user'
 
 import { Download, Lock, MagicStick, Plus } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
@@ -403,6 +405,15 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const canViewProject = computed(() => userStore.hasPermission('project:view'))
+const canViewFiles = computed(() => canViewProject.value && userStore.hasPermission('file:view'))
+// can_update/can_delete 来自服务端项目角色校验；动作权限与资源权限必须同时满足。
+const canUpload = computed(() => canViewProject.value && !!project.value?.can_update && userStore.hasPermission('file:upload'))
+const canManageMembers = computed(() => canViewProject.value && !!project.value?.can_update && userStore.hasPermission('project:member:manage'))
+const canDeleteRevision = computed(() => canViewProject.value && !!project.value?.can_delete && userStore.hasPermission('project:delete'))
+const canDownloadSource = computed(() => canViewProject.value && !!project.value && userStore.hasPermission('file:download'))
+const canScan = computed(() => canViewProject.value && !!project.value && userStore.hasPermission('security:scan'))
 
 const projectId = Number(route.params.id)
 const loading = ref(false)
@@ -502,7 +513,7 @@ function getStatusType(status: string): 'success' | 'warning' | 'info' | 'danger
 const deletingRevisionId = ref<number | null>(null)
 
 async function removeRevision(row: { id: number; revision_no: number }): Promise<void> {
-  if (!project.value) return
+  if (!canDeleteRevision.value || !project.value) return
   try {
     await ElMessageBox.confirm(
       `确定删除源码修复副本 rev#${row.revision_no}？原始源码归档不受影响，删除后不可恢复。`,
@@ -510,6 +521,7 @@ async function removeRevision(row: { id: number; revision_no: number }): Promise
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
   } catch { return }
+  if (!canDeleteRevision.value || !project.value) return
   deletingRevisionId.value = row.id
   try {
     await deleteSourceRevision(project.value.id, row.id)
@@ -521,6 +533,7 @@ async function removeRevision(row: { id: number; revision_no: number }): Promise
 }
 
 async function fetchDetail(): Promise<void> {
+  if (!canViewProject.value) return
   loading.value = true
   try {
     project.value = await getProjectDetail(projectId)
@@ -532,8 +545,9 @@ async function fetchDetail(): Promise<void> {
 }
 
 async function openSecurityScan(): Promise<void> {
+  if (!canScan.value) return
   persistedAuditResult.value = null
-  if (project.value?.source_archive?.audit_status === 'succeeded') {
+  if (userStore.hasPermission('security:view') && project.value?.source_archive?.audit_status === 'succeeded') {
     try {
       const stored = await getAuditSourceArchiveResult(projectId)
       persistedAuditResult.value = stored?.result ?? null
@@ -541,11 +555,11 @@ async function openSecurityScan(): Promise<void> {
       /* 权限或网络错误已由 http 拦截器提示；仍允许用户打开重新扫描。 */
     }
   }
-  securityScanVisible.value = true
+  if (canScan.value) securityScanVisible.value = true
 }
 
 async function handleDownloadSource(): Promise<void> {
-  if (downloadingSource.value) return
+  if (!canDownloadSource.value || downloadingSource.value) return
   downloadingSource.value = true
   try {
     const blob = await downloadProjectSource(projectId)
@@ -566,11 +580,23 @@ async function handleDownloadSource(): Promise<void> {
 }
 
 function handleUploadFile(): void {
+  if (!canUpload.value) return
   fileInputRef.value?.click()
 }
 
 function handleUploadFolder(): void {
+  if (!canUpload.value) return
   folderInputRef.value?.click()
+}
+
+function handleUploadAuditArchive(): void {
+  if (!canUpload.value) return
+  auditArchiveInputRef.value?.click()
+}
+
+function openAiPrompt(): void {
+  if (!canViewProject.value || !project.value) return
+  aiPromptVisible.value = true
 }
 
 function getExtDetail(filename: string): string {
@@ -602,6 +628,7 @@ const VALID_EXTS_DETAIL = new Set([
 ])
 
 async function onFileSelected(e: Event): Promise<void> {
+  if (!canUpload.value) return
   const input = e.target as HTMLInputElement
   const fileList = input.files
   if (!fileList || fileList.length === 0) return
@@ -671,6 +698,7 @@ async function onFileSelected(e: Event): Promise<void> {
 }
 
 async function onFolderSelected(e: Event): Promise<void> {
+  if (!canUpload.value) return
   const input = e.target as HTMLInputElement
   const fileList = input.files
   if (!fileList || fileList.length === 0) return
@@ -708,6 +736,7 @@ async function onFolderSelected(e: Event): Promise<void> {
 }
 
 async function onAuditArchiveSelected(e: Event): Promise<void> {
+  if (!canUpload.value) return
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file || uploadingAudit.value) return
@@ -744,6 +773,7 @@ function onFileUploaded(): void {
  * 拉取项目成员列表
  */
 async function fetchMembers(): Promise<void> {
+  if (!canViewProject.value) return
   memberLoading.value = true
   try {
     members.value = await listProjectMembers(projectId)
@@ -758,6 +788,7 @@ async function fetchMembers(): Promise<void> {
  * 打开添加成员对话框
  */
 function openAddMemberDialog(): void {
+  if (!canManageMembers.value) return
   addMemberVisible.value = true
 }
 
@@ -772,6 +803,7 @@ function resetAddForm(): void {
  * 提交添加成员
  */
 async function submitAddMember(): Promise<void> {
+  if (!canManageMembers.value || addSubmitting.value) return
   if (!addForm.value.user_id) {
     ElMessage.warning('请输入用户 ID')
     return
@@ -798,6 +830,7 @@ async function submitAddMember(): Promise<void> {
  * @param newRole - 新角色
  */
 async function handleChangeRole(userId: number, newRole: ProjectRole): Promise<void> {
+  if (!canManageMembers.value) return
   try {
     await updateProjectMemberRole(projectId, userId, { role_in_project: newRole })
     ElMessage.success('角色已更新')
@@ -812,6 +845,7 @@ async function handleChangeRole(userId: number, newRole: ProjectRole): Promise<v
  * @param row - 成员行数据
  */
 async function handleRemoveMember(row: ProjectMemberOut): Promise<void> {
+  if (!canManageMembers.value) return
   try {
     await ElMessageBox.confirm(
       `确定要将用户「${row.username}」移出项目吗？`,
@@ -822,6 +856,7 @@ async function handleRemoveMember(row: ProjectMemberOut): Promise<void> {
     return /* 用户取消 */
   }
   try {
+    if (!canManageMembers.value) return
     await removeProjectMember(projectId, row.user_id)
     ElMessage.success('成员已移除')
     fetchMembers()

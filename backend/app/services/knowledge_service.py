@@ -103,7 +103,7 @@ def add_document(
 
     pieces = _chunk_text(content)
     if pieces:
-        vectors, tag = embedding_service.embed_texts(db, pieces)
+        vectors, tag = embedding_service.embed_texts(db, pieces, user_id=user_id)
         for seq, (piece, vec) in enumerate(zip(pieces, vectors)):
             db.add(KnowledgeChunk(
                 doc_id=doc.id,
@@ -131,7 +131,7 @@ def retrieve(db: Session, user_id: int, query: str, top_k: int = 5) -> List[dict
     query = (query or "").strip()
     if not query:
         return []
-    qvec, _ = embedding_service.embed_one(db, query)
+    qvec, _ = embedding_service.embed_one(db, query, user_id=user_id)
     if not qvec:
         return []
 

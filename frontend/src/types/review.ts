@@ -103,6 +103,7 @@ export interface TaskOut {
   status: string
   total_files: number
   total_issues: number
+  report_issue_summary?: TaskDetailOut['report_issue_summary']
   severe_issues: number
   high_issues: number
   medium_issues: number
@@ -152,6 +153,14 @@ export interface TaskDetailOut {
   summary?: string
   model_name?: string
   coverage?: TaskCoverageOut | null
+  report_issue_summary?: {
+    source: 'sandbox_report'
+    basis: 'report_headings' | 'report_list' | 'unavailable'
+    total: number | null
+    unclassified: number | null
+    severity_counts: Record<string, number>
+    structured_issues?: number
+  } | null
   error_message?: string | null
   duration_ms: number
   start_time?: string

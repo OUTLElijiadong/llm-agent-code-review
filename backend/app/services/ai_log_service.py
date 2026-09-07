@@ -5,15 +5,19 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.core.pagination import Pagination
+from app.models.agent_response_run import AgentResponseRun
 from app.models.ai_call_log import AiCallLog
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from app.services.ai_usage_context import ATTRIBUTION_FIELDS
 
 
 def list_logs(db: Session, task_id: int = None, user_id: int = None, status: str = "",
-              start_date: str = "", end_date: str = "", page: int = 1, page_size: int = 20) -> dict:
+              start_date: str = "", end_date: str = "", page: int = 1, page_size: int = 20,
+              *, root_agent_run_id: int = None, agent_team_id: int = None,
+              agent_team_task_id: int = None, tool_execution_id: int = None) -> dict:
     """查询AI调用日志列表
 
     Args:
@@ -30,6 +34,10 @@ def list_logs(db: Session, task_id: int = None, user_id: int = None, status: str
         dict: 分页响应
     """
     q = db.query(AiCallLog)
+    for field, value in (("root_agent_run_id", root_agent_run_id), ("agent_team_id", agent_team_id),
+                         ("agent_team_task_id", agent_team_task_id), ("tool_execution_id", tool_execution_id)):
+        if value is not None:
+            q = q.filter(getattr(AiCallLog, field) == value)
     if task_id:
         q = q.filter(AiCallLog.task_id == task_id)
     if user_id:
@@ -84,7 +92,13 @@ def _to_traceable_dict(db: Session, log: AiCallLog, include_detail: bool = False
     project_id = code_file.project_id if code_file else (task.project_id if task else None)
     project = db.get(Project, project_id) if project_id else None
 
+    root_run = db.get(AgentResponseRun, log.root_agent_run_id) if log.root_agent_run_id else None
+    token_values = (log.prompt_tokens, log.completion_tokens, log.total_tokens)
     data = {
+        **{field: getattr(log, field) for field in ATTRIBUTION_FIELDS},
+        "root_agent_run_key": root_run.run_id if root_run else None,
+        "usage_state": ("unknown" if all(value is None for value in token_values)
+                        else "reported" if all(value is not None for value in token_values) else "partial"),
         "id": log.id,
         "task_id": log.task_id,
         "task_name": task.task_name if task else None,

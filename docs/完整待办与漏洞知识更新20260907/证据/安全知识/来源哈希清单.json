@@ -1,0 +1,336 @@
+{
+  "verified_at": "2026-09-07",
+  "snapshot_archive_sha256": "49e1eb8eafe9da839f54526830141ecf58e3b0fe4db95013c6e605adf64297a7",
+  "sources": [
+    {
+      "file": "owasp-index",
+      "source_url": "https://owasp.org/Top10/2025/",
+      "bytes": 25877,
+      "sha256": "37db8253029a5a6afd4f8383cda997a0a482e45766110591bf8f5a3b0d423857"
+    },
+    {
+      "file": "cwe.zip",
+      "source_url": "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip",
+      "bytes": 2021351,
+      "sha256": "3976f599e5e5200219a3108bb896d06e2a88fbb293369e1883cb423a5e9d7d50"
+    },
+    {
+      "file": "php-changelog.html",
+      "source_url": "https://www.php.net/ChangeLog-8.php",
+      "bytes": 701848,
+      "sha256": "77eb3b29967032607f3da1244faa152ce94a1ba0db7c3c6ae29ad9bd0a2f0ade"
+    },
+    {
+      "file": "laravel-signed-url.html",
+      "source_url": "https://github.com/laravel/framework/security/advisories/GHSA-crmm-hgp2-wgrp",
+      "bytes": 203711,
+      "sha256": "7e5e9da2bf6a50cf4e2af9205db3c6234b06985fa419b4a1e2a204f5a535c5f8"
+    },
+    {
+      "file": "php-tls-dos.html",
+      "source_url": "https://github.com/php/php-src/security/advisories/GHSA-mhmq-mmqj-2v39",
+      "bytes": 202317,
+      "sha256": "47fca21867484e504f512ec25d4a8949f6600d05c46008d55cd66ec955104538"
+    },
+    {
+      "file": "verified_advisories.json",
+      "source_url": "本地规范化参考记录，逐条来源见文件",
+      "bytes": 102228,
+      "sha256": "c3bd2185d9505a1eb2d5a0c94059afaaeaf6161ec424ae334cdd37556c39681c"
+    },
+    {
+      "file": "A01.html",
+      "source_url": "https://owasp.org/Top10/2025/A01_2025-Broken_Access_Control/",
+      "bytes": 36881,
+      "sha256": "da315070df0ad805417c9b6d5a8715b6211513afc5d70d3cf780d52bb56c5a39"
+    },
+    {
+      "file": "A02.html",
+      "source_url": "https://owasp.org/Top10/2025/A02_2025-Security_Misconfiguration/",
+      "bytes": 33943,
+      "sha256": "12b0a10d1d447d9a6d852c4db9196e1072d93e7b5ac42e681606e959670c7f6f"
+    },
+    {
+      "file": "A03.html",
+      "source_url": "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/",
+      "bytes": 38104,
+      "sha256": "7855904deb4c99c5a6ac63d6fd6d31da950119fbeb397289c2443528b33450eb"
+    },
+    {
+      "file": "A04.html",
+      "source_url": "https://owasp.org/Top10/2025/A04_2025-Cryptographic_Failures/",
+      "bytes": 39649,
+      "sha256": "e6e419222dc9e6358f66d280eb1621906929222c9867c655ed607b51cc418bd2"
+    },
+    {
+      "file": "A05.html",
+      "source_url": "https://owasp.org/Top10/2025/A05_2025-Injection/",
+      "bytes": 38472,
+      "sha256": "df8f178b38dc4be8099690aee02701d07ad7d2b0dabc0363ea4309265518d6a3"
+    },
+    {
+      "file": "A06.html",
+      "source_url": "https://owasp.org/Top10/2025/A06_2025-Insecure_Design/",
+      "bytes": 40633,
+      "sha256": "e6f94407ad2cc7cdc327952789de56da47425248f223f05bf8214708aa393920"
+    },
+    {
+      "file": "A07.html",
+      "source_url": "https://owasp.org/Top10/2025/A07_2025-Authentication_Failures/",
+      "bytes": 37855,
+      "sha256": "e5e4c51698ed4c966e5a767fd09db489edc11544cb24da09c76265a9015f8092"
+    },
+    {
+      "file": "A08.html",
+      "source_url": "https://owasp.org/Top10/2025/A08_2025-Software_or_Data_Integrity_Failures/",
+      "bytes": 33967,
+      "sha256": "9abba2b1837974083ce9f9dba9c8f99a1eaeb1edf1a6b1f7012117cb5dab4858"
+    },
+    {
+      "file": "A09.html",
+      "source_url": "https://owasp.org/Top10/2025/A09_2025-Security_Logging_and_Alerting_Failures/",
+      "bytes": 34978,
+      "sha256": "308a38720d33a31d2890a8fb20760c98750dd42b223a195ed51567cbe04e374a"
+    },
+    {
+      "file": "A10.html",
+      "source_url": "https://owasp.org/Top10/2025/A10_2025-Mishandling_of_Exceptional_Conditions/",
+      "bytes": 37194,
+      "sha256": "5796fc32df8efb1adae316dca9c7c4852ecff82b0ebc1c5ae45b4c9ac52549be"
+    },
+    {
+      "file": "CVE-2016-10033.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2016-10033",
+      "bytes": 11690,
+      "sha256": "f70ba17e955975440c2a8b59105817076cb23e4bb81cf6eec8f3a6fd3f831eb5"
+    },
+    {
+      "file": "CVE-2016-10045.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2016-10045",
+      "bytes": 9267,
+      "sha256": "d9a59e727492840d861b39fe55d860e8ee5779e0e8e579c8686d0f7ca66ed80f"
+    },
+    {
+      "file": "CVE-2017-1001000.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2017-1001000",
+      "bytes": 6322,
+      "sha256": "55d4e870423993ee558e62f7342702805f0d65deb822de480eeb578ad87251cd"
+    },
+    {
+      "file": "CVE-2017-9841.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2017-9841",
+      "bytes": 6072,
+      "sha256": "77f7339cd34629fe76b2f0667d7f32c23f3f10a305a802565e4377b41de0e7ed"
+    },
+    {
+      "file": "CVE-2018-15133.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2018-15133",
+      "bytes": 4699,
+      "sha256": "8139d768b1108ee661d370b3c689cc7937ed9b407836a36b4726970dad5bf913"
+    },
+    {
+      "file": "CVE-2019-11043.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2019-11043",
+      "bytes": 16864,
+      "sha256": "e32115c5b48bca1c90fab5a125d64f9067e728bb3ac6e13939ee0886d267e526"
+    },
+    {
+      "file": "CVE-2019-8942.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2019-8942",
+      "bytes": 5738,
+      "sha256": "31c775b9e3ab1a34603a672b1de106529424b42747190c49a6d5158e7b82aa66"
+    },
+    {
+      "file": "CVE-2021-21263.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-21263",
+      "bytes": 5993,
+      "sha256": "87e8a9da09189e98d9cca5ddab09e4e53f91235179007169327e9594695f2a0a"
+    },
+    {
+      "file": "CVE-2021-21381.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-21381",
+      "bytes": 5213,
+      "sha256": "831bc52af1ce591955afba371fd89bf3de71bfd92020c9b2f1f3394e21515c6b"
+    },
+    {
+      "file": "CVE-2021-21702.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-21702",
+      "bytes": 6349,
+      "sha256": "a11261946f63d42df72e9b5201ed37927f76972fdde6ab3edf9d8dc90fc7c116"
+    },
+    {
+      "file": "CVE-2021-21705.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-21705",
+      "bytes": 5386,
+      "sha256": "0e4cd195f7680cb09430c287500ab74988efc2f5a67fc25a56abe2533126a5c1"
+    },
+    {
+      "file": "CVE-2021-3129.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2021-3129",
+      "bytes": 4772,
+      "sha256": "fc5a48adaa37ea33335f68f0cd88089a145d157552ece8e9493eeab88f4cc684"
+    },
+    {
+      "file": "CVE-2022-21661.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2022-21661",
+      "bytes": 8916,
+      "sha256": "5dda67c7b24739c59fdb66ea0172738fdc39d154160ce67dfade8eb870172226"
+    },
+    {
+      "file": "CVE-2022-29248.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2022-29248",
+      "bytes": 3631,
+      "sha256": "1ca4611279c3297c0223e28d2de93ebebfa3cf7d312c36567e603791e19243f9"
+    },
+    {
+      "file": "CVE-2022-31042.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2022-31042",
+      "bytes": 3945,
+      "sha256": "fdfb09f71352d322388ad4e2a1a4bc7b1238fd5c966683a20d996a34bb5a4050"
+    },
+    {
+      "file": "CVE-2022-31043.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2022-31043",
+      "bytes": 3763,
+      "sha256": "f9977b8109fe5f3828e243ad184c7f17605e4c2fa16f6d2fd1ae315e1b367be5"
+    },
+    {
+      "file": "CVE-2023-2745.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2023-2745",
+      "bytes": 5195,
+      "sha256": "08678817b4fb96fc86f2718799450c2f490dde6fd859fb03f5466ed9a60e5e94"
+    },
+    {
+      "file": "CVE-2024-13918.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2024-13918",
+      "bytes": 3981,
+      "sha256": "694a6d3dd15bfd0223239d13f5b282335066bc8f50b9e2d4ccf3d459cc71bec9"
+    },
+    {
+      "file": "CVE-2024-13919.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2024-13919",
+      "bytes": 3973,
+      "sha256": "8902a9fc35a93c6ee4c3197b6c653bef9e3c188d5cbb0789e0ba8380c3411446"
+    },
+    {
+      "file": "CVE-2024-4577.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2024-4577",
+      "bytes": 9077,
+      "sha256": "e8cc1b1dcd1a3333776e9a0f08cd4543bc662e0ee60fc094bda0820f84b114eb"
+    },
+    {
+      "file": "CVE-2024-52301.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2024-52301",
+      "bytes": 4064,
+      "sha256": "06a926020ef3122f4e291afe60d54d300b631c49147b50420cf7ba74760e43fa"
+    },
+    {
+      "file": "CVE-2025-27515.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2025-27515",
+      "bytes": 2551,
+      "sha256": "967255e3a2a0b3dd628b3bd3ce0afca86e53a67aa459cc44d57f0fa1c2f81dcb"
+    },
+    {
+      "file": "CVE-2026-14355.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-14355",
+      "bytes": 3729,
+      "sha256": "ae58619921a53b89e3213aa841a0fadf4d85e47bc969083621da7f50de7f4ca5"
+    },
+    {
+      "file": "CVE-2026-17543.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-17543",
+      "bytes": 3607,
+      "sha256": "c95c72ef5bf16fd1b49e37a5db93ae047737634b425c9c1e32a5655c2b057f37"
+    },
+    {
+      "file": "CVE-2026-17544.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-17544",
+      "bytes": 3114,
+      "sha256": "25723e1e99f2013a9f67d0c1705806db1fa2709ec5a87dd3d55b240f20881e16"
+    },
+    {
+      "file": "CVE-2026-42371.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-42371",
+      "bytes": 2183,
+      "sha256": "d471a55385a27aeb829313138df20f390f6dd1a3455226ef8b892cb47556af63"
+    },
+    {
+      "file": "CVE-2026-44927.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-44927",
+      "bytes": 1860,
+      "sha256": "27ee30ec964703042d47001e01e003fd63dae123aaff4392ba6d0d94e8ee0609"
+    },
+    {
+      "file": "CVE-2026-44928.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-44928",
+      "bytes": 1888,
+      "sha256": "fed30a0384f6d32600d08a2ae0d3010efe3213e1c0cabf2e72a6ad32444c3559"
+    },
+    {
+      "file": "CVE-2026-48019.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-48019",
+      "bytes": 2925,
+      "sha256": "b99fb49b94afd64323ecadf51d7e633a259e41f21172541e6c14f354473b8131"
+    },
+    {
+      "file": "CVE-2026-6104.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-6104",
+      "bytes": 8874,
+      "sha256": "aab9b733cba43c03019360004a0aafafae2ce034ce973fd5cdd4382823027ee2"
+    },
+    {
+      "file": "CVE-2026-6722.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-6722",
+      "bytes": 10729,
+      "sha256": "b53165c1f8b3e31521c78fc5129eb095f0785bc9525245055c3696bc11614645"
+    },
+    {
+      "file": "CVE-2026-6735.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-6735",
+      "bytes": 3589,
+      "sha256": "459aacee798741f57940c8b81df819868b9524957e2bf85efacdb602c12d06eb"
+    },
+    {
+      "file": "CVE-2026-7258.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7258",
+      "bytes": 3588,
+      "sha256": "d3fd7a09c8caa5ee5893a61961d8c06ce853b0dc9fd45065c64968459ad4571b"
+    },
+    {
+      "file": "CVE-2026-7259.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7259",
+      "bytes": 4073,
+      "sha256": "0d3aaf84576a047290bb148f29ccb835a62c119128d131c28ab91cb65699449a"
+    },
+    {
+      "file": "CVE-2026-7260.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7260",
+      "bytes": 3457,
+      "sha256": "376599eef96f9f7f52648f8b011ac295d239d817d2eaa29c59aa12b1a119e583"
+    },
+    {
+      "file": "CVE-2026-7261.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7261",
+      "bytes": 4009,
+      "sha256": "c2d00244202ceb0242bf72b8f3fa37e659f3d5c7725a2929f107eff392bfbf2b"
+    },
+    {
+      "file": "CVE-2026-7262.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7262",
+      "bytes": 10264,
+      "sha256": "ebd4b8bbf65042c21a9feb6847e8b8193551979ace4add62d5495a4bea7abb1a"
+    },
+    {
+      "file": "CVE-2026-7263.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7263",
+      "bytes": 8341,
+      "sha256": "4c62be7ff5f0a5ee68678aac0765f0ce97c111c35437e6fd8a782bd686c53f7f"
+    },
+    {
+      "file": "CVE-2026-7568.json",
+      "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-7568",
+      "bytes": 10614,
+      "sha256": "fce6934940a800acfc00e5543e5083535410f7c46a2840880a949bed1e7319c3"
+    }
+  ]
+}

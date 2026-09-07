@@ -23,6 +23,7 @@ from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgent
 from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
+from app.services.ai_usage_context import current_attribution, model_attribution
 
 
 class AgentTeamError(ValueError):
@@ -1202,6 +1203,7 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
         int(getattr(settings, "agent_team_default_max_attempts", payload.max_attempts)),
     )
     team = AgentTeam(
+        **current_attribution(int(user.id)),
         user_id=int(user.id),
         surface=payload.surface,
         session_key=payload.session_id,
@@ -1617,6 +1619,7 @@ def _persist_task_request_message(
         "member_snapshot": _member_release_snapshot(member),
     }
     row = AgentMeshMessage(
+        **{**model_attribution(team), "agent_team_id": int(team.id), "agent_team_task_id": int(task.id)},
         message_id=message_id,
         user_id=int(team.user_id),
         schema_version="1.0",
@@ -1692,6 +1695,15 @@ def _mark_task_request_terminal(
     return message_id
 
 
+def _terminal_message_attribution(db: Session, team: AgentTeam, causation_id: str) -> dict[str, int]:
+    source = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.message_id == causation_id, AgentMeshMessage.user_id == team.user_id,
+    ).first() if causation_id else None
+    return model_attribution(source) if source is not None else {
+        **model_attribution(team), "agent_team_id": int(team.id),
+    }
+
+
 def _add_terminal_mesh_message(
     db: Session,
     team: AgentTeam,
@@ -1719,6 +1731,7 @@ def _add_terminal_mesh_message(
         status = "queued"
     db.add(
         AgentMeshMessage(
+            **_terminal_message_attribution(db, team, causation_id),
             message_id=message_id,
             user_id=int(team.user_id),
             schema_version="1.0",
@@ -2007,7 +2020,7 @@ def claim_next_task(db: Session, team_id: int, *, lease_seconds: Optional[int] =
         lease_expires_at=expires,
         dependency_context=dependency_context,
     )
-    _event(
+    execution_event = _event(
         db,
         team,
         "task.claimed",
@@ -2021,6 +2034,13 @@ def claim_next_task(db: Session, team_id: int, *, lease_seconds: Optional[int] =
     )
     _refresh_team_status(db, team)
     _refresh_member_statuses(db, team)
+    db.flush()
+    if request_message_id:
+        request_message = db.query(AgentMeshMessage).filter(
+            AgentMeshMessage.message_id == request_message_id,
+            AgentMeshMessage.user_id == team.user_id,
+        ).one()
+        request_message.agent_execution_event_id = int(execution_event.id)
     db.commit()
     return {
         "team_id": int(team.id),
@@ -2035,6 +2055,7 @@ def claim_next_task(db: Session, team_id: int, *, lease_seconds: Optional[int] =
         "instructions": candidate.instructions,
         "title": candidate.title,
         "attempt_count": candidate.attempt_count,
+        "execution_event_id": int(execution_event.id),
         "request_message_id": request_message_id,
         "member_snapshot": _member_release_snapshot(member),
     }

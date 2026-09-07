@@ -5,9 +5,10 @@ import type { AgentSituationOut } from '@/types/agent'
 interface Props {
   data: AgentSituationOut | null
   loading?: boolean
+  scopeLabel?: string
 }
 
-const props = withDefaults(defineProps<Props>(), { loading: false })
+const props = withDefaults(defineProps<Props>(), { loading: false, scopeLabel: '当前可见范围' })
 
 const safe = computed<AgentSituationOut>(() => props.data ?? {
   online: 0, working: 0, idle: 0, today_calls: 0,
@@ -56,25 +57,25 @@ const peakBucket = computed(() => {
     <div class="head">
       <span class="prism-mark" aria-hidden="true"></span>
       <h2 class="title">态势感知</h2>
-      <span class="hint">实时 · 自动同步</span>
+      <span class="hint">{{ scopeLabel }} · 自动同步</span>
     </div>
 
     <div class="metric-row">
       <div class="metric">
         <span class="metric-num">{{ safe.online }}</span>
-        <span class="metric-label">在岗</span>
+        <span class="metric-label">可见目录</span>
       </div>
       <div class="metric metric-busy">
         <span class="metric-num">{{ safe.working }}</span>
-        <span class="metric-label">工作中</span>
+        <span class="metric-label">近期执行</span>
       </div>
       <div class="metric metric-idle">
         <span class="metric-num">{{ safe.idle }}</span>
-        <span class="metric-label">空闲</span>
+        <span class="metric-label">非执行态</span>
       </div>
       <div class="metric">
         <span class="metric-num">{{ safe.today_calls }}</span>
-        <span class="metric-label">今日调用</span>
+        <span class="metric-label">今日模型请求</span>
       </div>
     </div>
 
@@ -116,6 +117,7 @@ const peakBucket = computed(() => {
       </div>
       <div v-else class="hotspot-empty">今日尚无 Agent 被调用</div>
     </div>
+    <p class="status-scope-note">执行状态按最新快照中的近期事件计算并自动同步；未见活动不等于离线，目录数量不代表在岗进程。</p>
   </section>
 </template>
 
@@ -176,6 +178,13 @@ const peakBucket = computed(() => {
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
+}
+
+.status-scope-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .metric-row {

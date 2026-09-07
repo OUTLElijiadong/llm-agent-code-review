@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="5" failures="0" errors="0" time="0.350343416">
+    <testsuite name="src/views/agent/AgentCountScope.test.ts" timestamp="2026-09-07T08:09:44.763Z" hostname="lijiadongdeMacBook-Air-7.local" tests="5" failures="0" errors="0" skipped="0" time="0.350343416">
+        <testcase classname="src/views/agent/AgentCountScope.test.ts" name="列表5、全局快照19、内置编排17分别明确范围，列表/分类/态势同为5" time="0.12633725">
+        </testcase>
+        <testcase classname="src/views/agent/AgentCountScope.test.ts" name="零历史账号保持0，不把全平台目录数当作可见或在岗" time="0.055254041">
+        </testcase>
+        <testcase classname="src/views/agent/AgentCountScope.test.ts" name="普通账号不把他人或无归属系统事件标为本人执行，自己事件可更新" time="0.05030025">
+        </testcase>
+        <testcase classname="src/views/agent/AgentCountScope.test.ts" name="超级管理员明确全平台目录，不以普通成员口径解释" time="0.056237917">
+        </testcase>
+        <testcase classname="src/views/agent/AgentCountScope.test.ts" name="超过90秒或无法解析的本人事件不制造近期执行数" time="0.061583666">
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,0 +1,13 @@
+{
+  "只读": true,
+  "来源": "cr_frontend nginx -T",
+  "配置哈希": "2c8ac2875130e3795449ee8d85c38895ffe8887ca591abf113fdf9b5cd91e044",
+  "限流指令存在": false,
+  "相关指令": [
+    "location /api/ws/ {",
+    "proxy_pass http://backend:8000/api/ws/;",
+    "location /api/ {",
+    "proxy_pass http://backend:8000/api/;"
+  ],
+  "未发送登录请求": true
+}

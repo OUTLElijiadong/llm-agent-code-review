@@ -157,6 +157,7 @@ export interface AgentSkillRecordOut {
  * 用于前端展示多 Agent 宏观调控能力面板
  */
 export interface MetaGPTInfoOut {
+  catalog_scope?: 'builtin_registry'
   /** 模块版本(如 "v2.4") */
   version: string
   /** 模块描述 */
@@ -221,6 +222,7 @@ export interface MetaGPTRoleInfo {
  * MetaGPT Environment 预览结果,对齐后端 GET /api/agents/metagpt/preview 返回结构
  */
 export interface MetaGPTEnvironmentPreviewOut {
+  catalog_scope?: 'builtin_registry'
   /** 环境模式(review / discussion) */
   mode: string
   /** 环境名称 */

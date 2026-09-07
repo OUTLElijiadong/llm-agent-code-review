@@ -19,6 +19,7 @@ from app.models.agent_governance import AgentAlert, AgentMetricSnapshot
 from app.models.agent_mesh import AgentMeshMessage
 from app.models.custom_agent import CustomAgent
 from app.models.user import User
+from app.services.ai_usage_context import model_attribution, usage_context
 
 _scheduler = None
 
@@ -1001,7 +1002,11 @@ def dispatch_once(*, limit: int = 4) -> dict[str, int]:
                     target_name = target_address
                     result = _result("blocked", "账户已停用或删除，Agent 消息未执行")
                 else:
-                    target_name, result = _handle(db, user, target_address, {**claimed, "user_id": user.id})
+                    source = db.query(AgentMeshMessage).filter(
+                        AgentMeshMessage.message_id == message_id, AgentMeshMessage.user_id == user.id,
+                    ).one()
+                    with usage_context(int(user.id), model_attribution(source), db=db):
+                        target_name, result = _handle(db, user, target_address, {**claimed, "user_id": user.id})
                 completion = agent_mesh_service.complete_dispatch_message(
                     db,
                     user,

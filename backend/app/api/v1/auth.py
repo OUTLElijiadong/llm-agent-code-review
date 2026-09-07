@@ -59,7 +59,10 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
     ip = _client_ip(request)
     attempt = login_failure_limiter.begin_attempt(ip)
     if not attempt.allowed:
-        raise TooManyRequestsError(retry_after=attempt.retry_after)
+        raise TooManyRequestsError(
+            f"登录尝试过于频繁，请等待 {attempt.retry_after} 秒后重试",
+            retry_after=attempt.retry_after,
+        )
     try:
         token, user = auth_service.login(db, payload.username, payload.password, ip=ip)
     except (AuthError, ForbiddenError) as exc:

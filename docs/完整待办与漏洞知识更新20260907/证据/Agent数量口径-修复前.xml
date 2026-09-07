@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="5" skipped="0" tests="6" time="1.461" timestamp="2026-09-07T15:52:59.276293+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.services.test_agent_count_scope" name="test_office_list_summary_and_situation_share_visible_five_of_nineteen" time="0.102"><failure message="AssertionError: assert 6 == 5&#10; +  where 6 = sum(&lt;generator object test_office_list_summary_and_situation_share_visible_five_of_nineteen.&lt;locals&gt;.&lt;genexpr&gt; at 0x10a9d1c10&gt;)&#10; +  and   5 = len([{'call_count': 1, 'category': 'frontline', 'code': 'chat_assistant', 'color': '#3DBCD9', ...}, {'call_count': 1, 'cat...r', 'color': '#E27C4A', ...}, {'call_count': 1, 'category': 'analytics', 'code': 'dashboard', 'color': '#2A9D8F', ...}])">count_scope = {'bus': &lt;app.agents.event_bus.AgentEventBus object at 0x10f1415e0&gt;, 'codes': ['chat_assistant', 'ai_prompt', 'code_fil...b': &lt;sqlalchemy.orm.session.Session object at 0x10f05f670&gt;, 'other': &lt;app.models.user.User object at 0x10aa02760&gt;, ...}
+
+    def test_office_list_summary_and_situation_share_visible_five_of_nineteen(count_scope):
+        env = count_scope
+        seed_calls(env, env['codes'] + ['qa_custom_0'])
+        runtime = agent_service.get_runtime_agents(env['db'], env['user'].id)
+        summary = agent_service.get_runtime_summary(env['db'], env['user'].id)
+        situation = agent_service.get_situation(env['db'], env['user'].id)
+        assert len(agent_service.get_runtime_catalog(env['db'])) == 19
+        assert len(runtime) == 5
+&gt;       assert summary['total'] == sum(row['count'] for row in summary['by_category']) == len(runtime)
+E       AssertionError: assert 6 == 5
+E        +  where 6 = sum(&lt;generator object test_office_list_summary_and_situation_share_visible_five_of_nineteen.&lt;locals&gt;.&lt;genexpr&gt; at 0x10a9d1c10&gt;)
+E        +  and   5 = len([{'call_count': 1, 'category': 'frontline', 'code': 'chat_assistant', 'color': '#3DBCD9', ...}, {'call_count': 1, 'cat...r', 'color': '#E27C4A', ...}, {'call_count': 1, 'category': 'analytics', 'code': 'dashboard', 'color': '#2A9D8F', ...}])
+
+backend/tests/unit/services/test_agent_count_scope.py:53: AssertionError</failure></testcase><testcase classname="tests.unit.services.test_agent_count_scope" name="test_empty_member_has_zero_visible_agents_without_fake_online" time="0.026"><failure message="assert 19 == 0">count_scope = {'bus': &lt;app.agents.event_bus.AgentEventBus object at 0x10f76cb20&gt;, 'codes': ['chat_assistant', 'ai_prompt', 'code_fil...b': &lt;sqlalchemy.orm.session.Session object at 0x10f76cf40&gt;, 'other': &lt;app.models.user.User object at 0x10f6e98b0&gt;, ...}
+
+    def test_empty_member_has_zero_visible_agents_without_fake_online(count_scope):
+        env = count_scope
+        assert agent_service.get_runtime_agents(env['db'], env['user'].id) == []
+        assert agent_service.get_runtime_summary(env['db'], env['user'].id)['total'] == 0
+&gt;       assert agent_service.get_situation(env['db'], env['user'].id)['online'] == 0
+E       assert 19 == 0
+
+backend/tests/unit/services/test_agent_count_scope.py:61: AssertionError</failure></testcase><testcase classname="tests.unit.services.test_agent_count_scope" name="test_custom_invoke_permission_is_applied_to_all_three_counts" time="0.028"><failure message="assert 19 == 6">count_scope = {'bus': &lt;app.agents.event_bus.AgentEventBus object at 0x10f7aeca0&gt;, 'codes': ['chat_assistant', 'ai_prompt', 'code_fil...b': &lt;sqlalchemy.orm.session.Session object at 0x10f7ae880&gt;, 'other': &lt;app.models.user.User object at 0x10f7a87f0&gt;, ...}
+
+    def test_custom_invoke_permission_is_applied_to_all_three_counts(count_scope):
+        env = count_scope; db = env['db']
+        seed_calls(env, env['codes'] + ['qa_custom_0'])
+        role = Role(code='qa_custom_invoke', name='验收角色', status='active')
+        permission = Permission(code='custom_agent:invoke', name='调用', module='agent', type='api')
+        db.add_all([role, permission]); db.flush()
+        db.add_all([RolePermission(role_id=role.id, permission_id=permission.id),
+                    UserRole(role_id=role.id, user_id=env['user'].id)]); db.commit()
+        assert len(agent_service.get_runtime_agents(db, env['user'].id)) == 6
+        assert agent_service.get_runtime_summary(db, env['user'].id)['total'] == 6
+&gt;       assert agent_service.get_situation(db, env['user'].id)['online'] == 6
+E       assert 19 == 6
+
+backend/tests/unit/services/test_agent_count_scope.py:74: AssertionError</failure></testcase><testcase classname="tests.unit.services.test_agent_count_scope" name="test_foreign_or_system_events_do_not_mark_member_agent_as_working" time="0.025"><failure message="AssertionError: assert 'working' == 'idle'&#10;  &#10;  - idle&#10;  + working">count_scope = {'bus': &lt;app.agents.event_bus.AgentEventBus object at 0x10f7cca30&gt;, 'codes': ['chat_assistant', 'ai_prompt', 'code_fil...b': &lt;sqlalchemy.orm.session.Session object at 0x10f7ccb50&gt;, 'other': &lt;app.models.user.User object at 0x10f7c6580&gt;, ...}
+
+    def test_foreign_or_system_events_do_not_mark_member_agent_as_working(count_scope):
+        env = count_scope; code = env['codes'][0]
+        seed_calls(env, [code])
+        for owner in [env['other'].id, None]:
+            env['bus'].publish(AgentEvent(type=AgentEventType.PROGRESS, agent=code, trace_id=f'foreign-{owner}', user_id=owner))
+&gt;       assert agent_service.get_runtime_agents(env['db'], env['user'].id)[0]['status'] == 'idle'
+E       AssertionError: assert 'working' == 'idle'
+E         
+E         - idle
+E         + working
+
+backend/tests/unit/services/test_agent_count_scope.py:82: AssertionError</failure></testcase><testcase classname="tests.unit.services.test_agent_count_scope" name="test_recent_event_expiry_does_not_rewrite_historical_log" time="0.026" /><testcase classname="tests.unit.services.test_agent_count_scope" name="test_admin_catalog_nineteen_and_metagpt_builtin_seventeen_are_distinct" time="0.031"><failure message="KeyError: 'catalog_scope'">count_scope = {'bus': &lt;app.agents.event_bus.AgentEventBus object at 0x10f83a460&gt;, 'codes': ['chat_assistant', 'ai_prompt', 'code_fil...b': &lt;sqlalchemy.orm.session.Session object at 0x10f7c67f0&gt;, 'other': &lt;app.models.user.User object at 0x10f85caf0&gt;, ...}
+
+    def test_admin_catalog_nineteen_and_metagpt_builtin_seventeen_are_distinct(count_scope):
+        env = count_scope
+        assert len(agent_service.get_runtime_agents(env['db'], None)) == 19
+        assert agent_service.get_runtime_summary(env['db'], None)['total'] == 19
+        assert agent_service.get_situation(env['db'], None)['online'] == 19
+        info = get_metagpt_info(env['user']).data
+        preview = preview_metagpt_environment('review', env['user']).data
+        assert len(info['adaptable_agents']) == preview['registered_agent_count'] == 17
+&gt;       assert info['catalog_scope'] == preview['catalog_scope'] == 'builtin_registry'
+E       KeyError: 'catalog_scope'
+
+backend/tests/unit/services/test_agent_count_scope.py:106: KeyError</failure></testcase></testsuite></testsuites>

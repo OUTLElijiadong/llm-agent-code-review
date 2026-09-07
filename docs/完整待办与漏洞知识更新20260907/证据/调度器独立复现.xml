@@ -1,0 +1,412 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="27" time="2.713" timestamp="2026-09-07T14:47:46.329990+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.services.test_agent_governance_api_integration" name="test_frontend_admin_governance_api_paths_match_backend_routes" time="0.600" /><testcase classname="tests.unit.services.test_agent_governance_api_integration" name="test_external_knowledge_source_api_requires_unique_super_admin" time="0.107"><failure message="assert 503 == 200&#10; +  where 503 = &lt;Response [503 Service Unavailable]&gt;.status_code">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10da36a90&gt;
+
+    def test_external_knowledge_source_api_requires_unique_super_admin(monkeypatch):
+        """普通管理员可读来源，但不能保存或抓取；唯一 admin 超管可执行。"""
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=engine)
+        Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+        session = Session()
+        ordinary = User(
+            username="manager",
+            password="x",
+            email="manager@example.com",
+            nickname="普通管理员",
+            role="admin",
+            status=1,
+            token_version=0,
+        )
+        super_user = User(
+            username="admin",
+            password="x",
+            email="admin@example.com",
+            nickname="超级管理员",
+            role="super_admin",
+            status=1,
+            token_version=0,
+        )
+        super_role = Role(name="超级管理员", code="super_admin", status="active", is_builtin=1)
+        session.add_all([ordinary, super_user, super_role])
+        session.flush()
+        session.add(UserRole(user_id=super_user.id, role_id=super_role.id))
+        session.commit()
+    
+        def override_db():
+            yield session
+    
+        app.dependency_overrides[get_db] = override_db
+        payload = {
+            "agent_code": "manager",
+            "source_type": "inline",
+            "source_uri": "安全知识",
+            "whitelist": 1,
+            "enabled": 1,
+            "config_json": {"content": "只有超管可修改来源"},
+        }
+        try:
+            client = TestClient(app)
+            ordinary_token = create_access_token(ordinary.id, ordinary.role, ordinary.token_version)
+            super_token = create_access_token(super_user.id, super_user.role, super_user.token_version)
+    
+            readable = client.get(
+                "/api/admin/governance/knowledge/sources",
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            denied_upsert = client.post(
+                "/api/admin/governance/knowledge/sources",
+                json=payload,
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            denied_crawl = client.post(
+                "/api/admin/governance/knowledge/crawl",
+                params={"agent_code": "manager"},
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            allowed = client.post(
+                "/api/admin/governance/knowledge/sources",
+                json=payload,
+                headers={"Authorization": f"Bearer {super_token}"},
+            )
+    
+            ordinary_jobs = client.get(
+                "/api/admin/jobs",
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            super_jobs = client.get(
+                "/api/admin/jobs",
+                headers={"Authorization": f"Bearer {super_token}"},
+            )
+            crawl_job = next(item for item in super_jobs.json()["data"] if item["job_type"] == "crawl")
+            crawl_row = session.get(AgentJob, crawl_job["id"])
+            runs_before = session.query(AgentJobRun).filter(AgentJobRun.job_id == crawl_job["id"]).count()
+            denied_job_update = client.put(
+                f"/api/admin/jobs/{crawl_job['id']}",
+                json={"status": "disabled"},
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            denied_job_run = client.post(
+                f"/api/admin/jobs/{crawl_job['id']}/run",
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            session.refresh(crawl_row)
+            status_after_denied_update = crawl_row.status
+            runs_after_denied_run = session.query(AgentJobRun).filter(AgentJobRun.job_id == crawl_job["id"]).count()
+            monkeypatch.setattr(
+                "app.services.scheduler_service._execute_job",
+                lambda _db, _job: {"doc_count": 1},
+            )
+            allowed_job_update = client.put(
+                f"/api/admin/jobs/{crawl_job['id']}",
+                json={"status": "disabled"},
+                headers={"Authorization": f"Bearer {super_token}"},
+            )
+            allowed_job_run = client.post(
+                f"/api/admin/jobs/{crawl_job['id']}/run",
+                headers={"Authorization": f"Bearer {super_token}"},
+            )
+            ordinary_job_runs = client.get(
+                "/api/admin/jobs/runs",
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            super_job_runs = client.get(
+                "/api/admin/jobs/runs",
+                headers={"Authorization": f"Bearer {super_token}"},
+            )
+    
+            sensitive_approval = ApprovalItem(
+                title="服务器操作审批",
+                action="operations.restart_service",
+                resource="production",
+                risk_level="critical",
+                status="pending",
+                decision="escalate",
+            )
+            program_approval = ApprovalItem(
+                title="程序内容审批",
+                action="project.update",
+                resource="project:1",
+                risk_level="high",
+                status="pending",
+                decision="escalate",
+            )
+            session.add_all([sensitive_approval, program_approval])
+            session.commit()
+            ordinary_approvals = client.get(
+                "/api/admin/approvals",
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            super_approvals = client.get(
+                "/api/admin/approvals",
+                headers={"Authorization": f"Bearer {super_token}"},
+            )
+            denied_sensitive_approval = client.post(
+                f"/api/admin/approvals/{sensitive_approval.id}/approve",
+                json={"note": "越权尝试"},
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+            denied_sensitive_rejection = client.post(
+                f"/api/admin/approvals/{sensitive_approval.id}/reject",
+                json={"note": "越权尝试"},
+                headers={"Authorization": f"Bearer {ordinary_token}"},
+            )
+    
+            assert readable.status_code == 200
+            assert denied_upsert.status_code == 403
+            assert denied_upsert.json()["code"] == 40322
+            assert denied_crawl.status_code == 403
+            assert denied_crawl.json()["code"] == 40322
+            assert allowed.status_code == 200
+            assert allowed.json()["data"]["source_type"] == "inline"
+            assert ordinary_jobs.status_code == 200
+            assert super_jobs.status_code == 200
+            assert {item["job_type"] for item in ordinary_jobs.json()["data"]}.isdisjoint({"crawl", "ops_health_check"})
+            assert {"crawl", "ops_health_check"}.issubset({item["job_type"] for item in super_jobs.json()["data"]})
+            assert denied_job_update.status_code == 403
+            assert denied_job_update.json()["code"] == 40322
+            assert denied_job_run.status_code == 403
+            assert denied_job_run.json()["code"] == 40322
+            assert status_after_denied_update == "enabled"
+            assert runs_after_denied_run == runs_before
+&gt;           assert allowed_job_update.status_code == 200
+E           assert 503 == 200
+E            +  where 503 = &lt;Response [503 Service Unavailable]&gt;.status_code
+
+tests/unit/services/test_agent_governance_api_integration.py:290: AssertionError</failure></testcase><testcase classname="tests.unit.services.test_agent_governance_api_integration" name="test_admin_governance_api_business_loop" time="0.111"><failure message="AssertionError: {&quot;code&quot;:50301,&quot;message&quot;:&quot;后台调度器不可用，任务配置未保存，请稍后重试&quot;,&quot;request_id&quot;:&quot;2c918bc7345340e3995ec5deab9c1d17&quot;,&quot;retryable&quot;:true,&quot;next_action&quot;:&quot;请稍后重试；若持续失败，请提供请求编号给管理员&quot;,&quot;detail&quot;:null}&#10;assert 503 == 200&#10; +  where 503 = &lt;Response [503 Service Unavailable]&gt;.status_code">admin_api_client = (&lt;starlette.testclient.TestClient object at 0x10daf8f10&gt;, &lt;sqlalchemy.orm.session.Session object at 0x10e0f96d0&gt;)
+
+    def test_admin_governance_api_business_loop(admin_api_client):
+        """验证管理端治理 API 已真实接入端点并形成业务闭环。"""
+        client, db = admin_api_client
+    
+        agents = _ok(client, "get", "/api/admin/governance/agents")
+        assert any(agent["code"] == "manager" for agent in agents)
+        overview = _ok(client, "get", "/api/admin/governance/overview")
+        assert overview["agents_total"] &gt;= 1
+    
+        manager = _ok(
+            client,
+            "put",
+            "/api/admin/governance/agents/manager",
+            json={"priority": 77, "auto_approval_threshold": 0.8},
+        )
+        assert manager["priority"] == 77
+    
+        memory = _ok(
+            client,
+            "post",
+            "/api/admin/governance/agents/manager/memory",
+            json={"title": "验证记忆", "content": "运行时集成验证", "memory_type": "reflection", "weight": 1},
+        )
+        assert memory["agent_code"] == "manager"
+    
+        source = _ok(
+            client,
+            "post",
+            "/api/admin/governance/knowledge/sources",
+            json={
+                "agent_code": "manager",
+                "source_type": "inline",
+                "source_uri": "闭环知识",
+                "whitelist": 1,
+                "enabled": 1,
+                "config_json": {"content": "治理知识抓取验证"},
+            },
+        )
+        assert source["agent_code"] == "manager"
+        crawl = _ok(client, "post", "/api/admin/governance/knowledge/crawl", params={"agent_code": "manager"})
+        assert crawl["doc_count"] &gt;= 1
+    
+        risk_doc = _ok(
+            client,
+            "post",
+            "/api/admin/governance/knowledge/docs",
+            json={
+                "agent_code": "manager",
+                "title": "高风险验证知识",
+                "content": "需要审批后生效",
+                "source_type": "manual",
+                "risk_level": "high",
+                "confidence": 0.3,
+            },
+        )
+        assert risk_doc["status"] == "pending_approval"
+        approvals = _ok(client, "get", "/api/admin/approvals")
+        pending = next(item for item in approvals if item["resource"] == f"agent_knowledge_doc:{risk_doc['id']}")
+        approved = _ok(client, "post", f"/api/admin/approvals/{pending['id']}/approve", json={"note": "通过"})
+        assert approved["status"] == "approved"
+    
+        policy = _ok(
+            client,
+            "post",
+            "/api/admin/policies",
+            json={
+                "rule_code": "integration_allow",
+                "name": "集成验证策略",
+                "subject": "agent:*",
+                "action": "knowledge.read",
+                "resource": "*",
+                "effect": "allow",
+                "risk_level": "low",
+                "condition_json": {},
+                "priority": 1,
+                "enabled": 1,
+            },
+        )
+        assert policy["rule_code"] == "integration_allow"
+        decision = _ok(
+            client,
+            "post",
+            "/api/admin/policies/evaluate",
+            json={"subject": "agent:manager", "action": "knowledge.read", "resource": "agent:manager", "context": {}},
+        )
+        assert decision["decision"] == "allow"
+    
+        permission = _ok(
+            client,
+            "post",
+            "/api/admin/tools/permissions",
+            json={
+                "agent_code": "manager",
+                "tool_code": "shell",
+                "permission": "deny",
+                "risk_level": "critical",
+                "enabled": 1,
+                "note": "集成验证",
+            },
+        )
+        assert permission["permission"] == "deny"
+        assert _ok(client, "get", "/api/admin/tools/permissions")
+    
+        jobs = _ok(client, "get", "/api/admin/jobs")
+        assert len(jobs) &gt;= 3
+        reflection_job = next(item for item in jobs if item["job_type"] == "reflection")
+&gt;       job = _ok(
+            client,
+            "put",
+            f"/api/admin/jobs/{reflection_job['id']}",
+            json={"schedule": "daily@02:10", "status": "enabled"},
+        )
+
+tests/unit/services/test_agent_governance_api_integration.py:419: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = &lt;starlette.testclient.TestClient object at 0x10daf8f10&gt;, method = 'put'
+url = '/api/admin/jobs/2'
+kwargs = {'json': {'schedule': 'daily@02:10', 'status': 'enabled'}}
+response = &lt;Response [503 Service Unavailable]&gt;, @py_assert1 = 503
+@py_assert4 = 200, @py_assert3 = False
+@py_format6 = '503\n{503 = &lt;Response [503 Service Unavailable]&gt;.status_code\n} == 200'
+@py_format8 = '{"code":50301,"message":"后台调度器不可用，任务配置未保存，请稍后重试","request_id":"2c918bc7345340e3995ec5deab9c1d17","retryable":true,"ne...稍后重试；若持续失败，请提供请求编号给管理员","detail":null}\n&gt;assert 503\n{503 = &lt;Response [503 Service Unavailable]&gt;.status_code\n} == 200'
+
+    def _ok(client: TestClient, method: str, url: str, **kwargs):
+        """调用管理端 API 并断言统一响应成功。
+    
+        Args:
+            client: TestClient 实例。
+            method: HTTP 方法。
+            url: 请求路径。
+            kwargs: 请求参数。
+    
+        Returns:
+            object: 响应 data 字段。
+        """
+        response = getattr(client, method)(url, **kwargs)
+&gt;       assert response.status_code == 200, response.text
+E       AssertionError: {"code":50301,"message":"后台调度器不可用，任务配置未保存，请稍后重试","request_id":"2c918bc7345340e3995ec5deab9c1d17","retryable":true,"next_action":"请稍后重试；若持续失败，请提供请求编号给管理员","detail":null}
+E       assert 503 == 200
+E        +  where 503 = &lt;Response [503 Service Unavailable]&gt;.status_code
+
+tests/unit/services/test_agent_governance_api_integration.py:89: AssertionError</failure></testcase><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_disabled_skill_scheduler_does_not_create_default_skill_jobs" time="0.022" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_disabled_skill_scheduler_does_not_register_existing_skill_job" time="0.000" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_scheduler_registers_second_interval_job" time="0.000" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_disabled_skill_scheduler_skips_existing_system_job" time="0.020" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_daily_budget_blocks_scheduled_skill_before_orchestrator" time="0.023" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_disabled_direct_skill_executor_skips_orchestrator" time="0.020" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_budget_block_is_persisted_as_failed_job_run" time="0.022" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_proactive_scheduler_uses_action_type" time="0.022" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_self_improvement_scheduler_keeps_action_parameter" time="0.021" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_application_health_closes_model_task_agent_and_evolution_loop" time="0.025" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_unhealthy_ops_result_marks_job_run_failed" time="0.023" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_security_monitor_partial_failure_does_not_block_scheduler" time="0.021" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_security_monitor_total_failure_is_persisted_as_failed" time="0.021" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_failed_skill_result_is_persisted_as_failed" time="0.023" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_reconcile_stale_scheduler_runs_closes_only_old_orphans" time="0.031" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_stuck_scheduler_runs_are_degraded_but_can_continue" time="0.042" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_application_degradation_keeps_ops_health_running" time="0.041" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_recovered_scheduler_failure_is_visible_without_blocking_health" time="0.026" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_degraded_ops_health_warns_but_does_not_fail_the_job" time="0.024" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_unhealthy_ops_skips_background_model_diagnosis_by_default" time="0.024" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_unhealthy_ops_can_explicitly_enable_model_diagnosis" time="0.023" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_unhealthy_ops_budget_blocks_model_diagnosis" time="0.027" /><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_only_unique_super_admin_can_control_or_run_ops_health_job" time="0.024"><failure message="app.core.exceptions.ServiceUnavailableError: 后台调度器不可用，任务配置未保存，请稍后重试">db = &lt;sqlalchemy.orm.session.Session object at 0x10ea1dca0&gt;
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10ea467f0&gt;
+
+    def test_only_unique_super_admin_can_control_or_run_ops_health_job(db: Any, monkeypatch: Any) -&gt; None:
+        job = AgentJob(
+            job_code="ops_health_check",
+            job_type="ops_health_check",
+            agent_code="operations",
+            schedule="interval@5m",
+            status="enabled",
+        )
+        ordinary = User(username="manager", password="x", role="admin", status=1)
+        super_user = User(username="admin", password="x", role="super_admin", status=1)
+        super_role = Role(name="超级管理员", code="super_admin", status="active", is_builtin=1)
+        db.add_all([job, ordinary, super_user, super_role])
+        db.flush()
+        db.add(UserRole(user_id=super_user.id, role_id=super_role.id))
+        db.commit()
+    
+        with pytest.raises(ForbiddenError, match="超级管理员"):
+            scheduler_service.update_job(db, job.id, {"status": "disabled"}, actor=ordinary)
+        with pytest.raises(ForbiddenError, match="超级管理员"):
+            scheduler_service.run_job(db, job.id, actor=ordinary)
+    
+&gt;       updated = scheduler_service.update_job(db, job.id, {"status": "disabled"}, actor=super_user)
+
+tests/unit/services/test_scheduler_skill_contract.py:847: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/services/scheduler_service.py:301: in update_job
+    with agent_scheduler_runtime.synchronize_job(job):
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:117: in __enter__
+    return next(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+job = &lt;app.models.agent_governance.AgentJob object at 0x10ea03be0&gt;
+
+    @contextmanager
+    def synchronize_job(job):
+        """在配置锁内与数据库提交协作，失败恢复原触发器及下次执行时间。"""
+        scheduler = _scheduler
+        if scheduler is None or not scheduler.running:
+            if settings.agent_governance_scheduler_enabled:
+&gt;               raise ServiceUnavailableError("后台调度器不可用，任务配置未保存，请稍后重试")
+E               app.core.exceptions.ServiceUnavailableError: 后台调度器不可用，任务配置未保存，请稍后重试
+
+app/services/agent_scheduler_runtime.py:230: ServiceUnavailableError</failure></testcase><testcase classname="tests.unit.services.test_scheduler_skill_contract" name="test_only_unique_super_admin_can_control_or_run_crawl_job" time="0.022"><failure message="app.core.exceptions.ServiceUnavailableError: 后台调度器不可用，任务配置未保存，请稍后重试">db = &lt;sqlalchemy.orm.session.Session object at 0x10e954fd0&gt;
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10eaa2d00&gt;
+
+    def test_only_unique_super_admin_can_control_or_run_crawl_job(db: Any, monkeypatch: Any) -&gt; None:
+        """外部知识抓取与服务器巡检一样属于受限调度动作。"""
+        job = AgentJob(
+            job_code="daily_agent_knowledge_crawl",
+            job_type="crawl",
+            agent_code="knowledge_distiller",
+            schedule="daily@02:00",
+            status="enabled",
+        )
+        ordinary = User(username="manager", password="x", role="admin", status=1)
+        super_user = User(username="admin", password="x", role="super_admin", status=1)
+        super_role = Role(name="超级管理员", code="super_admin", status="active", is_builtin=1)
+        db.add_all([job, ordinary, super_user, super_role])
+        db.flush()
+        db.add(UserRole(user_id=super_user.id, role_id=super_role.id))
+        db.commit()
+    
+        with pytest.raises(ForbiddenError, match="超级管理员"):
+            scheduler_service.update_job(db, job.id, {"status": "disabled"}, actor=ordinary)
+        with pytest.raises(ForbiddenError, match="超级管理员"):
+            scheduler_service.run_job(db, job.id, actor=ordinary)
+    
+&gt;       updated = scheduler_service.update_job(db, job.id, {"status": "disabled"}, actor=super_user)
+
+tests/unit/services/test_scheduler_skill_contract.py:876: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/services/scheduler_service.py:301: in update_job
+    with agent_scheduler_runtime.synchronize_job(job):
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:117: in __enter__
+    return next(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+job = &lt;app.models.agent_governance.AgentJob object at 0x10e056730&gt;
+
+    @contextmanager
+    def synchronize_job(job):
+        """在配置锁内与数据库提交协作，失败恢复原触发器及下次执行时间。"""
+        scheduler = _scheduler
+        if scheduler is None or not scheduler.running:
+            if settings.agent_governance_scheduler_enabled:
+&gt;               raise ServiceUnavailableError("后台调度器不可用，任务配置未保存，请稍后重试")
+E               app.core.exceptions.ServiceUnavailableError: 后台调度器不可用，任务配置未保存，请稍后重试
+
+app/services/agent_scheduler_runtime.py:230: ServiceUnavailableError</failure></testcase></testsuite></testsuites>

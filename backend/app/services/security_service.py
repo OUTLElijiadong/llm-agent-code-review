@@ -48,8 +48,10 @@ def _infer_owasp_from_issue(issue: ReviewIssue,
                             inferrer) -> str:
     """从 ReviewIssue 推断 OWASP 编号
 
-    优先级:title/description 中的关键词推断;失败返回空字符串。
+    优先保留落库的原始版本标签，缺失时再根据关键词推断；本查询不写回。
     """
+    if getattr(issue, "owasp", None):
+        return issue.owasp
     owasp, _ = inferrer(issue.title or "", issue.description or "")
     return owasp
 

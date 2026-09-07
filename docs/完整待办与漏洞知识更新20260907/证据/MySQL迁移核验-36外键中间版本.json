@@ -1,0 +1,270 @@
+{
+  "database": "prism_acceptance_048_ea2e52de2a16",
+  "environment": "local-isolated-mysql",
+  "production_connected": false,
+  "started_at_utc": "2026-09-07T06:44:50.760620+00:00",
+  "orphan_fk_rejected": true,
+  "delete_preserves_log_and_nulls_fk": true,
+  "status": "passed",
+  "foreign_keys": [
+    {
+      "table": "agent_response_run",
+      "name": "fk_agent_response_run_agent_execution_event_id",
+      "field": "agent_execution_event_id",
+      "target": "agent_team_event",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_response_run",
+      "name": "fk_agent_response_run_agent_run_id",
+      "field": "agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_response_run",
+      "name": "fk_agent_response_run_agent_team_id",
+      "field": "agent_team_id",
+      "target": "agent_team",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_response_run",
+      "name": "fk_agent_response_run_agent_team_task_id",
+      "field": "agent_team_task_id",
+      "target": "agent_team_task",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_response_run",
+      "name": "fk_agent_response_run_root_agent_run_id",
+      "field": "root_agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_response_run",
+      "name": "fk_agent_response_run_tool_execution_id",
+      "field": "tool_execution_id",
+      "target": "agent_tool_execution",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_team",
+      "name": "fk_agent_team_agent_execution_event_id",
+      "field": "agent_execution_event_id",
+      "target": "agent_team_event",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_team",
+      "name": "fk_agent_team_agent_run_id",
+      "field": "agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_team",
+      "name": "fk_agent_team_agent_team_id",
+      "field": "agent_team_id",
+      "target": "agent_team",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_team",
+      "name": "fk_agent_team_agent_team_task_id",
+      "field": "agent_team_task_id",
+      "target": "agent_team_task",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_team",
+      "name": "fk_agent_team_root_agent_run_id",
+      "field": "root_agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_team",
+      "name": "fk_agent_team_tool_execution_id",
+      "field": "tool_execution_id",
+      "target": "agent_tool_execution",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "review_task",
+      "name": "fk_review_task_agent_execution_event_id",
+      "field": "agent_execution_event_id",
+      "target": "agent_team_event",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "review_task",
+      "name": "fk_review_task_agent_run_id",
+      "field": "agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "review_task",
+      "name": "fk_review_task_agent_team_id",
+      "field": "agent_team_id",
+      "target": "agent_team",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "review_task",
+      "name": "fk_review_task_agent_team_task_id",
+      "field": "agent_team_task_id",
+      "target": "agent_team_task",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "review_task",
+      "name": "fk_review_task_root_agent_run_id",
+      "field": "root_agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "review_task",
+      "name": "fk_review_task_tool_execution_id",
+      "field": "tool_execution_id",
+      "target": "agent_tool_execution",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "ai_call_log",
+      "name": "fk_ai_call_log_agent_execution_event_id",
+      "field": "agent_execution_event_id",
+      "target": "agent_team_event",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "ai_call_log",
+      "name": "fk_ai_call_log_agent_run_id",
+      "field": "agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "ai_call_log",
+      "name": "fk_ai_call_log_agent_team_id",
+      "field": "agent_team_id",
+      "target": "agent_team",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "ai_call_log",
+      "name": "fk_ai_call_log_agent_team_task_id",
+      "field": "agent_team_task_id",
+      "target": "agent_team_task",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "ai_call_log",
+      "name": "fk_ai_call_log_root_agent_run_id",
+      "field": "root_agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "ai_call_log",
+      "name": "fk_ai_call_log_tool_execution_id",
+      "field": "tool_execution_id",
+      "target": "agent_tool_execution",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_mesh_message",
+      "name": "fk_agent_mesh_message_agent_execution_event_id",
+      "field": "agent_execution_event_id",
+      "target": "agent_team_event",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_mesh_message",
+      "name": "fk_agent_mesh_message_agent_run_id",
+      "field": "agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_mesh_message",
+      "name": "fk_agent_mesh_message_agent_team_id",
+      "field": "agent_team_id",
+      "target": "agent_team",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_mesh_message",
+      "name": "fk_agent_mesh_message_agent_team_task_id",
+      "field": "agent_team_task_id",
+      "target": "agent_team_task",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_mesh_message",
+      "name": "fk_agent_mesh_message_root_agent_run_id",
+      "field": "root_agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "agent_mesh_message",
+      "name": "fk_agent_mesh_message_tool_execution_id",
+      "field": "tool_execution_id",
+      "target": "agent_tool_execution",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "pentest_engagement",
+      "name": "fk_pentest_engagement_agent_execution_event_id",
+      "field": "agent_execution_event_id",
+      "target": "agent_team_event",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "pentest_engagement",
+      "name": "fk_pentest_engagement_agent_run_id",
+      "field": "agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "pentest_engagement",
+      "name": "fk_pentest_engagement_agent_team_id",
+      "field": "agent_team_id",
+      "target": "agent_team",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "pentest_engagement",
+      "name": "fk_pentest_engagement_agent_team_task_id",
+      "field": "agent_team_task_id",
+      "target": "agent_team_task",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "pentest_engagement",
+      "name": "fk_pentest_engagement_root_agent_run_id",
+      "field": "root_agent_run_id",
+      "target": "agent_response_run",
+      "ondelete": "SET NULL"
+    },
+    {
+      "table": "pentest_engagement",
+      "name": "fk_pentest_engagement_tool_execution_id",
+      "field": "tool_execution_id",
+      "target": "agent_tool_execution",
+      "ondelete": "SET NULL"
+    }
+  ],
+  "foreign_key_count": 36,
+  "legacy_fields_unchanged": true,
+  "historical_attribution_null": true,
+  "old_orphan_executing_preserved": true,
+  "downgrade_and_reupgrade": true,
+  "isolated_database_removed": true,
+  "finished_at_utc": "2026-09-07T06:45:09.802597+00:00"
+}

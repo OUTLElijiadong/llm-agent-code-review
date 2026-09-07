@@ -35,13 +35,14 @@
         <template #default="{ row }">
           <el-button link type="primary" @click="handleView(row.version_no)">查看</el-button>
           <el-popconfirm
+            v-if="canRestore"
             title="确定恢复到此版本吗？当前内容将被覆盖"
             confirm-button-text="确定"
             cancel-button-text="取消"
             @confirm="handleRestore(row.version_no)"
           >
             <template #reference>
-              <el-button link type="warning">恢复</el-button>
+              <el-button link type="warning" :loading="restoring">恢复</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -83,18 +84,25 @@
  * 版本历史页�?
  * 展示文件版本历史列表，支持查看和恢复版本
  */
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 
 import dayjs from 'dayjs'
 import EmptyState from '@/components/common/EmptyState.vue'
-import { listVersions, getVersion, restoreVersion } from '@/api/codeFile'
+import { useUserStore } from '@/stores/user'
+import { getProjectDetail } from '@/api/project'
+import { getDetail, listVersions, getVersion, restoreVersion } from '@/api/codeFile'
 import type { VersionOut, VersionDetailOut } from '@/types/project'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const projectWritable = ref(false)
+const canView = computed(() => userStore.hasPermission('file:view'))
+const canRestore = computed(() => projectWritable.value && userStore.hasPermission('file:edit'))
+const restoring = ref(false)
 
 const fileId = Number(route.params.fileId)
 
@@ -119,6 +127,7 @@ function formatDate(dateStr: string): string {
  * 获取版本列表
  */
 async function fetchVersions(): Promise<void> {
+  if (!canView.value) return
   loading.value = true
   try {
     const res = await listVersions(fileId)
@@ -135,6 +144,7 @@ async function fetchVersions(): Promise<void> {
  * @param versionNo - 版本号
  */
 async function handleView(versionNo: number): Promise<void> {
+  if (!canView.value) return
   contentDialogVisible.value = true
   contentLoading.value = true
   versionContent.value = ''
@@ -156,17 +166,32 @@ async function handleView(versionNo: number): Promise<void> {
  * @param versionNo - 版本号
  */
 async function handleRestore(versionNo: number): Promise<void> {
+  if (!canRestore.value || restoring.value) return
+  restoring.value = true
   try {
     await restoreVersion(fileId, versionNo)
     ElMessage.success('版本恢复成功')
     await fetchVersions()
   } catch {
     // 错误已在拦截器处理
+  } finally {
+    restoring.value = false
   }
 }
 
+async function fetchProjectPermission(): Promise<void> {
+  projectWritable.value = false
+  if (!canView.value || !userStore.hasPermission('file:edit') || !userStore.hasPermission('project:view')) return
+  try {
+    const file = await getDetail(fileId)
+    const project = await getProjectDetail(file.project_id)
+    projectWritable.value = project.id === file.project_id && project.can_update
+  } catch { /* 资源授权未确认时不提供恢复操作。 */ }
+}
+
 onMounted(() => {
-  fetchVersions()
+  void fetchVersions()
+  void fetchProjectPermission()
 })
 </script>
 

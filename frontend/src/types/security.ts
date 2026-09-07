@@ -119,12 +119,15 @@ export interface SecurityChecklistItem {
   owasp: string
   cwe: string
   description: string
+  cwe_refs?: string[]
+  source_url?: string
 }
 
 export interface SecurityChecklistOut {
   owasp_top10: SecurityChecklistItem[]
   secret_patterns: SecurityChecklistItem[]
   static_rules: SecurityChecklistItem[]
+  catalog_metadata?: Record<string, unknown>
 }
 
 // ---- v2.1.1 Dashboard 态势汇总 ----

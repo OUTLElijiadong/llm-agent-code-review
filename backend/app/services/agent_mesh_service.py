@@ -19,6 +19,7 @@ from app.models.agent_response_run import AgentResponseRun
 from app.models.custom_agent import CustomAgent
 from app.models.user import User
 from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
+from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 
 ONLINE_WINDOW = timedelta(seconds=90)
 _SESSION_TERMINAL = {"completed", "failed", "expired", "dead_letter"}
@@ -706,6 +707,7 @@ def send_message(
 
     now = _now()
     row = AgentMeshMessage(
+        **current_attribution(int(user.id)),
         message_id=f"msg_{uuid.uuid4().hex}",
         user_id=int(user.id),
         schema_version=message.schema_version,
@@ -853,29 +855,30 @@ def _send_dispatch_reply(
         metadata = _supervision_result_metadata(row)
         if metadata:
             reply_context = {**reply_context, **metadata}
-    return send_message(
-        db,
-        user,
-        surface=surface,
-        session_key=session_key,
-        trusted_source=True,
-        message=AgentMeshMessageIn.model_validate({
-            "idempotency_key": f"agent-result:{row.message_id}",
-            "trace_id": row.trace_id,
-            "correlation_id": row.message_id,
-            "causation_id": row.message_id,
-            "sent_from": target_address,
-            "send_to": row.sent_from,
-            "message_type": message_type,
-            "priority": row.priority,
-            "subject": f"{target_name}回复：{row.subject}"[:240],
-            "payload": dict(payload),
-            "context": reply_context,
-            "artifacts": _load(row.artifacts_json, []),
-            "errors": errors,
-            "delivery": {"requires_ack": True, "max_attempts": row.max_attempts},
-        }),
-    )
+    with usage_context(int(user.id), model_attribution(row)):
+        return send_message(
+            db,
+            user,
+            surface=surface,
+            session_key=session_key,
+            trusted_source=True,
+            message=AgentMeshMessageIn.model_validate({
+                "idempotency_key": f"agent-result:{row.message_id}",
+                "trace_id": row.trace_id,
+                "correlation_id": row.message_id,
+                "causation_id": row.message_id,
+                "sent_from": target_address,
+                "send_to": row.sent_from,
+                "message_type": message_type,
+                "priority": row.priority,
+                "subject": f"{target_name}回复：{row.subject}"[:240],
+                "payload": dict(payload),
+                "context": reply_context,
+                "artifacts": _load(row.artifacts_json, []),
+                "errors": errors,
+                "delivery": {"requires_ack": True, "max_attempts": row.max_attempts},
+            }),
+        )
 
 
 def _dead_letter_undeliverable_reply(

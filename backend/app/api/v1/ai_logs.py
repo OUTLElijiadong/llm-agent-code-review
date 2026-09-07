@@ -18,6 +18,10 @@ router = APIRouter()
 def list_logs(
     task_id: int = Query(None),
     user_id: int = Query(None),
+    root_agent_run_id: int = Query(None, gt=0),
+    agent_team_id: int = Query(None, gt=0),
+    agent_team_task_id: int = Query(None, gt=0),
+    tool_execution_id: int = Query(None, gt=0),
     status: str = Query(""),
     start: str = Query(""),
     end: str = Query(""),
@@ -27,7 +31,11 @@ def list_logs(
     _: User = Depends(require_admin),
 ):
     """AI调用日志列表(管理员)"""
-    result = ai_log_service.list_logs(db, task_id, user_id, status, start, end, page, page_size)
+    result = ai_log_service.list_logs(
+        db, task_id, user_id, status, start, end, page, page_size,
+        root_agent_run_id=root_agent_run_id, agent_team_id=agent_team_id,
+        agent_team_task_id=agent_team_task_id, tool_execution_id=tool_execution_id,
+    )
     return Resp(data=PageOut(**result))
 
 

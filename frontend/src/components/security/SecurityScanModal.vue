@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { Download, Lock, RefreshRight, View } from '@element-plus/icons-vue'
 import { scanAllProjects, scanFile, scanProject, scanTask } from '@/api/security'
+import { useUserStore } from '@/stores/user'
 import { renderMarkdown } from '@/utils/markdown'
 import type {
   ApiEndpointOut,
@@ -41,6 +42,9 @@ const visible = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
 })
+
+const userStore = useUserStore()
+const canScan = computed(() => userStore.hasPermission('security:scan'))
 
 // 扫描配置
 const scanDepth = ref<'quick' | 'standard' | 'deep'>('standard')
@@ -145,7 +149,7 @@ const scoreIcon = computed(() => {
 })
 
 async function runScan(): Promise<void> {
-  if (loading.value || disposed || !retryAllowed.value) return
+  if (!canScan.value || loading.value || disposed || !retryAllowed.value) return
   if (props.source !== 'all-projects' && (!Number.isInteger(props.refId) || (props.refId ?? 0) <= 0)) {
     errorMessage.value = '缺少有效的扫描目标，请重新选择后再试。'
     return
@@ -421,7 +425,7 @@ onBeforeUnmount(() => {
           type="primary"
           :icon="Lock"
           :loading="loading"
-          :disabled="loading || !retryAllowed"
+          :disabled="!canScan || loading || !retryAllowed"
           @click="runScan"
         >
           {{ scanActionLabel }}
@@ -746,11 +750,11 @@ onBeforeUnmount(() => {
     <!-- 初始空态 -->
     <div v-else-if="!loading" class="sec-empty">
       <div class="empty-icon" aria-hidden="true">🛡</div>
-      <div class="empty-text">点击右上角「开始扫描」启动安全审计</div>
+      <div class="empty-text">{{ canScan ? '点击右上角「开始扫描」启动安全审计' : '当前账号没有安全扫描权限' }}</div>
       <div class="empty-sub">
         {{ scopeDescription }}
       </div>
-      <el-button type="primary" :icon="RefreshRight" :loading="loading" @click="runScan">
+      <el-button type="primary" :icon="RefreshRight" :loading="loading" :disabled="!canScan || !retryAllowed" @click="runScan">
         开始扫描
       </el-button>
     </div>

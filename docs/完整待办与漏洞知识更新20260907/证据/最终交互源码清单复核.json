@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "vue_files": 104,
+  "action_count": 610,
+  "button_count": 446,
+  "all_source_sha256_matches": true,
+  "dashboard_review_gate_present": true,
+  "api_key_button_dynamic_name_present": true,
+  "project_resource_and_rbac_gates_present": true,
+  "shared_scan_guard_present": true,
+  "source_sha256": "884138c0ba8c78c3f265246f782a63cea8a38f2be59d260f8f30165c9c106d68",
+  "scope": "最终源码清单；没有据此把任何控件标为浏览器已测",
+  "ast_text_labels_verified": true
+}

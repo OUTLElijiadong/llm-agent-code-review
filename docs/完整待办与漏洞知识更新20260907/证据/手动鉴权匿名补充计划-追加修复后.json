@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "cases": [
+    [
+      "GET",
+      "/api/agents/events",
+      "缺token在_resolve_sse_token拒绝，先于事件总线订阅"
+    ],
+    [
+      "GET",
+      "/api/sandboxes/-1/preview/-1",
+      "空预览cookie解码失败，先于worker代理"
+    ],
+    [
+      "HEAD",
+      "/api/sandboxes/-1/preview/-1",
+      "空预览cookie解码失败，先于worker代理"
+    ],
+    [
+      "POST",
+      "/api/sandboxes/-1/preview/-1",
+      "空预览cookie解码失败，先于worker代理"
+    ],
+    [
+      "POST",
+      "/v1/responses",
+      "空Authorization在_bearer_identity拒绝，先于上游/存储"
+    ],
+    [
+      "GET",
+      "/v1/responses/-1",
+      "空Authorization在_bearer_identity拒绝，先于存储读取"
+    ],
+    [
+      "DELETE",
+      "/v1/responses/-1",
+      "空Authorization在_bearer_identity拒绝，先于存储删除"
+    ],
+    [
+      "GET",
+      "/v1/responses/-1/input_items",
+      "空Authorization在_bearer_identity拒绝，先于存储读取"
+    ]
+  ],
+  "created_at": "2026-09-07T08:25:16.185320+00:00",
+  "source_sha256": {
+    "app/main.py": "252547e259cbb80fe3fded9afd5add118f17b08c29b67490e382bc7cc5579197",
+    "app/core/database.py": "f187d56041c6b5920539838a27ce47aa0f5c36f52129ddb44cd5e77d0ffb9927",
+    "app/core/dependencies.py": "b75be1117e45d543d52fcae4bcadee16d1b93d214369beb7fd6e0a1c124f1709",
+    "app/core/security.py": "42bd514564cd3a3abd33e4a079e8cd61a565d885d876412b53378aa12db4c7e8",
+    "app/core/observability.py": "f5efc84337e50b5c26467e575ea4127088f601588ea33b7bf5770bef00eb483f",
+    "app/api/v1/agents.py": "19562d2447e92dc9155c52c148dff4a3403060304c217c000b42baf4da1fe264",
+    "app/api/v1/sandboxes.py": "da54a4e68eea39cbd7decea8afba0a85bd22c528a58f93fde35e2f6135d5805e",
+    "app/services/sandbox_service.py": "94710954637954049516b6bac7e18ca884b465f36a73353055e57f9e64a57de3",
+    "app/api/responses.py": "a86ac4fe52124e4f9f3a294fb508e5d1875b30eebbfa12f9b0b36cce20aa2a8c",
+    "app/services/deepseek_responses_service.py": "0071d8e7fc33943f317bcbeb4b4067dfc49e3737a9faa387c16dc2ba3bc28cb6",
+    "scripts/verify_permission_acceptance_https.py": "f9238c4dd2b966f653e94dfd44b914134e6aaeb29dbaaceda78001aaac086cc2"
+  },
+  "identity": "无Authorization、无Cookie、无APIKey；与用户JWT/RBAC凭据不同，不尝试正向付费请求"
+}

@@ -24,6 +24,7 @@ import time
 import urllib.parse
 import uuid
 import zipfile
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -64,6 +65,7 @@ from app.services import (
     rbac_service,
     strategy_learning_service,
 )
+from app.services.ai_usage_context import ATTRIBUTION_FIELDS, current_attribution, model_attribution, usage_context
 from app.services.project_member_service import get_visible_project_ids, require_project_access
 from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
 from app.utils.archive_extractor import read_archive_members
@@ -2427,11 +2429,12 @@ def _publish_sandbox_report(
         public_id = str(getattr(environment, "public_id", "") or "")
         passed = bool(conclusion.get("passed"))
         task_name = f"沙箱黑白盒测试 · {public_id}"
-        # 从审查报告解析问题清单条数(## 问题清单 段内以 - 开头行)
-        issue_count = 0
-        issue_section = re.search(r"## 问题清单(.*?)(?=\n## |$)", report_md, re.S)
-        if issue_section:
-            issue_count = len(re.findall(r"^[-*] ", issue_section.group(1), re.M))
+        from app.services.sandbox_report_summary import summarize_sandbox_report
+
+        report_issue_summary = summarize_sandbox_report(report_md)
+        # 旧列不可为空；未知与报告来源另存结构化摘要，详情不把该占位零当真实结论。
+        issue_count = report_issue_summary["total"] or 0
+        severity_counts = report_issue_summary["severity_counts"]
         task = (
             db.query(ReviewTask)
             .filter(ReviewTask.task_name == task_name, ReviewTask.review_type == "sandbox_test")
@@ -2458,6 +2461,7 @@ def _publish_sandbox_report(
         if task is None:
             task = ReviewTask(
                 user_id=owner_id,
+                **model_attribution(environment),
                 project_id=project_id,
                 task_name=task_name,
                 review_type="sandbox_test",
@@ -2465,6 +2469,10 @@ def _publish_sandbox_report(
                 total_files=1,
                 processed_files=1,
                 total_issues=issue_count,
+                severe_issues=severity_counts["严重"],
+                high_issues=severity_counts["高"],
+                medium_issues=severity_counts["中"],
+                low_issues=severity_counts["低"],
                 score=report_score,
                 summary=report_md,
                 start_time=started_at,
@@ -2476,11 +2484,18 @@ def _publish_sandbox_report(
             task.project_id = project_id
             task.status = "success" if passed else "failed"
             task.total_issues = issue_count
+            task.severe_issues = severity_counts["严重"]
+            task.high_issues = severity_counts["高"]
+            task.medium_issues = severity_counts["中"]
+            task.low_issues = severity_counts["低"]
             task.score = report_score
             task.summary = report_md
             task.start_time = started_at
             task.end_time = stopped_at
             task.duration_ms = duration_ms
+            origin = model_attribution(environment)
+            for field in ATTRIBUTION_FIELDS:
+                setattr(task, field, origin.get(field))
         db.flush()
         report_row = db.query(ReviewReport).filter(ReviewReport.task_id == task.id).first()
         if report_row is None:
@@ -2491,6 +2506,7 @@ def _publish_sandbox_report(
                     "source": "sandbox_test",
                     "public_id": public_id,
                     "report_md": report_md,
+                    "report_issue_summary": report_issue_summary,
                     "evidence": conclusion.get("evidence", {}),
                 },
                 summary=report_md[:2000],
@@ -2503,6 +2519,7 @@ def _publish_sandbox_report(
                 "source": "sandbox_test",
                 "public_id": public_id,
                 "report_md": report_md,
+                "report_issue_summary": report_issue_summary,
                 "evidence": conclusion.get("evidence", {}),
             }
             report_row.summary = report_md[:2000]
@@ -3395,6 +3412,7 @@ def _create_environment_locked(
     execution_token = uuid.uuid4().hex
     environment = SandboxEnvironment(
         public_id=public_id,
+        **current_attribution(int(actor.id)),
         project_id=project_id,
         owner_id=actor.id,
         worker_id=worker.id if worker else None,
@@ -3788,12 +3806,14 @@ def _execute_environment(
     execution_token: str | None = None,
 ) -> None:
     db = SessionLocal()
+    usage_scope = ExitStack()
     try:
         environment = db.get(SandboxEnvironment, environment_id)
         if not environment or environment.status not in {"queued", "recovering"}:
             return
         if execution_token is not None and str(environment.execution_token or "") != execution_token:
             return
+        usage_scope.enter_context(usage_context(int(environment.owner_id), model_attribution(environment), db=db))
         if source_archive_base64 is None:
             if environment.source_archive_blob is None:
                 raise RuntimeError("沙箱缺少持久化源码快照")
@@ -4354,6 +4374,7 @@ def _execute_environment(
                 {"stage": "executor" if cleanup_confirmed else "cleanup", "error": failure[:500]},
             )
     finally:
+        usage_scope.close()
         db.close()
 
 

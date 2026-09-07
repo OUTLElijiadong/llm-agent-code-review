@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="0.392" timestamp="2026-09-07T15:28:52.196011+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.agents.test_event_bus_coverage" name="test_base_agent_still_retries_rate_limit_then_accepts_stop_response" time="0.001"><failure message="assert False is True&#10; +  where False = AgentResult(success=False, data=None, error=&quot;[base] 调用失败(1 次尝试): 'types.SimpleNamespace' object has no attribute 'json...del='', duration_ms=0, tokens={}, failure_kind='invalid_response', finish_reason='', usage_log_ids=[], http_attempts=1).success">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x108218430&gt;
+
+    def test_base_agent_still_retries_rate_limit_then_accepts_stop_response(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -&gt; None:
+        """429 仍属于可恢复错误，但只接纳 stop 终止的完整响应。"""
+        responses = [
+            SimpleNamespace(status_code=429, text="rate limited"),
+            SimpleNamespace(
+                status_code=200,
+                text="",
+                json=lambda: {
+                    "choices": [{"finish_reason": "stop", "message": {"content": "{}"}}],
+                    "usage": {},
+                },
+            ),
+        ]
+    
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+    
+            def __enter__(self):
+                return self
+    
+            def __exit__(self, exc_type, exc, tb):
+                return False
+    
+            def post(self, *args, **kwargs):
+                return responses.pop(0)
+    
+        monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+        monkeypatch.setattr("app.agents.base.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr(
+            "app.agents.base.pin_public_http_url",
+            lambda url: __import__("app.utils.public_http", fromlist=["PinnedPublicUrl"]).PinnedPublicUrl(
+                url,
+                "https://93.184.216.34/chat/completions",
+                "api.deepseek.com",
+                "api.deepseek.com",
+                "93.184.216.34",
+            ),
+        )
+        agent = BaseAgent()
+        agent._max_retries = 2
+    
+        result = agent.call_json("test")
+    
+&gt;       assert result.success is True
+E       assert False is True
+E        +  where False = AgentResult(success=False, data=None, error="[base] 调用失败(1 次尝试): 'types.SimpleNamespace' object has no attribute 'json...del='', duration_ms=0, tokens={}, failure_kind='invalid_response', finish_reason='', usage_log_ids=[], http_attempts=1).success
+
+backend/tests/unit/agents/test_event_bus_coverage.py:387: AssertionError</failure></testcase><testcase classname="tests.unit.agents.test_event_bus_coverage" name="test_base_agent_does_not_sleep_past_shared_audit_deadline" time="0.001"><failure message="AssertionError: assert 'invalid_response' == 'semantic_budget_exhausted'&#10;  &#10;  - semantic_budget_exhausted&#10;  + invalid_response">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x109fd5340&gt;
+
+    def test_base_agent_does_not_sleep_past_shared_audit_deadline(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -&gt; None:
+        """重试退避不得突破整次语义审计的共享墙钟时限。"""
+        post_calls = 0
+        sleeps: list[float] = []
+    
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+    
+            def __enter__(self):
+                return self
+    
+            def __exit__(self, exc_type, exc, tb):
+                return False
+    
+            def post(self, *args, **kwargs):
+                nonlocal post_calls
+                post_calls += 1
+                return SimpleNamespace(status_code=429, text="rate limited")
+    
+        monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+        monkeypatch.setattr("app.agents.base.time.monotonic", lambda: 100.0)
+        monkeypatch.setattr("app.agents.base.time.sleep", sleeps.append)
+        monkeypatch.setattr(
+            "app.agents.base.pin_public_http_url",
+            lambda url: __import__("app.utils.public_http", fromlist=["PinnedPublicUrl"]).PinnedPublicUrl(
+                url,
+                "https://93.184.216.34/chat/completions",
+                "api.deepseek.com",
+                "api.deepseek.com",
+                "93.184.216.34",
+            ),
+        )
+        agent = BaseAgent()
+        agent._max_retries = 2
+    
+        result = agent.call_json("test", deadline_monotonic=100.05)
+    
+        assert result.success is False
+&gt;       assert result.failure_kind == "semantic_budget_exhausted"
+E       AssertionError: assert 'invalid_response' == 'semantic_budget_exhausted'
+E         
+E         - semantic_budget_exhausted
+E         + invalid_response
+
+backend/tests/unit/agents/test_event_bus_coverage.py:496: AssertionError</failure></testcase></testsuite></testsuites>

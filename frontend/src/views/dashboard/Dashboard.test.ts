@@ -12,12 +12,12 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   message: { warning: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }))
-const permissions = vi.hoisted(() => ({ canExport: true }))
+const permissions = vi.hoisted(() => ({ canExport: true, exportFormat: 'html' }))
 
 vi.mock('@/api/dashboard', () => mocks)
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
 vi.mock('@/stores/user', () => ({
-  useUserStore: () => ({ hasPermission: (code: string) => code !== 'security:view' && (!code.startsWith('report:export:') || permissions.canExport) }),
+  useUserStore: () => ({ hasPermission: (code: string) => code !== 'security:view' && (!code.startsWith('report:export:') || (permissions.canExport && code === `report:export:${permissions.exportFormat}`)) }),
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: mocks.message }))
 vi.mock('@/composables/useCountUp', () => ({ useCountUp: (source: { value: number }) => computed(() => source.value) }))
@@ -85,6 +85,7 @@ async function changeRange(wrapper: VueWrapper, days: number) {
 
 beforeEach(() => {
   permissions.canExport = true
+  permissions.exportFormat = 'html'
   Object.values(mocks).forEach((mock) => { if (vi.isMockFunction(mock)) mock.mockReset() })
   mocks.getSummary.mockResolvedValue(summary())
   mocks.getRiskDistribution.mockResolvedValue([])
@@ -236,12 +237,12 @@ describe('成员仪表盘真实读取状态', () => {
 
   it('读取失败或仍在加载时禁止导出不完整报告', async () => {
     mocks.getIssueTypeStatistics.mockRejectedValue(new Error('unavailable'))
-    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.get('[data-testid="export-dashboard"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="export-dashboard"]').trigger('click')
-    expect(open).not.toHaveBeenCalled()
+    expect(download).not.toHaveBeenCalled()
   })
 
   it('不展示写死的宣传、假直播标签和非周区间的周报文案', async () => {
@@ -255,7 +256,7 @@ describe('成员仪表盘真实读取状态', () => {
     expect(wrapper.text()).toContain('导出统计报告')
   })
 
-  it('noopener返回null不被误报为拦截，也不立即回收已请求打开的报告', async () => {
+  it('点击导出下载有文件名的HTML报告并反馈，不依赖弹出窗口', async () => {
     vi.useFakeTimers()
     class ReportURL extends URL {
       static createObjectURL = vi.fn(() => 'blob:https://review.example/report-test')
@@ -263,30 +264,66 @@ describe('成员仪表盘真实读取状态', () => {
     }
     vi.stubGlobal('URL', ReportURL)
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const downloads: { href: string; filename: string; connected: boolean }[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push({ href: this.href, filename: this.download, connected: this.isConnected })
+    })
     const wrapper = mountPage()
     await flushPromises()
     await wrapper.get('[data-testid="export-dashboard"]').trigger('click')
-    expect(open).toHaveBeenCalledWith('blob:https://review.example/report-test', '_blank', 'noopener,noreferrer')
+    expect(open).not.toHaveBeenCalled()
+    expect(downloads).toEqual([{ href: 'blob:https://review.example/report-test', filename: expect.stringMatching(/^prism-statistics-30d-\d{8}-\d{6}\.html$/), connected: true }])
+    expect(document.querySelector('a[download]')).toBeNull()
     expect(mocks.message.warning).not.toHaveBeenCalled()
-    expect(mocks.message.info).toHaveBeenCalledWith(expect.stringContaining('已请求打开统计报告'))
+    expect(mocks.message.info).toHaveBeenCalledWith(expect.stringContaining('已请求下载统计报告'))
     expect(ReportURL.revokeObjectURL).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(60_000)
     expect(ReportURL.revokeObjectURL).toHaveBeenCalledWith('blob:https://review.example/report-test')
   })
 
-  it('打开报告抛错时给出失败反馈并释放临时URL', async () => {
+  it('触发下载失败时给出反馈并清理临时链接与URL', async () => {
     class ReportURL extends URL {
       static createObjectURL = vi.fn(() => 'blob:https://review.example/report-test')
       static revokeObjectURL = vi.fn()
     }
     vi.stubGlobal('URL', ReportURL)
-    vi.spyOn(window, 'open').mockImplementation(() => { throw new Error('window denied') })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { throw new Error('download denied') })
     const wrapper = mountPage()
     await flushPromises()
     await wrapper.get('[data-testid="export-dashboard"]').trigger('click')
-    expect(mocks.message.error).toHaveBeenCalledWith(expect.stringContaining('无法打开统计报告'))
+    expect(mocks.message.error).toHaveBeenCalledWith(expect.stringContaining('无法下载统计报告'))
     expect(mocks.message.info).not.toHaveBeenCalled()
     expect(ReportURL.revokeObjectURL).toHaveBeenCalledWith('blob:https://review.example/report-test')
+    expect(document.querySelector('a[download]')).toBeNull()
+  })
+
+  it('下载内容保留真实统计范围与数值，项目标题按文本转义', async () => {
+    let report: Blob | undefined
+    class ReportURL extends URL {
+      static createObjectURL = vi.fn((blob: Blob) => { report = blob; return 'blob:https://review.example/data-check' })
+      static revokeObjectURL = vi.fn()
+    }
+    vi.stubGlobal('URL', ReportURL)
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    mocks.getSummary.mockResolvedValue(summary({ recent_tasks: [{
+      id: 7, task_name: '审查 <script>unsafe()</script>', project_id: 1,
+      project_name: '皮卡丘 & 测试', status: 'success', score: 81, create_time: '2026-09-07T07:00:00',
+    }] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="export-dashboard"]').trigger('click')
+    expect(report?.type).toBe('text/html;charset=utf-8')
+    const html = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = reject
+      reader.readAsText(report!)
+    })
+    expect(html).toContain('近 30 天；概览为累计值')
+    expect(html).toContain('皮卡丘 &amp; 测试')
+    expect(html).toContain('&lt;script&gt;unsafe()&lt;/script&gt;')
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('<div class="n">9</div><div class="l">累计发现问题</div>')
   })
 
   it('后端真实四类零计数不画出虚假的等分饼图且允许导出真实零', async () => {
@@ -313,7 +350,7 @@ describe('成员仪表盘真实读取状态', () => {
   ])('%s非法载荷%j不能作为成功数据或导出来源', async (key, data) => {
     const requests = { risk: mocks.getRiskDistribution, dimension: mocks.getIssueTypeStatistics, score: mocks.getScoreTrend, frequency: mocks.getReviewFrequency }
     requests[key as keyof typeof requests].mockResolvedValue(data)
-    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const wrapper = mountPage()
     await flushPromises()
     expect(section(wrapper, String(key)).attributes('data-state')).toBe('error')
@@ -321,7 +358,7 @@ describe('成员仪表盘真实读取状态', () => {
     expect(wrapper.find('.stat-grid').exists()).toBe(true)
     expect(wrapper.get('[data-testid="export-dashboard"]').attributes('disabled')).toBeDefined()
     ;(wrapper.vm as unknown as { onWeeklyReport(): void }).onWeeklyReport()
-    expect(open).not.toHaveBeenCalled()
+    expect(download).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -345,22 +382,32 @@ describe('成员仪表盘真实读取状态', () => {
 
   it('无导出权限时按钮不可见且直接调用也不能打开报告', async () => {
     permissions.canExport = false
-    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.find('[data-testid="export-dashboard"]').exists()).toBe(false)
     ;(wrapper.vm as unknown as { onWeeklyReport(): void }).onWeeklyReport()
-    expect(open).not.toHaveBeenCalled()
+    expect(download).not.toHaveBeenCalled()
+  })
+
+  it('只有PDF导出权限时不能下载HTML格式', async () => {
+    permissions.exportFormat = 'pdf'
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="export-dashboard"]').exists()).toBe(false)
+    ;(wrapper.vm as unknown as { onWeeklyReport(): void }).onWeeklyReport()
+    expect(download).not.toHaveBeenCalled()
   })
 
   it('加载中时按钮和直接导出调用均拒绝', async () => {
     mocks.getScoreTrend.mockReturnValue(deferred<never[]>().promise)
-    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.get('[data-testid="export-dashboard"]').attributes('disabled')).toBeDefined()
     ;(wrapper.vm as unknown as { onWeeklyReport(): void }).onWeeklyReport()
-    expect(open).not.toHaveBeenCalled()
+    expect(download).not.toHaveBeenCalled()
   })
 
   it('摘要重叠刷新不被旧请求覆盖', async () => {

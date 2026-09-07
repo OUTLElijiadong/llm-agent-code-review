@@ -1,0 +1,215 @@
+{
+  "verified_at_utc": "2026-09-07T08:22:25.875068+00:00",
+  "mysql_rerun": false,
+  "status": "all_bound_sources_unchanged",
+  "mysql_evidence_sha256": "f0c22cc8c94e4f06609d3bf7b7010cc3731fddbbffe45148870652ac64bfd60b",
+  "collector_unchanged": true,
+  "groups": {
+    "source_sha256_before": {
+      "backend/app/services/ai_usage_context.py": {
+        "expected": "ee0436b4e07bd8529c90133b56b01c9eaaa401b04b3049584ca3b1b38c38631f",
+        "current": "ee0436b4e07bd8529c90133b56b01c9eaaa401b04b3049584ca3b1b38c38631f",
+        "matches": true
+      },
+      "backend/alembic/versions/048_ai_usage_attribution.py": {
+        "expected": "a2c2e32e42246a6d08a3d66d82799d19a5c54077d8628ad7f00e43403eaa0968",
+        "current": "a2c2e32e42246a6d08a3d66d82799d19a5c54077d8628ad7f00e43403eaa0968",
+        "matches": true
+      },
+      "backend/app/models/usage_attribution.py": {
+        "expected": "544627d51e30e39565f6cc76051a218ed17181f5af440306d30b0c31486275c2",
+        "current": "544627d51e30e39565f6cc76051a218ed17181f5af440306d30b0c31486275c2",
+        "matches": true
+      },
+      "backend/app/models/agent_response_run.py": {
+        "expected": "2c1f2fb4604e9670dfc58b421d58533f262f5e392ca29448eaeb7c02a4424d28",
+        "current": "2c1f2fb4604e9670dfc58b421d58533f262f5e392ca29448eaeb7c02a4424d28",
+        "matches": true
+      },
+      "backend/app/models/agent_team.py": {
+        "expected": "f1a30c4e8faa6a848e8c0f8516c08c0d9ddf91289a46c49aea45dcb78cc83e5b",
+        "current": "f1a30c4e8faa6a848e8c0f8516c08c0d9ddf91289a46c49aea45dcb78cc83e5b",
+        "matches": true
+      },
+      "backend/app/models/review_task.py": {
+        "expected": "fa99ddbc0006be66970bc84bc32d47a124346586bfc038a7b057f7330d6ca97c",
+        "current": "fa99ddbc0006be66970bc84bc32d47a124346586bfc038a7b057f7330d6ca97c",
+        "matches": true
+      },
+      "backend/app/models/ai_call_log.py": {
+        "expected": "c6e53ef4d016275f0ac8afff645448e9e5886125b453b9a6364770234d6f2408",
+        "current": "c6e53ef4d016275f0ac8afff645448e9e5886125b453b9a6364770234d6f2408",
+        "matches": true
+      },
+      "backend/app/models/agent_mesh.py": {
+        "expected": "3ebc8a9ed57afdb14c1e053f2699443e8459b5a98f4b09900f15c35804860ca5",
+        "current": "3ebc8a9ed57afdb14c1e053f2699443e8459b5a98f4b09900f15c35804860ca5",
+        "matches": true
+      },
+      "backend/app/models/pentest.py": {
+        "expected": "a520f7b248532fdaeecbe1612b393ec42d66d0d5c4fc458bcef4b5a3bc399ac7",
+        "current": "a520f7b248532fdaeecbe1612b393ec42d66d0d5c4fc458bcef4b5a3bc399ac7",
+        "matches": true
+      },
+      "backend/app/models/agent_capability.py": {
+        "expected": "db385ee4b81fd5a5f54e903e706a027ff11e26bc4e2975b2e30190eb73fc5d29",
+        "current": "db385ee4b81fd5a5f54e903e706a027ff11e26bc4e2975b2e30190eb73fc5d29",
+        "matches": true
+      },
+      "backend/alembic/env.py": {
+        "expected": "72424ec975bc0d0171212575b7c97d078a9c399dc645203a5d3bdfac7331db67",
+        "current": "72424ec975bc0d0171212575b7c97d078a9c399dc645203a5d3bdfac7331db67",
+        "matches": true
+      },
+      "backend/app/core/config.py": {
+        "expected": "c8ff0c93bc3388b9c6c1cbcf1ccdacf192425c295e57dc52f2e8aff2c207a413",
+        "current": "c8ff0c93bc3388b9c6c1cbcf1ccdacf192425c295e57dc52f2e8aff2c207a413",
+        "matches": true
+      },
+      "backend/app/core/database.py": {
+        "expected": "f187d56041c6b5920539838a27ce47aa0f5c36f52129ddb44cd5e77d0ffb9927",
+        "current": "f187d56041c6b5920539838a27ce47aa0f5c36f52129ddb44cd5e77d0ffb9927",
+        "matches": true
+      },
+      "deploy/mysql/init.sql": {
+        "expected": "06d7a21b261b1ab91196c9bf5cee829bdcbf6f3e1da36e799937ce5789b4d39f",
+        "current": "06d7a21b261b1ab91196c9bf5cee829bdcbf6f3e1da36e799937ce5789b4d39f",
+        "matches": true
+      },
+      "deploy/mysql/seed.sql": {
+        "expected": "9fc5c521537a5be054d64e63b976bbc49e2f74de06876a2f024d242e2eb7c47e",
+        "current": "9fc5c521537a5be054d64e63b976bbc49e2f74de06876a2f024d242e2eb7c47e",
+        "matches": true
+      }
+    },
+    "source_sha256_after": {
+      "backend/app/services/ai_usage_context.py": {
+        "expected": "ee0436b4e07bd8529c90133b56b01c9eaaa401b04b3049584ca3b1b38c38631f",
+        "current": "ee0436b4e07bd8529c90133b56b01c9eaaa401b04b3049584ca3b1b38c38631f",
+        "matches": true
+      },
+      "backend/alembic/versions/048_ai_usage_attribution.py": {
+        "expected": "a2c2e32e42246a6d08a3d66d82799d19a5c54077d8628ad7f00e43403eaa0968",
+        "current": "a2c2e32e42246a6d08a3d66d82799d19a5c54077d8628ad7f00e43403eaa0968",
+        "matches": true
+      },
+      "backend/app/models/usage_attribution.py": {
+        "expected": "544627d51e30e39565f6cc76051a218ed17181f5af440306d30b0c31486275c2",
+        "current": "544627d51e30e39565f6cc76051a218ed17181f5af440306d30b0c31486275c2",
+        "matches": true
+      },
+      "backend/app/models/agent_response_run.py": {
+        "expected": "2c1f2fb4604e9670dfc58b421d58533f262f5e392ca29448eaeb7c02a4424d28",
+        "current": "2c1f2fb4604e9670dfc58b421d58533f262f5e392ca29448eaeb7c02a4424d28",
+        "matches": true
+      },
+      "backend/app/models/agent_team.py": {
+        "expected": "f1a30c4e8faa6a848e8c0f8516c08c0d9ddf91289a46c49aea45dcb78cc83e5b",
+        "current": "f1a30c4e8faa6a848e8c0f8516c08c0d9ddf91289a46c49aea45dcb78cc83e5b",
+        "matches": true
+      },
+      "backend/app/models/review_task.py": {
+        "expected": "fa99ddbc0006be66970bc84bc32d47a124346586bfc038a7b057f7330d6ca97c",
+        "current": "fa99ddbc0006be66970bc84bc32d47a124346586bfc038a7b057f7330d6ca97c",
+        "matches": true
+      },
+      "backend/app/models/ai_call_log.py": {
+        "expected": "c6e53ef4d016275f0ac8afff645448e9e5886125b453b9a6364770234d6f2408",
+        "current": "c6e53ef4d016275f0ac8afff645448e9e5886125b453b9a6364770234d6f2408",
+        "matches": true
+      },
+      "backend/app/models/agent_mesh.py": {
+        "expected": "3ebc8a9ed57afdb14c1e053f2699443e8459b5a98f4b09900f15c35804860ca5",
+        "current": "3ebc8a9ed57afdb14c1e053f2699443e8459b5a98f4b09900f15c35804860ca5",
+        "matches": true
+      },
+      "backend/app/models/pentest.py": {
+        "expected": "a520f7b248532fdaeecbe1612b393ec42d66d0d5c4fc458bcef4b5a3bc399ac7",
+        "current": "a520f7b248532fdaeecbe1612b393ec42d66d0d5c4fc458bcef4b5a3bc399ac7",
+        "matches": true
+      },
+      "backend/app/models/agent_capability.py": {
+        "expected": "db385ee4b81fd5a5f54e903e706a027ff11e26bc4e2975b2e30190eb73fc5d29",
+        "current": "db385ee4b81fd5a5f54e903e706a027ff11e26bc4e2975b2e30190eb73fc5d29",
+        "matches": true
+      },
+      "backend/alembic/env.py": {
+        "expected": "72424ec975bc0d0171212575b7c97d078a9c399dc645203a5d3bdfac7331db67",
+        "current": "72424ec975bc0d0171212575b7c97d078a9c399dc645203a5d3bdfac7331db67",
+        "matches": true
+      },
+      "backend/app/core/config.py": {
+        "expected": "c8ff0c93bc3388b9c6c1cbcf1ccdacf192425c295e57dc52f2e8aff2c207a413",
+        "current": "c8ff0c93bc3388b9c6c1cbcf1ccdacf192425c295e57dc52f2e8aff2c207a413",
+        "matches": true
+      },
+      "backend/app/core/database.py": {
+        "expected": "f187d56041c6b5920539838a27ce47aa0f5c36f52129ddb44cd5e77d0ffb9927",
+        "current": "f187d56041c6b5920539838a27ce47aa0f5c36f52129ddb44cd5e77d0ffb9927",
+        "matches": true
+      },
+      "deploy/mysql/init.sql": {
+        "expected": "06d7a21b261b1ab91196c9bf5cee829bdcbf6f3e1da36e799937ce5789b4d39f",
+        "current": "06d7a21b261b1ab91196c9bf5cee829bdcbf6f3e1da36e799937ce5789b4d39f",
+        "matches": true
+      },
+      "deploy/mysql/seed.sql": {
+        "expected": "9fc5c521537a5be054d64e63b976bbc49e2f74de06876a2f024d242e2eb7c47e",
+        "current": "9fc5c521537a5be054d64e63b976bbc49e2f74de06876a2f024d242e2eb7c47e",
+        "matches": true
+      }
+    },
+    "runtime_source_sha256": {
+      "backend/app/services/ai_usage_context.py": {
+        "expected": "ee0436b4e07bd8529c90133b56b01c9eaaa401b04b3049584ca3b1b38c38631f",
+        "current": "ee0436b4e07bd8529c90133b56b01c9eaaa401b04b3049584ca3b1b38c38631f",
+        "matches": true
+      },
+      "backend/app/models/usage_attribution.py": {
+        "expected": "544627d51e30e39565f6cc76051a218ed17181f5af440306d30b0c31486275c2",
+        "current": "544627d51e30e39565f6cc76051a218ed17181f5af440306d30b0c31486275c2",
+        "matches": true
+      },
+      "backend/app/models/agent_response_run.py": {
+        "expected": "2c1f2fb4604e9670dfc58b421d58533f262f5e392ca29448eaeb7c02a4424d28",
+        "current": "2c1f2fb4604e9670dfc58b421d58533f262f5e392ca29448eaeb7c02a4424d28",
+        "matches": true
+      },
+      "backend/app/models/agent_team.py": {
+        "expected": "f1a30c4e8faa6a848e8c0f8516c08c0d9ddf91289a46c49aea45dcb78cc83e5b",
+        "current": "f1a30c4e8faa6a848e8c0f8516c08c0d9ddf91289a46c49aea45dcb78cc83e5b",
+        "matches": true
+      },
+      "backend/app/models/review_task.py": {
+        "expected": "fa99ddbc0006be66970bc84bc32d47a124346586bfc038a7b057f7330d6ca97c",
+        "current": "fa99ddbc0006be66970bc84bc32d47a124346586bfc038a7b057f7330d6ca97c",
+        "matches": true
+      },
+      "backend/app/models/ai_call_log.py": {
+        "expected": "c6e53ef4d016275f0ac8afff645448e9e5886125b453b9a6364770234d6f2408",
+        "current": "c6e53ef4d016275f0ac8afff645448e9e5886125b453b9a6364770234d6f2408",
+        "matches": true
+      },
+      "backend/app/models/agent_mesh.py": {
+        "expected": "3ebc8a9ed57afdb14c1e053f2699443e8459b5a98f4b09900f15c35804860ca5",
+        "current": "3ebc8a9ed57afdb14c1e053f2699443e8459b5a98f4b09900f15c35804860ca5",
+        "matches": true
+      },
+      "backend/app/models/pentest.py": {
+        "expected": "a520f7b248532fdaeecbe1612b393ec42d66d0d5c4fc458bcef4b5a3bc399ac7",
+        "current": "a520f7b248532fdaeecbe1612b393ec42d66d0d5c4fc458bcef4b5a3bc399ac7",
+        "matches": true
+      },
+      "backend/app/models/agent_capability.py": {
+        "expected": "db385ee4b81fd5a5f54e903e706a027ff11e26bc4e2975b2e30190eb73fc5d29",
+        "current": "db385ee4b81fd5a5f54e903e706a027ff11e26bc4e2975b2e30190eb73fc5d29",
+        "matches": true
+      }
+    }
+  },
+  "foreign_key_count": 42,
+  "source_unchanged_during_run": true,
+  "isolated_database_removed": true,
+  "production_connected": false,
+  "actual_model_http_sent": false
+}

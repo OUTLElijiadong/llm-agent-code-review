@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="4" time="1.671" timestamp="2026-09-07T15:26:20.356228+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.test_complete_permission_matrix" name="test_project_owner_cannot_manage_members_without_explicit_rbac[GET--None-project:view]" time="0.116"><failure message="AssertionError: {&quot;code&quot;:0,&quot;message&quot;:&quot;ok&quot;,&quot;data&quot;:[{&quot;id&quot;:5,&quot;user_id&quot;:104,&quot;username&quot;:&quot;matrix_no_permission&quot;,&quot;nickname&quot;:&quot;no_permission&quot;,&quot;role_in_project&quot;:&quot;owner&quot;,&quot;create_time&quot;:&quot;2026-09-07T07:26:21.931508&quot;,&quot;update_time&quot;:&quot;2026-09-07T07:26:21.931509&quot;},{&quot;id&quot;:6,&quot;user_id&quot;:101,&quot;username&quot;:&quot;matrix_owner_a&quot;,&quot;nickname&quot;:&quot;owner_a&quot;,&quot;role_in_project&quot;:&quot;reviewer&quot;,&quot;create_time&quot;:&quot;2026-09-07T07:26:21.931509&quot;,&quot;update_time&quot;:&quot;2026-09-07T07:26:21.931509&quot;}]}&#10;assert 200 == 403&#10; +  where 200 = &lt;Response [200 OK]&gt;.status_code">matrix_env = {'client': &lt;starlette.testclient.TestClient object at 0x110557a60&gt;, 'db': &lt;sqlalchemy.orm.session.Session object at 0x...NlciIsInZlciI6MCwiaWF0IjoxNzg4NzY1OTgxLCJleHAiOjE3ODkzNzA3ODF9.vGehGd4sRjL320fXukNxvIf5Pe3PchxLYF_8Hi7Hl94', ...}, ...}
+method = 'GET', suffix = '', body = None, permission = 'project:view'
+
+    @pytest.mark.parametrize('method,suffix,body,permission', [
+        ('GET', '', None, 'project:view'),
+        ('POST', '', {'user_id': 103, 'role_in_project': 'reviewer'}, 'project:member:manage'),
+        ('PUT', '/101', {'role_in_project': 'owner'}, 'project:member:manage'),
+        ('DELETE', '/101', None, 'project:member:manage'),
+    ])
+    def test_project_owner_cannot_manage_members_without_explicit_rbac(matrix_env, method, suffix, body, permission):
+        env = matrix_env
+        db = env['db']
+        owner = env['users']['no_permission']
+        project = Project(user_id=owner.id, project_name='成员权限独立验收', language='python')
+        db.add(project)
+        db.flush()
+        project_id = project.id
+        db.add_all([
+            ProjectMember(project_id=project_id, user_id=owner.id, role_in_project='owner'),
+            ProjectMember(project_id=project_id, user_id=101, role_in_project='reviewer'),
+        ])
+        db.commit()
+        try:
+            before = sorted((m.user_id, m.role_in_project) for m in db.query(ProjectMember).filter_by(project_id=project_id))
+            response = _request(env, 'no_permission', method, f'/api/projects/{project_id}/members{suffix}', json=body)
+&gt;           assert response.status_code == 403, response.text
+E           AssertionError: {"code":0,"message":"ok","data":[{"id":5,"user_id":104,"username":"matrix_no_permission","nickname":"no_permission","role_in_project":"owner","create_time":"2026-09-07T07:26:21.931508","update_time":"2026-09-07T07:26:21.931509"},{"id":6,"user_id":101,"username":"matrix_owner_a","nickname":"owner_a","role_in_project":"reviewer","create_time":"2026-09-07T07:26:21.931509","update_time":"2026-09-07T07:26:21.931509"}]}
+E           assert 200 == 403
+E            +  where 200 = &lt;Response [200 OK]&gt;.status_code
+
+tests/test_complete_permission_matrix.py:396: AssertionError</failure></testcase><testcase classname="tests.test_complete_permission_matrix" name="test_project_owner_cannot_manage_members_without_explicit_rbac[POST--body1-project:member:manage]" time="0.007"><failure message="AssertionError: {&quot;code&quot;:0,&quot;message&quot;:&quot;ok&quot;,&quot;data&quot;:{&quot;id&quot;:7,&quot;user_id&quot;:103,&quot;username&quot;:&quot;matrix_owner_b&quot;,&quot;nickname&quot;:&quot;owner_b&quot;,&quot;role_in_project&quot;:&quot;reviewer&quot;,&quot;create_time&quot;:&quot;2026-09-07T07:26:21.996400&quot;,&quot;update_time&quot;:&quot;2026-09-07T07:26:21.996402&quot;}}&#10;assert 200 == 403&#10; +  where 200 = &lt;Response [200 OK]&gt;.status_code">matrix_env = {'client': &lt;starlette.testclient.TestClient object at 0x110557a60&gt;, 'db': &lt;sqlalchemy.orm.session.Session object at 0x...NlciIsInZlciI6MCwiaWF0IjoxNzg4NzY1OTgxLCJleHAiOjE3ODkzNzA3ODF9.vGehGd4sRjL320fXukNxvIf5Pe3PchxLYF_8Hi7Hl94', ...}, ...}
+method = 'POST', suffix = ''
+body = {'role_in_project': 'reviewer', 'user_id': 103}
+permission = 'project:member:manage'
+
+    @pytest.mark.parametrize('method,suffix,body,permission', [
+        ('GET', '', None, 'project:view'),
+        ('POST', '', {'user_id': 103, 'role_in_project': 'reviewer'}, 'project:member:manage'),
+        ('PUT', '/101', {'role_in_project': 'owner'}, 'project:member:manage'),
+        ('DELETE', '/101', None, 'project:member:manage'),
+    ])
+    def test_project_owner_cannot_manage_members_without_explicit_rbac(matrix_env, method, suffix, body, permission):
+        env = matrix_env
+        db = env['db']
+        owner = env['users']['no_permission']
+        project = Project(user_id=owner.id, project_name='成员权限独立验收', language='python')
+        db.add(project)
+        db.flush()
+        project_id = project.id
+        db.add_all([
+            ProjectMember(project_id=project_id, user_id=owner.id, role_in_project='owner'),
+            ProjectMember(project_id=project_id, user_id=101, role_in_project='reviewer'),
+        ])
+        db.commit()
+        try:
+            before = sorted((m.user_id, m.role_in_project) for m in db.query(ProjectMember).filter_by(project_id=project_id))
+            response = _request(env, 'no_permission', method, f'/api/projects/{project_id}/members{suffix}', json=body)
+&gt;           assert response.status_code == 403, response.text
+E           AssertionError: {"code":0,"message":"ok","data":{"id":7,"user_id":103,"username":"matrix_owner_b","nickname":"owner_b","role_in_project":"reviewer","create_time":"2026-09-07T07:26:21.996400","update_time":"2026-09-07T07:26:21.996402"}}
+E           assert 200 == 403
+E            +  where 200 = &lt;Response [200 OK]&gt;.status_code
+
+tests/test_complete_permission_matrix.py:396: AssertionError</failure></testcase><testcase classname="tests.test_complete_permission_matrix" name="test_project_owner_cannot_manage_members_without_explicit_rbac[PUT-/101-body2-project:member:manage]" time="0.006"><failure message="AssertionError: {&quot;code&quot;:0,&quot;message&quot;:&quot;ok&quot;,&quot;data&quot;:null}&#10;assert 200 == 403&#10; +  where 200 = &lt;Response [200 OK]&gt;.status_code">matrix_env = {'client': &lt;starlette.testclient.TestClient object at 0x110557a60&gt;, 'db': &lt;sqlalchemy.orm.session.Session object at 0x...NlciIsInZlciI6MCwiaWF0IjoxNzg4NzY1OTgxLCJleHAiOjE3ODkzNzA3ODF9.vGehGd4sRjL320fXukNxvIf5Pe3PchxLYF_8Hi7Hl94', ...}, ...}
+method = 'PUT', suffix = '/101', body = {'role_in_project': 'owner'}
+permission = 'project:member:manage'
+
+    @pytest.mark.parametrize('method,suffix,body,permission', [
+        ('GET', '', None, 'project:view'),
+        ('POST', '', {'user_id': 103, 'role_in_project': 'reviewer'}, 'project:member:manage'),
+        ('PUT', '/101', {'role_in_project': 'owner'}, 'project:member:manage'),
+        ('DELETE', '/101', None, 'project:member:manage'),
+    ])
+    def test_project_owner_cannot_manage_members_without_explicit_rbac(matrix_env, method, suffix, body, permission):
+        env = matrix_env
+        db = env['db']
+        owner = env['users']['no_permission']
+        project = Project(user_id=owner.id, project_name='成员权限独立验收', language='python')
+        db.add(project)
+        db.flush()
+        project_id = project.id
+        db.add_all([
+            ProjectMember(project_id=project_id, user_id=owner.id, role_in_project='owner'),
+            ProjectMember(project_id=project_id, user_id=101, role_in_project='reviewer'),
+        ])
+        db.commit()
+        try:
+            before = sorted((m.user_id, m.role_in_project) for m in db.query(ProjectMember).filter_by(project_id=project_id))
+            response = _request(env, 'no_permission', method, f'/api/projects/{project_id}/members{suffix}', json=body)
+&gt;           assert response.status_code == 403, response.text
+E           AssertionError: {"code":0,"message":"ok","data":null}
+E           assert 200 == 403
+E            +  where 200 = &lt;Response [200 OK]&gt;.status_code
+
+tests/test_complete_permission_matrix.py:396: AssertionError</failure></testcase><testcase classname="tests.test_complete_permission_matrix" name="test_project_owner_cannot_manage_members_without_explicit_rbac[DELETE-/101-None-project:member:manage]" time="0.006"><failure message="AssertionError: {&quot;code&quot;:0,&quot;message&quot;:&quot;ok&quot;,&quot;data&quot;:null}&#10;assert 200 == 403&#10; +  where 200 = &lt;Response [200 OK]&gt;.status_code">matrix_env = {'client': &lt;starlette.testclient.TestClient object at 0x110557a60&gt;, 'db': &lt;sqlalchemy.orm.session.Session object at 0x...NlciIsInZlciI6MCwiaWF0IjoxNzg4NzY1OTgxLCJleHAiOjE3ODkzNzA3ODF9.vGehGd4sRjL320fXukNxvIf5Pe3PchxLYF_8Hi7Hl94', ...}, ...}
+method = 'DELETE', suffix = '/101', body = None
+permission = 'project:member:manage'
+
+    @pytest.mark.parametrize('method,suffix,body,permission', [
+        ('GET', '', None, 'project:view'),
+        ('POST', '', {'user_id': 103, 'role_in_project': 'reviewer'}, 'project:member:manage'),
+        ('PUT', '/101', {'role_in_project': 'owner'}, 'project:member:manage'),
+        ('DELETE', '/101', None, 'project:member:manage'),
+    ])
+    def test_project_owner_cannot_manage_members_without_explicit_rbac(matrix_env, method, suffix, body, permission):
+        env = matrix_env
+        db = env['db']
+        owner = env['users']['no_permission']
+        project = Project(user_id=owner.id, project_name='成员权限独立验收', language='python')
+        db.add(project)
+        db.flush()
+        project_id = project.id
+        db.add_all([
+            ProjectMember(project_id=project_id, user_id=owner.id, role_in_project='owner'),
+            ProjectMember(project_id=project_id, user_id=101, role_in_project='reviewer'),
+        ])
+        db.commit()
+        try:
+            before = sorted((m.user_id, m.role_in_project) for m in db.query(ProjectMember).filter_by(project_id=project_id))
+            response = _request(env, 'no_permission', method, f'/api/projects/{project_id}/members{suffix}', json=body)
+&gt;           assert response.status_code == 403, response.text
+E           AssertionError: {"code":0,"message":"ok","data":null}
+E           assert 200 == 403
+E            +  where 200 = &lt;Response [200 OK]&gt;.status_code
+
+tests/test_complete_permission_matrix.py:396: AssertionError</failure></testcase></testsuite></testsuites>
