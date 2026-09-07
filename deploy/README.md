@@ -104,12 +104,11 @@ cd deploy
 ./backup.sh --reason manual_preflight
 ./verify-backup.sh
 
-# 优先小步发布；只有确有需要时才使用 all
-./deploy.sh backend --revision "$release_sha"
-./deploy.sh frontend --revision "$release_sha"
+# 前后端必须绑定同一提交，禁止拆分发布造成版本漂移
+./deploy.sh all --revision "$release_sha"
 ```
 
-可用目标为 `all`、`backend`、`frontend`。Backend/all 流程会再次执行强制发布前备份，并由目标 Backend 镜像执行 `alembic upgrade head`。数据库结构迁移使用一次性容器共享 MySQL 网络命名空间，并通过 `127.0.0.1` TCP 连接 `root@%` 完成 DDL；root 凭据只进入该一次性容器，长期运行的 Backend 仍使用普通应用数据库账号，且不会开启 `log_bin_trust_function_creators` 这类全局放宽开关。构建、迁移、容器健康、`/healthz`、`/readyz` 或 HTTPS 冒烟失败时，发布立即停止并在条件允许时切回上一应用镜像。
+当前仅允许目标 `all`，`backend`、`frontend` 拆分发布会被脚本拒绝。全量流程会再次执行强制发布前备份，并由目标 Backend 镜像执行 `alembic upgrade head`。数据库结构迁移使用一次性容器共享 MySQL 网络命名空间，并通过 `127.0.0.1` TCP 连接 `root@%` 完成 DDL；root 凭据只进入该一次性容器，长期运行的 Backend 仍使用普通应用数据库账号，且不会开启 `log_bin_trust_function_creators` 这类全局放宽开关。构建、迁移、容器健康、`/healthz`、`/readyz` 或 HTTPS 冒烟失败时，发布立即停止并在条件允许时切回上一应用镜像。
 
 发布状态保存在 `deploy/.releases/`：
 

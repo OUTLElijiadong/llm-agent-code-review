@@ -30,6 +30,39 @@ class EmptyMcp:
         return False
 
 
+@pytest.mark.parametrize("blocking", [["https"], ["backup", "release"]])
+def test_status_failure_preserves_named_blocking_checks(db, monkeypatch, blocking) -> None:
+    payload = {
+        "ok": False,
+        "error": "存在阻断性生产故障，已停止自动继续",
+        "result": {
+            "checks": {"blocking_checks": blocking},
+            "health_status": "error",
+            "can_continue": False,
+        },
+    }
+    monkeypatch.setattr(ops_service, "_call_executor", lambda *_args: payload)
+    result = ops_service.execute(db, None, action="status", source="scheduler")
+    assert result["status"] == "failed"
+    for check in blocking:
+        assert check in result["error"]
+    assert result["result"]["result"]["can_continue"] is False
+    assert db.query(ToolCallLog).one().status == "failed"
+
+
+@pytest.mark.parametrize("blocking", [None, "https", ["unknown-private-detail"], [{}]])
+def test_status_failure_does_not_invent_or_echo_unknown_checks(db, monkeypatch, blocking) -> None:
+    payload = {
+        "ok": False,
+        "error": "生产关键检查失败",
+        "result": {"checks": {"blocking_checks": blocking}},
+    }
+    monkeypatch.setattr(ops_service, "_call_executor", lambda *_args: payload)
+    result = ops_service.execute(db, None, action="status", source="scheduler")
+    assert result["status"] == "failed"
+    assert result["error"] == "生产关键检查失败"
+
+
 @pytest.fixture(autouse=True)
 def lightweight_orchestrator(monkeypatch):
     monkeypatch.setattr(responses_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())

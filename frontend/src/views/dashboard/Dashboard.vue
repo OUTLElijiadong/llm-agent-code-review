@@ -71,7 +71,7 @@
       <article class="chart-card" data-section="dimension" :data-state="chartStates.dimension" :aria-busy="chartStates.dimension === 'loading'">
         <header class="chart-head">
           <div>
-            <h3 class="font-display">8 维度问题分布 · 棱镜光谱</h3>
+            <h3 class="font-display">问题类型分布 · 棱镜光谱</h3>
             <p class="chart-desc">{{ timeRange }} 天内的问题分布<span v-if="chartStates.dimension === 'success'"> · {{ totalDimCount }} 个</span></p>
           </div>
         </header>
@@ -247,6 +247,10 @@ const today = computed(() => {
 })
 
 const dimMeta = DIM_META
+const otherDimMeta = { key: '__other__', name: '未归类', color: '#9BA3B0' }
+const displayDimMeta = computed(() => issueTypeData.value.some((item) => item.key === '__other__' && item.value > 0)
+  ? [...dimMeta, otherDimMeta]
+  : dimMeta)
 
 const statCards = computed(() => {
   const hasReview = reviewCountSrc.value > 0
@@ -302,7 +306,7 @@ const riskLevel = computed(() => hasAverageScore.value ? reviewRiskLevel(summary
 const totalDimCount = computed(() => issueTypeData.value.reduce((s, x) => s + x.value, 0))
 
 const dimSummary = computed(() => {
-  return dimMeta
+  return displayDimMeta.value
     .map((d) => {
       const found = issueTypeData.value.find((x) => x.key === d.key)
       return { ...d, value: found?.value ?? 0 }
@@ -316,7 +320,7 @@ const dimPolarOption = computed<EChartsOption>(() => ({
   polar: { radius: ['18%', '78%'] },
   angleAxis: {
     type: 'category',
-    data: dimMeta.map((d) => d.name),
+    data: displayDimMeta.value.map((d) => d.name),
     axisLine: { show: false },
     axisTick: { show: false },
     axisLabel: { color: '#4F5667', fontSize: 11, fontFamily: '"Noto Sans SC", sans-serif' },
@@ -331,7 +335,7 @@ const dimPolarOption = computed<EChartsOption>(() => ({
   series: [{
     type: 'bar',
     coordinateSystem: 'polar',
-    data: dimMeta.map((d) => {
+    data: displayDimMeta.value.map((d) => {
       const found = issueTypeData.value.find((x) => x.key === d.key)
       return { value: found?.value ?? 0, itemStyle: { color: d.color, borderRadius: 4 } }
     }),
@@ -539,9 +543,9 @@ async function loadIssueTypeStatistics() {
     const aggregate: Record<string, { key: string; name: string; value: number }> = {}
     for (const item of data as IssueTypeItem[]) {
       const norm = normalizeDimKey(item.issue_type)
-      const key = norm ?? '__other__'
-      const meta = dimMeta.find((dimension) => dimension.key === key)
-      const name = meta?.name ?? item.issue_type ?? '其他'
+      const meta = dimMeta.find((dimension) => dimension.key === norm)
+      const key = meta?.key ?? otherDimMeta.key
+      const name = meta?.name ?? otherDimMeta.name
       if (!aggregate[key]) aggregate[key] = { key, name, value: 0 }
       aggregate[key].value += item.count
     }

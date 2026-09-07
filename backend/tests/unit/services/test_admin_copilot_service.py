@@ -31,6 +31,68 @@ def _message(db, admin, text, **extra):
     )
 
 
+def test_ops_failure_receipt_preserves_blocking_checks() -> None:
+    receipt = admin_copilot_service._ops_execution_receipt({
+        "id": 17,
+        "action": "status",
+        "status": "failed",
+        "duration_ms": 42,
+        "error": "存在阻断性生产故障，已停止自动继续",
+        "result": {
+            "result": {
+                "checks": {"blocking_checks": ["https", "backup"]},
+            },
+        },
+    })
+    assert receipt["status"] == "failed"
+    assert "阻断检查：HTTPS 入口（https）、备份链路（backup）" in receipt["content"]
+
+
+def test_ops_failure_receipt_does_not_invent_missing_details() -> None:
+    receipt = admin_copilot_service._ops_execution_receipt({
+        "id": 18,
+        "action": "status",
+        "status": "failed",
+        "duration_ms": 42,
+        "error": "生产关键检查失败",
+        "result": {"result": {"checks": {"blocking_checks": []}}},
+    })
+    assert receipt["content"].endswith("原因：生产关键检查失败。")
+
+
+@pytest.mark.parametrize("has_data", [True, False])
+def test_status_failure_reaches_conversation_and_history(db, copilot_data, monkeypatch, has_data) -> None:
+    admin, _, _ = copilot_data
+    payload = {
+        "id": 19,
+        "action": "status",
+        "status": "failed",
+        "error": "生产关键检查失败",
+        "result": {"result": {"checks": {"blocking_checks": ["https"]}, "can_continue": False}},
+    }
+    monkeypatch.setattr(
+        "app.agents.operations_agent.OperationsAgent.execute_action",
+        lambda *_args, **_kwargs: AgentResult(
+            success=False,
+            data=payload if has_data else None,
+            error="生产关键检查失败",
+        ),
+    )
+
+    receipt = _message(db, admin, "查看服务器状态")
+
+    assert receipt["status"] == "failed"
+    assert "生产关键检查失败" in receipt["content"]
+    if has_data:
+        assert "运维记录 #19" in receipt["content"]
+        assert "HTTPS 入口（https）" in receipt["content"]
+    else:
+        assert "阻断检查" not in receipt["content"]
+    history = admin_chat_history_service.list_history(db, admin, "admin-session-001")
+    assert history["messages"][-1]["payload"]["status"] == "failed"
+    assert history["messages"][-1]["payload"]["content"] == receipt["content"]
+
+
 @pytest.mark.parametrize("failure_kind", ["invalid_json", "output_truncated"])
 def test_manager_structured_failure_retries_with_distinct_compact_prompt(
     db,

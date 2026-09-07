@@ -265,6 +265,29 @@ def _uncertain_execution(row: OpsExecution, error: str, *, duplicate: bool) -> d
     return result
 
 
+def execution_failure_reason(action: str, result: dict[str, Any]) -> str:
+    reason = str(_redact_value(result.get("error") or "执行器返回失败"))[:3000]
+    if action != "status":
+        return reason
+    details = result.get("result")
+    checks = details.get("checks") if isinstance(details, dict) else None
+    blocking = checks.get("blocking_checks") if isinstance(checks, dict) else None
+    if not isinstance(blocking, list):
+        return reason
+    labels = {
+        "https": "HTTPS 入口（https）",
+        "backup": "备份链路（backup）",
+        "release": "发布绑定（release）",
+        "alembic": "数据库迁移（alembic）",
+        "containers": "关键容器（containers）",
+        "disk": "磁盘容量（disk）",
+        "memory": "内存容量（memory）",
+    }
+    failures = list(dict.fromkeys(labels[code] for code in blocking if isinstance(code, str) and code in labels))
+    detail = "阻断检查：" + "、".join(failures)
+    return f"{reason}；{detail}" if failures and detail not in reason else reason
+
+
 def _finalize_execution(
     db: Session,
     row: OpsExecution,
@@ -277,7 +300,7 @@ def _finalize_execution(
 ) -> dict[str, Any]:
     row.status = "success" if result.get("ok") else "failed"
     row.result_json = json.dumps(_redact_value(result), ensure_ascii=False, default=str)[:200_000]
-    row.error = None if result.get("ok") else str(result.get("error") or "执行器返回失败")[:4000]
+    row.error = None if result.get("ok") else execution_failure_reason(row.action, result)
     row.duration_ms = max(0, int(duration_ms))
     row.finished_at = datetime.now(timezone.utc)
 

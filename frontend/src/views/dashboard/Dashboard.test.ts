@@ -96,6 +96,32 @@ beforeEach(() => {
 afterEach(() => { wrappers.splice(0).forEach((wrapper) => wrapper.unmount()) })
 
 describe('成员仪表盘真实读取状态', () => {
+  it('未知维度不得从图表和图例消失，分项合计应等于真实总数', async () => {
+    mocks.getIssueTypeStatistics.mockResolvedValue([
+      { issue_type: 'security', count: 30 },
+      { issue_type: 'logic', count: 30 },
+      { issue_type: '历史自定义类型', count: 200 },
+      { issue_type: '另一个未映射类型', count: 35 },
+    ])
+    const wrapper = mountPage()
+    await flushPromises()
+    const dimension = section(wrapper, 'dimension')
+    expect(dimension.text()).toContain('295 个')
+    expect(dimension.get('.legend-list').text()).toContain('未归类235')
+    const option = JSON.parse(dimension.get('.chart-output').text())
+    expect(option.angleAxis.data).toContain('未归类')
+    expect(option.series[0].data.reduce((total: number, item: { value: number }) => total + item.value, 0)).toBe(295)
+  })
+
+  it('全部问题未归类时显示真实数量而不是全零光谱', async () => {
+    mocks.getIssueTypeStatistics.mockResolvedValue([{ issue_type: '未知分类', count: 7 }])
+    const wrapper = mountPage()
+    await flushPromises()
+    const dimension = section(wrapper, 'dimension')
+    expect(dimension.get('.legend-list').text()).toContain('未归类7')
+    expect(dimension.text()).not.toContain('暂无维度数据')
+  })
+
   it('首载未取得摘要时不显示零项任务或零分', async () => {
     mocks.getSummary.mockReturnValue(deferred<SummaryOut>().promise)
     const wrapper = mountPage()

@@ -8,9 +8,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
-// These helpers are consumed by Vue templates; keep the narrow suppression because
-// typescript-eslint cannot reliably see bindings in every scoped table slot.
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   activateAgentKnowledgeDoc,
   approveItem,
@@ -72,6 +69,8 @@ const userStore = useUserStore()
 const loading = ref(false)
 const overview = ref<GovernanceOverview | null>(null)
 const agents = ref<GovernanceAgent[]>([])
+const agentsLoaded = ref(false)
+const agentLoadError = ref('')
 const approvals = ref<ApprovalItem[]>([])
 const policies = ref<PolicyRule[]>([])
 const decisions = ref<PolicyDecision[]>([])
@@ -184,6 +183,7 @@ const pageSubtitle = computed(() => {
 })
 
 import {
+  CATEGORY_LABELS,
   agentCodeText,
   artifactTypeText,
   categoryText,
@@ -197,7 +197,15 @@ import {
   sourceTypeText,
   toolCodeText,
 } from '@/constants/adminGovernance'
-/* eslint-enable @typescript-eslint/no-unused-vars */
+function agentCategoryText(value: unknown): string {
+  if (value === null || value === undefined) return '未提供分类'
+  if (typeof value !== 'string') return '分类格式异常'
+  const category = value.trim()
+  if (!category) return '未提供分类'
+  return Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, category)
+    ? CATEGORY_LABELS[category]
+    : `未知分类（${category}）`
+}
 
 function statusText(value: string | number | null | undefined): string {
   const labels: Record<string, string> = {
@@ -246,7 +254,10 @@ const observabilityCards = computed(() => [
  * @returns Promise<void>
  */
 async function loadData(): Promise<void> {
+  const isAgentsRequest = props.mode === 'agents'
+  if (isAgentsRequest && loading.value) return
   loading.value = true
+  if (isAgentsRequest) agentLoadError.value = ''
   try {
     if (props.mode === 'overview') {
       overview.value = await getGovernanceOverview()
@@ -255,6 +266,7 @@ async function loadData(): Promise<void> {
       alerts.value = await listAlerts()
     } else if (props.mode === 'agents') {
       agents.value = await listGovernanceAgents()
+      agentsLoaded.value = true
     } else if (props.mode === 'approvals') {
       approvals.value = await listApprovals()
     } else if (props.mode === 'policies') {
@@ -285,6 +297,12 @@ async function loadData(): Promise<void> {
     } else if (props.mode === 'rollback') {
       artifactVersions.value = await listArtifactVersions()
     }
+  } catch (error) {
+    if (!isAgentsRequest) throw error
+    const message = error instanceof Error
+      ? error.message
+      : error && typeof error === 'object' ? (error as { message?: unknown }).message : undefined
+    agentLoadError.value = (typeof message === 'string' && message.trim()) || 'Agent 列表加载失败，请刷新重试'
   } finally {
     loading.value = false
   }
@@ -633,7 +651,12 @@ onMounted(loadData)
         <h2>{{ pageTitle }}</h2>
         <p>{{ pageSubtitle }}</p>
       </div>
-      <el-button @click="loadData">刷新</el-button>
+      <el-button
+        :loading="mode === 'agents' && loading"
+        :disabled="mode === 'agents' && loading"
+        :aria-busy="mode === 'agents' ? loading : undefined"
+        @click="loadData"
+      >{{ mode === 'agents' && loading ? (agentsLoaded ? '正在刷新' : '正在加载') : '刷新' }}</el-button>
     </div>
 
     <template v-if="mode === 'overview'">
@@ -659,7 +682,7 @@ onMounted(loadData)
               </template>
             <el-table-column prop="name" label="Agent(智能体)" min-width="140" />
             <el-table-column label="分类" width="110">
-            <template #default="{ row }"><span :title="row.category">{ categoryText(row.category) }</span></template>
+            <template #default="{ row }"><span :title="row.category">{{ categoryText(row.category) }}</span></template>
           </el-table-column>
             <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small">{{ statusText(row.status) }}</el-tag></template></el-table-column>
             <el-table-column prop="priority" label="优先级" width="90" />
@@ -680,14 +703,26 @@ onMounted(loadData)
     </template>
 
     <section v-else-if="mode === 'agents'" class="panel">
+      <p class="agent-load-status" role="status" aria-live="polite" aria-atomic="true">
+        <template v-if="loading">{{ agentsLoaded ? '正在刷新 Agent 列表，保留上次成功结果。' : '正在加载 Agent 列表…' }}</template>
+        <template v-else-if="agentsLoaded && !agentLoadError">已加载 {{ agents.length }} 个 Agent</template>
+      </p>
+      <el-alert
+        v-if="agentLoadError"
+        type="error"
+        :title="agentLoadError"
+        :description="agentsLoaded ? '当前保留上次成功加载的列表，请刷新重试。' : '尚未获取 Agent 列表，请刷新重试。'"
+        :closable="false"
+        show-icon
+      />
       <el-table :data="agents" stripe>
           <template #empty>
-            <EmptyState compact description="暂无 Agent 记录" />
+            <EmptyState compact :description="agentsLoaded ? '暂无 Agent 记录' : loading ? '正在加载 Agent 列表' : '尚未获取 Agent 列表'" />
           </template>
         <el-table-column prop="name" label="Agent(智能体)" min-width="150" />
         <el-table-column prop="code" label="内部编码" min-width="140" />
         <el-table-column label="分类" width="120">
-            <template #default="{ row }"><span :title="row.category">{ categoryText(row.category) }</span></template>
+            <template #default="{ row }"><span :title="typeof row.category === 'string' ? row.category : undefined">{{ agentCategoryText(row.category) }}</span></template>
           </el-table-column>
         <el-table-column label="职责边界" min-width="260" show-overflow-tooltip>
           <template #default="{ row }">{{ agentBoundaryText(row) }}</template>
@@ -709,10 +744,10 @@ onMounted(loadData)
           </template>
         <el-table-column prop="title" label="审批事项" min-width="220" />
         <el-table-column label="Agent(智能体)" width="120">
-            <template #default="{ row }"><span :title="row.agent_code">{ agentCodeText(row.agent_code) }</span></template>
+            <template #default="{ row }"><span :title="row.agent_code">{{ agentCodeText(row.agent_code) }}</span></template>
           </el-table-column>
         <el-table-column label="动作" min-width="150">
-            <template #default="{ row }"><span :title="row.action">{ policyActionText(row.action) }</span></template>
+            <template #default="{ row }"><span :title="row.action">{{ policyActionText(row.action) }}</span></template>
           </el-table-column>
         <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="row.risk_level === 'high' ? 'danger' : 'warning'">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
         <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
@@ -849,16 +884,16 @@ onMounted(loadData)
             <EmptyState compact description="暂无工具授权" />
           </template>
           <el-table-column label="Agent(智能体)" width="130">
-            <template #default="{ row }"><span :title="row.agent_code">{ agentCodeText(row.agent_code) }</span></template>
+            <template #default="{ row }"><span :title="row.agent_code">{{ agentCodeText(row.agent_code) }}</span></template>
           </el-table-column>
           <el-table-column label="工具" width="130">
-            <template #default="{ row }"><span :title="row.tool_code">{ toolCodeText(row.tool_code) }</span></template>
+            <template #default="{ row }"><span :title="row.tool_code">{{ toolCodeText(row.tool_code) }}</span></template>
           </el-table-column>
           <el-table-column label="权限" width="110">
-            <template #default="{ row }"><span :title="row.permission">{ decisionText(row.permission) }</span></template>
+            <template #default="{ row }"><span :title="row.permission">{{ decisionText(row.permission) }}</span></template>
           </el-table-column>
           <el-table-column label="风险" width="90">
-            <template #default="{ row }"><span :title="row.risk_level">{ riskText(row.risk_level) }</span></template>
+            <template #default="{ row }"><span :title="row.risk_level">{{ riskText(row.risk_level) }}</span></template>
           </el-table-column>
           <el-table-column label="启用" width="80"><template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template></el-table-column>
           <el-table-column prop="note" label="备注" min-width="180" show-overflow-tooltip />
@@ -871,22 +906,22 @@ onMounted(loadData)
             <EmptyState compact description="暂无工具注册" />
           </template>
           <el-table-column label="Agent(智能体)" width="130">
-            <template #default="{ row }"><span :title="row.agent_code">{ agentCodeText(row.agent_code) }</span></template>
+            <template #default="{ row }"><span :title="row.agent_code">{{ agentCodeText(row.agent_code) }}</span></template>
           </el-table-column>
           <el-table-column label="工具" width="130">
-            <template #default="{ row }"><span :title="row.tool_code">{ toolCodeText(row.tool_code) }</span></template>
+            <template #default="{ row }"><span :title="row.tool_code">{{ toolCodeText(row.tool_code) }}</span></template>
           </el-table-column>
           <el-table-column label="动作" min-width="150">
-            <template #default="{ row }"><span :title="row.action">{ policyActionText(row.action) }</span></template>
+            <template #default="{ row }"><span :title="row.action">{{ policyActionText(row.action) }}</span></template>
           </el-table-column>
           <el-table-column label="决策" width="90">
-            <template #default="{ row }"><span :title="row.decision">{ decisionText(row.decision) }</span></template>
+            <template #default="{ row }"><span :title="row.decision">{{ decisionText(row.decision) }}</span></template>
           </el-table-column>
           <el-table-column label="状态" width="100">
-            <template #default="{ row }"><span :title="row.status">{ statusText(row.status) }</span></template>
+            <template #default="{ row }"><span :title="row.status">{{ statusText(row.status) }}</span></template>
           </el-table-column>
           <el-table-column label="风险" width="90">
-            <template #default="{ row }"><span :title="row.risk_level">{ riskText(row.risk_level) }</span></template>
+            <template #default="{ row }"><span :title="row.risk_level">{{ riskText(row.risk_level) }}</span></template>
           </el-table-column>
           <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
         </el-table>
@@ -968,7 +1003,7 @@ onMounted(loadData)
             <EmptyState compact description="暂无知识源" />
           </template>
           <el-table-column label="类型" width="100">
-            <template #default="{ row }"><span :title="row.source_type">{ sourceTypeText(row.source_type) }</span></template>
+            <template #default="{ row }"><span :title="row.source_type">{{ sourceTypeText(row.source_type) }}</span></template>
           </el-table-column>
           <el-table-column prop="source_uri" label="来源" min-width="240" show-overflow-tooltip />
           <el-table-column label="白名单" width="90"><template #default="{ row }">{{ row.whitelist ? '白名单' : '需审核' }}</template></el-table-column>
@@ -984,7 +1019,7 @@ onMounted(loadData)
               </template>
             <el-table-column prop="title" label="标题" min-width="180" />
             <el-table-column label="类型" width="110">
-            <template #default="{ row }"><span :title="row.memory_type">{ memoryTypeText(row.memory_type) }</span></template>
+            <template #default="{ row }"><span :title="row.memory_type">{{ memoryTypeText(row.memory_type) }}</span></template>
           </el-table-column>
             <el-table-column prop="weight" label="权重" width="90" />
           </el-table>
@@ -997,11 +1032,11 @@ onMounted(loadData)
               </template>
             <el-table-column prop="title" label="标题" min-width="180" />
             <el-table-column label="来源" width="100">
-            <template #default="{ row }"><span :title="row.source_type">{ sourceTypeText(row.source_type) }</span></template>
+            <template #default="{ row }"><span :title="row.source_type">{{ sourceTypeText(row.source_type) }}</span></template>
           </el-table-column>
             <el-table-column prop="risk_level" label="风险" width="90" />
             <el-table-column label="状态" width="130">
-            <template #default="{ row }"><span :title="row.status">{ statusText(row.status) }</span></template>
+            <template #default="{ row }"><span :title="row.status">{{ statusText(row.status) }}</span></template>
           </el-table-column>
             <el-table-column prop="chunk_count" label="切片" width="80" />
             <el-table-column label="操作" width="90">
@@ -1130,7 +1165,7 @@ onMounted(loadData)
             <EmptyState compact description="暂无激励事件" />
           </template>
           <el-table-column label="Agent(智能体)" width="140">
-            <template #default="{ row }"><span :title="row.agent_code">{ agentCodeText(row.agent_code) }</span></template>
+            <template #default="{ row }"><span :title="row.agent_code">{{ agentCodeText(row.agent_code) }}</span></template>
           </el-table-column>
           <el-table-column label="类型" width="100"><template #default="{ row }">{{ row.event_type === 'reward' ? '奖励' : '惩罚' }}</template></el-table-column>
           <el-table-column prop="score" label="分数" width="90" />
@@ -1170,7 +1205,7 @@ onMounted(loadData)
           </template>
           <el-table-column prop="agent_code" label="Agent(智能体)" width="130" />
           <el-table-column label="类型" width="110">
-            <template #default="{ row }"><span :title="row.artifact_type">{ artifactTypeText(row.artifact_type) }</span></template>
+            <template #default="{ row }"><span :title="row.artifact_type">{{ artifactTypeText(row.artifact_type) }}</span></template>
           </el-table-column>
           <el-table-column prop="version" label="版本" min-width="160" />
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
@@ -1286,6 +1321,12 @@ onMounted(loadData)
 .panel h3 {
   margin: 0 0 12px;
   font-size: 15px;
+}
+
+.agent-load-status {
+  margin: 0 0 12px;
+  color: var(--gray-700);
+  font-size: 13px;
 }
 
 .panel-heading {

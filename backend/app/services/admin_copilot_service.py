@@ -24,6 +24,7 @@ from app.services import (
     admin_chat_history_service,
     agent_governance_service,
     observability_service,
+    ops_service,
 )
 
 ASSISTANT_NAME = "Prism 管理副驾驶"
@@ -436,6 +437,15 @@ def _execute_ops_action(
         request_id=request_id,
         session_db_id=session.id,
     )
+    if not result.success and isinstance(result.data, dict):
+        return {
+            **_ops_execution_receipt({
+                **result.data,
+                "error": result.data.get("error") or result.error,
+            }),
+            "_agent_code": "operations",
+            "_trace_id": trace_id,
+        }
     if not result.success or not isinstance(result.data, dict):
         return {
             **_text(f"运维 Agent 执行失败：{result.error or '未知错误'}。", status="failed"),
@@ -778,9 +788,14 @@ def _ops_execution_receipt(data: dict[str, Any]) -> dict[str, Any]:
     execution_id = data.get("id")
     duration = int(data.get("duration_ms") or 0)
     if status != "success":
+        result = data.get("result") if isinstance(data.get("result"), dict) else {}
+        reason = ops_service.execution_failure_reason(action, {
+            **result,
+            "error": data.get("error") or result.get("error"),
+        })
         return _text(
             f"{prefix}（运维记录 #{execution_id}）：{action} 失败，"
-            f"耗时 {duration} ms。原因：{data.get('error') or '执行器返回失败'}。",
+            f"耗时 {duration} ms。原因：{reason}。",
             status="failed",
         )
     summary = ""
