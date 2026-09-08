@@ -1161,8 +1161,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   let activeRunId = sessionRun.value?.run_id
   let protocolError = ''
 
-  const syncTimeline = (): ChatMessage | null => {
-    if (!runToolCalls.length) return null
+  const syncTimeline = (includeAudit = false): ChatMessage | null => {
+    if (!runToolCalls.length && !includeAudit) return null
     if (!timelineTarget) {
       timelineTarget = {
         id: messageId(),
@@ -1173,6 +1173,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         toolCalls: [...runToolCalls],
       }
       messages.value.push(timelineTarget)
+      // 后续事件修改响应式条目，阶段更新不依赖其他状态偶然触发重绘。
+      timelineTarget = messages.value[messages.value.length - 1]
     } else {
       timelineTarget.toolCalls = [...runToolCalls]
     }
@@ -1214,7 +1216,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         // 审计四阶段进度:优先挂在当前工具时间线消息上;还没有时间线时自建审计行
         showTyping.value = false
         if (event.phase && event.label) {
-          const target = timelineTarget ?? messages.value[messages.value.length - 1]
+          const target = syncTimeline(true)
           if (target && target.auditPhases) {
             const existing = target.auditPhases.find((item) => item.phase === event.phase)
             if (existing) {
@@ -1225,14 +1227,6 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
             }
           } else if (target) {
             target.auditPhases = [{ phase: event.phase, label: event.label, message: event.message || '' }]
-          } else {
-            messages.value.push({
-              id: messageId(),
-              role: 'assistant',
-              content: '',
-              time: dayjs().format('HH:mm'),
-              auditPhases: [{ phase: event.phase, label: event.label, message: event.message || '' }],
-            })
           }
         }
       } else if (isResponseToolEvent(event)) {
@@ -2204,7 +2198,7 @@ onMounted(() => {
             </Transition>
 
             <div ref="chatBody" class="chat-body" :class="{ 'is-restoring': sessionRestoring }" @click="onMessageClick">
-            <div v-for="(msg, i) in messages" :key="msg.id ?? i" class="msg-row" :class="msg.role">
+            <div v-for="(msg, i) in messages" :key="msg.id ?? i" class="msg-row" :class="[msg.role, { 'has-timeline': msg.toolCalls?.length || msg.auditPhases?.length }]">
               <div class="msg-avatar">
                 <template v-if="msg.role === 'user'">U</template>
                 <PrismMascot v-else :size="26" :status="'idle'" />
@@ -2352,6 +2346,7 @@ onMounted(() => {
                   v-if="msg.toolCalls?.length || msg.auditPhases?.length"
                   :calls="msg.toolCalls ?? []"
                   :audit-phases="msg.auditPhases"
+                  :active="Boolean(msg.runId && msg.runId === sessionRun?.run_id && isAgentResponseSessionActive(sessionRun?.status))"
                 />
 
                 <!-- 团队卡片属于调用时间线,随消息锚点出现,不会在最终结论后统一补充。 -->
@@ -3020,7 +3015,9 @@ onMounted(() => {
 }
 
 /* 恢复历史时整片渲染,跳过入场动画避免整屏闪烁 */
-.chat-body.is-restoring .msg-bubble { animation: none; }
+.chat-body.is-restoring .msg-bubble,
+.msg-row.error .msg-bubble,
+.msg-row.has-timeline .msg-bubble { animation: none; }
 
 .msg-row {
   display: flex;
@@ -3836,6 +3833,19 @@ onMounted(() => {
 
 .drawer-enter-from .chat-drawer,
 .drawer-leave-to .chat-drawer { transform: translateY(8px) scale(.98); }
+
+/* 放在本组件动效声明之后，避免较晚的基础规则重新启用呼吸或面板位移。 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-fab, .chat-fab::after, .chat-overlay,
+  .chat-drawer, .mascot-float-enter-active, .mascot-float-leave-active,
+  .msg-bubble, .typing-label, .typing-dot { animation: none !important; transition: none !important; }
+  .drawer-enter-active, .drawer-leave-active,
+  .drawer-enter-active .chat-drawer, .drawer-leave-active .chat-drawer { transition: none; }
+  .drawer-enter-from, .drawer-leave-to,
+  .drawer-enter-from .chat-drawer, .drawer-leave-to .chat-drawer,
+  .mascot-float-enter-from, .mascot-float-leave-to { transform: none; opacity: 1; }
+  .chat-fab:hover { transform: none; }
+}
 
 @media (max-width: 520px) {
   .chat-overlay { right: 16px; bottom: 16px; }

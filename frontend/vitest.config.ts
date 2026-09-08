@@ -6,7 +6,11 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   plugins: [vue()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, 'src') },
+    alias: [
+      { find: '@', replacement: path.resolve(__dirname, 'src') },
+      // Monaco 0.45 只提供浏览器 module 入口；显式定位后，组件测试才能替换其运行时。
+      { find: /^monaco-editor$/, replacement: path.resolve(__dirname, 'node_modules/monaco-editor/esm/vs/editor/editor.main.js') },
+    ],
   },
   test: {
     environment: 'jsdom',

@@ -1055,8 +1055,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   let activeRunId = sessionRun.value?.run_id
   let protocolError = ''
 
-  const syncTimeline = (): ChatEntry | null => {
-    if (!runToolCalls.length) return null
+  const syncTimeline = (includeAudit = false): ChatEntry | null => {
+    if (!runToolCalls.length && !includeAudit) return null
     if (!timelineTarget) {
       timelineTarget = {
         ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
@@ -1064,6 +1064,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         toolCalls: [...runToolCalls],
       }
       messages.value.push(timelineTarget)
+      // 后续事件修改响应式条目，阶段更新不依赖其他状态偶然触发重绘。
+      timelineTarget = messages.value[messages.value.length - 1]
       if (!visible.value) unreadAlerts.value += 1
     } else {
       timelineTarget.toolCalls = [...runToolCalls]
@@ -1105,7 +1107,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         // 审计四阶段进度:挂在当前时间线条目上,渲染成角色阶段卡
         showTyping.value = false
         if (event.phase && event.label) {
-          const target = timelineTarget ?? messages.value[messages.value.length - 1]
+          const target = syncTimeline(true)
           if (target && target.auditPhases) {
             const existing = target.auditPhases.find((item) => item.phase === event.phase)
             if (existing) {
@@ -1658,7 +1660,7 @@ onMounted(() => {
           v-for="entry in messages"
           :key="entry.id"
           class="message-row"
-          :class="`is-${entry.role}`"
+          :class="[`is-${entry.role}`, { 'has-timeline': entry.toolCalls?.length || entry.auditPhases?.length, 'has-error': entry.payload.type === 'error' }]"
         >
           <div v-if="entry.role === 'assistant'" class="message-avatar">
             <PrismMascot :size="22" :status="'idle'" />
@@ -1705,6 +1707,7 @@ onMounted(() => {
               v-if="entry.toolCalls?.length || entry.auditPhases?.length"
               :calls="entry.toolCalls ?? []"
               :audit-phases="entry.auditPhases"
+              :active="Boolean(entry.runId && entry.runId === sessionRun?.run_id && isAgentResponseSessionActive(sessionRun?.status))"
               :subject="MASCOT_NAME"
             />
 
@@ -2183,7 +2186,9 @@ input { font: inherit; }
 .message-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 14px; animation: copilot-msg-in 0.26s cubic-bezier(0.16, 0.84, 0.44, 1) backwards; }
 .message-row.is-user { justify-content: flex-end; animation-name: copilot-msg-in-user; }
 /* 恢复历史时整片渲染,跳过入场动画避免整屏闪烁 */
-.copilot-messages.is-restoring .message-row { animation: none; }
+.copilot-messages.is-restoring .message-row,
+.message-row.has-error,
+.message-row.has-timeline { animation: none; }
 @keyframes copilot-msg-in { from { opacity: 0; transform: translateY(8px) translateX(-6px); } to { opacity: 1; transform: translateY(0) translateX(0); } }
 @keyframes copilot-msg-in-user { from { opacity: 0; transform: translateY(8px) translateX(6px); } to { opacity: 1; transform: translateY(0) translateX(0); } }
 .message-stack { max-width: calc(100% - 34px); min-width: 0; position: relative; }
@@ -2441,6 +2446,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .thinking-city-enter-from,
 .thinking-city-leave-to { opacity: 0; transform: translateY(-6px) scale(0.985); }
 @media (prefers-reduced-motion: reduce) {
+  .copilot-trigger, .copilot-trigger.is-busy::after { animation: none; transition: none; }
+  .copilot-trigger:hover { transform: none; }
   .thinking-city-enter-active,
   .thinking-city-leave-active,
   .thinking-city-toggle { transition: none; }

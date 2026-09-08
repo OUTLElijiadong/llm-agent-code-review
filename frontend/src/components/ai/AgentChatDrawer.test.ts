@@ -1151,3 +1151,25 @@ it('运行中展示小菱执行进度条(已完成 X/Y 步 + 当前动作),完�
   expect(wrapper.find('.chat-progress').exists()).toBe(false)
   wrapper.unmount()
 })
+
+it.each(['completed', 'failed', 'cancelled'])('审计阶段属于真实助手运行，%s 后立即停止活动标记', async (terminal) => {
+  const wrapper = await mountReadyDrawer()
+  try {
+    await wrapper.find('.chat-input').setValue('审计阶段核验')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-audit' } })
+    emit(0, { type: 'response.audit.progress', phase: 'scout', label: '侦察员', message: '读取项目' })
+    await flushPromises()
+    expect(wrapper.find('.msg-row.user .xl-steps').exists()).toBe(false)
+    expect(wrapper.get('.msg-row.assistant .xl-audit-now').text()).toBe('进行中')
+    emit(0, { type: 'response.audit.progress', phase: 'analysis', label: '分析师', message: '分析证据' })
+    await flushPromises()
+    expect(wrapper.findAll('.xl-audit-phase')).toHaveLength(2)
+    expect(wrapper.findAll('.xl-audit-now')).toHaveLength(1)
+    emit(0, { type: `response.${terminal}`, response: { id: 'run-audit' } })
+    await finish(0)
+    expect(wrapper.find('.xl-audit-now').exists()).toBe(false)
+    expect(wrapper.text()).toContain('分析师')
+  } finally { wrapper.unmount() }
+})

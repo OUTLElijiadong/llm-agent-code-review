@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, getCurrentInstance, reactive, watch } from 'vue'
+import { usePreferredReducedMotion } from '@vueuse/core'
 import { CircleCheck, WarningFilled } from '@element-plus/icons-vue'
 
 import { toolDisplayInfo } from '@/utils/toolDisplay'
-import type { ResponseToolCall, ResponseToolCallStatus } from '@/utils/responsesTimeline'
+import { formatResponseValue, type ResponseToolCall, type ResponseToolCallStatus } from '@/utils/responsesTimeline'
 
 /**
  * 「小菱工作步骤」通俗时间线。
  *
  * 设计原则(尼尔森·系统状态可见 + 游戏3原则·清晰度):
  * - 不展示代码级调用链:工具名/状态机术语全部翻译成人话动作
- * - RAG 检索类显示专属「检索中」脉冲态,让用户知道小菱在翻知识库
+ * - 只为真实新增步骤和主动展开的结果提供一次入场提示
  * - 页面操作类显示「正在帮你操作」+ 彩点,呼应全屏彩框/虚拟鼠标
- * - 进行中的步骤高亮呼吸,完成的收成对勾,失败的给原因
+ * - 运行、等待、取消按真实事件区分；失败原因立即可见，撤回内容不做离场
  */
 const props = withDefaults(defineProps<{
   calls: ResponseToolCall[]
@@ -20,9 +21,18 @@ const props = withDefaults(defineProps<{
   auditPhases?: Array<{ phase: string; label: string; message: string }>
   /** 助手称谓: 成员端小菱 / 管理端贾维斯(角色分离, 默认小菱)。 */
   subject?: string
+  /** 只有归属当前活跃 run 的审计阶段才显示活动标记。 */
+  active?: boolean
 }>(), {
   subject: '小菱',
+  active: false,
 })
+
+const reducedMotion = usePreferredReducedMotion()
+const resultIdPrefix = `tool-result-${getCurrentInstance()?.uid}`
+const resultId = (key: string): string => `${resultIdPrefix}-${encodeURIComponent(key)}`
+/** 内容撤回不等待 CSS 过渡，尤其是权限变化和错误替换。 */
+function removeImmediately(_element: Element, done: () => void): void { done() }
 
 const STATUS_NOTES: Record<ResponseToolCallStatus, string> = {
   streaming: '正在准备这个操作…',
@@ -58,6 +68,7 @@ interface StepView {
   failed: boolean
   waiting: boolean
   error?: string
+  result?: string
 }
 
 function stepView(call: ResponseToolCall): StepView {
@@ -75,22 +86,26 @@ function stepView(call: ResponseToolCall): StepView {
     done: status === 'completed',
     failed: status === 'failed' || status === 'rejected',
     waiting: status === 'waiting_approval' || status === 'waiting_input',
-    error: call.error?.trim() || undefined,
+    error: status === 'failed' ? formatResponseValue(call.error) || undefined : undefined,
+    // Mesh 的 preview 是传输元数据，不是用户请求的工具输出。
+    result: status === 'completed' && !call.direction ? formatResponseValue(call.resultPreview) || undefined : undefined,
   }
 }
 
 const steps = computed<StepView[]>(() => visibleCalls.value.map(stepView))
 const doneCount = computed(() => steps.value.filter((step) => step.done).length)
-const failedCount = computed(() => steps.value.filter((step) => step.failed).length)
+const failedCount = computed(() => steps.value.filter((step) => step.status === 'failed').length)
 /** 是否有 RAG 检索正在/曾经发生(顶部显示检索徽标)。 */
-const ragActive = computed(() => steps.value.some((step) => step.isRag && (step.running || step.waiting)))
+const ragActive = computed(() => steps.value.some((step) => step.isRag && step.running))
 const pageActionActive = computed(() => steps.value.some((step) => step.isPageAction && step.running))
 
-/** 单条展开状态;默认折叠,失败步骤自动展开让用户直接看到原因。 */
+/** 只折叠成功结果；错误原因独立常显。撤回结果在下一次渲染前清掉展开状态。 */
 const expandedKeys = reactive(new Set<string>())
-for (const step of steps.value) {
-  if (step.failed && step.error) expandedKeys.add(step.key)
-}
+// 使用默认 pre：工具处理器先 push 再补齐状态，同步读取会缓存尚未补齐的中间态。
+watch(steps, (current) => {
+  const keys = new Set(current.filter((step) => step.result).map((step) => step.key))
+  for (const key of expandedKeys) if (!keys.has(key)) expandedKeys.delete(key)
+})
 
 function toggle(step: StepView): void {
   if (expandedKeys.has(step.key)) expandedKeys.delete(step.key)
@@ -102,15 +117,19 @@ function summaryText(): string {
   if (!total) return ''
   const parts: string[] = []
   if (doneCount.value) parts.push(`${doneCount.value} 步完成`)
-  const active = total - doneCount.value - failedCount.value
+  const active = steps.value.filter((step) => step.running).length
   if (active > 0) parts.push(`${active} 步进行中`)
+  const waiting = steps.value.filter((step) => step.waiting).length
+  if (waiting) parts.push(`${waiting} 步待确认`)
+  const cancelled = steps.value.filter((step) => step.status === 'rejected').length
+  if (cancelled) parts.push(`${cancelled} 步已取消`)
   if (failedCount.value) parts.push(`${failedCount.value} 步出错`)
   return parts.join(' · ')
 }
 </script>
 
 <template>
-  <section v-if="steps.length || auditPhases?.length" class="xl-steps" aria-label="小菱工作步骤">
+  <section v-if="steps.length || auditPhases?.length" class="xl-steps" :aria-label="`${subject}工作步骤`">
     <header class="xl-steps-head">
       <span class="xl-steps-title">{{ subject }}的工作</span>
       <span v-if="ragActive" class="xl-steps-rag" role="status">
@@ -122,15 +141,15 @@ function summaryText(): string {
       <span class="xl-steps-summary">{{ summaryText() }}</span>
     </header>
 
-    <ol v-if="auditPhases?.length" class="xl-audit-phases" aria-label="审计阶段">
-      <li v-for="(item, index) in auditPhases" :key="item.phase" class="xl-audit-phase is-latest">
+    <TransitionGroup v-if="auditPhases?.length" tag="ol" name="xl-arrival" :css="reducedMotion !== 'reduce'" class="xl-audit-phases" aria-label="审计阶段" @leave="removeImmediately">
+      <li v-for="(item, index) in auditPhases" :key="item.phase" class="xl-audit-phase" :class="{ 'is-latest': active && index === auditPhases.length - 1 }">
         <span class="xl-audit-idx">{{ index + 1 }}</span>
         <span class="xl-audit-label">{{ item.label }}</span>
-        <span v-if="index === (auditPhases?.length ?? 0) - 1" class="xl-audit-now">进行中</span>
+        <span v-if="active && index === auditPhases.length - 1" class="xl-audit-now">进行中</span>
       </li>
-    </ol>
+    </TransitionGroup>
 
-    <ol v-if="steps.length" class="xl-step-list">
+    <TransitionGroup v-if="steps.length" tag="ol" name="xl-arrival" :css="reducedMotion !== 'reduce'" class="xl-step-list" @leave="removeImmediately">
       <li
         v-for="step in steps"
         :key="step.key"
@@ -161,25 +180,23 @@ function summaryText(): string {
           </template>
         </div>
 
-        <div
-          class="xl-step-body"
-          :class="{ 'is-expandable': Boolean(step.error) }"
-          :role="step.error ? 'button' : undefined"
-          :tabindex="step.error ? 0 : undefined"
-          @click="step.error && toggle(step)"
-          @keydown.enter.prevent="step.error && toggle(step)"
-          @keydown.space.prevent="step.error && toggle(step)"
-        >
+        <div class="xl-step-body">
           <div class="xl-step-line">
             <span class="xl-step-action">{{ step.action }}</span>
             <span v-if="step.isPageAction" class="xl-step-chip is-page" title="小菱正在替你操作页面">帮我操作</span>
             <span v-else-if="step.isRag" class="xl-step-chip is-rag">知识库</span>
             <span class="xl-step-note" :class="{ 'is-waiting': step.waiting }">{{ step.note }}</span>
           </div>
-          <div v-if="step.error && expandedKeys.has(step.key)" class="xl-step-error">{{ step.error }}</div>
+          <div v-if="step.error" class="xl-step-error" role="status">{{ step.error }}</div>
+          <button v-if="step.result" type="button" class="xl-result-toggle" :aria-label="`${step.action}：${expandedKeys.has(step.key) ? '收起结果' : '查看结果'}`" :aria-expanded="expandedKeys.has(step.key)" :aria-controls="resultId(step.key)" @click="toggle(step)">
+            {{ expandedKeys.has(step.key) ? '收起结果' : '查看结果' }}
+          </button>
+          <Transition name="xl-result" :css="reducedMotion !== 'reduce'" @leave="removeImmediately">
+            <pre v-if="step.result && expandedKeys.has(step.key)" :id="resultId(step.key)" class="xl-step-result" tabindex="0" :aria-label="`${step.action}的结果`">{{ step.result }}</pre>
+          </Transition>
         </div>
       </li>
-    </ol>
+    </TransitionGroup>
   </section>
 </template>
 
@@ -221,11 +238,9 @@ function summaryText(): string {
 
 .xl-rag-pulse, .xl-page-pulse {
   width: 7px; height: 7px; border-radius: 50%;
-  animation: xl-breathe 1.1s ease-in-out infinite;
 }
 .xl-rag-pulse { background: var(--accent-500); }
 .xl-page-pulse { background: var(--brand-500); }
-@keyframes xl-breathe { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.1); } }
 
 .xl-step-list { display: grid; margin: 0; padding: 6px 12px; list-style: none; }
 
@@ -242,9 +257,7 @@ function summaryText(): string {
 }
 .xl-audit-phase.is-latest:last-child {
   background: linear-gradient(90deg, rgba(107, 124, 255, 0.10), rgba(75, 155, 255, 0.08));
-  animation: xl-audit-breathe 1.8s ease-in-out infinite;
 }
-@keyframes xl-audit-breathe { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
 .xl-audit-idx {
   display: grid;
   place-items: center;
@@ -270,9 +283,6 @@ function summaryText(): string {
   color: var(--brand-600);
   font-size: 10px;
   font-weight: 600;
-}
-@media (prefers-reduced-motion: reduce) {
-  .xl-audit-phase.is-latest:last-child { animation: none; }
 }
 
 .xl-step {
@@ -350,9 +360,8 @@ function summaryText(): string {
   font-size: 10.5px;
   white-space: nowrap;
 }
-.xl-step.is-running .xl-step-note { color: var(--brand-600); animation: xl-note-breathe 1.6s ease-in-out infinite; }
+.xl-step.is-running .xl-step-note { color: var(--brand-600); }
 .xl-step-note.is-waiting { color: var(--sev-medium); font-weight: 600; }
-@keyframes xl-note-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 
 .xl-step-error {
   margin-top: 3px;
@@ -362,8 +371,17 @@ function summaryText(): string {
   overflow-wrap: anywhere;
 }
 
+.xl-result-toggle { margin-top: 4px; padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--brand-700); font: inherit; font-size: 11px; cursor: pointer; }
+.xl-result-toggle:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
+.xl-step-result { max-height: 180px; overflow: auto; margin: 5px 0 0; padding: 8px; border-radius: 6px; background: var(--gray-50); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
+/* 只进入、不延迟离开；无 appear，恢复历史直接呈现。 */
+.xl-arrival-enter-active, .xl-result-enter-active { transition: opacity 160ms ease-out, transform 160ms ease-out; }
+.xl-arrival-enter-from, .xl-result-enter-from { opacity: 0; transform: translateY(4px); }
+/* 新增失败或入场中失败都立即显示，不被父步骤的淡入遮住。 */
+.xl-step.is-failed { opacity: 1; transform: none; transition: none; }
 @media (prefers-reduced-motion: reduce) {
-  .xl-step-spinner, .xl-rag-pulse, .xl-page-pulse { animation: none; }
-  .xl-step.is-running .xl-step-note { animation: none; }
+  .xl-step-spinner, .xl-step-rag-dot::before, .xl-step-rag-dot::after { animation: none; }
+  .xl-arrival-enter-active, .xl-result-enter-active { transition: none; }
+  .xl-arrival-enter-from, .xl-result-enter-from { opacity: 1; transform: none; }
 }
 </style>
