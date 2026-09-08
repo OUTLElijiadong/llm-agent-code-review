@@ -23,7 +23,9 @@ import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timezone
+from importlib.metadata import version
 from pathlib import Path
+from types import CodeType
 
 ROOT = Path(__file__).resolve().parents[1]
 ACCOUNTS = ("owner_a", "member_a", "owner_b", "no_permission")
@@ -86,14 +88,85 @@ def write_private(path, value, *, exclusive=False):
         os.fsync(stream.fileno())
 
 
+# 已独立复核的3.8.7基线；合法删除路由时须复核并显式更新此门禁。
+MIN_ROUTE_METHODS = 313
+MIN_ENDPOINT_SOURCES = 41
+REQUIRED_ROUTES = {
+    ("POST", "/api/auth/login"), ("POST", "/v1/responses"),
+    ("GET", "/api/discuss/start"), ("GET", "/api/review/tasks/{task_id}"),
+    ("GET", "/healthz"), ("GET", "/readyz"), ("GET", "/metrics"),
+}
+
+
+def iter_api_route_contexts(routes, *, exclusions=None):
+    """0.137.2+使用官方有效上下文；旧版保留克隆后APIRoute，绝不手工拼继承。"""
+    from fastapi import applications, routing
+    from starlette.routing import Route, WebSocketRoute
+
+    exclusions = [] if exclusions is None else exclusions
+    doc_names = {"openapi", "swagger_ui_html", "swagger_ui_redirect", "redoc_html"}
+    doc_codes = {
+        value for value in applications.FastAPI.setup.__code__.co_consts
+        if isinstance(value, CodeType) and value.co_name in doc_names
+    }
+    iterator = getattr(routing, "iter_route_contexts", None)
+    for context in iterator(routes) if callable(iterator) else routes:
+        original = context.original_route if callable(iterator) else context
+        if isinstance(original, routing.APIRoute):
+            if not context.path or context.dependant is None:
+                raise ValueError("有效路由上下文缺少路径或依赖")
+            yield context
+        elif isinstance(original, Route):
+            endpoint = original.endpoint
+            if (
+                getattr(endpoint, "__module__", None) != "fastapi.applications"
+                or getattr(endpoint, "__code__", None) not in doc_codes
+                or Path(inspect.getsourcefile(endpoint)).resolve() != Path(applications.__file__).resolve()
+            ):
+                raise ValueError("存在业务非APIRoute HTTP端点，必须单独复核后才能生成完整计划")
+            exclusions.append({
+                "kind": "framework_docs", "path": context.path,
+                "methods": sorted(context.methods),
+                "endpoint": endpoint.__module__ + "." + endpoint.__qualname__,
+                "status": "excluded", "reason": "FastAPI内建文档端点，不纳入业务权限矩阵",
+            })
+        elif isinstance(original, WebSocketRoute):
+            endpoint = inspect.unwrap(original.endpoint)
+            source = str(Path(inspect.getsourcefile(endpoint)).resolve().relative_to(ROOT))
+            exclusions.append({
+                "kind": "websocket", "path": context.path,
+                "endpoint": endpoint.__module__ + "." + endpoint.__qualname__, "source": source,
+                "status": "not_tested", "reason": "HTTP权限矩阵不建立WebSocket连接，需独立验收",
+            })
+        else:
+            # 旧框架遇到新树节点或将来加入Mount时，不能无声跳过后误称完整。
+            raise ValueError("存在尚未支持的路由节点，拒绝生成不完整计划")
+
+
+def route_inventory(rows):
+    keys = [(row["method"], row["path"]) for row in rows]
+    endpoints = {row["endpoint"] for row in rows}
+    if len(keys) != len(set(keys)):
+        raise ValueError("路由计划包含重复方法和路径")
+    if len(keys) < MIN_ROUTE_METHODS or len(endpoints) < MIN_ENDPOINT_SOURCES or not REQUIRED_ROUTES <= set(keys):
+        raise ValueError("路由计划完整性不足，拒绝空计划或缩小范围")
+    return {
+        "route_methods": len(keys),
+        "endpoint_sources": len(endpoints),
+        "routes_sha256": sha(json.dumps(rows, sort_keys=True, ensure_ascii=False).encode()),
+    }
+
+
 def build_plan():
     # 只构造已安装 app 的路由依赖图；不使用 TestClient，不启动 lifespan。
     sys.path.insert(0, str(ROOT))
-    from fastapi.routing import APIRoute
+    from fastapi import routing
 
     from app.main import app
 
     sources = {
+        "scripts/verify_permission_acceptance_https.py",
+        "requirements.lock",
         "app/main.py",
         "app/api/__init__.py",
         "app/core/database.py",
@@ -106,6 +179,7 @@ def build_plan():
         "app/api/v1/reports.py",
     }
     rows = []
+    exclusions = []
 
     def ordered(dependant):
         for child in dependant.dependencies:
@@ -117,9 +191,7 @@ def build_plan():
         "starlette.middleware.cors.CORSMiddleware",
         "app.core.observability.RequestContextMiddleware",
     }
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route in iter_api_route_contexts(app.routes, exclusions=exclusions):
         calls = list(ordered(route.dependant))[:-1]
         names = [call.__module__ + "." + call.__qualname__ for call in calls]
         # SlowAPI 的 wraps 闭包位于本机虚拟环境；绑定被包装的应用源码才能跨主机核验。
@@ -146,8 +218,19 @@ def build_plan():
                     "unknown_dependencies": unknown,
                 }
             )
+    sources.update(item["source"] for item in exclusions if "source" in item)
     return {
-        "schema": 1,
+        "schema": 2,
+        "excluded_routes": exclusions,
+        "inventory": route_inventory(rows),
+        "runtime": {
+            "fastapi": version("fastapi"),
+            "starlette": version("starlette"),
+            "routing_sha256": sha(Path(routing.__file__).read_bytes()),
+            "discovery": (
+                "iter_route_contexts" if callable(getattr(routing, "iter_route_contexts", None)) else "flat_apiroute"
+            ),
+        },
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "middleware": sorted(middleware),
         "routes": rows,
@@ -159,8 +242,10 @@ def build_plan():
 
 
 def validate_plan(plan, source_root):
-    if plan.get("schema") != 1 or not plan.get("routes") or not plan.get("source_sha256"):
-        raise ValueError("计划格式不完整")
+    if plan.get("schema") != 2 or not plan.get("routes") or not plan.get("source_sha256"):
+        raise ValueError("计划格式不完整，旧版计划必须重新生成")
+    if plan.get("inventory") != route_inventory(plan["routes"]):
+        raise ValueError("路由计划完整性指纹不匹配")
     for name, expected in plan["source_sha256"].items():
         path = (source_root / name).resolve()
         if not path.is_relative_to(source_root.resolve()) or sha(path.read_bytes()) != expected:
@@ -174,6 +259,11 @@ def validate_plan(plan, source_root):
             raise ValueError("匿名矩阵缺少安全证明")
         if row["no_permission"] == "ready" and (row["guard"] not in GUARDS or row["unknown_dependencies"]):
             raise ValueError("无权限矩阵缺少安全证明")
+    # 不能仅相信提交的路由行或源码子集：同一已加载应用重建依赖证明，不启动lifespan。
+    current = build_plan()
+    for field in ("routes", "excluded_routes", "middleware", "source_sha256", "inventory"):
+        if plan.get(field) != current[field]:
+            raise ValueError(f"计划与执行应用完整路由或源码不匹配: {field}")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -478,6 +568,8 @@ class Runner:
         a["file_name"] = source["file_name"]
 
     def run(self):
+        if self.phase in {"matrix", "all"}:
+            validate_plan(self.plan, ROOT)
         try:
             self.log["status"] = "running"
             for account in ACCOUNTS:

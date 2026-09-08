@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ArrowRight, Lock, TrendCharts } from '@element-plus/icons-vue'
@@ -12,7 +12,7 @@ import type {
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { OWASP_TOP10, SECURITY_CATALOG_METADATA, type OwaspDoc } from './owasp-knowledge'
 import { useUserStore } from '@/stores/user'
-import { ElMessage } from 'element-plus/es/components/message/index'
+import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -21,12 +21,15 @@ const loading = ref(false)
 const checklist = ref<SecurityChecklistOut | null>(null)
 const dashboardData = ref<SecurityDashboardSummaryOut | null>(null)
 const dashboardLoading = ref(false)
+const dashboardError = ref('')
+const checklistError = ref('')
+let disposed = false
 const selectedOwasp = ref<OwaspDoc | null>(null)
 const detailVisible = ref(false)
 const securityScanVisible = ref(false)
 
-const secretCount = computed(() => checklist.value?.secret_patterns.length ?? 0)
-const staticCount = computed(() => checklist.value?.static_rules.length ?? 0)
+const secretCount = computed(() => checklist.value?.secret_patterns.length ?? '—')
+const staticCount = computed(() => checklist.value?.static_rules.length ?? '—')
 const canScan = computed(() => userStore.hasPermission('security:scan'))
 const canViewProjects = computed(() => userStore.hasPermission('project:view'))
 const canCreateProject = computed(() => userStore.hasPermission('project:create'))
@@ -61,15 +64,25 @@ const owaspColors: Record<string, string> = {
 }
 
 async function loadChecklist(): Promise<void> {
+  if (loading.value || disposed) return
   loading.value = true
   try {
-    checklist.value = await getSecurityChecklist()
-  } catch {
-    checklist.value = null
-    ElMessage.error('获取安全规则清单失败')
+    const result = await getSecurityChecklist()
+    if (disposed) return
+    checklist.value = result
+    checklistError.value = ''
+  } catch (error) {
+    if (disposed) return
+    if (mustDiscardReadSnapshot(error)) checklist.value = null
+    checklistError.value = readFailure(error, '安全规则清单', Boolean(checklist.value))
   } finally {
-    loading.value = false
+    if (!disposed) loading.value = false
   }
+}
+
+function readFailure(error: unknown, subject: string, hasSnapshot: boolean): string {
+  const detail = actionableError(error, '服务暂不可用')
+  return `${subject}读取失败：${detail.message}。${hasSnapshot ? '保留上次成功结果，当前数据尚未更新。' : '尚未取得结果。'}${detail.nextAction || '请重试读取。'}${detail.requestId ? ` 请求编号：${detail.requestId}` : ''}`
 }
 
 function openOwaspDetail(owasp: OwaspDoc): void {
@@ -78,13 +91,19 @@ function openOwaspDetail(owasp: OwaspDoc): void {
 }
 
 async function loadDashboardSummary(): Promise<void> {
+  if (dashboardLoading.value || disposed) return
   dashboardLoading.value = true
   try {
-    dashboardData.value = await getSecurityDashboard(30)
-  } catch {
-    dashboardData.value = null
+    const result = await getSecurityDashboard(30)
+    if (disposed) return
+    dashboardData.value = result
+    dashboardError.value = ''
+  } catch (error) {
+    if (disposed) return
+    if (mustDiscardReadSnapshot(error)) dashboardData.value = null
+    dashboardError.value = readFailure(error, '安全概览', Boolean(dashboardData.value))
   } finally {
-    dashboardLoading.value = false
+    if (!disposed) dashboardLoading.value = false
   }
 }
 
@@ -108,6 +127,7 @@ onMounted(() => {
   loadChecklist()
   loadDashboardSummary()
 })
+onBeforeUnmount(() => { disposed = true })
 </script>
 
 <template>
@@ -150,7 +170,12 @@ onMounted(() => {
           我的项目安全概览
         </h3>
         <p class="block-sub">近 30 天安全态势</p>
+        <el-button data-testid="refresh-dashboard" :disabled="dashboardLoading" @click="loadDashboardSummary">
+          {{ dashboardLoading ? '正在读取概览…' : dashboardError ? '重试读取概览' : '刷新概览' }}
+        </el-button>
       </header>
+
+      <p v-if="dashboardError" data-testid="dashboard-error" class="read-error" role="alert">{{ dashboardError }}</p>
 
       <div v-if="dashboardData" class="overview-body">
         <!-- 有项目但未扫描 -->
@@ -291,7 +316,12 @@ onMounted(() => {
           确定性正则匹配,扫描文件中的硬编码 API Key、Token、密码、私钥等。
           命中后默认 <code>severity = 严重</code>,无 LLM 调用成本。
         </p>
+        <el-button data-testid="refresh-checklist" :disabled="loading" @click="loadChecklist">
+          {{ loading ? '正在读取规则…' : checklistError ? '重试读取规则清单' : '刷新规则清单' }}
+        </el-button>
       </header>
+
+      <p v-if="checklistError" data-testid="checklist-error" class="read-error" role="alert">{{ checklistError }}</p>
 
       <div class="rule-table-wrap" v-loading="loading">
         <el-table
@@ -323,6 +353,7 @@ onMounted(() => {
             </template>
           </el-table-column>
         </el-table>
+        <p v-else-if="checklist && !loading" class="block-sub">未配置敏感信息规则。</p>
       </div>
     </section>
 
@@ -366,6 +397,7 @@ onMounted(() => {
             </template>
           </el-table-column>
         </el-table>
+        <p v-else-if="checklist && !loading" class="block-sub">未配置静态语义规则。</p>
       </div>
     </section>
 
@@ -541,6 +573,19 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.block-head > .el-button {
+  align-self: flex-start;
+}
+
+.read-error {
+  margin: 0;
+  padding: 12px;
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
 }
 
 .block-title {

@@ -63,7 +63,8 @@ def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
 
 def test_plan_is_portable_to_deployment_without_local_virtualenv(tmp_path):
     plan = runner_module.build_plan()
-    assert all(name.startswith('app/') for name in plan['source_sha256'])
+    assert all(name.startswith('app/') or name in {'scripts/verify_permission_acceptance_https.py', 'requirements.lock'}
+               for name in plan['source_sha256'])
     for row in plan['routes']:
         if row['path'] in {'/api/auth/captcha', '/api/auth/register'}:
             assert row['endpoint'] == 'app/api/v1/auth.py'
