@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="7" time="2.246" timestamp="2026-09-08T12:53:14.579680+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_warm_and_cold_workers_fail_closed_on_shared_redis_outage" time="0.001"><failure message="Failed: DID NOT RAISE &lt;class 'app.core.exceptions.ServiceUnavailableError'&gt;">def test_warm_and_cold_workers_fail_closed_on_shared_redis_outage():
+        shared = MODULE._AtomicRedis()
+        warm, cold = _limiter(shared), _limiter(shared)
+        for _ in range(5):
+            attempt = warm.begin_attempt('192.0.2.11')
+            warm.finish_attempt('192.0.2.11', attempt.reservation_id, success=False)
+        shared.fail = True
+        for limiter in (warm, cold):
+            with pytest.raises(ServiceUnavailableError) as error:
+&gt;               limiter.begin_attempt('192.0.2.11')
+E               Failed: DID NOT RAISE &lt;class 'app.core.exceptions.ServiceUnavailableError'&gt;
+
+backend/tests/unit/core/test_login_redis_unavailability.py:31: Failed</failure></testcase><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_backoff_does_not_probe_early_and_recovery_preserves_shared_full_bucket" time="0.001"><failure message="Failed: DID NOT RAISE &lt;class 'app.core.exceptions.ServiceUnavailableError'&gt;">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10ef88430&gt;
+
+    def test_backoff_does_not_probe_early_and_recovery_preserves_shared_full_bucket(monkeypatch):
+        now = [1000.0]
+        monkeypatch.setattr(rate_limit, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+        shared = MODULE._AtomicRedis()
+        warm, cold = _limiter(shared), _limiter(shared)
+        for _ in range(5): warm.record_failure('192.0.2.12')
+        shared.fail = True
+&gt;       with pytest.raises(ServiceUnavailableError): cold.begin_attempt('192.0.2.12')
+E       Failed: DID NOT RAISE &lt;class 'app.core.exceptions.ServiceUnavailableError'&gt;
+
+backend/tests/unit/core/test_login_redis_unavailability.py:42: Failed</failure></testcase><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_invalid_redis_result_fails_closed" time="0.001"><failure message="Failed: DID NOT RAISE &lt;class 'app.core.exceptions.ServiceUnavailableError'&gt;">def test_invalid_redis_result_fails_closed():
+        redis = SimpleNamespace(eval=lambda *_args: ['malformed'])
+&gt;       with pytest.raises(ServiceUnavailableError): _limiter(redis).begin_attempt('192.0.2.13')
+E       Failed: DID NOT RAISE &lt;class 'app.core.exceptions.ServiceUnavailableError'&gt;
+
+backend/tests/unit/core/test_login_redis_unavailability.py:55: Failed</failure></testcase><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_redis_initialization_failure_fails_closed_and_recovers" time="0.021"><failure message="Failed: DID NOT RAISE &lt;class 'app.core.exceptions.ServiceUnavailableError'&gt;">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10ef16910&gt;
+
+    def test_redis_initialization_failure_fails_closed_and_recovers(monkeypatch):
+        import redis as redis_module
+        now = [1000.0]
+        monkeypatch.setattr(rate_limit, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+        attempts = []
+        shared = MODULE._AtomicRedis()
+        def connect(*_args, **_kwargs):
+            attempts.append(True)
+            if len(attempts) == 1: raise ValueError('invalid temporary configuration')
+            return shared
+        monkeypatch.setattr(redis_module.Redis, 'from_url', connect)
+        limiter = rate_limit.LoginFailureLimiter(redis_url='redis://local-test.invalid', limit=5, window_seconds=60)
+&gt;       with pytest.raises(ServiceUnavailableError): limiter.begin_attempt('192.0.2.14')
+E       Failed: DID NOT RAISE &lt;class 'app.core.exceptions.ServiceUnavailableError'&gt;
+
+backend/tests/unit/core/test_login_redis_unavailability.py:70: Failed</failure></testcase><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_unconfigured_redis_keeps_local_memory_mode" time="0.000" /><testcase classname="tests.unit.api.test_auth_redis_unavailability_api" name="test_redis_outage_rejects_login_before_auth_but_existing_session_get_still_works" time="0.547"><failure message="assert 200 == 503&#10; +  where 200 = &lt;Response [200 OK]&gt;.status_code">local_auth = (&lt;starlette.testclient.TestClient object at 0x10f73d6a0&gt;, sessionmaker(class_='Session', bind=Engine(sqlite:////privat...outage.sqlite), autoflush=True, expire_on_commit=False), &lt;http_login_redis_fixture._AtomicRedis object at 0x10f42be80&gt;)
+
+    def test_redis_outage_rejects_login_before_auth_but_existing_session_get_still_works(local_auth):
+        client, factory, redis = local_auth
+        existing_token = create_access_token(901, 'user', 0)
+        redis.fail = True
+        response = client.post('/api/auth/login', json={'username': 'isolated-outage-user', 'password': 'isolated-correct-password'})
+&gt;       assert response.status_code == 503
+E       assert 200 == 503
+E        +  where 200 = &lt;Response [200 OK]&gt;.status_code
+
+backend/tests/unit/api/test_auth_redis_unavailability_api.py:51: AssertionError</failure></testcase><testcase classname="tests.unit.api.test_auth_redis_unavailability_api" name="test_settlement_failure_returns_no_jwt_and_does_not_undo_committed_session_version" time="0.485"><failure message="assert (200 == 503)&#10; +  where 200 = &lt;Response [200 OK]&gt;.status_code">local_auth = (&lt;starlette.testclient.TestClient object at 0x10f7f5640&gt;, sessionmaker(class_='Session', bind=Engine(sqlite:////privat...outage.sqlite), autoflush=True, expire_on_commit=False), &lt;http_login_redis_fixture._AtomicRedis object at 0x10f744280&gt;)
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10f73df10&gt;
+
+    def test_settlement_failure_returns_no_jwt_and_does_not_undo_committed_session_version(local_auth, monkeypatch):
+        client, factory, redis = local_auth
+        original = auth_api.auth_service.login
+        generated = []
+        def success_then_outage(*args, **kwargs):
+            result = original(*args, **kwargs)
+            generated.append(result[0])
+            redis.fail = True
+            return result
+        monkeypatch.setattr(auth_api.auth_service, 'login', success_then_outage)
+        response = client.post('/api/auth/login', json={'username': 'isolated-outage-user', 'password': 'isolated-correct-password'})
+&gt;       assert response.status_code == 503 and response.headers['Retry-After'] == '5'
+E       assert (200 == 503)
+E        +  where 200 = &lt;Response [200 OK]&gt;.status_code
+
+backend/tests/unit/api/test_auth_redis_unavailability_api.py:70: AssertionError</failure></testcase></testsuite></testsuites>

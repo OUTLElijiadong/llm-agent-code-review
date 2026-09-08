@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="14" time="1.643" timestamp="2026-09-08T12:41:29.057060+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.test_review_task_access_errors" name="test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error[]" time="0.145"><failure message="assert False&#10; +  where False = all(&lt;generator object test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error.&lt;locals&gt;.&lt;genexpr&gt; at 0x10ce79200&gt;)">review_http = (&lt;starlette.testclient.TestClient object at 0x10d47a790&gt;, {'disabled': &lt;app.models.user.User object at 0x10d301e20&gt;, '...ion': &lt;app.models.user.User object at 0x10ceb6bb0&gt;, 'outsider': &lt;app.models.user.User object at 0x10ceb6df0&gt;, ...}, [])
+suffix = ''
+
+    @pytest.mark.parametrize('suffix', ['', '/issues'])
+    def test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error(review_http, suffix):
+        client, users, writes = review_http
+        bodies = []
+        for actor, task_id in [('owner', 162), ('outsider', 11), ('owner', 12), ('owner', 13), ('owner', 14), ('owner', 15)]:
+            response = client.get(f'/api/review/tasks/{task_id}{suffix}', headers=headers(users[actor]))
+            assert response.status_code == 404
+            body = response.json()
+            assert body['code'] == 40400
+            assert body.get('detail') is None
+            assert 'private-' not in response.text and 'project_id' not in response.text
+            body.pop('request_id')
+            bodies.append(body)
+&gt;       assert all(body == bodies[0] for body in bodies)
+E       assert False
+E        +  where False = all(&lt;generator object test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error.&lt;locals&gt;.&lt;genexpr&gt; at 0x10ce79200&gt;)
+
+tests/test_review_task_access_errors.py:80: AssertionError</failure></testcase><testcase classname="tests.test_review_task_access_errors" name="test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error[/issues]" time="0.051"><failure message="assert False&#10; +  where False = all(&lt;generator object test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error.&lt;locals&gt;.&lt;genexpr&gt; at 0x10ceda270&gt;)">review_http = (&lt;starlette.testclient.TestClient object at 0x10d61d4f0&gt;, {'disabled': &lt;app.models.user.User object at 0x10d5550d0&gt;, '...ion': &lt;app.models.user.User object at 0x10d555670&gt;, 'outsider': &lt;app.models.user.User object at 0x10d555f10&gt;, ...}, [])
+suffix = '/issues'
+
+    @pytest.mark.parametrize('suffix', ['', '/issues'])
+    def test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error(review_http, suffix):
+        client, users, writes = review_http
+        bodies = []
+        for actor, task_id in [('owner', 162), ('outsider', 11), ('owner', 12), ('owner', 13), ('owner', 14), ('owner', 15)]:
+            response = client.get(f'/api/review/tasks/{task_id}{suffix}', headers=headers(users[actor]))
+            assert response.status_code == 404
+            body = response.json()
+            assert body['code'] == 40400
+            assert body.get('detail') is None
+            assert 'private-' not in response.text and 'project_id' not in response.text
+            body.pop('request_id')
+            bodies.append(body)
+&gt;       assert all(body == bodies[0] for body in bodies)
+E       assert False
+E        +  where False = all(&lt;generator object test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error.&lt;locals&gt;.&lt;genexpr&gt; at 0x10ceda270&gt;)
+
+tests/test_review_task_access_errors.py:80: AssertionError</failure></testcase><testcase classname="tests.test_review_task_access_errors" name="test_visible_owner_and_reviewer_keep_success[-owner]" time="0.039" /><testcase classname="tests.test_review_task_access_errors" name="test_visible_owner_and_reviewer_keep_success[-member]" time="0.037" /><testcase classname="tests.test_review_task_access_errors" name="test_visible_owner_and_reviewer_keep_success[/issues-owner]" time="0.035" /><testcase classname="tests.test_review_task_access_errors" name="test_visible_owner_and_reviewer_keep_success[/issues-member]" time="0.035" /><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[None-401-40100-]" time="0.030" /><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[None-401-40100-/issues]" time="0.030" /><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[no_permission-403-40303-]" time="0.031" /><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[no_permission-403-40303-/issues]" time="0.030" /><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[disabled-403-40301-]" time="0.030" /><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[disabled-403-40301-/issues]" time="0.029" /><testcase classname="tests.test_review_task_access_errors" name="test_project_read_infrastructure_failure_is_not_masked_as_not_found[]" time="0.032" /><testcase classname="tests.test_review_task_access_errors" name="test_project_read_infrastructure_failure_is_not_masked_as_not_found[/issues]" time="0.031" /></testsuite></testsuites>

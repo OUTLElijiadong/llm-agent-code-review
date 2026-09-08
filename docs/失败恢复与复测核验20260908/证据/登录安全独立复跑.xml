@@ -1,0 +1,436 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="5" failures="0" skipped="0" tests="39" time="17.347" timestamp="2026-09-08T13:04:22.920117+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.core.test_login_rate_limit" name="test_client_ip_only_trusts_proxy_headers_from_configured_networks" time="0.001" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_slowapi_limiter_uses_shared_redis_and_emits_retry_after" time="0.028" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_login_failure_limiter_counts_only_recorded_failures_and_resets" time="0.000" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_login_failure_limiter_redis_state_is_shared_between_instances" time="0.000" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_memory_reservation_admission_is_atomic_under_concurrency" time="0.002" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_success_releases_reservation_and_clears_failures" time="0.000" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_release_returns_memory_reservation_capacity_without_counting_failure" time="0.000" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_redis_lua_reservation_admission_is_atomic_under_concurrency" time="0.003" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_redis_success_clears_failures_for_other_limiter_instances" time="0.000" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_redis_read_failure_does_not_create_a_local_write_budget" time="0.001" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_redis_finish_failure_does_not_clear_shared_failures_or_reservations" time="0.001" /><testcase classname="tests.unit.core.test_login_rate_limit" name="test_redis_reset_failure_rejects_without_locally_clearing_shared_state" time="0.001" /><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_keeps_same_window_blocked" time="0.118"><error message="failed on setup with &quot;subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.&quot;">@pytest.fixture
+    def redis_limiter():
+        assert re.fullmatch(r'prism-login-audit-[a-z0-9-]+', CONTAINER)
+&gt;       inspected = subprocess.run(
+            ['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', CONTAINER],
+            capture_output=True, check=True, timeout=10,
+        )
+
+backend/tests/unit/core/test_login_rate_limit_real_redis.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = True, timeout = 10, check = True
+popenargs = (['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908'],)
+kwargs = {'stderr': -1, 'stdout': -1}
+process = &lt;Popen: returncode: 1 args: ['docker', 'inspect', '--format', '{{json .HostC...&gt;
+stdout = b'\n'
+stderr = b'permission denied while trying to connect to the docker API at unix:///Users/li/.docker/run/docker.sock\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output &amp; stderr attributes if those streams
+        were captured.
+    
+        If timeout is given, and the process takes too long, a TimeoutExpired
+        exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+&gt;               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.
+
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py:528: CalledProcessError</error></testcase><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_subsecond_remaining_reports_one_second_and_then_expires" time="0.118"><error message="failed on setup with &quot;subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.&quot;">@pytest.fixture
+    def redis_limiter():
+        assert re.fullmatch(r'prism-login-audit-[a-z0-9-]+', CONTAINER)
+&gt;       inspected = subprocess.run(
+            ['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', CONTAINER],
+            capture_output=True, check=True, timeout=10,
+        )
+
+backend/tests/unit/core/test_login_rate_limit_real_redis.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = True, timeout = 10, check = True
+popenargs = (['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908'],)
+kwargs = {'stderr': -1, 'stdout': -1}
+process = &lt;Popen: returncode: 1 args: ['docker', 'inspect', '--format', '{{json .HostC...&gt;
+stdout = b'\n'
+stderr = b'permission denied while trying to connect to the docker API at unix:///Users/li/.docker/run/docker.sock\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output &amp; stderr attributes if those streams
+        were captured.
+    
+        If timeout is given, and the process takes too long, a TimeoutExpired
+        exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+&gt;               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.
+
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py:528: CalledProcessError</error></testcase><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_admission_near_expiry_does_not_restart_window" time="0.125"><error message="failed on setup with &quot;subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.&quot;">@pytest.fixture
+    def redis_limiter():
+        assert re.fullmatch(r'prism-login-audit-[a-z0-9-]+', CONTAINER)
+&gt;       inspected = subprocess.run(
+            ['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', CONTAINER],
+            capture_output=True, check=True, timeout=10,
+        )
+
+backend/tests/unit/core/test_login_rate_limit_real_redis.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = True, timeout = 10, check = True
+popenargs = (['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908'],)
+kwargs = {'stderr': -1, 'stdout': -1}
+process = &lt;Popen: returncode: 1 args: ['docker', 'inspect', '--format', '{{json .HostC...&gt;
+stdout = b'\n'
+stderr = b'permission denied while trying to connect to the docker API at unix:///Users/li/.docker/run/docker.sock\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output &amp; stderr attributes if those streams
+        were captured.
+    
+        If timeout is given, and the process takes too long, a TimeoutExpired
+        exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+&gt;               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.
+
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py:528: CalledProcessError</error></testcase><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_failure_settlement_near_expiry_does_not_restart_window" time="0.133"><error message="failed on setup with &quot;subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.&quot;">@pytest.fixture
+    def redis_limiter():
+        assert re.fullmatch(r'prism-login-audit-[a-z0-9-]+', CONTAINER)
+&gt;       inspected = subprocess.run(
+            ['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', CONTAINER],
+            capture_output=True, check=True, timeout=10,
+        )
+
+backend/tests/unit/core/test_login_rate_limit_real_redis.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = True, timeout = 10, check = True
+popenargs = (['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908'],)
+kwargs = {'stderr': -1, 'stdout': -1}
+process = &lt;Popen: returncode: 1 args: ['docker', 'inspect', '--format', '{{json .HostC...&gt;
+stdout = b'\n'
+stderr = b'permission denied while trying to connect to the docker API at unix:///Users/li/.docker/run/docker.sock\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output &amp; stderr attributes if those streams
+        were captured.
+    
+        If timeout is given, and the process takes too long, a TimeoutExpired
+        exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+&gt;               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.
+
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py:528: CalledProcessError</error></testcase><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_check_and_legacy_increment_preserve_subsecond_window" time="0.171"><error message="failed on setup with &quot;subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.&quot;">@pytest.fixture
+    def redis_limiter():
+        assert re.fullmatch(r'prism-login-audit-[a-z0-9-]+', CONTAINER)
+&gt;       inspected = subprocess.run(
+            ['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', CONTAINER],
+            capture_output=True, check=True, timeout=10,
+        )
+
+backend/tests/unit/core/test_login_rate_limit_real_redis.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = True, timeout = 10, check = True
+popenargs = (['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908'],)
+kwargs = {'stderr': -1, 'stdout': -1}
+process = &lt;Popen: returncode: 1 args: ['docker', 'inspect', '--format', '{{json .HostC...&gt;
+stdout = b'\n'
+stderr = b'permission denied while trying to connect to the docker API at unix:///Users/li/.docker/run/docker.sock\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output &amp; stderr attributes if those streams
+        were captured.
+    
+        If timeout is given, and the process takes too long, a TimeoutExpired
+        exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+&gt;               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['docker', 'inspect', '--format', '{{json .HostConfig.NetworkMode}}', 'prism-login-audit-20260908']' returned non-zero exit status 1.
+
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py:528: CalledProcessError</error></testcase><testcase classname="tests.unit.api.test_auth_rate_limit_api" name="test_login_rejects_before_authentication_when_atomic_reservation_is_denied" time="0.002" /><testcase classname="tests.unit.api.test_auth_rate_limit_api" name="test_login_authentication_failure_atomically_settles_reservation" time="0.001" /><testcase classname="tests.unit.api.test_auth_rate_limit_api" name="test_login_success_atomically_settles_and_clears_failures" time="0.074" /><testcase classname="tests.unit.api.test_auth_rate_limit_api" name="test_login_internal_error_releases_without_counting_failure" time="0.001" /><testcase classname="tests.unit.api.test_auth_rate_limit_api" name="test_login_route_allows_five_failures_then_rejects_sixth" time="0.001" /><testcase classname="tests.unit.api.test_auth_rate_limit_api" name="test_real_login_http_cooldown_counts_down_and_correct_password_cannot_bypass" time="2.346" /><testcase classname="tests.unit.api.test_auth_rate_limit_api" name="test_correct_password_after_sixth_request_obeys_original_window[10.0-10.01-429-5]" time="5.845" /><testcase classname="tests.unit.api.test_auth_rate_limit_api" name="test_correct_password_after_sixth_request_obeys_original_window[59.9-60.01-200-6]" time="3.546" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_warm_and_cold_workers_fail_closed_on_shared_redis_outage" time="0.002" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_backoff_does_not_probe_early_and_recovery_preserves_shared_full_bucket" time="0.001" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_invalid_redis_result_fails_closed[None]" time="0.001" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_invalid_redis_result_fails_closed[result1]" time="0.001" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_invalid_redis_result_fails_closed[result2]" time="0.002" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_invalid_redis_result_fails_closed[result3]" time="0.002" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_invalid_redis_result_fails_closed[result4]" time="0.001" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_outage_concurrency_uses_one_probe_per_worker_backoff" time="0.009" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_redis_initialization_failure_fails_closed_and_recovers" time="0.001" /><testcase classname="tests.unit.core.test_login_redis_unavailability" name="test_unconfigured_redis_keeps_local_memory_mode" time="0.000" /><testcase classname="tests.unit.api.test_auth_redis_unavailability_api" name="test_redis_outage_rejects_login_before_auth_but_existing_session_get_still_works" time="0.457" /><testcase classname="tests.unit.api.test_auth_redis_unavailability_api" name="test_settlement_failure_returns_no_jwt_and_does_not_undo_committed_session_version" time="0.719" /><testcase classname="tests.unit.api.test_auth_redis_unavailability_api" name="test_auth_failure_and_reservation_release_outage_also_fail_closed[credentials]" time="0.788" /><testcase classname="tests.unit.api.test_auth_redis_unavailability_api" name="test_auth_failure_and_reservation_release_outage_also_fail_closed[infrastructure]" time="0.626" /></testsuite></testsuites>

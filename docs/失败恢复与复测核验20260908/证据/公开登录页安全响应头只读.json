@@ -1,0 +1,19 @@
+{
+  "collected_at_utc": "2026-09-08T04:48:47.823452+00:00",
+  "method": "HEAD",
+  "url": "https://lijiadong.cn/login",
+  "status": 200,
+  "headers": {
+    "Content-Security-Policy": null,
+    "Content-Security-Policy-Report-Only": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' wss:; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
+    "Reporting-Endpoints": null,
+    "Report-To": null,
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin"
+  },
+  "credentials_sent": false,
+  "body_read": false,
+  "production_login_attempts": 0
+}

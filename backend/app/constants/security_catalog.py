@@ -1,11 +1,10 @@
 """官方安全分类快照；新扫描使用当前映射，历史记录不在此迁移。"""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import re
-
+from copy import deepcopy
+from pathlib import Path
 
 _DATA_PATH = Path(__file__).with_name("data") / "security_catalog.json"
 _CATALOG = json.loads(_DATA_PATH.read_text(encoding="utf-8"))

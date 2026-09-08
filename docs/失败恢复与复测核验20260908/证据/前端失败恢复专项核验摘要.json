@@ -1,0 +1,449 @@
+{
+  "test_cases": 84,
+  "failures": 0,
+  "errors": 0,
+  "source_sha256": {
+    "frontend/src/views/project/ProjectForm.vue": "124a51e7f4ce00516e672850c3d39f63b3949b0a400b1b726419270c535f9147",
+    "frontend/src/views/project/ProjectList.vue": "4545ec4ba80d05e7f5a22d0e8dd4fbd5fa936d621fdc47426ca4c14037bb54a3",
+    "frontend/src/views/project/ProjectDetail.vue": "b279b56e4a078ce05ee635fa25ae6851cf0e229b21c228fa56d48180dc10b4b5",
+    "frontend/src/views/code/CodeFileList.vue": "36bf17076beb6d36094a5ec77705022b1c15b0256e4ceeef6d94203d6eece53d",
+    "frontend/src/views/agent/AgentCenter.vue": "46b1b9d5a25a20ba8aeeba8f62e3db6a8a456228fa2b2004f7e843cecc0141da",
+    "frontend/src/views/report/ReportDetail.vue": "abc75e7583fff0ad362aabf5376fd3ca452a2f2683ad90f3c6b83de874aa68a1",
+    "frontend/src/composables/withFeedback.ts": "82ef3289a3e0e79bdc6c44cbbe76434eedcd570ad8aebd891377d43812828e73",
+    "frontend/src/views/project/FailureRecovery.test.ts": "64a50cb5153b2a5f42447873f9ffeebd8df8bae70533116db8e94544634b1b64"
+  },
+  "xml_sha256": "d0edb89ec5f175572d00352399569370ef157b1b0619c5f8b4a5efc6ff8a99e0",
+  "production_ui_clicks": 0,
+  "production_http_requests": 0,
+  "model_requests": 0,
+  "real_downloads": 0,
+  "test_fixture_boundary": "真实Vue与ElementPlus挂载，网络API替身、合成角色资源数据；测试内104/162等ID不表示生产账号或实际权限。",
+  "legacy_ledger": {
+    "path": "docs/完整待办与漏洞知识更新20260907/证据/生产3.8.6-全部控件逐角色验收台账.json",
+    "sha256": "01b3c825fc75120fd7d5c54d9abae8a46e48319209a452a4c7782a64120e9bc8",
+    "modified": false
+  },
+  "validation": "local_mounted_fault_injection_only",
+  "cases": [
+    {
+      "name": "actionableError > 读取拦截器直接抛出的业务错误元数据",
+      "suite": "src/composables/withFeedback.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "actionableError > 读取 Axios 响应并用响应头补全请求编号",
+      "suite": "src/composables/withFeedback.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "actionableError > 网络错误允许人工重试，未知对象保持保守不可重试",
+      "suite": "src/composables/withFeedback.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "actionableError > 已收到但缺少重试契约的响应默认不可安全重放",
+      "suite": "src/composables/withFeedback.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "列表5、全局快照19、内置编排17分别明确范围，列表/分类/态势同为5",
+      "suite": "src/views/agent/AgentCountScope.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "零历史账号保持0，不把全平台目录数当作可见或在岗",
+      "suite": "src/views/agent/AgentCountScope.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "普通账号不把他人或无归属系统事件标为本人执行，自己事件可更新",
+      "suite": "src/views/agent/AgentCountScope.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "超级管理员明确全平台目录，不以普通成员口径解释",
+      "suite": "src/views/agent/AgentCountScope.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "超过90秒或无法解析的本人事件不制造近期执行数",
+      "suite": "src/views/agent/AgentCountScope.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > 沙箱4个未分级报告条目不展示四级全零和虚构修复进度",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > 领域报告只显示真实 JSON 出口并隐藏非等价导出和预览",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > 导出请求期间重复调用只发出一次，并且错误不会保存文件",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > 导出错误展示后端message和next_action并提供重试操作",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > 兼容后端 task.name 字段并展示真实任务名",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > 顶部 Word 和 PDF 按钮统一调用新导出接口并传递当前模板",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > 风险文案和颜色按最终分数计算，不受动画中间值影响",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > CVSS 缺失时显示未评分",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 报告口径 > 只有 score 没有有效向量时不计入分布并显示未评分",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail HTML 预览 > 在网络等待前同步预开窗口，导航开始后才提示成功",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail HTML 预览 > 弹窗被拦截时显示带 sandbox 的页内预览，不误报新窗口成功并在关闭后恢复焦点",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail HTML 预览 > 无法切断 opener 时关闭预开窗口并回退到页内预览",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail HTML 预览 > 预览接口失败时关闭预开窗口并且只显示错误",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 详细修复方案 > 点击后平滑滚动到真实详情区域并转移键盘焦点",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 详细修复方案 > 用户开启减少动效时改为即时滚动",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 格式权限 > 只读账号保留打印和预览，隐藏下载入口且直接调用也不发送导出请求",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 格式权限 > JSON 权限只开放 JSON 生成与导出",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 格式权限 > 自动生成等待报告来源就绪，领域报告不会发送 HTML 请求",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ReportDetail 格式权限 > 报告读取失败不自动生成，也不开放任何报告操作",
+      "suite": "src/views/report/ReportDetail.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 项目刷新503保留快照并显示失败；重试成功后移除提示",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 项目先失败不能显示还没有项目；403清空已授权快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 旧筛选响应不覆盖新结果；新筛选失败明确旧条件快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 创建按钮在父请求完成前保持锁定，超时保留输入且不会自动重发",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 分析失败保留手填值，不显示Agent已分析；分析中不可创建",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 文件列表503保留内容与重试；过期响应不覆盖新筛选",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 详情503保留只读快照并关闭写操作，403清空；重试重新校验权限",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > Agent画像读取失败仍更新成功目录，不产生同步成功提示；手动恢复可成功",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > Agent技能切换忽略旧响应；失败显示重试而不是没有技能",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 报告首次失败有原地重试，503保留标明过期的报告，权限业务码清空",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 二进制本地异常有持续反馈且回收URL，无真实下载且可以手动重试",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 真实拦截器解包业务码40101不可保留受保护快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 真实拦截器解包业务码40102不可保留受保护快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 真实拦截器解包业务码40300不可保留受保护快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 真实拦截器解包业务码40301不可保留受保护快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 真实拦截器解包业务码40400不可保留受保护快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 临时失败42900允许保留已成功快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 临时失败50000允许保留已成功快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 临时失败50301允许保留已成功快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 所有已读页面对解包403清空快照",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 卸载后的迟到响应不能重新写状态或注册Agent订阅心跳",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > Agent手动和心跳同时刷新只发一组GET；普通角色不能调用自进化",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 关闭分析中的表单后迟到结果不覆盖输入或显示成功",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "主页面失败恢复真实挂载 > 创建成功但上传未完成仍锁定；上传失败只提示补传而不重建项目",
+      "suite": "src/views/project/FailureRecovery.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList remote import permission > 不向缺少 project:import 权限的只读角色显示远程导入",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList remote import permission > 向具备 project:import 权限的普通用户显示远程导入",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList create permission > 缺少 project:create 时隐藏创建入口且处理器不打开表单",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList create permission > 具备 project:create 时显示创建入口",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 视图切换 > 通过 aria-pressed 暴露当前视图并在点击后同步更新",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 运行中显示取消按钮并防止重复取消请求",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 提交时携带幂等键，轮询完成后刷新项目并跳转",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 刷新后从 localStorage 恢复任务，网络错误时保留待恢复记录",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 服务端 5xx/429 错误仍保留待恢复记录",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 明确的任务不存在错误清理记录并保留失败原因",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 刷新时若提交响应丢失，会用原幂等键重新排队而不是创建重复任务",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 没有导入权限时不恢复或轮询本地任务",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 队列请求网络失败时不删除幂等任务，且显示可读提示",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 任务失败时保留可读原因并清理已结束的恢复记录",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "ProjectList 远程导入异步任务 > 成功响应缺少项目编号时保留恢复记录并显示可操作原因",
+      "suite": "src/views/project/ProjectList.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "项目详情资源角色与 RBAC 求交 > reviewer 隐藏全部写入口，保留合法下载和 AI 修复手册，直接调用写 handler 无效",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "项目详情资源角色与 RBAC 求交 > owner 具备对应权限时真实按钮能上传、添加成员、修改角色和移除",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "项目详情资源角色与 RBAC 求交 > owner 被撤回动作权限也不可管理成员、上传、下载或删除副本",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "项目详情资源角色与 RBAC 求交 > owner 可以上传文件夹、空项目审计包，以及确认删除自己的源码修复副本",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "项目详情资源角色与 RBAC 求交 > 确认框打开期间撤销成员权限，确认后不再发送删除请求",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "项目详情资源角色与 RBAC 求交 > 无权限账号不主动读取项目、文件或成员",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "项目详情资源角色与 RBAC 求交 > 有 scan 权限的 reviewer 可以打开扫描，不因没有 security:view 调取保存结果",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > 资源元信息返回之前及失败时保持只读",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > 资源元信息返回之前及失败时保持只读",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > reviewer 即使有 file:edit，编辑器只读且 Ctrl+S/处理函数不保存",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > owner 授权后保存真实内容并更新版本",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > reviewer 能查看历史，但恢复按钮和处理函数均拒绝",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > owner 可以确认恢复历史版本",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > owner 没有 file:edit 时不可保存或恢复",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > owner 没有 file:edit 时不可保存或恢复",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > 二进制编辑器无下载权限时按钮和处理函数均拒绝",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    },
+    {
+      "name": "文件编辑与版本恢复真实项目授权 > 文件列表无下载权限不提供二进制下载",
+      "suite": "src/views/project/ProjectResourcePermission.test.ts",
+      "status": "passed"
+    }
+  ]
+}

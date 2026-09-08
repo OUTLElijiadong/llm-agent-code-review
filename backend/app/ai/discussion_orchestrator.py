@@ -58,9 +58,9 @@ from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
+from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 from app.services.issue_merger import merge_findings_and_issues
 from app.services.review_input_service import freeze_task_inputs, validate_review_input
-from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 
 # 讨论画像 code → 注册中心 BaseAgent code(与 review_service 保持一致),
 # 用于向 Agent 办公室广播事件时点亮正确的工位卡。
@@ -626,7 +626,9 @@ class DiscussionOrchestrator:
                     final_error = state.get("error") or ""
                 except asyncio.CancelledError:
                     cancelled_during_finalization = True
-                    report_task_id = await loop.run_in_executor(None, copy_context().run, lambda: _cancel_review_task(task_id))
+                    report_task_id = await loop.run_in_executor(
+                        None, copy_context().run, lambda: _cancel_review_task(task_id)
+                    )
                     state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
                     final_status = state["status"]
                     final_error = state.get("error") or "圆桌讨论已取消，丢弃未完成的报告结果"
@@ -661,7 +663,9 @@ class DiscussionOrchestrator:
         session = self._bus.get_session(self._session_id)
         if not session or session.status != "active":
             raise _DiscussionInactive("cancelled")
-        await asyncio.get_running_loop().run_in_executor(None, copy_context().run, lambda: _ensure_running(self._task_id))
+        await asyncio.get_running_loop().run_in_executor(
+            None, copy_context().run, lambda: _ensure_running(self._task_id)
+        )
 
     def _publish_terminal(self, session_id: str, task_id: int, status: str, error: str = "") -> None:
         """复用发言和 done 控制帧发布可见失败原因，再关闭会话。"""
@@ -1016,7 +1020,10 @@ def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
         task = log_db.get(ReviewTask, task_id)
         if task is None or task.user_id != user_id:
             raise RuntimeError("圆桌模型调用缺少可信任务来源")
-        fields = {**model_attribution(task), "_review_task_id": task_id, "_file_id": usage_file_id, "_chunk_index": usage_chunk_index}
+        fields = {
+            **model_attribution(task), "_review_task_id": task_id,
+            "_file_id": usage_file_id, "_chunk_index": usage_chunk_index,
+        }
         with usage_context(user_id, fields, db=log_db):
             try:
                 return agent.call_raw(**kwargs)

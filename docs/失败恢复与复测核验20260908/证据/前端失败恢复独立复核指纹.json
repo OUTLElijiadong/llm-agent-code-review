@@ -1,0 +1,22 @@
+{
+  "scope": "7 production source files read plus independent actual Vue/ElementPlus fixture execution, APIs mocked",
+  "production_requests": 0,
+  "model_requests": 0,
+  "source_sha256": {
+    "frontend/src/composables/withFeedback.ts": "82ef3289a3e0e79bdc6c44cbbe76434eedcd570ad8aebd891377d43812828e73",
+    "frontend/src/views/agent/AgentCenter.vue": "46b1b9d5a25a20ba8aeeba8f62e3db6a8a456228fa2b2004f7e843cecc0141da",
+    "frontend/src/views/code/CodeFileList.vue": "36bf17076beb6d36094a5ec77705022b1c15b0256e4ceeef6d94203d6eece53d",
+    "frontend/src/views/project/ProjectDetail.vue": "b279b56e4a078ce05ee635fa25ae6851cf0e229b21c228fa56d48180dc10b4b5",
+    "frontend/src/views/project/ProjectForm.vue": "e9326ff90b15e1a58419c32e066e300a237b2a7e640012272f4f6b5f728dabba",
+    "frontend/src/views/project/ProjectList.vue": "4545ec4ba80d05e7f5a22d0e8dd4fbd5fa936d621fdc47426ca4c14037bb54a3",
+    "frontend/src/views/report/ReportDetail.vue": "545c550601f34823e6fbd0317916f3faa2bc9eefa3e8680bcfd7e59d8a60ceac",
+    "frontend/src/views/project/FailureRecovery.test.ts": "64a50cb5153b2a5f42447873f9ffeebd8df8bae70533116db8e94544634b1b64",
+    "frontend/src/views/report/FailureRecoveryIndependent.test.ts": "339dffc095d351e7208d494c5cbb2ea7e71057733321f9296b7760b03a9b1af7"
+  },
+  "tests": 28,
+  "failed": 0,
+  "errors": 0,
+  "xml_sha256": "2475c933e6093b23548691083e393bcbbe3389d4d6c14562d953d1c308b20e66",
+  "result": "passed",
+  "boundaries": "28 tests are own rerun; parent 88 tests not rerun here; no real browser download claim"
+}

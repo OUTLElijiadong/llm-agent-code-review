@@ -52,6 +52,9 @@
       @completed="fetchDetail"
     />
 
+    <el-alert v-if="loadError" data-testid="detail-load-error" type="warning" :closable="false" show-icon :title="loadError">
+      <el-button :loading="loading" @click="fetchDetail">重试读取</el-button>
+    </el-alert>
     <template v-if="project">
       <el-tabs v-model="activeTab" class="detail-tabs">
         <!-- Tab 1: 项目信息 -->
@@ -308,7 +311,7 @@
       </el-tabs>
     </template>
 
-    <EmptyState v-else-if="!loading" description="项目不存在" />
+    <EmptyState v-else-if="!loading && !loadError" description="尚未加载项目详情" />
 
     <input
       ref="fileInputRef"
@@ -402,6 +405,7 @@ import AiPromptModal from '@/components/issue/AiPromptModal.vue'
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { mustDiscardReadSnapshot, readableError } from '@/composables/withFeedback'
 
 const route = useRoute()
 const router = useRouter()
@@ -409,14 +413,18 @@ const userStore = useUserStore()
 const canViewProject = computed(() => userStore.hasPermission('project:view'))
 const canViewFiles = computed(() => canViewProject.value && userStore.hasPermission('file:view'))
 // can_update/can_delete 来自服务端项目角色校验；动作权限与资源权限必须同时满足。
-const canUpload = computed(() => canViewProject.value && !!project.value?.can_update && userStore.hasPermission('file:upload'))
-const canManageMembers = computed(() => canViewProject.value && !!project.value?.can_update && userStore.hasPermission('project:member:manage'))
-const canDeleteRevision = computed(() => canViewProject.value && !!project.value?.can_delete && userStore.hasPermission('project:delete'))
+const resourceReady = computed(() => !!project.value && !loading.value && !loadError.value)
+const canUpload = computed(() => canViewProject.value && resourceReady.value && !!project.value?.can_update && userStore.hasPermission('file:upload'))
+const canManageMembers = computed(() => canViewProject.value && resourceReady.value && !!project.value?.can_update && userStore.hasPermission('project:member:manage'))
+const canDeleteRevision = computed(() => canViewProject.value && resourceReady.value && !!project.value?.can_delete && userStore.hasPermission('project:delete'))
 const canDownloadSource = computed(() => canViewProject.value && !!project.value && userStore.hasPermission('file:download'))
-const canScan = computed(() => canViewProject.value && !!project.value && userStore.hasPermission('security:scan'))
+const canScan = computed(() => canViewProject.value && resourceReady.value && userStore.hasPermission('security:scan'))
 
 const projectId = Number(route.params.id)
 const loading = ref(false)
+const loadError = ref('')
+let detailRequestVersion = 0
+let disposed = false
 const project = ref<ProjectDetailOut | null>(null)
 const fileListKey = ref(0)
 const aiPromptVisible = ref(false)
@@ -534,13 +542,27 @@ async function removeRevision(row: { id: number; revision_no: number }): Promise
 
 async function fetchDetail(): Promise<void> {
   if (!canViewProject.value) return
+  const version = ++detailRequestVersion
   loading.value = true
   try {
-    project.value = await getProjectDetail(projectId)
-  } catch {
-    project.value = null
+    const result = await getProjectDetail(projectId)
+    if (version !== detailRequestVersion || disposed) return
+    project.value = result
+    loadError.value = ''
+  } catch (error: unknown) {
+    if (version !== detailRequestVersion || disposed) return
+    if (mustDiscardReadSnapshot(error)) {
+      project.value = null
+      members.value = []
+      aiPromptVisible.value = false
+      securityScanVisible.value = false
+      addMemberVisible.value = false
+    }
+    loadError.value = project.value
+      ? `项目详情刷新失败（${readableError(error)}）；保留上次成功的只读快照，重新读取成功后恢复写操作。`
+      : `项目详情读取失败（${readableError(error)}），请重试读取或返回项目列表核对。`
   } finally {
-    loading.value = false
+    if (version === detailRequestVersion && !disposed) loading.value = false
   }
 }
 
@@ -881,6 +903,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  detailRequestVersion++
   if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
   window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })

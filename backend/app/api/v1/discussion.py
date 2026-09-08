@@ -20,9 +20,9 @@ from app.models.project import Project
 from app.models.user import User
 from app.schemas.common import Resp
 from app.services import rule_service
+from app.services.ai_usage_context import current_attribution
 from app.services.project_member_service import require_project_access
 from app.services.review_input_service import validate_review_input
-from app.services.ai_usage_context import current_attribution
 
 router = APIRouter()
 

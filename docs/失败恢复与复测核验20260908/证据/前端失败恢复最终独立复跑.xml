@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="28" failures="0" errors="0" time="22.166959001">
+    <testsuite name="src/views/project/FailureRecovery.test.ts" timestamp="2026-09-08T05:10:19.175Z" hostname="lijiadongdeMacBook-Air-7.local" tests="24" failures="0" errors="0" skipped="0" time="19.529652667">
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 项目刷新503保留快照并显示失败；重试成功后移除提示" time="2.019102375">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 项目先失败不能显示还没有项目；403清空已授权快照" time="0.7633755">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 旧筛选响应不覆盖新结果；新筛选失败明确旧条件快照" time="0.662069875">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 创建按钮在父请求完成前保持锁定，超时保留输入且不会自动重发" time="1.302346292">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 分析失败保留手填值，不显示Agent已分析；分析中不可创建" time="0.458745375">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 文件列表503保留内容与重试；过期响应不覆盖新筛选" time="1.547410292">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 详情503保留只读快照并关闭写操作，403清空；重试重新校验权限" time="1.369795375">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent画像读取失败仍更新成功目录，不产生同步成功提示；手动恢复可成功" time="0.623956708">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent技能切换忽略旧响应；失败显示重试而不是没有技能" time="1.546597584">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 报告首次失败有原地重试，503保留标明过期的报告，权限业务码清空" time="1.530070834">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 二进制本地异常有持续反馈且回收URL，无真实下载且可以手动重试" time="1.583682917">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40101不可保留受保护快照" time="0.010252375">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40102不可保留受保护快照" time="0.002774458">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40300不可保留受保护快照" time="0.003686292">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40301不可保留受保护快照" time="0.006917959">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40400不可保留受保护快照" time="0.007477625">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 临时失败42900允许保留已成功快照" time="0.002255083">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 临时失败50000允许保留已成功快照" time="0.001296958">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 临时失败50301允许保留已成功快照" time="0.002890084">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 所有已读页面对解包403清空快照" time="3.989766584">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 卸载后的迟到响应不能重新写状态或注册Agent订阅心跳" time="0.394355458">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent手动和心跳同时刷新只发一组GET；普通角色不能调用自进化" time="0.307841917">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 关闭分析中的表单后迟到结果不覆盖输入或显示成功" time="0.274886875">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 创建成功但上传未完成仍锁定；上传失败只提示补传而不重建项目" time="1.105674792">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/views/report/FailureRecoveryIndependent.test.ts" timestamp="2026-09-08T05:10:19.288Z" hostname="lijiadongdeMacBook-Air-7.local" tests="4" failures="0" errors="0" skipped="0" time="2.637306334">
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 报告本地click异常必须释放URL和锚点" time="1.311771791">
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 报告访问被403撤销后迟到HTML不得重新打开预览" time="0.68579275">
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 卸载后迟到HTML不得创建预览资源或写入缓存" time="0.416266875">
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 拖拽异步收集期间父提交锁生效后不得补发分析" time="0.218950458">
+        </testcase>
+    </testsuite>
+</testsuites>

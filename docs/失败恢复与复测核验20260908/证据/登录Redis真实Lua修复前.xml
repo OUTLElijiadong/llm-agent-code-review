@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="5" time="5.663" timestamp="2026-09-08T12:46:17.731219+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_keeps_same_window_blocked" time="0.692" /><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_subsecond_remaining_reports_one_second_and_then_expires" time="0.648"><failure message="assert 60 == 1&#10; +  where 60 = LoginAttempt(allowed=False, remaining=0, retry_after=60, reservation_id=None).retry_after">redis_limiter = (&lt;test_login_rate_limit_real_redis._ContainerRedis object at 0x10c48a5b0&gt;, &lt;app.core.rate_limit.LoginFailureLimiter object at 0x10c48a460&gt;, 'isolated-test-93b8464167a84d96a738e16ad28411da')
+
+    def test_real_lua_subsecond_remaining_reports_one_second_and_then_expires(redis_limiter):
+        redis, limiter, ip = redis_limiter
+        _fail(limiter, ip, 5)
+        _last_subsecond(redis, limiter, ip)
+        blocked = limiter.begin_attempt(ip)
+        assert not blocked.allowed
+&gt;       assert blocked.retry_after == 1
+E       assert 60 == 1
+E        +  where 60 = LoginAttempt(allowed=False, remaining=0, retry_after=60, reservation_id=None).retry_after
+
+tests/unit/core/test_login_rate_limit_real_redis.py:79: AssertionError</failure></testcase><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_admission_near_expiry_does_not_restart_window" time="0.565"><failure message="AssertionError: assert 59958 &lt;= 450&#10; +  where 59958 = int('59958')&#10; +    where '59958' = command('PTTL', 'prism:auth:login-limit:v2:2be076004b973d95952e325da48dc9b59697aa8f95bd9ff67c3f1705f2b85560')&#10; +      where command = &lt;test_login_rate_limit_real_redis._ContainerRedis object at 0x10c4f3c10&gt;.command">redis_limiter = (&lt;test_login_rate_limit_real_redis._ContainerRedis object at 0x10c4f3c10&gt;, &lt;app.core.rate_limit.LoginFailureLimiter object at 0x10c4f3df0&gt;, 'isolated-test-f95f62fe0d2c4dc29043c30e760ca33c')
+
+    def test_real_lua_admission_near_expiry_does_not_restart_window(redis_limiter):
+        redis, limiter, ip = redis_limiter
+        _fail(limiter, ip, 4)
+        key = _last_subsecond(redis, limiter, ip)
+        assert limiter.begin_attempt(ip).allowed
+&gt;       assert 0 &lt; int(redis.command('PTTL', key)) &lt;= 450
+E       AssertionError: assert 59958 &lt;= 450
+E        +  where 59958 = int('59958')
+E        +    where '59958' = command('PTTL', 'prism:auth:login-limit:v2:2be076004b973d95952e325da48dc9b59697aa8f95bd9ff67c3f1705f2b85560')
+E        +      where command = &lt;test_login_rate_limit_real_redis._ContainerRedis object at 0x10c4f3c10&gt;.command
+
+tests/unit/core/test_login_rate_limit_real_redis.py:89: AssertionError</failure></testcase><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_failure_settlement_near_expiry_does_not_restart_window" time="0.629"><failure message="assert 60 == 1&#10; +  where 60 = LoginLimitState(allowed=False, remaining=0, retry_after=60).retry_after">redis_limiter = (&lt;test_login_rate_limit_real_redis._ContainerRedis object at 0x10c4f6bb0&gt;, &lt;app.core.rate_limit.LoginFailureLimiter object at 0x10c4f6040&gt;, 'isolated-test-8aaa61a7613e4fc09930cdc4960ae362')
+
+    def test_real_lua_failure_settlement_near_expiry_does_not_restart_window(redis_limiter):
+        redis, limiter, ip = redis_limiter
+        _fail(limiter, ip, 4)
+        attempt = limiter.begin_attempt(ip)
+        key = _last_subsecond(redis, limiter, ip)
+        state = limiter.finish_attempt(ip, attempt.reservation_id, success=False)
+        assert not state.allowed
+&gt;       assert state.retry_after == 1
+E       assert 60 == 1
+E        +  where 60 = LoginLimitState(allowed=False, remaining=0, retry_after=60).retry_after
+
+tests/unit/core/test_login_rate_limit_real_redis.py:99: AssertionError</failure></testcase><testcase classname="tests.unit.core.test_login_rate_limit_real_redis" name="test_real_lua_check_and_legacy_increment_preserve_subsecond_window" time="0.545"><failure message="AssertionError: assert 60 == 1&#10; +  where 60 = LoginLimitState(allowed=False, remaining=0, retry_after=60).retry_after&#10; +    where LoginLimitState(allowed=False, remaining=0, retry_after=60) = record_failure('isolated-test-8d7a82b43d0b48bfb8af4918a1266a7f')&#10; +      where record_failure = &lt;app.core.rate_limit.LoginFailureLimiter object at 0x10c4f59d0&gt;.record_failure">redis_limiter = (&lt;test_login_rate_limit_real_redis._ContainerRedis object at 0x10c4f5850&gt;, &lt;app.core.rate_limit.LoginFailureLimiter object at 0x10c4f59d0&gt;, 'isolated-test-8d7a82b43d0b48bfb8af4918a1266a7f')
+
+    def test_real_lua_check_and_legacy_increment_preserve_subsecond_window(redis_limiter):
+        redis, limiter, ip = redis_limiter
+        _fail(limiter, ip, 4)
+        key = _last_subsecond(redis, limiter, ip)
+&gt;       assert limiter.record_failure(ip).retry_after == 1
+E       AssertionError: assert 60 == 1
+E        +  where 60 = LoginLimitState(allowed=False, remaining=0, retry_after=60).retry_after
+E        +    where LoginLimitState(allowed=False, remaining=0, retry_after=60) = record_failure('isolated-test-8d7a82b43d0b48bfb8af4918a1266a7f')
+E        +      where record_failure = &lt;app.core.rate_limit.LoginFailureLimiter object at 0x10c4f59d0&gt;.record_failure
+
+tests/unit/core/test_login_rate_limit_real_redis.py:107: AssertionError</failure></testcase></testsuite></testsuites>

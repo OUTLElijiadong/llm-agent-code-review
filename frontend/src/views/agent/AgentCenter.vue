@@ -29,6 +29,7 @@
       </div>
     </header>
 
+    <el-alert v-if="loadError" data-testid="agent-load-error" :title="loadError" type="warning" :closable="false" show-icon />
     <el-tabs v-model="activeTab" class="agent-tabs">
       <el-tab-pane label="Agent 办公室" name="office">
         <SituationPanel :data="situation" :loading="loading" :scope-label="isAdmin ? '全平台目录' : '本账号记录'" />
@@ -61,7 +62,7 @@
               @select="onAgentSelect"
             />
             <EmptyState
-              v-if="!filteredAgents.length"
+              v-if="!filteredAgents.length && !readErrors.runtime"
               description="当前筛选下没有匹配的 Agent"
               compact
             />
@@ -172,8 +173,11 @@
               </div>
             </div>
           </template>
+          <el-alert v-if="skillsError" data-testid="skills-load-error" :title="skillsError" type="warning" :closable="false" show-icon>
+            <el-button :loading="skillsLoading" @click="loadAgentSkills(selectedAgent.code)">重试读取技能</el-button>
+          </el-alert>
           <EmptyState
-            v-else
+            v-if="!skillsLoading && !agentSkills.length && !skillsError"
             description="该 Agent 暂未挂载 Skill"
             compact
           />
@@ -244,6 +248,7 @@ import {
 import { triggerEvolution } from '@/api/evolution'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { mustDiscardReadSnapshot, readableError } from '@/composables/withFeedback'
 import { agentCodeText } from '@/constants/adminGovernance'
 import type {
   AgentRuntimeOut,
@@ -259,6 +264,9 @@ const route = useRoute()
 const userStore = useUserStore()
 
 const loading = ref(false)
+const readErrors = ref({ runtime: '', situation: '', mappings: '' })
+const loadError = computed(() => Object.values(readErrors.value).filter(Boolean).join('；'))
+let disposed = false
 const runtime = ref<AgentRuntimeOut[]>([])
 // 分类与页首基于同一列表快照，避免独立请求/刷新瞬间形成不同分母。
 const summary = computed(() => {
@@ -279,6 +287,9 @@ const selectedAgent = ref<AgentRuntimeOut | null>(null)
 // === v3.0 AgentSkill 升级:per-Agent Skill 元数据 ===
 const agentSkills = ref<SkillMetaOut[]>([])
 const skillsLoading = ref(false)
+const skillsError = ref('')
+let skillsRequestVersion = 0
+let skillsAgentCode = ''
 const triggering = ref(false)
 const isAdmin = computed(() => ['admin', 'super_admin'].includes(userStore.profile?.role || ''))
 
@@ -358,14 +369,21 @@ function onAgentSelect(code: string): void {
  * @param agentCode - Agent code
  */
 async function loadAgentSkills(agentCode: string): Promise<void> {
+  const version = ++skillsRequestVersion
   skillsLoading.value = true
-  agentSkills.value = []
+  skillsError.value = ''
+  if (skillsAgentCode !== agentCode) agentSkills.value = []
+  skillsAgentCode = agentCode
   try {
-    agentSkills.value = await listAgentSkills(agentCode)
-  } catch {
-    // 静默失败,抽屉里会显示 EmptyState
+    const result = await listAgentSkills(agentCode)
+    if (version !== skillsRequestVersion || disposed) return
+    agentSkills.value = result
+  } catch (error: unknown) {
+    if (version !== skillsRequestVersion || disposed) return
+    if (mustDiscardReadSnapshot(error)) agentSkills.value = []
+    skillsError.value = agentSkills.value.length ? '技能读取失败，保留上次成功结果，可重试读取技能。' : '技能读取失败，请重试读取技能。'
   } finally {
-    skillsLoading.value = false
+    if (version === skillsRequestVersion && !disposed) skillsLoading.value = false
   }
 }
 
@@ -376,6 +394,7 @@ async function loadAgentSkills(agentCode: string): Promise<void> {
  * @param agent - 选中的 Agent
  */
 async function triggerSelfImprove(agent: AgentRuntimeOut): Promise<void> {
+  if (!isAdmin.value || triggering.value) return
   triggering.value = true
   try {
     const res = await triggerEvolution(agent.code, 90)
@@ -398,10 +417,13 @@ async function triggerSelfImprove(agent: AgentRuntimeOut): Promise<void> {
 }
 
 // 选中 Agent 变化时自动加载 Skill 元数据
-watch(selectedAgent, (agent) => {
-  if (agent) {
-    loadAgentSkills(agent.code)
+watch(() => selectedAgent.value?.code, (code) => {
+  if (code) {
+    void loadAgentSkills(code)
   } else {
+    skillsRequestVersion++
+    skillsLoading.value = false
+    skillsError.value = ''
     agentSkills.value = []
   }
 })
@@ -417,28 +439,53 @@ function goRules(): void {
   router.push('/rules')
 }
 
-async function loadAll(): Promise<void> {
+async function loadAll(includeMappings = true): Promise<boolean> {
+  if (loading.value || disposed) return false
   loading.value = true
   try {
-    const [r, sit, tm] = await Promise.all([
+    const [r, sit, tm] = await Promise.allSettled([
       listRuntimeAgents(),
       getSituation(60),
-      listTypeMappings(),
+      includeMappings ? listTypeMappings() : Promise.resolve(typeMappings.value),
     ])
-    runtime.value = r
-    situation.value = sit
+    if (disposed) return false
+    if (r.status === 'fulfilled') {
+      runtime.value = r.value
+      readErrors.value.runtime = ''
+      if (selectedAgent.value) selectedAgent.value = runtime.value.find(a => a.code === selectedAgent.value?.code) ?? null
+    } else {
+      if (mustDiscardReadSnapshot(r.reason)) {
+        runtime.value = []
+        selectedAgent.value = null
+        drawerVisible.value = false
+      }
+      readErrors.value.runtime = `Agent 目录读取失败（${readableError(r.reason)}），显示上次成功结果（如有），请刷新重试`
+    }
+    if (sit.status === 'fulfilled') {
+      situation.value = sit.value
+      readErrors.value.situation = ''
+    } else {
+      if (mustDiscardReadSnapshot(sit.reason)) situation.value = null
+      readErrors.value.situation = `态势读取失败（${readableError(sit.reason)}），显示上次成功快照（如有）`
+    }
+    if (includeMappings) {
+      if (tm.status === 'fulfilled') {
+        typeMappings.value = tm.value
+        readErrors.value.mappings = ''
+      } else {
+        if (mustDiscardReadSnapshot(tm.reason)) typeMappings.value = []
+        readErrors.value.mappings = `审查画像读取失败（${readableError(tm.reason)}），其余已成功读取的数据仍可查看，请刷新重试`
+      }
+    }
     syncSituationActivityCounts()
-    typeMappings.value = tm
-  } catch {
-    ElMessage.error('加载 Agent 办公室数据失败')
+    return !loadError.value
   } finally {
-    loading.value = false
+    if (!disposed) loading.value = false
   }
 }
 
 async function refreshAll(): Promise<void> {
-  await loadAll()
-  ElMessage.success('已同步最新数据')
+  if (await loadAll()) ElMessage.success('已同步最新数据')
 }
 
 // === v2.0 A2: 订阅 SSE,实时更新工位卡的 status 与 working 计数 ===
@@ -526,20 +573,7 @@ function scheduleStatsRefresh(): void {
 }
 
 async function refreshAgentStats(): Promise<void> {
-  try {
-    const [fresh, sit] = await Promise.all([
-      listRuntimeAgents(),
-      getSituation(60),
-    ])
-    runtime.value = fresh
-    if (selectedAgent.value) {
-      selectedAgent.value = runtime.value.find((a) => a.code === selectedAgent.value?.code) ?? null
-    }
-    situation.value = sit
-    syncSituationActivityCounts()
-  } catch {
-    // 静默失败
-  }
+  await loadAll(false)
 }
 
 // === 60s 心跳定期全量刷新 (兜底) ===
@@ -556,6 +590,8 @@ function ensureStream(): void {
 }
 
 function teardownStream(): void {
+  disposed = true
+  skillsRequestVersion++
   stream?.close()
   stream = null
   errorTimers.forEach((t) => clearTimeout(t))
@@ -566,6 +602,7 @@ function teardownStream(): void {
 
 onMounted(async () => {
   await loadAll()
+  if (disposed) return
   ensureStream()
   heartbeatTimer = setInterval(refreshAgentStats, HEARTBEAT_REFRESH_MS)
   // 从 ReviewStart 跳转过来时自动打开讨论面板

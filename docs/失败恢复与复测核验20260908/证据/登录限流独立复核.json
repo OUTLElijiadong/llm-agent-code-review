@@ -1,0 +1,82 @@
+{
+  "reviewer": "/root/permission_matrix",
+  "sources_match": true,
+  "source_checks": [
+    {
+      "path": "backend/app/core/rate_limit.py",
+      "expected": "ec41e6b572f7c3109291eaf5620d1e1306b76e578d10b2b5aa9cce3cd4122a42",
+      "actual": "ec41e6b572f7c3109291eaf5620d1e1306b76e578d10b2b5aa9cce3cd4122a42"
+    },
+    {
+      "path": "backend/app/api/v1/auth.py",
+      "expected": "a3ba9385635033347a7c632c3916071861a68a7c7621e33e6b92a2ddc62ce62a",
+      "actual": "a3ba9385635033347a7c632c3916071861a68a7c7621e33e6b92a2ddc62ce62a"
+    },
+    {
+      "path": "frontend/src/views/auth/Login.vue",
+      "expected": "504af5fd9efca6316056fbaf20c000094cadb82a4ff36e00042c7fbc38062c93",
+      "actual": "504af5fd9efca6316056fbaf20c000094cadb82a4ff36e00042c7fbc38062c93"
+    },
+    {
+      "path": "backend/tests/unit/core/test_login_rate_limit.py",
+      "expected": "d40a49c7978e415f22c85a6891eb34ea71765987ca73125c6435e04ac06714a9",
+      "actual": "d40a49c7978e415f22c85a6891eb34ea71765987ca73125c6435e04ac06714a9"
+    },
+    {
+      "path": "backend/tests/unit/core/test_login_rate_limit_real_redis.py",
+      "expected": "769a5a72099bae5c541fc0802d4d92cc18ec7f3eb5e9cbb025d2e2beff5c6cfd",
+      "actual": "769a5a72099bae5c541fc0802d4d92cc18ec7f3eb5e9cbb025d2e2beff5c6cfd"
+    },
+    {
+      "path": "backend/tests/unit/api/test_auth_rate_limit_api.py",
+      "expected": "14954eea7148c790e9668133f5e6db4e1b6a0ee89484d2f93fdf5499a75be4ef",
+      "actual": "14954eea7148c790e9668133f5e6db4e1b6a0ee89484d2f93fdf5499a75be4ef"
+    },
+    {
+      "path": "backend/tests/unit/core/test_login_redis_unavailability.py",
+      "expected": "23b5eea13c13aa3a11fc65d4af4dec87e1ff6a0e907f3b8047d69aecb9805e1f",
+      "actual": "23b5eea13c13aa3a11fc65d4af4dec87e1ff6a0e907f3b8047d69aecb9805e1f"
+    },
+    {
+      "path": "backend/tests/unit/api/test_auth_redis_unavailability_api.py",
+      "expected": "6b0f8fcf3179c76dcdd591e53e94524f65a18c3307d97bfe58e2830066066c18",
+      "actual": "6b0f8fcf3179c76dcdd591e53e94524f65a18c3307d97bfe58e2830066066c18"
+    },
+    {
+      "path": "frontend/src/views/auth/Login.test.ts",
+      "expected": "f8a2fb7960a0e43b706c77d3357092cea7bc08967bf85a6d3f90616c414c3802",
+      "actual": "f8a2fb7960a0e43b706c77d3357092cea7bc08967bf85a6d3f90616c414c3802"
+    }
+  ],
+  "independent_runs": [
+    {
+      "file": "登录安全独立复跑.xml",
+      "sha256": "e5fe62fedf9cdc8a92d2706cdc5e723cda83b0114df625aac70876512ec07a4c",
+      "total": 39,
+      "failed": 0,
+      "errors": 5,
+      "skipped": 0
+    },
+    {
+      "file": "登录安全独立复跑Docker准入.xml",
+      "sha256": "bae4637d141bb337a36485539c3342325bc9c0fa500a6d75dfb04bec3a7e7079",
+      "total": 39,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "file": "登录UI与HTTP独立复跑.xml",
+      "sha256": "f903993a9eda81369f7c27f56d43af62a8493231026e66e71de1527a246194ca",
+      "total": 32,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "result": "本轮限流修复范围独立复核通过",
+  "initial_environment_failure": "首次默认沙箱无Docker socket权限导致5个setup error，其余34通过；本地准入后39项无跳过通过。",
+  "scope": "真实Lua为本地network none容器、随机key并清理；无生产认证或Redis写入。",
+  "boundary": "不据此推断用户所述生产现象唯一由Redis故障造成。",
+  "collector_sha256": "a2d6609f60a35ec5f46f1b81d55842e032338bbafd9f59adee5fb96a03dc0dad"
+}

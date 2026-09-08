@@ -1,0 +1,14 @@
+{
+  "后端最终源码全量回归.xml": {
+    "tests": 3975,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "前端全量最终回归.xml": {
+    "tests": 1033,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

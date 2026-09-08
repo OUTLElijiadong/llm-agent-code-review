@@ -112,6 +112,10 @@
       <span class="filter-result font-mono">{{ projects.length }} / {{ total }} 条</span>
     </section>
 
+    <el-alert v-if="loadError" data-testid="project-load-error" type="warning" :closable="false" show-icon :title="loadError">
+      <el-button :loading="loading" @click="fetchProjects">重试读取</el-button>
+    </el-alert>
+
     <!-- ============ 表格视图 ============ -->
     <section id="project-table-view" v-show="view === 'table'" class="table-card" v-loading="loading">
       <table class="prism-table">
@@ -186,11 +190,11 @@
             </td>
             <td class="col-act" @click.stop>
               <el-button link type="primary" @click="handleView(row)">详情</el-button>
-              <el-button v-if="row.can_update" link type="primary" @click="handleEdit(row)">编辑</el-button>
-              <el-button v-if="row.can_delete" link type="danger" @click="handleDelete(row.id)">删除</el-button>
+              <el-button v-if="row.can_update" link type="primary" :disabled="loading || !!loadError" @click="handleEdit(row)">编辑</el-button>
+              <el-button v-if="row.can_delete" link type="danger" :disabled="loading || !!loadError" @click="handleDelete(row.id)">删除</el-button>
             </td>
           </tr>
-          <tr v-if="!loading && projects.length === 0">
+          <tr v-if="!loading && !loadError && projects.length === 0">
             <td colspan="9">
               <EmptyState :description="canCreateProject ? '还没有项目，点击右上角新建一个吧' : '还没有可查看的项目'">
                 <el-button v-if="canCreateProject" type="primary" @click="handleCreate">+ 新建项目</el-button>
@@ -244,6 +248,7 @@
                 type="primary"
                 :icon="EditIcon"
                 aria-label="编辑项目"
+                :disabled="loading || !!loadError"
                 @click="handleEdit(row)"
               />
             </el-tooltip>
@@ -254,6 +259,7 @@
                 type="danger"
                 :icon="DeleteIcon"
                 aria-label="删除项目"
+                :disabled="loading || !!loadError"
                 @click="handleDelete(row.id)"
               />
             </el-tooltip>
@@ -276,7 +282,7 @@
         </footer>
       </article>
 
-      <div v-if="!loading && projects.length === 0" class="card-empty">
+      <div v-if="!loading && !loadError && projects.length === 0" class="card-empty">
         <EmptyState description="还没有项目">
           <el-button v-if="canCreateProject" type="primary" @click="handleCreate">+ 新建项目</el-button>
         </EmptyState>
@@ -300,6 +306,8 @@
       v-model:visible="formVisible"
       :mode="formMode"
       :initial-data="editingProject"
+      :submitting="formSubmitting"
+      :submit-error="formSubmitError"
       @submit="onFormSubmit"
     />
 
@@ -357,6 +365,7 @@ import type {
 import ProjectForm from './ProjectForm.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { mustDiscardReadSnapshot, readableError } from '@/composables/withFeedback'
 import { confirmDanger } from '@/composables/useDangerConfirm'
 
 const router = useRouter()
@@ -368,6 +377,9 @@ const canDeleteProject = computed(() => userStore.hasPermission('project:delete'
 const view = ref<'table' | 'card'>('table')
 
 const loading = ref(false)
+const loadError = ref('')
+let listRequestVersion = 0
+let successfulQuery = ''
 const projects = ref<ProjectOut[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -377,6 +389,8 @@ const languageFilter = ref('')
 const statusFilter = ref('')
 
 const formVisible = ref(false)
+const formSubmitting = ref(false)
+const formSubmitError = ref('')
 const formMode = ref<'create' | 'edit'>('create')
 const editingProject = ref<ProjectOut | null>(null)
 const remoteVisible = ref(false)
@@ -831,24 +845,36 @@ function dismissRemoteImportFeedback(): void {
 }
 
 async function fetchProjects(): Promise<void> {
+  const version = ++listRequestVersion
   loading.value = true
+  const params: Record<string, unknown> = {
+    page: page.value,
+    page_size: pageSize.value,
+  }
+  if (keyword.value) params.keyword = keyword.value
+  if (languageFilter.value) params.language = languageFilter.value
+  if (statusFilter.value) params.status = statusFilter.value
+  const query = JSON.stringify(params)
+  loadError.value = successfulQuery && successfulQuery !== query ? '正在读取新筛选条件；下方暂为旧筛选的上次成功结果。' : ''
   try {
-    const params: Record<string, unknown> = {
-      page: page.value,
-      page_size: pageSize.value,
-    }
-    if (keyword.value) params.keyword = keyword.value
-    if (languageFilter.value) params.language = languageFilter.value
-    if (statusFilter.value) params.status = statusFilter.value
-
     const res = await getProjects(params)
+    if (version !== listRequestVersion || componentDisposed) return
     projects.value = res.items
     total.value = res.total
-  } catch {
-    projects.value = []
-    total.value = 0
+    successfulQuery = query
+    loadError.value = ''
+  } catch (error: unknown) {
+    if (version !== listRequestVersion || componentDisposed) return
+    if (mustDiscardReadSnapshot(error)) {
+      projects.value = []
+      total.value = 0
+      successfulQuery = ''
+    }
+    loadError.value = successfulQuery
+      ? `项目读取失败（${readableError(error)}）；下方保留${successfulQuery === query ? '' : '旧筛选的'}上次成功结果，当前数据尚未更新。`
+      : `项目读取失败（${readableError(error)}），尚未取得结果，请重试读取。`
   } finally {
-    loading.value = false
+    if (version === listRequestVersion && !componentDisposed) loading.value = false
   }
 }
 
@@ -865,14 +891,16 @@ function handleReset(): void {
 }
 
 function handleCreate(): void {
-  if (!canCreateProject.value) return
+  if (!canCreateProject.value || formSubmitting.value) return
+  formSubmitError.value = ''
   formMode.value = 'create'
   editingProject.value = null
   formVisible.value = true
 }
 
 function handleEdit(row: ProjectOut): void {
-  if (!canUpdateProject.value || !row.can_update) return
+  if (!canUpdateProject.value || !row.can_update || loading.value || loadError.value || formSubmitting.value) return
+  formSubmitError.value = ''
   formMode.value = 'edit'
   editingProject.value = row
   formVisible.value = true
@@ -883,8 +911,9 @@ function handleView(row: ProjectOut): void {
 }
 
 async function handleDelete(id: number): Promise<void> {
-  if (!canDeleteProject.value) return
+  if (!canDeleteProject.value || loading.value || loadError.value) return
   if (!await confirmDanger({ target: '删除该项目' })) return
+  if (!canDeleteProject.value || loading.value || loadError.value) return
   try {
     await deleteProject(id)
     ElMessage.success('项目已删除')
@@ -925,34 +954,46 @@ async function submitRemoteImport(): Promise<void> {
 }
 
 async function onFormSubmit(data: { project_name: string; description?: string; language?: string; files?: File[] }): Promise<void> {
-  if (formMode.value === 'create') {
-    if (!canCreateProject.value) return
-    const { files, ...projectData } = data
-    const result = await createProject(projectData)
-    ElMessage.success('项目创建成功')
-    if (files && files.length > 0) {
-      ElMessage.info(`正在上传 ${files.length} 个文件...`)
-      try {
-        const uploadResult = await uploadFolder(result.id, files)
-        if (uploadResult.success_count > 0) {
-          ElMessage.success(`成功上传 ${uploadResult.success_count} 个文件`)
+  if (formSubmitting.value) return
+  if (formMode.value === 'create' ? !canCreateProject.value : !canUpdateProject.value || !editingProject.value?.can_update || !!loadError.value || loading.value) return
+  formSubmitting.value = true
+  formSubmitError.value = ''
+  try {
+    if (formMode.value === 'create') {
+      if (!canCreateProject.value) return
+      const { files, ...projectData } = data
+      const result = await createProject(projectData)
+      ElMessage.success('项目创建成功')
+      if (files && files.length > 0) {
+        ElMessage.info(`正在上传 ${files.length} 个文件...`)
+        try {
+          const uploadResult = await uploadFolder(result.id, files)
+          if (uploadResult.success_count > 0) {
+            ElMessage.success(`成功上传 ${uploadResult.success_count} 个文件`)
+          }
+          if (uploadResult.fail_count > 0) {
+            const errMsg = uploadResult.errors.slice(0, 3).map((e: any) => e.error).join('; ')
+            ElMessage.warning({ message: `${uploadResult.fail_count} 个文件上传失败: ${errMsg}`, duration: 6000 })
+          }
+        } catch (e: any) {
+          const detail = e?.response?.data?.detail || e?.message || e?.toString() || ''
+          ElMessage.error({ message: `项目 #${result.id} 已创建；文件上传失败：${detail}。请打开该项目补传文件，无需重新创建。`, duration: 6000 })
         }
-        if (uploadResult.fail_count > 0) {
-          const errMsg = uploadResult.errors.slice(0, 3).map((e: any) => e.error).join('; ')
-          ElMessage.warning({ message: `${uploadResult.fail_count} 个文件上传失败: ${errMsg}`, duration: 6000 })
-        }
-      } catch (e: any) {
-        const detail = e?.response?.data?.detail || e?.message || e?.toString() || ''
-        ElMessage.error({ message: `文件上传失败: ${detail}`, duration: 6000 })
       }
+    } else if (editingProject.value) {
+      if (!canUpdateProject.value || !editingProject.value.can_update) return
+      await updateProject(editingProject.value.id, data)
+      ElMessage.success('项目更新成功')
     }
-  } else if (editingProject.value) {
-    if (!canUpdateProject.value || !editingProject.value.can_update) return
-    await updateProject(editingProject.value.id, data)
-    ElMessage.success('项目更新成功')
+    formVisible.value = false
+    await fetchProjects()
+  } catch {
+    formSubmitError.value = formMode.value === 'create'
+      ? '创建请求未确认成功，已保留输入。请先关闭表单并刷新项目列表核对是否已创建，避免重复提交。'
+      : '保存请求未确认成功，已保留输入。请先核对项目当前信息再决定是否重新保存。'
+  } finally {
+    formSubmitting.value = false
   }
-  formVisible.value = false
-  await fetchProjects()
 }
 
 let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined

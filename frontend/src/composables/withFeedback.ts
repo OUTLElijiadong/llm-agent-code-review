@@ -62,6 +62,14 @@ export function readableError(error: unknown, fallback = '操作失败,请重试
   return actionableError(error, fallback).message
 }
 
+/** 权限失效或资源消失时不能继续显示旧快照；兼容 http 拦截器解包后的业务错误。 */
+export function mustDiscardReadSnapshot(error: unknown): boolean {
+  const status = (error as { response?: { status?: number } } | null)?.response?.status
+  const code = actionableError(error).code
+  return [401, 403, 404].includes(status ?? 0)
+    || (code !== undefined && [401, 403, 404].includes(Math.floor(code / 100)))
+}
+
 /**
  * 包装一个异步操作,失败时统一弹出人话错误提示(不再静默)。
  * 用于替换 `try { ... } catch {}` 的静默写法。

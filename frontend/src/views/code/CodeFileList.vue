@@ -20,12 +20,16 @@
       </el-select>
     </div>
 
+    <el-alert v-if="loadError" data-testid="file-load-error" type="warning" :closable="false" show-icon :title="loadError">
+      <el-button :loading="loading" @click="fetchFiles">重试读取</el-button>
+    </el-alert>
+    <el-alert v-if="downloadError" data-testid="file-download-error" :title="downloadError" type="error" :closable="false" show-icon />
     <el-table
       v-loading="loading"
       :data="files"
       border
       stripe
-      empty-text="暂无代码文件"
+      :empty-text="loadError ? '文件列表未读取成功' : '暂无代码文件'"
     >
       <el-table-column prop="file_name" label="文件名" min-width="220" show-overflow-tooltip>
         <template #default="{ row }">
@@ -114,7 +118,7 @@
  *  - 添加文件类型徽章(文本/图片/压缩包/二进制)
  *  - 修复:确保压缩包上传后内部文件正常显示,不显示 base64 内容
  */
-import { ref, computed, onMounted, type Component } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
@@ -123,6 +127,7 @@ import dayjs from 'dayjs'
 import { list, downloadBinary } from '@/api/codeFile'
 import type { CodeFileOut } from '@/types/project'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { mustDiscardReadSnapshot, readableError } from '@/composables/withFeedback'
 
 /** 文件分类信息 */
 interface FileCategory {
@@ -146,6 +151,10 @@ const canView = computed(() => userStore.hasPermission('file:view'))
 const canDownload = computed(() => userStore.hasPermission('file:download'))
 
 const loading = ref(false)
+const loadError = ref('')
+let requestVersion = 0
+let successfulQuery = ''
+let disposed = false
 const files = ref<CodeFileOut[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -153,6 +162,7 @@ const pageSize = ref(10)
 const languageFilter = ref('')
 /** v2: 当前正在下载的二进制文件 ID,用于按钮 loading 状态 */
 const downloadingId = ref<number | null>(null)
+const downloadError = ref('')
 
 /**
  * 格式化日期
@@ -216,23 +226,35 @@ function fileCategory(row: CodeFileOut): FileCategory {
  */
 async function fetchFiles(): Promise<void> {
   if (!canView.value) return
+  const version = ++requestVersion
   loading.value = true
+  const params: Record<string, unknown> = {
+    project_id: props.projectId,
+    page: page.value,
+    page_size: pageSize.value,
+  }
+  if (languageFilter.value) params.language = languageFilter.value
+  const query = JSON.stringify(params)
+  loadError.value = successfulQuery && successfulQuery !== query ? '正在读取新筛选条件；下方暂为旧筛选的上次成功结果。' : ''
   try {
-    const params: Record<string, unknown> = {
-      project_id: props.projectId,
-      page: page.value,
-      page_size: pageSize.value,
-    }
-    if (languageFilter.value) params.language = languageFilter.value
-
     const res = await list(params)
+    if (version !== requestVersion || disposed) return
     files.value = res.items
     total.value = res.total
-  } catch {
-    files.value = []
-    total.value = 0
+    successfulQuery = query
+    loadError.value = ''
+  } catch (error: unknown) {
+    if (version !== requestVersion || disposed) return
+    if (mustDiscardReadSnapshot(error)) {
+      files.value = []
+      total.value = 0
+      successfulQuery = ''
+    }
+    loadError.value = successfulQuery
+      ? `文件读取失败（${readableError(error)}）；下方保留${successfulQuery === query ? '' : '旧筛选的'}上次成功结果，当前数据尚未更新。`
+      : `文件读取失败（${readableError(error)}），尚未取得结果，请重试读取。`
   } finally {
-    loading.value = false
+    if (version === requestVersion && !disposed) loading.value = false
   }
 }
 
@@ -272,20 +294,24 @@ function handleHistory(row: CodeFileOut): void {
 async function handleDownload(row: CodeFileOut): Promise<void> {
   if (!canDownload.value || downloadingId.value !== null) return
   downloadingId.value = row.id
+  downloadError.value = ''
+  let url: string | undefined
+  let link: HTMLAnchorElement | undefined
   try {
     const blob = await downloadBinary(row.id)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = row.file_name
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    if (disposed || !canDownload.value) return
+    url = URL.createObjectURL(blob)
+    link = document.createElement('a')
+    link.href = url
+    link.download = row.file_name
+    document.body.appendChild(link)
+    link.click()
     ElMessage.success('文件下载已开始')
-  } catch {
-    /* 错误已在拦截器处理 */
+  } catch (error) {
+    if (!disposed) downloadError.value = `下载未完成：${readableError(error)}。请核对浏览器下载记录后再手动重试。`
   } finally {
+    link?.remove()
+    if (url) URL.revokeObjectURL(url)
     downloadingId.value = null
   }
 }
@@ -293,6 +319,7 @@ async function handleDownload(row: CodeFileOut): Promise<void> {
 onMounted(() => {
   fetchFiles()
 })
+onBeforeUnmount(() => { disposed = true; requestVersion++ })
 </script>
 
 <style scoped lang="scss">

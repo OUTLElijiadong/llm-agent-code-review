@@ -1,0 +1,49 @@
+{
+  "scope": "offline evidence/source recount; production requests zero; raw report not read",
+  "production_requests": 0,
+  "passed": true,
+  "checks": {
+    "exact_eight_fields": true,
+    "all_eight_hashes_equal_previous": true,
+    "all_eight_hashes_equal_backup_baseline": true,
+    "row_hash_equal": true,
+    "baseline_file_sha_matches": true,
+    "embedded_baseline_exact_bytes": true,
+    "project_readonly_single_target": true,
+    "review_all_non_time_fields_equal": true,
+    "review_helper_exact_sha": true,
+    "review_collector_exact_sha": true,
+    "review_query_exact_sha": true,
+    "stored_16_preserved": true,
+    "outline_4_findings_16_field_bullets": true,
+    "no_explicit_severity_labels": true,
+    "four_unclassified_summary": true,
+    "review_readonly_no_model": true
+  },
+  "source_sha256": {
+    "project_baseline": "95cf1f72edfd732723980600e52edf0953fb999612b2aec39fcff5eed6ca5bbf",
+    "project_last": "0c7e766fb7d5fbaee1ce6d86be26919947add1ecb7e7b224a4fc45e4151a07a9",
+    "project_current": "a9f776af53521803d83f5b5e9f516c14e9c1cee0777918a0b508c09d854db55d",
+    "project_collector": "40093f610630b95de7779854f76bda7ce39e7529c1afb464609f660e2b109f4c",
+    "review_last": "670646b91ddfd1070ba4583ef34f3b46e51f3f6366b11eae57dc5a6f8cf15041",
+    "review_current": "0abf503c1c576c375d4a64aa84d6c05de6ebed867e74dae590bfc10bf980f547",
+    "review_collector": "2a317387550ac5cd24dc6f230991d149067e8680cd1d9b55df76100105aecd46",
+    "outline": "ddd96a626082662465c0b5c5da2f09cdbeb368f40723bf066addb3cd07127bbe",
+    "helper": "2a2b5bf89ea4617d4d8457d9a87febb04497ff887bb0c45744f250eb2a04b044"
+  },
+  "project_row_sha256": "9e49ca15c51357ed0fc9c71703c8371ab9b67593e493b8385b4e753826131194",
+  "report_md_sha256": "431b70ea13309a291f8483c3e8ab645d70d613305fa3206f1c62197c19d7a43a",
+  "summary": {
+    "source": "sandbox_report",
+    "basis": "report_headings",
+    "total": 4,
+    "severity_counts": {
+      "严重": 0,
+      "高": 0,
+      "中": 0,
+      "低": 0
+    },
+    "unclassified": 4
+  },
+  "boundary": "4 report findings are unclassified, not 4 confirmed vulnerabilities or zero risk. Current report hash/helper match prior evidence; old typed outline is recounted, raw current Markdown is not downloaded or reprocessed locally."
+}

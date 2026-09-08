@@ -1555,6 +1555,25 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
     return pagination.to_dict(items)
 
 
+def _require_readable_task(db: Session, user: User, task_id: int) -> ReviewTask:
+    """审查读取统一隐藏缺失、已删除和不可见资源，不透传父项目的存在信息。"""
+    from app.services.project_member_service import require_project_access
+
+    task = db.get(ReviewTask, task_id)
+    if task is not None and task.status != "deleted":
+        try:
+            require_project_access(db, task.project_id, user, need_write=False)
+        except NotFoundError:
+            pass
+        else:
+            return task
+    raise NotFoundError(
+        "审查任务不存在或当前账号无权访问",
+        code=40400,
+        next_action="请返回审查记录列表重新选择；如需访问，请联系项目负责人确认权限",
+    )
+
+
 def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     """获取审查任务详情
 
@@ -1572,12 +1591,7 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     Raises:
         NotFoundError: 任务不存在或无访问权限
     """
-    from app.services.project_member_service import require_project_access
-    task = db.get(ReviewTask, task_id)
-    if not task or task.status == "deleted":
-        raise NotFoundError("审查任务不存在", code=40400)
-    # v2.4: 用 project_member 关系校验,reviewer 可读同项目任务
-    require_project_access(db, task.project_id, user, need_write=False)
+    task = _require_readable_task(db, user, task_id)
     project = db.get(Project, task.project_id)
     report_issue_summary = None
     if task.review_type == "sandbox_test":
@@ -1736,12 +1750,7 @@ def list_task_issues(db: Session, user: User, task_id: int, file_id: int = None,
     Raises:
         NotFoundError: 任务不存在或无访问权限
     """
-    from app.services.project_member_service import require_project_access
-    task = db.get(ReviewTask, task_id)
-    if not task or task.status == "deleted":
-        raise NotFoundError("审查任务不存在", code=40400)
-    # v2.4: 用 project_member 关系校验,reviewer 可读同项目任务的问题
-    require_project_access(db, task.project_id, user, need_write=False)
+    _require_readable_task(db, user, task_id)
     q = db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id)
     if file_id:
         q = q.filter(ReviewIssue.file_id == file_id)

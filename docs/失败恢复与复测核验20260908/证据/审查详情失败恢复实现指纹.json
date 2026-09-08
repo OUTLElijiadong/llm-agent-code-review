@@ -1,0 +1,82 @@
+{
+  "status": "final_local_and_independent_passed",
+  "recorded_at_utc": "2026-09-08T05:09:56.875792+00:00",
+  "production_requests": 0,
+  "model_requests": 0,
+  "historical_state_writes": false,
+  "source_sha256": {
+    "backend/app/services/review_service.py": "245615a54bf4767c66bd6fa008c05588f2ad2d633c2c0de13fa1ac750cd7f639",
+    "backend/tests/test_review_task_access_errors.py": "2509671c4ed747de3eed4789dd39c44cda292f57f1c08bfc498a9a620eaa44e5",
+    "frontend/src/views/review/ReviewTaskDetail.vue": "7396316728bc551b5fd3c91ad01aa6220d0ae8d1441cf328e4b75a33fb0f27f0",
+    "frontend/src/views/review/ReviewTaskDetail.test.ts": "0c3089f12bb92a4a69e0875c9e8bf42b748b4c1ddb807010593a4fbc61eb2390"
+  },
+  "tests": {
+    "审查详情错误语义-准确红测.xml": {
+      "tests": 14,
+      "failed": 2,
+      "errors": 0,
+      "sha256": "26df3969375b7732620c9d1e82978395ff3dba800840a07f07982e9914b11d26"
+    },
+    "审查详情失败恢复-准确红测.xml": {
+      "tests": 52,
+      "failed": 6,
+      "errors": 0,
+      "sha256": "54f0e2d3490e7eb4479faf3518cfb76315f8429fa9a8a05cd23d1a894de68067"
+    },
+    "审查详情错误语义-修复后.xml": {
+      "tests": 14,
+      "failed": 0,
+      "errors": 0,
+      "sha256": "4f6029c04e2f4711acf9107ee9f69872f54426468ad021a834fe45558ef9d4a7"
+    },
+    "审查详情失败恢复-修复后.xml": {
+      "tests": 52,
+      "failed": 0,
+      "errors": 0,
+      "sha256": "630ac0bbdd418a73e499c3cfb88150d261619ca38ea2082252ead626399413ee"
+    },
+    "审查详情错误与既有流程最终回归.xml": {
+      "tests": 118,
+      "failed": 0,
+      "errors": 0,
+      "sha256": "e05763ac58f22b945131993685e289be8b3eb95d8eb8016747b7c3e07c846b4c"
+    },
+    "审查问题访问失效-准确红测.xml": {
+      "tests": 56,
+      "failed": 3,
+      "errors": 0,
+      "sha256": "57c91541ba5c6cec72e54754a8cc0320b417b36bcbfad93bebcf72865d39e0b9"
+    },
+    "审查问题访问失效-修复后.xml": {
+      "tests": 56,
+      "failed": 0,
+      "errors": 0,
+      "sha256": "5ce9f3c054aae478dd96a1b8f8531fe05272f366d83f35fb9ae1a2002790915b"
+    },
+    "审查问题权限撤回独立红测.xml": {
+      "tests": 1,
+      "failed": 1,
+      "errors": 0,
+      "sha256": "92134ec6260641a6b1b0a2998160aa2c4280020c956f40b702db0f6c66963aca"
+    },
+    "审查问题权限撤回独立修复后.xml": {
+      "tests": 1,
+      "failed": 0,
+      "errors": 0,
+      "sha256": "9c4921c9df53761d85de401eab21cb2020729ae07f4c3abf067e4d94e2401acc"
+    }
+  },
+  "checks": {
+    "selected_eslint_exit": 0,
+    "vue_tsc_exit": 0,
+    "selected_ruff_exit": 0,
+    "non_xml_code_diff_check_exit": 0
+  },
+  "scope": "两个审查GET防枚举错误与ReviewTaskDetail恢复交互，含issue:view单独撤回清缓存；未改全局权限/HTTP/数据库/生产。",
+  "first_round_source_sha256": {
+    "backend/app/services/review_service.py": "245615a54bf4767c66bd6fa008c05588f2ad2d633c2c0de13fa1ac750cd7f639",
+    "backend/tests/test_review_task_access_errors.py": "2509671c4ed747de3eed4789dd39c44cda292f57f1c08bfc498a9a620eaa44e5",
+    "frontend/src/views/review/ReviewTaskDetail.vue": "0aff51cd14e2690cc7a4c9014352a29c760b485545bba84e97fd700d04b5a3d7",
+    "frontend/src/views/review/ReviewTaskDetail.test.ts": "9e3821976e469ca116791e65a656ab6c4d37dd5276e8a8439cf481110fab2e1f"
+  }
+}

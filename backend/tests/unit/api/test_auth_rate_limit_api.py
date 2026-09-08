@@ -197,3 +197,76 @@ def test_real_login_http_cooldown_counts_down_and_correct_password_cannot_bypass
         assert len(authentication_calls) == 6
         assert "Retry-After" not in restored.headers
     engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "sixth_at,correct_at,expected_status,expected_calls",
+    [(10.0, 10.01, 429, 5), (59.9, 60.01, 200, 6)],
+)
+def test_correct_password_after_sixth_request_obeys_original_window(
+    monkeypatch, tmp_path, sixth_at, correct_at, expected_status, expected_calls,
+):
+    """Immediately changing to the correct password cannot bypass a live window."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core import rate_limit
+    from app.core.database import Base, get_db
+    from app.core.error_handlers import register_handlers
+    from app.core.security import hash_password
+
+    now = [1000.0]
+    monkeypatch.setattr(rate_limit, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(
+        auth_api, "login_failure_limiter", LoginFailureLimiter(redis_url="", limit=5, window_seconds=60),
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'boundary.sqlite'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as db:
+        db.add(User(username="boundary-user", password=hash_password("correct-password"), role="user", status=1))
+        db.commit()
+    app = FastAPI()
+    app.include_router(auth_api.router, prefix="/api/auth")
+    register_handlers(app)
+
+    def database():
+        with factory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = database
+    original_login = auth_api.auth_service.login
+    authentication_calls = []
+
+    def login(*args, **kwargs):
+        authentication_calls.append(True)
+        return original_login(*args, **kwargs)
+
+    monkeypatch.setattr(auth_api.auth_service, "login", login)
+    try:
+        with TestClient(app) as client:
+            for offset in (0, 2, 4, 6, 8):
+                now[0] = 1000.0 + offset
+                assert client.post(
+                    "/api/auth/login", json={"username": "boundary-user", "password": "wrong-password"},
+                ).status_code == 401
+            now[0] = 1000.0 + sixth_at
+            sixth = client.post(
+                "/api/auth/login", json={"username": "boundary-user", "password": "wrong-password"},
+            )
+            assert sixth.status_code == 429
+            assert int(sixth.headers["Retry-After"]) == (50 if sixth_at == 10.0 else 1)
+            now[0] = 1000.0 + correct_at
+            correct = client.post(
+                "/api/auth/login", json={"username": "boundary-user", "password": "correct-password"},
+            )
+            assert correct.status_code == expected_status
+            assert len(authentication_calls) == expected_calls
+            if expected_status == 429:
+                assert correct.json()["retry_after_seconds"] == 50
+            else:
+                assert correct.json()["data"]["access_token"]
+    finally:
+        engine.dispose()

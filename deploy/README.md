@@ -110,6 +110,8 @@ cd deploy
 
 当前仅允许目标 `all`，`backend`、`frontend` 拆分发布会被脚本拒绝。全量流程会再次执行强制发布前备份，并由目标 Backend 镜像执行 `alembic upgrade head`。数据库结构迁移使用一次性容器共享 MySQL 网络命名空间，并通过 `127.0.0.1` TCP 连接 `root@%` 完成 DDL；root 凭据只进入该一次性容器，长期运行的 Backend 仍使用普通应用数据库账号，且不会开启 `log_bin_trust_function_creators` 这类全局放宽开关。构建、迁移、容器健康、`/healthz`、`/readyz` 或 HTTPS 冒烟失败时，发布立即停止并在条件允许时切回上一应用镜像。
 
+失败日志包含 `stage` 和原始退出码。切换前失败保留当前应用和 pending；切换后失败尝试完整应用回滚，回滚失败保留证据并明确要求检查。迁移一旦尝试，必须核验当前结构及备份，不能把应用回滚理解为数据库已还原。发布或回滚已经通过冒烟并提交账本后，容器列表展示失败只提示重试只读巡检，不把已完成事务误报失败。
+
 发布状态保存在 `deploy/.releases/`：
 
 - `current.env`：当前发布；
@@ -165,7 +167,7 @@ cd /opt/code-review/deploy
 ./ops-check.sh
 ```
 
-也可只回滚 `backend` 或 `frontend`。回滚前必须确认上一镜像仍存在，并评估当前数据库 schema 是否与上一应用兼容。数据库不兼容时，应保持停写并按独立恢复方案处理，禁止机械执行 Alembic downgrade。
+仅允许 `all` 回滚，前后端必须保持同一提交。回滚前必须确认上一镜像仍存在，并评估当前数据库 schema 是否与上一应用兼容。数据库不兼容时，应保持停写并按独立恢复方案处理，禁止机械执行 Alembic downgrade。
 
 ## 8. 运维巡检与定时任务
 
@@ -177,7 +179,7 @@ status=$?
 cat /tmp/prism-ops.json
 ```
 
-它检查 Compose、四个容器、磁盘、内存、最近备份的年龄/gzip/SHA、Alembic `current=head`、HTTP 308 和 HTTPS 健康。任一必需项失败时退出码为 `1`，参数/调用错误为 `2`。
+它检查 Compose、MySQL/Redis/ClamAV/Backend/Frontend 五个服务、磁盘、内存、最近备份的年龄/gzip/SHA、Alembic `current=head`、HTTP 308 和 HTTPS 健康。任一必需项失败时退出码为 `1`，参数/调用错误为 `2`。资源使用率 `-1` 表示采集失败，反馈检查权限并重试；容量确认前仍阻止高负载操作，不能将其解释为已达到容量阈值。
 
 systemd 模板提供：
 

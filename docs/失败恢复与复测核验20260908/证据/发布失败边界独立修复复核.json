@@ -1,0 +1,150 @@
+{
+  "scope": "isolated real deploy/rollback with local command substitutes",
+  "production_requests": 0,
+  "database_mutations": 0,
+  "model_requests": 0,
+  "source_sha256": {
+    "deploy/deploy.sh": "0544c0a996817210b7385f2486dc2877d9af89adb5cbfdc5e4787537006a341e",
+    "deploy/rollback.sh": "bad177ec5a332d90134840bb7c4768a13b854d8917312348356ed65d2b517eb5",
+    "deploy/lib/common.sh": "949687d893c55e5cbc5bd5f3be7586f2163965dcd57b3fea4eb5b034def1f0f1"
+  },
+  "fixture_root": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-failure-tests.XXUwWr",
+  "cases": [
+    {
+      "name": "single_lock_release",
+      "exit": 41,
+      "expected_exit": 41,
+      "checks": {
+        "original_exit": true,
+        "no_database_restore": true,
+        "one_failure_or_success": true,
+        "release_once": true,
+        "simulated_next_owner_lock_survives": true
+      },
+      "passed": true,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/single_lock_release/independent-output.log",
+      "log_sha256": "86a832b4ecd9deeccb8acf4346919e0e7896f326dc6c286ecff4370fc891a60d",
+      "selected_events": [
+        "[2026-09-08T04:56:07Z] WARN  发布事务失败(rc=41, stage=backup, target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb): 未捕获命令失败",
+        "[2026-09-08T04:56:07Z] WARN  应用尚未切换，跳过回滚；pending 状态保留供人工核对"
+      ]
+    },
+    {
+      "name": "rollback_final_ps",
+      "exit": 44,
+      "expected_exit": 44,
+      "checks": {
+        "original_exit": true,
+        "no_database_restore": true,
+        "one_failure_or_success": true,
+        "lock_released": true,
+        "rollback_succeeded": true,
+        "no_false_failure": true,
+        "pending_removed": true
+      },
+      "passed": true,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/rollback_final_ps/independent-output.log",
+      "log_sha256": "7e6b7cb04359a46f8a523fbc04cd11c37ebfd8d9035ba1081fe73fa7b7d9c22a",
+      "selected_events": [
+        "[2026-09-08T04:56:12Z] WARN  发布事务失败(rc=44, stage=backend_switch, target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb): 未捕获命令失败",
+        "[2026-09-08T04:56:12Z] WARN  数据库迁移已尝试，当前结构需核验；应用回滚不代表数据库已还原。备份: /var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/rollback_final_ps/backup.sql.gz",
+        "[2026-09-08T04:56:13Z] INFO  应用层回滚完成(release=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)；请确认数据库向后兼容性",
+        "[2026-09-08T04:56:13Z] WARN  应用回滚已完成，但容器列表读取失败；请重试只读运维检查",
+        "[2026-09-08T04:56:13Z] INFO  应用自动回滚完成；请核对数据库兼容性与公网冒烟结果"
+      ]
+    },
+    {
+      "name": "asset_original_exit",
+      "exit": 43,
+      "expected_exit": 43,
+      "checks": {
+        "original_exit": true,
+        "no_database_restore": true,
+        "one_failure_or_success": true,
+        "lock_released": true,
+        "rollback_succeeded": true,
+        "no_false_failure": true,
+        "pending_removed": true
+      },
+      "passed": true,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/asset_original_exit/independent-output.log",
+      "log_sha256": "0752f98cfa9c280d3018f1bec0bf05755166a2b1ba5c37fb2d363ad145a7284b",
+      "selected_events": [
+        "[2026-09-08T04:56:18Z] WARN  发布事务失败(rc=43, stage=frontend_assets, target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb): 前端 assets 卷同步失败",
+        "[2026-09-08T04:56:18Z] WARN  数据库迁移已尝试，当前结构需核验；应用回滚不代表数据库已还原。备份: /var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/asset_original_exit/backup.sql.gz",
+        "[2026-09-08T04:56:19Z] INFO  应用层回滚完成(release=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)；请确认数据库向后兼容性",
+        "[2026-09-08T04:56:19Z] INFO  应用自动回滚完成；请核对数据库兼容性与公网冒烟结果"
+      ]
+    },
+    {
+      "name": "explicit_fatal",
+      "exit": 1,
+      "expected_exit": 1,
+      "checks": {
+        "original_exit": true,
+        "no_database_restore": true,
+        "one_failure_or_success": true,
+        "lock_released": true,
+        "stage_feedback": true,
+        "application_not_switched": true,
+        "pending_retained": true,
+        "current_unchanged": true
+      },
+      "passed": true,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/explicit_fatal/independent-output.log",
+      "log_sha256": "f8e18437cfa0f2ff7c2c66eef43e13af2ae6677bd9d8ea0b516da3bd65b03094",
+      "selected_events": [
+        "[2026-09-08T04:56:23Z] WARN  发布事务失败(rc=1, stage=migration_preflight, target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb): 发布阶段异常退出",
+        "[2026-09-08T04:56:23Z] WARN  应用尚未切换，跳过回滚；pending 状态保留供人工核对"
+      ]
+    },
+    {
+      "name": "migration_verify_fatal",
+      "exit": 1,
+      "expected_exit": 1,
+      "checks": {
+        "original_exit": true,
+        "no_database_restore": true,
+        "one_failure_or_success": true,
+        "lock_released": true,
+        "stage_feedback": true,
+        "application_not_switched": true,
+        "pending_retained": true,
+        "current_unchanged": true,
+        "migration_boundary_explicit": true
+      },
+      "passed": true,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/migration_verify_fatal/independent-output.log",
+      "log_sha256": "f9fe5ec8f696e4b1d48f41ded4e21eff18f6c4a06776c6f1ee63a57d13d86a39",
+      "selected_events": [
+        "[2026-09-08T04:56:27Z] WARN  发布事务失败(rc=1, stage=migration_verify, target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb): 发布阶段异常退出",
+        "[2026-09-08T04:56:27Z] WARN  数据库迁移已尝试，当前结构需核验；应用回滚不代表数据库已还原。备份: /var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/migration_verify_fatal/backup.sql.gz",
+        "[2026-09-08T04:56:27Z] WARN  应用尚未切换，跳过回滚；pending 状态保留供人工核对"
+      ]
+    },
+    {
+      "name": "release_final_ps",
+      "exit": 0,
+      "expected_exit": 0,
+      "checks": {
+        "original_exit": true,
+        "no_database_restore": true,
+        "one_failure_or_success": true,
+        "lock_released": true,
+        "release_committed": true,
+        "success_feedback": true,
+        "display_warning": true,
+        "no_rollback": true
+      },
+      "passed": true,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-tufkhqyi/release_final_ps/independent-output.log",
+      "log_sha256": "7bfcba1bb908a2bf06b9035b04f85f35a1f8eb37bfdafd25eef2f1d562926109",
+      "selected_events": [
+        "[2026-09-08T04:56:32Z] INFO  发布完成(target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, alembic=048_ai_usage_attribution)",
+        "[2026-09-08T04:56:32Z] WARN  发布已完成，但容器列表读取失败；请重试只读运维检查"
+      ]
+    }
+  ],
+  "source_unchanged": true,
+  "passed": true
+}

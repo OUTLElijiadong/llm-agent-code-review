@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.exceptions import AuthError, ForbiddenError, TooManyRequestsError, ValidationError
-from app.core.rate_limit import client_ip, limiter, login_failure_limiter
+from app.core.rate_limit import LoginRateLimitUnavailableError, client_ip, limiter, login_failure_limiter
 from app.models.user import User
 from app.schemas.auth import ChangePasswordIn, LoginIn, LoginOut, RegisterIn, UserOut
 from app.schemas.common import Resp
@@ -91,7 +91,21 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
             ip=ip,
         )
         raise
-    login_failure_limiter.finish_attempt(ip, attempt.reservation_id, success=True)
+    try:
+        login_failure_limiter.finish_attempt(ip, attempt.reservation_id, success=True)
+    except LoginRateLimitUnavailableError:
+        # auth_service.login 已提交会话版本；不能回写旧版本，也不能返回已签发令牌。
+        audit_service.log(
+            db,
+            user,
+            "login",
+            target_type="user",
+            target_id=user.id,
+            detail="凭据验证完成但安全校验结算失败，令牌未返回；会话版本已递增",
+            status="failed",
+            ip=ip,
+        )
+        raise
     audit_service.log(
         db,
         user,

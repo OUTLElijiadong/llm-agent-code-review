@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "checks": {
+    "104_vue": true,
+    "616_actions_unique": true,
+    "452_buttons": true,
+    "all_source_sha_current": true,
+    "ledger_sources_match": true,
+    "3080_unique_cells": true,
+    "five_roles_each616": true,
+    "every_role_exact_action_set": true,
+    "statuses": true,
+    "no_current_identity_or_pass": true,
+    "json_csv_exact": true,
+    "provenance_sha": true,
+    "mapped34cells66observations": true,
+    "unmapped1cell1observation": true,
+    "24_supplementals": true,
+    "historical_contents_unmodified": true
+  },
+  "input_sha256": {
+    "docs/失败恢复与复测核验20260908/证据/全部按钮与交互源码清单-最终绑定.json": "e6968318493fc8393ad01716a2b0a90fa31ad36a2b4c912fc0ba9340b919524f",
+    "docs/失败恢复与复测核验20260908/证据/本轮全部控件逐角色验收台账.json": "b0627b17ea3b6a7ba6960a4a9c8a8c36e013b35ddc9c6628ff150a5e3902cb01",
+    "docs/失败恢复与复测核验20260908/证据/本轮全部控件逐角色验收台账.csv": "ab3d381196886c368632f34c8e379d94a517e0d78fd4aa46d6dbfb609dadc496",
+    "docs/失败恢复与复测核验20260908/证据/本轮台账历史未映射条目.json": "37ccdb201b7abebfe9aa5b620281d3f86d8637c3ef833bc3bfd42d9ba41a1d58"
+  },
+  "boundary": "initial plan only, no current production clicks or real account ids; prior evidence remains historical"
+}

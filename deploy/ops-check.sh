@@ -334,13 +334,21 @@ add_blocking_check() {
 if [[ "$disk_status" == "degraded" ]]; then
   add_action "disk_cleanup_review" "审阅磁盘清理" "磁盘使用率 ${disk_used}% 已达到或超过告警阈值 ${disk_threshold}%，请先执行 cleanup.sh dry-run 并由人确认。" true
 elif [[ "$disk_status" == "error" ]]; then
-  add_action "disk_emergency_capacity" "人工处置磁盘" "磁盘使用率 ${disk_used}% 已达到临界阈值 ${disk_critical_threshold}%，禁止继续发布或写入。" true
+  if [[ "$disk_used" == "-1" ]]; then
+    add_action "disk_probe_repair" "恢复磁盘状态采集" "未能取得磁盘使用率，请检查采集权限并重试巡检；确认容量前禁止继续发布或写入。" true
+  else
+    add_action "disk_emergency_capacity" "人工处置磁盘" "磁盘使用率 ${disk_used}% 已达到临界阈值 ${disk_critical_threshold}%，禁止继续发布或写入。" true
+  fi
   add_blocking_check disk
 fi
 if [[ "$memory_status" == "degraded" ]]; then
   add_action "memory_pressure_review" "审阅内存压力" "内存使用率 ${memory_used}% 已达到或超过告警阈值 ${memory_threshold}%，请检查异常任务或扩容。" true
 elif [[ "$memory_status" == "error" ]]; then
-  add_action "memory_emergency_capacity" "人工处置内存" "内存使用率 ${memory_used}% 已达到临界阈值 ${memory_critical_threshold}%，禁止继续高负载操作。" true
+  if [[ "$memory_used" == "-1" ]]; then
+    add_action "memory_probe_repair" "恢复内存状态采集" "未能取得内存使用率，请检查采集权限并重试巡检；确认容量前禁止继续高负载操作。" true
+  else
+    add_action "memory_emergency_capacity" "人工处置内存" "内存使用率 ${memory_used}% 已达到临界阈值 ${memory_critical_threshold}%，禁止继续高负载操作。" true
+  fi
   add_blocking_check memory
 fi
 if [[ "$containers_status" == "error" ]]; then

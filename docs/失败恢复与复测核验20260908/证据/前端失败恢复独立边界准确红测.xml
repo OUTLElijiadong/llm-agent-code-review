@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="4" failures="1" errors="0" time="0.166130583">
+    <testsuite name="src/views/report/FailureRecoveryIndependent.test.ts" timestamp="2026-09-08T05:03:19.738Z" hostname="lijiadongdeMacBook-Air-7.local" tests="4" failures="1" errors="0" skipped="0" time="0.166130583">
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 报告本地click异常必须释放URL和锚点" time="0.078915666">
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 报告访问被403撤销后迟到HTML不得重新打开预览" time="0.035687875">
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 卸载后迟到HTML不得创建预览资源或写入缓存" time="0.025514708">
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 拖拽异步收集期间父提交锁生效后不得补发分析" time="0.025529042">
+            <failure message="expected &quot;spy&quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      Object {
+        &quot;file_names&quot;: Array [
+          &quot;main.py&quot;,
+        ],
+        &quot;folder_name&quot;: &quot;未命名文件夹&quot;,
+      },
+    ]
+
+
+Number of calls: 1
+" type="AssertionError">
+AssertionError: expected &quot;spy&quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      Object {
+        &quot;file_names&quot;: Array [
+          &quot;main.py&quot;,
+        ],
+        &quot;folder_name&quot;: &quot;未命名文件夹&quot;,
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/report/FailureRecoveryIndependent.test.ts:58:35
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,0 +1,84 @@
+{
+  "previous_ledger_sha256": "01b3c825fc75120fd7d5c54d9abae8a46e48319209a452a4c7782a64120e9bc8",
+  "rows": [
+    {
+      "row_id": "member_a|src/views/project/ProjectDetail.vue:18:424",
+      "account_role": "member_a",
+      "account_label": "项目A普通成员",
+      "account_id": 104,
+      "project_scope": "专用项目162 reviewer，项目163不可见",
+      "pages_from_source": [
+        "/projects/:id"
+      ],
+      "page_resolution": "路由AST与静态组件引用图；运行时宿主实例仍需实际确认",
+      "control_id": "src/views/project/ProjectDetail.vue:18:424",
+      "file": "src/views/project/ProjectDetail.vue",
+      "line": 18,
+      "tag": "el-button",
+      "is_button_or_link": true,
+      "label": "下载源码",
+      "dynamic_accessible_label": null,
+      "events": [
+        {
+          "event": "click",
+          "handler": "handleDownloadSource"
+        }
+      ],
+      "source_conditions": [
+        "if: canDownloadSource && project && (project.file_count ?? 0) > 0"
+      ],
+      "expected_behavior": "按账号真实RBAC、资源归属及当前业务状态验证允许/拒绝、可见/禁用；源码条件仅作定位线索",
+      "required_environment": "本轮最终源码经Git bundle发布后的生产HTTPS真实浏览器",
+      "current_release_status": "observed",
+      "blocker": null,
+      "current_release_actual_result": "顶部下载源码可见，未点击，未下载。",
+      "current_release_evidence": [
+        {
+          "type": "parent_reported_real_browser_observation",
+          "file": "docs/完整待办与漏洞知识更新20260907/证据/生产3.8.6真实UI观察.json",
+          "observation_id": "ui386_016",
+          "source_batch_id": "root_ui_002",
+          "observer": "/root",
+          "mapper": "/root/permission_matrix"
+        }
+      ],
+      "historical_observations": [],
+      "scenarios_to_record": [
+        "账号与页面前置状态",
+        "可见或隐藏/禁用",
+        "实际点击或交互",
+        "确认/取消/错误与重试（适用时）",
+        "最终跳转或数据读回",
+        "发布版本及证据"
+      ],
+      "current_release_observations": [
+        {
+          "observation_id": "ui386_016",
+          "source_batch_id": "root_ui_002",
+          "account_role": "member_a",
+          "account_id": 104,
+          "page": "/projects/162",
+          "action": "观察顶部下载源码",
+          "actual_result": "顶部下载源码可见，未点击，未下载。",
+          "status": "observed",
+          "control_id": "src/views/project/ProjectDetail.vue:18:424",
+          "coverage_scope": "观察顶部下载源码"
+        }
+      ],
+      "current_release_environment": {
+        "url": "https://lijiadong.cn",
+        "version": "3.8.6",
+        "release": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+        "release_evidence": {
+          "file": "生产发布运行态与048核验.json",
+          "sha256": "12a964853e175cb9e7ae92721d85113f9440e7a6d1d6f4b5af8b338622be82c0",
+          "version_and_release_equal": true,
+          "boundary": "只读运行态取证绑定，浏览器操作仍以主代理实际观察转录为来源。"
+        }
+      },
+      "coverage_boundary": "仅覆盖所列真实场景；共享节点的其他实例、事件、状态和分支未据此推定通过。"
+    }
+  ],
+  "count": 1,
+  "reason": "同一文件存在多个相同文字/事件的下载源码按钮，未凭handler猜测历史实例；保留完整原记录，不升级本轮状态。"
+}

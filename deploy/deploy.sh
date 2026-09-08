@@ -72,10 +72,30 @@ chmod 700 "$release_dir"
 lock_dir="$(maintenance_lock_path)"
 mkdir -p "$(dirname "$lock_dir")"
 acquire_directory_lock "$lock_dir"
-trap 'release_directory_lock "$lock_dir"' EXIT
-
 rollback_ready=0
 deployment_mutated=0
+migration_attempted=0
+failure_handled=0
+lock_released=0
+deploy_stage="preflight"
+
+# 故障处理与 EXIT 可到达同一路径，只释放本事务持有的锁一次。
+release_deploy_lock() {
+  if [[ "$lock_released" == "0" ]]; then
+    lock_released=1
+    release_directory_lock "$lock_dir"
+  fi
+}
+
+# EXIT 也覆盖显式 fatal/exit；ERR trap 本身无法捕获这些退出。
+on_deploy_exit() {
+  local rc=$?
+  if [[ "$rc" != "0" && "$failure_handled" == "0" ]]; then
+    finish_deploy_failure "$rc" "发布阶段异常退出"
+  fi
+  release_deploy_lock
+}
+trap on_deploy_exit EXIT
 
 # 发布异常时尝试切回上一应用镜像，并保留原始失败状态码。
 # 参数: $1 原始错误码；$2 失败摘要。
@@ -84,7 +104,16 @@ finish_deploy_failure() {
   local rc="$1"
   local reason="$2"
   trap - ERR
-  log_warn "发布事务失败(rc=$rc, target=$target, sha=$target_sha): $reason"
+  # -E 会把 ERR 传播进 $(...)。子 Shell 只把错误码交回主事务，
+  # 不得提前释放共用维护锁或重复执行回滚。
+  if (( BASH_SUBSHELL > 0 )); then
+    exit "$rc"
+  fi
+  failure_handled=1
+  log_warn "发布事务失败(rc=$rc, stage=$deploy_stage, target=$target, sha=$target_sha): $reason"
+  if [[ "$migration_attempted" == "1" ]]; then
+    log_warn "数据库迁移已尝试，当前结构需核验；应用回滚不代表数据库已还原。备份: ${backup_file:-none}"
+  fi
   if [[ "$deployment_mutated" == "1" && "$rollback_ready" == "1" && -f "$previous_state" ]]; then
     log_warn "开始应用层自动回滚；数据库不会自动 downgrade/restore"
     if ! ./rollback.sh "$target" --confirm ROLLBACK_APPLICATION --from-deploy-failure; then
@@ -97,13 +126,16 @@ finish_deploy_failure() {
   else
     log_warn "尚无可验证的上一镜像，未执行自动回滚"
   fi
+  release_deploy_lock
   exit "$rc"
 }
 
 # 显式处理 `command || fatal` 场景。ERR trap 不会覆盖 OR 列表右侧的
 # fatal，因此所有应用切换后的显式失败都必须从这里进入回滚事务。
 deploy_fatal() {
-  finish_deploy_failure 1 "$*"
+  local rc=$?
+  [[ "$rc" != "0" ]] || rc=1
+  finish_deploy_failure "$rc" "$*"
 }
 
 # 参数: ERR trap 自动传入失败状态。
@@ -191,16 +223,24 @@ log_info "发布预检通过(target=$target, version=$APP_VERSION, sha=$target_s
 
 backup_file="none"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then
+  deploy_stage="dependencies"
   compose up -d mysql clamav
   wait_for_service_health mysql "${MYSQL_HEALTH_TIMEOUT:-180}" || fatal "MySQL 未就绪"
   wait_for_service_health clamav "${CLAMAV_HEALTH_TIMEOUT:-420}" || fatal "ClamAV 未就绪"
+  deploy_stage="backup"
   backup_file="$(PRISM_MAINTENANCE_LOCK_HELD=1 ./backup.sh --reason pre_deploy | tail -n 1)"
   [[ -f "$backup_file" ]] || fatal "发布前备份未生成"
+  deploy_stage="backup_verify"
   PRISM_MAINTENANCE_LOCK_HELD=1 ./verify-backup.sh "$backup_file"
   log_info "发布前备份已完成"
+  deploy_stage="backend_build"
   compose build backend
+  deploy_stage="migration_preflight"
   prepare_admin_alembic
+  deploy_stage="migration"
+  migration_attempted=1
   run_admin_alembic upgrade head
+  deploy_stage="migration_verify"
   assert_alembic_at_head || fatal "Alembic 未位于唯一 head"
   # GeoLite2 以只读 bind 挂载进容器，而后端以非 root(prism, uid 10001)运行；
   # 宿主机文件若属主 501 且权限 640，容器内将 Permission denied，导致
@@ -210,8 +250,11 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
     chmod 644 "$geolite_host" 2>/dev/null || log_warn "无法调整 GeoLite2 权限: $geolite_host"
   fi
   deployment_mutated=1
+  deploy_stage="backend_switch"
   compose up -d --no-deps --no-build --pull never backend
+  deploy_stage="backend_health"
   wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || deploy_fatal "Backend 未恢复健康"
+  deploy_stage="backend_smoke"
   smoke_backend "$target_sha" || deploy_fatal "Backend 冒烟失败"
 fi
 
@@ -219,24 +262,32 @@ if [[ "$target" == "frontend" ]]; then
   wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-180}" || fatal "现有 Backend 不健康"
 fi
 if [[ "$target" == "all" || "$target" == "frontend" ]]; then
+  deploy_stage="frontend_build"
   compose build frontend
   deployment_mutated=1
+  deploy_stage="frontend_switch"
   compose up -d --no-deps --no-build --pull never frontend
   # assets 是命名卷挂载，必须把新镜像 dist 同步进卷，否则 index.html 引用的
   # 新哈希文件 404 导致页面空白。
+  deploy_stage="frontend_assets"
   ./sync-frontend-assets.sh "$desired_frontend" || deploy_fatal "前端 assets 卷同步失败"
+  deploy_stage="frontend_health"
   wait_for_service_health frontend "${FRONTEND_HEALTH_TIMEOUT:-120}" || deploy_fatal "Frontend 未恢复健康"
 fi
 
+deploy_stage="https_smoke"
 smoke_https "$desired_backend" || deploy_fatal "HTTPS/同源冒烟失败"
+deploy_stage="release_ledger"
 alembic_revision="$(current_alembic_revision)"
 write_release_state \
   "$current_state" "$target_sha" "$desired_backend" "$desired_frontend" \
   "$target" "$backup_file" "$alembic_revision" "$app_version"
 rm -f "$pending_state"
+# 提交发布账本后仅剩信息展示，不能因 compose ps 失败撤销已验收版本。
+failure_handled=1
 trap - ERR
 log_info "发布完成(target=$target, sha=$target_sha, alembic=$alembic_revision)"
 if ! assert_compose_release_environment default; then
   log_warn "应用已按目标版本发布，但默认 Compose 环境仍漂移；校准默认配置前禁止直接重建"
 fi
-compose ps
+compose ps || log_warn "发布已完成，但容器列表读取失败；请重试只读运维检查"

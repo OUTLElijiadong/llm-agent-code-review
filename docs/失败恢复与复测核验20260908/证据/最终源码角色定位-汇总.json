@@ -1,0 +1,15 @@
+{
+  "source_actions": 616,
+  "source_buttons_or_links": 452,
+  "roles": 5,
+  "total_role_control_rows": 3080,
+  "current_release_statuses": {
+    "untested": 2464,
+    "blocked": 616,
+    "passed": 0
+  },
+  "rows_with_historical_observations": 20,
+  "historical_observations": 21,
+  "note": "源码节点×角色台账，不是运行时唯一按钮实例数；共享组件多宿主、列表重复行、原生组件内建关闭/确认和未绑定事件的输入需在浏览器补场景。旧版可见/禁用/校验不能当成点击成功或新版通过。",
+  "ledger_sha256": "c398cb40635f77aee2781157973cf33e6c8882d71cca0d146db357d580dcf453"
+}

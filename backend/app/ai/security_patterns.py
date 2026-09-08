@@ -11,10 +11,10 @@
 from __future__ import annotations
 
 import re
-
-from app.constants.security_catalog import owasp_for_cwe
 from dataclasses import dataclass
 from typing import List, Optional, Pattern
+
+from app.constants.security_catalog import owasp_for_cwe
 
 
 @dataclass(frozen=True)

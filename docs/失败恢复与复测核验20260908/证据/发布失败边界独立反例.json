@@ -1,0 +1,43 @@
+{
+  "scope": "isolated real deploy/rollback with local command substitutes; no production/network/database/model",
+  "source_sha": {
+    "deploy/deploy.sh": "8ffc22303c96298a7fbadf84b2471ed61491a307ef06c909e949cfa4c1cbd6fa",
+    "deploy/rollback.sh": "5c676c3585aa5cb4f5db4b4af51cb997bf0913b75591a39d1dab0f75a82ce99e"
+  },
+  "cases": [
+    {
+      "case": "double_lock_release",
+      "exit": 41,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-2e_p2xev/double_lock_release/independent-output.log",
+      "selected_events": [
+        "[2026-09-08T04:53:52Z] WARN  发布事务失败(rc=41, stage=backup, target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb): 未捕获命令失败",
+        "[2026-09-08T04:53:52Z] WARN  应用尚未切换，跳过回滚；pending 状态保留供人工核对"
+      ],
+      "lock_release_calls": 2,
+      "simulated_new_owner_lock_survives": false
+    },
+    {
+      "case": "rollback_final_ps",
+      "exit": 44,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-2e_p2xev/rollback_final_ps/independent-output.log",
+      "selected_events": [
+        "[2026-09-08T04:53:57Z] INFO  应用层回滚完成(release=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)；请确认数据库向后兼容性",
+        "[2026-09-08T04:53:56Z] WARN  发布事务失败(rc=44, stage=backend_switch, target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb): 未捕获命令失败",
+        "[2026-09-08T04:53:57Z] WARN  应用自动回滚失败，请保持维护窗口并人工检查 current/previous/pending 状态"
+      ],
+      "pending_exists": false,
+      "current_old": true
+    },
+    {
+      "case": "asset_original_exit",
+      "exit": 1,
+      "log": "/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-independent-boundaries-2e_p2xev/asset_original_exit/independent-output.log",
+      "selected_events": [
+        "[2026-09-08T04:54:04Z] INFO  应用层回滚完成(release=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)；请确认数据库向后兼容性",
+        "[2026-09-08T04:54:04Z] INFO  应用自动回滚完成；请核对数据库兼容性与公网冒烟结果",
+        "[2026-09-08T04:54:03Z] WARN  发布事务失败(rc=1, stage=frontend_assets, target=all, sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb): 前端 assets 卷同步失败"
+      ],
+      "injected_asset_exit": 43
+    }
+  ]
+}

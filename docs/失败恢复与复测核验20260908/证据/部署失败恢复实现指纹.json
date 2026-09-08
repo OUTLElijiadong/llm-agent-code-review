@@ -1,0 +1,14 @@
+{
+  "production_fault_injection": false,
+  "matrix_uses": "real deploy and rollback scripts with isolated command doubles",
+  "scenario_count": 13,
+  "precise_exit_code_assertions": true,
+  "source_sha256": {
+    "deploy/deploy.sh": "0544c0a996817210b7385f2486dc2877d9af89adb5cbfdc5e4787537006a341e",
+    "deploy/rollback.sh": "bad177ec5a332d90134840bb7c4768a13b854d8917312348356ed65d2b517eb5",
+    "deploy/ops-check.sh": "b79b3df03188ac0961b84983f40fdbf11308256198187b1f8cb8bb2a7ddb3be7",
+    "deploy/lib/common.sh": "949687d893c55e5cbc5bd5f3be7586f2163965dcd57b3fea4eb5b034def1f0f1",
+    "deploy/tests/test_scripts.sh": "b6836c4706c92b72a09550549e6f3ff349866b5859800611a81e0eebea2eff4c",
+    "deploy/tests/deploy_failure_cases.sh": "4e649aa324885b1664aca459d338651d7cbc8bcb1e9bc1bd8684bb1657178b06"
+  }
+}

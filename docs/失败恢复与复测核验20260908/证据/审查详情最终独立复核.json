@@ -1,0 +1,108 @@
+{
+  "结论": "独立反例修后通过；未发现剩余阻断",
+  "源码": {
+    "backend/app/services/review_service.py": {
+      "SHA256": "245615a54bf4767c66bd6fa008c05588f2ad2d633c2c0de13fa1ac750cd7f639",
+      "与作者冻结一致": true
+    },
+    "backend/tests/test_review_task_access_errors.py": {
+      "SHA256": "2509671c4ed747de3eed4789dd39c44cda292f57f1c08bfc498a9a620eaa44e5",
+      "与作者冻结一致": true
+    },
+    "frontend/src/views/review/ReviewTaskDetail.vue": {
+      "SHA256": "7396316728bc551b5fd3c91ad01aa6220d0ae8d1441cf328e4b75a33fb0f27f0",
+      "与作者最终冻结消息一致": true,
+      "与首轮源码不同": "问题权限单独撤回缓存修复，已独审"
+    },
+    "frontend/src/views/review/ReviewTaskDetail.test.ts": {
+      "SHA256": "0c3089f12bb92a4a69e0875c9e8bf42b748b4c1ddb807010593a4fbc61eb2390",
+      "与作者最终冻结消息一致": true,
+      "与首轮源码不同": "问题权限单独撤回缓存修复，已独审"
+    }
+  },
+  "测试": {
+    "审查详情错误语义-准确红测.xml": {
+      "总数": 14,
+      "失败": 2,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "26df3969375b7732620c9d1e82978395ff3dba800840a07f07982e9914b11d26"
+    },
+    "审查详情失败恢复-准确红测.xml": {
+      "总数": 52,
+      "失败": 6,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "54f0e2d3490e7eb4479faf3518cfb76315f8429fa9a8a05cd23d1a894de68067"
+    },
+    "审查详情错误语义-修复后.xml": {
+      "总数": 14,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "4f6029c04e2f4711acf9107ee9f69872f54426468ad021a834fe45558ef9d4a7"
+    },
+    "审查详情失败恢复-修复后.xml": {
+      "总数": 52,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "630ac0bbdd418a73e499c3cfb88150d261619ca38ea2082252ead626399413ee"
+    },
+    "审查详情错误与既有流程最终回归.xml": {
+      "总数": 118,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "e05763ac58f22b945131993685e289be8b3eb95d8eb8016747b7c3e07c846b4c"
+    },
+    "审查问题权限撤回独立红测.xml": {
+      "总数": 1,
+      "失败": 1,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "92134ec6260641a6b1b0a2998160aa2c4280020c956f40b702db0f6c66963aca"
+    },
+    "审查问题权限撤回独立修复后.xml": {
+      "总数": 1,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "9c4921c9df53761d85de401eab21cb2020729ae07f4c3abf067e4d94e2401acc"
+    },
+    "审查问题访问失效-准确红测.xml": {
+      "总数": 56,
+      "失败": 3,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "57c91541ba5c6cec72e54754a8cc0320b417b36bcbfad93bebcf72865d39e0b9"
+    },
+    "审查问题访问失效-修复后.xml": {
+      "总数": 56,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "5ce9f3c054aae478dd96a1b8f8531fe05272f366d83f35fb9ae1a2002790915b"
+    }
+  },
+  "临时目录已清理": true,
+  "作者最终证据再次重算": {
+    "文件": "审查详情失败恢复实现指纹.json",
+    "SHA256": "93b005a58c570619e33462cafd1411c32412c1a05f701cd3def173f7c0f267c0",
+    "逐项一致": {
+      "backend/app/services/review_service.py": true,
+      "backend/tests/test_review_task_access_errors.py": true,
+      "frontend/src/views/review/ReviewTaskDetail.vue": true,
+      "frontend/src/views/review/ReviewTaskDetail.test.ts": true,
+      "审查详情错误语义-准确红测.xml": true,
+      "审查详情失败恢复-准确红测.xml": true,
+      "审查详情错误语义-修复后.xml": true,
+      "审查详情失败恢复-修复后.xml": true,
+      "审查详情错误与既有流程最终回归.xml": true,
+      "审查问题访问失效-准确红测.xml": true,
+      "审查问题访问失效-修复后.xml": true,
+      "审查问题权限撤回独立红测.xml": true,
+      "审查问题权限撤回独立修复后.xml": true
+    }
+  }
+}

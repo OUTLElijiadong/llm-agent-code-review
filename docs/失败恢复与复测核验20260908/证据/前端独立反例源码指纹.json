@@ -1,0 +1,16 @@
+{
+  "stage": "before_independent_red",
+  "files": {
+    "frontend/src/views/report/ReportDetail.vue": "545c550601f34823e6fbd0317916f3faa2bc9eefa3e8680bcfd7e59d8a60ceac",
+    "frontend/src/views/project/ProjectForm.vue": "124a51e7f4ce00516e672850c3d39f63b3949b0a400b1b726419270c535f9147",
+    "frontend/src/views/report/FailureRecoveryIndependent.test.ts": "6284e33d2193b021c4bc9e43af33f52bf20691f047bb0eaefbd31aaa0ab6f614"
+  },
+  "report_baseline_red_files": {
+    "frontend/src/views/report/ReportDetail.vue": "5a8bb29d7768f2bef84a0cdef0e30f43d33d61042b31e46d04e129db03b9c42a",
+    "frontend/src/views/project/ProjectForm.vue": "124a51e7f4ce00516e672850c3d39f63b3949b0a400b1b726419270c535f9147",
+    "frontend/src/views/report/FailureRecoveryIndependent.test.ts": "339dffc095d351e7208d494c5cbb2ea7e71057733321f9296b7760b03a9b1af7"
+  },
+  "report_baseline_red_note": "Git HEAD ReportDetail plus current ProjectForm; first mixed candidate run had three report passes and one ProjectForm failure; not same source as parent 84 tests",
+  "report_baseline_red_test_sha256": "339dffc095d351e7208d494c5cbb2ea7e71057733321f9296b7760b03a9b1af7",
+  "note": "首个夹具运行没有测试/路由mock错误；候选有效运行3pass1fail；准确四红来自已注明Git HEAD报告基线+本轮表单。最终代码与28绿见前端失败恢复独立复核指纹.json。"
+}

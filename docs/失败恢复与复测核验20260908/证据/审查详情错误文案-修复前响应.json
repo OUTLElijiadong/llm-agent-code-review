@@ -1,0 +1,105 @@
+{
+  "environment": "isolated SQLite + real JWT + real review router, no lifespan",
+  "production_requests": 0,
+  "model_requests": 0,
+  "business_writes_during_requests": [],
+  "rows": [
+    {
+      "case": "absent_task",
+      "endpoint_suffix": "",
+      "http_status": 404,
+      "code": 40400,
+      "message": "审查任务不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "outside_project",
+      "endpoint_suffix": "",
+      "http_status": 404,
+      "code": 40400,
+      "message": "项目不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "deleted_project",
+      "endpoint_suffix": "",
+      "http_status": 404,
+      "code": 40400,
+      "message": "项目不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "quarantined_project",
+      "endpoint_suffix": "",
+      "http_status": 404,
+      "code": 40400,
+      "message": "项目不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "missing_parent_project",
+      "endpoint_suffix": "",
+      "http_status": 404,
+      "code": 40400,
+      "message": "项目不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "deleted_task",
+      "endpoint_suffix": "",
+      "http_status": 404,
+      "code": 40400,
+      "message": "审查任务不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "absent_task",
+      "endpoint_suffix": "/issues",
+      "http_status": 404,
+      "code": 40400,
+      "message": "审查任务不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "outside_project",
+      "endpoint_suffix": "/issues",
+      "http_status": 404,
+      "code": 40400,
+      "message": "项目不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "deleted_project",
+      "endpoint_suffix": "/issues",
+      "http_status": 404,
+      "code": 40400,
+      "message": "项目不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "quarantined_project",
+      "endpoint_suffix": "/issues",
+      "http_status": 404,
+      "code": 40400,
+      "message": "项目不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "missing_parent_project",
+      "endpoint_suffix": "/issues",
+      "http_status": 404,
+      "code": 40400,
+      "message": "项目不存在",
+      "next_action": "请刷新页面后重新选择"
+    },
+    {
+      "case": "deleted_task",
+      "endpoint_suffix": "/issues",
+      "http_status": 404,
+      "code": 40400,
+      "message": "审查任务不存在",
+      "next_action": "请刷新页面后重新选择"
+    }
+  ],
+  "review_service_sha256": "e02c039d4b11cf84322700f9962bcaf1898a94eed7dd99f296f4ca62d7c349bb"
+}

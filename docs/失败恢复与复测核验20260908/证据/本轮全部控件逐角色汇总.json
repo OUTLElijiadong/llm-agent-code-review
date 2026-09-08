@@ -1,0 +1,15 @@
+{
+  "source_actions": 616,
+  "source_buttons_or_links": 452,
+  "roles": 5,
+  "total_role_control_rows": 3080,
+  "current_release_statuses": {
+    "untested": 2464,
+    "blocked": 616
+  },
+  "current_release_passed": 0,
+  "rows_with_previous_release_observations": 34,
+  "previous_release_observations": 66,
+  "note": "源码节点乘角色；动态实例和未测场景不由源码或本地挂载测试推定通过。",
+  "ledger_sha256": "b0627b17ea3b6a7ba6960a4a9c8a8c36e013b35ddc9c6628ff150a5e3902cb01"
+}

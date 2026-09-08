@@ -1,0 +1,19 @@
+{
+  "business_writes": false,
+  "source": "production_readonly",
+  "rows": [
+    {
+      "utc": "2026-09-08 05:05:27.347724",
+      "kind": "snapshot",
+      "read_only": 1
+    },
+    {
+      "id": 162,
+      "kind": "task",
+      "status": "failed",
+      "project_id": 158,
+      "project_exists": true,
+      "project_status": "deleted"
+    }
+  ]
+}

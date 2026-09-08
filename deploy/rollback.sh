@@ -104,4 +104,4 @@ if [[ -f "$rollback_from" ]]; then
 fi
 rm -f "$pending_state"
 log_info "应用层回滚完成(release=$previous_sha)；请确认数据库向后兼容性"
-compose ps
+compose ps || log_warn "应用回滚已完成，但容器列表读取失败；请重试只读运维检查"

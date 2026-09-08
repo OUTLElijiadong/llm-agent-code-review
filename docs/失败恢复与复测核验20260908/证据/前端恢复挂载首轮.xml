@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="9" failures="0" errors="0" time="0.457319708">
+    <testsuite name="src/views/project/FailureRecovery.test.ts" timestamp="2026-09-08T04:52:19.147Z" hostname="lijiadongdeMacBook-Air-7.local" tests="9" failures="0" errors="0" skipped="0" time="0.457319708">
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 项目刷新503保留快照并显示失败；重试成功后移除提示" time="0.11027075">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 项目先失败不能显示还没有项目；403清空已授权快照" time="0.046562458">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 旧筛选响应不覆盖新结果；新筛选失败明确旧条件快照" time="0.043507875">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 创建按钮在父请求完成前保持锁定，超时保留输入且不会自动重发" time="0.061150125">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 分析失败保留手填值，不显示Agent已分析；分析中不可创建" time="0.014968167">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 文件列表503保留内容与重试；过期响应不覆盖新筛选" time="0.063472333">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 详情503保留只读快照并关闭写操作，403清空；重试重新校验权限" time="0.06578925">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent画像读取失败仍更新成功目录，不产生同步成功提示；手动恢复可成功" time="0.02446375">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent技能切换忽略旧响应；失败显示重试而不是没有技能" time="0.026654083">
+        </testcase>
+    </testsuite>
+</testsuites>

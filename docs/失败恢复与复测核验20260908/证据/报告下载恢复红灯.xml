@@ -1,0 +1,579 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="22" failures="2" errors="0" time="0.625165167">
+    <testsuite name="src/views/project/FailureRecovery.test.ts" timestamp="2026-09-08T04:54:50.526Z" hostname="lijiadongdeMacBook-Air-7.local" tests="22" failures="2" errors="0" skipped="0" time="0.625165167">
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 项目刷新503保留快照并显示失败；重试成功后移除提示" time="0.108617917">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 项目先失败不能显示还没有项目；403清空已授权快照" time="0.0663615">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 旧筛选响应不覆盖新结果；新筛选失败明确旧条件快照" time="0.045198083">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 创建按钮在父请求完成前保持锁定，超时保留输入且不会自动重发" time="0.054959042">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 分析失败保留手填值，不显示Agent已分析；分析中不可创建" time="0.010942917">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 文件列表503保留内容与重试；过期响应不覆盖新筛选" time="0.042116791">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 详情503保留只读快照并关闭写操作，403清空；重试重新校验权限" time="0.055923666">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent画像读取失败仍更新成功目录，不产生同步成功提示；手动恢复可成功" time="0.022849292">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent技能切换忽略旧响应；失败显示重试而不是没有技能" time="0.024509584">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 报告首次失败有原地重试，503保留标明过期的报告，权限业务码清空" time="0.008404458">
+            <failure message="Unable to get [data-testid=&quot;report-load-error&quot;] within: &lt;div data-v-1eaece16=&quot;&quot; class=&quot;report-detail-page&quot;&gt;
+  &lt;!-- ============ 顶部操作栏（打印时隐藏）============ --&gt;
+  &lt;header data-v-1eaece16=&quot;&quot; class=&quot;page-head no-print&quot;&gt;&lt;button data-v-1eaece16=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button is-link back-btn&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;&lt;i data-v-1eaece16=&quot;&quot; class=&quot;el-icon&quot;&gt;&lt;svg data-v-1eaece16=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;&lt;path fill=&quot;currentColor&quot; d=&quot;M609.408 149.376 277.76 489.6a32 32 0 0 0 0 44.672l331.648 340.352a29.12 29.12 0 0 0 41.728 0 30.59 30.59 0 0 0 0-42.752L339.264 511.936l311.872-319.872a30.59 30.59 0 0 0 0-42.688 29.12 29.12 0 0 0-41.728 0&quot;&gt;&lt;/path&gt;&lt;/svg&gt;&lt;/i&gt;返回列表 &lt;/span&gt;
+    &lt;/button&gt;
+    &lt;h1 data-v-1eaece16=&quot;&quot; class=&quot;font-display&quot;&gt;审查报告&lt;/h1&gt;
+    &lt;div data-v-1eaece16=&quot;&quot; class=&quot;head-actions&quot;&gt;
+      &lt;!--v-if--&gt;
+      &lt;!--v-if--&gt;
+      &lt;!--v-if--&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;&lt;!-- ============ T15 报告操作工具栏(模板类型 / 生成 / 预览 / 导出)============ --&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;div data-v-27ab7390=&quot;&quot; data-v-1eaece16=&quot;&quot; class=&quot;empty-state&quot;&gt;
+    &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-illustration&quot; aria-hidden=&quot;true&quot;&gt;
+      &lt;div data-v-035bd481=&quot;&quot; data-v-27ab7390=&quot;&quot; class=&quot;ai-orb is-idle&quot; style=&quot;--orb-size: 72px;&quot; role=&quot;img&quot; aria-label=&quot;AI 待机&quot;&gt;&lt;span class=&quot;ai-orb-core-wrap&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-core&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-swirl&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-shine&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-halo&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-desc&quot;&gt;报告数据加载失败&lt;/div&gt;
+    &lt;!--v-if--&gt;
+  &lt;/div&gt;
+  &lt;!--teleport start--&gt;
+  &lt;!--teleport end--&gt;
+&lt;/div&gt;" type="Error">
+Error: Unable to get [data-testid=&quot;report-load-error&quot;] within: &lt;div data-v-1eaece16=&quot;&quot; class=&quot;report-detail-page&quot;&gt;
+  &lt;!-- ============ 顶部操作栏（打印时隐藏）============ --&gt;
+  &lt;header data-v-1eaece16=&quot;&quot; class=&quot;page-head no-print&quot;&gt;&lt;button data-v-1eaece16=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button is-link back-btn&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;&lt;i data-v-1eaece16=&quot;&quot; class=&quot;el-icon&quot;&gt;&lt;svg data-v-1eaece16=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;&lt;path fill=&quot;currentColor&quot; d=&quot;M609.408 149.376 277.76 489.6a32 32 0 0 0 0 44.672l331.648 340.352a29.12 29.12 0 0 0 41.728 0 30.59 30.59 0 0 0 0-42.752L339.264 511.936l311.872-319.872a30.59 30.59 0 0 0 0-42.688 29.12 29.12 0 0 0-41.728 0&quot;&gt;&lt;/path&gt;&lt;/svg&gt;&lt;/i&gt;返回列表 &lt;/span&gt;
+    &lt;/button&gt;
+    &lt;h1 data-v-1eaece16=&quot;&quot; class=&quot;font-display&quot;&gt;审查报告&lt;/h1&gt;
+    &lt;div data-v-1eaece16=&quot;&quot; class=&quot;head-actions&quot;&gt;
+      &lt;!--v-if--&gt;
+      &lt;!--v-if--&gt;
+      &lt;!--v-if--&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;&lt;!-- ============ T15 报告操作工具栏(模板类型 / 生成 / 预览 / 导出)============ --&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;div data-v-27ab7390=&quot;&quot; data-v-1eaece16=&quot;&quot; class=&quot;empty-state&quot;&gt;
+    &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-illustration&quot; aria-hidden=&quot;true&quot;&gt;
+      &lt;div data-v-035bd481=&quot;&quot; data-v-27ab7390=&quot;&quot; class=&quot;ai-orb is-idle&quot; style=&quot;--orb-size: 72px;&quot; role=&quot;img&quot; aria-label=&quot;AI 待机&quot;&gt;&lt;span class=&quot;ai-orb-core-wrap&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-core&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-swirl&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-shine&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-halo&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-desc&quot;&gt;报告数据加载失败&lt;/div&gt;
+    &lt;!--v-if--&gt;
+  &lt;/div&gt;
+  &lt;!--teleport start--&gt;
+  &lt;!--teleport end--&gt;
+&lt;/div&gt;
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/project/FailureRecovery.test.ts:170:20
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 二进制本地异常有持续反馈且回收URL，无真实下载且可以手动重试" time="0.030291167">
+            <failure message="Unable to get [data-testid=&quot;file-download-error&quot;] within: &lt;div data-v-a236147f=&quot;&quot; class=&quot;code-file-list&quot;&gt;
+  &lt;div data-v-a236147f=&quot;&quot; class=&quot;toolbar&quot;&gt;
+    &lt;div data-v-a236147f=&quot;&quot; class=&quot;el-select filter-select&quot;&gt;
+      &lt;div class=&quot;el-select__wrapper el-tooltip__trigger el-tooltip__trigger&quot; tabindex=&quot;-1&quot;&gt;
+        &lt;!--v-if--&gt;
+        &lt;div class=&quot;el-select__selection&quot;&gt;
+          &lt;!--v-if--&gt;
+          &lt;div class=&quot;el-select__selected-item el-select__input-wrapper is-hidden&quot;&gt;&lt;input type=&quot;text&quot; class=&quot;el-select__input&quot; autocomplete=&quot;off&quot; style=&quot;min-width: 11px;&quot; tabindex=&quot;0&quot; role=&quot;combobox&quot; readonly=&quot;&quot; spellcheck=&quot;false&quot; aria-activedescendant=&quot;&quot; aria-controls=&quot;el-id-5053-178&quot; aria-expanded=&quot;false&quot; aria-autocomplete=&quot;none&quot; aria-haspopup=&quot;listbox&quot; value=&quot;&quot; id=&quot;el-id-5053-189&quot;&gt;
+            &lt;!--v-if--&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;el-select__selected-item el-select__placeholder is-transparent&quot;&gt;&lt;span&gt;语言筛选&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;el-select__suffix&quot;&gt;&lt;i class=&quot;el-icon el-select__caret el-select__icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+              &lt;path fill=&quot;currentColor&quot; d=&quot;M831.872 340.864 512 652.672 192.128 340.864a30.59 30.59 0 0 0-42.752 0 29.12 29.12 0 0 0 0 41.6L489.664 714.24a32 32 0 0 0 44.672 0l340.288-331.712a29.12 29.12 0 0 0 0-41.728 30.59 30.59 0 0 0-42.752 0z&quot;&gt;&lt;/path&gt;
+            &lt;/svg&gt;&lt;/i&gt;
+          &lt;!--v-if--&gt;
+          &lt;!--v-if--&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;!--teleport start--&gt;
+      &lt;!--teleport end--&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+  &lt;!--v-if--&gt;
+  &lt;div data-v-a236147f=&quot;&quot; class=&quot;el-table--fit el-table--striped el-table--border el-table--scrollable-x el-table--enable-row-transition el-table el-table--layout-fixed&quot; data-prefix=&quot;el&quot; loading-number=&quot;1&quot;&gt;
+    &lt;div class=&quot;el-table__inner-wrapper&quot;&gt;
+      &lt;div class=&quot;hidden-columns&quot;&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;button data-v-a236147f=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+            &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;查看代码&lt;/span&gt;
+          &lt;/button&gt;&lt;button data-v-a236147f=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+            &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;版本历史&lt;/span&gt;
+          &lt;/button&gt;&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;el-table__header-wrapper&quot;&gt;
+        &lt;table class=&quot;el-table__header&quot; border=&quot;0&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; style=&quot;width: 1140px;&quot;&gt;
+          &lt;colgroup&gt;
+            &lt;col name=&quot;el-table_4_column_22&quot; width=&quot;220&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_23&quot; width=&quot;120&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_24&quot; width=&quot;110&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_25&quot; width=&quot;110&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_26&quot; width=&quot;100&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_27&quot; width=&quot;80&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_28&quot; width=&quot;180&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_29&quot; width=&quot;220&quot;&gt;
+          &lt;/colgroup&gt;
+          &lt;thead class=&quot;&quot;&gt;
+            &lt;tr class=&quot;&quot;&gt;
+              &lt;th class=&quot;el-table_4_column_22 is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;文件名
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_23 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;语言
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_24 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;类型
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_25 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;大小
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_26 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;行数
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_27 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;版本
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_28 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;更新时间
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_29 is-center el-table-fixed-column--right is-first-column is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot; style=&quot;right: 0px;&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;操作
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+            &lt;/tr&gt;
+          &lt;/thead&gt;
+        &lt;/table&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;el-table__body-wrapper&quot;&gt;
+        &lt;div class=&quot;el-scrollbar&quot;&gt;
+          &lt;div class=&quot;el-scrollbar__wrap el-scrollbar__wrap--hidden-default&quot;&gt;
+            &lt;div class=&quot;el-scrollbar__view&quot; style=&quot;display: inline-block; vertical-align: middle;&quot;&gt;
+              &lt;table class=&quot;el-table__body&quot; cellspacing=&quot;0&quot; cellpadding=&quot;0&quot; border=&quot;0&quot; style=&quot;table-layout: fixed; width: 1140px;&quot;&gt;
+                &lt;colgroup&gt;
+                  &lt;col name=&quot;el-table_4_column_22&quot; width=&quot;220&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_23&quot; width=&quot;120&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_24&quot; width=&quot;110&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_25&quot; width=&quot;110&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_26&quot; width=&quot;100&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_27&quot; width=&quot;80&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_28&quot; width=&quot;180&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_29&quot; width=&quot;220&quot;&gt;
+                &lt;/colgroup&gt;
+                &lt;!--v-if--&gt;
+                &lt;tbody tabindex=&quot;-1&quot;&gt;
+                  &lt;tr class=&quot;el-table__row&quot;&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_22 el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell el-tooltip&quot; style=&quot;width: 218px;&quot;&gt;
+                        &lt;!----&gt;&lt;i data-v-a236147f=&quot;&quot; class=&quot;el-icon file-icon file-icon-binary&quot;&gt;&lt;svg data-v-a236147f=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                            &lt;path fill=&quot;currentColor&quot; d=&quot;M832 384H576V128H192v768h640zm-26.496-64L640 154.496V320zM160 64h480l256 256v608a32 32 0 0 1-32 32H160a32 32 0 0 1-32-32V96a32 32 0 0 1 32-32m160 448h384v64H320zm0-192h160v64H320zm0 384h384v64H320z&quot;&gt;&lt;/path&gt;
+                          &lt;/svg&gt;&lt;/i&gt;&lt;span data-v-a236147f=&quot;&quot; class=&quot;file-name-text&quot;&gt;原有文件.py&lt;/span&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_23 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;
+                        &lt;transition-stub data-v-a236147f=&quot;&quot; name=&quot;el-zoom-in-center&quot; appear=&quot;true&quot; persisted=&quot;false&quot; css=&quot;true&quot;&gt;&lt;span class=&quot;el-tag el-tag--info el-tag--small el-tag--light&quot;&gt;&lt;span class=&quot;el-tag__content&quot;&gt;python&lt;/span&gt;
+                          &lt;!--v-if--&gt;&lt;/span&gt;
+                        &lt;/transition-stub&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_24 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;
+                        &lt;transition-stub data-v-a236147f=&quot;&quot; name=&quot;el-zoom-in-center&quot; appear=&quot;true&quot; persisted=&quot;false&quot; css=&quot;true&quot;&gt;&lt;span class=&quot;el-tag el-tag--danger el-tag--small el-tag--light&quot;&gt;&lt;span class=&quot;el-tag__content&quot;&gt;二进制&lt;/span&gt;
+                          &lt;!--v-if--&gt;&lt;/span&gt;
+                        &lt;/transition-stub&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_25 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;&lt;span data-v-a236147f=&quot;&quot; class=&quot;&quot;&gt;8 B&lt;/span&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_26 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;&lt;span data-v-a236147f=&quot;&quot; class=&quot;text-muted&quot;&gt;-&lt;/span&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_27 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt; v1
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_28 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;2026-09-07 00:00
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; style=&quot;right: 0px;&quot; class=&quot;el-table_4_column_29 is-center el-table-fixed-column--right is-first-column el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;&lt;button data-v-a236147f=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+                          &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;&lt;i data-v-a236147f=&quot;&quot; class=&quot;el-icon&quot;&gt;&lt;svg data-v-a236147f=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;&lt;path fill=&quot;currentColor&quot; d=&quot;M160 832h704a32 32 0 1 1 0 64H160a32 32 0 1 1 0-64m384-253.696 236.288-236.352 45.248 45.248L508.8 704 192 387.2l45.248-45.248L480 584.704V128h64z&quot;&gt;&lt;/path&gt;&lt;/svg&gt;&lt;/i&gt;下载 &lt;/span&gt;
+                        &lt;/button&gt;&lt;button data-v-a236147f=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--info is-link&quot;&gt;
+                          &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;查看元信息&lt;/span&gt;
+                        &lt;/button&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/tbody&gt;
+                &lt;!--v-if--&gt;
+              &lt;/table&gt;
+              &lt;!--v-if--&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;transition-stub name=&quot;el-scrollbar-fade&quot; appear=&quot;false&quot; persisted=&quot;true&quot; css=&quot;true&quot;&gt;
+            &lt;div class=&quot;el-scrollbar__bar is-horizontal&quot; style=&quot;display: none;&quot;&gt;
+              &lt;div class=&quot;el-scrollbar__thumb&quot; style=&quot;transform: translateX(NaN%);&quot;&gt;&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/transition-stub&gt;
+          &lt;transition-stub name=&quot;el-scrollbar-fade&quot; appear=&quot;false&quot; persisted=&quot;true&quot; css=&quot;true&quot;&gt;
+            &lt;div class=&quot;el-scrollbar__bar is-vertical&quot; style=&quot;display: none;&quot;&gt;
+              &lt;div class=&quot;el-scrollbar__thumb&quot; style=&quot;transform: translateY(NaN%);&quot;&gt;&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/transition-stub&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;!--v-if--&gt;
+      &lt;div class=&quot;el-table__border-left-patch&quot;&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;el-table__column-resize-proxy&quot; style=&quot;display: none;&quot;&gt;&lt;/div&gt;
+    &lt;transition-stub name=&quot;el-loading-fade&quot; appear=&quot;false&quot; persisted=&quot;false&quot; css=&quot;true&quot;&gt;
+      &lt;div class=&quot;el-loading-mask&quot; style=&quot;&quot;&gt;
+        &lt;div class=&quot;el-loading-spinner&quot;&gt;&lt;svg class=&quot;circular&quot; viewBox=&quot;0 0 50 50&quot;&gt;
+            &lt;circle class=&quot;path&quot; cx=&quot;25&quot; cy=&quot;25&quot; r=&quot;20&quot; fill=&quot;none&quot;&gt;&lt;/circle&gt;
+          &lt;/svg&gt;
+          &lt;!----&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/transition-stub&gt;
+  &lt;/div&gt;
+  &lt;div data-v-a236147f=&quot;&quot; class=&quot;pagination-wrap&quot;&gt;
+    &lt;div data-v-a236147f=&quot;&quot; class=&quot;el-pagination&quot;&gt;&lt;span class=&quot;el-pagination__total is-first&quot; disabled=&quot;false&quot;&gt;Total 1&lt;/span&gt;&lt;span class=&quot;el-pagination__sizes&quot;&gt;&lt;div class=&quot;el-select&quot;&gt;&lt;div class=&quot;el-select__wrapper el-tooltip__trigger el-tooltip__trigger&quot; tabindex=&quot;-1&quot;&gt;&lt;!--v-if--&gt;&lt;div class=&quot;el-select__selection&quot;&gt;&lt;!--v-if--&gt;&lt;div class=&quot;el-select__selected-item el-select__input-wrapper is-hidden&quot;&gt;&lt;input type=&quot;text&quot; class=&quot;el-select__input&quot; autocomplete=&quot;off&quot; style=&quot;min-width: 11px;&quot; tabindex=&quot;0&quot; role=&quot;combobox&quot; readonly=&quot;&quot; spellcheck=&quot;false&quot; aria-activedescendant=&quot;&quot; aria-controls=&quot;el-id-5053-190&quot; aria-expanded=&quot;false&quot; aria-autocomplete=&quot;none&quot; aria-haspopup=&quot;listbox&quot; value=&quot;&quot; id=&quot;el-id-5053-195&quot;&gt;&lt;!--v-if--&gt;&lt;/div&gt;&lt;div class=&quot;el-select__selected-item el-select__placeholder&quot;&gt;&lt;span&gt;10/page&lt;/span&gt;&lt;/div&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;el-select__suffix&quot;&gt;&lt;i class=&quot;el-icon el-select__caret el-select__icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+        &lt;path fill=&quot;currentColor&quot; d=&quot;M831.872 340.864 512 652.672 192.128 340.864a30.59 30.59 0 0 0-42.752 0 29.12 29.12 0 0 0 0 41.6L489.664 714.24a32 32 0 0 0 44.672 0l340.288-331.712a29.12 29.12 0 0 0 0-41.728 30.59 30.59 0 0 0-42.752 0z&quot;&gt;&lt;/path&gt;
+      &lt;/svg&gt;&lt;/i&gt;
+    &lt;!--v-if--&gt;
+    &lt;!--v-if--&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;!--teleport start--&gt;
+&lt;!--teleport end--&gt;
+&lt;/div&gt;&lt;/span&gt;&lt;button type=&quot;button&quot; class=&quot;btn-prev&quot; disabled=&quot;&quot; aria-label=&quot;Go to previous page&quot; aria-disabled=&quot;true&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+      &lt;path fill=&quot;currentColor&quot; d=&quot;M609.408 149.376 277.76 489.6a32 32 0 0 0 0 44.672l331.648 340.352a29.12 29.12 0 0 0 41.728 0 30.59 30.59 0 0 0 0-42.752L339.264 511.936l311.872-319.872a30.59 30.59 0 0 0 0-42.688 29.12 29.12 0 0 0-41.728 0&quot;&gt;&lt;/path&gt;
+    &lt;/svg&gt;&lt;/i&gt;&lt;/button&gt;
+&lt;ul class=&quot;el-pager&quot;&gt;
+  &lt;li class=&quot;is-active number&quot; aria-current=&quot;true&quot; aria-label=&quot;page 1&quot; tabindex=&quot;0&quot;&gt; 1 &lt;/li&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+&lt;/ul&gt;&lt;button type=&quot;button&quot; class=&quot;btn-next is-last&quot; disabled=&quot;&quot; aria-label=&quot;Go to next page&quot; aria-disabled=&quot;true&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+      &lt;path fill=&quot;currentColor&quot; d=&quot;M340.864 149.312a30.59 30.59 0 0 0 0 42.752L652.736 512 340.864 831.872a30.59 30.59 0 0 0 0 42.752 29.12 29.12 0 0 0 41.728 0L714.24 534.336a32 32 0 0 0 0-44.672L382.592 149.376a29.12 29.12 0 0 0-41.728 0z&quot;&gt;&lt;/path&gt;
+    &lt;/svg&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;" type="Error">
+Error: Unable to get [data-testid=&quot;file-download-error&quot;] within: &lt;div data-v-a236147f=&quot;&quot; class=&quot;code-file-list&quot;&gt;
+  &lt;div data-v-a236147f=&quot;&quot; class=&quot;toolbar&quot;&gt;
+    &lt;div data-v-a236147f=&quot;&quot; class=&quot;el-select filter-select&quot;&gt;
+      &lt;div class=&quot;el-select__wrapper el-tooltip__trigger el-tooltip__trigger&quot; tabindex=&quot;-1&quot;&gt;
+        &lt;!--v-if--&gt;
+        &lt;div class=&quot;el-select__selection&quot;&gt;
+          &lt;!--v-if--&gt;
+          &lt;div class=&quot;el-select__selected-item el-select__input-wrapper is-hidden&quot;&gt;&lt;input type=&quot;text&quot; class=&quot;el-select__input&quot; autocomplete=&quot;off&quot; style=&quot;min-width: 11px;&quot; tabindex=&quot;0&quot; role=&quot;combobox&quot; readonly=&quot;&quot; spellcheck=&quot;false&quot; aria-activedescendant=&quot;&quot; aria-controls=&quot;el-id-5053-178&quot; aria-expanded=&quot;false&quot; aria-autocomplete=&quot;none&quot; aria-haspopup=&quot;listbox&quot; value=&quot;&quot; id=&quot;el-id-5053-189&quot;&gt;
+            &lt;!--v-if--&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;el-select__selected-item el-select__placeholder is-transparent&quot;&gt;&lt;span&gt;语言筛选&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;el-select__suffix&quot;&gt;&lt;i class=&quot;el-icon el-select__caret el-select__icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+              &lt;path fill=&quot;currentColor&quot; d=&quot;M831.872 340.864 512 652.672 192.128 340.864a30.59 30.59 0 0 0-42.752 0 29.12 29.12 0 0 0 0 41.6L489.664 714.24a32 32 0 0 0 44.672 0l340.288-331.712a29.12 29.12 0 0 0 0-41.728 30.59 30.59 0 0 0-42.752 0z&quot;&gt;&lt;/path&gt;
+            &lt;/svg&gt;&lt;/i&gt;
+          &lt;!--v-if--&gt;
+          &lt;!--v-if--&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;!--teleport start--&gt;
+      &lt;!--teleport end--&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+  &lt;!--v-if--&gt;
+  &lt;div data-v-a236147f=&quot;&quot; class=&quot;el-table--fit el-table--striped el-table--border el-table--scrollable-x el-table--enable-row-transition el-table el-table--layout-fixed&quot; data-prefix=&quot;el&quot; loading-number=&quot;1&quot;&gt;
+    &lt;div class=&quot;el-table__inner-wrapper&quot;&gt;
+      &lt;div class=&quot;hidden-columns&quot;&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;/div&gt;
+        &lt;div data-v-a236147f=&quot;&quot;&gt;&lt;button data-v-a236147f=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+            &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;查看代码&lt;/span&gt;
+          &lt;/button&gt;&lt;button data-v-a236147f=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+            &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;版本历史&lt;/span&gt;
+          &lt;/button&gt;&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;el-table__header-wrapper&quot;&gt;
+        &lt;table class=&quot;el-table__header&quot; border=&quot;0&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; style=&quot;width: 1140px;&quot;&gt;
+          &lt;colgroup&gt;
+            &lt;col name=&quot;el-table_4_column_22&quot; width=&quot;220&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_23&quot; width=&quot;120&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_24&quot; width=&quot;110&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_25&quot; width=&quot;110&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_26&quot; width=&quot;100&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_27&quot; width=&quot;80&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_28&quot; width=&quot;180&quot;&gt;
+            &lt;col name=&quot;el-table_4_column_29&quot; width=&quot;220&quot;&gt;
+          &lt;/colgroup&gt;
+          &lt;thead class=&quot;&quot;&gt;
+            &lt;tr class=&quot;&quot;&gt;
+              &lt;th class=&quot;el-table_4_column_22 is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;文件名
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_23 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;语言
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_24 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;类型
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_25 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;大小
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_26 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;行数
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_27 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;版本
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_28 is-center is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;更新时间
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+              &lt;th class=&quot;el-table_4_column_29 is-center el-table-fixed-column--right is-first-column is-leaf el-table__cell&quot; colspan=&quot;1&quot; rowspan=&quot;1&quot; scope=&quot;col&quot; style=&quot;right: 0px;&quot;&gt;
+                &lt;div class=&quot;cell&quot;&gt;操作
+                  &lt;!----&gt;
+                  &lt;!----&gt;
+                &lt;/div&gt;
+              &lt;/th&gt;
+            &lt;/tr&gt;
+          &lt;/thead&gt;
+        &lt;/table&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;el-table__body-wrapper&quot;&gt;
+        &lt;div class=&quot;el-scrollbar&quot;&gt;
+          &lt;div class=&quot;el-scrollbar__wrap el-scrollbar__wrap--hidden-default&quot;&gt;
+            &lt;div class=&quot;el-scrollbar__view&quot; style=&quot;display: inline-block; vertical-align: middle;&quot;&gt;
+              &lt;table class=&quot;el-table__body&quot; cellspacing=&quot;0&quot; cellpadding=&quot;0&quot; border=&quot;0&quot; style=&quot;table-layout: fixed; width: 1140px;&quot;&gt;
+                &lt;colgroup&gt;
+                  &lt;col name=&quot;el-table_4_column_22&quot; width=&quot;220&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_23&quot; width=&quot;120&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_24&quot; width=&quot;110&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_25&quot; width=&quot;110&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_26&quot; width=&quot;100&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_27&quot; width=&quot;80&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_28&quot; width=&quot;180&quot;&gt;
+                  &lt;col name=&quot;el-table_4_column_29&quot; width=&quot;220&quot;&gt;
+                &lt;/colgroup&gt;
+                &lt;!--v-if--&gt;
+                &lt;tbody tabindex=&quot;-1&quot;&gt;
+                  &lt;tr class=&quot;el-table__row&quot;&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_22 el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell el-tooltip&quot; style=&quot;width: 218px;&quot;&gt;
+                        &lt;!----&gt;&lt;i data-v-a236147f=&quot;&quot; class=&quot;el-icon file-icon file-icon-binary&quot;&gt;&lt;svg data-v-a236147f=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                            &lt;path fill=&quot;currentColor&quot; d=&quot;M832 384H576V128H192v768h640zm-26.496-64L640 154.496V320zM160 64h480l256 256v608a32 32 0 0 1-32 32H160a32 32 0 0 1-32-32V96a32 32 0 0 1 32-32m160 448h384v64H320zm0-192h160v64H320zm0 384h384v64H320z&quot;&gt;&lt;/path&gt;
+                          &lt;/svg&gt;&lt;/i&gt;&lt;span data-v-a236147f=&quot;&quot; class=&quot;file-name-text&quot;&gt;原有文件.py&lt;/span&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_23 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;
+                        &lt;transition-stub data-v-a236147f=&quot;&quot; name=&quot;el-zoom-in-center&quot; appear=&quot;true&quot; persisted=&quot;false&quot; css=&quot;true&quot;&gt;&lt;span class=&quot;el-tag el-tag--info el-tag--small el-tag--light&quot;&gt;&lt;span class=&quot;el-tag__content&quot;&gt;python&lt;/span&gt;
+                          &lt;!--v-if--&gt;&lt;/span&gt;
+                        &lt;/transition-stub&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_24 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;
+                        &lt;transition-stub data-v-a236147f=&quot;&quot; name=&quot;el-zoom-in-center&quot; appear=&quot;true&quot; persisted=&quot;false&quot; css=&quot;true&quot;&gt;&lt;span class=&quot;el-tag el-tag--danger el-tag--small el-tag--light&quot;&gt;&lt;span class=&quot;el-tag__content&quot;&gt;二进制&lt;/span&gt;
+                          &lt;!--v-if--&gt;&lt;/span&gt;
+                        &lt;/transition-stub&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_25 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;&lt;span data-v-a236147f=&quot;&quot; class=&quot;&quot;&gt;8 B&lt;/span&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_26 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;&lt;span data-v-a236147f=&quot;&quot; class=&quot;text-muted&quot;&gt;-&lt;/span&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_27 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt; v1
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; class=&quot;el-table_4_column_28 is-center el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;2026-09-07 00:00
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                    &lt;td colspan=&quot;1&quot; rowspan=&quot;1&quot; style=&quot;right: 0px;&quot; class=&quot;el-table_4_column_29 is-center el-table-fixed-column--right is-first-column el-table__cell&quot;&gt;
+                      &lt;div class=&quot;cell&quot;&gt;
+                        &lt;!----&gt;&lt;button data-v-a236147f=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+                          &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;&lt;i data-v-a236147f=&quot;&quot; class=&quot;el-icon&quot;&gt;&lt;svg data-v-a236147f=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;&lt;path fill=&quot;currentColor&quot; d=&quot;M160 832h704a32 32 0 1 1 0 64H160a32 32 0 1 1 0-64m384-253.696 236.288-236.352 45.248 45.248L508.8 704 192 387.2l45.248-45.248L480 584.704V128h64z&quot;&gt;&lt;/path&gt;&lt;/svg&gt;&lt;/i&gt;下载 &lt;/span&gt;
+                        &lt;/button&gt;&lt;button data-v-a236147f=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--info is-link&quot;&gt;
+                          &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;查看元信息&lt;/span&gt;
+                        &lt;/button&gt;
+                      &lt;/div&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/tbody&gt;
+                &lt;!--v-if--&gt;
+              &lt;/table&gt;
+              &lt;!--v-if--&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;transition-stub name=&quot;el-scrollbar-fade&quot; appear=&quot;false&quot; persisted=&quot;true&quot; css=&quot;true&quot;&gt;
+            &lt;div class=&quot;el-scrollbar__bar is-horizontal&quot; style=&quot;display: none;&quot;&gt;
+              &lt;div class=&quot;el-scrollbar__thumb&quot; style=&quot;transform: translateX(NaN%);&quot;&gt;&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/transition-stub&gt;
+          &lt;transition-stub name=&quot;el-scrollbar-fade&quot; appear=&quot;false&quot; persisted=&quot;true&quot; css=&quot;true&quot;&gt;
+            &lt;div class=&quot;el-scrollbar__bar is-vertical&quot; style=&quot;display: none;&quot;&gt;
+              &lt;div class=&quot;el-scrollbar__thumb&quot; style=&quot;transform: translateY(NaN%);&quot;&gt;&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/transition-stub&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;!--v-if--&gt;
+      &lt;div class=&quot;el-table__border-left-patch&quot;&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;el-table__column-resize-proxy&quot; style=&quot;display: none;&quot;&gt;&lt;/div&gt;
+    &lt;transition-stub name=&quot;el-loading-fade&quot; appear=&quot;false&quot; persisted=&quot;false&quot; css=&quot;true&quot;&gt;
+      &lt;div class=&quot;el-loading-mask&quot; style=&quot;&quot;&gt;
+        &lt;div class=&quot;el-loading-spinner&quot;&gt;&lt;svg class=&quot;circular&quot; viewBox=&quot;0 0 50 50&quot;&gt;
+            &lt;circle class=&quot;path&quot; cx=&quot;25&quot; cy=&quot;25&quot; r=&quot;20&quot; fill=&quot;none&quot;&gt;&lt;/circle&gt;
+          &lt;/svg&gt;
+          &lt;!----&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/transition-stub&gt;
+  &lt;/div&gt;
+  &lt;div data-v-a236147f=&quot;&quot; class=&quot;pagination-wrap&quot;&gt;
+    &lt;div data-v-a236147f=&quot;&quot; class=&quot;el-pagination&quot;&gt;&lt;span class=&quot;el-pagination__total is-first&quot; disabled=&quot;false&quot;&gt;Total 1&lt;/span&gt;&lt;span class=&quot;el-pagination__sizes&quot;&gt;&lt;div class=&quot;el-select&quot;&gt;&lt;div class=&quot;el-select__wrapper el-tooltip__trigger el-tooltip__trigger&quot; tabindex=&quot;-1&quot;&gt;&lt;!--v-if--&gt;&lt;div class=&quot;el-select__selection&quot;&gt;&lt;!--v-if--&gt;&lt;div class=&quot;el-select__selected-item el-select__input-wrapper is-hidden&quot;&gt;&lt;input type=&quot;text&quot; class=&quot;el-select__input&quot; autocomplete=&quot;off&quot; style=&quot;min-width: 11px;&quot; tabindex=&quot;0&quot; role=&quot;combobox&quot; readonly=&quot;&quot; spellcheck=&quot;false&quot; aria-activedescendant=&quot;&quot; aria-controls=&quot;el-id-5053-190&quot; aria-expanded=&quot;false&quot; aria-autocomplete=&quot;none&quot; aria-haspopup=&quot;listbox&quot; value=&quot;&quot; id=&quot;el-id-5053-195&quot;&gt;&lt;!--v-if--&gt;&lt;/div&gt;&lt;div class=&quot;el-select__selected-item el-select__placeholder&quot;&gt;&lt;span&gt;10/page&lt;/span&gt;&lt;/div&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;el-select__suffix&quot;&gt;&lt;i class=&quot;el-icon el-select__caret el-select__icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+        &lt;path fill=&quot;currentColor&quot; d=&quot;M831.872 340.864 512 652.672 192.128 340.864a30.59 30.59 0 0 0-42.752 0 29.12 29.12 0 0 0 0 41.6L489.664 714.24a32 32 0 0 0 44.672 0l340.288-331.712a29.12 29.12 0 0 0 0-41.728 30.59 30.59 0 0 0-42.752 0z&quot;&gt;&lt;/path&gt;
+      &lt;/svg&gt;&lt;/i&gt;
+    &lt;!--v-if--&gt;
+    &lt;!--v-if--&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;!--teleport start--&gt;
+&lt;!--teleport end--&gt;
+&lt;/div&gt;&lt;/span&gt;&lt;button type=&quot;button&quot; class=&quot;btn-prev&quot; disabled=&quot;&quot; aria-label=&quot;Go to previous page&quot; aria-disabled=&quot;true&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+      &lt;path fill=&quot;currentColor&quot; d=&quot;M609.408 149.376 277.76 489.6a32 32 0 0 0 0 44.672l331.648 340.352a29.12 29.12 0 0 0 41.728 0 30.59 30.59 0 0 0 0-42.752L339.264 511.936l311.872-319.872a30.59 30.59 0 0 0 0-42.688 29.12 29.12 0 0 0-41.728 0&quot;&gt;&lt;/path&gt;
+    &lt;/svg&gt;&lt;/i&gt;&lt;/button&gt;
+&lt;ul class=&quot;el-pager&quot;&gt;
+  &lt;li class=&quot;is-active number&quot; aria-current=&quot;true&quot; aria-label=&quot;page 1&quot; tabindex=&quot;0&quot;&gt; 1 &lt;/li&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+&lt;/ul&gt;&lt;button type=&quot;button&quot; class=&quot;btn-next is-last&quot; disabled=&quot;&quot; aria-label=&quot;Go to next page&quot; aria-disabled=&quot;true&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+      &lt;path fill=&quot;currentColor&quot; d=&quot;M340.864 149.312a30.59 30.59 0 0 0 0 42.752L652.736 512 340.864 831.872a30.59 30.59 0 0 0 0 42.752 29.12 29.12 0 0 0 41.728 0L714.24 534.336a32 32 0 0 0 0-44.672L382.592 149.376a29.12 29.12 0 0 0-41.728 0z&quot;&gt;&lt;/path&gt;
+    &lt;/svg&gt;&lt;/i&gt;&lt;/button&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/project/FailureRecovery.test.ts:188:20
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40101不可保留受保护快照" time="0.000319958">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40102不可保留受保护快照" time="0.000216542">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40300不可保留受保护快照" time="0.000199416">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40301不可保留受保护快照" time="0.000190375">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 真实拦截器解包业务码40400不可保留受保护快照" time="0.000186083">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 临时失败42900允许保留已成功快照" time="0.000194167">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 临时失败50000允许保留已成功快照" time="0.000187666">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 临时失败50301允许保留已成功快照" time="0.000184542">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 所有已读页面对解包403清空快照" time="0.125115292">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 卸载后的迟到响应不能重新写状态或注册Agent订阅心跳" time="0.012125625">
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent手动和心跳同时刷新只发一组GET；普通角色不能调用自进化" time="0.015528333">
+        </testcase>
+    </testsuite>
+</testsuites>

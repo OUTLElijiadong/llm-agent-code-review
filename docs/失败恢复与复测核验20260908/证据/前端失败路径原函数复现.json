@@ -1,0 +1,181 @@
+{
+  "observed_at_utc": "2026-09-08T04:42:47.942Z",
+  "method": "current_sfc_function_execution_with_local_injected_dependencies",
+  "production_requests": 0,
+  "model_requests": 0,
+  "downloads": 0,
+  "ui_click_passes": 0,
+  "application_changes": false,
+  "sources": {
+    "frontend/src/views/project/ProjectList.vue": "def2ea42862174bb507d4ff7472fe07898cf3dcd2d5f39f33035a197f0988803",
+    "frontend/src/views/code/CodeFileList.vue": "0c94d37983aff92db890ff016196798ccaca8f73ddc8092ef07203a57a442315",
+    "frontend/src/views/project/ProjectDetail.vue": "2dd104b2e3b2c78deeba62b222c4bf7fd7e4a31a795be775601a3f19e3430058",
+    "frontend/src/views/project/ProjectForm.vue": "c85441acaeb0d2a0814ed588e9b9246bf0e6b17cc98ab32f5b52108d2e8bdb4d",
+    "frontend/src/views/agent/AgentCenter.vue": "cd979619ca5c592c78c147d7e4240afd7724ecadacd8e43ab581d6f8dec6e392",
+    "frontend/src/views/report/ReportDetail.vue": "5a8bb29d7768f2bef84a0cdef0e30f43d33d61042b31e46d04e129db03b9c42a"
+  },
+  "cases": [
+    {
+      "id": "F01",
+      "reproduced": true,
+      "file": "frontend/src/views/project/ProjectList.vue",
+      "function": "fetchProjects",
+      "scenario": "已有成功结果后刷新失败",
+      "actual": {
+        "before": [
+          {
+            "id": 162
+          }
+        ],
+        "after": [],
+        "total": 0,
+        "loading": false
+      },
+      "problem": "读取失败清空已有项目，显示层失去错误与空结果区别"
+    },
+    {
+      "id": "F02",
+      "reproduced": true,
+      "file": "frontend/src/views/project/ProjectList.vue",
+      "function": "fetchProjects",
+      "scenario": "A慢请求在B快请求之后完成",
+      "actual": {
+        "query": "B",
+        "rows": [
+          {
+            "id": 162,
+            "name": "A"
+          }
+        ]
+      },
+      "problem": "旧筛选响应覆盖新筛选结果"
+    },
+    {
+      "id": "F03",
+      "reproduced": true,
+      "file": "frontend/src/views/code/CodeFileList.vue",
+      "function": "fetchFiles",
+      "scenario": "已有文件列表后读取失败",
+      "actual": {
+        "files": [],
+        "total": 0,
+        "loading": false
+      },
+      "problem": "故障伪装成暂无代码文件"
+    },
+    {
+      "id": "F04",
+      "reproduced": true,
+      "file": "frontend/src/views/project/ProjectDetail.vue",
+      "function": "fetchDetail",
+      "scenario": "已有详情后再次读取失败",
+      "actual": {
+        "project": null,
+        "loading": false
+      },
+      "problem": "同资源刷新失败清空详情及所有依赖按钮"
+    },
+    {
+      "id": "F05",
+      "reproduced": true,
+      "files": [
+        "frontend/src/views/project/ProjectForm.vue",
+        "frontend/src/views/project/ProjectList.vue"
+      ],
+      "function": "handleSubmit + onFormSubmit",
+      "scenario": "第一次创建尚未返回时再次提交",
+      "actual": {
+        "creationCalls": 2,
+        "submittingWhileCreationPending": false
+      },
+      "problem": "子表单只等待emit，实际创建期间不锁定，父回调也没有防重入"
+    },
+    {
+      "id": "F06",
+      "reproduced": true,
+      "file": "frontend/src/views/project/ProjectForm.vue",
+      "function": "autoAnalyzeFolder",
+      "scenario": "分析失败时已有人工填写内容",
+      "actual": {
+        "form": {
+          "project_name": "selected-folder",
+          "description": "",
+          "language": "plaintext"
+        },
+        "aiFilled": true,
+        "analyzing": false
+      },
+      "problem": "失败覆盖人工内容且将aiFilled设true，触发成功分析横幅"
+    },
+    {
+      "id": "F07",
+      "reproduced": true,
+      "file": "frontend/src/views/agent/AgentCenter.vue",
+      "function": "loadAll + refreshAll",
+      "scenario": "非关键画像映射失败，runtime和态势请求成功",
+      "actual": {
+        "messages": [
+          {
+            "type": "error",
+            "message": "加载 Agent 办公室数据失败"
+          },
+          {
+            "type": "success",
+            "message": "已同步最新数据"
+          }
+        ],
+        "runtime": [
+          {
+            "code": "old"
+          }
+        ],
+        "loading": false
+      },
+      "problem": "成功部分未展示，且刷新失败后错误提示紧接成功提示"
+    },
+    {
+      "id": "F08",
+      "reproduced": true,
+      "file": "frontend/src/views/agent/AgentCenter.vue",
+      "function": "loadAgentSkills",
+      "scenario": "切到AgentB后旧AgentA请求才结束",
+      "actual": {
+        "selectedByScenario": "B",
+        "displayedSkills": [
+          {
+            "name": "A.self_improve"
+          }
+        ]
+      },
+      "problem": "旧Agent技能响应覆盖当前抽屉的技能"
+    },
+    {
+      "id": "F09",
+      "reproduced": true,
+      "file": "frontend/src/views/report/ReportDetail.vue",
+      "function": "loadReport",
+      "scenario": "同报告已显示后读取失败",
+      "actual": {
+        "report": null,
+        "loading": false,
+        "messages": [
+          "报告加载失败，请返回列表重试"
+        ]
+      },
+      "problem": "只有返回列表重试提示，原报告清空；是否存在可达刷新触发需挂载验收进一步确认"
+    },
+    {
+      "id": "F10",
+      "reproduced": true,
+      "file": "frontend/src/views/code/CodeFileList.vue",
+      "function": "handleDownload",
+      "scenario": "API已返回但本地URL创建抛异常",
+      "actual": {
+        "messages": [],
+        "downloadingId": null,
+        "actualDownload": false
+      },
+      "problem": "本地异常也被“拦截器已处理”catch吞掉，用户没有反馈"
+    }
+  ]
+}

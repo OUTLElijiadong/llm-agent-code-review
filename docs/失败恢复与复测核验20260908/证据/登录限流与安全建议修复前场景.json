@@ -1,0 +1,318 @@
+{
+  "same_window": [
+    {
+      "seconds_from_first": 0,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 1
+    },
+    {
+      "seconds_from_first": 2,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 2
+    },
+    {
+      "seconds_from_first": 4,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 3
+    },
+    {
+      "seconds_from_first": 6,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 4
+    },
+    {
+      "seconds_from_first": 8,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 5
+    },
+    {
+      "seconds_from_first": 10,
+      "correct_password": false,
+      "http": 429,
+      "retry_after": "50",
+      "authentication_calls": 5
+    },
+    {
+      "seconds_from_first": 10.01,
+      "correct_password": true,
+      "http": 429,
+      "retry_after": "50",
+      "authentication_calls": 5
+    },
+    {
+      "seconds_from_first": 30,
+      "correct_password": true,
+      "http": 429,
+      "retry_after": "30",
+      "authentication_calls": 5
+    }
+  ],
+  "crossed_original_window_boundary": [
+    {
+      "seconds_from_first": 0,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 1
+    },
+    {
+      "seconds_from_first": 2,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 2
+    },
+    {
+      "seconds_from_first": 4,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 3
+    },
+    {
+      "seconds_from_first": 6,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 4
+    },
+    {
+      "seconds_from_first": 8,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 5
+    },
+    {
+      "seconds_from_first": 59.9,
+      "correct_password": false,
+      "http": 429,
+      "retry_after": "1",
+      "authentication_calls": 5
+    },
+    {
+      "seconds_from_first": 60.01,
+      "correct_password": true,
+      "http": 200,
+      "retry_after": null,
+      "authentication_calls": 6
+    }
+  ],
+  "source_ip_scope": [
+    {
+      "seconds_from_first": 0,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 1
+    },
+    {
+      "seconds_from_first": 2,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 2
+    },
+    {
+      "seconds_from_first": 4,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 3
+    },
+    {
+      "seconds_from_first": 6,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 4
+    },
+    {
+      "seconds_from_first": 8,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 5
+    },
+    {
+      "seconds_from_first": 10,
+      "correct_password": true,
+      "http": 429,
+      "retry_after": "50",
+      "authentication_calls": 5
+    },
+    {
+      "seconds_from_first": 10.01,
+      "correct_password": true,
+      "http": 200,
+      "retry_after": null,
+      "authentication_calls": 6
+    }
+  ],
+  "admitted_success_clears": [
+    {
+      "seconds_from_first": 0,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 1
+    },
+    {
+      "seconds_from_first": 2,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 2
+    },
+    {
+      "seconds_from_first": 4,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 3
+    },
+    {
+      "seconds_from_first": 6,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 4
+    },
+    {
+      "seconds_from_first": 8,
+      "correct_password": true,
+      "http": 200,
+      "retry_after": null,
+      "authentication_calls": 5
+    },
+    {
+      "seconds_from_first": 10,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 6
+    },
+    {
+      "seconds_from_first": 12,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 7
+    },
+    {
+      "seconds_from_first": 14,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 8
+    },
+    {
+      "seconds_from_first": 16,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 9
+    },
+    {
+      "seconds_from_first": 18,
+      "correct_password": false,
+      "http": 401,
+      "retry_after": null,
+      "authentication_calls": 10
+    },
+    {
+      "seconds_from_first": 20,
+      "correct_password": false,
+      "http": 429,
+      "retry_after": "50",
+      "authentication_calls": 10
+    }
+  ],
+  "password_policy": {
+    "server_5_chars_rejected": true,
+    "server_33_chars_rejected": true,
+    "server_123456_registration_accepted": true,
+    "stored_bcrypt_hash_not_plaintext": true,
+    "database": "isolated_sqlite",
+    "beta_invite_disabled_only_in_local_test": true
+  },
+  "redis_cold_worker_outage": {
+    "shared_redis_5_failures": true,
+    "warm_worker_denied_after_outage": true,
+    "cold_worker_admitted_after_outage": true,
+    "scope": "isolated_injected_redis_outage_not_production_observation"
+  },
+  "real_redis_same_window": {
+    "events": [
+      {
+        "seconds_from_first": 0,
+        "correct_password": false,
+        "http": 401,
+        "retry_after": null,
+        "authentication_calls": 1
+      },
+      {
+        "seconds_from_first": 2,
+        "correct_password": false,
+        "http": 401,
+        "retry_after": null,
+        "authentication_calls": 2
+      },
+      {
+        "seconds_from_first": 4,
+        "correct_password": false,
+        "http": 401,
+        "retry_after": null,
+        "authentication_calls": 3
+      },
+      {
+        "seconds_from_first": 6,
+        "correct_password": false,
+        "http": 401,
+        "retry_after": null,
+        "authentication_calls": 4
+      },
+      {
+        "seconds_from_first": 8,
+        "correct_password": false,
+        "http": 401,
+        "retry_after": null,
+        "authentication_calls": 5
+      },
+      {
+        "seconds_from_first": 10,
+        "correct_password": false,
+        "http": 429,
+        "retry_after": "58",
+        "authentication_calls": 5
+      },
+      {
+        "seconds_from_first": 10.01,
+        "correct_password": true,
+        "http": 429,
+        "retry_after": "58",
+        "authentication_calls": 5
+      }
+    ],
+    "redis_version": "6.2.21",
+    "clock_note": "event offsets only drive local shadow clock; Redis uses its actual clock, so Retry-After remains near60",
+    "isolation": "local_network_none_unix_socket"
+  },
+  "real_redis_subsecond_expiry": {
+    "pttl_ms_before_reject": 404,
+    "rejected_retry_after_seconds": 60,
+    "admitted_after_sleep_seconds": 0.6,
+    "ttl_injection": "PEXPIRE on isolated test key to reach final450ms of existing60s window",
+    "production_redis_modified": false
+  }
+}

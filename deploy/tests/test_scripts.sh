@@ -851,6 +851,36 @@ assert payload["can_continue"] is False
 assert payload["checks"]["disk"]["status"] == "error"
 PY
 
+  # 隔离采集失败：只替换采集结果这一输入，不替换状态判定/反馈/门禁。
+  mkdir -p "$workspace/ops-probe-failure/lib"
+  cp lib/common.sh "$workspace/ops-probe-failure/lib/"
+  python3 - "$workspace/ops-probe-failure/ops-check.sh" <<'PYTHON'
+from pathlib import Path
+import sys
+source = Path('ops-check.sh').read_text()
+assert 'memory_used="$(memory_used_percent)"' in source
+Path(sys.argv[1]).write_text(source.replace('memory_used="$(memory_used_percent)"', 'memory_used=-1'))
+PYTHON
+  set +e
+  PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
+    FAKE_DF_PERCENT=unavailable DEPLOY_ENV_FILE="$env_file" \
+    BACKUP_DIR="$backup_dir" OPS_HTTPS_REQUIRED=FALSE \
+    bash "$workspace/ops-probe-failure/ops-check.sh" > "$workspace/ops-probe-failure.json"
+  exit_code=$?
+  set -e
+  [[ "$exit_code" == 1 ]]
+  python3 - "$workspace/ops-probe-failure.json" <<'PYTHON'
+import json, sys
+payload = json.load(open(sys.argv[1]))
+assert payload['can_continue'] is False
+for kind in ('disk', 'memory'):
+    assert payload['checks'][kind]['used_percent'] == -1
+    assert kind in payload['blocking_checks']
+    action = next(item for item in payload['actions'] if item['code'] == kind + '_probe_repair')
+    assert '未能取得' in action['message'] and '重试巡检' in action['message']
+    assert '-1%' not in action['message']
+PYTHON
+
   set +e
   PATH="$fake_bin:$PATH" \
     FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
@@ -1517,6 +1547,14 @@ verify_systemd_templates() {
   done
 }
 
+if [[ "${1:-}" == --failure-matrix-only ]]; then
+  test_root="$(mktemp -d "${TMPDIR:-/tmp}/prism-failure-tests.XXXXXX")"
+  trap cleanup_test_workspace EXIT
+  printf 'test_artifacts=%s\n' "$test_root"
+  source tests/deploy_failure_cases.sh
+  run_deploy_failure_matrix "$test_root"
+  exit 0
+fi
 if [[ "${1:-}" == --release-case ]]; then
   run_release_binding_case "$2" "$3"
   exit 0
@@ -1717,6 +1755,8 @@ run_backup_archive_drift_simulation "$fake_bin" "$test_root"
 run_verify_backup_guard_simulation "$fake_bin" "$test_root"
 run_restore_failure_simulation "$test_root"
 run_deploy_failure_rollback_simulation "$test_root"
+source tests/deploy_failure_cases.sh
+run_deploy_failure_matrix "$test_root"
 run_ops_check_simulation "$fake_bin" "$test_root"
 run_cleanup_simulation "$fake_bin" "$test_root"
 run_sandbox_pin_simulation "$fake_bin" "$test_root"

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="1" failures="0" errors="0" time="0.05833175">
+    <testsuite name=".audit-review-20260908/issue-revocation.test.ts" timestamp="2026-09-08T05:08:34.278Z" hostname="lijiadongdeMacBook-Air-7.local" tests="1" failures="0" errors="0" skipped="0" time="0.05833175">
+        <testcase classname=".audit-review-20260908/issue-revocation.test.ts" name="independent issue:view revocation removes cached issue data" time="0.057880375">
+        </testcase>
+    </testsuite>
+</testsuites>

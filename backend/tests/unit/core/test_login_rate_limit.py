@@ -6,8 +6,10 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
 from starlette.requests import Request
 
+from app.core.exceptions import ServiceUnavailableError
 from app.core.rate_limit import LoginFailureLimiter, build_limiter, client_ip
 
 
@@ -257,7 +259,7 @@ def test_redis_success_clears_failures_for_other_limiter_instances() -> None:
     assert second.check("203.0.113.18").remaining == 2
 
 
-def test_redis_failure_switches_one_limiter_to_memory_without_read_write_mismatch() -> None:
+def test_redis_read_failure_does_not_create_a_local_write_budget() -> None:
     redis = _AtomicRedis()
     limiter = LoginFailureLimiter(
         redis_url="redis://redis:6379/0",
@@ -269,20 +271,20 @@ def test_redis_failure_switches_one_limiter_to_memory_without_read_write_mismatc
     calls_before_failure = redis.calls
     redis.fail = True
 
-    state_after_read_failure = limiter.check("203.0.113.15")
-    assert state_after_read_failure.remaining == 1
-
-    limiter.record_failure("203.0.113.15")
+    with pytest.raises(ServiceUnavailableError):
+        limiter.check("203.0.113.15")
+    with pytest.raises(ServiceUnavailableError):
+        limiter.record_failure("203.0.113.15")
     assert redis.calls == calls_before_failure + 1
-    assert limiter.check("203.0.113.15").allowed is False
 
     redis.fail = False
-    limiter.reset("203.0.113.15")
-    assert limiter.check("203.0.113.15").allowed is True
+    with pytest.raises(ServiceUnavailableError):
+        limiter.reset("203.0.113.15")
+    assert redis.values[limiter._key("203.0.113.15")]["failures"] == 1
     assert redis.calls == calls_before_failure + 1
 
 
-def test_redis_finish_failure_uses_shadow_and_stays_on_memory() -> None:
+def test_redis_finish_failure_does_not_clear_shared_failures_or_reservations() -> None:
     redis = _AtomicRedis()
     limiter = LoginFailureLimiter(
         redis_url="redis://redis:6379/0",
@@ -296,18 +298,18 @@ def test_redis_finish_failure_uses_shadow_and_stays_on_memory() -> None:
     redis.fail = True
     calls_before_finish = redis.calls
 
-    state = limiter.finish_attempt("203.0.113.16", attempt.reservation_id, success=True)
-
-    assert state.allowed is True
-    assert state.remaining == 2
+    with pytest.raises(ServiceUnavailableError):
+        limiter.finish_attempt("203.0.113.16", attempt.reservation_id, success=True)
     assert redis.calls == calls_before_finish + 1
     redis.fail = False
-    limiter.record_failure("203.0.113.16")
+    with pytest.raises(ServiceUnavailableError):
+        limiter.record_failure("203.0.113.16")
     assert redis.calls == calls_before_finish + 1
-    assert limiter.check("203.0.113.16").remaining == 1
+    bucket = redis.values[limiter._key("203.0.113.16")]
+    assert bucket["failures"] == 1 and bucket["pending"] == 1
 
 
-def test_redis_reset_failure_also_switches_limiter_to_memory_permanently() -> None:
+def test_redis_reset_failure_rejects_without_locally_clearing_shared_state() -> None:
     redis = _AtomicRedis()
     limiter = LoginFailureLimiter(
         redis_url="redis://redis:6379/0",
@@ -319,10 +321,12 @@ def test_redis_reset_failure_also_switches_limiter_to_memory_permanently() -> No
     redis.fail = True
     calls_before_reset = redis.calls
 
-    limiter.reset("203.0.113.19")
+    with pytest.raises(ServiceUnavailableError):
+        limiter.reset("203.0.113.19")
 
     assert redis.calls == calls_before_reset + 1
     redis.fail = False
-    limiter.record_failure("203.0.113.19")
+    with pytest.raises(ServiceUnavailableError):
+        limiter.record_failure("203.0.113.19")
     assert redis.calls == calls_before_reset + 1
-    assert limiter.check("203.0.113.19").remaining == 1
+    assert redis.values[limiter._key("203.0.113.19")]["failures"] == 1

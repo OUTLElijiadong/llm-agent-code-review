@@ -1,0 +1,88 @@
+{
+  "源码": [
+    {
+      "路径": "backend/app/core/rate_limit.py",
+      "SHA256": "ec41e6b572f7c3109291eaf5620d1e1306b76e578d10b2b5aa9cce3cd4122a42"
+    },
+    {
+      "路径": "backend/app/api/v1/auth.py",
+      "SHA256": "a3ba9385635033347a7c632c3916071861a68a7c7621e33e6b92a2ddc62ce62a"
+    },
+    {
+      "路径": "frontend/src/views/auth/Login.vue",
+      "SHA256": "504af5fd9efca6316056fbaf20c000094cadb82a4ff36e00042c7fbc38062c93"
+    },
+    {
+      "路径": "backend/tests/unit/core/test_login_rate_limit.py",
+      "SHA256": "d40a49c7978e415f22c85a6891eb34ea71765987ca73125c6435e04ac06714a9"
+    },
+    {
+      "路径": "backend/tests/unit/core/test_login_rate_limit_real_redis.py",
+      "SHA256": "769a5a72099bae5c541fc0802d4d92cc18ec7f3eb5e9cbb025d2e2beff5c6cfd"
+    },
+    {
+      "路径": "backend/tests/unit/api/test_auth_rate_limit_api.py",
+      "SHA256": "14954eea7148c790e9668133f5e6db4e1b6a0ee89484d2f93fdf5499a75be4ef"
+    },
+    {
+      "路径": "backend/tests/unit/core/test_login_redis_unavailability.py",
+      "SHA256": "23b5eea13c13aa3a11fc65d4af4dec87e1ff6a0e907f3b8047d69aecb9805e1f"
+    },
+    {
+      "路径": "backend/tests/unit/api/test_auth_redis_unavailability_api.py",
+      "SHA256": "6b0f8fcf3179c76dcdd591e53e94524f65a18c3307d97bfe58e2830066066c18"
+    },
+    {
+      "路径": "frontend/src/views/auth/Login.test.ts",
+      "SHA256": "f8a2fb7960a0e43b706c77d3357092cea7bc08967bf85a6d3f90616c414c3802"
+    }
+  ],
+  "测试": [
+    {
+      "文件": "登录Redis真实Lua修复前.xml",
+      "SHA256": "2ebcc894ddc36c03696b627fb2f1b07e9c9070751d46bedf409e22f7b09f661f",
+      "总数": 5,
+      "失败": 4,
+      "错误": 0,
+      "跳过": 0
+    },
+    {
+      "文件": "登录Redis故障关闭修复前.xml",
+      "SHA256": "3f0e015d7ca4dcd3931073351a591b0736d3e5d7436ebf11042bd88c1df94e47",
+      "总数": 7,
+      "失败": 6,
+      "错误": 0,
+      "跳过": 0
+    },
+    {
+      "文件": "登录安全服务提示修复前.xml",
+      "SHA256": "5b21cd0ec8c7168c8881d283ff7247ddffb21a745ef4458682c6f483c2eaad81",
+      "总数": 12,
+      "失败": 1,
+      "错误": 0,
+      "跳过": 0
+    },
+    {
+      "文件": "登录精度与Redis故障关闭最终回归.xml",
+      "SHA256": "314a6026aa6d41f98c7ce5b86a5ee15c834432c1b6a6ff8436e155dfc5d8e898",
+      "总数": 39,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0
+    },
+    {
+      "文件": "登录安全服务提示与HTTP回归.xml",
+      "SHA256": "a27af0c11a369af6253454fc83cdb8e366cdb735eee1a9218ba4c1405a27f73b",
+      "总数": 32,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0
+    }
+  ],
+  "检查": {
+    "Ruff": "7文件通过",
+    "ESLint": "Login.vue及Login.test.ts通过"
+  },
+  "生产行为": "仅匿名HEAD，无生产认证或数据写入",
+  "真实Redis": "本地隔离6.2.21，5项真实Lua；故障由独立夹具注入"
+}

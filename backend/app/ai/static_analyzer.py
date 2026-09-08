@@ -13,8 +13,6 @@
 """
 from __future__ import annotations
 
-from app.constants.security_catalog import owasp_reference
-
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -22,6 +20,7 @@ from app.ai.cvss import CVSS_VERSION, calculate_cvss_score
 from app.ai.security_patterns import SecretMatch, scan_secrets
 from app.ai.security_static_rules import StaticMatch, apply_static_rules
 from app.constants.compliance import get_compliance_mapping
+from app.constants.security_catalog import owasp_reference
 
 # === CWE → CVSS 向量模板(基于该 CWE 的典型攻击路径预设) ===
 _CWE_TO_CVSS_VECTOR: Dict[str, str] = {

@@ -1,0 +1,121 @@
+{
+  "scope": "independent offline JSON recount and collector read; no production commands",
+  "production_requests": 0,
+  "business_writes": false,
+  "passed": true,
+  "checks": {
+    "runtime_all_fields_except_observation_equal": true,
+    "exact_42_unique_foreign_keys": true,
+    "foreign_key_contract": true,
+    "runtime_readonly": true,
+    "release_3_8_6": true,
+    "revision_048": true,
+    "frontend_summary_269_and_same_manifest": true,
+    "historical_task_unchanged": true,
+    "historical_team_tasks_unchanged": true,
+    "historical_event_unchanged": true,
+    "orphan_tool_unchanged": true,
+    "unresolved_tool_unchanged": true,
+    "relationship_unchanged": true,
+    "owner_mismatch_unchanged": true,
+    "task_member_team_mismatch_unchanged": true,
+    "two_historical_tasks": true,
+    "seven_orphan_ids": true,
+    "three_unresolved_ids": true,
+    "history_readonly": true,
+    "exact_query_sha256": true,
+    "query_starts_readonly_ends_rollback": true,
+    "tool_counts_reconcile": true,
+    "tool_integrity_valid": true
+  },
+  "source_sha256": {
+    "runtime_before": "12a964853e175cb9e7ae92721d85113f9440e7a6d1d6f4b5af8b338622be82c0",
+    "runtime_current": "a0cfb3b7e1070a00114ed9803a74e0d0fb40776596deb6c177cc43fb515ead45",
+    "history_before": "dc0e96a8ccf20428ca990caa4097666b2c640593e210016c0d1ad1f5fb6edf77",
+    "history_current": "5d02c2dfe7cfb35e29d1bf3ca0208d2051fe22581eb46aa9fab4feb2e7e0aa86",
+    "history_collector": "37ffc5a773c422edc437050c275b8c1381d2fe37111e24625f2682a799bb0eb4",
+    "runtime_collector": "6a4b90538b7c307e6bbac71463ef76cf8d51b8b206288f8c51e5a9792c2a8759"
+  },
+  "foreign_key_recount": {
+    "agent_mesh_message": 6,
+    "agent_response_run": 6,
+    "agent_team": 6,
+    "ai_call_log": 6,
+    "pentest_engagement": 6,
+    "review_task": 6,
+    "sandbox_environment": 6
+  },
+  "frontend_evidence_boundary": "Current evidence retains count and canonical digest, not per-file maps. Compared current count/digest with prior verified runtime; no claim of independently recomputing current 269 raw file hashes.",
+  "historical_rows": {
+    "historical_task": {
+      "count": 2,
+      "canonical_sha256": "5031f79d7ee01f1a043e3987544c6032130bd4b10230441cc1ad74289c508e22"
+    },
+    "historical_team_tasks": {
+      "count": 6,
+      "canonical_sha256": "4594fe9d25fed567662a10fe182c37c76427648b6a439d7b9a826e12577cff6a"
+    },
+    "historical_event": {
+      "count": 23,
+      "canonical_sha256": "1e4546c5dbb447bb395475f085f7d74a48a8b69b91a10358cd69b83b9101a189"
+    },
+    "orphan_tool": {
+      "count": 7,
+      "canonical_sha256": "ac3c3b39f7435ff0198eeb319cf8a069be2c3e4f20d10f4d5a05fc3bafba4cee"
+    },
+    "unresolved_tool": {
+      "count": 3,
+      "canonical_sha256": "213f1de5d99c708a7caa868bec6a44dfd7be747158c4fd68f10dc20e1afde9d5"
+    },
+    "relationship": {
+      "count": 12,
+      "canonical_sha256": "fc75ff440831ef14c187e12d7a1c1afd366ec7d69b162efe08b7bcb90395eacc"
+    },
+    "owner_mismatch": {
+      "count": 1,
+      "canonical_sha256": "831fd6181808cdbd39d2e91a92418809d34d80f8bbc8ab49373a5eabe92f6b51"
+    },
+    "task_member_team_mismatch": {
+      "count": 1,
+      "canonical_sha256": "831fd6181808cdbd39d2e91a92418809d34d80f8bbc8ab49373a5eabe92f6b51"
+    }
+  },
+  "dynamic_global_status_deltas": [
+    {
+      "table": "agent_response_run",
+      "status": "completed",
+      "before": 519,
+      "current": 520,
+      "delta": 1
+    },
+    {
+      "table": "agent_tool_execution",
+      "status": "failed",
+      "before": 344,
+      "current": 348,
+      "delta": 4
+    },
+    {
+      "table": "agent_tool_execution",
+      "status": "success",
+      "before": 2229,
+      "current": 2257,
+      "delta": 28
+    },
+    {
+      "table": "ops_execution",
+      "status": "failed",
+      "before": 43173,
+      "current": 43178,
+      "delta": 5
+    },
+    {
+      "table": "ops_execution",
+      "status": "success",
+      "before": 42900,
+      "current": 44831,
+      "delta": 1931
+    }
+  ],
+  "dynamic_count_boundary": "Aggregate snapshot deltas do not identify callers or prove causes. Historical selected rows remained unchanged."
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "file": "backend/app/ai/discussion_orchestrator.py",
+    "only_import_order_or_formatting": true,
+    "sha256": "998b68c01d3dae661f6b0342a6274d4ac385a7e31c10c378a7e7c0e88b9ed7c7"
+  },
+  {
+    "file": "backend/app/ai/security_patterns.py",
+    "only_import_order_or_formatting": true,
+    "sha256": "cedc0d9178f3bb104d88f931d14422c0aac879a48d4904a984f813bf27035024"
+  },
+  {
+    "file": "backend/app/ai/security_static_rules.py",
+    "only_import_order_or_formatting": true,
+    "sha256": "d436123abffe82da302c06f91727e72a0d079d94e3d89c1fdd27e585f812a75a"
+  },
+  {
+    "file": "backend/app/ai/static_analyzer.py",
+    "only_import_order_or_formatting": true,
+    "sha256": "ac243ecae451c0b55490e87f8e47605e7f4c93f79b54b21997af11bef31952f7"
+  },
+  {
+    "file": "backend/app/api/v1/discussion.py",
+    "only_import_order_or_formatting": true,
+    "sha256": "724ddf5fffa420b9a61b5eba8ad1b71c0abb9df470e7b6a3db7f7559db7bdc73"
+  },
+  {
+    "file": "backend/app/constants/security_catalog.py",
+    "only_import_order_or_formatting": true,
+    "sha256": "6d49b3fe2799065665a66fdaa6213b7d14a118d2657806c00a56e722f144c640"
+  }
+]

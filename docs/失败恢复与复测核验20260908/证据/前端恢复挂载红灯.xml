@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="9" failures="9" errors="0" time="0.350212125">
+    <testsuite name="src/views/project/FailureRecovery.test.ts" timestamp="2026-09-08T04:48:30.608Z" hostname="lijiadongdeMacBook-Air-7.local" tests="9" failures="9" errors="0" skipped="0" time="0.350212125">
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 项目刷新503保留快照并显示失败；重试成功后移除提示" time="0.102868125">
+            <failure message="expected &apos;项目管理共 0 个项目 · 0 活跃 · 0 归档☰表格▦卡片新建项目语言…&apos; to contain &apos;原有项目&apos;" type="AssertionError">
+AssertionError: expected &apos;项目管理共 0 个项目 · 0 活跃 · 0 归档☰表格▦卡片新建项目语言…&apos; to contain &apos;原有项目&apos;
+
+Expected: &quot;原有项目&quot;
+Received: &quot;项目管理共 0 个项目 · 0 活跃 · 0 归档☰表格▦卡片新建项目语言状态重置0 / 0 条项目名称语言状态评分文件Agent 运转最近审查创建时间操作还没有项目，点击右上角新建一个吧+ 新建项目还没有项目+ 新建项目&quot;
+
+ ❯ src/views/project/FailureRecovery.test.ts:60:28
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 项目先失败不能显示还没有项目；403清空已授权快照" time="0.028897959">
+            <failure message="expected &apos;项目管理共 0 个项目 · 0 活跃 · 0 归档☰表格▦卡片新建项目语言…&apos; not to contain &apos;还没有项目&apos;" type="AssertionError">
+AssertionError: expected &apos;项目管理共 0 个项目 · 0 活跃 · 0 归档☰表格▦卡片新建项目语言…&apos; not to contain &apos;还没有项目&apos;
+
+Expected: &quot;还没有项目&quot;
+Received: &quot;项目管理共 0 个项目 · 0 活跃 · 0 归档☰表格▦卡片新建项目语言状态重置0 / 0 条项目名称语言状态评分文件Agent 运转最近审查创建时间操作还没有项目，点击右上角新建一个吧+ 新建项目还没有项目+ 新建项目&quot;
+
+ ❯ src/views/project/FailureRecovery.test.ts:68:32
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 旧筛选响应不覆盖新结果；新筛选失败明确旧条件快照" time="0.043867917">
+            <failure message="expected &apos;A项目&apos; to be &apos;B项目&apos; // Object.is equality" type="AssertionError">
+AssertionError: expected &apos;A项目&apos; to be &apos;B项目&apos; // Object.is equality
+
+Expected: &quot;B项目&quot;
+Received: &quot;A项目&quot;
+
+ ❯ src/views/project/FailureRecovery.test.ts:83:46
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 创建按钮在父请求完成前保持锁定，超时保留输入且不会自动重发" time="0.0325835">
+            <failure message="缺少 + 新建项目" type="Error">
+Error: 缺少 + 新建项目
+ ❯ button src/views/project/FailureRecovery.test.ts:37:129
+ ❯ src/views/project/FailureRecovery.test.ts:91:11
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 分析失败保留手填值，不显示Agent已分析；分析中不可创建" time="0.014293916">
+            <failure message="expected undefined to be defined" type="AssertionError">
+AssertionError: expected undefined to be defined
+ ❯ src/views/project/FailureRecovery.test.ts:109:51
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 文件列表503保留内容与重试；过期响应不覆盖新筛选" time="0.037122875">
+            <failure message="expected &apos;语言筛选查看代码版本历史文件名语言类型大小行数版本更新时间操作暂无代码文件&apos; to contain &apos;原有文件.py&apos;" type="AssertionError">
+AssertionError: expected &apos;语言筛选查看代码版本历史文件名语言类型大小行数版本更新时间操作暂无代码文件&apos; to contain &apos;原有文件.py&apos;
+
+Expected: &quot;原有文件.py&quot;
+Received: &quot;语言筛选查看代码版本历史文件名语言类型大小行数版本更新时间操作暂无代码文件&quot;
+
+ ❯ src/views/project/FailureRecovery.test.ts:118:28
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; 详情503保留只读快照并关闭写操作，403清空；重试重新校验权限" time="0.052284792">
+            <failure message="expected &apos;Back项目详情项目不存在&apos; to contain &apos;原有项目&apos;" type="AssertionError">
+AssertionError: expected &apos;Back项目详情项目不存在&apos; to contain &apos;原有项目&apos;
+
+Expected: &quot;原有项目&quot;
+Received: &quot;Back项目详情项目不存在&quot;
+
+ ❯ src/views/project/FailureRecovery.test.ts:129:28
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent画像读取失败仍更新成功目录，不产生同步成功提示；手动恢复可成功" time="0.018939125">
+            <failure message="expected &apos;A&apos; to be &apos;最新Agent&apos; // Object.is equality" type="AssertionError">
+AssertionError: expected &apos;A&apos; to be &apos;最新Agent&apos; // Object.is equality
+
+Expected: &quot;最新Agent&quot;
+Received: &quot;A&quot;
+
+ ❯ src/views/project/FailureRecovery.test.ts:143:37
+            </failure>
+        </testcase>
+        <testcase classname="src/views/project/FailureRecovery.test.ts" name="主页面失败恢复真实挂载 &gt; Agent技能切换忽略旧响应；失败显示重试而不是没有技能" time="0.01891225">
+            <failure message="expected &apos;A.skill&apos; to be &apos;B.skill&apos; // Object.is equality" type="AssertionError">
+AssertionError: expected &apos;A.skill&apos; to be &apos;B.skill&apos; // Object.is equality
+
+Expected: &quot;B.skill&quot;
+Received: &quot;A.skill&quot;
+
+ ❯ src/views/project/FailureRecovery.test.ts:155:41
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

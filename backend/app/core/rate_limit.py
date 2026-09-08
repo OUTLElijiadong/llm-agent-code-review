@@ -17,6 +17,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.core.config import settings
+from app.core.exceptions import ServiceUnavailableError
 
 
 def _parsed_ip(value: str) -> Optional[ipaddress._BaseAddress]:
@@ -86,6 +87,14 @@ class LoginAttempt(LoginLimitState):
     reservation_id: Optional[str] = None
 
 
+class LoginRateLimitUnavailableError(ServiceUnavailableError):
+    """共享登录安全计数不可用，认证必须等待后再尝试。"""
+
+    def __init__(self, retry_after: int) -> None:
+        self.retry_after = max(1, int(retry_after))
+        super().__init__(f"安全校验服务暂不可用，请等待 {self.retry_after} 秒后重试")
+
+
 @dataclass
 class _MemoryLoginBucket:
     failures: int = 0
@@ -98,28 +107,38 @@ class LoginFailureLimiter:
     """带原子准入预留的登录失败固定窗口限流器。
 
     登录开始前先占用一个窗口名额，认证结束后再把预留原子结算为成功或失败。
-    Redis 可用时所有状态转换均由 Lua 完成；任一 Redis 操作失败后，该实例
-    粘性降级到已同步的进程内影子状态，避免后续读写落在不同后端。
+    配置 Redis 时所有状态转换均由 Lua 完成；故障时拒绝登录并在 5 秒后
+    重试共享存储，不能用冷实例的空内存放行。未配置 Redis 时保留本地模式。
     """
 
-    _CHECK_SCRIPT = """
+    _REDIS_RETRY_SECONDS = 5
+
+    # Redis TTL rounds subsecond lifetimes to 0. Preserve that live window and
+    # round PTTL upward for Retry-After, matching the in-memory ceil semantics.
+    _TTL_HELPER_SCRIPT = """
+local function remaining_seconds(key, window)
+  local remaining_ms = redis.call('PTTL', key)
+  if remaining_ms < 0 then return window end
+  return math.max(1, math.ceil(remaining_ms / 1000))
+end
+"""
+
+    _CHECK_SCRIPT = _TTL_HELPER_SCRIPT + """
 -- prism:login-check
 local failures = tonumber(redis.call('HGET', KEYS[1], 'failures') or '0')
 local pending = tonumber(redis.call('HGET', KEYS[1], 'pending') or '0')
-local ttl = redis.call('TTL', KEYS[1])
-if ttl < 1 then ttl = tonumber(ARGV[1]) end
+local ttl = remaining_seconds(KEYS[1], tonumber(ARGV[1]))
 return {failures, pending, ttl}
 """
 
-    _RESERVE_SCRIPT = """
+    _RESERVE_SCRIPT = _TTL_HELPER_SCRIPT + """
 -- prism:login-reserve
 local limit = tonumber(ARGV[1])
 local window = tonumber(ARGV[2])
 local token_field = 'r:' .. ARGV[3]
 local failures = tonumber(redis.call('HGET', KEYS[1], 'failures') or '0')
 local pending = tonumber(redis.call('HGET', KEYS[1], 'pending') or '0')
-local ttl = redis.call('TTL', KEYS[1])
-if ttl < 1 then ttl = window end
+local ttl = remaining_seconds(KEYS[1], window)
 if redis.call('HEXISTS', KEYS[1], token_field) == 1 then
   return {1, failures, pending, ttl}
 end
@@ -128,11 +147,11 @@ if failures + pending >= limit then
 end
 pending = redis.call('HINCRBY', KEYS[1], 'pending', 1)
 redis.call('HSET', KEYS[1], token_field, 1)
-if redis.call('TTL', KEYS[1]) < 1 then redis.call('EXPIRE', KEYS[1], window) end
-return {1, failures, pending, redis.call('TTL', KEYS[1])}
+if redis.call('PTTL', KEYS[1]) == -1 then redis.call('EXPIRE', KEYS[1], window) end
+return {1, failures, pending, remaining_seconds(KEYS[1], window)}
 """
 
-    _FINISH_SUCCESS_SCRIPT = """
+    _FINISH_SUCCESS_SCRIPT = _TTL_HELPER_SCRIPT + """
 -- prism:login-finish-success
 local token_field = 'r:' .. ARGV[1]
 local window = tonumber(ARGV[2])
@@ -148,12 +167,11 @@ if settled == 1 then
   end
   redis.call('HSET', KEYS[1], 'pending', pending, 'failures', failures)
 end
-local ttl = redis.call('TTL', KEYS[1])
-if ttl < 1 then ttl = window end
+local ttl = remaining_seconds(KEYS[1], window)
 return {settled, failures, pending, ttl}
 """
 
-    _FINISH_FAILURE_SCRIPT = """
+    _FINISH_FAILURE_SCRIPT = _TTL_HELPER_SCRIPT + """
 -- prism:login-finish-failure
 local limit = tonumber(ARGV[1])
 local token_field = 'r:' .. ARGV[2]
@@ -166,15 +184,14 @@ if settled == 1 then
   failures = math.min(limit, failures + 1)
   redis.call('HSET', KEYS[1], 'pending', pending, 'failures', failures)
 end
-local ttl = redis.call('TTL', KEYS[1])
-if ttl < 1 then
+if redis.call('PTTL', KEYS[1]) == -1 then
   redis.call('EXPIRE', KEYS[1], window)
-  ttl = window
 end
+local ttl = remaining_seconds(KEYS[1], window)
 return {settled, failures, pending, ttl}
 """
 
-    _RELEASE_SCRIPT = """
+    _RELEASE_SCRIPT = _TTL_HELPER_SCRIPT + """
 -- prism:login-release
 local token_field = 'r:' .. ARGV[1]
 local window = tonumber(ARGV[2])
@@ -189,12 +206,11 @@ if settled == 1 then
   end
   redis.call('HSET', KEYS[1], 'pending', pending)
 end
-local ttl = redis.call('TTL', KEYS[1])
-if ttl < 1 then ttl = window end
+local ttl = remaining_seconds(KEYS[1], window)
 return {settled, failures, pending, ttl}
 """
 
-    _INCREMENT_SCRIPT = """
+    _INCREMENT_SCRIPT = _TTL_HELPER_SCRIPT + """
 -- prism:login-increment
 local limit = tonumber(ARGV[1])
 local window = tonumber(ARGV[2])
@@ -202,8 +218,8 @@ local failures = tonumber(redis.call('HGET', KEYS[1], 'failures') or '0')
 local pending = tonumber(redis.call('HGET', KEYS[1], 'pending') or '0')
 failures = math.min(limit, failures + 1)
 redis.call('HSET', KEYS[1], 'failures', failures, 'pending', pending)
-if redis.call('TTL', KEYS[1]) < 1 then redis.call('EXPIRE', KEYS[1], window) end
-return {failures, pending, redis.call('TTL', KEYS[1])}
+if redis.call('PTTL', KEYS[1]) == -1 then redis.call('EXPIRE', KEYS[1], window) end
+return {failures, pending, remaining_seconds(KEYS[1], window)}
 """
 
     def __init__(
@@ -220,6 +236,7 @@ return {failures, pending, redis.call('TTL', KEYS[1])}
         self._redis = redis_client
         self._redis_initialized = redis_client is not None
         self._redis_disabled = False
+        self._redis_retry_at = 0.0
         self._redis_lock = threading.RLock()
         self._memory: dict[str, _MemoryLoginBucket] = {}
         self._lock = threading.Lock()
@@ -231,10 +248,12 @@ return {failures, pending, redis.call('TTL', KEYS[1])}
     def _client(self):
         with self._redis_lock:
             if self._redis_disabled:
-                return None
+                remaining = self._redis_retry_at - time.monotonic()
+                if remaining > 0:
+                    raise LoginRateLimitUnavailableError(math.ceil(remaining))
+                self._redis_disabled = False
             if self._redis_initialized:
                 return self._redis
-            self._redis_initialized = True
             if not self.redis_url:
                 return None
             try:
@@ -246,20 +265,18 @@ return {failures, pending, redis.call('TTL', KEYS[1])}
                     socket_connect_timeout=1,
                     socket_timeout=1,
                 )
-            except Exception as exc:  # pragma: no cover - environment-specific
-                self._redis_disabled = True
-                self._redis = None
-                logger.warning("[rate-limit] Redis 限流初始化失败，粘性降级进程内计数: {}", exc)
+                self._redis_initialized = True
+            except Exception as exc:
+                raise self._disable_redis(exc) from exc
             return self._redis
 
-    def _disable_redis(self, exc: Exception) -> None:
+    def _disable_redis(self, exc: Exception) -> LoginRateLimitUnavailableError:
         with self._redis_lock:
-            first_failure = not self._redis_disabled
             self._redis_disabled = True
-            self._redis_initialized = True
-            self._redis = None
-        if first_failure:
-            logger.warning("[rate-limit] Redis 操作失败，粘性降级进程内计数: {}", exc)
+            self._redis_retry_at = time.monotonic() + self._REDIS_RETRY_SECONDS
+        # 不输出 Redis URL、连接异常原文或凭据；保留客户端连接池以便到期重连。
+        logger.warning("[rate-limit] 共享登录安全计数不可用，5 秒后重试: {}", type(exc).__name__)
+        return LoginRateLimitUnavailableError(self._REDIS_RETRY_SECONDS)
 
     def _eval(self, script: str, key: str, *args: object):
         client = self._client()
@@ -267,21 +284,24 @@ return {failures, pending, redis.call('TTL', KEYS[1])}
             return None
         try:
             result = client.eval(script, 1, key, *args)
-        except Exception as exc:  # pragma: no cover - covered by fault-injection fake
-            self._disable_redis(exc)
-            return None
-        with self._redis_lock:
-            return None if self._redis_disabled else result
+            if result is None:
+                raise ValueError("Redis Lua 返回空结果")
+        except Exception as exc:
+            raise self._disable_redis(exc) from exc
+        return result
 
     def _numbers(self, result: Any, expected: int) -> Optional[tuple[int, ...]]:
         try:
             values = tuple(int(value) for value in result)
             if len(values) != expected:
                 raise ValueError(f"Redis Lua 返回字段数异常: {len(values)} != {expected}")
+            if any(value < 0 for value in values) or values[-1] < 1:
+                raise ValueError("Redis Lua 返回无效计数或剩余时间")
+            if expected == 4 and values[0] not in (0, 1):
+                raise ValueError("Redis Lua 返回无效准入或结算状态")
             return values
         except Exception as exc:
-            self._disable_redis(exc)
-            return None
+            raise self._disable_redis(exc) from exc
 
     def _state(self, count: int, ttl: int) -> LoginLimitState:
         blocked = count >= self.limit
@@ -533,8 +553,8 @@ return {failures, pending, redis.call('TTL', KEYS[1])}
             if client is not None:
                 try:
                     client.delete(key)
-                except Exception as exc:  # pragma: no cover - covered by fault-injection fake
-                    self._disable_redis(exc)
+                except Exception as exc:
+                    raise self._disable_redis(exc) from exc
         with self._lock:
             self._memory.pop(key, None)
 

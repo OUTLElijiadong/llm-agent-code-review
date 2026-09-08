@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="1" failures="1" errors="0" time="0.066328834">
+    <testsuite name=".audit-review-20260908/issue-revocation.test.ts" timestamp="2026-09-08T05:04:09.754Z" hostname="lijiadongdeMacBook-Air-7.local" tests="1" failures="1" errors="0" skipped="0" time="0.066328834">
+        <testcase classname=".audit-review-20260908/issue-revocation.test.ts" name="independent issue:view revocation removes cached issue data" time="0.065965667">
+            <failure message="expected &apos;分析中test-model当前文件worker.ts已完成文件 / 总文件…&apos; not to contain &apos;cached-private-finding&apos;" type="AssertionError">
+AssertionError: expected &apos;分析中test-model当前文件worker.ts已完成文件 / 总文件…&apos; not to contain &apos;cached-private-finding&apos;
+
+Expected: &quot;cached-private-finding&quot;
+Received: &quot;分析中test-model当前文件worker.ts已完成文件 / 总文件2 / 8当前 / 最近文件分片3 / 11仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。返回 隔离测试审查全面审查·test-model·1.0s任务 #21测试项目尚无最终评分0危急0高0中0低0总计运行中文件列表0暂无审查文件·请选择文件text请从左侧选择一个文件查看代码问题列表1危急0高0中0低0代码规范命名规范注释完整性可维护性性能问题异常处理潜在 Bug安全漏洞问题列表更新失败：无问题查看权限。已有内容为上次成功获取的结果。重新加载问题高cached-private-findingprivate.ts · L?  安全漏洞未修复&quot;
+
+ ❯ .audit-review-20260908/issue-revocation.test.ts:109:30
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="4" failures="4" errors="0" time="0.52272975">
+    <testsuite name="src/views/report/FailureRecoveryIndependent.test.ts" timestamp="2026-09-08T05:04:09.678Z" hostname="lijiadongdeMacBook-Air-7.local" tests="4" failures="4" errors="0" skipped="0" time="0.52272975">
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 报告本地click异常必须释放URL和锚点" time="0.193458875">
+            <failure message="expected &quot;spy&quot; to be called with arguments: [ &apos;blob:independent-fixture&apos; ]
+
+Number of calls: 0
+" type="AssertionError">
+AssertionError: expected &quot;spy&quot; to be called with arguments: [ &apos;blob:independent-fixture&apos; ]
+
+Number of calls: 0
+
+ ❯ src/views/report/FailureRecoveryIndependent.test.ts:34:33
+            </failure>
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 报告访问被403撤销后迟到HTML不得重新打开预览" time="0.143280042">
+            <failure message="expected true to be false // Object.is equality" type="AssertionError">
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/views/report/FailureRecoveryIndependent.test.ts:43:79
+            </failure>
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 卸载后迟到HTML不得创建预览资源或写入缓存" time="0.144837666">
+            <failure message="expected true to be false // Object.is equality" type="AssertionError">
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/views/report/FailureRecoveryIndependent.test.ts:50:42
+            </failure>
+        </testcase>
+        <testcase classname="src/views/report/FailureRecoveryIndependent.test.ts" name="独立失败恢复边界 &gt; 拖拽异步收集期间父提交锁生效后不得补发分析" time="0.0403685">
+            <failure message="expected &quot;spy&quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      Object {
+        &quot;file_names&quot;: Array [
+          &quot;main.py&quot;,
+        ],
+        &quot;folder_name&quot;: &quot;未命名文件夹&quot;,
+      },
+    ]
+
+
+Number of calls: 1
+" type="AssertionError">
+AssertionError: expected &quot;spy&quot; to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      Object {
+        &quot;file_names&quot;: Array [
+          &quot;main.py&quot;,
+        ],
+        &quot;folder_name&quot;: &quot;未命名文件夹&quot;,
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/report/FailureRecoveryIndependent.test.ts:58:35
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,0 +1,813 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="52" failures="6" errors="0" time="0.772841959">
+    <testsuite name="src/views/review/ReviewTaskDetail.test.ts" timestamp="2026-09-08T04:43:00.338Z" hostname="lijiadongdeMacBook-Air-7.local" tests="52" failures="6" errors="0" skipped="0" time="0.772841959">
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 当前文件已是 v2 时仍读取并校验任务 v1，使用冻结的名称和语言" time="0.071228584">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 有快照摘要但服务端校验为 false 时阻断，不能当作旧任务回退" time="0.029431125">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 有快照摘要但服务端校验为 undefined 时阻断，不能当作旧任务回退" time="0.017373">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{&quot;content_sha256&quot;:null}" time="0.007832083">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{&quot;content_sha256&quot;:&quot;&quot;}" time="0.010711875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{&quot;content_sha256&quot;:&quot;broken&quot;}" time="0.006231166">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{&quot;version_no&quot;:0}" time="0.008335958">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 快照元数据不完整或非法时拒绝当前内容兜底：{}" time="0.008517292">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 服务端快照校验失败后重试先重新读取任务记录，恢复后才读取历史内容" time="0.065828458">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 重新确认失败快照时任务接口断线，保留阻断和明确重试错误" time="0.0269845">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 已知快照的元数据在重试中消失时仍阻断，多次重试也不能降级为旧任务" time="0.017150833">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 只有没有快照元数据的旧任务才显示带历史未知警告的当前文件：{&quot;snapshot_verified&quot;:false,&quot;content_sha256&quot;:null}" time="0.009576708">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 只有没有快照元数据的旧任务才显示带历史未知警告的当前文件：{}" time="0.017880334">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 即使历史接口返回成功，UTF-8 内容摘要不符也不展示" time="0.083971208">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 缺少 crypto 时明确无法校验，不把服务端标记当作浏览器验证" time="0.007297292">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 缺少 TextEncoder 时明确无法校验，不把服务端标记当作浏览器验证" time="0.005284167">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 浏览器摘要计算异常显示错误而不是信任未验证内容" time="0.006473958">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 版本接口返回的身份或内容无效时拒绝展示：{&quot;file_id&quot;:99}" time="0.006907625">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 版本接口返回的身份或内容无效时拒绝展示：{&quot;version_no&quot;:2}" time="0.006741333">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 版本接口返回的身份或内容无效时拒绝展示：{}" time="0.016047041">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 软删除或历史版本 404 明确无法读取原始输入，重试仍读取同一历史版本" time="0.066288041">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 历史请求未完成时反馈忙态，不宣称已校验，同一文件键盘连按不重复请求" time="0.068583334">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 源码编辑入口明确编辑当前版本，导航不冒充快照编辑" time="0.006007">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 切换文件后忽略旧历史请求的迟到 resolve，不覆盖新内容或错误" time="0.008651459">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 切换文件后忽略旧历史请求的迟到 reject，不覆盖新内容或错误" time="0.018094708">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查输入快照预览 &gt; 摘要计算期间切换任务，旧摘要完成后不能污染新任务预览" time="0.017113084">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 沙箱历史16字段行按报告4条展示，未分级不伪造零风险" time="0.004659875">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 沙箱报告缺少问题清单时保留未知条目数，不显示旧占位16或0" time="0.002544375">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 只显示 coverage 返回的阶段、文件和分片计数，不推算百分比" time="0.004419333">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; pending 即使携带 100 分也不显示风险评级和满分动画" time="0.00500275">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; running 即使携带 100 分也不显示风险评级和满分动画" time="0.004902125">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; failed 即使携带 100 分也不显示风险评级和满分动画" time="0.009683667">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; cancelled 即使携带 100 分也不显示风险评级和满分动画" time="0.005329583">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 成功且评分有效时显示服务端原值，不经动画制造中间评分" time="0.004325917">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 历史或非法 coverage 标未知，不借用任务总数" time="0.004385792">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 历史或非法 coverage 标未知，不借用任务总数" time="0.003875458">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 历史或非法 coverage 标未知，不借用任务总数" time="0.004370208">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 真实零计数保留为零，而不是未知或虚构完成" time="0.003649209">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 失败展示真实覆盖缺口和服务端错误，不伪装为未发现问题" time="0.003805041">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 初次连接失败有原因和重试入口，重试只读取原任务" time="0.011534375">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 任务不可用显示审查语义、请求编号和返回入口，不读取问题列表" time="0.005706125">
+            <failure message="expected &apos;加载审查任务详情失败：审查任务不存在或当前账号无权访问 重新加载&apos; to contain &apos;review-unavailable-162&apos;" type="AssertionError">
+AssertionError: expected &apos;加载审查任务详情失败：审查任务不存在或当前账号无权访问 重新加载&apos; to contain &apos;review-unavailable-162&apos;
+
+Expected: &quot;review-unavailable-162&quot;
+Received: &quot;加载审查任务详情失败：审查任务不存在或当前账号无权访问 重新加载&quot;
+
+ ❯ src/views/review/ReviewTaskDetail.test.ts:435:26
+            </failure>
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 失败后的重试保持原因和可返回入口，连点不重复且成功后清除旧编号" time="0.006744834">
+            <failure message="Unable to get .page-error within: &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;review-detail-page&quot;&gt;
+  &lt;!-- ============ 页面加载中 ============ --&gt;
+  &lt;div data-v-462006c4=&quot;&quot; data-v-22a7c15a=&quot;&quot; class=&quot;prism-loading overlay&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-label=&quot;正在加载审查详情&quot;&gt;
+    &lt;div data-v-035bd481=&quot;&quot; data-v-462006c4=&quot;&quot; class=&quot;ai-orb is-thinking&quot; style=&quot;--orb-size: 72px;&quot; role=&quot;img&quot; aria-label=&quot;AI 正在思考&quot;&gt;&lt;span class=&quot;ai-orb-core-wrap&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-core&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-swirl&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-shine&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-halo&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;
+      &lt;!--v-if--&gt;
+    &lt;/div&gt;
+    &lt;div data-v-462006c4=&quot;&quot; class=&quot;loader-text&quot;&gt;
+      &lt;div data-v-462006c4=&quot;&quot; class=&quot;loader-label font-display&quot;&gt;正在加载审查详情&lt;/div&gt;
+      &lt;div data-v-462006c4=&quot;&quot; class=&quot;loader-sub&quot;&gt;&lt;span data-v-462006c4=&quot;&quot; class=&quot;think-dots&quot;&gt;&lt;span data-v-462006c4=&quot;&quot;&gt;&lt;/span&gt;&lt;span data-v-462006c4=&quot;&quot;&gt;&lt;/span&gt;&lt;span data-v-462006c4=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;span data-v-462006c4=&quot;&quot; class=&quot;font-mono&quot;&gt;正在请求审查数据与问题列表&lt;/span&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-37c312ac=&quot;&quot; data-v-462006c4=&quot;&quot; class=&quot;fluid-progress loader-fluid&quot; style=&quot;height: 5px;&quot; role=&quot;progressbar&quot; aria-busy=&quot;true&quot;&gt;&lt;canvas data-v-37c312ac=&quot;&quot; class=&quot;fluid-progress-canvas&quot; width=&quot;1&quot; height=&quot;1&quot;&gt;&lt;/canvas&gt;&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;" type="Error">
+Error: Unable to get .page-error within: &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;review-detail-page&quot;&gt;
+  &lt;!-- ============ 页面加载中 ============ --&gt;
+  &lt;div data-v-462006c4=&quot;&quot; data-v-22a7c15a=&quot;&quot; class=&quot;prism-loading overlay&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-label=&quot;正在加载审查详情&quot;&gt;
+    &lt;div data-v-035bd481=&quot;&quot; data-v-462006c4=&quot;&quot; class=&quot;ai-orb is-thinking&quot; style=&quot;--orb-size: 72px;&quot; role=&quot;img&quot; aria-label=&quot;AI 正在思考&quot;&gt;&lt;span class=&quot;ai-orb-core-wrap&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-core&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-swirl&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-shine&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-halo&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;
+      &lt;!--v-if--&gt;
+    &lt;/div&gt;
+    &lt;div data-v-462006c4=&quot;&quot; class=&quot;loader-text&quot;&gt;
+      &lt;div data-v-462006c4=&quot;&quot; class=&quot;loader-label font-display&quot;&gt;正在加载审查详情&lt;/div&gt;
+      &lt;div data-v-462006c4=&quot;&quot; class=&quot;loader-sub&quot;&gt;&lt;span data-v-462006c4=&quot;&quot; class=&quot;think-dots&quot;&gt;&lt;span data-v-462006c4=&quot;&quot;&gt;&lt;/span&gt;&lt;span data-v-462006c4=&quot;&quot;&gt;&lt;/span&gt;&lt;span data-v-462006c4=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;span data-v-462006c4=&quot;&quot; class=&quot;font-mono&quot;&gt;正在请求审查数据与问题列表&lt;/span&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-37c312ac=&quot;&quot; data-v-462006c4=&quot;&quot; class=&quot;fluid-progress loader-fluid&quot; style=&quot;height: 5px;&quot; role=&quot;progressbar&quot; aria-busy=&quot;true&quot;&gt;&lt;canvas data-v-37c312ac=&quot;&quot; class=&quot;fluid-progress-canvas&quot; width=&quot;1&quot; height=&quot;1&quot;&gt;&lt;/canvas&gt;&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/review/ReviewTaskDetail.test.ts:449:20
+            </failure>
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 重复失败更新请求编号，可返回审查记录而不重发任务" time="0.003853959">
+            <failure message="expected &apos;加载审查任务详情失败：读取失败二 重新加载&apos; to contain &apos;second-id&apos;" type="AssertionError">
+AssertionError: expected &apos;加载审查任务详情失败：读取失败二 重新加载&apos; to contain &apos;second-id&apos;
+
+Expected: &quot;second-id&quot;
+Received: &quot;加载审查任务详情失败：读取失败二 重新加载&quot;
+
+ ❯ src/views/review/ReviewTaskDetail.test.ts:468:47
+            </failure>
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 已加载任务失去访问权（40303）后清除旧内容，丢弃迟到源码并允许重新读取" time="0.009069709">
+            <failure message="Unable to get .page-error within: &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;review-detail-page&quot;&gt;
+  &lt;!-- ============ 页面加载中 ============ --&gt;
+  &lt;!-- ============ 正常内容 ============ --&gt;
+  &lt;section data-v-22a7c15a=&quot;&quot; class=&quot;execution-panel&quot; aria-label=&quot;执行阶段与覆盖&quot;&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;execution-status&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-atomic=&quot;true&quot;&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;execution-heading&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;分析中&lt;/strong&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;test-model&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;stale-note&quot;&gt;上次成功获取的数据；当前连接已中断&lt;/span&gt;&lt;/div&gt;
+      &lt;dl data-v-22a7c15a=&quot;&quot; class=&quot;coverage-grid&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;当前文件&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;worker.ts&lt;/dd&gt;
+        &lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;已完成文件 / 总文件&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;2 / 8&lt;/dd&gt;
+        &lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;当前 / 最近文件分片&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;3 / 11&lt;/dd&gt;
+        &lt;/div&gt;
+      &lt;/dl&gt;
+      &lt;p data-v-22a7c15a=&quot;&quot; class=&quot;coverage-note&quot;&gt;仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;!--v-if--&gt;
+  &lt;/section&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;connection-error&quot; role=&quot;alert&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;状态更新失败：任务不可访问&lt;/strong&gt;
+    &lt;p data-v-22a7c15a=&quot;&quot;&gt;已暂停自动刷新。重新获取只读取原任务状态，不会重新发起审查。&lt;/p&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;重新获取状态&lt;/span&gt;
+    &lt;/button&gt;
+  &lt;/div&gt;&lt;!-- ============ 顶部摘要条 ============ --&gt;
+  &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;task-head&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button is-link back-btn&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;&lt;i data-v-22a7c15a=&quot;&quot; class=&quot;el-icon&quot;&gt;&lt;svg data-v-22a7c15a=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;&lt;path fill=&quot;currentColor&quot; d=&quot;M609.408 149.376 277.76 489.6a32 32 0 0 0 0 44.672l331.648 340.352a29.12 29.12 0 0 0 41.728 0 30.59 30.59 0 0 0 0-42.752L339.264 511.936l311.872-319.872a30.59 30.59 0 0 0 0-42.688 29.12 29.12 0 0 0-41.728 0&quot;&gt;&lt;/path&gt;&lt;/svg&gt;&lt;/i&gt;返回 &lt;/span&gt;
+    &lt;/button&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-title&quot;&gt;
+      &lt;h1 data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;隔离测试审查&lt;/h1&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-meta font-mono&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;全面审查&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dot&quot;&gt;·&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;test-model&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dot&quot;&gt;·&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;1.0s&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;trace-meta&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono&quot;&gt;任务 #21&lt;/span&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+          &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;测试项目&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;score-unavailable&quot;&gt;尚无最终评分&lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-tally&quot;&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-severe);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;危急&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-high);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;高&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-medium);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;中&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-low);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;低&lt;/span&gt;&lt;/div&gt;
+      &lt;!--v-if--&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-divider&quot;&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;总计&lt;/span&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-actions&quot;&gt;
+      &lt;!--v-if--&gt;
+      &lt;!--v-if--&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;status-pill s-running&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;pill-dot&quot;&gt;&lt;/span&gt;运行中&lt;/span&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot; source=&quot;task&quot; ref-id=&quot;21&quot;&gt;&lt;/div&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot; source=&quot;task&quot; ref-id=&quot;21&quot; auto-start=&quot;true&quot;&gt;&lt;/div&gt;&lt;!-- ============ 三栏工作台 ============ --&gt;
+  &lt;section data-v-22a7c15a=&quot;&quot; class=&quot;workbench&quot;&gt;
+    &lt;!-- 左：文件树 --&gt;
+    &lt;aside data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-files&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;文件列表&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono pane-count&quot;&gt;1&lt;/span&gt;&lt;/header&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;file-row active&quot; role=&quot;button&quot; tabindex=&quot;0&quot; aria-pressed=&quot;true&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-ico font-mono&quot;&gt;TS&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-name&quot;&gt;private.ts&lt;/span&gt;
+          &lt;!--v-if--&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary el-button--small is-link file-open&quot; title=&quot;编辑当前版本，内容可能不同于本次审查快照&quot;&gt;
+            &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt; 编辑当前版本 &lt;/span&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/aside&gt;&lt;!-- 中：Monaco 代码 --&gt;
+    &lt;main data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-code&quot; aria-busy=&quot;true&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head pane-head-code&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-file font-mono&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-ico&quot;&gt;TS&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;private.ts&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;lang-chip font-mono&quot;&gt;typescript&lt;/span&gt;&lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-tools&quot;&gt;
+          &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;el-button-group el-button-group--horizontal&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--small&quot; aria-label=&quot;放大代码字号&quot; title=&quot;放大字号&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                  &lt;path fill=&quot;currentColor&quot; d=&quot;m795.904 750.72 124.992 124.928a32 32 0 0 1-45.248 45.248L750.656 795.904a416 416 0 1 1 45.248-45.248zM480 832a352 352 0 1 0 0-704 352 352 0 0 0 0 704m-32-384v-96a32 32 0 0 1 64 0v96h96a32 32 0 0 1 0 64h-96v96a32 32 0 0 1-64 0v-96h-96a32 32 0 0 1 0-64z&quot;&gt;&lt;/path&gt;
+                &lt;/svg&gt;&lt;/i&gt;
+              &lt;!--v-if--&gt;
+            &lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--small&quot; aria-label=&quot;缩小代码字号&quot; title=&quot;缩小字号&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                  &lt;path fill=&quot;currentColor&quot; d=&quot;m795.904 750.72 124.992 124.928a32 32 0 0 1-45.248 45.248L750.656 795.904a416 416 0 1 1 45.248-45.248zM480 832a352 352 0 1 0 0-704 352 352 0 0 0 0 704M352 448h256a32 32 0 0 1 0 64H352a32 32 0 0 1 0-64&quot;&gt;&lt;/path&gt;
+                &lt;/svg&gt;&lt;/i&gt;
+              &lt;!--v-if--&gt;
+            &lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/header&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-provenance is-warning&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-atomic=&quot;true&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;当前内容，历史输入未知&lt;/strong&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;正在读取当前文件内容。&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body code-body&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;loading-box&quot;&gt;
+          &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;el-skeleton is-animated&quot;&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p is-first&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph is-last&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/main&gt;&lt;!-- 右：问题列表 --&gt;
+    &lt;aside data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-issues&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;问题列表&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono pane-count&quot;&gt;0&lt;/span&gt;&lt;/header&gt;&lt;!-- 严重度过滤 --&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;filter-chips&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(220, 73, 97);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;危急&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(226, 124, 74);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;高&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(217, 168, 87);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;中&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(111, 163, 199);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;低&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;&lt;!-- 维度过滤 --&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;filter-dims&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #6B7CFF;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(107, 124, 255);&quot;&gt;&lt;/span&gt;代码规范&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #4B9BFF;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(75, 155, 255);&quot;&gt;&lt;/span&gt;命名规范&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #2BBFB9;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(43, 191, 185);&quot;&gt;&lt;/span&gt;注释完整性&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #4FB87A;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(79, 184, 122);&quot;&gt;&lt;/span&gt;可维护性&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #D4A53A;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(212, 165, 58);&quot;&gt;&lt;/span&gt;性能问题&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #E08648;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(224, 134, 72);&quot;&gt;&lt;/span&gt;异常处理&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #E25C73;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(226, 92, 115);&quot;&gt;&lt;/span&gt;潜在 Bug&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #B85AC4;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(184, 90, 196);&quot;&gt;&lt;/span&gt;安全漏洞&lt;/button&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body issue-body&quot;&gt;
+        &lt;!--v-if--&gt;
+        &lt;div data-v-27ab7390=&quot;&quot; data-v-22a7c15a=&quot;&quot; class=&quot;empty-state compact&quot;&gt;
+          &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-illustration&quot; aria-hidden=&quot;true&quot;&gt;
+            &lt;div data-v-035bd481=&quot;&quot; data-v-27ab7390=&quot;&quot; class=&quot;ai-orb is-idle&quot; style=&quot;--orb-size: 52px;&quot; role=&quot;img&quot; aria-label=&quot;AI 待机&quot;&gt;&lt;span class=&quot;ai-orb-core-wrap&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-core&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-swirl&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-shine&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-halo&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-desc&quot;&gt;尚无可展示的问题，不代表审查通过&lt;/div&gt;
+          &lt;!--v-if--&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;!--v-if--&gt;
+    &lt;/aside&gt;
+  &lt;/section&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot;&gt;&lt;/div&gt;
+&lt;/div&gt;" type="Error">
+Error: Unable to get .page-error within: &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;review-detail-page&quot;&gt;
+  &lt;!-- ============ 页面加载中 ============ --&gt;
+  &lt;!-- ============ 正常内容 ============ --&gt;
+  &lt;section data-v-22a7c15a=&quot;&quot; class=&quot;execution-panel&quot; aria-label=&quot;执行阶段与覆盖&quot;&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;execution-status&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-atomic=&quot;true&quot;&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;execution-heading&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;分析中&lt;/strong&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;test-model&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;stale-note&quot;&gt;上次成功获取的数据；当前连接已中断&lt;/span&gt;&lt;/div&gt;
+      &lt;dl data-v-22a7c15a=&quot;&quot; class=&quot;coverage-grid&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;当前文件&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;worker.ts&lt;/dd&gt;
+        &lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;已完成文件 / 总文件&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;2 / 8&lt;/dd&gt;
+        &lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;当前 / 最近文件分片&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;3 / 11&lt;/dd&gt;
+        &lt;/div&gt;
+      &lt;/dl&gt;
+      &lt;p data-v-22a7c15a=&quot;&quot; class=&quot;coverage-note&quot;&gt;仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;!--v-if--&gt;
+  &lt;/section&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;connection-error&quot; role=&quot;alert&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;状态更新失败：任务不可访问&lt;/strong&gt;
+    &lt;p data-v-22a7c15a=&quot;&quot;&gt;已暂停自动刷新。重新获取只读取原任务状态，不会重新发起审查。&lt;/p&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;重新获取状态&lt;/span&gt;
+    &lt;/button&gt;
+  &lt;/div&gt;&lt;!-- ============ 顶部摘要条 ============ --&gt;
+  &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;task-head&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button is-link back-btn&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;&lt;i data-v-22a7c15a=&quot;&quot; class=&quot;el-icon&quot;&gt;&lt;svg data-v-22a7c15a=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;&lt;path fill=&quot;currentColor&quot; d=&quot;M609.408 149.376 277.76 489.6a32 32 0 0 0 0 44.672l331.648 340.352a29.12 29.12 0 0 0 41.728 0 30.59 30.59 0 0 0 0-42.752L339.264 511.936l311.872-319.872a30.59 30.59 0 0 0 0-42.688 29.12 29.12 0 0 0-41.728 0&quot;&gt;&lt;/path&gt;&lt;/svg&gt;&lt;/i&gt;返回 &lt;/span&gt;
+    &lt;/button&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-title&quot;&gt;
+      &lt;h1 data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;隔离测试审查&lt;/h1&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-meta font-mono&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;全面审查&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dot&quot;&gt;·&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;test-model&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dot&quot;&gt;·&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;1.0s&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;trace-meta&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono&quot;&gt;任务 #21&lt;/span&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+          &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;测试项目&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;score-unavailable&quot;&gt;尚无最终评分&lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-tally&quot;&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-severe);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;危急&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-high);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;高&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-medium);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;中&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-low);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;低&lt;/span&gt;&lt;/div&gt;
+      &lt;!--v-if--&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-divider&quot;&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;总计&lt;/span&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-actions&quot;&gt;
+      &lt;!--v-if--&gt;
+      &lt;!--v-if--&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;status-pill s-running&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;pill-dot&quot;&gt;&lt;/span&gt;运行中&lt;/span&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot; source=&quot;task&quot; ref-id=&quot;21&quot;&gt;&lt;/div&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot; source=&quot;task&quot; ref-id=&quot;21&quot; auto-start=&quot;true&quot;&gt;&lt;/div&gt;&lt;!-- ============ 三栏工作台 ============ --&gt;
+  &lt;section data-v-22a7c15a=&quot;&quot; class=&quot;workbench&quot;&gt;
+    &lt;!-- 左：文件树 --&gt;
+    &lt;aside data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-files&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;文件列表&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono pane-count&quot;&gt;1&lt;/span&gt;&lt;/header&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;file-row active&quot; role=&quot;button&quot; tabindex=&quot;0&quot; aria-pressed=&quot;true&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-ico font-mono&quot;&gt;TS&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-name&quot;&gt;private.ts&lt;/span&gt;
+          &lt;!--v-if--&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary el-button--small is-link file-open&quot; title=&quot;编辑当前版本，内容可能不同于本次审查快照&quot;&gt;
+            &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt; 编辑当前版本 &lt;/span&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/aside&gt;&lt;!-- 中：Monaco 代码 --&gt;
+    &lt;main data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-code&quot; aria-busy=&quot;true&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head pane-head-code&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-file font-mono&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-ico&quot;&gt;TS&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;private.ts&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;lang-chip font-mono&quot;&gt;typescript&lt;/span&gt;&lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-tools&quot;&gt;
+          &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;el-button-group el-button-group--horizontal&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--small&quot; aria-label=&quot;放大代码字号&quot; title=&quot;放大字号&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                  &lt;path fill=&quot;currentColor&quot; d=&quot;m795.904 750.72 124.992 124.928a32 32 0 0 1-45.248 45.248L750.656 795.904a416 416 0 1 1 45.248-45.248zM480 832a352 352 0 1 0 0-704 352 352 0 0 0 0 704m-32-384v-96a32 32 0 0 1 64 0v96h96a32 32 0 0 1 0 64h-96v96a32 32 0 0 1-64 0v-96h-96a32 32 0 0 1 0-64z&quot;&gt;&lt;/path&gt;
+                &lt;/svg&gt;&lt;/i&gt;
+              &lt;!--v-if--&gt;
+            &lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--small&quot; aria-label=&quot;缩小代码字号&quot; title=&quot;缩小字号&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                  &lt;path fill=&quot;currentColor&quot; d=&quot;m795.904 750.72 124.992 124.928a32 32 0 0 1-45.248 45.248L750.656 795.904a416 416 0 1 1 45.248-45.248zM480 832a352 352 0 1 0 0-704 352 352 0 0 0 0 704M352 448h256a32 32 0 0 1 0 64H352a32 32 0 0 1 0-64&quot;&gt;&lt;/path&gt;
+                &lt;/svg&gt;&lt;/i&gt;
+              &lt;!--v-if--&gt;
+            &lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/header&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-provenance is-warning&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-atomic=&quot;true&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;当前内容，历史输入未知&lt;/strong&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;正在读取当前文件内容。&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body code-body&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;loading-box&quot;&gt;
+          &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;el-skeleton is-animated&quot;&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p is-first&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph is-last&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/main&gt;&lt;!-- 右：问题列表 --&gt;
+    &lt;aside data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-issues&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;问题列表&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono pane-count&quot;&gt;0&lt;/span&gt;&lt;/header&gt;&lt;!-- 严重度过滤 --&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;filter-chips&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(220, 73, 97);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;危急&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(226, 124, 74);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;高&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(217, 168, 87);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;中&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(111, 163, 199);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;低&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;&lt;!-- 维度过滤 --&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;filter-dims&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #6B7CFF;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(107, 124, 255);&quot;&gt;&lt;/span&gt;代码规范&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #4B9BFF;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(75, 155, 255);&quot;&gt;&lt;/span&gt;命名规范&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #2BBFB9;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(43, 191, 185);&quot;&gt;&lt;/span&gt;注释完整性&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #4FB87A;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(79, 184, 122);&quot;&gt;&lt;/span&gt;可维护性&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #D4A53A;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(212, 165, 58);&quot;&gt;&lt;/span&gt;性能问题&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #E08648;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(224, 134, 72);&quot;&gt;&lt;/span&gt;异常处理&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #E25C73;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(226, 92, 115);&quot;&gt;&lt;/span&gt;潜在 Bug&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #B85AC4;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(184, 90, 196);&quot;&gt;&lt;/span&gt;安全漏洞&lt;/button&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body issue-body&quot;&gt;
+        &lt;!--v-if--&gt;
+        &lt;div data-v-27ab7390=&quot;&quot; data-v-22a7c15a=&quot;&quot; class=&quot;empty-state compact&quot;&gt;
+          &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-illustration&quot; aria-hidden=&quot;true&quot;&gt;
+            &lt;div data-v-035bd481=&quot;&quot; data-v-27ab7390=&quot;&quot; class=&quot;ai-orb is-idle&quot; style=&quot;--orb-size: 52px;&quot; role=&quot;img&quot; aria-label=&quot;AI 待机&quot;&gt;&lt;span class=&quot;ai-orb-core-wrap&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-core&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-swirl&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-shine&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-halo&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-desc&quot;&gt;尚无可展示的问题，不代表审查通过&lt;/div&gt;
+          &lt;!--v-if--&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;!--v-if--&gt;
+    &lt;/aside&gt;
+  &lt;/section&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot;&gt;&lt;/div&gt;
+&lt;/div&gt;
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/review/ReviewTaskDetail.test.ts:487:20
+            </failure>
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 已加载任务失去访问权（40400）后清除旧内容，丢弃迟到源码并允许重新读取" time="0.008750167">
+            <failure message="Unable to get .page-error within: &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;review-detail-page&quot;&gt;
+  &lt;!-- ============ 页面加载中 ============ --&gt;
+  &lt;!-- ============ 正常内容 ============ --&gt;
+  &lt;section data-v-22a7c15a=&quot;&quot; class=&quot;execution-panel&quot; aria-label=&quot;执行阶段与覆盖&quot;&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;execution-status&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-atomic=&quot;true&quot;&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;execution-heading&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;分析中&lt;/strong&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;test-model&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;stale-note&quot;&gt;上次成功获取的数据；当前连接已中断&lt;/span&gt;&lt;/div&gt;
+      &lt;dl data-v-22a7c15a=&quot;&quot; class=&quot;coverage-grid&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;当前文件&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;worker.ts&lt;/dd&gt;
+        &lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;已完成文件 / 总文件&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;2 / 8&lt;/dd&gt;
+        &lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;当前 / 最近文件分片&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;3 / 11&lt;/dd&gt;
+        &lt;/div&gt;
+      &lt;/dl&gt;
+      &lt;p data-v-22a7c15a=&quot;&quot; class=&quot;coverage-note&quot;&gt;仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;!--v-if--&gt;
+  &lt;/section&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;connection-error&quot; role=&quot;alert&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;状态更新失败：任务不可访问&lt;/strong&gt;
+    &lt;p data-v-22a7c15a=&quot;&quot;&gt;已暂停自动刷新。重新获取只读取原任务状态，不会重新发起审查。&lt;/p&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;重新获取状态&lt;/span&gt;
+    &lt;/button&gt;
+  &lt;/div&gt;&lt;!-- ============ 顶部摘要条 ============ --&gt;
+  &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;task-head&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button is-link back-btn&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;&lt;i data-v-22a7c15a=&quot;&quot; class=&quot;el-icon&quot;&gt;&lt;svg data-v-22a7c15a=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;&lt;path fill=&quot;currentColor&quot; d=&quot;M609.408 149.376 277.76 489.6a32 32 0 0 0 0 44.672l331.648 340.352a29.12 29.12 0 0 0 41.728 0 30.59 30.59 0 0 0 0-42.752L339.264 511.936l311.872-319.872a30.59 30.59 0 0 0 0-42.688 29.12 29.12 0 0 0-41.728 0&quot;&gt;&lt;/path&gt;&lt;/svg&gt;&lt;/i&gt;返回 &lt;/span&gt;
+    &lt;/button&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-title&quot;&gt;
+      &lt;h1 data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;隔离测试审查&lt;/h1&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-meta font-mono&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;全面审查&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dot&quot;&gt;·&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;test-model&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dot&quot;&gt;·&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;1.0s&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;trace-meta&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono&quot;&gt;任务 #21&lt;/span&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+          &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;测试项目&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;score-unavailable&quot;&gt;尚无最终评分&lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-tally&quot;&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-severe);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;危急&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-high);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;高&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-medium);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;中&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-low);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;低&lt;/span&gt;&lt;/div&gt;
+      &lt;!--v-if--&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-divider&quot;&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;总计&lt;/span&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-actions&quot;&gt;
+      &lt;!--v-if--&gt;
+      &lt;!--v-if--&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;status-pill s-running&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;pill-dot&quot;&gt;&lt;/span&gt;运行中&lt;/span&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot; source=&quot;task&quot; ref-id=&quot;21&quot;&gt;&lt;/div&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot; source=&quot;task&quot; ref-id=&quot;21&quot; auto-start=&quot;true&quot;&gt;&lt;/div&gt;&lt;!-- ============ 三栏工作台 ============ --&gt;
+  &lt;section data-v-22a7c15a=&quot;&quot; class=&quot;workbench&quot;&gt;
+    &lt;!-- 左：文件树 --&gt;
+    &lt;aside data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-files&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;文件列表&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono pane-count&quot;&gt;1&lt;/span&gt;&lt;/header&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;file-row active&quot; role=&quot;button&quot; tabindex=&quot;0&quot; aria-pressed=&quot;true&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-ico font-mono&quot;&gt;TS&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-name&quot;&gt;private.ts&lt;/span&gt;
+          &lt;!--v-if--&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary el-button--small is-link file-open&quot; title=&quot;编辑当前版本，内容可能不同于本次审查快照&quot;&gt;
+            &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt; 编辑当前版本 &lt;/span&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/aside&gt;&lt;!-- 中：Monaco 代码 --&gt;
+    &lt;main data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-code&quot; aria-busy=&quot;true&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head pane-head-code&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-file font-mono&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-ico&quot;&gt;TS&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;private.ts&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;lang-chip font-mono&quot;&gt;typescript&lt;/span&gt;&lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-tools&quot;&gt;
+          &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;el-button-group el-button-group--horizontal&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--small&quot; aria-label=&quot;放大代码字号&quot; title=&quot;放大字号&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                  &lt;path fill=&quot;currentColor&quot; d=&quot;m795.904 750.72 124.992 124.928a32 32 0 0 1-45.248 45.248L750.656 795.904a416 416 0 1 1 45.248-45.248zM480 832a352 352 0 1 0 0-704 352 352 0 0 0 0 704m-32-384v-96a32 32 0 0 1 64 0v96h96a32 32 0 0 1 0 64h-96v96a32 32 0 0 1-64 0v-96h-96a32 32 0 0 1 0-64z&quot;&gt;&lt;/path&gt;
+                &lt;/svg&gt;&lt;/i&gt;
+              &lt;!--v-if--&gt;
+            &lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--small&quot; aria-label=&quot;缩小代码字号&quot; title=&quot;缩小字号&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                  &lt;path fill=&quot;currentColor&quot; d=&quot;m795.904 750.72 124.992 124.928a32 32 0 0 1-45.248 45.248L750.656 795.904a416 416 0 1 1 45.248-45.248zM480 832a352 352 0 1 0 0-704 352 352 0 0 0 0 704M352 448h256a32 32 0 0 1 0 64H352a32 32 0 0 1 0-64&quot;&gt;&lt;/path&gt;
+                &lt;/svg&gt;&lt;/i&gt;
+              &lt;!--v-if--&gt;
+            &lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/header&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-provenance is-warning&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-atomic=&quot;true&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;当前内容，历史输入未知&lt;/strong&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;正在读取当前文件内容。&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body code-body&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;loading-box&quot;&gt;
+          &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;el-skeleton is-animated&quot;&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p is-first&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph is-last&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/main&gt;&lt;!-- 右：问题列表 --&gt;
+    &lt;aside data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-issues&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;问题列表&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono pane-count&quot;&gt;0&lt;/span&gt;&lt;/header&gt;&lt;!-- 严重度过滤 --&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;filter-chips&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(220, 73, 97);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;危急&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(226, 124, 74);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;高&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(217, 168, 87);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;中&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(111, 163, 199);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;低&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;&lt;!-- 维度过滤 --&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;filter-dims&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #6B7CFF;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(107, 124, 255);&quot;&gt;&lt;/span&gt;代码规范&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #4B9BFF;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(75, 155, 255);&quot;&gt;&lt;/span&gt;命名规范&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #2BBFB9;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(43, 191, 185);&quot;&gt;&lt;/span&gt;注释完整性&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #4FB87A;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(79, 184, 122);&quot;&gt;&lt;/span&gt;可维护性&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #D4A53A;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(212, 165, 58);&quot;&gt;&lt;/span&gt;性能问题&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #E08648;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(224, 134, 72);&quot;&gt;&lt;/span&gt;异常处理&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #E25C73;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(226, 92, 115);&quot;&gt;&lt;/span&gt;潜在 Bug&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #B85AC4;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(184, 90, 196);&quot;&gt;&lt;/span&gt;安全漏洞&lt;/button&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body issue-body&quot;&gt;
+        &lt;!--v-if--&gt;
+        &lt;div data-v-27ab7390=&quot;&quot; data-v-22a7c15a=&quot;&quot; class=&quot;empty-state compact&quot;&gt;
+          &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-illustration&quot; aria-hidden=&quot;true&quot;&gt;
+            &lt;div data-v-035bd481=&quot;&quot; data-v-27ab7390=&quot;&quot; class=&quot;ai-orb is-idle&quot; style=&quot;--orb-size: 52px;&quot; role=&quot;img&quot; aria-label=&quot;AI 待机&quot;&gt;&lt;span class=&quot;ai-orb-core-wrap&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-core&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-swirl&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-shine&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-halo&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-desc&quot;&gt;尚无可展示的问题，不代表审查通过&lt;/div&gt;
+          &lt;!--v-if--&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;!--v-if--&gt;
+    &lt;/aside&gt;
+  &lt;/section&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot;&gt;&lt;/div&gt;
+&lt;/div&gt;" type="Error">
+Error: Unable to get .page-error within: &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;review-detail-page&quot;&gt;
+  &lt;!-- ============ 页面加载中 ============ --&gt;
+  &lt;!-- ============ 正常内容 ============ --&gt;
+  &lt;section data-v-22a7c15a=&quot;&quot; class=&quot;execution-panel&quot; aria-label=&quot;执行阶段与覆盖&quot;&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;execution-status&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-atomic=&quot;true&quot;&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;execution-heading&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;分析中&lt;/strong&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;test-model&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;stale-note&quot;&gt;上次成功获取的数据；当前连接已中断&lt;/span&gt;&lt;/div&gt;
+      &lt;dl data-v-22a7c15a=&quot;&quot; class=&quot;coverage-grid&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;当前文件&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;worker.ts&lt;/dd&gt;
+        &lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;已完成文件 / 总文件&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;2 / 8&lt;/dd&gt;
+        &lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot;&gt;
+          &lt;dt data-v-22a7c15a=&quot;&quot;&gt;当前 / 最近文件分片&lt;/dt&gt;
+          &lt;dd data-v-22a7c15a=&quot;&quot;&gt;3 / 11&lt;/dd&gt;
+        &lt;/div&gt;
+      &lt;/dl&gt;
+      &lt;p data-v-22a7c15a=&quot;&quot; class=&quot;coverage-note&quot;&gt;仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;!--v-if--&gt;
+  &lt;/section&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;connection-error&quot; role=&quot;alert&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;状态更新失败：任务不可访问&lt;/strong&gt;
+    &lt;p data-v-22a7c15a=&quot;&quot;&gt;已暂停自动刷新。重新获取只读取原任务状态，不会重新发起审查。&lt;/p&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;重新获取状态&lt;/span&gt;
+    &lt;/button&gt;
+  &lt;/div&gt;&lt;!-- ============ 顶部摘要条 ============ --&gt;
+  &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;task-head&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button is-link back-btn&quot;&gt;
+      &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;&lt;i data-v-22a7c15a=&quot;&quot; class=&quot;el-icon&quot;&gt;&lt;svg data-v-22a7c15a=&quot;&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;&lt;path fill=&quot;currentColor&quot; d=&quot;M609.408 149.376 277.76 489.6a32 32 0 0 0 0 44.672l331.648 340.352a29.12 29.12 0 0 0 41.728 0 30.59 30.59 0 0 0 0-42.752L339.264 511.936l311.872-319.872a30.59 30.59 0 0 0 0-42.688 29.12 29.12 0 0 0-41.728 0&quot;&gt;&lt;/path&gt;&lt;/svg&gt;&lt;/i&gt;返回 &lt;/span&gt;
+    &lt;/button&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-title&quot;&gt;
+      &lt;h1 data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;隔离测试审查&lt;/h1&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-meta font-mono&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;全面审查&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dot&quot;&gt;·&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;test-model&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dot&quot;&gt;·&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;1.0s&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;trace-meta&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono&quot;&gt;任务 #21&lt;/span&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary is-link&quot;&gt;
+          &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt;测试项目&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;score-unavailable&quot;&gt;尚无最终评分&lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-tally&quot;&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-severe);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;危急&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-high);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;高&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-medium);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;中&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot; style=&quot;color: var(--sev-low);&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;低&lt;/span&gt;&lt;/div&gt;
+      &lt;!--v-if--&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-divider&quot;&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;tally-item&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-val font-display&quot;&gt;0&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;t-label&quot;&gt;总计&lt;/span&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;head-actions&quot;&gt;
+      &lt;!--v-if--&gt;
+      &lt;!--v-if--&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;status-pill s-running&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;pill-dot&quot;&gt;&lt;/span&gt;运行中&lt;/span&gt;
+    &lt;/div&gt;
+  &lt;/header&gt;
+  &lt;!--v-if--&gt;
+  &lt;!--v-if--&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot; source=&quot;task&quot; ref-id=&quot;21&quot;&gt;&lt;/div&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot; source=&quot;task&quot; ref-id=&quot;21&quot; auto-start=&quot;true&quot;&gt;&lt;/div&gt;&lt;!-- ============ 三栏工作台 ============ --&gt;
+  &lt;section data-v-22a7c15a=&quot;&quot; class=&quot;workbench&quot;&gt;
+    &lt;!-- 左：文件树 --&gt;
+    &lt;aside data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-files&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;文件列表&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono pane-count&quot;&gt;1&lt;/span&gt;&lt;/header&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;file-row active&quot; role=&quot;button&quot; tabindex=&quot;0&quot; aria-pressed=&quot;true&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-ico font-mono&quot;&gt;TS&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-name&quot;&gt;private.ts&lt;/span&gt;
+          &lt;!--v-if--&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--primary el-button--small is-link file-open&quot; title=&quot;编辑当前版本，内容可能不同于本次审查快照&quot;&gt;
+            &lt;!--v-if--&gt;&lt;span class=&quot;&quot;&gt; 编辑当前版本 &lt;/span&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+        &lt;!--v-if--&gt;
+      &lt;/div&gt;
+    &lt;/aside&gt;&lt;!-- 中：Monaco 代码 --&gt;
+    &lt;main data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-code&quot; aria-busy=&quot;true&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head pane-head-code&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-file font-mono&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;file-ico&quot;&gt;TS&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;private.ts&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;lang-chip font-mono&quot;&gt;typescript&lt;/span&gt;&lt;/div&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-tools&quot;&gt;
+          &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;el-button-group el-button-group--horizontal&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--small&quot; aria-label=&quot;放大代码字号&quot; title=&quot;放大字号&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                  &lt;path fill=&quot;currentColor&quot; d=&quot;m795.904 750.72 124.992 124.928a32 32 0 0 1-45.248 45.248L750.656 795.904a416 416 0 1 1 45.248-45.248zM480 832a352 352 0 1 0 0-704 352 352 0 0 0 0 704m-32-384v-96a32 32 0 0 1 64 0v96h96a32 32 0 0 1 0 64h-96v96a32 32 0 0 1-64 0v-96h-96a32 32 0 0 1 0-64z&quot;&gt;&lt;/path&gt;
+                &lt;/svg&gt;&lt;/i&gt;
+              &lt;!--v-if--&gt;
+            &lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; aria-disabled=&quot;false&quot; type=&quot;button&quot; class=&quot;el-button el-button--small&quot; aria-label=&quot;缩小代码字号&quot; title=&quot;缩小字号&quot;&gt;&lt;i class=&quot;el-icon&quot;&gt;&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 1024 1024&quot;&gt;
+                  &lt;path fill=&quot;currentColor&quot; d=&quot;m795.904 750.72 124.992 124.928a32 32 0 0 1-45.248 45.248L750.656 795.904a416 416 0 1 1 45.248-45.248zM480 832a352 352 0 1 0 0-704 352 352 0 0 0 0 704M352 448h256a32 32 0 0 1 0 64H352a32 32 0 0 1 0-64&quot;&gt;&lt;/path&gt;
+                &lt;/svg&gt;&lt;/i&gt;
+              &lt;!--v-if--&gt;
+            &lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/header&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;code-provenance is-warning&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; aria-atomic=&quot;true&quot;&gt;&lt;strong data-v-22a7c15a=&quot;&quot;&gt;当前内容，历史输入未知&lt;/strong&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;正在读取当前文件内容。&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body code-body&quot;&gt;
+        &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;loading-box&quot;&gt;
+          &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;el-skeleton is-animated&quot;&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p is-first&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;el-skeleton__item el-skeleton__p el-skeleton__paragraph is-last&quot;&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/main&gt;&lt;!-- 右：问题列表 --&gt;
+    &lt;aside data-v-22a7c15a=&quot;&quot; class=&quot;pane pane-issues&quot;&gt;
+      &lt;header data-v-22a7c15a=&quot;&quot; class=&quot;pane-head&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-display&quot;&gt;问题列表&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;font-mono pane-count&quot;&gt;0&lt;/span&gt;&lt;/header&gt;&lt;!-- 严重度过滤 --&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;filter-chips&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(220, 73, 97);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;危急&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(226, 124, 74);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;高&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(217, 168, 87);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;中&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;chip&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-dot&quot; style=&quot;background: rgb(111, 163, 199);&quot;&gt;&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot;&gt;低&lt;/span&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;chip-num font-mono&quot;&gt;0&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;&lt;!-- 维度过滤 --&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;filter-dims&quot;&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #6B7CFF;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(107, 124, 255);&quot;&gt;&lt;/span&gt;代码规范&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #4B9BFF;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(75, 155, 255);&quot;&gt;&lt;/span&gt;命名规范&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #2BBFB9;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(43, 191, 185);&quot;&gt;&lt;/span&gt;注释完整性&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #4FB87A;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(79, 184, 122);&quot;&gt;&lt;/span&gt;可维护性&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #D4A53A;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(212, 165, 58);&quot;&gt;&lt;/span&gt;性能问题&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #E08648;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(224, 134, 72);&quot;&gt;&lt;/span&gt;异常处理&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #E25C73;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(226, 92, 115);&quot;&gt;&lt;/span&gt;潜在 Bug&lt;/button&gt;&lt;button data-v-22a7c15a=&quot;&quot; class=&quot;dim-chip&quot; style=&quot;--dim-color: #B85AC4;&quot;&gt;&lt;span data-v-22a7c15a=&quot;&quot; class=&quot;dim-dot&quot; style=&quot;background: rgb(184, 90, 196);&quot;&gt;&lt;/span&gt;安全漏洞&lt;/button&gt;&lt;/div&gt;
+      &lt;div data-v-22a7c15a=&quot;&quot; class=&quot;pane-body issue-body&quot;&gt;
+        &lt;!--v-if--&gt;
+        &lt;div data-v-27ab7390=&quot;&quot; data-v-22a7c15a=&quot;&quot; class=&quot;empty-state compact&quot;&gt;
+          &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-illustration&quot; aria-hidden=&quot;true&quot;&gt;
+            &lt;div data-v-035bd481=&quot;&quot; data-v-27ab7390=&quot;&quot; class=&quot;ai-orb is-idle&quot; style=&quot;--orb-size: 52px;&quot; role=&quot;img&quot; aria-label=&quot;AI 待机&quot;&gt;&lt;span class=&quot;ai-orb-core-wrap&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-core&quot; data-v-035bd481=&quot;&quot;&gt;&lt;span class=&quot;ai-orb-swirl&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-shine&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;ai-orb-halo&quot; aria-hidden=&quot;true&quot; data-v-035bd481=&quot;&quot;&gt;&lt;/span&gt;
+              &lt;!--v-if--&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div data-v-27ab7390=&quot;&quot; class=&quot;empty-desc&quot;&gt;尚无可展示的问题，不代表审查通过&lt;/div&gt;
+          &lt;!--v-if--&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;!--v-if--&gt;
+    &lt;/aside&gt;
+  &lt;/section&gt;
+  &lt;div data-v-22a7c15a=&quot;&quot; modelvalue=&quot;false&quot;&gt;&lt;/div&gt;
+&lt;/div&gt;
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/review/ReviewTaskDetail.test.ts:487:20
+            </failure>
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 离开失败页后迟到的重试不能重启轮询或读取问题" time="0.002833292">
+            <failure message="未找到按钮：返回审查记录" type="Error">
+Error: 未找到按钮：返回审查记录
+ ❯ button src/views/review/ReviewTaskDetail.test.ts:75:21
+ ❯ src/views/review/ReviewTaskDetail.test.ts:506:11
+            </failure>
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 轮询失败保留上次数据、停止静默重试，手动重连成功后继续到终态" time="0.0189155">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 问题接口失败不显示空成功态，可独立重试" time="0.006254084">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 忙态重试只发一次读取，卸载后的迟到响应不会重启轮询" time="0.0039045">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 切换任务后丢弃旧任务的迟到响应" time="0.004056583">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 代码连接错误可重试，文件行支持键盘选择" time="0.007643709">
+        </testcase>
+        <testcase classname="src/views/review/ReviewTaskDetail.test.ts" name="审查详情真实执行状态 &gt; 迟到的问题筛选响应不能覆盖较新的筛选结果" time="0.006677584">
+        </testcase>
+    </testsuite>
+</testsuites>

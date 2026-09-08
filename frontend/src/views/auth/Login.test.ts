@@ -140,6 +140,22 @@ describe('登录冷却倒计时', () => {
     sessionStorage.clear()
   })
 
+  it('安全校验不可用保留具体原因，五秒后恢复手动重试，不自动提交密码', async () => {
+    user.login.mockRejectedValueOnce({ code: 50301, message: '安全校验服务暂不可用，请等待 5 秒后重试', retry_after_seconds: 5 })
+    await renderLogin()
+    await fillCredentials()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('安全校验服务暂不可用')
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(user.login).toHaveBeenCalledOnce()
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(user.login).toHaveBeenCalledTimes(2)
+  })
+
   it('按服务端秒数倒计时，冷却中直接提交不发请求，结束后仅手动重试', async () => {
     user.login.mockRejectedValueOnce({ code: 42900, message: '登录尝试过于频繁', retry_after_seconds: 37 })
     const router = await renderLogin()

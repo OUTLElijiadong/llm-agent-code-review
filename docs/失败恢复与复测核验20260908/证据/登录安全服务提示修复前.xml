@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="12" failures="1" errors="0" time="0.227133291">
+    <testsuite name="src/views/auth/Login.test.ts" timestamp="2026-09-08T04:58:12.950Z" hostname="lijiadongdeMacBook-Air-7.local" tests="12" failures="1" errors="0" skipped="0" time="0.227133291">
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 复用构建版本，移除未经证实的速度和在线声明，保留注册说明" time="0.025941166">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 未注入构建版本时不把常量的后备值当作已确认的发布版本" time="0.005763541">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 真实表单校验阻止空提交并展示必填错误" time="0.111810958">
+            <system-err>
+async-validator: [ &apos;username is required&apos; ]
+
+async-validator: [ &apos;password is required&apos; ]
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 成功登录后保留 user 的角色首页规则" time="0.012091459">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 成功登录后保留 super_admin 的角色首页规则" time="0.009108625">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 校验与请求期间重复提交只登录一次，忙态有可读文字" time="0.007348583">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 失败原因持久可读、保留输入，显式重试后成功" time="0.008410875">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 注册是原生可聚焦链接并通过既有路由跳转" time="0.00506275">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录冷却倒计时 &gt; 安全校验不可用保留具体原因，五秒后恢复手动重试，不自动提交密码" time="0.009425958">
+            <failure message="expected &apos;当前登录入口暂时受限，请等待倒计时结束后再试。&apos; to contain &apos;安全校验服务暂不可用&apos;" type="AssertionError">
+AssertionError: expected &apos;当前登录入口暂时受限，请等待倒计时结束后再试。&apos; to contain &apos;安全校验服务暂不可用&apos;
+
+Expected: &quot;安全校验服务暂不可用&quot;
+Received: &quot;当前登录入口暂时受限，请等待倒计时结束后再试。&quot;
+
+ ❯ src/views/auth/Login.test.ts:149:50
+            </failure>
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录冷却倒计时 &gt; 按服务端秒数倒计时，冷却中直接提交不发请求，结束后仅手动重试" time="0.014595709">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录冷却倒计时 &gt; 重新挂载保留同一等待截止时间，卸载清理计时器，不保存账号密码" time="0.01196075">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录冷却倒计时 &gt; 没有服务端等待秒数时显示原因而不猜测倒计时" time="0.005036083">
+        </testcase>
+    </testsuite>
+</testsuites>

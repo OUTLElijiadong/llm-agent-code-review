@@ -1,0 +1,50 @@
+{
+  "实现指纹逐项一致": {
+    "backend/app/services/review_service.py": true,
+    "backend/tests/test_review_task_access_errors.py": true,
+    "frontend/src/views/review/ReviewTaskDetail.vue": true,
+    "frontend/src/views/review/ReviewTaskDetail.test.ts": true
+  },
+  "测试独立重算": {
+    "审查详情错误语义-准确红测.xml": {
+      "tests": 14,
+      "failed": 2,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "26df3969375b7732620c9d1e82978395ff3dba800840a07f07982e9914b11d26",
+      "matches_author": true
+    },
+    "审查详情失败恢复-准确红测.xml": {
+      "tests": 52,
+      "failed": 6,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "54f0e2d3490e7eb4479faf3518cfb76315f8429fa9a8a05cd23d1a894de68067",
+      "matches_author": true
+    },
+    "审查详情错误语义-修复后.xml": {
+      "tests": 14,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "4f6029c04e2f4711acf9107ee9f69872f54426468ad021a834fe45558ef9d4a7",
+      "matches_author": true
+    },
+    "审查详情失败恢复-修复后.xml": {
+      "tests": 52,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "630ac0bbdd418a73e499c3cfb88150d261619ca38ea2082252ead626399413ee",
+      "matches_author": true
+    },
+    "审查详情错误与既有流程最终回归.xml": {
+      "tests": 118,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e05763ac58f22b945131993685e289be8b3eb95d8eb8016747b7c3e07c846b4c",
+      "matches_author": true
+    }
+  }
+}

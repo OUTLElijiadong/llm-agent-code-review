@@ -3,6 +3,8 @@
     :model-value="visible"
     :title="mode === 'create' ? '新建项目' : '编辑项目'"
     :close-on-click-modal="false"
+    :close-on-press-escape="!submitting && !validating"
+    :show-close="!submitting && !validating"
     width="580px"
     @update:model-value="$emit('update:visible', $event)"
     @close="handleClose"
@@ -12,6 +14,7 @@
       ref="formRef"
       :model="form"
       :rules="rules"
+      :disabled="submitting"
       label-width="90px"
       @submit.prevent="handleSubmit"
     >
@@ -23,7 +26,7 @@
             webkitdirectory
             directory
             multiple
-            :disabled="analyzing"
+            :disabled="busy"
             style="display: none"
             @change="onFolderSelected"
           />
@@ -67,6 +70,9 @@
           </template>
         </el-alert>
       </template>
+
+      <el-alert v-if="analysisError" :title="analysisError" type="warning" :closable="false" show-icon />
+      <el-alert v-if="submitError" :title="submitError" type="error" :closable="false" show-icon />
 
       <el-form-item label="项目名称" prop="project_name">
         <el-input
@@ -113,8 +119,8 @@
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="handleClose">取消</el-button>
-      <el-button type="primary" :loading="submitting" :disabled="!canSubmit" @click="handleSubmit">
+      <el-button :disabled="submitting || validating" @click="handleClose">取消</el-button>
+      <el-button type="primary" :loading="submitting || validating" :disabled="!canSubmit || busy" @click="handleSubmit">
         {{ submitButtonText }}
       </el-button>
     </template>
@@ -122,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Loading, FolderOpened } from '@element-plus/icons-vue'
 
@@ -134,6 +140,8 @@ interface Props {
   visible: boolean
   mode: 'create' | 'edit'
   initialData: ProjectOut | null
+  submitting?: boolean
+  submitError?: string
 }
 
 const props = defineProps<Props>()
@@ -150,8 +158,11 @@ const emit = defineEmits<{
 
 const formRef = ref<FormInstance>()
 const folderInputRef = ref<HTMLInputElement>()
-const submitting = ref(false)
+const validating = ref(false)
 const analyzing = ref(false)
+const busy = computed(() => !!props.submitting || validating.value || analyzing.value)
+const analysisError = ref('')
+let analysisVersion = 0
 const aiFilled = ref(false)
 const selectedFiles = ref<File[]>([])
 const folderDisplayPath = ref('')
@@ -200,6 +211,8 @@ const languageName = computed(() => langNames[form.language] || form.language ||
  * @returns void
  */
 function handleOpen(): void {
+  analysisVersion++
+  analysisError.value = ''
   analyzing.value = false
   aiFilled.value = false
   selectedFiles.value = []
@@ -220,6 +233,9 @@ function handleOpen(): void {
  * @returns void
  */
 function handleClose(): void {
+  if (props.submitting || validating.value) return
+  analysisVersion++
+  analyzing.value = false
   emit('update:visible', false)
 }
 
@@ -228,7 +244,7 @@ function handleClose(): void {
  * @returns void
  */
 function handleSelectFolder(): void {
-  if (analyzing.value) return
+  if (busy.value) return
   folderInputRef.value?.click()
 }
 
@@ -287,6 +303,7 @@ async function processFolder(files: File[], names: string[], folderName: string,
  * @returns void
  */
 function onFolderSelected(e: Event): void {
+  if (busy.value) return
   const input = e.target as HTMLInputElement
   const fileList = input.files
   if (!fileList || fileList.length === 0) return
@@ -302,6 +319,8 @@ function onFolderSelected(e: Event): void {
  * @returns void
  */
 function onDrop(e: DragEvent): void {
+  if (busy.value) return
+  const version = analysisVersion
   const dt = e.dataTransfer
   if (!dt || !dt.files || dt.files.length === 0) return
   const items = dt.items
@@ -323,6 +342,7 @@ function onDrop(e: DragEvent): void {
       if (entry) traverse(entry, '')
     }
     setTimeout(() => {
+      if (version !== analysisVersion || busy.value) return
       if (fileList.length === 0) return
       const names = fileList.map((f: any) => f.relativePath || f.webkitRelativePath || f.name)
       const folderName = fileList[0] && (fileList[0] as any).webkitRelativePath
@@ -344,30 +364,31 @@ function onDrop(e: DragEvent): void {
  * @returns Promise<void>
  */
 async function autoAnalyzeFolder(folderName: string, fileNames: string[]): Promise<void> {
+  const version = ++analysisVersion
+  const original = { ...form }
   analyzing.value = true
+  aiFilled.value = false
+  analysisError.value = ''
   try {
     const result = await analyzeFolder({
       folder_name: folderName || '未命名文件夹',
       file_names: fileNames.slice(0, 30),
     })
-    form.project_name = result.project_name
-    form.description = result.description
-    form.language = result.language
+    if (version !== analysisVersion) return
+    // 分析期间的手动修改优先，不用稍晚返回的建议覆盖用户输入。
+    if (form.project_name === original.project_name) form.project_name = result.project_name
+    if (form.description === original.description) form.description = result.description
+    if (form.language === original.language) form.language = result.language
     aiFilled.value = true
     ElMessage.success({
       message: `Agent 已识别项目: ${result.project_name}（${result.language_name}）`,
       duration: 4000,
     })
   } catch {
-    if (folderName) {
-      form.project_name = folderName
-      form.description = ''
-      form.language = 'plaintext'
-      aiFilled.value = true
-    }
-    ElMessage.warning('Agent 分析失败，请手动填写项目信息')
+    if (version !== analysisVersion) return
+    analysisError.value = 'Agent 分析失败，已保留手动填写的信息和所选文件，可继续手动创建。'
   } finally {
-    analyzing.value = false
+    if (version === analysisVersion) analyzing.value = false
   }
 }
 
@@ -376,14 +397,10 @@ async function autoAnalyzeFolder(folderName: string, fileNames: string[]): Promi
  * @returns Promise<void>
  */
 async function handleSubmit(): Promise<void> {
-  if (!formRef.value) return
+  if (!formRef.value || busy.value) return
+  validating.value = true
   try {
-    await formRef.value.validate()
-  } catch {
-    return
-  }
-  submitting.value = true
-  try {
+    try { await formRef.value.validate() } catch { return }
     const submitData: {
       project_name: string
       description?: string
@@ -394,10 +411,13 @@ async function handleSubmit(): Promise<void> {
     if (form.language) submitData.language = form.language
     if (selectedFiles.value.length > 0) submitData.files = selectedFiles.value
     emit('submit', submitData)
+    // emit 不返回父处理器的 Promise；等待父传入 submitting，再交还本地校验锁。
+    await nextTick()
   } finally {
-    submitting.value = false
+    validating.value = false
   }
 }
+onBeforeUnmount(() => { analysisVersion++ })
 </script>
 
 <style scoped lang="scss">

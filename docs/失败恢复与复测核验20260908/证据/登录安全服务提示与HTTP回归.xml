@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="32" failures="0" errors="0" time="0.258606709">
+    <testsuite name="src/api/http.test.ts" timestamp="2026-09-08T05:00:14.731Z" hostname="lijiadongdeMacBook-Air-7.local" tests="20" failures="0" errors="0" skipped="0" time="0.012087375">
+        <testcase classname="src/api/http.test.ts" name="http interceptors &gt; creates the shared client with the production timeout" time="0.001000958">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http interceptors &gt; injects a bearer token only when one exists" time="0.000142">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http interceptors &gt; accepts successful envelopes and blob downloads" time="0.000373625">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http interceptors &gt; rejects business failures with the backend message" time="0.000591125">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http interceptors &gt; handles 401 by clearing auth state, emitting an event and redirecting" time="0.001075541">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http interceptors &gt; reports 403 and network failures without clearing the token" time="0.000234333">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http interceptors &gt; 解析 Blob 形式的领域导出错误并保留下一步操作" time="0.006251417">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http interceptors &gt; silently propagates an explicitly cancelled request" time="0.00016075">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http convenience functions &gt; cleans query params and unwraps get/post/put/delete envelopes" time="0.000575292">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="http convenience functions &gt; preserves omitted params and returns downloaded blobs" time="0.000231917">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="登录冷却响应 &gt; 登录错密由表单显示，不触发会话过期、跳转或重复 toast" time="0.000102583">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="登录冷却响应 &gt; 应用 429 保留 Retry-After 剩余秒并由登录表单唯一提示" time="0.000111375">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="登录冷却响应 &gt; 代理 HTML 429 解析 HTTP-date，使用服务器 Date 避免本机时钟偏差" time="0.000093083">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="登录冷却响应 &gt; 无效 Retry-After invalid 不捏造倒计时，允许读取应用剩余秒" time="0.000088333">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="登录冷却响应 &gt; 无效 Retry-After -3 不捏造倒计时，允许读取应用剩余秒" time="0.000060667">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="登录冷却响应 &gt; 无效 Retry-After 1.5 不捏造倒计时，允许读取应用剩余秒" time="0.000067542">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="登录冷却响应 &gt; 无效 Retry-After  不捏造倒计时，允许读取应用剩余秒" time="0.000049083">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="登录冷却响应 &gt; 代理无剩余值时只说明稍后重试，不编造 60 秒" time="0.000075208">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="代理 503 的 Retry-After 也交给登录页，不假装密码错误" time="0.00015">
+        </testcase>
+        <testcase classname="src/api/http.test.ts" name="Retry-After 的零秒与已过去 HTTP-date 都不会被改成默认冷却" time="0.00011475">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/views/auth/Login.test.ts" timestamp="2026-09-08T05:00:14.732Z" hostname="lijiadongdeMacBook-Air-7.local" tests="12" failures="0" errors="0" skipped="0" time="0.246519334">
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 复用构建版本，移除未经证实的速度和在线声明，保留注册说明" time="0.037177375">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 未注入构建版本时不把常量的后备值当作已确认的发布版本" time="0.009348416">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 真实表单校验阻止空提交并展示必填错误" time="0.124734375">
+            <system-err>
+async-validator: [ &apos;username is required&apos; ]
+
+async-validator: [ &apos;password is required&apos; ]
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 成功登录后保留 user 的角色首页规则" time="0.008833334">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 成功登录后保留 super_admin 的角色首页规则" time="0.007133792">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 校验与请求期间重复提交只登录一次，忙态有可读文字" time="0.009085333">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 失败原因持久可读、保留输入，显式重试后成功" time="0.007254875">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录真实反馈 &gt; 注册是原生可聚焦链接并通过既有路由跳转" time="0.004265">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录冷却倒计时 &gt; 安全校验不可用保留具体原因，五秒后恢复手动重试，不自动提交密码" time="0.008180334">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录冷却倒计时 &gt; 按服务端秒数倒计时，冷却中直接提交不发请求，结束后仅手动重试" time="0.010362667">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录冷却倒计时 &gt; 重新挂载保留同一等待截止时间，卸载清理计时器，不保存账号密码" time="0.012408625">
+        </testcase>
+        <testcase classname="src/views/auth/Login.test.ts" name="登录冷却倒计时 &gt; 没有服务端等待秒数时显示原因而不猜测倒计时" time="0.007227875">
+        </testcase>
+    </testsuite>
+</testsuites>

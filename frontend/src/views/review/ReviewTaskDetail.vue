@@ -11,9 +11,14 @@
     <!-- ============ 加载失败 ============ -->
     <div v-else-if="pageError" class="page-error" role="alert">
       <EmptyState :description="pageError" />
-      <el-button type="primary" :icon="RefreshRight" :disabled="refreshing" @click="loadAllData" style="margin-top: 12px">
-        重新加载
-      </el-button>
+      <p class="recovery-hint">{{ detailNextAction || '可重新读取原任务状态，或返回审查记录列表；重新加载不会再次发起审查。' }}</p>
+      <p v-if="detailRequestId" class="request-id">请求编号：{{ detailRequestId }}</p>
+      <div class="recovery-actions">
+        <el-button type="primary" :icon="RefreshRight" :loading="refreshing" :disabled="refreshing" @click="loadAllData">
+          重新加载
+        </el-button>
+        <el-button @click="router.push('/reviews')">返回审查记录</el-button>
+      </div>
     </div>
 
     <!-- ============ 正常内容 ============ -->
@@ -43,6 +48,7 @@
     <div v-if="detailError" class="connection-error" role="alert">
       <strong>状态更新失败：{{ detailError }}</strong>
       <p>已暂停自动刷新。重新获取只读取原任务状态，不会重新发起审查。</p>
+      <p v-if="detailRequestId" class="request-id">请求编号：{{ detailRequestId }}</p>
       <el-button :loading="refreshing" :disabled="refreshing" @click="loadAllData">{{ refreshing ? '正在重新连接' : '重新获取状态' }}</el-button>
     </div>
 
@@ -307,7 +313,8 @@
 
         <div class="pane-body issue-body">
           <div v-if="issuesError" class="issues-error" role="alert">
-            <p>问题列表更新失败：{{ issuesError }}。已有内容为上次成功获取的结果。</p>
+            <p>问题列表更新失败：{{ issuesError }}。</p>
+            <p v-if="issues.length">已有内容为上次成功获取的结果。</p>
             <el-button :loading="issuesLoading" :disabled="issuesLoading" @click="retryIssues">重新加载问题</el-button>
           </div>
           <div
@@ -391,6 +398,8 @@ type TraceFileItem = Partial<TaskFileOut> & {
 const pageLoading = ref(true)
 const pageError = ref('')
 const detailError = ref('')
+const detailRequestId = ref('')
+const detailNextAction = ref('')
 const issuesError = ref('')
 const codeError = ref('')
 const refreshing = ref(false)
@@ -399,6 +408,7 @@ let disposed = false
 let viewGeneration = 0
 let issueSequence = 0
 let codeSequence = 0
+let issuesAccessRevoked = false
 const snapshotFileIds = new Set<number>()
 let detailRequest: { generation: number; promise: Promise<void> } | null = null
 let issueRequest: { key: string; promise: Promise<void> } | null = null
@@ -433,6 +443,48 @@ function coverageCount(value: unknown): string {
 function requestError(error: unknown, fallback: string): string {
   const failure = error as { message?: unknown } | null
   return typeof failure?.message === 'string' && failure.message.trim() ? failure.message : fallback
+}
+
+function isReadAccessFailure(error: unknown): boolean {
+  const failure = error as { code?: unknown; response?: { status?: number } } | null
+  const status = typeof failure?.code === 'number' ? Math.floor(failure.code / 100) : failure?.response?.status
+  return status === 401 || status === 403 || status === 404
+}
+
+function recordDetailFailure(error: unknown): void {
+  const failure = error as { code?: unknown; request_id?: unknown; next_action?: unknown; response?: { status?: number } } | null
+  detailError.value = requestError(error, '无法连接审查服务')
+  detailRequestId.value = typeof failure?.request_id === 'string' ? failure.request_id : ''
+  detailNextAction.value = typeof failure?.next_action === 'string' ? failure.next_action : ''
+  if (isReadAccessFailure(error)) {
+    // 权限/资源已失效时不能继续显示缓存内容；也不能让迟到请求重新填充它。
+    issueSequence++
+    codeSequence++
+    issuesAccessRevoked = true
+    issueRequest = null
+    task.value = null
+    issues.value = []
+    issueTotal.value = 0
+    issuesLoading.value = false
+    fileList.value = []
+    snapshotFileIds.clear()
+    currentFileId.value = null
+    currentFileName.value = ''
+    currentLanguage.value = 'text'
+    codeContent.value = ''
+    codeError.value = ''
+    loadingCode.value = false
+    currentIsBinary.value = false
+    currentBinaryMeta.value = null
+    previewSource.value = null
+    previewVerified.value = false
+    snapshotVersion.value = null
+    selectedIssue.value = null
+    drawerVisible.value = false
+    aiPromptVisible.value = false
+    securityScanVisible.value = false
+  }
+  if (!task.value) pageError.value = `加载审查任务详情失败：${detailError.value}`
 }
 const issues = ref<IssueOut[]>([])
 const issueTotal = ref(0)
@@ -469,6 +521,30 @@ const selectedIssue = ref<IssueOut | null>(null)
 const codeViewerRef = ref<InstanceType<typeof CodeViewer> | null>(null)
 const aiPromptVisible = ref(false)
 const securityScanVisible = ref(false)
+
+function discardIssueSnapshot(): void {
+  issuesAccessRevoked = true
+  issues.value = []
+  issueTotal.value = 0
+  selectedIssue.value = null
+  drawerVisible.value = false
+  // 保留详情接口仍授权的文件；移除仅由已失效的问题列表补充的文件信息。
+  fileList.value = (task.value?.files ?? []).map((file) => ({ ...file }))
+  codeSequence++
+  currentFileId.value = null
+  currentFileName.value = ''
+  currentLanguage.value = 'text'
+  codeContent.value = ''
+  codeError.value = ''
+  loadingCode.value = false
+  currentIsBinary.value = false
+  currentBinaryMeta.value = null
+  previewSource.value = null
+  previewVerified.value = false
+  snapshotVersion.value = null
+  aiPromptVisible.value = false
+  securityScanVisible.value = false
+}
 
 const statusLabels: Record<string, string> = {
   pending: '待处理',
@@ -597,6 +673,8 @@ function loadTaskDetail(): Promise<void> {
     if (!data) throw new Error('接口未返回审查任务详情')
     task.value = data
     detailError.value = ''
+    detailRequestId.value = ''
+    detailNextAction.value = ''
     pageError.value = ''
     fileList.value = (data.files ?? []).map((item) => ({ ...item }))
     for (const file of data.files ?? []) {
@@ -604,8 +682,7 @@ function loadTaskDetail(): Promise<void> {
     }
   }).catch((error: unknown) => {
     if (disposed || generation !== viewGeneration) return
-    detailError.value = requestError(error, '无法连接审查服务')
-    if (!task.value) pageError.value = `加载审查任务详情失败：${detailError.value}`
+    recordDetailFailure(error)
   }).finally(() => {
     if (detailRequest?.promise === promise) detailRequest = null
   })
@@ -630,6 +707,7 @@ function doLoadIssues(): Promise<void> {
     issues.value = data.items
     issueTotal.value = data.total
     issuesError.value = ''
+    issuesAccessRevoked = false
 
     const fileSet = new Map<number, TraceFileItem>()
     fileList.value.forEach((item) => fileSet.set(item.file_id, item))
@@ -645,6 +723,7 @@ function doLoadIssues(): Promise<void> {
     fileList.value = Array.from(fileSet.values())
   }).catch((error: unknown) => {
     if (disposed || generation !== viewGeneration || sequence !== issueSequence) return
+    if (isReadAccessFailure(error)) discardIssueSnapshot()
     issuesError.value = requestError(error, '无法获取问题列表')
   }).finally(() => {
     if (!disposed && sequence === issueSequence) issuesLoading.value = false
@@ -664,10 +743,11 @@ async function loadAllData() {
   const generation = viewGeneration
   refreshing.value = true
   stopPolling()
-  pageLoading.value = !task.value
-  pageError.value = ''
+  // 手动重试保留失败原因与返回入口，避免再次被全页 loading 锁住。
+  pageLoading.value = !task.value && !pageError.value
   try {
-    await Promise.all([loadTaskDetail(), doLoadIssues()])
+    await loadTaskDetail()
+    if (!disposed && generation === viewGeneration && task.value && !detailError.value) await doLoadIssues()
   } finally {
     if (!disposed && generation === viewGeneration) {
       pageLoading.value = false
@@ -809,6 +889,7 @@ function onFilePick(fileId: number) {
 }
 
 function onIssueClick(issue: IssueOut) {
+  if (issuesAccessRevoked || disposed) return
   selectedIssue.value = issue
   if (issue.file_id && currentFileId.value !== issue.file_id) {
     currentFileId.value = issue.file_id
@@ -830,6 +911,7 @@ function showPendingReviews(): void {
 }
 
 async function onIssueReviewed(updated: IssueOut): Promise<void> {
+  if (issuesAccessRevoked || disposed) return
   selectedIssue.value = updated
   const index = issues.value.findIndex((item) => item.id === updated.id)
   if (index >= 0) issues.value.splice(index, 1, updated)
@@ -909,7 +991,11 @@ watch(taskId, () => {
   loadingCode.value = false
   codeError.value = ''
   detailError.value = ''
+  detailRequestId.value = ''
+  detailNextAction.value = ''
+  pageError.value = ''
   issuesError.value = ''
+  issuesAccessRevoked = false
   selectedIssue.value = null
   drawerVisible.value = false
   aiPromptVisible.value = false
@@ -945,6 +1031,11 @@ onUnmounted(() => {
   justify-content: center;
   min-height: 320px;
 }
+
+.recovery-hint,
+.request-id { margin: 6px 0; color: var(--gray-600); overflow-wrap: anywhere; }
+.recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.recovery-actions :deep(.el-button + .el-button) { margin-left: 0; }
 
 .execution-panel {
   padding: 16px 20px;

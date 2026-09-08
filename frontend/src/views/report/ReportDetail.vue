@@ -30,6 +30,9 @@
       </div>
     </header>
 
+    <el-alert v-if="loadError" data-testid="report-load-error" class="no-print" :title="loadError" type="warning" :closable="false" show-icon>
+      <el-button :loading="loading" @click="loadReport">重试读取报告</el-button>
+    </el-alert>
     <!-- ============ T15 报告操作工具栏(模板类型 / 生成 / 预览 / 导出)============ -->
     <section v-if="report" class="report-toolbar no-print">
       <div class="toolbar-left">
@@ -445,7 +448,7 @@
       label="正在加载审查报告"
       sublabel="正在整理评分、问题和导出信息"
     />
-    <EmptyState v-else-if="!loading" description="报告数据加载失败" />
+    <EmptyState v-else-if="!loading && !loadError" description="尚未加载报告数据" />
 
     <el-dialog
       v-model="previewFallbackVisible"
@@ -480,6 +483,7 @@ import dayjs from 'dayjs'
 import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import { mustDiscardReadSnapshot, readableError } from '@/composables/withFeedback'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import {
   getReportDetail,
@@ -502,6 +506,9 @@ const userStore = useUserStore()
 const taskId = Number(route.params.id)
 
 const loading = ref(true)
+const loadError = ref('')
+let reportRequestVersion = 0
+let disposed = false
 const report = ref<ReportDetailOut | null>(null)
 const exportingWord = ref(false)
 const exportingPdf = ref(false)
@@ -516,6 +523,7 @@ const previewing = ref(false)
 /** 弹窗被拦截时的页内安全预览。 */
 const previewFallbackVisible = ref(false)
 const previewFallbackHtml = ref('')
+let pendingPreviewWindow: Window | null = null
 type PreviewButtonTarget = { $el?: HTMLElement; focus?: () => void }
 const previewButtonRef = ref<PreviewButtonTarget | null>(null)
 /** 统一管理新窗口 Blob URL，避免请求失败或页面卸载时泄漏。 */
@@ -559,7 +567,7 @@ const isDomainReport = computed(() => {
   const sourceType = report.value?.source?.type
   return sourceType === 'sandbox_test' || sourceType === 'pentest'
 })
-const canViewReport = computed(() => !!report.value && userStore.hasPermission('report:view'))
+const canViewReport = computed(() => !!report.value && !loading.value && !loadError.value && userStore.hasPermission('report:view'))
 function canExport(format: ReportFormat): boolean {
   return canViewReport.value && userStore.hasPermission(`report:export:${format}`)
     && (!isDomainReport.value || format === 'json')
@@ -687,26 +695,46 @@ function ruleLabel(rule: Record<string, unknown>): string {
 }
 
 async function loadReport() {
+  if (!userStore.hasPermission('report:view')) {
+    report.value = null
+    loading.value = false
+    loadError.value = '当前账号没有报告查看权限，请返回列表。'
+    return
+  }
+  const version = ++reportRequestVersion
   loading.value = true
   try {
-    report.value = await getReportDetail(taskId)
-  } catch {
-    report.value = null
-    ElMessage.error('报告加载失败，请返回列表重试')
+    const result = await getReportDetail(taskId)
+    if (disposed || version !== reportRequestVersion) return
+    report.value = result
+    loadError.value = ''
+  } catch (error) {
+    if (disposed || version !== reportRequestVersion) return
+    if (mustDiscardReadSnapshot(error)) {
+      report.value = null
+      issues.value = []
+      previewFallbackVisible.value = false
+      previewFallbackHtml.value = ''
+    }
+    loadError.value = `报告读取失败：${readableError(error)}。${report.value ? '保留上次成功的只读快照；重新读取成功后恢复报告操作。' : '可重试读取报告，或返回列表核对。'}`
   } finally {
-    loading.value = false
+    if (!disposed && version === reportRequestVersion) loading.value = false
   }
 }
 
 function downloadBlob(response: Blob, filename: string) {
   const url = window.URL.createObjectURL(response)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  window.URL.revokeObjectURL(url)
+  let link: HTMLAnchorElement | undefined
+  try {
+    link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+  } finally {
+    link?.remove()
+    window.URL.revokeObjectURL(url)
+  }
 }
 
 async function downloadWord() {
@@ -714,10 +742,11 @@ async function downloadWord() {
   exportingWord.value = true
   try {
     const response = await apiExportReport(taskId, 'word', templateType.value)
+    if (disposed || !canExport('word')) return
     downloadBlob(response as unknown as Blob, `review_report_${taskId}.docx`)
     ElMessage.success('Word 报告导出成功')
-  } catch {
-    ElMessage.error('导出失败')
+  } catch (error) {
+    if (!disposed) showExportError(error, 'word', '导出')
   } finally {
     exportingWord.value = false
   }
@@ -728,10 +757,11 @@ async function downloadPdf() {
   exportingPdf.value = true
   try {
     const response = await apiExportReport(taskId, 'pdf', templateType.value)
+    if (disposed || !canExport('pdf')) return
     downloadBlob(response as unknown as Blob, `review_report_${taskId}.pdf`)
     ElMessage.success('PDF 报告导出成功')
-  } catch {
-    ElMessage.error('导出失败')
+  } catch (error) {
+    if (!disposed) showExportError(error, 'pdf', '导出')
   } finally {
     exportingPdf.value = false
   }
@@ -893,6 +923,7 @@ async function handleGenerate(format: ReportFormat): Promise<void> {
   generatingFormat.value = format
   try {
     const result = await apiGenerateReport(taskId, format, templateType.value)
+    if (disposed || !canExport(format)) return
     if (result instanceof Blob) {
       // pdf / word
       const ext = format === 'pdf' ? 'pdf' : 'docx'
@@ -908,7 +939,7 @@ async function handleGenerate(format: ReportFormat): Promise<void> {
       ElMessage.success(`${format.toUpperCase()} 报告生成成功`)
     }
   } catch (error) {
-    showExportError(error, format, '生成')
+    if (!disposed) showExportError(error, format, '生成')
   } finally {
     generatingFormat.value = null
   }
@@ -984,11 +1015,16 @@ async function handlePreview(): Promise<void> {
     return
   }
   const popup = preopenPreviewWindow()
+  pendingPreviewWindow = popup
 
   previewing.value = true
   previewFallbackVisible.value = false
   try {
     const html = await apiPreviewReport(taskId, templateType.value)
+    if (disposed || !canViewReport.value) {
+      try { popup?.close() } catch { /* 不再使用已失效预览窗口 */ }
+      return
+    }
     if (popup && !popup.closed) {
       const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
       const url = window.URL.createObjectURL(blob)
@@ -1006,13 +1042,24 @@ async function handlePreview(): Promise<void> {
     previewFallbackHtml.value = html
     previewFallbackVisible.value = true
     await nextTick()
+    if (disposed || !canViewReport.value) {
+      previewFallbackVisible.value = false
+      previewFallbackHtml.value = ''
+      return
+    }
     ElMessage.success('HTML 报告已在当前页面打开')
-  } catch {
+  } catch (error) {
     if (popup && !popup.closed) {
       try { popup.close() } catch { /* 忽略浏览器关闭窗口限制 */ }
     }
-    ElMessage.error('预览报告失败')
+    if (!disposed) {
+      exportErrorMessage.value = `预览报告失败：${readableError(error)}`
+      exportErrorNextAction.value = '请核对报告状态后手动重新预览。'
+      retryExportFormat.value = null
+      ElMessage.error('预览报告失败')
+    }
   } finally {
+    if (pendingPreviewWindow === popup) pendingPreviewWindow = null
     previewing.value = false
   }
 }
@@ -1029,13 +1076,14 @@ async function handleExport(format: ReportFormat): Promise<void> {
   retryExportFormat.value = null
   try {
     const blob = await apiExportReport(taskId, format, templateType.value)
+    if (disposed || !canExport(format)) return
     const extMap: Record<ReportFormat, string> = {
       json: 'json', html: 'html', pdf: 'pdf', word: 'docx',
     }
     downloadBlob(blob, `review_report_${taskId}.${extMap[format]}`)
     ElMessage.success(`${format.toUpperCase()} 报告导出成功`)
   } catch (error) {
-    showExportError(error, format, '导出')
+    if (!disposed) showExportError(error, format, '导出')
   } finally {
     exportingFormat.value = null
   }
@@ -1088,6 +1136,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  reportRequestVersion++
+  try { pendingPreviewWindow?.close() } catch { /* 浏览器可能已关闭该窗口 */ }
+  pendingPreviewWindow = null
   for (const url of [...previewUrlTimers.keys()]) releasePreviewUrl(url)
 })
 </script>

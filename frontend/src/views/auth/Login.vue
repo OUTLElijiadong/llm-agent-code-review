@@ -100,7 +100,7 @@ async function handleLogin(): Promise<void> {
     ElMessage.success('登录成功')
     await router.replace(getRoleHomePath(userStore.profile?.role))
   } catch (error: unknown) {
-    const failure = error as { message?: unknown; retry_after_seconds?: unknown } | null
+    const failure = error as { code?: unknown; message?: unknown; retry_after_seconds?: unknown } | null
     loginError.value = typeof failure?.message === 'string' && failure.message.trim()
       ? failure.message
       : '登录失败，请检查网络连接后重试。'
@@ -109,7 +109,9 @@ async function handleLogin(): Promise<void> {
     if (typeof seconds === 'number' && Number.isSafeInteger(seconds) && seconds > 0) {
       const until = Date.now() + seconds * 1000
       if (Number.isSafeInteger(until)) {
-        loginError.value = '当前登录入口暂时受限，请等待倒计时结束后再试。'
+        if (failure?.code !== 50301) {
+          loginError.value = '当前登录入口暂时受限，请等待倒计时结束后再试。'
+        }
         startCooldown(until)
       }
     }

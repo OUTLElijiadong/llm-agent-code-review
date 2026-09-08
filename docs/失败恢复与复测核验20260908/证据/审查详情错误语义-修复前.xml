@@ -1,0 +1,771 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="14" failures="0" skipped="0" tests="14" time="2.222" timestamp="2026-09-08T12:41:02.888520+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="tests.test_review_task_access_errors" name="test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error[]" time="0.092"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f56cbe0&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error[/issues]" time="0.021"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f644190&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_visible_owner_and_reviewer_keep_success[-owner]" time="0.020"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f64bd60&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_visible_owner_and_reviewer_keep_success[-member]" time="0.021"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f642490&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_visible_owner_and_reviewer_keep_success[/issues-owner]" time="0.020"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f6c7ac0&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_visible_owner_and_reviewer_keep_success[/issues-member]" time="0.020"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f6c95b0&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[None-401-40100-]" time="0.020"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f661400&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[None-401-40100-/issues]" time="0.020"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f7ad670&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[no_permission-403-40303-]" time="0.021"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f5d1250&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[no_permission-403-40303-/issues]" time="0.059"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f67a9a0&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[disabled-403-40301-]" time="0.020"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f80ef10&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_authentication_and_permission_errors_are_not_masked_as_not_found[disabled-403-40301-/issues]" time="0.019"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f7fc2e0&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_project_read_infrastructure_failure_is_not_masked_as_not_found[]" time="0.021"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f80eaf0&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase><testcase classname="tests.test_review_task_access_errors" name="test_project_read_infrastructure_failure_is_not_masked_as_not_found[/issues]" time="0.020"><error message="failed on setup with &quot;TypeError: 'created_by' is an invalid keyword argument for ProjectMember&quot;">@pytest.fixture
+    def review_http():
+        engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, expire_on_commit=False)()
+        users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
+                 for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
+        users['disabled'].status = 0
+        role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+        db.add_all([*users.values(), role])
+        for index, code in enumerate(('review:view', 'issue:view'), 1):
+            db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
+            db.add(RolePermission(role_id=role.id, permission_id=index))
+        for name in ('owner', 'member', 'outsider', 'disabled'):
+            db.add(UserRole(user_id=users[name].id, role_id=role.id))
+        for index, status in enumerate(('active', 'deleted', 'quarantined'), 11):
+            db.add(Project(id=index, user_id=users['owner'].id, project_name=f'private-project-{index}', status=status))
+            db.add(ReviewTask(id=index, user_id=users['owner'].id, project_id=index,
+                              task_name=f'private-task-{index}', status='success'))
+&gt;       db.add(ProjectMember(project_id=11, user_id=users['member'].id, role_in_project='reviewer', created_by=users['owner'].id))
+
+tests/test_review_task_access_errors.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+&lt;string&gt;:4: in __init__
+    ???
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:597: in _initialize_instance
+    manager.dispatch.init_failure(self, args, kwargs)
+.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/state.py:594: in _initialize_instance
+    manager.original_init(*mixed[1:], **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;app.models.project_member.ProjectMember object at 0x10f6c8d60&gt;
+kwargs = {'created_by': 1, 'project_id': 11, 'role_in_project': 'reviewer', 'user_id': 2}
+cls_ = &lt;class 'app.models.project_member.ProjectMember'&gt;, k = 'created_by'
+
+    def _declarative_constructor(self: Any, **kwargs: Any) -&gt; None:
+        """A simple constructor that allows initialization from kwargs.
+    
+        Sets attributes on the constructed instance using the names and
+        values in ``kwargs``.
+    
+        Only keys that are present as
+        attributes of the instance's class are allowed. These could be,
+        for example, any mapped columns or relationships.
+        """
+        cls_ = type(self)
+        for k in kwargs:
+            if not hasattr(cls_, k):
+&gt;               raise TypeError(
+                    "%r is an invalid keyword argument for %s" % (k, cls_.__name__)
+                )
+E               TypeError: 'created_by' is an invalid keyword argument for ProjectMember
+
+.venv/lib/python3.9/site-packages/sqlalchemy/orm/decl_base.py:2179: TypeError</error></testcase></testsuite></testsuites>
