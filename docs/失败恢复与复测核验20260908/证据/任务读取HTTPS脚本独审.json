@@ -1,0 +1,49 @@
+{
+  "核验时间UTC": "2026-09-08T05:46:02.437184+00:00",
+  "结论": "修复后7项隔离测试通过；脚本可交主代理复读后执行",
+  "生产请求": 0,
+  "应用源码修改": false,
+  "检查": {
+    "Ruff": "通过"
+  },
+  "源码SHA256": {
+    "docs/失败恢复与复测核验20260908/证据/verify_task_access_https.py": "9f77677806af86ac8d3df316a48e76b2560101142625b2018035fe1ecd689f59",
+    "docs/失败恢复与复测核验20260908/证据/任务读取HTTPS脚本本地隔离测试.py": "3b27471dc1de966b818c343d3619487c8af1bd9e742f7c75e14f1465b836fe86",
+    "backend/scripts/verify_permission_acceptance_https.py": "743acaf3110d5933ebee6af415b122cb8fcfc340c2339b82b0efa2e8b32c79f0",
+    "backend/app/core/error_handlers.py": "ff39b307cc34d46e9253c7bfc7d20372d22919e1ab29072dc28ccf69b40531d7",
+    "backend/app/core/dependencies.py": "b75be1117e45d543d52fcae4bcadee16d1b93d214369beb7fd6e0a1c124f1709",
+    "backend/app/core/rbac_dependency.py": "084dc337ec8981138229228794dccc722c73e8dddc6526d5d9009b9a84090ab8",
+    "backend/app/services/review_service.py": "245615a54bf4767c66bd6fa008c05588f2ad2d633c2c0de13fa1ac750cd7f639"
+  },
+  "测试": {
+    "任务读取HTTPS脚本首轮适配器错误.xml": {
+      "总数": 7,
+      "失败": 4,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "8bd08cec0d2b44f287036cb57a63d35fdf21c1c5088752e8559a5d0fa37cf2d0"
+    },
+    "任务读取HTTPS脚本独审准确红测.xml": {
+      "总数": 7,
+      "失败": 6,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "9c3cda6c99e82f20ca3e41ca7a9151a95868f48c79be558a3fa9309147cc02cc"
+    },
+    "任务读取HTTPS脚本开发信封边界复现.xml": {
+      "总数": 7,
+      "失败": 1,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "c23a65cde440dbdec4d81f1d001f01bad99fd19d49829f42a8ed0ad0628676c3"
+    },
+    "任务读取HTTPS脚本独审修复后.xml": {
+      "总数": 7,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "6433eb238e2dde4f29a90c4224ebd96f4cca68edb2e86716d375f720991bf6a6"
+    }
+  },
+  "执行范围": "4次正确密码登录和8次自身角色/权限读取，30次任务GET；不调用创建审查或模型端点，输出不把请求范围冒充数据库实际计数"
+}

@@ -1,0 +1,28 @@
+{
+  "status": "blocked_pending_explicit_user_approval",
+  "action": "停用QA107-110并撤销测试会话",
+  "executed": false,
+  "review_reason": "该命令会在生产环境停用四个QA账号并撤销其会话，属于实质性访问变更；用户虽授权验收任务，但未明确授权这一具体停用范围和权限变更。",
+  "scope": {
+    "account_ids": [
+      107,
+      108,
+      109,
+      110
+    ],
+    "role_id": 7,
+    "retain_projects": [
+      164,
+      165
+    ],
+    "retain_files": [
+      1894,
+      1895
+    ]
+  },
+  "script": "finalize_qa_20260908.py",
+  "script_sha256": "3232d5d6574e437ce02eb627c32a7f02b8b5584c9ba42e15f55bb70c94d8cdb6",
+  "local_independent_tests": 44,
+  "user_confirmation_requested": true,
+  "workaround_attempted": false
+}

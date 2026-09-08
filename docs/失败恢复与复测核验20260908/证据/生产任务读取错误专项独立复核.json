@@ -1,0 +1,321 @@
+{
+  "核验时间UTC": "2026-09-08T06:01:11.078796+00:00",
+  "结论": "42请求结构及结果通过；30错误公开信封和5权限/空角色响应独立重建SHA全部一致",
+  "原始收据": {
+    "文件": "生产任务读取错误专项修正后原始结果.json",
+    "SHA256": "d9408fea6dff642f189f6622c13e778fe3ab273ae930384011d4f495da5096bb"
+  },
+  "重算脚本SHA256": "38a7e047ad2a439897f34fea88df504d56725c5064d8b34ed56b1c22a654e4ad",
+  "来源SHA256": {
+    "backend/app/core/error_handlers.py": "ff39b307cc34d46e9253c7bfc7d20372d22919e1ab29072dc28ccf69b40531d7",
+    "backend/app/core/exceptions.py": "42f41fbae9af4b40cfa0aa81a1d58d2e57d14e5f6642b9df4396b44c562aff01",
+    "backend/app/core/dependencies.py": "b75be1117e45d543d52fcae4bcadee16d1b93d214369beb7fd6e0a1c124f1709",
+    "backend/app/core/rbac_dependency.py": "084dc337ec8981138229228794dccc722c73e8dddc6526d5d9009b9a84090ab8",
+    "backend/app/services/review_service.py": "245615a54bf4767c66bd6fa008c05588f2ad2d633c2c0de13fa1ac750cd7f639",
+    "backend/app/api/v1/rbac.py": "d0f34037d29d7713172fed807705083f79ba4e815914482b015394ca9779ae3c",
+    "backend/app/schemas/common.py": "a8a0ae072c382529582bc8f0adcd08fe479f0270e5094d38f285372f9a0f7e88",
+    "frontend/nginx.conf.template": "b062cee5bea6b43d826b9d57dbc729cceafca7bcb10588bfcde880999fd72f1f"
+  },
+  "请求数": 42,
+  "正常登录与自身RBAC读取": 12,
+  "错误HTTP计数": {
+    "401": 6,
+    "403": 6,
+    "404": 18
+  },
+  "错误信封SHA匹配数": 30,
+  "权限与空角色SHA匹配数": 5,
+  "头体同服务器编号": true,
+  "边缘覆盖客户端编号数": 30,
+  "错误响应仅五个公开字段": true,
+  "未返回detail或任务/项目正文": true,
+  "错误响应逐条比对": [
+    {
+      "账号": "anonymous",
+      "路径": "/api/review/tasks/-1",
+      "HTTP": 401,
+      "字节数": 145,
+      "SHA256": "4afae814fe4f2b6f7cb68a2b762fda8cb0a86f3b159323e5f6737a1c8277fa50",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "anonymous",
+      "路径": "/api/review/tasks/-1/issues",
+      "HTTP": 401,
+      "字节数": 145,
+      "SHA256": "65bc3a26c5d42ae3f974566fada33af32c81d5195c051ff3f24d3cb1397d1f0d",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "anonymous",
+      "路径": "/api/review/tasks/161",
+      "HTTP": 401,
+      "字节数": 145,
+      "SHA256": "772fde98ad51dae3b4e6295360e811d6614f08fbb88e9837a0ad3653882edfe5",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "anonymous",
+      "路径": "/api/review/tasks/161/issues",
+      "HTTP": 401,
+      "字节数": 145,
+      "SHA256": "de5fcfde20c5c361bb1febb79c48fb5f8d576a2e0fef7f960c931ff9da76018f",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "anonymous",
+      "路径": "/api/review/tasks/162",
+      "HTTP": 401,
+      "字节数": 145,
+      "SHA256": "c9d6bfb570a2bde92115dc6d93fe2ff35f7e76e6345dda503e3f6e3f86d89ce3",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "anonymous",
+      "路径": "/api/review/tasks/162/issues",
+      "HTTP": 401,
+      "字节数": 145,
+      "SHA256": "c7be37b000a59643b019d31cf1e0a206423196373a8b7e3da90c87b7d04e8707",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "no_permission",
+      "路径": "/api/review/tasks/-1",
+      "HTTP": 403,
+      "字节数": 175,
+      "SHA256": "6045ef7e6527213ab1031ebe3749c1c337ec333ea1e9eed8e037fd247a6bed70",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "no_permission",
+      "路径": "/api/review/tasks/-1/issues",
+      "HTTP": 403,
+      "字节数": 174,
+      "SHA256": "5d0d1f412c1da43c4e059164f24d7c944069786e521acc6783117985b1e986bd",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "no_permission",
+      "路径": "/api/review/tasks/161",
+      "HTTP": 403,
+      "字节数": 175,
+      "SHA256": "9d28c9fb8b26f576a420669f13f17898cc637d91178472ef41602dc1562bdd10",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "no_permission",
+      "路径": "/api/review/tasks/161/issues",
+      "HTTP": 403,
+      "字节数": 174,
+      "SHA256": "6c15dca3651ca69b4073154f3aabe27edeb9a4d1d957f4fc8afa325bc7982d9c",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "no_permission",
+      "路径": "/api/review/tasks/162",
+      "HTTP": 403,
+      "字节数": 175,
+      "SHA256": "b3bf55dd2dfbe3b2bf1d25823c676ba48786e899a092a132eb37740ca1544f12",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "no_permission",
+      "路径": "/api/review/tasks/162/issues",
+      "HTTP": 403,
+      "字节数": 174,
+      "SHA256": "3b3de3955a69d36ede090ed70192f11d2ad59093ffdf1bb6829248e8ba76155b",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_a",
+      "路径": "/api/review/tasks/-1",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "c1443fc48c969f4c7bf18ac5f23842cd8181e7c67055d0384cb146466eee52db",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_a",
+      "路径": "/api/review/tasks/-1/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "3475ea7c347ab398c0784f49974f4f3fc57642e29524aec8c8d6115f06ca7088",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_a",
+      "路径": "/api/review/tasks/161",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "b36fe49513ec6f31ec99a4496956204b690ae73c12d6d0cc986ab10dcc6ae871",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_a",
+      "路径": "/api/review/tasks/161/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "dfbff184199e19d749aadf6a56778945bbcabe3258f4cf036ae7ae67809d1b85",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_a",
+      "路径": "/api/review/tasks/162",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "30f291d8e1d1397503c4ca160202d6ba43f64497a60f015328005b5d5d86a7d0",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_a",
+      "路径": "/api/review/tasks/162/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "deb508621c0995563fc642537877cc4d0e5cb55f7dbd5614551587497d3f6821",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "member_a",
+      "路径": "/api/review/tasks/-1",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "a96a013b369e332347c694b090ba659c5938714afb363aaf0e3ba4a9b678b4c1",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "member_a",
+      "路径": "/api/review/tasks/-1/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "be2ab794689138e9c65237fc0d12b49e5b610a860a2a7dac7bad666b6786686f",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "member_a",
+      "路径": "/api/review/tasks/161",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "4dff83cf4d8d9710af7a17ad735d17fc0f4220c47f35bb05192587216ca8ec42",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "member_a",
+      "路径": "/api/review/tasks/161/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "f1c77e440e6ef23fd2f04721ef492b0281ecdd72e7502aeb1c3737f6b9bb48d1",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "member_a",
+      "路径": "/api/review/tasks/162",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "4058b9b45cc65b269d642776c15764a9bf38f22d7d3345def10d955175811e8d",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "member_a",
+      "路径": "/api/review/tasks/162/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "37e5c07fe4723bf0c736f10ed0bd815315441768c008a460fab1c460c769dd6d",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_b",
+      "路径": "/api/review/tasks/-1",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "236d63ab08d56327153a7f7c11f499b9716092b162b4aedeee163b10773a1438",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_b",
+      "路径": "/api/review/tasks/-1/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "bd989e84a757f030024023420863597e8911b9cce712b7f536c488cb73088b1d",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_b",
+      "路径": "/api/review/tasks/161",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "d05bba941d774e23146bc5ba1f5bfa6122cdccf90aea3771d585a2222db7b5bc",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_b",
+      "路径": "/api/review/tasks/161/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "76b7057946ac392e96ca84e5225bc5b84ccb31c9ec416f5e9512b401051d995d",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_b",
+      "路径": "/api/review/tasks/162",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "9807106abb0c35f3d91b339eaba33f4401ea5e8275783495f5ae2d3ade564f3d",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_b",
+      "路径": "/api/review/tasks/162/issues",
+      "HTTP": 404,
+      "字节数": 251,
+      "SHA256": "750d8a506d79294182f144d2a07792a5ee766aa8a3e0cdc87cdf095ca9245009",
+      "公开信封完全匹配": true
+    }
+  ],
+  "权限与空角色逐条比对": [
+    {
+      "账号": "owner_a",
+      "路径": "/api/rbac/users/107/permissions",
+      "HTTP": 200,
+      "字节数": 349,
+      "SHA256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "member_a",
+      "路径": "/api/rbac/users/108/permissions",
+      "HTTP": 200,
+      "字节数": 349,
+      "SHA256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "owner_b",
+      "路径": "/api/rbac/users/109/permissions",
+      "HTTP": 200,
+      "字节数": 349,
+      "SHA256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "no_permission",
+      "路径": "/api/rbac/users/110/roles",
+      "HTTP": 200,
+      "字节数": 35,
+      "SHA256": "f139e4295f71dc13b09f52f38526a00e06b1f5ddcc7cbe39c3ff4f314ddb9a24",
+      "公开信封完全匹配": true
+    },
+    {
+      "账号": "no_permission",
+      "路径": "/api/rbac/users/110/permissions",
+      "HTTP": 200,
+      "字节数": 35,
+      "SHA256": "f139e4295f71dc13b09f52f38526a00e06b1f5ddcc7cbe39c3ff4f314ddb9a24",
+      "公开信封完全匹配": true
+    }
+  ],
+  "方法": "按真实生产JSONResponse字段顺序、UTF8及紧凑JSON编码，从固定公开合同与响应头编号重建预期字节；逐条对照原收据SHA和长度，不读取原响应正文",
+  "边界": "4个成功登录正文含token、3个专用角色正文含动态时间，未重建这7个正文；身份与角色通过原Runner已审实现及已保存11项断言支持，不把断言冒充独立正文重算。模型/任务新增量另由生产数据库收尾快照核查。",
+  "生产请求": 0,
+  "生产凭据读取": false,
+  "应用修改": false
+}

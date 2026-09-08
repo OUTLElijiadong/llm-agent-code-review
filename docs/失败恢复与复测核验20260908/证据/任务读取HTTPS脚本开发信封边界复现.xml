@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="7" time="13.230" timestamp="2026-09-08T13:43:10.393270+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="test_task_access_https_review" name="test_real_login_runner_and_thirty_negative_gets_match_contract" time="2.631"><failure message="RuntimeError: task_access_acceptance_failed">isolated = namespace(execute=&lt;function isolated.&lt;locals&gt;.execute at 0x10d31cdc0&gt;, requests=[('POST', '/api/auth/login'), ('GET', ...n', 'password': 'isolated-valid-password'}}}, mutate=[None], db=&lt;sqlalchemy.orm.session.Session object at 0x10cd7ce50&gt;)
+
+    def test_real_login_runner_and_thirty_negative_gets_match_contract(isolated):
+&gt;       evidence=isolated.execute()
+
+/tmp/test_task_access_https_review.py:95: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/test_task_access_https_review.py:81: in execute
+    runpy.run_path(str(SCRIPT_PATH),run_name='__main__')
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py:268: in run_path
+    return _run_module_code(code, init_globals, run_name,
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py:97: in _run_module_code
+    _run_code(code, mod_globals, init_globals,
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py:87: in _run_code
+    exec(code, run_globals)
+docs/失败恢复与复测核验20260908/证据/verify_task_access_https.py:142: in &lt;module&gt;
+    main()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def main():
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument('--credentials', type=Path, required=True)
+        parser.add_argument('--output', type=Path, required=True)
+        args = parser.parse_args()
+        manifest = private_json(args.credentials)
+        validate_manifest(manifest)
+        runner = Runner('https://lijiadong.cn', manifest, {}, args.output, phase='task-access')
+        try:
+            runner.log['status'] = 'running'
+            for account in ACCOUNTS:
+                runner.login(account)
+            errors404 = []
+            for account in ['anonymous', 'no_permission', 'owner_a', 'member_a', 'owner_b']:
+                expected = 401 if account == 'anonymous' else 403 if account == 'no_permission' else 404
+                for task_id in [-1, 161, 162]:
+                    for suffix in ['', '/issues']:
+                        path = f'/api/review/tasks/{task_id}{suffix}'
+                        rid = 'qa-' + uuid.uuid4().hex
+                        headers = {'Accept': 'application/json', 'X-Request-Id': rid}
+                        if account != 'anonymous':
+                            headers['Authorization'] = 'Bearer ' + runner.tokens[account]
+                        row = {'account': account, 'method': 'GET', 'path': path, 'expected': expected,
+                               'status': 'pending', 'request_id': rid}
+                        runner.log['requests'].append(row)
+                        runner.save()
+                        try:
+                            try:
+                                response = runner.client.open(
+                                    urllib.request.Request(runner.base + path, headers=headers), timeout=20,
+                                )
+                            except urllib.error.HTTPError as exc:
+                                response = exc
+                            with response:
+                                raw = response.read(8193)
+                                row.update(actual=response.code, response_bytes=len(raw),
+                                           response_sha256=hashlib.sha256(raw).hexdigest(),
+                                           response_request_id=response.headers.get('X-Request-Id'))
+                                if response.code != expected or len(raw) &gt; 8192:
+                                    raise ValueError('unexpected_task_error_response')
+                                if row['response_request_id'] != rid:
+                                    raise ValueError('request_id_header_not_preserved')
+                                data = json.loads(raw)
+                                validate_error(data, expected, rid, suffix)
+                                if expected == 404:
+                                    errors404.append({key: value for key, value in data.items() if key != 'request_id'})
+                            row['status'] = 'passed'
+                        except Exception as exc:
+                            row['status'] = 'failed'
+                            row['failure_type'] = type(exc).__name__
+                            raise
+                        finally:
+                            runner.save()
+                        time.sleep(0.15)
+            if len(errors404) != 18 or not all(value == errors404[0] for value in errors404):
+                raise ValueError('not_found_envelopes_differ')
+            runner.check(True, '缺失与不可见任务两个GET同一404信封，未返回项目存在信息')
+            runner.log['status'] = 'passed'
+        except Exception as exc:
+            runner.log['status'] = 'failed'
+            runner.log['failure_type'] = type(exc).__name__
+&gt;           raise RuntimeError('task_access_acceptance_failed') from None
+E           RuntimeError: task_access_acceptance_failed
+
+docs/失败恢复与复测核验20260908/证据/verify_task_access_https.py:132: RuntimeError</failure></testcase><testcase classname="test_task_access_https_review" name="test_manifest_identity_is_rejected_before_login[role_code]" time="0.767" /><testcase classname="test_task_access_https_review" name="test_manifest_identity_is_rejected_before_login[username]" time="0.760" /><testcase classname="test_task_access_https_review" name="test_manifest_identity_is_rejected_before_login[id]" time="0.764" /><testcase classname="test_task_access_https_review" name="test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code[leaky404]" time="2.539" /><testcase classname="test_task_access_https_review" name="test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code[wrong401]" time="1.573" /><testcase classname="test_task_access_https_review" name="test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code[wrong403]" time="2.563" /></testsuite></testsuites>

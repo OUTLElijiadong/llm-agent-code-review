@@ -1,0 +1,48 @@
+{
+  "审阅人": "permission_matrix",
+  "状态": "通过",
+  "检查": {
+    "原独审35结论与22个来源指纹": true,
+    "版本与048只读迁移": true,
+    "42外键逐项关系前后保持": true,
+    "五运行源码独立重算": true,
+    "历史九集合完整相等且七孤儿三执行保持": true,
+    "项目161八字段及行hash相等": true,
+    "任务161全部非时间字段相等和未分级语义": true,
+    "270双map及canonical摘要和index重算": true,
+    "资源容器与发布账本绑定": true,
+    "本轮备份048八十九表与sidecar重算": true,
+    "发布原日志保持与环境警告闭环": true
+  },
+  "来源指纹": {
+    "3.8.7发布后数据与备份独立复核.json": "045161c887fa8ef160ab9cefeb4d0e92641ce7f24119ff974d43a9c0b08e978b",
+    "发布前生产版本与外键核验.json": "a0cfb3b7e1070a00114ed9803a74e0d0fb40776596deb6c177cc43fb515ead45",
+    "发布后生产版本与外键核验.json": "6085d4d8d5bfc7e40310dd43d011e67a46cacfe247fc19781a903004d4614e3a",
+    "发布后前端资源与备份核验.json": "2082ab12f7cef84f531a6b37ca82efe468e58c6c94220bd6c5e815364bb99efb",
+    "发布前历史账本只读.json": "5d02c2dfe7cfb35e29d1bf3ca0208d2051fe22581eb46aa9fab4feb2e7e0aa86",
+    "发布后历史账本只读.json": "9233d9564f4e5474980eb45a3b6bb5e66545bcfdc0b119b3d82a87f045acb025",
+    "发布前项目161八字段核验.json": "a9f776af53521803d83f5b5e9f516c14e9c1cee0777918a0b508c09d854db55d",
+    "发布后项目161八字段核验.json": "217ceed67c7bb769b912b90495c7acfce6e5daf64f8ba7b1b5df7acef0ed793c",
+    "发布前审查任务161报告核验.json": "0abf503c1c576c375d4a64aa84d6c05de6ebed867e74dae590bfc10bf980f547",
+    "发布后审查任务161报告核验.json": "0ba32b1e7b705598cb24c93c806d534dc9f4df24a5915afc5220875474aef6ff",
+    "生产默认发布环境校准.json": "190f077c6eacd752bd4a42e0d56bae4c7212da36625ee6cf64932f4075a0aa85",
+    "发布后生产运维门禁.json": "fa388db4767271c63f035af936a279ee0500ea860249234271079dd9d4a3b563"
+  },
+  "原来源指纹重算数": 22,
+  "外键逐表": {
+    "agent_mesh_message": 6,
+    "agent_response_run": 6,
+    "agent_team": 6,
+    "ai_call_log": 6,
+    "pentest_engagement": 6,
+    "review_task": 6,
+    "sandbox_environment": 6
+  },
+  "前端数量": 270,
+  "前端规范摘要": "bbbe99af2f6212fcc497f06b9428832dacde3fb27a6c6b50b910c9ee738282ee",
+  "备份校验旁文件摘要": "4728769faa5e1585a432037a45b1a14cde7272b3de03152b107f22639c8c5548",
+  "生产请求数": 0,
+  "生产写入": false,
+  "测试或迁移重跑": false,
+  "证据边界": "重新读取原始归档JSON并独立计算相等关系和SHA；未执行原审阅脚本、生产采集器或读取SQL正文。备份gzip字节及3725全目录只验证已采集证据的一致性，不声称本地重读原始备份或全部公开文件。UI通过数不由这些证据推导。"
+}

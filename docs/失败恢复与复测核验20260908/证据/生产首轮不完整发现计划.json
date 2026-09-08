@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "generated_at": "2026-09-08T05:41:03.544161+00:00",
+  "middleware": [
+    "app.core.observability.RequestContextMiddleware",
+    "starlette.middleware.cors.CORSMiddleware"
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "endpoint": "app/main.py",
+      "line": 253,
+      "dependency_order": [],
+      "anonymous": "blocked",
+      "no_permission": "blocked",
+      "guard": null,
+      "unknown_dependencies": []
+    },
+    {
+      "method": "GET",
+      "path": "/readyz",
+      "endpoint": "app/main.py",
+      "line": 267,
+      "dependency_order": [],
+      "anonymous": "blocked",
+      "no_permission": "blocked",
+      "guard": null,
+      "unknown_dependencies": []
+    },
+    {
+      "method": "GET",
+      "path": "/metrics",
+      "endpoint": "app/main.py",
+      "line": 295,
+      "dependency_order": [],
+      "anonymous": "blocked",
+      "no_permission": "blocked",
+      "guard": null,
+      "unknown_dependencies": []
+    }
+  ],
+  "source_sha256": {
+    "app/api/__init__.py": "9360949f3eebfef707f2f08ba767107b4f4cc5b46aae13431a8477a736568583",
+    "app/api/v1/reports.py": "31c4e760f05875ee2e31fc8c0e29b564819e1679e60127dcbe47c5abb9757fce",
+    "app/core/database.py": "f187d56041c6b5920539838a27ce47aa0f5c36f52129ddb44cd5e77d0ffb9927",
+    "app/core/dependencies.py": "b75be1117e45d543d52fcae4bcadee16d1b93d214369beb7fd6e0a1c124f1709",
+    "app/core/observability.py": "f5efc84337e50b5c26467e575ea4127088f601588ea33b7bf5770bef00eb483f",
+    "app/core/rbac_dependency.py": "084dc337ec8981138229228794dccc722c73e8dddc6526d5d9009b9a84090ab8",
+    "app/core/security.py": "42bd514564cd3a3abd33e4a079e8cd61a565d885d876412b53378aa12db4c7e8",
+    "app/core/super_admin.py": "28191099c19fb13292bbb4790c9d1239b8f59652ac240614e0a3316e2bd2f4bb",
+    "app/main.py": "252547e259cbb80fe3fded9afd5add118f17b08c29b67490e382bc7cc5579197",
+    "app/services/rbac_service.py": "671d62b77db2c19d5fa5c9b2692d60a1340b5d1b542ef935df13c5fcdd9b2b59"
+  },
+  "proof": "FastAPI按依赖树先求子依赖再调用依赖；仅已复核只读身份/RBAC依赖可通过计划。缺token或无权限在端点调用前抛出；未知依赖和公开路由不发送负向请求。中间件只有CORS及日志/进程内指标；不声称HTTP日志本身零写入。"
+}

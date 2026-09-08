@@ -1,0 +1,69 @@
+{
+  "核验时间UTC": "2026-09-08T05:31:09.731904+00:00",
+  "结论": "通过：服务器重建物与独立核验的本地完整Git bundle逐字节摘要及长度相同，可以进入主代理正式部署流程",
+  "逐项比对": {
+    "服务器状态通过": true,
+    "服务器字节数等于独立原包": true,
+    "服务器SHA等于独立原包": true,
+    "本地差异往返包字节数一致": true,
+    "本地差异往返包SHA一致": true,
+    "差异传输字节数一致": true,
+    "差异传输SHA一致": true,
+    "服务器收据旧完整包保持": true,
+    "服务器包权限600": true,
+    "服务器原生解码器1.5.5": true,
+    "服务器解码前可用内存匹配": true,
+    "服务器未写业务": true
+  },
+  "传输方式": "Zstandard --patch-from 以旧完整bundle作为字典传输差异；传输量1,309,693字节，重建发布物仍为274,090,027字节完整bundle。不是git增量bundle，不依赖旧仓库提交补全目标历史。",
+  "独立本地完整包": {
+    "字节数": 274090027,
+    "SHA256": "68f4066025523e5c1687ffa99a0bf8ad726269b468443c5afe43f7171404a300",
+    "目标提交": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+    "版本": "3.8.7",
+    "目标历史提交数": 343,
+    "外部前置提交数": 0
+  },
+  "独立本地往返产物": {
+    "文件": "/tmp/prism-release-20260908-3.8.7/patch-roundtrip-verified.bundle",
+    "字节数": 274090027,
+    "SHA256": "68f4066025523e5c1687ffa99a0bf8ad726269b468443c5afe43f7171404a300"
+  },
+  "独立差异传输包": {
+    "文件": "/tmp/prism-release-20260908-3.8.7/prism-4035d19-transfer.zst",
+    "字节数": 1309693,
+    "SHA256": "cf392273bbefb46ba5ff66db9b385fe05e41ca2b9f32c411660bc853816a9c79"
+  },
+  "服务器原始收据": {
+    "status": "passed",
+    "bundle": "/tmp/prism-4035d19-full.bundle",
+    "bytes": 274090027,
+    "sha256": "68f4066025523e5c1687ffa99a0bf8ad726269b468443c5afe43f7171404a300",
+    "patch_bytes": 1309693,
+    "patch_sha256": "cf392273bbefb46ba5ff66db9b385fe05e41ca2b9f32c411660bc853816a9c79",
+    "previous_bundle_unchanged": true,
+    "mode": "0o600",
+    "decoder": "*** Zstandard CLI (64-bit) v1.5.5, by Yann Collet ***",
+    "available_memory_before_kb": 4594508,
+    "business_writes": false
+  },
+  "来源文件": {
+    "服务器收据": {
+      "文件": "/tmp/prism-release-20260908-3.8.7/server-bundle-verification.json",
+      "字节数": 480,
+      "SHA256": "397b4a92dc072b9230a992859ce75ab7a561744a1599e203524d5295e2d42607"
+    },
+    "重建脚本": {
+      "文件": "/tmp/prism-release-20260908-3.8.7/reconstruct_bundle.py",
+      "字节数": 2138,
+      "SHA256": "2fc513af5215d1f033677d04794485b1ef24426bdcbddea03fc69445a1ad6802"
+    }
+  },
+  "脚本只读审查": [
+    "固定/tmp任务文件；校验旧包大小266403299和SHA4b1942cc79829146a26cc1a687cff6afb6ab5d288ea07acb5f8ef33cc88b86cb以及差异文件大小与SHA后才解码。",
+    "检查没有残留重建/partial文件，使用umask077，最低MemAvailable1536MiB，zstd --memory=512MB有界解码；子进程失败即停止。",
+    "重建目标完整大小和SHA通过后fsync、chmod0600、原子替换临时发布目标；如存在前次传输目标则保留为rsync-partial，未覆盖作为字典的旧完整包。",
+    "本地git bundle verify成功后才打印passed收据，再重算旧包摘要确认未变；脚本不切换代码、不重启容器、不写数据库、不推送Git。"
+  ],
+  "证据界限": "本子代理独立重算本地原包/往返包/差异包，完整读取重建脚本并逐值核对主代理提供的服务器执行收据；本次没有再次登录服务器或重执行重建。正式部署尚由主代理另行执行。"
+}

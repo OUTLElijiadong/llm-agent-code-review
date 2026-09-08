@@ -1,0 +1,1 @@
+{"status": "aligned", "release": "4035d1902342ab88357b5bb6071545d1a0572dd1", "version": "3.8.7", "changed_fields": ["APP_RELEASE", "APP_VERSION", "BACKEND_RELEASE", "FRONTEND_RELEASE"], "unrelated_bytes_preserved": true, "backup": "/opt/code-review/deploy/.env.before-4035d1902342-20260908T053817Z", "file_mode": "0600"}

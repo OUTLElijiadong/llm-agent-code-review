@@ -1,0 +1,48 @@
+{
+  "status": "passed",
+  "write_executed": false,
+  "old_qa_still_disabled": true,
+  "new_qa_disable_pending_user_approval": true,
+  "accounts": [
+    {
+      "id": 103,
+      "role": "user",
+      "status": 0
+    },
+    {
+      "id": 104,
+      "role": "user",
+      "status": 0
+    },
+    {
+      "id": 105,
+      "role": "user",
+      "status": 0
+    },
+    {
+      "id": 106,
+      "role": "user",
+      "status": 0
+    },
+    {
+      "id": 107,
+      "role": "user",
+      "status": 1
+    },
+    {
+      "id": 108,
+      "role": "user",
+      "status": 1
+    },
+    {
+      "id": 109,
+      "role": "user",
+      "status": 1
+    },
+    {
+      "id": 110,
+      "role": "user",
+      "status": 1
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "source_actions": 616,
+  "source_buttons_or_links": 452,
+  "roles": 5,
+  "total_role_control_rows": 3080,
+  "current_release_statuses": {
+    "untested": 2430,
+    "passed": 14,
+    "partially_tested": 9,
+    "observed": 11,
+    "blocked": 616
+  },
+  "current_release_passed": 14,
+  "rows_with_previous_release_observations": 34,
+  "previous_release_observations": 66,
+  "note": "passed只表示已列明静态按钮场景；动态实例/不完整结果为partially_tested，显隐/禁用为observed。36原观察不等于36个唯一按钮，API不计UI通过。",
+  "raw_browser_observations": 36,
+  "mapped_unique_raw_observations": 29,
+  "raw_unmapped_or_supplemental": 7,
+  "row_observation_links": 36,
+  "rows_with_current_observations": 34,
+  "per_role": {
+    "owner_a": {
+      "untested": 604,
+      "passed": 5,
+      "partially_tested": 6,
+      "observed": 1
+    },
+    "member_a": {
+      "untested": 604,
+      "passed": 2,
+      "observed": 8,
+      "partially_tested": 2
+    },
+    "owner_b": {
+      "untested": 612,
+      "passed": 4
+    },
+    "no_permission": {
+      "untested": 610,
+      "partially_tested": 1,
+      "passed": 3,
+      "observed": 2
+    },
+    "administrator": {
+      "blocked": 616
+    }
+  },
+  "ledger_sha256": "61c4b49c8794d387d05bdec1864a969ab50d5dff98a9df91356a3a7c88c2aada",
+  "csv_sha256": "6de159a22d8ebc8f0b5b7b2db34a80558d6516cb9aecfcb46b037a69fed8a5a1",
+  "initialization_sha256": "b0627b17ea3b6a7ba6960a4a9c8a8c36e013b35ddc9c6628ff150a5e3902cb01"
+}

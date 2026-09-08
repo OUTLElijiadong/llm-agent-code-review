@@ -1,0 +1,80 @@
+{
+  "审阅人": "permission_matrix",
+  "状态": "打回",
+  "检查": {
+    "初始化未覆盖与新文件摘要": true,
+    "616乘5唯一行及定位保持": true,
+    "104份源码SHA及452按钮链接": true,
+    "当前八份来源与原来源SHA一致": true,
+    "准确账号ID与四份原始版本": true,
+    "状态计数及逐角色汇总准确": true,
+    "JSON与CSV所有字段逐格相同": true,
+    "36条映射逐条对原件及保守状态": true,
+    "36原观察29映射7补充全保留": true,
+    "源码定位及旧34格66观察24补充保留": false,
+    "精确按钮补充版本及映射边界存在": true
+  },
+  "总格数": 3080,
+  "状态重数": {
+    "untested": 2430,
+    "passed": 14,
+    "partially_tested": 9,
+    "observed": 11,
+    "blocked": 616
+  },
+  "逐角色重数": {
+    "owner_a": {
+      "untested": 604,
+      "passed": 5,
+      "partially_tested": 6,
+      "observed": 1
+    },
+    "member_a": {
+      "untested": 604,
+      "passed": 2,
+      "observed": 8,
+      "partially_tested": 2
+    },
+    "owner_b": {
+      "untested": 612,
+      "passed": 4
+    },
+    "no_permission": {
+      "untested": 610,
+      "partially_tested": 1,
+      "passed": 3,
+      "observed": 2
+    },
+    "administrator": {
+      "blocked": 616
+    }
+  },
+  "来源SHA256": {
+    "本轮全部控件逐角色验收台账.json": "b0627b17ea3b6a7ba6960a4a9c8a8c36e013b35ddc9c6628ff150a5e3902cb01",
+    "生产3.8.7-全部控件逐角色验收台账.json": "61c4b49c8794d387d05bdec1864a969ab50d5dff98a9df91356a3a7c88c2aada",
+    "生产3.8.7-全部控件逐角色汇总.json": "5bdea74d26974d73492a6249481138eb3e0f9068ab2a52b1ab7176199c8ace7c",
+    "全部按钮与交互源码清单-最终绑定.json": "e6968318493fc8393ad01716a2b0a90fa31ad36a2b4c912fc0ba9340b919524f",
+    "生产浏览器精确动作补充.json": "4c39f3d6844191457a9eaf0ac493e0424e96efe65651979dd882c050aec557cb",
+    "生产浏览器owner_a观察.json": "80b4f6d0b7a0fa21db2ec76012bfd94b6ccd712f3b7cf72b3ea531ffdfef7d23",
+    "生产浏览器member_a观察.json": "81e79348682ec7b04f8c6cd136b8ca59ccfd531d06e4719c78be6c4eae882659",
+    "生产浏览器owner_b观察.json": "d784351d3610643d38f86f75b7cbe06aa14821f612159b6843bef21dd6d680c1",
+    "生产浏览器no_permission观察.json": "c8e074bbb75a2d97fa547e63d5c36c9b890a6bbb523df5424c2cae7b9c5a3902",
+    "生产3.8.7-全部控件逐角色验收台账.csv": "6de159a22d8ebc8f0b5b7b2db34a80558d6516cb9aecfcb46b037a69fed8a5a1"
+  },
+  "本轮映射格数": 34,
+  "本轮映射观察链接": 36,
+  "原始观察数": 36,
+  "唯一映射原观察数": 29,
+  "未映射补充数": 7,
+  "生产请求数": 0,
+  "生产写入": false,
+  "生成器执行": false,
+  "证据边界": [
+    "四账号正常登录仅证明所列正常按钮场景；不推定错误密码、网络失败、限流冷却生产实测。",
+    "owner_a刷新只点未收完整结果、首次紧连编辑与编辑取消结果不完整、no_permission退出末态不完整均保持partial。",
+    "项目表格行、搜索结果和文本文件查看仅覆盖QA实例，保持partial；成员上传/下载描述无法唯一定位者不猜按钮。",
+    "成员保存按钮隐藏仅observed；没有用AX的settable推导Monaco只读编辑实测。",
+    "616管理员格仍blocked；未用92个API夹具请求、权限矩阵、本地挂载测试或旧版观察新增UI passed。",
+    "这是原始CUA观察转录与台账的离线独审，不是第二轮浏览器点击。"
+  ]
+}

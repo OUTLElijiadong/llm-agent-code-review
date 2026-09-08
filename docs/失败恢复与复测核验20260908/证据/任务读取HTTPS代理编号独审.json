@@ -1,0 +1,50 @@
+{
+  "核验时间UTC": "2026-09-08T05:52:37.180960+00:00",
+  "结论": "代理编号合同修正后11项隔离回归通过；未改应用、未执行生产",
+  "请求编号合同": "服务器响应头为合法编号，正文必须等于该服务器编号；Nginx可覆盖客户端发送编号，两个编号均保留在脱敏日志",
+  "脚本SHA256": "429c5bd9ebb576d1a5a46f0413a19d7db41af6b1a17791d2d0e6a2aed4d8f5e7",
+  "源文件SHA256": {
+    "docs/失败恢复与复测核验20260908/证据/verify_task_access_https.py": "429c5bd9ebb576d1a5a46f0413a19d7db41af6b1a17791d2d0e6a2aed4d8f5e7",
+    "docs/失败恢复与复测核验20260908/证据/verify_task_access_https_v1_client_id_assumption.py": "9f77677806af86ac8d3df316a48e76b2560101142625b2018035fe1ecd689f59",
+    "docs/失败恢复与复测核验20260908/证据/任务读取HTTPS代理编号隔离测试.py": "e221bc0f06d13c9719ce8d833fd20c2d6438901ed724fdccfb176fa58d4ac26d",
+    "frontend/nginx.conf.template": "b062cee5bea6b43d826b9d57dbc729cceafca7bcb10588bfcde880999fd72f1f",
+    "backend/app/core/observability.py": "f5efc84337e50b5c26467e575ea4127088f601588ea33b7bf5770bef00eb483f",
+    "backend/app/core/error_handlers.py": "ff39b307cc34d46e9253c7bfc7d20372d22919e1ab29072dc28ccf69b40531d7"
+  },
+  "原生产失败收据": {
+    "文件": "生产任务读取错误专项原始结果.json",
+    "SHA256": "cbfc6b949d3155225cac9852af179ecfe52f096e5042bc6bc69ce7dd876887ac",
+    "总请求": 13,
+    "summary": {
+      "passed": 12,
+      "failed": 1
+    },
+    "最后请求HTTP": 401,
+    "原结果保留": true,
+    "原正文不在日志中": "未读取原正文；按公开固定信封及返回边缘编号重建145字节与SHA完全匹配，证明头/体编号一致",
+    "公开信封独立比对": {
+      "文件": "原匿名401公开信封独立哈希比对.json",
+      "SHA256": "65ba0fccb5161a63efa45cb30485370ee8581a6cebc50869ac14be1e77555b65",
+      "长度及SHA一致": true
+    }
+  },
+  "测试": {
+    "任务读取HTTPS代理编号准确红测.xml": {
+      "总数": 1,
+      "失败": 1,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "4e4ace67b1c1d09051f6143d827e06fa61591e65e5aa91fd0d41ca11003d65b6"
+    },
+    "任务读取HTTPS代理编号最终回归.xml": {
+      "总数": 11,
+      "失败": 0,
+      "错误": 0,
+      "跳过": 0,
+      "SHA256": "ca7390b69458b2c883440c8dca0be609b858cf3ecae002ac91c3a197283a6e93"
+    }
+  },
+  "生产请求": 0,
+  "应用修改": false,
+  "Ruff": "通过"
+}

@@ -1,0 +1,8 @@
+{
+  "status": "launched",
+  "release": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+  "previous": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+  "pid": 3075034,
+  "log": "/root/prism-release-4035d19/deploy.log",
+  "bundle_bytes": 274090027
+}

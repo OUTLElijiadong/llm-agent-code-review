@@ -1,0 +1,54 @@
+{
+  "schema": "真实浏览器观察-v1",
+  "version": "3.8.7",
+  "release": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+  "account": "member_a",
+  "account_id": 108,
+  "source": "mcp__cua_repl正常UI操作与AX状态",
+  "observations": [
+    {
+      "id": "m01",
+      "page": "/login",
+      "action": "正常登录",
+      "result": "用户名member_a；角色普通用户；侧栏3.8.7"
+    },
+    {
+      "id": "m02",
+      "page": "/projects",
+      "action": "项目管理",
+      "result": "仅QA-a；项目行仅详情，没有编辑/删除；新建项目保留（全局project:create允许）"
+    },
+    {
+      "id": "m03",
+      "page": "/projects/164",
+      "action": "详情",
+      "result": "本成员项目正确加载，项目信息/代码文件/审查任务/成员管理标签可见"
+    },
+    {
+      "id": "m04",
+      "page": "/projects/164",
+      "action": "成员管理标签",
+      "result": "显示owner107和reviewer108两行，操作列—，无添加/变更/删除操作"
+    },
+    {
+      "id": "m05",
+      "page": "/projects/164",
+      "action": "代码文件标签",
+      "result": "显示file1894 v2/21B/2行；允许下载/查看/历史，无上传入口"
+    },
+    {
+      "id": "m06",
+      "page": "/code/164/file/1894",
+      "action": "查看代码",
+      "result": "真实导航编辑器，QA源码可见，没有保存按钮；未尝试修改编辑器文本，不把AX的settable等同readonly实测"
+    },
+    {
+      "id": "m07",
+      "page": "/code/164/file/1894",
+      "action": "菜单退出登录并确认",
+      "result": "操作已执行，下一步正常登录其他QA证明返回登录页"
+    }
+  ],
+  "business_mutation_buttons_clicked": false,
+  "api_results_not_counted_as_ui": true
+}

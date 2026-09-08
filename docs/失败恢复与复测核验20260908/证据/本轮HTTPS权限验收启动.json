@@ -1,0 +1,1 @@
+{"status": "launched", "pid": 3099725, "account_ids": {"owner_a": 107, "member_a": 108, "owner_b": 109, "no_permission": 110}, "credentials_mode": "0600", "plan": {"routes": 3, "anonymous_ready": 0, "no_permission_ready": 0}}

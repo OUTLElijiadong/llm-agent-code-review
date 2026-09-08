@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="7" time="30.452" timestamp="2026-09-08T13:41:08.561113+08:00" hostname="lijiadongdeMacBook-Air-7.local"><testcase classname="test_task_access_https_review" name="test_real_login_runner_and_thirty_negative_gets_match_contract" time="6.620" /><testcase classname="test_task_access_https_review" name="test_manifest_identity_is_rejected_before_login[role_code]" time="0.947"><failure message="AssertionError: assert [('POST', '/a...permissions')] == []&#10;  &#10;  Left contains 3 more items, first extra item: ('POST', '/api/auth/login')&#10;  Use -v to get more diff">isolated = namespace(execute=&lt;function isolated.&lt;locals&gt;.execute at 0x10da581f0&gt;, requests=[('POST', '/api/auth/login'), ('GET', ...n', 'password': 'isolated-valid-password'}}}, mutate=[None], db=&lt;sqlalchemy.orm.session.Session object at 0x10d9f9e20&gt;)
+field = 'role_code'
+
+    @pytest.mark.parametrize('field',['role_code','username','id'])
+    def test_manifest_identity_is_rejected_before_login(isolated,field):
+        if field=='role_code':isolated.manifest['role_code']='foreign_role'
+        elif field=='username':isolated.manifest['accounts']['owner_a']['username']='foreign-account'
+        else:isolated.manifest['accounts']['owner_a']['id']=True
+        with pytest.raises((ValueError,RuntimeError,AssertionError)):
+            isolated.execute()
+&gt;       assert isolated.requests==[]
+E       AssertionError: assert [('POST', '/a...permissions')] == []
+E         
+E         Left contains 3 more items, first extra item: ('POST', '/api/auth/login')
+E         Use -v to get more diff
+
+/tmp/test_task_access_https_review.py:111: AssertionError</failure></testcase><testcase classname="test_task_access_https_review" name="test_manifest_identity_is_rejected_before_login[username]" time="0.770"><failure message="AssertionError: assert [('POST', '/api/auth/login')] == []&#10;  &#10;  Left contains one more item: ('POST', '/api/auth/login')&#10;  Use -v to get more diff">isolated = namespace(execute=&lt;function isolated.&lt;locals&gt;.execute at 0x10dae6820&gt;, requests=[('POST', '/api/auth/login')], manifes...n', 'password': 'isolated-valid-password'}}}, mutate=[None], db=&lt;sqlalchemy.orm.session.Session object at 0x10daf4460&gt;)
+field = 'username'
+
+    @pytest.mark.parametrize('field',['role_code','username','id'])
+    def test_manifest_identity_is_rejected_before_login(isolated,field):
+        if field=='role_code':isolated.manifest['role_code']='foreign_role'
+        elif field=='username':isolated.manifest['accounts']['owner_a']['username']='foreign-account'
+        else:isolated.manifest['accounts']['owner_a']['id']=True
+        with pytest.raises((ValueError,RuntimeError,AssertionError)):
+            isolated.execute()
+&gt;       assert isolated.requests==[]
+E       AssertionError: assert [('POST', '/api/auth/login')] == []
+E         
+E         Left contains one more item: ('POST', '/api/auth/login')
+E         Use -v to get more diff
+
+/tmp/test_task_access_https_review.py:111: AssertionError</failure></testcase><testcase classname="test_task_access_https_review" name="test_manifest_identity_is_rejected_before_login[id]" time="0.953"><failure message="AssertionError: assert [('POST', '/api/auth/login')] == []&#10;  &#10;  Left contains one more item: ('POST', '/api/auth/login')&#10;  Use -v to get more diff">isolated = namespace(execute=&lt;function isolated.&lt;locals&gt;.execute at 0x10dbd93a0&gt;, requests=[('POST', '/api/auth/login')], manifes...n', 'password': 'isolated-valid-password'}}}, mutate=[None], db=&lt;sqlalchemy.orm.session.Session object at 0x10dbcd850&gt;)
+field = 'id'
+
+    @pytest.mark.parametrize('field',['role_code','username','id'])
+    def test_manifest_identity_is_rejected_before_login(isolated,field):
+        if field=='role_code':isolated.manifest['role_code']='foreign_role'
+        elif field=='username':isolated.manifest['accounts']['owner_a']['username']='foreign-account'
+        else:isolated.manifest['accounts']['owner_a']['id']=True
+        with pytest.raises((ValueError,RuntimeError,AssertionError)):
+            isolated.execute()
+&gt;       assert isolated.requests==[]
+E       AssertionError: assert [('POST', '/api/auth/login')] == []
+E         
+E         Left contains one more item: ('POST', '/api/auth/login')
+E         Use -v to get more diff
+
+/tmp/test_task_access_https_review.py:111: AssertionError</failure></testcase><testcase classname="test_task_access_https_review" name="test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code[leaky404]" time="6.514"><failure message="Failed: DID NOT RAISE any of (&lt;class 'ValueError'&gt;, &lt;class 'RuntimeError'&gt;, &lt;class 'AssertionError'&gt;)">isolated = namespace(execute=&lt;function isolated.&lt;locals&gt;.execute at 0x10dbd95e0&gt;, requests=[('POST', '/api/auth/login'), ('GET', ...assword': 'isolated-valid-password'}}}, mutate=['leaky404'], db=&lt;sqlalchemy.orm.session.Session object at 0x10dbed670&gt;)
+mutate = 'leaky404'
+
+    @pytest.mark.parametrize('mutate',['leaky404','wrong401','wrong403'])
+    def test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code(isolated,mutate):
+        isolated.mutate[0]=mutate
+        with pytest.raises((ValueError,RuntimeError,AssertionError)):
+&gt;           isolated.execute()
+E           Failed: DID NOT RAISE any of (&lt;class 'ValueError'&gt;, &lt;class 'RuntimeError'&gt;, &lt;class 'AssertionError'&gt;)
+
+/tmp/test_task_access_https_review.py:118: Failed</failure></testcase><testcase classname="test_task_access_https_review" name="test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code[wrong401]" time="6.425"><failure message="Failed: DID NOT RAISE any of (&lt;class 'ValueError'&gt;, &lt;class 'RuntimeError'&gt;, &lt;class 'AssertionError'&gt;)">isolated = namespace(execute=&lt;function isolated.&lt;locals&gt;.execute at 0x10dc89af0&gt;, requests=[('POST', '/api/auth/login'), ('GET', ...assword': 'isolated-valid-password'}}}, mutate=['wrong401'], db=&lt;sqlalchemy.orm.session.Session object at 0x10da375e0&gt;)
+mutate = 'wrong401'
+
+    @pytest.mark.parametrize('mutate',['leaky404','wrong401','wrong403'])
+    def test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code(isolated,mutate):
+        isolated.mutate[0]=mutate
+        with pytest.raises((ValueError,RuntimeError,AssertionError)):
+&gt;           isolated.execute()
+E           Failed: DID NOT RAISE any of (&lt;class 'ValueError'&gt;, &lt;class 'RuntimeError'&gt;, &lt;class 'AssertionError'&gt;)
+
+/tmp/test_task_access_https_review.py:118: Failed</failure></testcase><testcase classname="test_task_access_https_review" name="test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code[wrong403]" time="6.567"><failure message="Failed: DID NOT RAISE any of (&lt;class 'ValueError'&gt;, &lt;class 'RuntimeError'&gt;, &lt;class 'AssertionError'&gt;)">isolated = namespace(execute=&lt;function isolated.&lt;locals&gt;.execute at 0x10dcb9940&gt;, requests=[('POST', '/api/auth/login'), ('GET', ...assword': 'isolated-valid-password'}}}, mutate=['wrong403'], db=&lt;sqlalchemy.orm.session.Session object at 0x10da5b670&gt;)
+mutate = 'wrong403'
+
+    @pytest.mark.parametrize('mutate',['leaky404','wrong401','wrong403'])
+    def test_error_envelope_rejects_privacy_leak_or_wrong_exact_auth_code(isolated,mutate):
+        isolated.mutate[0]=mutate
+        with pytest.raises((ValueError,RuntimeError,AssertionError)):
+&gt;           isolated.execute()
+E           Failed: DID NOT RAISE any of (&lt;class 'ValueError'&gt;, &lt;class 'RuntimeError'&gt;, &lt;class 'AssertionError'&gt;)
+
+/tmp/test_task_access_https_review.py:118: Failed</failure></testcase></testsuite></testsuites>

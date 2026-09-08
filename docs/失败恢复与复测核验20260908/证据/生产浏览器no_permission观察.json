@@ -1,0 +1,48 @@
+{
+  "schema": "真实浏览器观察-v1",
+  "version": "3.8.7",
+  "release": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+  "account": "no_permission",
+  "account_id": 110,
+  "source": "mcp__cua_repl正常UI操作与AX状态",
+  "observations": [
+    {
+      "id": "n01",
+      "page": "/login",
+      "action": "正常登录",
+      "result": "登录成功toast；no_permission普通用户；侧栏3.8.7"
+    },
+    {
+      "id": "n02",
+      "page": "/dashboard",
+      "action": "观察零权限导航",
+      "result": "不显示项目/代码/审查/问题/报告/Agent中心/安全中心；工作台保留，无导出统计报告；自身全部0"
+    },
+    {
+      "id": "n03",
+      "page": "/dashboard",
+      "action": "刷新数据",
+      "result": "已返回5/5项；仍自身0数据，不暴露其他账号项目/任务"
+    },
+    {
+      "id": "n04",
+      "page": "/403",
+      "action": "新标签直接访问/reviews/162",
+      "result": "实际转到403，访问被拒绝/没有权限；有返回首页/返回上一页"
+    },
+    {
+      "id": "n05",
+      "page": "/dashboard",
+      "action": "403返回首页",
+      "result": "实际回工作台，仍0数据，业务入口保持隐藏"
+    },
+    {
+      "id": "n06",
+      "page": "/dashboard",
+      "action": "退出登录并确认",
+      "result": "退出已执行，未使用账号继续业务操作"
+    }
+  ],
+  "business_mutation_buttons_clicked": false,
+  "api_results_not_counted_as_ui": true
+}

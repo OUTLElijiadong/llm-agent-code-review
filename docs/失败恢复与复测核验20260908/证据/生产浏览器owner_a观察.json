@@ -1,0 +1,119 @@
+{
+  "schema": "真实浏览器观察-v1",
+  "release": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+  "version": "3.8.7",
+  "source": "mcp__cua_repl正常UI操作与AX状态",
+  "browser_tab_id": "2",
+  "account": "owner_a",
+  "account_id": 107,
+  "observations": [
+    {
+      "id": "ui01",
+      "page": "/login",
+      "action": "本轮QA正常账号密码登录",
+      "result": "进入/dashboard；仅QA临时凭据用于表单，未写入项目证据"
+    },
+    {
+      "id": "ui02",
+      "page": "/dashboard",
+      "action": "新标签重新载入",
+      "result": "侧栏v3.8.7；普通用户owner_a；项目1/文件1/审查0；旧标签仍旧3.8.6，未把旧脚本当新版验收"
+    },
+    {
+      "id": "ui03",
+      "page": "/dashboard",
+      "action": "刷新数据",
+      "result": "随后功能导航正常打开；未单独捕获刷新完成AX，此项仅点击事实，不单独判完整passed"
+    },
+    {
+      "id": "ui04",
+      "page": "/dashboard",
+      "action": "打开功能导航",
+      "result": "弹窗显示功能导航及页面列表"
+    },
+    {
+      "id": "ui05",
+      "page": "/dashboard",
+      "action": "输入皮卡丘",
+      "result": "没有匹配的功能页面；项目名称请在“项目管理”中搜索。"
+    },
+    {
+      "id": "ui06",
+      "page": "/dashboard",
+      "action": "输入项目管理并点击匹配项",
+      "result": "真实转到/projects，弹窗关闭"
+    },
+    {
+      "id": "ui07",
+      "page": "/projects",
+      "action": "观察项目可见范围",
+      "result": "仅QA权限验收-20260908-a，共1项目，不见owner_b项目"
+    },
+    {
+      "id": "ui08",
+      "page": "/projects",
+      "action": "新建项目",
+      "result": "显示新建表单，空名称创建项目按钮禁用，可手动创建与取消"
+    },
+    {
+      "id": "ui09",
+      "page": "/projects",
+      "action": "取消新建",
+      "result": "返回项目列表；未创建额外资源"
+    },
+    {
+      "id": "ui10",
+      "page": "/projects",
+      "action": "编辑项目",
+      "result": "关闭新建后的首次紧连点击未打开，单独再次点击正常打开；回显现有名称/描述/Python；只证明稳定页面下可用"
+    },
+    {
+      "id": "ui11",
+      "page": "/projects",
+      "action": "取消编辑",
+      "result": "点击已执行，随后页面另核；未提交字段"
+    },
+    {
+      "id": "ui12",
+      "page": "/projects/164",
+      "action": "项目详情",
+      "result": "真实从列表进入本项目，名称/语言/状态/文件1准确回显"
+    },
+    {
+      "id": "ui13",
+      "page": "/projects/164",
+      "action": "代码文件标签",
+      "result": "显示permission_renamed.py，21B，2行，版本v2"
+    },
+    {
+      "id": "ui14",
+      "page": "/code/164/file/1894",
+      "action": "查看代码",
+      "result": "真实进入编辑器，源码print(version two)与版本v2可见，未点击保存"
+    },
+    {
+      "id": "ui15",
+      "page": "/reviews/162",
+      "action": "新标签打开不可见任务",
+      "result": "持续内联错误：审查任务不存在或当前账号无权访问；返回列表/联系负责人建议；请求编号63cc0a9ac0b87838d4ac3ae94cb87455"
+    },
+    {
+      "id": "ui16",
+      "page": "/reviews/162",
+      "action": "重新加载",
+      "result": "保持同一404说明，出现错误反馈，请求编号更新为1fc589a3110f73e6fcbf9fffcabce635；不伪报成功"
+    },
+    {
+      "id": "ui17",
+      "page": "/reviews",
+      "action": "返回审查记录",
+      "result": "真实进入审查记录，可见最近成功读取时间、刷新按钮和0任务空态"
+    }
+  ],
+  "notes": [
+    "API通过不计为UI通过",
+    "导出下载本轮未执行",
+    "管理员需用户正常登录",
+    "非完整616控件验收"
+  ]
+}

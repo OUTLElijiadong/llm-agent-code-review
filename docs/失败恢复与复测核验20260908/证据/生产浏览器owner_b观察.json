@@ -1,0 +1,48 @@
+{
+  "schema": "真实浏览器观察-v1",
+  "version": "3.8.7",
+  "release": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+  "account": "owner_b",
+  "account_id": 109,
+  "source": "mcp__cua_repl正常UI操作与AX状态",
+  "observations": [
+    {
+      "id": "b01",
+      "page": "/login",
+      "action": "正常登录",
+      "result": "owner_b普通用户；侧栏3.8.7"
+    },
+    {
+      "id": "b02",
+      "page": "/projects",
+      "action": "项目管理",
+      "result": "共1项目，仅QA-b；不见QA-a"
+    },
+    {
+      "id": "b03",
+      "page": "/projects/164",
+      "action": "新标签直接访问另一账号项目",
+      "result": "项目详情读取失败（项目不存在），请重试读取或返回项目列表核对；没有项目名称/源码/数据"
+    },
+    {
+      "id": "b04",
+      "page": "/projects/164",
+      "action": "重试读取",
+      "result": "错误保持，无旧数据冒充成功"
+    },
+    {
+      "id": "b05",
+      "page": "/projects",
+      "action": "返回",
+      "result": "实际导航到项目列表，仅QA-b"
+    },
+    {
+      "id": "b06",
+      "page": "/projects",
+      "action": "菜单退出并确认",
+      "result": "正常退出以便无权限账号继续验收"
+    }
+  ],
+  "business_mutation_buttons_clicked": false,
+  "api_results_not_counted_as_ui": true
+}

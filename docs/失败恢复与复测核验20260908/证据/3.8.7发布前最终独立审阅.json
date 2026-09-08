@@ -1,0 +1,93 @@
+{
+  "scope": "offline final XML/source/evidence review; one readonly production deploy-log tail; no production writes or test reruns",
+  "release_candidate": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+  "head_matches": true,
+  "application_matches_commit": true,
+  "final_tests": {
+    "后端最终源码全量回归.xml": {
+      "counts": {
+        "tests": 3975,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "sha256": "d716a14d05d40d85cf5bfd7789cd0ae3beee1122e5b6d44100fdd5edf43c0987",
+      "review_detail_test_count": 0,
+      "independent_failure_test_count": 0
+    },
+    "前端全量最终回归.xml": {
+      "counts": {
+        "tests": 1033,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "sha256": "ec9423f73061aa4042686967f2a50ca21d9917484fe243f49b8504154deb9a85",
+      "review_detail_test_count": 56,
+      "independent_failure_test_count": 4
+    }
+  },
+  "final_source_checks": {
+    "审查详情失败恢复实现指纹.json": {
+      "backend/app/services/review_service.py": true,
+      "backend/tests/test_review_task_access_errors.py": true,
+      "frontend/src/views/review/ReviewTaskDetail.vue": true,
+      "frontend/src/views/review/ReviewTaskDetail.test.ts": true
+    },
+    "部署失败恢复实现指纹.json": {
+      "deploy/deploy.sh": true,
+      "deploy/rollback.sh": true,
+      "deploy/ops-check.sh": true,
+      "deploy/lib/common.sh": true,
+      "deploy/tests/test_scripts.sh": true,
+      "deploy/tests/deploy_failure_cases.sh": true
+    },
+    "前端失败恢复独立复核指纹.json": {
+      "frontend/src/composables/withFeedback.ts": true,
+      "frontend/src/views/agent/AgentCenter.vue": true,
+      "frontend/src/views/code/CodeFileList.vue": true,
+      "frontend/src/views/project/ProjectDetail.vue": true,
+      "frontend/src/views/project/ProjectForm.vue": true,
+      "frontend/src/views/project/ProjectList.vue": true,
+      "frontend/src/views/report/ReportDetail.vue": true,
+      "frontend/src/views/project/FailureRecovery.test.ts": true,
+      "frontend/src/views/report/FailureRecoveryIndependent.test.ts": true
+    }
+  },
+  "pre_release_evidence_checks": {
+    "发布前版本与历史账本独立复核.json": {
+      "previous_independent_passed": true,
+      "sha256": "49ef905342b872b7639616ba50f0abeb1f8ffb31685ba9cf06edb19e789b445f"
+    },
+    "发布前项目与审查161独立复核.json": {
+      "previous_independent_passed": true,
+      "sha256": "f0a2e47128e8776790123a72e32a3c50a94b4fa04369ccc5fb4d3ad5a18d7cd4"
+    }
+  },
+  "collector_sha256": {
+    "docs/失败恢复与复测核验20260908/证据/collect_project161_fingerprint.py": "40093f610630b95de7779854f76bda7ce39e7529c1afb464609f660e2b109f4c",
+    "docs/失败恢复与复测核验20260908/证据/collect_task162_readonly.py": "28a5f20c21bad0e2c025364d8dde406e6dd4e7ba3dd2b9fff373dc9a85b0ecfc",
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_release_readonly.py": "6a4b90538b7c307e6bbac71463ef76cf8d51b8b206288f8c51e5a9792c2a8759",
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_historical_ledger.py": "37ffc5a773c422edc437050c275b8c1381d2fe37111e24625f2682a799bb0eb4",
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_review161_summary_readonly.py": "2a317387550ac5cd24dc6f230991d149067e8680cd1d9b55df76100105aecd46",
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_release_assets_backup_readonly.py": "b5a93736a03243d7a5ad1cd7dbafeb4f36090264b253ec4d5a5631acee5da046"
+  },
+  "collector_review": "Reviewed readonly SQL start/end, constant table/field scope, whitelist output, same-release container/ledger checks and no plaintext SQL/report export. Did not run collectors in this review.",
+  "log_observation": {
+    "production_readonly_tail_executed": true,
+    "observed_deploy_event_utc": "2026-09-08T05:34:39Z",
+    "source": "/root/prism-release-4035d19/deploy.log",
+    "reported_application_release": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+    "reported_same_origin_smoke": "passed",
+    "warning": "Compose default release environment drift: APP_RELEASE",
+    "boundary": "Tail exit 0 is not a deployment exit-code attestation; new runtime evidence and default Compose calibration remain for the parent."
+  },
+  "post_release_comparison_plan": [
+    "Expected runtime3.8.7 and exact4035d19 checkout/ledger/images; all42 expected FKs remain nullable BIGINT SETNULL",
+    "Use new image-derived raw269-path maps if count remains269; recompute actual count/hash without using local dist or oldmanifest as current baseline",
+    "Compare selected historical task/team/event/orphan/executing rows; report global counters only as dynamic deltas",
+    "Project161 exact8 field digests/row; review161 stored16/success/update/reporthash unchanged and4unclassified summary",
+    "Read BACKUP_FILE from currentledger; compare actualgz bytes/SHA with whitelistmeta and sidecar, current deploy log backup reference, predeploy revision and table_count; do not rerun backup/restore/migration"
+  ],
+  "passed": true
+}

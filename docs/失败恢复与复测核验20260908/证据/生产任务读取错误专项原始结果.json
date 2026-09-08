@@ -1,0 +1,245 @@
+{
+  "status": "failed",
+  "base_url": "https://lijiadong.cn",
+  "marker": "20260908",
+  "phase": "task-access",
+  "started_at": "2026-09-08T05:47:08.421021+00:00",
+  "requests": [
+    {
+      "account": "owner_a",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-d5d78985998946898fc5a5a6f4469d3d",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 461,
+      "response_sha256": "533ea23c0ba6023d08d4f629d52302b1b65208abb655c25d6c1ab4b2e66b4b16",
+      "response_request_id": "42eaf1f6c4cdce74075ce5fed2c24d6a",
+      "elapsed_ms": 353
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/rbac/users/107/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-9c8a1854eca649eead30512cbc97288e",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "eeed3248b23e16a61ed3a57b05694fb30bbb8299b81cc01f6a793e96a7248d1d",
+      "response_request_id": "3e6c89e6aa95d57ec1a6808629ce8ed9",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/rbac/users/107/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-a5634139b8704e67a9c513a8d55fba3d",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "ed01e2ae042cb8abc66f87df1785c4bc",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "member_a",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-76be40bffc9a4f8ca2b3c43248684cd0",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 463,
+      "response_sha256": "8a15929ae196e5282208a15266e6e735175ba242ba41c3d83fe204ba3ab76b4a",
+      "response_request_id": "c0a92ad8775fd0ec2d57868746d8f7c1",
+      "elapsed_ms": 349
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/rbac/users/108/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-3741579ec8194beabe006ee7143e4eec",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "eeed3248b23e16a61ed3a57b05694fb30bbb8299b81cc01f6a793e96a7248d1d",
+      "response_request_id": "5148cd738fba17d82f615f5ebdc396b8",
+      "elapsed_ms": 55
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/rbac/users/108/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-357d9573f8b4448d982e40f40bf7bad2",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "4556aaba8fd12d43695a3e23e3a7ceef",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "owner_b",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-c66b3bfbfc0d44d787392f018ae4db7b",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 461,
+      "response_sha256": "b8534adab4c689d45109da4c942d41df7f21e12efee32a9cdcbb4f09925dbe1c",
+      "response_request_id": "610929b93bd2aa43b18c72431785a7c5",
+      "elapsed_ms": 316
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/rbac/users/109/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-89a1b0ec82ab432bb170383192f6e7d5",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "eeed3248b23e16a61ed3a57b05694fb30bbb8299b81cc01f6a793e96a7248d1d",
+      "response_request_id": "3f64457b7a22a41bf04a50628a2871c3",
+      "elapsed_ms": 24
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/rbac/users/109/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-fbfac359b04048fb8ef4c5506d00a1a0",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "8dc2cb82fc458509bc93529b7fb22c9a",
+      "elapsed_ms": 24
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-b5e05f7ff70441feab496c6b7a08288a",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 473,
+      "response_sha256": "77a8ac1dd2501bd027e5c7f89a4b7ae0ef1c54d03e6855cee6cc393bef428478",
+      "response_request_id": "639535877300162fe56d083e18733261",
+      "elapsed_ms": 311
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/110/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-154da904f1c9487db6b356e2bbf17897",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 35,
+      "response_sha256": "f139e4295f71dc13b09f52f38526a00e06b1f5ddcc7cbe39c3ff4f314ddb9a24",
+      "response_request_id": "1c660ae0b973d57901e395c4f9d81ac8",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/110/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-f71a4b5e587744e5b22cc99dcea0c2df",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 35,
+      "response_sha256": "f139e4295f71dc13b09f52f38526a00e06b1f5ddcc7cbe39c3ff4f314ddb9a24",
+      "response_request_id": "d690a840fe6320dac776a68540142a1d",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/api/review/tasks/-1",
+      "expected": 401,
+      "status": "failed",
+      "request_id": "qa-94481f8941264608a2218054b96e8fc6",
+      "actual": 401,
+      "response_bytes": 145,
+      "response_sha256": "619ca6e5c67a0b07be621c9d06324c0a647c6f0b6cab596e0e83496ae013fcdc",
+      "response_request_id": "f5b71cee6c7997f72eb11ed7064703e0",
+      "failure_type": "ValueError"
+    }
+  ],
+  "assertions": [
+    {
+      "check": "owner_a身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_a仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "owner_a权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "member_a身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "member_a仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "member_a权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "owner_b身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_b仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "owner_b权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "no_permission身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "无权限账号无任何角色和权限",
+      "passed": true
+    }
+  ],
+  "resources": {},
+  "blocked": [],
+  "plan_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "failure_type": "ValueError",
+  "finished_at": "2026-09-08T05:47:11.872197+00:00",
+  "summary": {
+    "passed": 12,
+    "failed": 1
+  }
+}

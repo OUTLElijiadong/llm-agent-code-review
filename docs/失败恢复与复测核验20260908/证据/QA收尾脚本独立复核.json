@@ -1,0 +1,64 @@
+{
+  "核验时间UTC": "2026-09-08T05:58:29.665366+00:00",
+  "结论": "准备脚本独立审阅及44项本地复跑通过，未执行生产",
+  "源文件SHA256": {
+    "docs/失败恢复与复测核验20260908/证据/finalize_qa_20260908.py": "3232d5d6574e437ce02eb627c32a7f02b8b5584c9ba42e15f55bb70c94d8cdb6",
+    "docs/失败恢复与复测核验20260908/证据/test_finalize_qa_20260908.py": "712ce43fdf13446d370dee4884badaf923d09cdd83663a079faab2d9e77d478a",
+    "backend/scripts/prepare_permission_acceptance.py": "18d5ccb87620c9366afd185bf4b416aa906bed434a670323ca6c2bd9fc1f03b9",
+    "backend/app/core/dependencies.py": "b75be1117e45d543d52fcae4bcadee16d1b93d214369beb7fd6e0a1c124f1709",
+    "backend/app/api/v1/auth.py": "a3ba9385635033347a7c632c3916071861a68a7c7621e33e6b92a2ddc62ce62a",
+    "backend/app/services/auth_service.py": "f596939501eb2164a183831b554e7f7127151662e6f6cb2013e244824e1e5971",
+    "backend/app/models/project.py": "25cfd7e9fd78d40155e89f2c8c03770e2087d2dfbec86ad47782c2b096ed4841",
+    "backend/app/models/code_file.py": "e2a5b084f0a7ada45bf16251d6fd711674957f5ebf6ff2cf33d1b4693d9c3afe"
+  },
+  "独立测试": {
+    "文件": "QA收尾脚本独立复跑.xml",
+    "SHA256": "8f85df03ccc45de2d9fe3723cca854d7aa1e0ceb9ea13d2b270194c047c88bf0",
+    "tests": 44,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "范围": {
+    "marker": "20260908",
+    "account_ids": [
+      107,
+      108,
+      109,
+      110
+    ],
+    "role_id": 7,
+    "permission_count": 20,
+    "project_ids": [
+      164,
+      165
+    ],
+    "file_ids": [
+      1894,
+      1895
+    ],
+    "normal_login_requests": 4,
+    "me_before_requests": 4,
+    "me_old_token_after_requests": 4,
+    "disable_calls": 1
+  },
+  "关键合同": [
+    "严格固定账号、角色、权限、项目成员；出现额外QA资源或关联立即阻断",
+    "原地现有prepare SHA固定且DB对四用户加锁，唯一写入为status0与token_version+1",
+    "登录成功自身me200且版本精确+1；禁用再精确+1；旧token因status先被403/40301拒绝",
+    "MySQL utf8mb4，只读一致性事务并ROLLBACK；项目8字段及代码文件15字段（正文/二进制只hash）前后三阶段一致",
+    "root私有目录与0600/NOFOLLOW凭据；root临时容器副本0700/0600，普通退出清理",
+    "TLS默认校验、禁环境代理、禁重定向；仅两条既有HTTP路径，无模型或任务启动",
+    "O_EXCL持久化执行意图与fsync，异常停止不自动重试；未知异常原文和命令stdout/stderr不泄露",
+    "真实本地FastAPI认证/SQLAlchemy/prepare CLI证明历史admin及项目/审查161完整行保持"
+  ],
+  "边界": [
+    "本地测试没有执行Docker/MySQL；数据库SQL按真实模型逐字段只读审阅，实际生产结果需执行后另核",
+    "硬杀或宿主失联可留下root-only临时目录及未完成收据；不得自动重放disable，需按阶段只读核查",
+    "生产全库其他行是否不变由既有CLI四账号限定与本地完整行对照支持，不把本地夹具断言冒充生产全库快照"
+  ],
+  "生产凭据读取": false,
+  "生产请求": 0,
+  "生产写入": false,
+  "应用修改": false
+}

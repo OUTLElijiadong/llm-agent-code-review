@@ -1,0 +1,27 @@
+{
+  "version": "3.8.7",
+  "application_commit": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+  "previous_application_commit": "0a14b5359a446ab7b447e10c061b1ebbe6d15e29",
+  "git_remote_push_performed": false,
+  "bundle": {
+    "bytes": 274090027,
+    "sha256": "68f4066025523e5c1687ffa99a0bf8ad726269b468443c5afe43f7171404a300",
+    "local_path": "/tmp/prism-release-20260908-3.8.7/prism-4035d19-full.bundle",
+    "server_path": "/tmp/prism-4035d19-full.bundle",
+    "complete_history": true
+  },
+  "deployment": {
+    "exit_code": 0,
+    "exit_code_evidence": "本轮只读SSH读取/root/prism-release-4035d19/exit-code返回0；正式log完成时间05:34:39UTC",
+    "actual_business_database_restore": false,
+    "isolated_restore_tables": 89,
+    "migration": "048_ai_usage_attribution"
+  },
+  "wire_compression": {
+    "patch_bytes": 1309693,
+    "reconstructed_bundle_same_full_sha": true,
+    "description": "差异压缩仅用于传输，服务端恢复完整无先决条件Git bundle后才发布"
+  },
+  "local_test_redis_removed": true,
+  "knowledge_receipt": "20260908-043653-5695123a36"
+}

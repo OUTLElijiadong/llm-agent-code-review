@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "bundle": "/tmp/prism-4035d19-full.bundle",
+  "bytes": 274090027,
+  "sha256": "68f4066025523e5c1687ffa99a0bf8ad726269b468443c5afe43f7171404a300",
+  "patch_bytes": 1309693,
+  "patch_sha256": "cf392273bbefb46ba5ff66db9b385fe05e41ca2b9f32c411660bc853816a9c79",
+  "previous_bundle_unchanged": true,
+  "mode": "0o600",
+  "decoder": "*** Zstandard CLI (64-bit) v1.5.5, by Yann Collet ***",
+  "available_memory_before_kb": 4594508,
+  "business_writes": false
+}

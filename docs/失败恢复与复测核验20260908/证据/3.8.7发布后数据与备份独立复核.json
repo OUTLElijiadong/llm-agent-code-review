@@ -1,0 +1,171 @@
+{
+  "审阅人": "usage_attribution",
+  "状态": "通过",
+  "发布提交": "4035d1902342ab88357b5bb6071545d1a0572dd1",
+  "版本": "3.8.7",
+  "生产请求数": 0,
+  "生产写入": false,
+  "重复测试或迁移": false,
+  "检查": {
+    "运行版本与迁移": true,
+    "运行证据只读事务": true,
+    "七表精确四十二外键": true,
+    "外键完整契约与前版相同": true,
+    "五份运行源码与当前源相同": true,
+    "当前应用与发布提交相同": true,
+    "历史完整行保持_historical_task": true,
+    "历史完整行保持_historical_team_tasks": true,
+    "历史完整行保持_historical_event": true,
+    "历史完整行保持_orphan_tool": true,
+    "历史完整行保持_unresolved_tool": true,
+    "历史完整行保持_relationship": true,
+    "历史完整行保持_tool_integrity": true,
+    "历史完整行保持_owner_mismatch": true,
+    "历史完整行保持_task_member_team_mismatch": true,
+    "两项历史任务状态保持": true,
+    "七孤儿与三执行旧状态保持": true,
+    "历史查询哈希及只读事务": true,
+    "仅全局运维计数变化": true,
+    "工具账本总数相符": true,
+    "项目八字段与行哈希保持": true,
+    "项目结构只读与单个目标": true,
+    "报告所有非采集时间字段保持": true,
+    "报告解析器和查询来源绑定": true,
+    "报告旧十六与四未分级语义": true,
+    "前端双清单逐路径相等且确为二百七十": true,
+    "资源路径与摘要有效": true,
+    "资源摘要与索引独立重算": true,
+    "容器镜像与账本跨证据绑定": true,
+    "资源采集器来源与副作用边界": true,
+    "备份白名单及本次发布绑定": true,
+    "备份大小与远程三方哈希一致": true,
+    "备份校验旁文件哈希独立重算": true,
+    "日志还原表数与镜像和完成事件": true,
+    "默认环境警告已保留并有后续校准门禁": true
+  },
+  "来源指纹": {
+    "docs/失败恢复与复测核验20260908/证据/发布前生产版本与外键核验.json": "a0cfb3b7e1070a00114ed9803a74e0d0fb40776596deb6c177cc43fb515ead45",
+    "docs/失败恢复与复测核验20260908/证据/发布后生产版本与外键核验.json": "6085d4d8d5bfc7e40310dd43d011e67a46cacfe247fc19781a903004d4614e3a",
+    "docs/失败恢复与复测核验20260908/证据/发布前历史账本只读.json": "5d02c2dfe7cfb35e29d1bf3ca0208d2051fe22581eb46aa9fab4feb2e7e0aa86",
+    "docs/失败恢复与复测核验20260908/证据/发布后历史账本只读.json": "9233d9564f4e5474980eb45a3b6bb5e66545bcfdc0b119b3d82a87f045acb025",
+    "docs/失败恢复与复测核验20260908/证据/发布前项目161八字段核验.json": "a9f776af53521803d83f5b5e9f516c14e9c1cee0777918a0b508c09d854db55d",
+    "docs/失败恢复与复测核验20260908/证据/发布后项目161八字段核验.json": "217ceed67c7bb769b912b90495c7acfce6e5daf64f8ba7b1b5df7acef0ed793c",
+    "docs/失败恢复与复测核验20260908/证据/发布前审查任务161报告核验.json": "0abf503c1c576c375d4a64aa84d6c05de6ebed867e74dae590bfc10bf980f547",
+    "docs/失败恢复与复测核验20260908/证据/发布后审查任务161报告核验.json": "0ba32b1e7b705598cb24c93c806d534dc9f4df24a5915afc5220875474aef6ff",
+    "docs/失败恢复与复测核验20260908/证据/发布后前端资源与备份核验.json": "2082ab12f7cef84f531a6b37ca82efe468e58c6c94220bd6c5e815364bb99efb",
+    "docs/失败恢复与复测核验20260908/证据/生产默认发布环境校准.json": "190f077c6eacd752bd4a42e0d56bae4c7212da36625ee6cf64932f4075a0aa85",
+    "docs/失败恢复与复测核验20260908/证据/发布后生产运维门禁.json": "fa388db4767271c63f035af936a279ee0500ea860249234271079dd9d4a3b563",
+    "docs/失败恢复与复测核验20260908/证据/生产正式发布.log": "4c39f9f2aabf7a28dddffc443ce592b95da53aab09260a3d7b362d6785fde00e",
+    "backend/app/constants/data/security_catalog.json": "5e2a836bbcb5866c8f096f54dc5f411a606861a8a6eb9c48547fd53a8ef33e90",
+    "backend/app/constants/data/verified_advisories.json": "c3bd2185d9505a1eb2d5a0c94059afaaeaf6161ec424ae334cdd37556c39681c",
+    "backend/app/ai/audit_knowledge/known_cves.md": "5ba55d4fd674c882f1801f7fc9c5d25cfeae92c06a67c3c3a4a5f1c6cab79869",
+    "backend/app/services/ai_usage_context.py": "ee0436b4e07bd8529c90133b56b01c9eaaa401b04b3049584ca3b1b38c38631f",
+    "backend/app/services/sandbox_report_summary.py": "2a2b5bf89ea4617d4d8457d9a87febb04497ff887bb0c45744f250eb2a04b044",
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_historical_ledger.py": "37ffc5a773c422edc437050c275b8c1381d2fe37111e24625f2682a799bb0eb4",
+    "docs/完整待办与漏洞知识更新20260907/证据/项目161完整字段比较.json": "95cf1f72edfd732723980600e52edf0953fb999612b2aec39fcff5eed6ca5bbf",
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_review161_summary_readonly.py": "2a317387550ac5cd24dc6f230991d149067e8680cd1d9b55df76100105aecd46",
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_release_assets_backup_readonly.py": "b5a93736a03243d7a5ad1cd7dbafeb4f36090264b253ec4d5a5631acee5da046",
+    "docs/完整待办与漏洞知识更新20260907/证据/collect_release_readonly.py": "6a4b90538b7c307e6bbac71463ef76cf8d51b8b206288f8c51e5a9792c2a8759"
+  },
+  "外键逐表重数": {
+    "agent_mesh_message": 6,
+    "agent_response_run": 6,
+    "agent_team": 6,
+    "ai_call_log": 6,
+    "pentest_engagement": 6,
+    "review_task": 6,
+    "sandbox_environment": 6
+  },
+  "历史指定行": {
+    "historical_task": {
+      "count": 2,
+      "canonical_sha256": "5031f79d7ee01f1a043e3987544c6032130bd4b10230441cc1ad74289c508e22"
+    },
+    "historical_team_tasks": {
+      "count": 6,
+      "canonical_sha256": "4594fe9d25fed567662a10fe182c37c76427648b6a439d7b9a826e12577cff6a"
+    },
+    "historical_event": {
+      "count": 23,
+      "canonical_sha256": "1e4546c5dbb447bb395475f085f7d74a48a8b69b91a10358cd69b83b9101a189"
+    },
+    "orphan_tool": {
+      "count": 7,
+      "canonical_sha256": "ac3c3b39f7435ff0198eeb319cf8a069be2c3e4f20d10f4d5a05fc3bafba4cee"
+    },
+    "unresolved_tool": {
+      "count": 3,
+      "canonical_sha256": "213f1de5d99c708a7caa868bec6a44dfd7be747158c4fd68f10dc20e1afde9d5"
+    },
+    "relationship": {
+      "count": 12,
+      "canonical_sha256": "fc75ff440831ef14c187e12d7a1c1afd366ec7d69b162efe08b7bcb90395eacc"
+    },
+    "tool_integrity": {
+      "count": 1,
+      "canonical_sha256": "baf022f227fd8b3f492b167120a8f1ea3a73cabcb3c216ed6c9c17725ea42c62"
+    },
+    "owner_mismatch": {
+      "count": 1,
+      "canonical_sha256": "831fd6181808cdbd39d2e91a92418809d34d80f8bbc8ab49373a5eabe92f6b51"
+    },
+    "task_member_team_mismatch": {
+      "count": 1,
+      "canonical_sha256": "831fd6181808cdbd39d2e91a92418809d34d80f8bbc8ab49373a5eabe92f6b51"
+    }
+  },
+  "全局动态计数差异": [
+    {
+      "table": "ops_execution",
+      "status": "failed",
+      "before": 43178,
+      "after": 43179,
+      "delta": 1
+    },
+    {
+      "table": "ops_execution",
+      "status": "success",
+      "before": 44831,
+      "after": 44894,
+      "delta": 63
+    }
+  ],
+  "前端": {
+    "镜像应有文件": 270,
+    "公开目录文件总数": 3725,
+    "双清单相等": true,
+    "独立重算规范摘要": "bbbe99af2f6212fcc497f06b9428832dacde3fb27a6c6b50b910c9ee738282ee",
+    "索引摘要": "912356fd9feb685298d382cd036f53723f349a0b6d339cb427e7375bfbe44a64"
+  },
+  "备份": {
+    "file": "code_review_20260908T053024Z_4035d1902342.sql.gz",
+    "bytes": 405224409,
+    "sha256": "e9672fb383e674c0394769c6a3ac609c2bbc2aa4dd727be4f563d8fa03c4dc9b",
+    "revision": "048_ai_usage_attribution",
+    "table_count": 89
+  },
+  "项目行摘要": "9e49ca15c51357ed0fc9c71703c8371ab9b67593e493b8385b4e753826131194",
+  "报告原文摘要": "431b70ea13309a291f8483c3e8ab645d70d613305fa3206f1c62197c19d7a43a",
+  "报告摘要": {
+    "source": "sandbox_report",
+    "basis": "report_headings",
+    "total": 4,
+    "severity_counts": {
+      "严重": 0,
+      "高": 0,
+      "中": 0,
+      "低": 0
+    },
+    "unclassified": 4
+  },
+  "证据边界": [
+    "独立离线重算已采集JSON与源码、完整读取正式日志；未再SSH、发HTTP、读取业务原文、执行模型或改写生产。",
+    "本轮资源清单为270，早期发布前计划沿用269仅为计划；本报告按实际镜像与served双清单重数。3725全目录仅有采集器摘要，未独立重算该完整目录的逐路径SHA。",
+    "备份gzip字节大小与SHA来自已审采集器的远程实际读取；本地只重算校验旁文件规范字节SHA，未重新下载、解压或恢复；metadata原始字节未归档，未声称本地重算其SHA。",
+    "日志证明独立恢复89表/048和发布完成事件，没有BACKUP_FILE路径或进程退出码行；备份精确关联来自collector核对发布账本，exit0为主代理工具执行证据。",
+    "默认环境校准记录为主代理执行结果；本审未读取.env原文。后续运维门禁确认账本、镜像与默认环境一致。",
+    "全局ops计数差不能据此推定调用人或业务原因。指定历史行完整保持，不将其旧异常自动修为终态。",
+    "四条报告发现仍未分级，不等于四个已确认漏洞或零风险；本地不重新解析未下载的敏感Markdown，核对报告hash、同版helper与前后完整摘要。",
+    "本结论仅覆盖版本、外键、指定历史数据、资源与备份；不代表全部角色按钮已点击验收。"
+  ]
+}
