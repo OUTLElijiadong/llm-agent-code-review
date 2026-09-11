@@ -61,7 +61,7 @@ const searchItems = computed<SearchItem[]>(() => {
     { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'], topNav: true },
     { title: '审查规则', description: '配置代码规范、性能、安全等审查维度', path: '/rules', roles: ['user', 'reviewer'] },
     { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['user', 'reviewer'], topNav: true },
-    { title: 'Agent 工坊', description: '创建和测试个人 Agent 草稿', path: '/agent-studio', roles: ['user', 'reviewer'] },
+    { title: 'Agent 工坊', description: '创建和测试个人 Agent 草稿', path: '/agent-studio', roles: ['reviewer'] },
     { title: '开发者论坛', description: '提问、分享经验和交流审查实践', path: '/forum', roles: ['admin', 'user', 'reviewer'] },
     { title: '个人知识库', description: '管理个人 RAG 文档、同步与检索', path: '/knowledge', roles: ['user', 'reviewer'] },
     { title: '个性化画像', description: '配置技术栈、目标和 AI 偏好', path: '/profile/personalization', roles: ['user', 'reviewer'] },

@@ -16,7 +16,7 @@ vi.mock('vue-router', () => ({
     replace: harness.replace,
     resolve: ({ path }: { path: string }) => ({
       matched: [{}],
-      meta: path === '/agent-studio' ? { permissions: ['agent_asset:create'] } : {},
+      meta: path === '/agent-studio' ? { roles: ['reviewer'], permissions: ['agent_asset:create'] } : {},
     }),
   }),
 }))
@@ -62,10 +62,20 @@ describe('AppHeader navigation visibility', () => {
   })
 
   it('uses the same permission gate for search results', () => {
+    harness.role = 'reviewer'
     harness.permission = false
     expect(mountHeader().text()).not.toContain('Agent 工坊')
 
     harness.permission = true
+    expect(mountHeader().text()).toContain('Agent 工坊')
+  })
+
+  it('普通用户搜索不到 Agent 工坊(仅审查者及以上可见)', () => {
+    harness.role = 'user'
+    harness.permission = true
+    expect(mountHeader().text()).not.toContain('Agent 工坊')
+
+    harness.role = 'reviewer'
     expect(mountHeader().text()).toContain('Agent 工坊')
   })
 

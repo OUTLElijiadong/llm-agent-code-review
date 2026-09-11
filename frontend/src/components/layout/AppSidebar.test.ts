@@ -13,7 +13,11 @@ vi.mock('vue-router', () => ({
     push: harness.push,
     resolve: ({ path }: { path: string }) => ({
       matched: [{}],
-      meta: ['/agent-studio', '/projects'].includes(path) ? { permissions: ['test:permission'] } : {},
+      meta: path === '/agent-studio'
+        ? { roles: ['reviewer', 'admin'], permissions: ['test:permission'] }
+        : path === '/projects'
+          ? { permissions: ['test:permission'] }
+          : {},
     }),
   }),
 }))
@@ -51,13 +55,22 @@ describe('AppSidebar ordinary member navigation', () => {
     })
   }
 
-  it('shows the private Agent Studio entry to an ordinary member', () => {
+  it('审查员可以看到 Agent 工坊入口', () => {
+    harness.role = 'reviewer'
     const wrapper = mountSidebar()
 
     expect(wrapper.text()).toContain('Agent 工坊')
   })
 
-  it('hides Agent Studio when the ordinary member lacks its route permission', () => {
+  it('普通用户即使有权限也看不到 Agent 工坊(仅审查者及以上)', () => {
+    const wrapper = mountSidebar()
+
+    expect(wrapper.text()).not.toContain('Agent 工坊')
+    expect(wrapper.find('[data-route="/agent-studio"]').exists()).toBe(false)
+  })
+
+  it('hides Agent Studio when the reviewer lacks its route permission', () => {
+    harness.role = 'reviewer'
     harness.permission = false
     const wrapper = mountSidebar()
 
