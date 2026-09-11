@@ -870,6 +870,41 @@ _cap(
         "/api/admin/llm/models",
         permission="server_ops:view",
     ),
+    _cap(
+        "llm.config.registry.get",
+        "/admin/llm",
+        "查询模型注册表与角色分配",
+        "GET",
+        "/api/admin/llm/models/registry",
+        permission="server_ops:view",
+    ),
+    _cap(
+        "llm.config.registry.sync",
+        "/admin/llm",
+        "从 provider 拉取最新模型并写入注册表",
+        "POST",
+        "/api/admin/llm/models/registry/sync",
+        WRITE,
+        "server_ops:execute",
+    ),
+    _cap(
+        "llm.config.registry.save",
+        "/admin/llm",
+        "保存模型注册表(手工增删/能力标记)",
+        "PUT",
+        "/api/admin/llm/models/registry",
+        CRITICAL,
+        "server_ops:execute",
+    ),
+    _cap(
+        "llm.config.assignments.save",
+        "/admin/llm",
+        "更新角色到模型的分配(小菱/视觉/总调度/子Agent)",
+        "PUT",
+        "/api/admin/llm/models/assignments",
+        CRITICAL,
+        "server_ops:execute",
+    ),
     # MCP 与受控沙箱节点。所有能力均由 API 的 require_super_admin 再次强制校验；
     # 注册表仅向管理 Agent 暴露稳定能力码和 OpenAPI 参数契约。
     _cap(

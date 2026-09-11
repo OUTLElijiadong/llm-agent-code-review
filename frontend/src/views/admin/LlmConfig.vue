@@ -4,11 +4,16 @@ import { Check, Connection, Download, Refresh } from '@element-plus/icons-vue'
 
 import {
   fetchLlmModels,
+  getModelRegistry,
   getLlmConfig,
+  saveModelAssignments,
+  saveModelRegistry,
+  syncModelRegistry,
   testLlmConfig,
   updateLlmConfig,
   type LlmConfig,
   type LlmDraft,
+  type ModelRegistryItem,
 } from '@/api/llmConfig'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -259,6 +264,93 @@ async function restoreDefault(): Promise<void> {
   }
 }
 
+/* ── 模型注册表与角色分配 ── */
+const registry = ref<ModelRegistryItem[]>([])
+const roleLabels = ref<Record<string, string>>({})
+const assignments = reactive<Record<string, string>>({})
+const registryLoading = ref(false)
+const registrySyncing = ref(false)
+const registrySaving = ref(false)
+const newModelId = ref('')
+
+async function loadRegistry(): Promise<void> {
+  registryLoading.value = true
+  try {
+    const view = await getModelRegistry()
+    registry.value = view.models
+    roleLabels.value = view.roles
+    for (const role of Object.keys(view.roles)) {
+      assignments[role] = view.assignments[role] ?? ''
+    }
+  } catch (error) {
+    ElMessage.warning(errorText(error, '模型注册表加载失败'))
+  } finally {
+    registryLoading.value = false
+  }
+}
+
+async function syncRegistry(): Promise<void> {
+  registrySyncing.value = true
+  try {
+    const result = await syncModelRegistry(draftPayload())
+    registry.value = result.models
+    ElMessage[result.success ? 'success' : 'warning'](result.message)
+  } catch (error) {
+    ElMessage.error(errorText(error, '模型注册表同步失败'))
+  } finally {
+    registrySyncing.value = false
+  }
+}
+
+function removeRegistryRow(id?: string): void {
+  if (!id) return
+  registry.value = registry.value.filter((item) => item.id !== id)
+}
+
+function addManualModel(): void {
+  const id = newModelId.value.trim()
+  if (!id) return
+  if (registry.value.some((item) => item.id === id)) {
+    ElMessage.warning('该模型已在注册表中')
+    return
+  }
+  registry.value = [...registry.value, {
+    id, label: id, source: 'manual', added_at: '',
+    vision: /vision|vl|omni|gpt-4o|gemini|claude/i.test(id),
+  }]
+  newModelId.value = ''
+}
+
+async function persistRegistry(): Promise<void> {
+  registrySaving.value = true
+  try {
+    const view = await saveModelRegistry(
+      registry.value.map((item) => ({ id: item.id, label: item.label, vision: item.vision })),
+    )
+    registry.value = view.models
+    ElMessage.success('注册表已保存')
+  } catch (error) {
+    ElMessage.error(errorText(error, '注册表保存失败'))
+  } finally {
+    registrySaving.value = false
+  }
+}
+
+async function persistAssignments(): Promise<void> {
+  registrySaving.value = true
+  try {
+    const view = await saveModelAssignments({ ...assignments })
+    for (const role of Object.keys(view.roles)) {
+      assignments[role] = view.assignments[role] ?? ''
+    }
+    ElMessage.success('模型分配已更新')
+  } catch (error) {
+    ElMessage.error(errorText(error, '模型分配保存失败'))
+  } finally {
+    registrySaving.value = false
+  }
+}
+
 watch(
   () => form.provider,
   (provider, previousProvider) => {
@@ -274,7 +366,10 @@ watch(
   },
 )
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadRegistry()
+})
 </script>
 
 <template>
@@ -458,6 +553,77 @@ onMounted(load)
         </div>
       </el-form>
     </el-card>
+
+    <!-- ══ 模型注册表与角色分配 ══ -->
+    <el-card shadow="never" class="config-card registry-card" v-loading="registryLoading">
+      <template #header>
+        <div class="registry-head">
+          <div>
+            <h3>模型注册表与分配</h3>
+            <p>从 provider 拉取或手工登记模型,再把角色指到具体模型;分配留空表示沿用全局默认。小菱消息带图时自动使用「小菱视觉」分配的模型,任务结束自动切回。</p>
+          </div>
+          <el-button :icon="Download" :loading="registrySyncing" @click="syncRegistry">从接口同步最新模型</el-button>
+        </div>
+      </template>
+
+      <div class="registry-tools">
+        <el-input
+          v-model="newModelId"
+          placeholder="手工登记模型名,如 deepseek-v4-flash-vision-exp"
+          clearable
+          @keydown.enter.prevent="addManualModel"
+        />
+        <el-button @click="addManualModel">添加</el-button>
+      </div>
+
+      <el-table :data="registry" size="small" class="registry-table" empty-text="注册表为空,点击上方同步或手工添加">
+        <el-table-column prop="id" label="模型" min-width="220">
+          <template #default="scope">
+            <code class="mono">{{ scope?.row?.id }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column label="能力" width="110">
+          <template #default="scope">
+            <el-switch :model-value="scope?.row?.vision" active-text="视觉" inline-prompt @update:model-value="scope && scope.row && (scope.row.vision = Boolean($event))" />
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="90">
+          <template #default="scope">
+            <el-tag size="small" :type="scope?.row?.source === 'pulled' ? 'info' : 'warning'" effect="plain">
+              {{ scope?.row?.source === 'pulled' ? '拉取' : '手工' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80">
+          <template #default="scope">
+            <el-button text type="danger" size="small" @click="removeRegistryRow(scope?.row?.id)">移除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="registry-actions">
+        <el-button type="primary" :loading="registrySaving" :disabled="registrySyncing" @click="persistRegistry">保存注册表</el-button>
+      </div>
+
+      <el-divider />
+
+      <h4 class="assign-title">角色分配</h4>
+      <div class="assign-grid">
+        <div v-for="(label, role) in roleLabels" :key="role" class="assign-item">
+          <span class="assign-label">{{ label }}</span>
+          <el-select v-model="assignments[role]" clearable placeholder="沿用全局默认" aria-label="label">
+            <el-option
+              v-for="item in registry"
+              :key="item.id"
+              :label="`${item.id}${item.vision ? ' (视觉)' : ''}`"
+              :value="item.id"
+            />
+          </el-select>
+        </div>
+      </div>
+      <div class="registry-actions">
+        <el-button type="primary" :loading="registrySaving" @click="persistAssignments">保存分配</el-button>
+      </div>
+    </el-card>
   </div>
 </template>
 
@@ -539,6 +705,21 @@ onMounted(load)
   margin-top: 22px;
 }
 
+.registry-card { margin-top: 18px; }
+.registry-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+  h3 { margin: 0 0 6px; font-size: 16px; }
+  p { margin: 0; color: var(--el-text-color-secondary); font-size: 12.5px; max-width: 640px; line-height: 1.7; }
+}
+.registry-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-bottom: 12px; }
+.registry-table { margin-bottom: 10px; }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+.registry-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.assign-title { margin: 0 0 12px; font-size: 14px; }
+.assign-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
+.assign-item { display: grid; gap: 6px; }
+.assign-label { font-size: 12.5px; font-weight: 600; color: var(--el-text-color-regular); }
+
 @media (max-width: 720px) {
   .page-header {
     align-items: stretch;
@@ -569,6 +750,10 @@ onMounted(load)
   .model-control {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .registry-head { flex-direction: column; }
+  .registry-tools { grid-template-columns: minmax(0, 1fr); }
+  .assign-grid { grid-template-columns: minmax(0, 1fr); }
 
   .model-control .el-button,
   .actions .el-button {

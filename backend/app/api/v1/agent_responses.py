@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import ForbiddenError
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.agent_mesh import AgentMeshMessage
@@ -37,6 +37,60 @@ from app.utils.api_resolver import resolve_api_config
 
 router = APIRouter()
 _BACKGROUND_RESPONSE_TASKS: set[asyncio.Task[Any]] = set()
+
+
+@router.get("/runs/{run_id}/assets")
+def list_run_assets(run_id: str, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """列出一次运行留档的多模态资产(输入/输出图片元数据;仅本人)。"""
+    from app.models.agent_multimodal import AgentMultimodalAsset
+
+    rows = (
+        db.query(AgentMultimodalAsset)
+        .filter(
+            AgentMultimodalAsset.run_id == run_id,
+            AgentMultimodalAsset.user_id == int(user.id),
+        )
+        .order_by(AgentMultimodalAsset.id)
+        .all()
+    )
+    return Resp(data=[{
+        "id": int(row.id),
+        "run_id": row.run_id,
+        "role": row.role,
+        "mime": row.mime,
+        "sha256": row.sha256,
+        "create_time": row.create_time.isoformat() if row.create_time else None,
+    } for row in rows])
+
+
+@router.get("/assets/{asset_id}/image")
+def get_asset_image(asset_id: int, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """查看留档的多模态图片(内联,仅本人)。"""
+    from fastapi.responses import Response as FastResponse
+
+    from app.models.agent_multimodal import AgentMultimodalAsset
+
+    row = (
+        db.query(AgentMultimodalAsset)
+        .filter(
+            AgentMultimodalAsset.id == asset_id,
+            AgentMultimodalAsset.user_id == int(user.id),
+        )
+        .first()
+    )
+    if row is None:
+        raise NotFoundError("多模态资产不存在", code=40400)
+    return FastResponse(
+        content=row.data,
+        media_type=row.mime,
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 def _release_background_response_task(task: asyncio.Task[Any]) -> None:
@@ -81,6 +135,8 @@ def _is_admin_actor(db: Session, user: User) -> bool:
 class AgentResponseMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=100_000)
+    # 多模态:data URL 图片(PNG/JPEG/WebP/GIF,单张≤1.5MB,≤4张);服务端再校验
+    images: List[str] = Field(default_factory=list, max_length=4)
 
 
 class AgentResponsesRequest(BaseModel):
@@ -121,7 +177,10 @@ class AgentResponsesRequest(BaseModel):
     @model_validator(mode="after")
     def validate_action_fields(self) -> "AgentResponsesRequest":
         if self.action == "start":
-            has_user_message = any(item.role == "user" and item.content.strip() for item in self.messages)
+            has_user_message = any(
+                item.role == "user" and (item.content.strip() or item.images)
+                for item in self.messages
+            )
             if not has_user_message and not self.mesh_message_id:
                 raise ValueError("启动 Agent 时必须提供用户消息或 Agent Mesh 消息")
             if has_user_message and self.mesh_message_id:
@@ -368,6 +427,10 @@ def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
                     continue
                 part_type = str(part.get("type") or "")
                 visible_types = {"input_text", "text"} if role == "user" else {"output_text", "refusal"}
+                if part_type == "input_image":
+                    # 多模态:恢复会话时以标记呈现已归档图片
+                    parts.append("[图片]")
+                    continue
                 if part_type not in visible_types:
                     continue
                 part_value = part.get("refusal") if part_type == "refusal" else part.get("text")
@@ -839,6 +902,14 @@ async def stream_agent_response(
             if api_config is not None and api_config.source in {"user", "global"}
             else settings.deepseek_orchestrator_model
         )
+        # 多模态:含图消息本运行切到视觉模型,元数据同步(与服务层同口径)
+        if payload.action == "start" and any(item.images for item in payload.messages):
+            from app.services.multimodal_service import resolve_vision_model
+
+            try:
+                response_model = resolve_vision_model(db)
+            except Exception:  # noqa: BLE001 - 元数据降级为默认模型名
+                pass
 
         async def sink(event: Mapping[str, Any]) -> None:
             nonlocal discard_events
@@ -887,7 +958,7 @@ async def stream_agent_response(
                 mesh_message_id = ""
                 source_attribution = {}
                 if payload.action == "start":
-                    messages = [item.model_dump() for item in payload.messages if item.content.strip()]
+                    messages = [item.model_dump() for item in payload.messages if item.content.strip() or item.images]
                     if payload.mesh_message_id:
                         mesh_message_id = payload.mesh_message_id
                         _, system_input = agent_mesh_service.prepare_message_run(

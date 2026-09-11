@@ -6,6 +6,10 @@ const llmApi = vi.hoisted(() => ({
   getLlmConfig: vi.fn(),
   testLlmConfig: vi.fn(),
   updateLlmConfig: vi.fn(),
+  getModelRegistry: vi.fn(),
+  saveModelRegistry: vi.fn(),
+  saveModelAssignments: vi.fn(),
+  syncModelRegistry: vi.fn(),
 }))
 const messages = vi.hoisted(() => ({
   success: vi.fn(),
@@ -59,6 +63,7 @@ function mountConfig() {
 }
 
 beforeEach(() => {
+  llmApi.getModelRegistry.mockResolvedValue({ models: [], assignments: {}, roles: { chat: '小菱对话', chat_vision: '小菱视觉', orchestrator: '总调度', subagent: '子Agent' } })
   vi.clearAllMocks()
   llmApi.getLlmConfig.mockResolvedValue({ ...config })
 })

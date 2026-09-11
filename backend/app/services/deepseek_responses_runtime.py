@@ -396,6 +396,7 @@ class DeepSeekResponsesRuntime:
         keep_recent_tokens: int = DEFAULT_KEEP_RECENT_TOKENS,
         completion_guard: Optional[CompletionGuard] = None,
         on_round: Optional[Callable[[Mapping[str, Any]], None]] = None,
+        image_assets: Optional[Mapping[str, str]] = None,
     ) -> None:
         if max_rounds < 1:
             raise ValueError("max_rounds 必须大于 0")
@@ -418,6 +419,9 @@ class DeepSeekResponsesRuntime:
         self._keep_recent_tokens = keep_recent_tokens
         self._completion_guard = completion_guard
         self._on_round = on_round
+        # 多模态:sha256 -> data URL。检查点只存 prism-asset:// 占位符,
+        # 发往上游的 payload 在此还原;恢复运行缺项时降级为文字说明。
+        self._image_assets: Dict[str, str] = dict(image_assets) if image_assets else {}
         self._locks: Dict[str, asyncio.Lock] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
         self._cancel_reasons: Dict[str, str] = {}
@@ -758,6 +762,10 @@ class DeepSeekResponsesRuntime:
             # failed/incomplete 响应中的工具调用不具备执行语义，审计原文继续
             # 留在 checkpoint，但不能以缺失 output 的协议形态重发给上游。
             projected_input = _without_unpaired_function_calls(projected_input)
+            if self._image_assets:
+                from app.services.multimodal_service import restore_image_placeholders
+
+                projected_input = restore_image_placeholders(projected_input, self._image_assets)
 
             previous_compactions = int(checkpoint.context_metadata.get("compaction_count") or 0)
             if context_metadata["compacted"]:

@@ -203,6 +203,22 @@ class Orchestrator(BaseAgent):
         cfg = resolve_api_config(db, user.id)
         self.set_api_config(cfg)
 
+        # 模型分配(管理员在大模型管理页配置):子 Agent 默认模型可按
+        # 注册表分配覆盖;总调度者(chat/orchestrator)在 Responses 链路解析。
+        try:
+            from app.services.system_config_service import resolve_model_assignment
+
+            subagent_model = resolve_model_assignment(db, "subagent", "")
+            if subagent_model:
+                for agent in [self.project_mgr, self.review_orch, self.file_mgr,
+                              self.dashboard_agent, self.rule_mgr, self.reporter,
+                              self.ai_prompt, self.security_sentinel, self.test_verifier,
+                              self.sandbox_deployer, self.evolution_agent]:
+                    agent._model = subagent_model
+                logger.info(f"[Orchestrator] 子 Agent 模型已按分配覆盖: {subagent_model}")
+        except Exception:  # noqa: BLE001 - 分配读取失败保持默认模型
+            logger.debug("[Orchestrator] 子 Agent 模型分配读取失败,沿用默认", exc_info=True)
+
         logger.info("[Orchestrator] DB 已注入到所有操作类 Agent")
 
     def _disabled_result(self, agent_code: str) -> Optional[AgentResult]:

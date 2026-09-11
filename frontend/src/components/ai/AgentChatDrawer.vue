@@ -117,6 +117,8 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'error'
   content: string
   time: string
+  /** 多模态:该条用户消息携带的图片 data URL(仅内存展示,不落本地快照) */
+  images?: string[]
   /** 错误卡片:失败后留在消息流里,带「重试」与「新建对话」 */
   errorCard?: { retryable: boolean; nextAction?: string; requestId?: string }
   runId?: string
@@ -374,8 +376,9 @@ function persistSnapshot(): void {
   saveAgentChatSnapshot(sessionId.value, {
     messages: messages.value.map((message) => ({
       role: message.role === 'error' ? 'assistant' : message.role,
-      content: message.content,
+      content: message.images?.length && !message.content.trim() ? '(图片)' : message.content,
       teamIds: message.teamIds?.length ? [...message.teamIds] : undefined,
+      // data URL 过大,不落本地快照;恢复后以文字占位
     })),
     teams: visibleAgentTeams.value.map(snapshotTeam),
     runStatus: sessionRun.value?.status ?? null,
@@ -904,15 +907,29 @@ function formatStreamContent(value: string): string {
   return normalizeAgentText(value)
 }
 
-function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
-  return messages.value
+function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string; images?: string[] }> {
+  const history = messages.value
     // 欢迎语是本地开屏气泡,错误卡片是本地展示层,两者都不参与模型上下文
     .filter((message) => (
       message.role !== 'error'
       && message.content.trim().length > 0
       && message.content.trim() !== WELCOME_TEXT.trim()
     ))
-    .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }))
+  const lastUserIndex = (() => {
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i].role === 'user') return i
+    }
+    return -1
+  })()
+  return history.map((message, index) => {
+    const item: { role: 'user' | 'assistant'; content: string; images?: string[] } = {
+      role: message.role as 'user' | 'assistant',
+      content: message.content,
+    }
+    // 多模态:仅最后一条用户消息带图(历史图片服务端已留档,不重复发送 base64)
+    if (index === lastUserIndex && message.images?.length) item.images = message.images
+    return item
+  })
 }
 
 function eventErrorMessage(event: ResponseStreamEvent): string {
@@ -1626,11 +1643,62 @@ function stepLabel(s: StepBubble): string {
   return TYPE_LABELS[s.type] ?? s.type
 }
 
+/* ── 多模态:待发送图片(≤4张,单张≤1.5MB;随下一条消息发送并自动切视觉模型) ── */
+const pendingImages = ref<Array<{ id: string; dataUrl: string; name: string }>>([])
+const MAX_CHAT_IMAGES = 4
+const MAX_CHAT_IMAGE_BYTES = 1_500_000
+
+const CHAT_IMAGE_MIME = /^image\/(png|jpeg|webp|gif)$/
+
+async function addPendingImageFiles(files: File[]): Promise<void> {
+  for (const file of files) {
+    if (!CHAT_IMAGE_MIME.test(file.type)) {
+      ElMessage.warning(`「${file.name}」格式不支持,请使用 PNG/JPEG/WebP/GIF`)
+      continue
+    }
+    if (pendingImages.value.length >= MAX_CHAT_IMAGES) {
+      ElMessage.warning(`一次最多带 ${MAX_CHAT_IMAGES} 张图片`)
+      break
+    }
+    if (file.size > MAX_CHAT_IMAGE_BYTES) {
+      ElMessage.warning(`「${file.name}」超过 1.5MB,请压缩后再发`)
+      continue
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+    pendingImages.value.push({ id: messageId(), dataUrl, name: file.name })
+  }
+}
+
+function removePendingImage(id: string): void {
+  pendingImages.value = pendingImages.value.filter((item) => item.id !== id)
+}
+
+function onChatInputPaste(event: ClipboardEvent): void {
+  const files = Array.from(event.clipboardData?.files ?? []).filter(
+    (file) => file.type.startsWith('image/'),
+  )
+  if (files.length) {
+    event.preventDefault()
+    void addPendingImageFiles(files)
+  }
+}
+
 async function sendMessage(): Promise<void> {
   const text = inputText.value.trim()
-  if (!text || loading.value || sessionRestoring.value || sessionBusy.value) return
+  const images = [...pendingImages.value]
+  if ((!text && !images.length) || loading.value || sessionRestoring.value || sessionBusy.value) return
 
-  messages.value.push({ id: messageId(), role: 'user', content: text, time: dayjs().format('HH:mm') })
+  messages.value.push({
+    id: messageId(), role: 'user', content: text || '(图片)',
+    images: images.length ? images.map((item) => item.dataUrl) : undefined,
+    time: dayjs().format('HH:mm'),
+  })
+  pendingImages.value = []
   inputText.value = ''
   lastFailedRun.value = { kind: 'user-message' }
   // 新对话自动命名:首条用户消息提炼为会话标题
@@ -1873,11 +1941,13 @@ async function processIncomingFiles(files: File[]): Promise<void> {
   uploading.value = true
   setUploadProgress(`准备上传…`, 0, files.length)
   try {
-    const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? '') && f.type.startsWith('image/'))
     const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     if (images.length && !codeFiles.length) {
+      // 多模态:纯图片作为聊天附件,发送时自动切换视觉模型
       resetUploadProgress()
-      ElMessage.info('图片会作为项目附件上传；若要让小菱帮你创建代码项目，请再拖入至少一个代码文件')
+      await addPendingImageFiles(images)
+      ElMessage.success('图片已添加,发送后将自动用视觉模型分析')
       return
     }
     const targets = files.slice(0, 20)
@@ -1899,8 +1969,12 @@ async function onDrop(event: DragEvent): Promise<void> {
 
 async function onFileInput(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
-  await processIncomingFiles(Array.from(input.files ?? []))
+  const files = Array.from(input.files ?? [])
   input.value = ''
+  const imageFiles = files.filter((f) => CHAT_IMAGE_MIME.test(f.type))
+  const rest = files.filter((f) => !CHAT_IMAGE_MIME.test(f.type))
+  if (imageFiles.length) await addPendingImageFiles(imageFiles)
+  if (rest.length) await processIncomingFiles(rest)
 }
 
 /** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
@@ -2315,7 +2389,12 @@ onMounted(() => {
                   class="msg-content markdown-body"
                   v-html="renderAuthorizedAgentMarkdown(msg.content, router, userStore)"
                 />
-                <div v-else-if="msg.role === 'user'" class="msg-content">{{ msg.content }}</div>
+                <div v-else-if="msg.role === 'user'" class="msg-content">
+                  <div v-if="msg.images?.length" class="msg-images">
+                    <img v-for="(img, imgIndex) in msg.images" :key="imgIndex" :src="img" alt="用户图片" >
+                  </div>
+                  {{ msg.content }}
+                </div>
                 <!-- 助手消息 hover 显示复制按钮 -->
                 <button
                   v-if="msg.role === 'assistant' && msg.content"
@@ -2575,7 +2654,14 @@ onMounted(() => {
               />
               <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
             </div>
-            <p v-else class="chat-input-hint">支持直接拖入代码文件帮你建项目;Shift+Enter 换行</p>
+            <p v-else class="chat-input-hint">支持直接拖入代码文件帮你建项目;图片会由视觉模型解读;Shift+Enter 换行</p>
+            <div v-if="pendingImages.length" class="chat-image-tray" aria-label="待发送图片">
+              <div v-for="img in pendingImages" :key="img.id" class="chat-image-chip">
+                <img :src="img.dataUrl" :alt="img.name" >
+                <button type="button" class="chip-remove" :aria-label="`移除${img.name}`" @click="removePendingImage(img.id)">×</button>
+              </div>
+              <span class="tray-hint">发送时自动切换视觉模型</span>
+            </div>
             <input
               ref="uploadInput"
               class="source-upload-input"
@@ -2593,6 +2679,7 @@ onMounted(() => {
               rows="2"
               :disabled="loading || uploading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
+              @paste="onChatInputPaste"
             />
             <div class="chat-input-actions">
               <button
@@ -3695,6 +3782,28 @@ onMounted(() => {
   font-weight: 600;
   color: var(--brand-600, #5b58e8);
   white-space: nowrap;
+}
+
+/* ── 多模态图片附件 ── */
+.chat-image-tray {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+}
+.chat-image-chip {
+  position: relative; width: 52px; height: 52px; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--gray-200, #dcdfe6); background: #fff;
+}
+.chat-image-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chip-remove {
+  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; border-radius: 50%;
+  border: none; cursor: pointer; font-size: 11px; line-height: 1; color: #fff;
+  background: rgba(23, 34, 62, .55);
+}
+.chip-remove:hover { background: rgba(220, 73, 97, .85); }
+.tray-hint { font-size: 11px; color: var(--brand-500, #4078f4); }
+.msg-images { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.msg-images img {
+  max-width: 180px; max-height: 140px; border-radius: 10px; object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, .5);
 }
 
 .chat-input-hint {

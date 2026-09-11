@@ -2445,7 +2445,39 @@ class AgentResponsesService:
         run_id: str,
         event_sink: Optional[EventSink] = None,
     ) -> RuntimeResult:
-        executor, runtime = await self._runtime(run_id, event_sink)
+        # 多模态:抽取消息内图片,留档并把该条消息升级为 content parts;
+        # 含图运行切换视觉模型,仅本次运行生效。
+        vision_model = ""
+        image_assets_map: Optional[Mapping[str, str]] = None
+        prepared_messages: Sequence[Mapping[str, Any]] = messages
+        image_urls: list[str] = []
+        for message in messages:
+            raw_images = message.get("images") if isinstance(message, Mapping) else None
+            if isinstance(raw_images, Sequence) and not isinstance(raw_images, (str, bytes, bytearray)):
+                image_urls.extend([str(url) for url in raw_images])
+        if image_urls:
+            from app.services import multimodal_service
+
+            assets = multimodal_service.store_message_images(
+                self._db,
+                user_id=int(self._user.id),
+                run_id=run_id,
+                surface=self._surface,
+                images=image_urls,
+            )
+            # 仅把图片挂到最后一条用户消息(前端形态:新消息带图);
+            # 之前的消息保持纯文本,历史不重复带图。
+            prepared_messages = []
+            for index, message in enumerate(messages):
+                content = str(message.get("content") or "")
+                if index == len(messages) - 1 and assets:
+                    content = multimodal_service.multimodal_content_parts(content, assets)  # type: ignore[assignment]
+                prepared_messages.append({"role": message.get("role", "user"), "content": content})
+            image_assets_map = multimodal_service.image_asset_map(assets)
+            vision_model = multimodal_service.resolve_vision_model(self._db)
+        executor, runtime = await self._runtime(
+            run_id, event_sink, vision_model=vision_model, image_assets=image_assets_map,
+        )
         tools = await executor.tool_schemas()
         instructions = _instructions(self._surface, self._user, self._is_super_admin)
         try:
@@ -2458,7 +2490,7 @@ class AgentResponsesService:
         except Exception:  # noqa: BLE001 - 记忆检索降级不能阻断小菱主链路
             self._db.rollback()
         result = await runtime.start(
-            messages,
+            prepared_messages,
             instructions=instructions,
             tools=tools,
             run_id=run_id,
@@ -2525,6 +2557,9 @@ class AgentResponsesService:
         self,
         run_id: str,
         event_sink: Optional[EventSink],
+        *,
+        vision_model: str = "",
+        image_assets: Optional[Mapping[str, str]] = None,
     ) -> tuple[PrismToolExecutor, DeepSeekResponsesRuntime]:
         config = resolve_api_config(self._db, self._user.id)
         mcp = McpToolProvider(db=self._db, user=self._user)
@@ -2549,6 +2584,11 @@ class AgentResponsesService:
             if config.source in {"user", "global"}
             else settings.deepseek_orchestrator_model
         )
+        # 多模态:消息含图片时本运行切换视觉模型(角色分配 chat_vision 优先);
+        # 仅本次运行生效,任务结束后同会话下一条消息自动回到默认模型配置。
+        # 视觉运行不做 pro→flash 回退,避免回退到不支持图片的模型。
+        if vision_model:
+            fallback_model = vision_model
         agent_label = "manager" if self._surface == "admin" else "chat_assistant"
 
         def _write_ai_call_log(response: Mapping[str, Any]) -> None:
@@ -2580,7 +2620,12 @@ class AgentResponsesService:
             tool_executor=executor,
             checkpoint_store=self._store,
             model=fallback_model,
-            fallback_model=settings.deepseek_model if settings.deepseek_orchestrator_fallback_to_flash else None,
+            fallback_model=(
+                settings.deepseek_model
+                if settings.deepseek_orchestrator_fallback_to_flash and not vision_model
+                else None
+            ),
+            image_assets=image_assets,
             max_rounds=settings.agent_responses_max_rounds,
             stream=True,
             context_window_tokens=settings.deepseek_context_window_tokens,

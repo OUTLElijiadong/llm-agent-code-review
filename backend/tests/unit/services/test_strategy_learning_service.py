@@ -267,7 +267,7 @@ async def test_new_response_run_receives_same_account_strategy_context(db, monke
             assert tools == []
             return RuntimeResult(run_id=run_id, status=COMPLETED)
 
-    async def fake_runtime(_self, _run_id, _event_sink):
+    async def fake_runtime(_self, _run_id, _event_sink, **_kwargs):
         return FakeExecutor(), FakeRuntime()
 
     monkeypatch.setattr(agent_responses_service.AgentResponsesService, "_runtime", fake_runtime)

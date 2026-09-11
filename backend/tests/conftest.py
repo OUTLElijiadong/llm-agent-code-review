@@ -45,6 +45,7 @@ from app.models.agent_mesh import (  # noqa: F401,E402
     AgentMeshMessage,
     AgentMeshMessageEvent,
 )
+from app.models.agent_multimodal import AgentMultimodalAsset  # noqa: F401,E402
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution  # noqa: F401,E402
 from app.models.agent_team import (  # noqa: F401,E402
     AgentTeam,
@@ -87,6 +88,7 @@ from app.models.review_task import ReviewTask  # noqa: F401,E402
 from app.models.review_task_file import ReviewTaskFile  # noqa: F401,E402
 
 # 显式导入全部 ORM 模型,确保 Base.metadata 注册所有表
+from app.models.system_config import SystemConfig  # noqa: F401,E402
 from app.models.user import User  # noqa: F401,E402
 from app.models.user_avatar import UserAvatar  # noqa: F401,E402
 from app.models.user_profile import UserProfile  # noqa: F401,E402
