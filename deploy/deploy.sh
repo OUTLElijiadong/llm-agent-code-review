@@ -283,6 +283,13 @@ write_release_state \
   "$current_state" "$target_sha" "$desired_backend" "$desired_frontend" \
   "$target" "$backup_file" "$alembic_revision" "$app_version"
 rm -f "$pending_state"
+# 自动校准默认 Compose 环境(.env)与本次发布一致,消除发布后 ops-check
+# 的漂移告警窗口;校准失败不回滚已验收发布,仅告警提示手工处理。
+if calibrate_default_env_file "$target_sha" "$desired_backend" "$desired_frontend" "$app_version"; then
+  log_info "默认 Compose 环境已随发布校准: $target_sha / $app_version"
+else
+  log_warn "默认 Compose 环境(.env)校准失败;手工校准前 ops-check 将持续报告发布环境漂移"
+fi
 # 提交发布账本后仅剩信息展示，不能因 compose ps 失败撤销已验收版本。
 failure_handled=1
 trap - ERR

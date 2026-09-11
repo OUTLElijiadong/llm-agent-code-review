@@ -461,6 +461,39 @@ assert_running_release_environment() {
   done
 }
 
+# 把默认 Compose 环境文件(.env)校准为与本次发布一致。
+# 背景: ops-check 对「运行镜像 ↔ .env ↔ 发布账本」做三方一致性检查,发布后
+# 若 .env 仍指旧版本,校准前窗口期每次巡检都判发布环境漂移失败。
+# 发布账本落盘后调用;先按惯例备份 .env.before-<短SHA>-<UTC时间>,再原位
+# 更新(cat 回写保留原文件权限)。四个键存在则替换、缺失则追加。
+# 参数: $1 目标 SHA；$2 Backend tag；$3 Frontend tag；$4 版本号。
+# 返回: 校准成功 0;失败非 0(调用方仅告警,不回滚已验收发布)。
+calibrate_default_env_file() {
+  local target_sha="$1" backend_release="$2" frontend_release="$3" app_version="$4"
+  local env_file="${DEPLOY_ENV_FILE:-.env}" backup_file stamp tmp_file key value
+  [[ -f "$env_file" ]] || return 0
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  backup_file="${env_file}.before-$(printf '%s' "$target_sha" | cut -c1-9)-${stamp}"
+  cp "$env_file" "$backup_file" || return 1
+  tmp_file="${env_file}.calibrating.$$"
+  sed \
+    -e "s|^APP_RELEASE=.*|APP_RELEASE=${target_sha}|" \
+    -e "s|^APP_VERSION=.*|APP_VERSION=${app_version}|" \
+    -e "s|^BACKEND_RELEASE=.*|BACKEND_RELEASE=${backend_release}|" \
+    -e "s|^FRONTEND_RELEASE=.*|FRONTEND_RELEASE=${frontend_release}|" \
+    "$env_file" > "$tmp_file" || { rm -f "$tmp_file"; return 1; }
+  for key in APP_RELEASE APP_VERSION BACKEND_RELEASE FRONTEND_RELEASE; do
+    case "$key" in
+      APP_RELEASE) value="$target_sha" ;;
+      APP_VERSION) value="$app_version" ;;
+      BACKEND_RELEASE) value="$backend_release" ;;
+      FRONTEND_RELEASE) value="$frontend_release" ;;
+    esac
+    grep -q "^${key}=" "$tmp_file" || printf '%s=%s\n' "$key" "$value" >> "$tmp_file"
+  done
+  cat "$tmp_file" > "$env_file" && rm -f "$tmp_file" || { rm -f "$tmp_file"; return 1; }
+}
+
 # 原子写入发布状态文件。
 # 参数: $1 文件；$2 SHA；$3 Backend tag；$4 Frontend tag；$5 target；$6 备份；$7 Alembic。
 # 返回: 写入成功时 0。

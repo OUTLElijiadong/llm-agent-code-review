@@ -1735,6 +1735,9 @@ assert_contains lib/common.sh '"https://$domain/readyz"'
 assert_contains lib/common.sh '{\"status\":\"ready\",\"release\":\"$expected_release\"}'
 assert_contains lib/common.sh '-e MALWARE_SCAN_FAIL_CLOSED=true'
 assert_contains deploy.sh 'release_image_exists prism-frontend "$current_frontend"'
+# 发布成功路径必须自动校准默认 Compose 环境,消除 ops-check 漂移告警窗口。
+assert_contains deploy.sh 'calibrate_default_env_file "$target_sha" "$desired_backend" "$desired_frontend" "$app_version"'
+assert_contains lib/common.sh 'calibrate_default_env_file() {'
 assert_contains docker-compose.yml '--general-log=0'
 assert_not_contains docker-compose.yml '--general-log=1'
 
