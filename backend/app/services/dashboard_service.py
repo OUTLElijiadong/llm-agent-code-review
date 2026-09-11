@@ -133,8 +133,18 @@ _issue_stats_task_columns = load_only(
 )
 
 
-def _issue_stats(db: Session, user: User, *, since: datetime | None = None) -> list[dict]:
-    """所有图表复用报告来源事实，保持非删除任务及项目成员可见范围。"""
+def _issue_stats(
+    db: Session,
+    user: User,
+    *,
+    since: datetime | None = None,
+    window_days: int | None = None,
+) -> list[dict]:
+    """所有图表复用报告来源事实，保持非删除任务及项目成员可见范围。
+
+    window_days 用于缓存归桶(窗口口径按天,不按秒级时间戳,否则 TTL 缓存
+    形同虚设);since 仍作为实际过滤截止时刻。
+    """
 
     def _compute() -> list[dict]:
         tasks = (
@@ -145,7 +155,10 @@ def _issue_stats(db: Session, user: User, *, since: datetime | None = None) -> l
         )
         return list(load_task_issue_stats(db, tasks, since=since).values())
 
-    bucket = "all" if since is None else f"since:{int(since.timestamp())}"
+    if window_days is not None:
+        bucket = f"days:{int(window_days)}"
+    else:
+        bucket = "all"
     return _cached_compute(_stats_cache, (user.id, bucket), _compute)
 
 
@@ -242,14 +255,14 @@ def get_risk_distribution(db: Session, user: User, days: int = 30) -> list[dict]
     Args:
         db: 数据库会话
         user: 当前用户
-        days: 统计天数
+        days: 统计天数;0 表示累计全部
 
     Returns:
         list[dict]: [{severity: str, count: int}, ...]
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = None if days <= 0 else datetime.now(timezone.utc) - timedelta(days=days)
     result = {"严重": 0, "高": 0, "中": 0, "低": 0}
-    for item in _issue_stats(db, user, since=cutoff):
+    for item in _issue_stats(db, user, since=cutoff, window_days=max(days, 0)):
         for severity, count in item["severity"].items():
             result[severity] = result.get(severity, 0) + count
     return [{"severity": k, "count": v} for k, v in result.items()]
@@ -261,14 +274,14 @@ def get_issue_type_statistics(db: Session, user: User, days: int = 30) -> list[d
     Args:
         db: 数据库会话
         user: 当前用户
-        days: 统计天数
+        days: 统计天数;0 表示累计全部
 
     Returns:
         list[dict]: [{issue_type: str, count: int}, ...]
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = None if days <= 0 else datetime.now(timezone.utc) - timedelta(days=days)
     result: dict[str, int] = {}
-    for item in _issue_stats(db, user, since=cutoff):
+    for item in _issue_stats(db, user, since=cutoff, window_days=max(days, 0)):
         for kind, count in item["by_type"].items():
             result[kind] = result.get(kind, 0) + count
     return [{"issue_type": kind, "count": count} for kind, count in result.items()]

@@ -16,6 +16,7 @@
           <el-option label="近 7 天" :value="7" />
           <el-option label="近 30 天" :value="30" />
           <el-option label="近 90 天" :value="90" />
+          <el-option label="累计" :value="0" />
         </el-select>
         <el-button :loading="loading" @click="loadDashboard">刷新数据</el-button>
         <el-button v-if="canExportWeeklyReport" data-testid="export-dashboard" :disabled="!canExportCurrentData" @click="onWeeklyReport">导出统计报告</el-button>
@@ -63,7 +64,7 @@
 
     <!-- ============ v2.1.1 安全态势卡 ============ -->
     <section v-if="canViewSecurity" class="security-row prism-rise" style="--rise-delay: 180ms">
-      <SecurityPostureCard :days="timeRange" />
+      <SecurityPostureCard :days="securityDays" />
     </section>
 
     <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
@@ -72,7 +73,7 @@
         <header class="chart-head">
           <div>
             <h3 class="font-display">问题类型分布 · 棱镜光谱</h3>
-            <p class="chart-desc">{{ timeRange }} 天内的问题分布<span v-if="chartStates.dimension === 'success'"> · {{ totalDimCount }} 个</span></p>
+            <p class="chart-desc">{{ rangeLabel }}的问题分布<span v-if="chartStates.dimension === 'success'"> · {{ totalDimCount }} 个</span></p>
           </div>
         </header>
         <p v-if="chartStates.dimension === 'loading'" role="status">正在读取维度数据</p>
@@ -123,7 +124,7 @@
     <section class="chart-row three-col prism-stagger">
       <article class="chart-card" data-section="frequency" :data-state="chartStates.frequency" :aria-busy="chartStates.frequency === 'loading'">
         <header class="chart-head">
-          <h3 class="font-display">{{ timeRange }} 天审查任务趋势</h3>
+          <h3 class="font-display">{{ rangeLabel }}审查任务趋势</h3>
         </header>
         <p v-if="chartStates.frequency === 'loading'" role="status">正在读取趋势数据</p>
         <p v-else-if="chartStates.frequency === 'error'" class="load-feedback error" role="alert">趋势数据读取失败。<button class="link" type="button" @click="loadReviewFrequency">重试趋势数据</button></p>
@@ -133,12 +134,22 @@
 
       <article class="chart-card" data-section="risk" :data-state="chartStates.risk" :aria-busy="chartStates.risk === 'loading'">
         <header class="chart-head">
-          <h3 class="font-display">严重度分布</h3>
+          <div>
+            <h3 class="font-display">严重度分布</h3>
+            <p class="chart-desc">{{ rangeLabel }}的问题分布<span v-if="chartStates.risk === 'success' && riskTotal > 0"> · {{ riskTotal }} 个</span></p>
+          </div>
         </header>
         <p v-if="chartStates.risk === 'loading'" role="status">正在读取严重度数据</p>
         <p v-else-if="chartStates.risk === 'error'" class="load-feedback error" role="alert">严重度数据读取失败。<button class="link" type="button" @click="loadRiskDistribution">重试严重度数据</button></p>
         <BaseChart v-else-if="riskData.some((item) => item.value > 0)" :option="severityOption" height="220px" />
-        <EmptyState v-else description="暂无严重度数据" compact />
+        <template v-else>
+          <EmptyState :description="`${rangeLabel}暂无严重度数据`" compact />
+          <p v-if="timeRange !== 0 && cumulativeIssueCount > 0" class="empty-hint" data-testid="risk-cumulative-hint">
+            统计卡为累计口径，本窗口没有新问题；累计共
+            <b class="hl font-mono">{{ cumulativeIssueCount }}</b> 个 ·
+            <button class="link" type="button" @click="switchToCumulative">切换累计查看</button>
+          </p>
+        </template>
       </article>
 
       <article class="chart-card" data-section="score" :data-state="chartStates.score" :aria-busy="chartStates.score === 'loading'">
@@ -237,6 +248,18 @@ const riskData = ref<{ name: string; value: number; severity: string }[]>([])
 const issueTypeData = ref<{ key: string; name: string; value: number }[]>([])
 const scoreTrendData = ref<{ name: string; value: number }[]>([])
 const frequencyData = ref<{ name: string; value: number }[]>([])
+
+/* 时间窗口:0 表示累计;图表副标题统一口径,防"统计卡累计 vs 图表窗口"认知错位 */
+const rangeLabel = computed(() => (timeRange.value === 0 ? '累计' : `近 ${timeRange.value} 天`))
+const securityDays = computed(() => (timeRange.value === 0 ? 365 : timeRange.value))
+const riskTotal = computed(() => riskData.value.reduce((total, item) => total + item.value, 0))
+const cumulativeIssueCount = computed(() => summary.value?.total_issues ?? 0)
+
+function switchToCumulative() {
+  if (timeRange.value === 0) return
+  timeRange.value = 0
+  loadCharts()
+}
 
 const today = computed(() => {
   const d = dayjs()
@@ -562,7 +585,7 @@ async function loadScoreTrend() {
 }
 
 async function loadReviewFrequency() {
-  await loadChart('frequency', () => getReviewFrequency(timeRange.value), (data) => {
+  await loadChart('frequency', () => getReviewFrequency(timeRange.value === 0 ? 3650 : timeRange.value), (data) => {
     assertRows(data, (row) => isCalendarDate(row.date) && isCount(row.count))
     frequencyData.value = data.map((item: FrequencyItem) => ({
       name: dayjs(item.date).format('M/D'),
@@ -986,6 +1009,15 @@ button.link {
   cursor: pointer;
 
   &:hover { text-decoration: underline; }
+}
+
+/* 窗口全零但累计有数据时的口径提示 */
+.empty-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--gray-500);
+
+  .hl { color: var(--brand-500); }
 }
 
 /* ============ 8 维度 legend ============ */

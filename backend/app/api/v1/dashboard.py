@@ -23,17 +23,17 @@ def summary(scope: str = Query("mine"), db: Session = Depends(get_db),
 
 
 @router.get("/risk-distribution", response_model=Resp[list[RiskItem]])
-def risk_distribution(days: int = Query(30), db: Session = Depends(get_db),
+def risk_distribution(days: int = Query(30, ge=0, le=3650), db: Session = Depends(get_db),
                       user: User = Depends(get_current_user)):
-    """风险等级分布"""
+    """风险等级分布;days=0 表示累计全部"""
     data = dashboard_service.get_risk_distribution(db, user, days)
     return Resp(data=[RiskItem(**d) for d in data])
 
 
 @router.get("/issue-type-statistics", response_model=Resp[list[IssueTypeItem]])
-def issue_type_statistics(days: int = Query(30), db: Session = Depends(get_db),
+def issue_type_statistics(days: int = Query(30, ge=0, le=3650), db: Session = Depends(get_db),
                           user: User = Depends(get_current_user)):
-    """问题类型分布"""
+    """问题类型分布;days=0 表示累计全部"""
     data = dashboard_service.get_issue_type_statistics(db, user, days)
     return Resp(data=[IssueTypeItem(**d) for d in data])
 

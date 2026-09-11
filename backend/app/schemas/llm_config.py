@@ -59,3 +59,41 @@ class LlmModelsOut(BaseModel):
     fallback: bool = False
     retryable: bool = False
     next_action: str = ""
+
+
+class ModelRegistryItemIn(BaseModel):
+    """注册表条目(管理员手工新增/编辑;vision 能力标记可改)。"""
+    id: str = Field(min_length=1, max_length=128)
+    label: Optional[str] = Field(default=None, max_length=64)
+    vision: bool = False
+
+
+class ModelRegistryItemOut(ModelRegistryItemIn):
+    source: str = "manual"
+    added_at: str = ""
+
+
+class ModelRegistryOut(BaseModel):
+    """模型注册表 + 角色分配 + 角色说明。"""
+    models: List[ModelRegistryItemOut] = Field(default_factory=list)
+    assignments: dict = Field(default_factory=dict)
+    roles: dict = Field(default_factory=dict)
+
+
+class ModelRegistryReplaceIn(BaseModel):
+    """整表保存注册表(手工编辑)。"""
+    models: List[ModelRegistryItemIn] = Field(default_factory=list, max_length=200)
+
+
+class ModelRegistrySyncOut(BaseModel):
+    """从 provider 拉取并合并进注册表的结果。"""
+    success: bool
+    message: str
+    fetched: List[str] = Field(default_factory=list)
+    added: List[str] = Field(default_factory=list)
+    models: List[ModelRegistryItemOut] = Field(default_factory=list)
+
+
+class ModelAssignmentsIn(BaseModel):
+    """角色->模型分配;空串清除该角色回退全局默认。"""
+    assignments: dict = Field(default_factory=dict)

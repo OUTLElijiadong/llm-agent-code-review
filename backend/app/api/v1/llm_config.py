@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import require_super_admin
+from app.core.exceptions import ValidationError
 from app.models.user import User
 from app.schemas.api_config import ApiConfigTestIn, ApiConfigTestOut
 from app.schemas.common import Resp
@@ -19,6 +20,11 @@ from app.schemas.llm_config import (
     LlmModelsIn,
     LlmModelsOut,
     LlmTestIn,
+    ModelAssignmentsIn,
+    ModelRegistryItemOut,
+    ModelRegistryOut,
+    ModelRegistryReplaceIn,
+    ModelRegistrySyncOut,
 )
 from app.services import api_config_service, audit_service, system_config_service
 
@@ -137,3 +143,96 @@ def list_models(payload: LlmModelsIn, db: Session = Depends(get_db),
     draft = _resolve_draft(payload, db)
     result = api_config_service.fetch_models(LlmModelsIn(**draft))
     return Resp(data=result, message=result.message)
+
+
+def _registry_view(db: Session) -> ModelRegistryOut:
+    return ModelRegistryOut(
+        models=[
+            ModelRegistryItemOut(**item)
+            for item in system_config_service.get_model_registry(db)
+        ],
+        assignments=system_config_service.get_model_assignments(db),
+        roles=dict(system_config_service.MODEL_ASSIGNMENT_ROLES),
+    )
+
+
+@router.get("/models/registry", response_model=Resp[ModelRegistryOut])
+def get_registry(db: Session = Depends(get_db),
+                 admin: User = Depends(require_super_admin)):
+    """查看模型注册表与角色分配。"""
+    return Resp(data=_registry_view(db))
+
+
+@router.post("/models/registry/sync", response_model=Resp[ModelRegistrySyncOut])
+def sync_registry(payload: LlmModelsIn, db: Session = Depends(get_db),
+                  admin: User = Depends(require_super_admin)):
+    """从 provider 拉取最新模型列表并合并进注册表(不删除既有条目)。"""
+    draft = _resolve_draft(payload, db)
+    if not (draft["base_url"] and draft["api_key"]):
+        return Resp(
+            data=ModelRegistrySyncOut(
+                success=False, message="请先配置端点与 API Key",
+                models=[ModelRegistryItemOut(**i) for i in system_config_service.get_model_registry(db)],
+            ),
+            message="配置不完整",
+        )
+    result = api_config_service.fetch_models(LlmModelsIn(**draft))
+    models, added = system_config_service.merge_pulled_models(db, result.models)
+    fetched = result.models if result.success else []
+    message = (
+        f"已拉取 {len(fetched)} 个模型,新增 {len(added)} 个"
+        if result.success else f"拉取失败:{result.message},注册表保持不变"
+    )
+    audit_service.log(
+        db, admin, "llm_model_registry_sync",
+        target_type="system_config", target_id="model_registry",
+        detail=f"模型注册表同步 success={result.success} fetched={len(fetched)} added={added[:10]}",
+    )
+    return Resp(data=ModelRegistrySyncOut(
+        success=result.success,
+        message=message,
+        fetched=fetched,
+        added=added,
+        models=[ModelRegistryItemOut(**item) for item in models],
+    ), message=message)
+
+
+@router.put("/models/registry", response_model=Resp[ModelRegistryOut])
+def replace_registry(payload: ModelRegistryReplaceIn, db: Session = Depends(get_db),
+                     admin: User = Depends(require_super_admin)):
+    """整表保存注册表(手工新增/删除/编辑能力标记)。"""
+    # 保留既有条目的 source/added_at,新增条目默认 manual 并推断视觉能力。
+    existing = {m["id"]: m for m in system_config_service.get_model_registry(db)}
+    merged = []
+    for item in payload.models:
+        prior = existing.get(item.id, {})
+        merged.append({
+            "id": item.id,
+            "label": item.label or item.id,
+            "vision": bool(item.vision),
+            "source": prior.get("source", "manual"),
+            "added_at": prior.get("added_at", ""),
+        })
+    system_config_service.replace_model_registry(db, merged)
+    audit_service.log(
+        db, admin, "llm_model_registry_update",
+        target_type="system_config", target_id="model_registry",
+        detail=f"模型注册表保存 count={len(merged)}",
+    )
+    return Resp(data=_registry_view(db))
+
+
+@router.put("/models/assignments", response_model=Resp[ModelRegistryOut])
+def update_assignments(payload: ModelAssignmentsIn, db: Session = Depends(get_db),
+                       admin: User = Depends(require_super_admin)):
+    """更新角色->模型分配;空串清除。"""
+    try:
+        system_config_service.update_model_assignments(db, payload.assignments)
+    except ValidationError as exc:
+        return Resp(message=exc.message)
+    audit_service.log(
+        db, admin, "llm_model_assignments_update",
+        target_type="system_config", target_id="model_assignments",
+        detail=f"模型分配更新 roles={sorted(payload.assignments.keys())}",
+    )
+    return Resp(data=_registry_view(db))

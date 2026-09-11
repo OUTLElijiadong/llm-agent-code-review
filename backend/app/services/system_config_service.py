@@ -6,6 +6,7 @@
 Key 不直接回显给前端(仅返回是否已配置)。
 """
 import json
+from datetime import datetime, timezone
 from typing import Optional
 
 from loguru import logger
@@ -391,3 +392,156 @@ def update_llm_config(
         )
         raise
     return get_llm_config_public(db)
+
+
+# ── 模型注册表与按角色模型分配 ────────────────────────────────────────────────
+# 管理员从 provider 拉取或手工登记可用模型(含视觉能力标记),再把语义角色
+# (小菱对话/小菱视觉/总调度/子Agent)指到注册表中的具体模型;留空表示沿用
+# 全局默认。注册表与分配都不含 Key,仅存模型标识与能力元数据。
+
+MODEL_REGISTRY_KEY = "model_registry"
+MODEL_ASSIGNMENTS_KEY = "model_assignments"
+
+# 语义角色 -> 中文说明;新增角色必须同步前端 LlmConfig.vue 与运行时解析点。
+MODEL_ASSIGNMENT_ROLES: dict[str, str] = {
+    "chat": "小菱对话(用户端默认)",
+    "chat_vision": "小菱视觉(消息含图片时临时使用)",
+    "orchestrator": "总调度/管理端助手",
+    "subagent": "子Agent默认",
+}
+
+_VISION_MODEL_MARKERS = ("vision", "-vl", "vl-", "omni", "gpt-4o", "gemini", "claude", "qwen-vl")
+
+
+def guess_vision_capability(model_id: str) -> bool:
+    """按模型名推断视觉能力;仅作为注册表初始标记,管理员可改。"""
+    lowered = (model_id or "").lower()
+    return any(marker in lowered for marker in _VISION_MODEL_MARKERS)
+
+
+def _normalize_registry_entry(entry: dict, *, source: str) -> Optional[dict]:
+    model_id = str(entry.get("id") or entry.get("model") or "").strip()
+    if not model_id or len(model_id) > 128:
+        return None
+    return {
+        "id": model_id,
+        "label": str(entry.get("label") or model_id).strip()[:64] or model_id,
+        "vision": bool(entry.get("vision")),
+        "source": source if source in {"pulled", "manual"} else "manual",
+        "added_at": str(entry.get("added_at") or ""),
+    }
+
+
+def get_model_registry(db: Session) -> list[dict]:
+    """读取模型注册表;坏数据自动清空重建,不抛错。"""
+    raw = _get_raw(db, MODEL_REGISTRY_KEY)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    models = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(models, list):
+        return []
+    seen, result = set(), []
+    for entry in models:
+        if not isinstance(entry, dict):
+            continue
+        normalized = _normalize_registry_entry(entry, source=str(entry.get("source") or "manual"))
+        if normalized and normalized["id"] not in seen:
+            seen.add(normalized["id"])
+            result.append(normalized)
+    return result
+
+
+def replace_model_registry(db: Session, models: list[dict]) -> list[dict]:
+    """整表替换(管理员手工编辑保存)。"""
+    normalized, seen = [], set()
+    for entry in models:
+        if not isinstance(entry, dict):
+            continue
+        item = _normalize_registry_entry(entry, source=str(entry.get("source") or "manual"))
+        if item and item["id"] not in seen:
+            seen.add(item["id"])
+            normalized.append(item)
+    _set_raw(db, MODEL_REGISTRY_KEY, json.dumps({"models": normalized}, ensure_ascii=False))
+    return normalized
+
+
+def merge_pulled_models(db: Session, pulled_ids: list[str]) -> tuple[list[dict], list[str]]:
+    """把 provider /models 拉取结果合并进注册表;返回(新注册表, 新增ids)。
+
+    已存在条目仅刷新能力推断,不覆盖管理员手工修改的 label/vision;
+    拉取列表里消失的条目保留(可能是手工登记或上游列表不全)。
+    """
+    existing = {m["id"]: m for m in get_model_registry(db)}
+    added: list[str] = []
+    for raw_id in pulled_ids:
+        model_id = str(raw_id or "").strip()
+        if not model_id:
+            continue
+        if model_id in existing:
+            continue
+        entry = _normalize_registry_entry(
+            {"id": model_id}, source="pulled",
+        )
+        if entry is None:
+            continue
+        entry["vision"] = guess_vision_capability(model_id)
+        entry["added_at"] = datetime.now(timezone.utc).isoformat()
+        existing[model_id] = entry
+        added.append(model_id)
+    ordered = sorted(existing.values(), key=lambda m: m["id"])
+    _set_raw(db, MODEL_REGISTRY_KEY, json.dumps({"models": ordered}, ensure_ascii=False))
+    return ordered, added
+
+
+def get_model_assignments(db: Session) -> dict[str, str]:
+    """读取角色->模型分配;只返回合法角色的非空字符串值。"""
+    raw = _get_raw(db, MODEL_ASSIGNMENTS_KEY)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for role, model_id in data.items():
+        if role in MODEL_ASSIGNMENT_ROLES and isinstance(model_id, str) and model_id.strip():
+            result[role] = model_id.strip()
+    return result
+
+
+def update_model_assignments(db: Session, assignments: dict[str, str]) -> dict[str, str]:
+    """更新角色分配;模型必须已在注册表(或允许指向当前全局默认模型的任意 id)。
+
+    空串/None 表示清除该角色分配,回退全局默认。
+    """
+    if not isinstance(assignments, dict):
+        raise ValidationError("分配格式不正确", code=40001)
+    registry_ids = {m["id"] for m in get_model_registry(db)}
+    current = get_model_assignments(db)
+    for role, model_id in assignments.items():
+        if role not in MODEL_ASSIGNMENT_ROLES:
+            raise ValidationError(f"未知的模型分配角色: {role}", code=40001)
+        value = (model_id or "").strip()
+        if value and value not in registry_ids:
+            raise ValidationError(
+                f"模型 {value} 未在注册表中,请先在模型注册表添加", code=40001,
+            )
+        if value:
+            current[role] = value
+        else:
+            current.pop(role, None)
+    _set_raw(db, MODEL_ASSIGNMENTS_KEY, json.dumps(current, ensure_ascii=False))
+    return current
+
+
+def resolve_model_assignment(db: Session, role: str, default: str = "") -> str:
+    """运行时解析角色模型;未分配/表缺失时返回 default(全局默认)。"""
+    assignments = get_model_assignments(db)
+    assigned = assignments.get(role, "")
+    return assigned if assigned else (default or "")

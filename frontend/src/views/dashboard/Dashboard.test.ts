@@ -336,6 +336,26 @@ describe('成员仪表盘真实读取状态', () => {
     expect(wrapper.get('[data-testid="export-dashboard"]').attributes('disabled')).toBeUndefined()
   })
 
+  it('窗口全零但累计有数据时提示口径并可一键切换累计', async () => {
+    mocks.getRiskDistribution.mockResolvedValue(['严重', '高', '中', '低'].map((severity) => ({ severity, count: 0 })))
+    const wrapper = mountPage()
+    await flushPromises()
+    const risk = section(wrapper, 'risk')
+    expect(risk.text()).toContain('近 30 天暂无严重度数据')
+    expect(risk.get('[data-testid="risk-cumulative-hint"]').text()).toContain('9')
+    expect(mocks.getRiskDistribution).toHaveBeenCalledWith(30)
+
+    mocks.getRiskDistribution.mockResolvedValue([
+      { severity: '严重', count: 5 }, { severity: '高', count: 3 },
+      { severity: '中', count: 2 }, { severity: '低', count: 1 },
+    ])
+    await risk.get('[data-testid="risk-cumulative-hint"] button').trigger('click')
+    await flushPromises()
+    expect(mocks.getRiskDistribution).toHaveBeenLastCalledWith(0)
+    expect(section(wrapper, 'risk').find('.chart-output').exists()).toBe(true)
+    expect(section(wrapper, 'risk').text()).toContain('累计的问题分布')
+  })
+
   it.each([
     ['risk', null], ['risk', [null]], ['risk', [{ severity: '严重', count: -1 }]],
     ['risk', [{ severity: null, count: 1 }]], ['risk', [{ severity: '严重', count: Infinity }]],
