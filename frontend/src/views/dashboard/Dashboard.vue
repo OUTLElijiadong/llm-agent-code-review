@@ -62,6 +62,53 @@
     </section>
     </section>
 
+    <!-- ============ 后台进行中(隐藏设计:无任务时整块不渲染) ============ -->
+    <section
+      v-if="runningLoaded && runningData && (runningData.reviews.length || runningData.agents.length)"
+      class="running-panel prism-rise"
+      data-testid="running-panel"
+    >
+      <header class="running-head">
+        <h3 class="font-display">
+          <span class="running-pulse" aria-hidden="true"></span>
+          后台进行中
+          <span class="running-count font-mono">{{ runningData.reviews.length + runningData.agents.length }}</span>
+        </h3>
+        <p class="running-sub">审查与 Agent 任务进度实时更新(5 秒)</p>
+      </header>
+      <div class="running-list">
+        <button
+          v-for="item in runningData.reviews"
+          :key="`r-${item.id}`"
+          type="button"
+          class="running-item review"
+          @click="goReviewDetail(item.id)"
+        >
+          <span class="ri-main">
+            <b>{{ item.task_name }}</b>
+            <span class="ri-meta font-mono">{{ item.project_name }} · {{ item.status === 'pending' ? '排队中' : `${item.processed_files}/${item.total_files || '?'} 文件` }}</span>
+          </span>
+          <span class="ri-bar" :class="{ indeterminate: item.status === 'pending' || !item.total_files }">
+            <span class="ri-fill" :style="{ width: `${reviewProgress(item)}%` }"></span>
+          </span>
+          <span class="ri-pct font-mono">{{ item.status === 'pending' ? '…' : item.total_files ? `${reviewProgress(item)}%` : '运行中' }}</span>
+        </button>
+        <div
+          v-for="item in runningData.agents"
+          :key="`a-${item.run_id}`"
+          class="running-item agent"
+          :title="item.session_key"
+        >
+          <span class="agent-dot" aria-hidden="true"></span>
+          <span class="ri-main">
+            <b>{{ item.surface === 'admin' ? '贾维斯' : '小菱' }}会话</b>
+            <span class="ri-meta font-mono">{{ AGENT_RUN_STATUS_LABELS[item.status] || item.status }}</span>
+          </span>
+          <span class="ri-tag">Agent</span>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ v2.1.1 安全态势卡 ============ -->
     <section v-if="canViewSecurity" class="security-row prism-rise" style="--rise-delay: 180ms">
       <SecurityPostureCard :days="securityDays" />
@@ -120,8 +167,14 @@
       </article>
     </section>
 
-    <!-- ============ 3 个分析图 ============ -->
-    <section class="chart-row three-col prism-stagger">
+    <!-- ============ 3 个分析图(渐进披露:默认折叠,可展开并记住偏好) ============ -->
+    <section class="analysis-fold prism-rise">
+      <button type="button" class="analysis-toggle" :aria-expanded="analysisOpen" @click="analysisOpen = !analysisOpen">
+        <span class="at-chevron" :class="{ open: analysisOpen }" aria-hidden="true">▸</span>
+        <b class="font-display">深度分析</b>
+        <span class="at-sub">趋势 · 严重度 · 评分明细</span>
+      </button>
+      <section v-show="analysisOpen" class="chart-row three-col prism-stagger">
       <article class="chart-card" data-section="frequency" :data-state="chartStates.frequency" :aria-busy="chartStates.frequency === 'loading'">
         <header class="chart-head">
           <h3 class="font-display">{{ rangeLabel }}审查任务趋势</h3>
@@ -178,11 +231,12 @@
         <EmptyState v-else description="暂无评分数据" compact />
       </article>
     </section>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 
@@ -204,7 +258,7 @@ import {
   getScoreTrend,
   getReviewFrequency,
 } from '@/api/dashboard'
-import type { RiskItem, IssueTypeItem, ScoreTrendItem, FrequencyItem, SummaryOut, RecentTaskOut } from '@/types/dashboard'
+import type { RunningOut, RunningReviewItem, RiskItem, IssueTypeItem, ScoreTrendItem, FrequencyItem, SummaryOut, RecentTaskOut } from '@/types/dashboard'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { useUserStore } from '@/stores/user'
 
@@ -245,6 +299,49 @@ const projectCountAnim = useCountUp(projectCountSrc)
 const fileCountAnim = useCountUp(fileCountSrc)
 
 const riskData = ref<{ name: string; value: number; severity: string }[]>([])
+
+/* ── 后台进行中面板:有任务才显示(隐藏设计);运行期间 5s 轮询 ── */
+const runningData = ref<RunningOut | null>(null)
+const runningLoaded = ref(false)
+const AGENT_RUN_STATUS_LABELS: Record<string, string> = {
+  running: '运行中', approving: '待审批确认', rejecting: '驳回处理中',
+  answering: '等待补充回答', waiting_approval: '等待审批', waiting_input: '等待输入',
+}
+let runningTimer: ReturnType<typeof setInterval> | null = null
+
+async function loadRunning(): Promise<void> {
+  try {
+    runningData.value = await getRunning()
+    runningLoaded.value = true
+  } catch {
+    /* 面板静默失败:不打扰主数据 */
+  }
+}
+
+function reviewProgress(item: RunningReviewItem): number {
+  if (item.status === 'pending') return 0
+  if (!item.total_files) return 8
+  return Math.min(100, Math.round((item.processed_files / item.total_files) * 100))
+}
+
+function startRunningPolling(): void {
+  if (runningTimer) return
+  runningTimer = setInterval(() => { void loadRunning() }, 5000)
+}
+function stopRunningPolling(): void {
+  if (runningTimer) { clearInterval(runningTimer); runningTimer = null }
+}
+watch(() => runningData.value, (data) => {
+  const active = Boolean(data && (data.reviews.length || data.agents.length))
+  if (active) startRunningPolling()
+  else stopRunningPolling()
+})
+
+/* 分析区折叠(不重要内容渐进披露),偏好持久化 */
+const analysisOpen = ref(localStorage.getItem('prism:dashboard-analysis-open') !== '0')
+watch(analysisOpen, (open) => {
+  try { localStorage.setItem('prism:dashboard-analysis-open', open ? '1' : '0') } catch { /* ignore */ }
+})
 const issueTypeData = ref<{ key: string; name: string; value: number }[]>([])
 const scoreTrendData = ref<{ name: string; value: number }[]>([])
 const frequencyData = ref<{ name: string; value: number }[]>([])
@@ -678,6 +775,10 @@ function onNewReview() {
   router.push('/reviews/start')
 }
 
+function goReviewDetail(id: number) {
+  router.push(`/reviews/${id}`)
+}
+
 function goReviewList() {
   if (!canViewReviews.value) return
   router.push('/reviews')
@@ -698,6 +799,7 @@ async function loadDashboard(): Promise<void> {
 }
 
 onMounted(() => {
+  void loadRunning()
   loadDashboard()
   window.addEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
@@ -781,6 +883,80 @@ button.link {
 @media (max-width: 768px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
+/* ── 后台进行中面板 ── */
+.running-panel {
+  border: 1px solid rgba(64, 120, 244, .22);
+  background: linear-gradient(180deg, rgba(64, 120, 244, .05), #fff 65%);
+  border-radius: 14px; padding: 16px 18px;
+}
+.running-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.running-head h3 { margin: 0; font-size: 15.5px; display: flex; align-items: center; gap: 8px; }
+.running-count {
+  padding: 1px 9px; border-radius: 999px; font-size: 11.5px;
+  background: var(--brand-500, #4078f4); color: #fff;
+}
+.running-sub { margin: 0; font-size: 11.5px; color: var(--gray-400); }
+.running-pulse {
+  width: 9px; height: 9px; border-radius: 50%; background: #40a35f;
+  box-shadow: 0 0 0 0 rgba(64, 163, 99, .5);
+  animation: running-ping 1.6s ease-out infinite;
+}
+@keyframes running-ping {
+  0% { box-shadow: 0 0 0 0 rgba(64, 163, 99, .5); }
+  70% { box-shadow: 0 0 0 8px rgba(64, 163, 99, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(64, 163, 99, 0); }
+}
+.running-list { display: grid; gap: 8px; }
+.running-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) 150px 52px; gap: 14px;
+  align-items: center; padding: 10px 14px; border-radius: 10px;
+  background: #fff; border: 1px solid var(--gray-100, #eef0f4); text-align: left;
+}
+.running-item.review { cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+.running-item.review:hover { border-color: var(--brand-300, #a8c4fa); transform: translateY(-1px); }
+.running-item.agent { grid-template-columns: auto minmax(0, 1fr) auto; }
+.ri-main { display: grid; min-width: 0; }
+.ri-main b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ri-meta { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+.ri-bar { position: relative; height: 7px; border-radius: 999px; background: var(--gray-100, #eef0f4); overflow: hidden; }
+.ri-fill {
+  position: absolute; inset: 0 auto 0 0; border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand-400, #6f9df7), var(--brand-600, #2f5ce0));
+  transition: width .5s ease;
+}
+.ri-bar.indeterminate::after {
+  content: ''; position: absolute; left: -40%; top: 0; bottom: 0; width: 40%;
+  border-radius: 999px; background: var(--brand-300, #a8c4fa);
+  animation: ri-slide 1.4s ease-in-out infinite;
+}
+@keyframes ri-slide { to { left: 100%; } }
+.ri-pct { font-size: 11.5px; color: var(--gray-600); text-align: right; }
+.ri-tag {
+  padding: 2px 9px; border-radius: 999px; font-size: 10.5px;
+  background: rgba(143, 139, 255, .12); color: #6f6bd8;
+}
+.agent-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #8f8bff;
+  animation: running-ping 1.6s ease-out infinite;
+}
+
+/* ── 分析区折叠 ── */
+.analysis-fold { border: 1px dashed var(--gray-200); border-radius: 12px; overflow: hidden; }
+.analysis-toggle {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  background: #fbfcfe; border: none; cursor: pointer; text-align: left;
+}
+.analysis-toggle:hover { background: #f5f8ff; }
+.at-chevron { color: var(--gray-400); transition: transform .2s ease; font-size: 12px; }
+.at-chevron.open { transform: rotate(90deg); }
+.at-sub { font-size: 11.5px; color: var(--gray-400); }
+.analysis-fold .chart-row { margin-top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ri-fill, .at-chevron { transition: none; }
+  .ri-bar.indeterminate::after, .running-pulse, .agent-dot { animation: none; }
+}
+
 @media (max-width: 520px) {
   .stat-grid { grid-template-columns: 1fr; }
 }

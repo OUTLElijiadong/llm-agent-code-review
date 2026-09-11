@@ -1,6 +1,5 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import { deferred, pageOf, scanMountOptions } from './scanRegressionTestUtils'
 
 const api = vi.hoisted(() => ({ tasks: vi.fn(), projects: vi.fn() }))
@@ -151,20 +150,18 @@ describe('任务列表轮询恢复', () => {
     wrapper = mount(ReviewTaskList, {
       global: {
         ...scanMountOptions.global,
-        components: { ...scanMountOptions.global.components, ElTable, ElTableColumn },
-        stubs: { ...scanMountOptions.global.stubs, 'el-table': false, 'el-table-column': false },
       },
     })
     await flushPromises()
-    const renderedRows = wrapper.findAll('tbody tr')
+    const renderedRows = wrapper.findAll('.task-card')
     expect(renderedRows).toHaveLength(7)
     for (const row of renderedRows.slice(0, 5)) {
-      expect(row.findAll('td')[4].text()).toBe('未形成评分')
+      expect(row.get('.tc-score').text()).toBe('未形成评分')
       expect(row.find('.score-low, .score-medium, .score-high').exists()).toBe(false)
     }
-    expect(renderedRows[5].findAll('td')[4].text()).toBe('0')
+    expect(renderedRows[5].get('.tc-score').text()).toBe('0')
     expect(renderedRows[5].find('.score-low').exists()).toBe(true)
-    expect(renderedRows[6].findAll('td')[4].text()).toBe('100')
+    expect(renderedRows[6].get('.tc-score').text()).toBe('100')
     expect(renderedRows[6].find('.score-high').exists()).toBe(true)
     const vm = wrapper.vm as any
     expect(vm.compareScores(rows[0], rows[1])).toBe(0)

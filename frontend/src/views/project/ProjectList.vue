@@ -374,7 +374,8 @@ const canCreateProject = computed(() => userStore.hasPermission('project:create'
 const canUpdateProject = computed(() => userStore.hasPermission('project:update'))
 const canDeleteProject = computed(() => userStore.hasPermission('project:delete'))
 
-const view = ref<'table' | 'card'>('table')
+// 默认卡片视图(突出内容本身);表格可切换
+const view = ref<'table' | 'card'>('card')
 
 const loading = ref(false)
 const loadError = ref('')

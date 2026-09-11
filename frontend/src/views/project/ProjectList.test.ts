@@ -115,21 +115,21 @@ describe('ProjectList create permission', () => {
 })
 
 describe('ProjectList 视图切换', () => {
-  it('通过 aria-pressed 暴露当前视图并在点击后同步更新', async () => {
+  it('通过 aria-pressed 暴露当前视图并在点击后同步更新(默认卡片)', async () => {
     const wrapper = mountProjectList()
     await flushPromises()
 
+    // 2026-09 改版:默认卡片视图(突出内容本身),表格按需切换
     const [tableButton, cardButton] = wrapper.findAll('.view-btn')
+    expect(cardButton.attributes('aria-pressed')).toBe('true')
+    expect(tableButton.attributes('aria-pressed')).toBe('false')
+    expect(wrapper.find('.card-grid').isVisible()).toBe(true)
+
+    await tableButton.trigger('click')
+
     expect(tableButton.attributes('aria-pressed')).toBe('true')
     expect(cardButton.attributes('aria-pressed')).toBe('false')
-    expect(wrapper.find('tbody td[colspan]').attributes('colspan')).toBe('9')
-
-    await cardButton.trigger('click')
-
-    expect(tableButton.attributes('aria-pressed')).toBe('false')
-    expect(cardButton.attributes('aria-pressed')).toBe('true')
-    expect(wrapper.find('.card-grid').isVisible()).toBe(true)
-    expect(wrapper.find('.table-card').isVisible()).toBe(false)
+    expect(wrapper.find('.table-card').isVisible()).toBe(true)
     wrapper.unmount()
   })
 })

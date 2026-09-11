@@ -38,3 +38,28 @@ export interface FrequencyItem {
   date: string
   count: number
 }
+
+export interface RunningReviewItem {
+  id: number
+  task_name: string
+  project_id: number
+  project_name: string
+  review_type: string
+  status: string
+  processed_files: number
+  total_files: number
+  create_time?: string | null
+}
+
+export interface RunningAgentItem {
+  run_id: string
+  surface: string
+  session_key: string
+  status: string
+  update_time?: string | null
+}
+
+export interface RunningOut {
+  reviews: RunningReviewItem[]
+  agents: RunningAgentItem[]
+}

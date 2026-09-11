@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import false as sa_false, func, select
 from sqlalchemy.orm import Session, load_only
 
 from app.core.config import settings
@@ -344,3 +344,63 @@ def get_review_frequency(db: Session, user: User, days: int = 30) -> list[dict]:
         d = (cutoff + timedelta(days=i)).strftime("%Y-%m-%d")
         result.append({"date": d, "count": data_map.get(d, 0)})
     return result
+
+
+def get_running(db: Session, user: User) -> dict:
+    """首页「后台进行中」:可见项目中排队/运行中的审查 + 本人进行中的 Agent 运行。
+
+    轻量查询(索引列),供前端 5s 轮询;为空时前端隐藏整个面板(渐进披露)。
+    """
+    from app.models.agent_response_run import AgentResponseRun
+
+    visible_ids = _visible_project_ids(db, user)
+    review_rows = (
+        db.query(ReviewTask, Project.project_name)
+        .join(Project, Project.id == ReviewTask.project_id)
+        .filter(
+            ReviewTask.status.in_(("pending", "running")),
+            ReviewTask.project_id.in_(visible_ids) if visible_ids else sa_false(),
+        )
+        .order_by(ReviewTask.create_time.desc())
+        .limit(10)
+        .all()
+    ) if visible_ids else []
+    reviews = [
+        {
+            "id": task.id,
+            "task_name": task.task_name or f"审查任务 #{task.id}",
+            "project_id": task.project_id,
+            "project_name": project_name,
+            "review_type": task.review_type or "standard",
+            "status": task.status,
+            "processed_files": int(task.processed_files or 0),
+            "total_files": int(task.total_files or 0),
+            "create_time": task.create_time.isoformat() if task.create_time else None,
+        }
+        for task, project_name in review_rows
+    ]
+
+    agent_rows = (
+        db.query(AgentResponseRun)
+        .filter(
+            AgentResponseRun.user_id == user.id,
+            AgentResponseRun.status.in_((
+                "running", "approving", "rejecting", "answering",
+                "waiting_approval", "waiting_input",
+            )),
+        )
+        .order_by(AgentResponseRun.update_time.desc())
+        .limit(5)
+        .all()
+    )
+    agents = [
+        {
+            "run_id": row.run_id,
+            "surface": row.surface,
+            "session_key": row.session_key,
+            "status": row.status,
+            "update_time": row.update_time.isoformat() if row.update_time else None,
+        }
+        for row in agent_rows
+    ]
+    return {"reviews": reviews, "agents": agents}

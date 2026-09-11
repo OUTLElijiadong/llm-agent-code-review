@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getIssueTypeStatistics: vi.fn(),
   getScoreTrend: vi.fn(),
   getReviewFrequency: vi.fn(),
+  getRunning: vi.fn(),
   push: vi.fn(),
   message: { warning: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }))
@@ -92,6 +93,7 @@ beforeEach(() => {
   mocks.getIssueTypeStatistics.mockResolvedValue([])
   mocks.getScoreTrend.mockResolvedValue([])
   mocks.getReviewFrequency.mockResolvedValue([])
+  mocks.getRunning.mockResolvedValue({ reviews: [], agents: [] })
 })
 
 afterEach(() => { wrappers.splice(0).forEach((wrapper) => wrapper.unmount()) })

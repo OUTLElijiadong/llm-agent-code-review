@@ -8,7 +8,16 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.common import Resp
-from app.schemas.dashboard import FrequencyItem, IssueTypeItem, RiskItem, ScoreTrendItem, SummaryOut
+from app.schemas.dashboard import (
+    FrequencyItem,
+    IssueTypeItem,
+    RiskItem,
+    RunningAgentItem,
+    RunningOut,
+    RunningReviewItem,
+    ScoreTrendItem,
+    SummaryOut,
+)
 from app.services import dashboard_service
 
 router = APIRouter()
@@ -44,6 +53,16 @@ def score_trend(limit: int = Query(10), db: Session = Depends(get_db),
     """评分趋势"""
     data = dashboard_service.get_score_trend(db, user, limit)
     return Resp(data=[ScoreTrendItem(**d) for d in data])
+
+
+@router.get("/running", response_model=Resp[RunningOut])
+def running(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """后台进行中:排队/运行中的审查(带文件进度)与本人进行中的 Agent 运行"""
+    data = dashboard_service.get_running(db, user)
+    return Resp(data=RunningOut(
+        reviews=[RunningReviewItem(**item) for item in data["reviews"]],
+        agents=[RunningAgentItem(**item) for item in data["agents"]],
+    ))
 
 
 @router.get("/review-frequency", response_model=Resp[list[FrequencyItem]])
