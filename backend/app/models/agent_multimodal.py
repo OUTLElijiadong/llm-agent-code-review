@@ -16,7 +16,6 @@ class AgentMultimodalAsset(Base, IdMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_agent_multimodal_asset_run", "run_id"),
         Index("ix_agent_multimodal_asset_user", "user_id"),
-        {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
     )
 
     run_id = Column(String(80), nullable=False, comment="所属运行 run_id")

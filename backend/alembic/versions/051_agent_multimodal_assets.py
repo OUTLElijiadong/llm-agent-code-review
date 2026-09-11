@@ -34,8 +34,6 @@ def upgrade() -> None:
                   nullable=False, comment="图片二进制(≤1.5MB)"),
         sa.Column("create_time", sa.DateTime(), nullable=True),
         sa.Column("update_time", sa.DateTime(), nullable=True),
-        mysql_charset="utf8mb4",
-        mysql_collation="utf8mb4_unicode_ci",
     )
     op.create_index("ix_agent_multimodal_asset_run", "agent_multimodal_asset", ["run_id"])
     op.create_index("ix_agent_multimodal_asset_user", "agent_multimodal_asset", ["user_id"])

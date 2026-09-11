@@ -73,8 +73,6 @@ def upgrade() -> None:
                       nullable=False),
             sa.Column("create_time", sa.DateTime(), nullable=True),
             sa.Column("update_time", sa.DateTime(), nullable=True),
-            mysql_charset="utf8mb4",
-            mysql_collation="utf8mb4_unicode_ci",
         )
 
 
