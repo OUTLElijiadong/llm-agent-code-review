@@ -343,3 +343,9 @@ def delete_project(db: Session, user: User, project_id: int) -> None:
         raise ConflictError("项目存在进行中的审查任务，请先取消任务后再删除")
     project.status = "deleted"
     db.commit()
+    try:
+        from app.services.dashboard_service import invalidate_dashboard_stats
+
+        invalidate_dashboard_stats()
+    except Exception:  # noqa: BLE001 - 缓存失效失败不影响删除主流程
+        pass

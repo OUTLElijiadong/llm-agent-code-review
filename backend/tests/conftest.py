@@ -90,6 +90,20 @@ from app.models.review_task_file import ReviewTaskFile  # noqa: F401,E402
 from app.models.user import User  # noqa: F401,E402
 
 
+@pytest.fixture(autouse=True)
+def _clear_dashboard_stats_cache():
+    """每个测试清空仪表盘聚合缓存,避免跨内存库串数据;并把 TTL 归零防写后读旧值。"""
+    from app.core.config import settings as _settings
+    from app.services import dashboard_service as _dashboard
+
+    _dashboard.invalidate_dashboard_stats()
+    old_ttl = _settings.dashboard_stats_cache_seconds
+    _settings.dashboard_stats_cache_seconds = 0
+    yield
+    _settings.dashboard_stats_cache_seconds = old_ttl
+    _dashboard.invalidate_dashboard_stats()
+
+
 @pytest.fixture
 def db():
     engine = create_engine(

@@ -8,17 +8,72 @@ v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
 """
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
+from app.core.config import settings
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services.project_member_service import get_visible_project_ids
 from app.services.report_service import load_task_issue_stats
+
+# ── 仪表盘聚合缓存 ──────────────────────────────────────────────────────────
+# 工作台一次加载并发请求 summary/risk-distribution/issue-type-statistics 三个接口,
+# 它们各自重复执行同一份逐任务问题统计(含沙箱报告 markdown 正则解析)。这里按
+# (user_id, bucket) 缓存计算结果,TTL 内共享;同 key 并发请求只允许一个线程计算。
+_CACHE_LIMIT = 256
+_cache_lock = threading.Lock()
+_key_locks: dict[tuple, threading.Lock] = {}
+_stats_cache: dict[tuple, tuple[float, object]] = {}
+_visible_cache: dict[tuple, tuple[float, list[int]]] = {}
+
+
+def _cache_ttl() -> float:
+    return float(settings.dashboard_stats_cache_seconds)
+
+
+def _cached_compute(store: dict, key: tuple, compute):
+    ttl = _cache_ttl()
+    if ttl <= 0:
+        return compute()
+    with _cache_lock:
+        hit = store.get(key)
+        if hit is not None and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        key_lock = _key_locks.setdefault(key, threading.Lock())
+    with key_lock:
+        with _cache_lock:
+            hit = store.get(key)
+            if hit is not None and time.monotonic() - hit[0] < ttl:
+                return hit[1]
+        value = compute()
+        with _cache_lock:
+            store[key] = (time.monotonic(), value)
+            if len(store) > _CACHE_LIMIT:
+                for stale in sorted(store.items(), key=lambda kv: kv[1][0])[: len(store) - _CACHE_LIMIT]:
+                    store.pop(stale[0], None)
+                    _key_locks.pop(stale[0], None)
+        return value
+
+
+def invalidate_dashboard_stats(user_id: int | None = None) -> None:
+    """清除仪表盘聚合缓存;审查/报告/成员关系变化后调用可立即可见。"""
+    with _cache_lock:
+        if user_id is None:
+            _stats_cache.clear()
+            _visible_cache.clear()
+            _key_locks.clear()
+            return
+        for store in (_stats_cache, _visible_cache):
+            for key in [k for k in store if k[0] == user_id]:
+                store.pop(key, None)
+                _key_locks.pop(key, None)
 
 
 def _visible_project_ids(db: Session, user: User) -> list[int]:
@@ -31,10 +86,14 @@ def _visible_project_ids(db: Session, user: User) -> list[int]:
     Returns:
         list[int]: 可见项目 ID 列表(admin 为全部非删除项目;非 admin 为 owner ∪ member)
     """
-    visible_ids, _ = get_visible_project_ids(db, user)
-    return [row[0] for row in db.query(Project.id).filter(
-        Project.id.in_(visible_ids), Project.status != "deleted",
-    ).all()] if visible_ids else []
+
+    def _compute() -> list[int]:
+        visible_ids, _ = get_visible_project_ids(db, user)
+        return [row[0] for row in db.query(Project.id).filter(
+            Project.id.in_(visible_ids), Project.status != "deleted",
+        ).all()] if visible_ids else []
+
+    return _cached_compute(_visible_cache, (user.id, "visible"), _compute)
 
 
 def _valid_task_ids(db: Session, user: User):
@@ -57,10 +116,37 @@ def _valid_task_ids(db: Session, user: User):
     )
 
 
+# 问题统计只需要这些列;避免把 summary/rules_snapshot/score_breakdown 等
+# 大列整行拉进内存(全平台 admin 视角下曾把所有任务的大字段反复加载三遍)。
+_issue_stats_task_columns = load_only(
+    ReviewTask.id,
+    ReviewTask.user_id,
+    ReviewTask.project_id,
+    ReviewTask.review_type,
+    ReviewTask.create_time,
+    ReviewTask.end_time,
+    ReviewTask.total_issues,
+    ReviewTask.severe_issues,
+    ReviewTask.high_issues,
+    ReviewTask.medium_issues,
+    ReviewTask.low_issues,
+)
+
+
 def _issue_stats(db: Session, user: User, *, since: datetime | None = None) -> list[dict]:
     """所有图表复用报告来源事实，保持非删除任务及项目成员可见范围。"""
-    tasks = db.query(ReviewTask).filter(ReviewTask.id.in_(_valid_task_ids(db, user))).all()
-    return list(load_task_issue_stats(db, tasks, since=since).values())
+
+    def _compute() -> list[dict]:
+        tasks = (
+            db.query(ReviewTask)
+            .options(_issue_stats_task_columns)
+            .filter(ReviewTask.id.in_(_valid_task_ids(db, user)))
+            .all()
+        )
+        return list(load_task_issue_stats(db, tasks, since=since).values())
+
+    bucket = "all" if since is None else f"since:{int(since.timestamp())}"
+    return _cached_compute(_stats_cache, (user.id, bucket), _compute)
 
 
 def get_summary(db: Session, user: User) -> dict:

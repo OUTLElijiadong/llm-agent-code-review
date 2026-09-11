@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     # 上传后的固定全量验证在一个工具调用内等待唯一沙箱终态，避免模型提前
     # 结束或反复轮询。上限覆盖最长语言 profile 与报告后处理。
     agent_full_validation_wait_seconds: int = Field(default=600, ge=60, le=900)
+    # 仪表盘聚合(问题统计/可见项目)进程内缓存秒数;0 关闭。一次工作台加载会并发
+    # 请求 summary/risk/issue-type 三个接口,共享同一份计算结果,避免逐任务串行解析重复跑三遍。
+    dashboard_stats_cache_seconds: int = Field(default=30, ge=0, le=600)
     # DeepSeek V4 上下文窗口与内部 Agent 投影预算。完整 transcript 仍持久化供审计。
     deepseek_context_window_tokens: int = 1_000_000
     deepseek_max_output_tokens: int = 65_536

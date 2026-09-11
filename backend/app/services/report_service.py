@@ -555,3 +555,9 @@ def delete_report(db: Session, user: User, task_id: int) -> None:
         except Exception:  # noqa: BLE001 - 联动失败不阻断报告删除
             pass
     db.commit()
+    try:
+        from app.services.dashboard_service import invalidate_dashboard_stats
+
+        invalidate_dashboard_stats()
+    except Exception:  # noqa: BLE001 - 缓存失效失败不影响删除主流程
+        pass

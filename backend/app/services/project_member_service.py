@@ -281,6 +281,12 @@ def add_member(
         raise BadRequestError("该用户已是项目成员", code=40000)
     db.commit()
     db.refresh(member)
+    try:
+        from app.services.dashboard_service import invalidate_dashboard_stats
+
+        invalidate_dashboard_stats(user_id=user_id)
+    except Exception:  # noqa: BLE001 - 缓存失效失败不影响成员变更主流程
+        pass
     return member
 
 
@@ -326,6 +332,12 @@ def remove_member(
 
     db.delete(member)
     db.commit()
+    try:
+        from app.services.dashboard_service import invalidate_dashboard_stats
+
+        invalidate_dashboard_stats(user_id=user_id)
+    except Exception:  # noqa: BLE001 - 缓存失效失败不影响成员变更主流程
+        pass
     return True
 
 

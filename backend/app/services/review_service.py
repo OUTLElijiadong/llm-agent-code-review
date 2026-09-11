@@ -648,6 +648,12 @@ def _execute_review(
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
         _safe_commit(db)
+        try:
+            from app.services.dashboard_service import invalidate_dashboard_stats
+
+            invalidate_dashboard_stats()
+        except Exception:  # noqa: BLE001 - 缓存失效失败不影响审查主流程
+            logger.debug("仪表盘缓存失效调用失败", exc_info=True)
         _emit_review_event(AgentEventType.COMPLETE, task, user,
                            f"审查任务 #{task.id} 完成,评分={task.score},问题={len(all_issues)},"
                            f"耗时={task.duration_ms}ms")
