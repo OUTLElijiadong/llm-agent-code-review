@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
+import XiaolingGreeter from '@/components/ai/XiaolingGreeter.vue'
 
 const sidebarVisible = ref(false)
 
@@ -41,6 +42,7 @@ function closeSidebar(): void {
       </main>
     </div>
     <ProactivePageGuide surface="user" />
+    <XiaolingGreeter />
   </div>
 </template>
 

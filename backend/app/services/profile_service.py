@@ -56,8 +56,24 @@ def to_dict(profile: UserProfile) -> dict:
         "derived_summary": profile.derived_summary or "",
         "derived_stats": json.loads(profile.derived_stats) if profile.derived_stats else {},
         "last_learned_at": profile.last_learned_at,
+        "preference_prompted": int(profile.preference_prompted or 0),
+        "preference_prompted_at": profile.preference_prompted_at,
         "update_time": profile.update_time,
     }
+
+
+def mark_preference_prompted(db: Session, user_id: int, state: int) -> UserProfile:
+    """记录小菱偏好询问结果(1=已答 2=跳过),防止反复打扰。"""
+    if state not in (1, 2):
+        from app.core.exceptions import ValidationError
+
+        raise ValidationError("无效的偏好询问状态", code=40001)
+    profile = get_or_create(db, user_id)
+    profile.preference_prompted = state
+    profile.preference_prompted_at = _now()
+    db.commit()
+    db.refresh(profile)
+    return profile
 
 
 def update_profile(db: Session, user_id: int, payload: dict) -> UserProfile:

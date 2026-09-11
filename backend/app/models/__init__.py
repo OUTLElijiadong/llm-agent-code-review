@@ -41,6 +41,7 @@ _MODEL_MODULES = (
     "review_task_file",
     "system_config",
     "user",
+    "user_avatar",
     "user_feedback",
     "user_profile",
 )

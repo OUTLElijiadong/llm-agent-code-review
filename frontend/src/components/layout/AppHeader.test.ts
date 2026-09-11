@@ -9,6 +9,8 @@ const harness = vi.hoisted(() => ({
   replace: vi.fn(),
 }))
 
+vi.mock('@/api/avatar', () => ({ fetchAvatarBlob: async () => null }))
+
 vi.mock('vue-router', () => ({
   useRoute: () => ({ path: '/dashboard', matched: [], meta: { title: '工作台' } }),
   useRouter: () => ({

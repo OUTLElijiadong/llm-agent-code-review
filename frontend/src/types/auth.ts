@@ -18,6 +18,7 @@ export interface UserOut {
   username: string
   nickname?: string
   email?: string
+  avatar?: string | null
   role: string
   status: number
   last_login?: string
@@ -28,6 +29,7 @@ export interface LoginOut {
   access_token: string
   token_type: string
   expires_in: number
+  first_login?: boolean
   user: UserOut
 }
 

@@ -3,11 +3,12 @@ import { describe, expect, it } from 'vitest'
 import router from './index'
 
 describe('Agent Studio route permissions', () => {
-  it('allows ordinary members with the private draft permission to enter Agent Studio', () => {
+  it('Agent 工坊仅审查者及以上可进入(049 迁移同步收回普通用户权限)', () => {
     const route = router.getRoutes().find((item) => item.name === 'AgentStudio')
 
     expect(route).toBeDefined()
-    expect(route?.meta.roles).toContain('user')
+    expect(route?.meta.roles).not.toContain('user')
+    expect(route?.meta.roles).toContain('reviewer')
     expect(route?.meta.permissions).toContain('agent_asset:create')
   })
 })

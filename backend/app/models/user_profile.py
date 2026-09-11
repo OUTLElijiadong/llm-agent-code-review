@@ -6,7 +6,7 @@
 - 隐式: 系统从行为(采纳/忽略的问题类型、项目语言分布、论坛活跃)推断,
         写入 derived_summary / derived_stats,供个性化注入使用。
 """
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, SmallInteger, String, Text
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -32,3 +32,8 @@ class UserProfile(Base, IdMixin, TimestampMixin):
     derived_summary = Column(Text, comment="AI 综合画像摘要")
     derived_stats = Column(Text, comment="行为统计 JSON: 偏好/关注类型/语言分布等")
     last_learned_at = Column(DateTime, comment="最近一次隐式学习时间(UTC)")
+
+    # ── 小菱偏好询问状态(防反复打扰) ──
+    preference_prompted = Column(SmallInteger, nullable=False, default=0,
+                                 comment="偏好询问状态 0未问/1已答/2跳过")
+    preference_prompted_at = Column(DateTime, comment="偏好询问结算时间(UTC)")

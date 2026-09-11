@@ -31,4 +31,11 @@ class ProfileOut(BaseModel):
     derived_summary: str = ""
     derived_stats: dict = {}
     last_learned_at: Optional[datetime] = None
+    preference_prompted: int = 0
+    preference_prompted_at: Optional[datetime] = None
     update_time: Optional[datetime] = None
+
+
+class PreferencePromptIn(BaseModel):
+    """小菱偏好询问结果上报(已答/跳过)"""
+    state: int = Field(ge=1, le=2, description="1=已答 2=跳过")

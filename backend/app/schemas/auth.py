@@ -42,6 +42,7 @@ class UserOut(BaseModel):
     username: str
     nickname: Optional[str] = None
     email: Optional[str] = None
+    avatar: Optional[str] = None
     role: str
     status: int = 1
     last_login: Optional[str] = None
@@ -59,10 +60,11 @@ class UserOut(BaseModel):
 
 
 class LoginOut(BaseModel):
-    """登录成功响应"""
+    """登录成功响应(first_login=注册后首次登录,用于触发小菱新手引导)"""
     access_token: str
     token_type: str = "Bearer"
     expires_in: int
+    first_login: bool = False
     user: UserOut
 
 

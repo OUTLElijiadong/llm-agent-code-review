@@ -88,6 +88,8 @@ from app.models.review_task_file import ReviewTaskFile  # noqa: F401,E402
 
 # 显式导入全部 ORM 模型,确保 Base.metadata 注册所有表
 from app.models.user import User  # noqa: F401,E402
+from app.models.user_avatar import UserAvatar  # noqa: F401,E402
+from app.models.user_profile import UserProfile  # noqa: F401,E402
 
 
 @pytest.fixture(autouse=True)

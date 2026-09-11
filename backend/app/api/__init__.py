@@ -32,6 +32,7 @@ from app.api.v1 import (
     maintenance,
     mcp_governance,
     pentest,
+    avatars,
     project_members,
     projects,
     rbac,
@@ -69,6 +70,7 @@ api_router.include_router(maintenance.router, prefix="/maintenance", tags=["维�
 api_router.include_router(feedback.router, prefix="/feedback", tags=["用户反馈"])
 api_router.include_router(forum.router, prefix="/forum", tags=["开发者论坛"])
 api_router.include_router(user_profile.router, prefix="/me", tags=["用户画像"])
+api_router.include_router(avatars.router, tags=["用户头像"])
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["个人知识库"])
 api_router.include_router(llm_config.router, prefix="/admin/llm", tags=["大模型配置"])
 api_router.include_router(mcp_governance.router, prefix="/admin/mcp", tags=["MCP 治理"])

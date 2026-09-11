@@ -35,8 +35,8 @@ def test_new_login_invalidates_previous_token_and_logout_invalidates_latest(db, 
     user = _user(db)
     monkeypatch.setattr(auth_service, "verify_password", lambda *_args: True)
 
-    first_token, _ = auth_service.login(db, user.username, "password", ip="192.0.2.1")
-    second_token, _ = auth_service.login(db, user.username, "password", ip="192.0.2.2")
+    first_token, _, _ = auth_service.login(db, user.username, "password", ip="192.0.2.1")
+    second_token, _, _ = auth_service.login(db, user.username, "password", ip="192.0.2.2")
 
     with pytest.raises(AuthError) as stale:
         authenticate_access_token(first_token, db)
@@ -125,7 +125,7 @@ def test_concurrent_sqlite_logins_issue_distinct_cas_versions(tmp_path, monkeypa
     def login_from(ip: str) -> tuple[str, str]:
         worker_db = session_factory()
         try:
-            token, _ = auth_service.login(
+            token, _, _ = auth_service.login(
                 worker_db,
                 "concurrent-login-user",
                 "password",
@@ -187,7 +187,7 @@ def test_stale_change_password_cannot_revoke_new_login(tmp_path, monkeypatch) ->
 
         monkeypatch.setattr(auth_service, "verify_password", lambda *_args: True)
         monkeypatch.setattr(auth_service, "hash_password", lambda raw: f"hash:{raw}")
-        _new_token, _ = auth_service.login(login_db, user.username, "old-password")
+        _new_token, _, _ = auth_service.login(login_db, user.username, "old-password")
 
         with pytest.raises(AuthError) as stale:
             auth_service.change_password(stale_db, stale_user, "old-password", "new-password")
@@ -228,7 +228,7 @@ def test_stale_logout_cannot_revoke_new_login(tmp_path, monkeypatch) -> None:
         assert stale_user is not None and stale_user.token_version == 2
 
         monkeypatch.setattr(auth_service, "verify_password", lambda *_args: True)
-        new_token, _ = auth_service.login(login_db, user.username, "password")
+        new_token, _, _ = auth_service.login(login_db, user.username, "password")
 
         with pytest.raises(AuthError) as stale:
             auth_service.logout(stale_db, stale_user)
