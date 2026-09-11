@@ -7,6 +7,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { deleteBetaCode, generateBetaCodes, listBetaCodes, revokeBetaCode } from '@/api/betaCode'
 import type { BetaCodeStatus, BetaInviteCode } from '@/types/betaCode'
 
+import EmptyState from '@/components/common/EmptyState.vue'
+
 const loading = ref(false)
 const generating = ref(false)
 const rows = ref<BetaInviteCode[]>([])
@@ -148,31 +150,32 @@ onMounted(loadCodes)
         />
       </div>
 
-      <el-table v-loading="loading" :data="rows" stripe empty-text="暂无内测码">
-        <el-table-column prop="display_prefix" label="内测码" min-width="260">
-          <template #default="{ row }"><code>{{ row.display_prefix }}</code></template>
-        </el-table-column>
-        <el-table-column prop="label" label="备注" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.label || '-' }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusMeta[row.status as BetaCodeStatus].type" effect="plain">
-              {{ statusMeta[row.status as BetaCodeStatus].label }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="有效期至" width="170">
-          <template #default="{ row }">{{ formatTime(row.expires_at) }}</template>
-        </el-table-column>
-        <el-table-column label="使用用户" width="110">
-          <template #default="{ row }">{{ row.used_by ? `#${row.used_by}` : '-' }}</template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="170">
-          <template #default="{ row }">{{ formatTime(row.create_time) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
-          <template #default="{ row }">
+      <div class="code-cards" v-loading="loading" role="list" data-testid="code-cards">
+        <EmptyState v-if="!rows.length" compact description="暂无内测码" />
+        <article
+          v-for="row in rows"
+          :key="row.id"
+          class="code-card"
+          :data-status="row.status"
+          role="listitem"
+        >
+          <span class="bc-band" :data-status="row.status" aria-hidden="true"></span>
+          <div class="bc-main">
+            <div class="bc-line1">
+              <code class="bc-code" :title="row.display_prefix">{{ row.display_prefix }}</code>
+              <el-tag :type="statusMeta[row.status as BetaCodeStatus].type" effect="plain" size="small">
+                {{ statusMeta[row.status as BetaCodeStatus].label }}
+              </el-tag>
+            </div>
+            <div class="bc-line2 font-mono">
+              <span class="bc-remark" :title="row.label || ''">备注 {{ row.label || '-' }}</span>
+              <span>有效期至 {{ formatTime(row.expires_at) }}</span>
+              <span>{{ row.used_by ? `使用用户 #${row.used_by}` : '使用用户 -' }}</span>
+              <span v-if="row.used_at">使用于 {{ formatTime(row.used_at) }}</span>
+              <span>创建于 {{ formatTime(row.create_time) }}</span>
+            </div>
+          </div>
+          <div class="bc-actions">
             <el-button
               v-if="row.status === 'active'"
               text
@@ -186,9 +189,9 @@ onMounted(loadCodes)
               :icon="Delete"
               @click="handleDelete(row)"
             >删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+          </div>
+        </article>
+      </div>
 
       <el-pagination
         v-if="total > pageSize"
@@ -239,6 +242,36 @@ onMounted(loadCodes)
 .code-list { border-top: 1px solid var(--gray-200); background: #fff; }
 .list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; }
 .list-summary { color: var(--gray-600); font-size: 14px; }
+
+/* ── 内测码卡片列表(替代表格:码+状态为主行,备注/有效期/使用人/时间降级为次行) ── */
+.code-cards { display: grid; gap: 10px; min-height: 120px; }
+.code-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px; align-items: center;
+  padding: 13px 16px 13px 12px; border-radius: 12px;
+  background: #fff; border: 1px solid var(--gray-200);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.code-card:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
+  border-color: var(--brand-300, #a8c4fa);
+}
+.bc-band { width: 4px; height: 38px; border-radius: 999px; }
+.bc-band[data-status='active'] { background: #40a35f; }
+.bc-band[data-status='used'] { background: var(--gray-300, #cfd4dc); }
+.bc-band[data-status='revoked'] { background: var(--sev-severe, #dc4961); }
+.bc-band[data-status='expired'] { background: #d9a857; }
+.bc-main { display: grid; gap: 5px; min-width: 0; }
+.bc-line1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bc-code { font-size: 13.5px; font-weight: 650; letter-spacing: .02em; color: var(--gray-900); }
+.bc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
+.bc-remark { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc-actions { display: flex; gap: 2px; flex-shrink: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .code-card { transition: none; }
+}
 .pagination { justify-content: flex-end; padding-top: 18px; }
 .generated-list { display: grid; gap: 8px; max-height: 360px; overflow-y: auto; margin-top: 16px; }
 .generated-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 6px 8px 6px 14px; border: 1px solid var(--gray-200); border-radius: 6px; background: var(--gray-50); }
@@ -250,5 +283,8 @@ onMounted(loadCodes)
   .generator :deep(.el-form-item) { margin-right: 0; }
   .label-field { min-width: 0; }
   .list-toolbar :deep(.el-segmented) { overflow-x: auto; }
+  .code-card { grid-template-columns: auto minmax(0, 1fr); }
+  .bc-actions { grid-column: 2; justify-self: end; }
+  .bc-remark { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 }
 </style>

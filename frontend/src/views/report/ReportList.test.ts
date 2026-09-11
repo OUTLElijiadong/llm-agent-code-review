@@ -29,10 +29,7 @@ function mountPage(): VueWrapper {
       stubs: {
         'el-card': { template: '<div><slot /></div>' },
         'el-select': { template: '<div><slot /></div>' }, 'el-option': true,
-        'el-date-picker': true, 'el-pagination': true, 'el-table': { template: '<div><slot name="empty" /><slot /></div>' },
-        'el-table-column': {
-          template: '<div><slot :row="{ task_id: 42, task_name: \'渗透报告\', project_name: \'领域项目\', total_issues: 3, score: 72, status: \'success\', create_time: \'2026-09-05T00:00:00Z\', source: { type: \'pentest\' } }" /></div>',
-        },
+        'el-date-picker': true, 'el-pagination': true,
         'el-tooltip': { template: '<div><slot /></div>' },
         'el-button': { inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' },
         'el-icon': { template: '<i><slot /></i>' }, 'el-dropdown': { template: '<div><slot /><slot name="dropdown" /></div>' },
@@ -60,6 +57,25 @@ beforeEach(() => {
 })
 let wrapper: VueWrapper | undefined
 afterEach(() => wrapper?.unmount())
+
+describe('报告卡片列表', () => {
+  it('卡片化展示:主行任务名+审查类型徽章+结论,次行项目/问题数/时间,右侧评分色环', async () => {
+    wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="report-cards"]').exists()).toBe(true)
+    const card = wrapper.find('.report-card')
+    expect(card.exists()).toBe(true)
+    expect(card.attributes('data-status')).toBe('success')
+    const text = card.text()
+    expect(text).toContain('渗透报告')
+    expect(text).toContain('渗透测试')
+    expect(text).toContain('通过')
+    expect(text).toContain('领域项目')
+    expect(text).toContain('问题 3')
+    expect(text).toContain('72')
+    expect(text).toContain('2026-09-05')
+  })
+})
 
 describe('报告列表领域导出', () => {
   it('领域报告只显示真实 JSON 出口，不展示非等价 HTML/PDF/Word', async () => {

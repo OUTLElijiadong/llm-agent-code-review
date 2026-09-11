@@ -37,46 +37,61 @@
         />
       </div>
 
-      <el-table v-loading="loading" :data="rows" stripe empty-text="暂无审计记录">
-        <el-table-column prop="id" label="日志ID" width="90" />
-        <el-table-column prop="create_time" label="时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.create_time) }}</template>
-        </el-table-column>
-        <el-table-column prop="actor_name" label="操作者" width="160">
-          <template #default="{ row }">
-            <div>{{ row.actor_name || '系统' }}</div>
-            <div class="trace-sub">{{ row.actor_id ? `用户 #${row.actor_id}` : 'system' }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="action" label="操作类型" width="120">
-          <template #default="{ row }">
-            <el-tag size="small" :type="actionTagType(row.action)">{{ actionLabel(row.action) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="对象" width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.target_type">{{ row.target_type }} · {{ row.target_id }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="detail" label="说明" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="ip" label="来源" width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.ip || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="status" label="结果" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">
-              {{ row.status === 'success' ? '成功' : '失败' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="追溯" width="110" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="traceRoute(row)" link type="primary" @click="goTrace(row)">查看</el-button>
-            <span v-else class="text-muted">已记录</span>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div v-loading="loading" class="audit-cards" role="list" data-testid="audit-cards">
+        <EmptyState v-if="!rows.length" description="暂无审计记录" />
+        <article
+          v-for="row in rows"
+          :key="row.id"
+          class="audit-card"
+          :class="{ 'is-open': expandedId === row.id }"
+          :data-status="row.status"
+          role="listitem"
+          tabindex="0"
+          :aria-expanded="expandedId === row.id ? 'true' : 'false'"
+          @click="toggleExpand(row.id)"
+          @keydown.enter.prevent="toggleExpand(row.id)"
+          @keydown.space.prevent="toggleExpand(row.id)"
+        >
+          <span class="ac-band" :data-status="row.status" aria-hidden="true"></span>
+          <div class="ac-main">
+            <div class="ac-line1">
+              <el-tag size="small" :type="actionTagType(row.action)">{{ actionLabel(row.action) }}</el-tag>
+              <b class="ac-actor">{{ row.actor_name || '系统' }}</b>
+              <el-tag class="ac-status" size="small" :type="row.status === 'success' ? 'success' : 'danger'">
+                {{ row.status === 'success' ? '成功' : '失败' }}
+              </el-tag>
+            </div>
+            <div class="ac-line2 font-mono">
+              <span>{{ formatDateTime(row.create_time) }}</span>
+              <span>#{{ row.id }}</span>
+              <span>{{ row.actor_id ? `用户 #${row.actor_id}` : 'system' }}</span>
+            </div>
+          </div>
+          <el-icon class="ac-chevron" :class="{ 'is-open': expandedId === row.id }" aria-hidden="true">
+            <ArrowDown />
+          </el-icon>
+          <div v-if="expandedId === row.id" class="ac-detail" @click.stop>
+            <div class="ac-row">
+              <span class="ac-label">对象</span>
+              <span v-if="row.target_type" class="font-mono">{{ row.target_type }} · {{ row.target_id }}</span>
+              <span v-else class="text-muted">-</span>
+            </div>
+            <div class="ac-row">
+              <span class="ac-label">说明</span>
+              <span class="ac-text" :title="row.detail || ''">{{ row.detail || '-' }}</span>
+            </div>
+            <div class="ac-row">
+              <span class="ac-label">来源</span>
+              <span class="font-mono">{{ row.ip || '-' }}</span>
+            </div>
+            <div class="ac-row">
+              <span class="ac-label">追溯</span>
+              <el-button v-if="traceRoute(row)" link type="primary" size="small" @click="goTrace(row)">查看</el-button>
+              <span v-else class="text-muted">已记录</span>
+            </div>
+          </div>
+        </article>
+      </div>
 
       <div class="pagination-wrapper">
         <el-pagination
@@ -95,6 +110,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ArrowDown } from '@element-plus/icons-vue'
+import EmptyState from '@/components/common/EmptyState.vue'
 import { formatDateTime } from '@/utils/format'
 import { listAuditLogs } from '@/api/audit'
 import type { AuditLogOut } from '@/types/audit'
@@ -111,6 +128,13 @@ const filters = reactive({
   keyword: '',
 })
 const dateRange = ref<[string, string] | null>(null)
+
+/** 当前展开详情的日志 ID(null = 全部收起)。 */
+const expandedId = ref<number | null>(null)
+
+function toggleExpand(id: number): void {
+  expandedId.value = expandedId.value === id ? null : id
+}
 
 function actionLabel(action: string): string {
   const map: Record<string, string> = {
@@ -226,10 +250,135 @@ onMounted(loadLogs)
   color: var(--color-text-secondary, #909399);
 }
 
-.trace-sub {
-  color: var(--color-text-secondary, #909399);
-  font-family: var(--font-mono, monospace);
+/* ── 审计卡片列表(替代表格:摘要行点击展开详情,说明全文不再截断) ── */
+.audit-cards {
+  display: grid;
+  gap: 10px;
+  min-height: 120px;
+}
+.audit-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 12px 16px 12px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--gray-100, #eef0f4);
+  cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.audit-card:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
+  border-color: var(--brand-300, #a8c4fa);
+}
+.audit-card.is-open {
+  border-color: var(--brand-300, #a8c4fa);
+  box-shadow: 0 6px 16px rgba(23, 34, 62, .06);
+}
+.audit-card:focus-visible {
+  outline: 2px solid var(--brand-400, #6f9df7);
+  outline-offset: 2px;
+}
+.ac-band {
+  width: 4px;
+  height: 38px;
+  border-radius: 999px;
+  background: var(--sev-severe, #dc4961);
+}
+.ac-band[data-status='success'] {
+  background: #40a35f;
+}
+.ac-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.ac-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ac-actor {
+  font-size: 13.5px;
+  font-weight: 600;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ac-status {
+  margin-left: auto;
+}
+.ac-line2 {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
   font-size: 11px;
-  line-height: 1.4;
+  color: var(--color-text-secondary, #909399);
+}
+.ac-chevron {
+  color: var(--color-text-secondary, #909399);
+  font-size: 13px;
+  transition: transform .18s ease, color .18s ease;
+}
+.ac-chevron.is-open {
+  transform: rotate(180deg);
+  color: var(--brand-500, #4078f4);
+}
+.ac-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light, #f5f7fa);
+}
+.ac-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.ac-label {
+  flex: none;
+  width: 32px;
+  color: var(--color-text-secondary, #909399);
+  font-size: 11.5px;
+}
+.ac-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audit-card,
+  .ac-chevron {
+    transition: none;
+  }
+  .audit-card:hover {
+    transform: none;
+  }
+}
+@media (max-width: 760px) {
+  .audit-card {
+    padding: 10px 12px 10px 10px;
+    gap: 4px 10px;
+  }
+  .ac-actor {
+    max-width: 46vw;
+  }
+  .ac-status {
+    margin-left: 0;
+  }
+  .ac-line2 {
+    gap: 10px;
+  }
 }
 </style>

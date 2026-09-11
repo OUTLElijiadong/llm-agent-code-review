@@ -97,6 +97,8 @@ interface ChatEntry {
   role: 'user' | 'assistant'
   time: string
   runId?: string
+  /** 多模态:该条用户消息携带的图片 data URL(仅内存展示,不落本地快照) */
+  images?: string[]
   payload: AdminCopilotMessage
   approval?: ResponseApprovalRequiredEvent & {
     status: 'pending' | 'submitting' | 'approved' | 'rejected'
@@ -323,7 +325,7 @@ const pageActionActive = computed(() => (
   mascotStatus.value === 'running' && isPageActionTool(lastActiveToolName.value)
 ))
 const canSend = computed(() => (
-  inputText.value.trim().length > 0
+  (inputText.value.trim().length > 0 || pendingImages.value.length > 0)
   && !loading.value
   && !sessionRestoring.value
   && !sessionBusy.value
@@ -491,11 +493,12 @@ function startNewChat(): void {
   switcherRef.value?.createSession()
 }
 
-function userEntry(content: string): ChatEntry {
+function userEntry(content: string, images?: string[]): ChatEntry {
   return {
     id: crypto.randomUUID(),
     role: 'user',
     time: now(),
+    images: images?.length ? images : undefined,
     payload: { type: 'text', content },
   }
 }
@@ -808,11 +811,25 @@ function formatStreamContent(value: string): string {
   return normalizeAgentText(value)
 }
 
-function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
-  return messages.value
-    .map((entry) => ({ role: entry.role, content: entry.payload.content ?? '' }))
+function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string; images?: string[] }> {
+  const history = messages.value
+    .map((entry) => ({ role: entry.role, content: entry.payload.content ?? '', images: entry.images }))
     // 欢迎语是本地开屏气泡,不参与模型上下文,避免被服务端持久化后恢复重复
     .filter((entry) => entry.content.trim().length > 0 && entry.content.trim() !== WELCOME_TEXT.trim())
+  const lastUserIndex = (() => {
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i].role === 'user') return i
+    }
+    return -1
+  })()
+  return history.map((entry, index) => {
+    const item: { role: 'user' | 'assistant'; content: string; images?: string[] } = {
+      role: entry.role, content: entry.content,
+    }
+    // 多模态:仅最后一条用户消息带图(历史图片服务端已留档)
+    if (index === lastUserIndex && entry.images?.length) item.images = entry.images
+    return item
+  })
 }
 
 function eventErrorMessage(event: ResponseStreamEvent): string {
@@ -889,11 +906,13 @@ async function onDrop(event: DragEvent): Promise<void> {
   uploading.value = true
   setUploadProgress('准备上传…', 0, files.length)
   try {
-    const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
+    const images = files.filter((f) => IMAGE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? '') && CHAT_IMAGE_MIME.test(f.type))
     const codeFiles = files.filter((f) => CODE_EXTS.has(f.name.split('.').pop()?.toLowerCase() ?? ''))
     if (images.length && !codeFiles.length) {
+      // 多模态:纯图片作为聊天附件,发送时自动切换视觉模型
       resetUploadProgress()
-      ElMessage.info('图片会作为项目附件上传；若要让贾维斯帮你创建代码项目，请再拖入至少一个代码文件')
+      await addPendingImageFiles(images)
+      ElMessage.success('图片已添加,发送后将自动用视觉模型分析')
       return
     }
     const targets = files.slice(0, 20)
@@ -1311,10 +1330,56 @@ function handleCancelConfirm(reason: string): void {
   cancelPromptVisible.value = false
   void cancelResponse(reason)
 }
+/* ── 多模态:待发送图片(≤4张/单张≤1.5MB;拖入或粘贴,随下一条消息发送并自动切视觉模型) ── */
+const pendingImages = ref<Array<{ id: string; dataUrl: string; name: string }>>([])
+const MAX_CHAT_IMAGES = 4
+const MAX_CHAT_IMAGE_BYTES = 1_500_000
+const CHAT_IMAGE_MIME = /^image\/(png|jpeg|webp|gif)$/
+
+async function addPendingImageFiles(files: File[]): Promise<void> {
+  for (const file of files) {
+    if (!CHAT_IMAGE_MIME.test(file.type)) {
+      ElMessage.warning(`「${file.name}」格式不支持,请使用 PNG/JPEG/WebP/GIF`)
+      continue
+    }
+    if (pendingImages.value.length >= MAX_CHAT_IMAGES) {
+      ElMessage.warning(`一次最多带 ${MAX_CHAT_IMAGES} 张图片`)
+      break
+    }
+    if (file.size > MAX_CHAT_IMAGE_BYTES) {
+      ElMessage.warning(`「${file.name}」超过 1.5MB,请压缩后再发`)
+      continue
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+    pendingImages.value.push({ id: crypto.randomUUID(), dataUrl, name: file.name })
+  }
+}
+
+function removePendingImage(id: string): void {
+  pendingImages.value = pendingImages.value.filter((item) => item.id !== id)
+}
+
+function onComposerPaste(event: ClipboardEvent): void {
+  const files = Array.from(event.clipboardData?.files ?? []).filter(
+    (file) => CHAT_IMAGE_MIME.test(file.type),
+  )
+  if (files.length) {
+    event.preventDefault()
+    void addPendingImageFiles(files)
+  }
+}
+
 async function sendMessage(): Promise<void> {
   const content = inputText.value.trim()
-  if (!content || loading.value || sessionRestoring.value || sessionBusy.value) return
-  messages.value.push(userEntry(content))
+  const images = [...pendingImages.value]
+  if ((!content && !images.length) || loading.value || sessionRestoring.value || sessionBusy.value) return
+  messages.value.push(userEntry(content || '(图片)', images.length ? images.map((item) => item.dataUrl) : undefined))
+  pendingImages.value = []
   inputText.value = ''
   // 新对话自动命名:首条用户消息提炼为会话标题
   if (autoTitleAgentChatSession('admin', sessionId.value, content)) {
@@ -1685,9 +1750,12 @@ onMounted(() => {
               <el-icon v-else aria-hidden="true"><DocumentCopy /></el-icon>
             </button>
             <div
-              v-else-if="entry.payload.type === 'text' && entry.payload.content"
+              v-else-if="entry.payload.type === 'text' && (entry.payload.content || entry.images?.length)"
               class="message-bubble"
             >
+              <div v-if="entry.images?.length" class="msg-images">
+                <img v-for="(img, imgIndex) in entry.images" :key="imgIndex" :src="img" alt="图片附件" >
+              </div>
               {{ entry.payload.content }}
             </div>
 
@@ -1872,12 +1940,20 @@ onMounted(() => {
           />
           <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
         </div>
+        <div v-if="pendingImages.length" class="chat-image-tray" aria-label="待发送图片">
+          <div v-for="img in pendingImages" :key="img.id" class="chat-image-chip">
+            <img :src="img.dataUrl" :alt="img.name" >
+            <button type="button" class="chip-remove" :aria-label="`移除${img.name}`" @click="removePendingImage(img.id)">×</button>
+          </div>
+          <span class="tray-hint">发送时自动切换视觉模型</span>
+        </div>
         <div class="composer">
           <textarea
             ref="chatInputRef"
             v-model="inputText"
             rows="1"
             maxlength="2000"
+            @paste="onComposerPaste"
             :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '贾维斯正在运行中…可点击 + 新建对话并行处理') : '输入管理指令;也可直接拖入代码文件帮你建项目'"
             aria-label="输入管理指令"
             :disabled="loading || uploading || sessionRestoring || sessionBusy"
@@ -2528,6 +2604,29 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px); border-radius: 0 0 18px 18px; }
 .composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
+/* ── 多模态图片附件 ── */
+.chat-image-tray {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 12px 2px;
+}
+.chat-image-chip {
+  position: relative; width: 46px; height: 46px; border-radius: 9px; overflow: hidden;
+  border: 1px solid var(--agent-border); background: #fff;
+}
+.chat-image-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chip-remove {
+  position: absolute; top: 1px; right: 1px; width: 15px; height: 15px; border-radius: 50%;
+  border: none; cursor: pointer; font-size: 10px; line-height: 1; color: #fff;
+  background: rgba(31, 35, 41, .55);
+}
+.chip-remove:hover { background: rgba(213, 73, 65, .85); }
+.tray-hint { font-size: 11px; color: var(--brand-500, #5B58E8); }
+.msg-images { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.msg-images img {
+  max-width: 168px; max-height: 126px; border-radius: 9px; object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, .5);
+}
+
 .composer textarea { min-height: 38px; max-height: 84px; resize: none; padding: 9px 12px; border: 1px solid #d8dade; border-radius: 10px; color: var(--agent-text); outline: none; line-height: 18px; background: rgba(255, 255, 255, 0.85); transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease; }
 .composer textarea:focus { border-color: var(--agent-primary); background: #fff; box-shadow: 0 0 0 3px rgba(91, 88, 232, 0.12), 0 2px 8px rgba(91, 88, 232, 0.08); }
 .send-button { width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #fff; background: linear-gradient(135deg, var(--agent-primary), var(--agent-primary-strong)); cursor: pointer; box-shadow: 0 3px 10px rgba(91, 88, 232, 0.3); transition: all 0.15s ease; }

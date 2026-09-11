@@ -1,7 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AgentReleaseApproval } from '@/types/agentStudio'
+import type { AgentReleaseApproval, StudioAsset, StudioVersion } from '@/types/agentStudio'
 
 const api = vi.hoisted(() => ({
   approve: vi.fn(),
@@ -56,6 +56,30 @@ function release(overrides: Partial<AgentReleaseApproval> = {}): AgentReleaseApp
   }
 }
 
+function agentFixture(): StudioAsset {
+  return {
+    id: 11,
+    code: 'agent-reviewer',
+    name: '代码审查员',
+    owner_id: 2,
+    status: 'pending_approval',
+    create_time: '2026-09-01 10:00:00',
+    update_time: '2026-09-01 10:00:00',
+  }
+}
+
+function versionFixture(): StudioVersion {
+  return {
+    id: 21,
+    version_number: 3,
+    checksum: 'abc',
+    status: 'published',
+    original_author_id: 2,
+    create_time: '2026-09-01 10:00:00',
+    update_time: '2026-09-01 10:00:00',
+  }
+}
+
 function mountPage(): VueWrapper {
   return mount(AgentReleaseAdmin, {
     global: {
@@ -63,8 +87,7 @@ function mountPage(): VueWrapper {
       stubs: {
         'el-button': { props: ['loading', 'disabled'], template: '<button :disabled="disabled"><slot /></button>' },
         'el-segmented': true,
-        'el-table': true,
-        'el-table-column': true,
+        'EmptyState': { props: ['description'], template: '<div class="empty-stub">{{ description }}</div>' },
         'el-tag': { template: '<span class="tag-stub"><slot /></span>' },
         'el-drawer': { template: '<div class="drawer-stub"><slot /></div>' },
         'el-dialog': { template: '<div class="dialog-stub"><slot /><slot name="footer" /></div>' },
@@ -149,5 +172,100 @@ describe('AgentReleaseAdmin release details', () => {
     expect(element.box.prompt).toHaveBeenCalledTimes(1)
     expect(api.approve).not.toHaveBeenCalled()
     expect(element.message.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('AgentReleaseAdmin approval cards', () => {
+  it('renders approvals as cards: agent/version/risk in the main row, metrics on the right, chinese badges', async () => {
+    api.listApprovals.mockResolvedValue([
+      release({
+        agent: agentFixture(),
+        version: versionFixture(),
+        dependencies: [{ skill: 1 }, { skill: 2 }],
+        estimated_calls_per_chunk: 3,
+        title: '给审查员补充越权检查能力',
+      }),
+      release({ id: 8, status: 'approved', agent: agentFixture(), version: versionFixture(), title: '前一次发布' }),
+    ])
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const cards = wrapper.findAll('[data-testid="approval-cards"] .approval-card')
+    expect(cards).toHaveLength(2)
+
+    const first = cards[0]
+    const mainText = first.find('.rc-line1').text()
+    expect(mainText).toContain('#7')
+    expect(mainText).toContain('代码审查员')
+    expect(mainText).toContain('v3')
+    expect(mainText).toContain('高风险')
+    expect(mainText).toContain('待审批')
+    expect(first.find('.rc-code').text()).toBe('agent-reviewer')
+    expect(first.find('[data-testid="approval-metric-skills"]').text()).toContain('2')
+    expect(first.find('[data-testid="approval-metric-calls"]').text()).toContain('+3')
+    expect(first.text()).toContain('提交说明')
+    expect(first.text()).toContain('给审查员补充越权检查能力')
+    expect(first.text()).toContain('批准')
+    expect(first.text()).toContain('驳回')
+
+    expect(cards[1].find('.rc-line1').text()).toContain('已通过')
+    expect(cards[1].text()).not.toContain('批准')
+    expect(cards[1].text()).not.toContain('驳回')
+  })
+
+  it('keeps the empty state message when there is no approval', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const container = wrapper.find('[data-testid="approval-cards"]')
+    expect(container.exists()).toBe(true)
+    expect(container.text()).toContain('暂无发布审批')
+    expect(wrapper.find('.approval-card').exists()).toBe(false)
+  })
+
+  it('opens the detail drawer from the card 查看 button', async () => {
+    api.listApprovals.mockResolvedValue([release({ agent: agentFixture(), version: versionFixture() })])
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const detail = wrapper.findAll('.approval-card button').find((button) => button.text() === '查看')
+    expect(detail).toBeTruthy()
+    await detail!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.drawer-stub').text()).toContain('代码审查员')
+  })
+
+  it('approves from the card through the same decide flow with an opinion prompt', async () => {
+    element.box.prompt.mockResolvedValue({ value: '同意发布' })
+    api.listApprovals.mockResolvedValue([release({ agent: agentFixture(), version: versionFixture() })])
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const approve = wrapper.findAll('.approval-card button').find((button) => button.text() === '批准')
+    expect(approve).toBeTruthy()
+    await approve!.trigger('click')
+    await flushPromises()
+
+    expect(element.box.prompt).toHaveBeenCalled()
+    expect(api.approve).toHaveBeenCalledWith(7, '同意发布')
+  })
+
+  it('expands long submission notes in place', async () => {
+    const longNote = '这一版把系统提示词整体重写，并补充了鉴权与越权两类审查重点。'.repeat(3)
+    api.listApprovals.mockResolvedValue([release({ agent: agentFixture(), version: versionFixture(), title: longNote })])
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const note = wrapper.find('.rc-note-text')
+    expect(note.text()).toContain(longNote)
+    expect(note.classes()).not.toContain('is-expanded')
+
+    const toggle = wrapper.findAll('.rc-note button').find((button) => button.text() === '展开')
+    expect(toggle).toBeTruthy()
+    await toggle!.trigger('click')
+
+    expect(wrapper.find('.rc-note-text').classes()).toContain('is-expanded')
+    expect(wrapper.findAll('.rc-note button').some((button) => button.text() === '收起')).toBe(true)
   })
 })
