@@ -403,3 +403,13 @@ describe('ProjectList 远程导入异步任务', () => {
     wrapper.unmount()
   })
 })
+
+
+it('入库文件与整包归档文件区分口径，不把全部归档成员当可编辑代码文件', async () => {
+  projectApi.getProjects.mockResolvedValue({items:[{id:1,project_name:'归档项目',status:'active',file_count:4276,active_file_count:0,archive_file_count:4276,source_mode:'audit_archive',can_update:false,can_delete:false}],total:1})
+  const wrapper = mountProjectList()
+  await flushPromises()
+  expect(wrapper.text()).toContain('4276 个归档文件')
+  expect(wrapper.text()).not.toContain('4276 files')
+  wrapper.unmount()
+})

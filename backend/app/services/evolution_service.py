@@ -22,6 +22,7 @@ from app.models.review_experience import ReviewExperience
 from app.models.review_rule import ReviewRule
 from app.models.user import User
 from app.services import audit_service, eval_gate, experience_service, feedback_service
+from app.services.agent_model_service import configure_subagent
 
 
 def _utcnow() -> datetime:
@@ -65,7 +66,7 @@ def run_evolution(
     from app.agents.evolution_agent import EvolutionAgent
 
     harvest = experience_service.harvest(db, window_days=window_days)
-    agent = EvolutionAgent()
+    agent = configure_subagent(db, EvolutionAgent(), user.id if user else None)
     agent.inject(db, user=user)
     result = agent.run(window_days=window_days, distiller=distiller)
 

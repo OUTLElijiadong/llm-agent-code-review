@@ -162,8 +162,9 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
     rules = get_enabled_rules(db, user.id, language=project_lang)
     review_type = payload.review_type or "standard"
     profiles = get_agent_profiles(review_type)
+    from app.services.agent_model_service import resolve_subagent_config
     from app.utils.api_resolver import resolve_api_config
-    _api_cfg = resolve_api_config(db, user.id)
+    _api_cfg = resolve_subagent_config(db, resolve_api_config(db, user.id), agent_name="code_reviewer")
     agent = DeepSeekAgent(api_config=_api_cfg)
 
     task = ReviewTask(
@@ -400,8 +401,9 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
             )
             return
         # 使用解析后的 API 配置(用户自定义 > 管理员全局配置 > 系统默认 DeepSeek)
+        from app.services.agent_model_service import resolve_subagent_config
         from app.utils.api_resolver import resolve_api_config
-        api_config = resolve_api_config(db, user.id)
+        api_config = resolve_subagent_config(db, resolve_api_config(db, user.id), agent_name="code_reviewer")
         # 保留共享实例参数兼容既有内部调用；各独立代理会创建隔离客户端。
         collab_agent = DeepSeekAgent(api_config=api_config)
         files = load_task_inputs(db, task.id)
@@ -1550,6 +1552,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "project_name": project.project_name if project else "",
             "review_type": row.review_type, "status": row.status,
             "total_files": row.total_files,
+            "processed_files": row.processed_files,
             "total_issues": report_total if report_total is not None else row.total_issues,
             "report_issue_summary": summary,
             "severe_issues": row.severe_issues, "high_issues": row.high_issues,

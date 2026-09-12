@@ -59,31 +59,22 @@
       <el-tabs v-model="activeTab" class="detail-tabs">
         <!-- Tab 1: 项目信息 -->
         <el-tab-pane label="项目信息" name="info">
-          <el-descriptions :column="3" border class="info-card">
-            <el-descriptions-item label="项目名称">{{ project.project_name }}</el-descriptions-item>
-            <el-descriptions-item label="编程语言">
-              <el-tag v-if="project.language" size="small" type="info">{{ project.language }}</el-tag>
-              <span v-else class="text-muted">未设置</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="状态">
-              <el-tag :type="project.status === 'active' ? 'success' : 'info'" size="small">
-                {{ project.status === 'active' ? '活跃' : '归档' }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="文件数量">{{ project.file_count }}</el-descriptions-item>
-            <el-descriptions-item label="Agent 运转">
-              <span v-if="(project.agent_run_count ?? 0) > 0">
-                {{ project.agent_run_count }} 次
-                <span class="text-muted" style="font-size:12px">（最近 {{ project.last_agent_run_at ? formatDate(project.last_agent_run_at) : '—' }}）</span>
-              </span>
-              <span v-else class="text-muted">暂无运转</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="创建时间">{{ formatDate(project.create_time) }}</el-descriptions-item>
-            <el-descriptions-item label="更新时间">{{ formatDate(project.update_time) }}</el-descriptions-item>
-            <el-descriptions-item v-if="project.description" label="描述" :span="3">
-              {{ project.description }}
-            </el-descriptions-item>
-          </el-descriptions>
+          <div class="project-summary-cards">
+            <article class="summary-tile"><span>代码库文件</span><strong>{{ project.active_file_count ?? '—' }}</strong><small>已入库且有效的代码文件</small></article>
+            <article class="summary-tile"><span>整包归档文件</span><strong>{{ project.archive_file_count ?? '—' }}</strong><small>归档成员数量，独立于代码库</small></article>
+            <article class="summary-tile"><span>Agent 历史执行</span><strong>{{ project.agent_run_count ?? 0 }} 次</strong><small>最近 {{ project.last_agent_run_at ? formatDate(project.last_agent_run_at) : '暂无记录' }}</small></article>
+          </div>
+          <p class="project-description">{{ project.description || '暂无项目介绍' }}</p>
+          <details class="project-metadata">
+            <summary>项目属性与时间</summary>
+            <dl>
+              <div><dt>项目名称</dt><dd>{{ project.project_name }}</dd></div>
+              <div><dt>编程语言</dt><dd>{{ project.language || '未设置' }}</dd></div>
+              <div><dt>状态</dt><dd>{{ project.status === 'active' ? '活跃' : '归档' }}</dd></div>
+              <div><dt>创建时间</dt><dd>{{ formatDate(project.create_time) }}</dd></div>
+              <div><dt>更新时间</dt><dd>{{ formatDate(project.update_time) }}</dd></div>
+            </dl>
+          </details>
         </el-tab-pane>
 
         <!-- Tab 2: 代码文件 -->
@@ -196,41 +187,13 @@
             <div class="section-header">
               <h3>最近审查任务</h3>
             </div>
-            <el-table
-              v-if="project.recent_tasks.length > 0"
-              :data="project.recent_tasks"
-              border
-              stripe
-              empty-text="暂无审查记录"
-            >
-              <el-table-column label="任务编号" width="100" align="center">
-                <template #default="{ row }">
-                  {{ row.id }}
-                </template>
-              </el-table-column>
-              <el-table-column label="评分" width="100" align="center">
-                <template #default="{ row }">
-                  <el-tag :type="getScoreType(row.score)" size="small">{{ row.score }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="问题数" width="100" align="center">
-                <template #default="{ row }">
-                  {{ row.total_issues }}
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="120" align="center">
-                <template #default="{ row }">
-                  <el-tag :type="getStatusType(row.status)" size="small">
-                    {{ statusLabels[row.status] ?? row.status }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="创建时间" min-width="180" align="center">
-                <template #default="{ row }">
-                  {{ formatDate(row.create_time) }}
-                </template>
-              </el-table-column>
-            </el-table>
+            <div v-if="project.recent_tasks.length > 0" class="recent-task-cards">
+              <article v-for="task in project.recent_tasks" :key="task.id" class="recent-task-card">
+                <div><strong>审查 #{{ task.id }}</strong><el-tag :type="getStatusType(task.status)" size="small">{{ statusLabels[task.status] ?? task.status }}</el-tag></div>
+                <p><span>{{ ['sandbox_test', 'pentest'].includes(task.review_type || '') ? '测试评分' : task.review_type ? '代码评分' : '历史评分' }} <b>{{ task.status === 'success' ? task.score : '—' }}</b></span><span>报告问题 <b>{{ task.total_issues }}</b></span></p>
+                <footer><time>{{ formatDate(task.create_time) }}</time><el-button v-if="userStore.hasPermission('review:view')" text type="primary" @click="router.push(`/reviews/${task.id}`)">查看任务</el-button></footer>
+              </article>
+            </div>
             <EmptyState v-else description="暂无审查记录" />
           </div>
         </el-tab-pane>
@@ -499,12 +462,6 @@ const statusLabels: Record<string, string> = {
 
 function formatDate(dateStr: string): string {
   return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
-}
-
-function getScoreType(score: number): 'success' | 'warning' | 'danger' {
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
 }
 
 function getStatusType(status: string): 'success' | 'warning' | 'info' | 'danger' {
@@ -911,6 +868,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
+.project-summary-cards, .recent-task-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; }
+.summary-tile, .recent-task-card { padding: 20px; border: 1px solid var(--el-border-color-light); border-radius: 16px; background: var(--el-bg-color); min-width: 0; }
+.summary-tile { display: flex; flex-direction: column; gap: 10px; strong { font-size: 28px; } small { color: var(--el-text-color-secondary); } }
+.project-description { line-height: 1.8; overflow-wrap: anywhere; }
+.project-metadata { margin-top: 24px; padding: 18px; border-radius: 12px; background: var(--el-fill-color-light); summary { cursor: pointer; } dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; } dt { color: var(--el-text-color-secondary); } dd { margin: 6px 0 0; overflow-wrap: anywhere; } }
+.recent-task-card { > div, p, footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; } footer { color: var(--el-text-color-secondary); font-size: 12px; } }
+
 .project-detail {
   padding: 24px;
 }

@@ -60,6 +60,7 @@ import {
 } from '@/utils/agentMeshTimeline'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { actionableError } from '@/composables/withFeedback'
+import { CHAT_IMAGE_MIME, useChatImages } from '@/composables/useChatImages'
 import { buildAutoValidationPrompt } from '@/utils/autoValidation'
 import {
   autoTitleAgentChatSession,
@@ -308,7 +309,7 @@ const canStartRun = computed(() => (
   && !sessionRestoring.value
   && !sessionBusy.value
 ))
-const canSend = computed(() => inputText.value.trim().length > 0 && canStartRun.value)
+const canSend = computed(() => (inputText.value.trim().length > 0 || pendingImages.value.length > 0) && !readingImages.value && canStartRun.value)
 /** 小菱流式运行中:显示「停止响应」按钮,点击即中止当前流。 */
 const canStopResponse = computed(() => (
   loading.value || isAgentResponseSessionActive(sessionRun.value?.status)
@@ -1644,39 +1645,9 @@ function stepLabel(s: StepBubble): string {
 }
 
 /* ── 多模态:待发送图片(≤4张,单张≤1.5MB;随下一条消息发送并自动切视觉模型) ── */
-const pendingImages = ref<Array<{ id: string; dataUrl: string; name: string }>>([])
-const MAX_CHAT_IMAGES = 4
-const MAX_CHAT_IMAGE_BYTES = 1_500_000
-
-const CHAT_IMAGE_MIME = /^image\/(png|jpeg|webp|gif)$/
-
-async function addPendingImageFiles(files: File[]): Promise<void> {
-  for (const file of files) {
-    if (!CHAT_IMAGE_MIME.test(file.type)) {
-      ElMessage.warning(`「${file.name}」格式不支持,请使用 PNG/JPEG/WebP/GIF`)
-      continue
-    }
-    if (pendingImages.value.length >= MAX_CHAT_IMAGES) {
-      ElMessage.warning(`一次最多带 ${MAX_CHAT_IMAGES} 张图片`)
-      break
-    }
-    if (file.size > MAX_CHAT_IMAGE_BYTES) {
-      ElMessage.warning(`「${file.name}」超过 1.5MB,请压缩后再发`)
-      continue
-    }
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = () => reject(reader.error)
-      reader.readAsDataURL(file)
-    })
-    pendingImages.value.push({ id: messageId(), dataUrl, name: file.name })
-  }
-}
-
-function removePendingImage(id: string): void {
-  pendingImages.value = pendingImages.value.filter((item) => item.id !== id)
-}
+const { pendingImages, imageErrors, readingImages, addFiles: addPendingImageFiles, removePendingImage } = useChatImages(
+  computed(() => `${userStore.profile?.id ?? ''}:${sessionId.value}`),
+)
 
 function onChatInputPaste(event: ClipboardEvent): void {
   const files = Array.from(event.clipboardData?.files ?? []).filter(
@@ -1691,7 +1662,7 @@ function onChatInputPaste(event: ClipboardEvent): void {
 async function sendMessage(): Promise<void> {
   const text = inputText.value.trim()
   const images = [...pendingImages.value]
-  if ((!text && !images.length) || loading.value || sessionRestoring.value || sessionBusy.value) return
+  if ((!text && !images.length) || readingImages.value || loading.value || sessionRestoring.value || sessionBusy.value) return
 
   messages.value.push({
     id: messageId(), role: 'user', content: text || '(图片)',
@@ -1711,7 +1682,7 @@ async function sendMessage(): Promise<void> {
 
   // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
   // 权限仍由路由守卫裁决,实际跳转交给全局虚拟鼠标完成。
-  const localNavigation = router
+  const localNavigation = router && !images.length
     ? resolveLocalNavigationRequest(text, router, userStore)
     : null
   if (localNavigation) {
@@ -1946,8 +1917,8 @@ async function processIncomingFiles(files: File[]): Promise<void> {
     if (images.length && !codeFiles.length) {
       // 多模态:纯图片作为聊天附件,发送时自动切换视觉模型
       resetUploadProgress()
-      await addPendingImageFiles(images)
-      ElMessage.success('图片已添加,发送后将自动用视觉模型分析')
+      const added = await addPendingImageFiles(images)
+      if (added) ElMessage.success(`已添加 ${added} 张图片，发送后将自动用视觉模型分析`)
       return
     }
     const targets = files.slice(0, 20)
@@ -2655,6 +2626,11 @@ onMounted(() => {
               <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
             </div>
             <p v-else class="chat-input-hint">支持直接拖入代码文件帮你建项目;图片会由视觉模型解读;Shift+Enter 换行</p>
+            <p v-if="readingImages" role="status" class="chat-image-feedback">正在读取图片，请稍候…</p>
+            <div v-if="imageErrors.length" role="alert" class="chat-image-feedback is-error">
+              <p v-for="(error, index) in imageErrors" :key="index">{{ error }}</p>
+              <button type="button" @click="imageErrors = []">收起提示</button>
+            </div>
             <div v-if="pendingImages.length" class="chat-image-tray" aria-label="待发送图片">
               <div v-for="img in pendingImages" :key="img.id" class="chat-image-chip">
                 <img :src="img.dataUrl" :alt="img.name" >
@@ -3785,6 +3761,9 @@ onMounted(() => {
 }
 
 /* ── 多模态图片附件 ── */
+.chat-image-feedback { font-size: 12px; margin: 6px 0; overflow-wrap: anywhere; }
+.chat-image-feedback.is-error { color: var(--color-danger, #c43d36); }
+.chat-image-feedback p { margin: 4px 0; }
 .chat-image-tray {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
 }

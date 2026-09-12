@@ -30,7 +30,8 @@ def test_validate_rejects_bad_format_and_caps_count():
     with pytest.raises(Exception):
         ms.validate_images(["https://example.com/a.png"])  # 外链 URL 一律拒绝(仅支持本地上传)
     assert ms.validate_images([PNG_URL]) == [PNG_URL]
-    assert len(ms.validate_images([PNG_URL] * 6)) == 4  # 截断到 4 张
+    with pytest.raises(Exception, match="最多上传 4 张"):
+        ms.validate_images([PNG_URL] * 6)
 
 
 def test_store_dedups_and_builds_parts(db):

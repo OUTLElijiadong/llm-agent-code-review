@@ -3,10 +3,10 @@
  * 用户头像:内置可爱头像(前端本地 SVG,不走网络) / 自定义上传(带鉴权拉取) / 文字回退。
  * avatar 取值: undefined|null=默认(取昵称/用户名首字) | 'builtin:<key>' | 'upload'
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { fetchAvatarBlob } from '@/api/avatar'
-import { getCachedAvatarUrl, setCachedAvatarUrl } from '@/constants/avatars'
+import { avatarCacheRevision, getCachedAvatarUrl, setCachedAvatarUrl } from '@/constants/avatars'
 
 const props = withDefaults(defineProps<{
   avatar?: string | null
@@ -31,26 +31,26 @@ const fallbackChar = computed(() => (props.name || '友').trim().charAt(0).toUpp
 
 const uploadUrl = ref('')
 
+let requestGeneration = 0
 async function loadUploadImage() {
-  if (!isUpload.value || !props.userId) { uploadUrl.value = ''; return }
-  const cached = getCachedAvatarUrl(props.userId)
+  const generation = ++requestGeneration
+  const userId = props.userId
+  uploadUrl.value = ''
+  if (!isUpload.value || !userId) return
+  const cached = getCachedAvatarUrl(userId)
   if (cached) { uploadUrl.value = cached; return }
-  const blob = await fetchAvatarBlob(props.userId)
-  if (blob) {
-    const url = URL.createObjectURL(blob)
-    setCachedAvatarUrl(props.userId, url)
-    uploadUrl.value = url
-  } else {
-    uploadUrl.value = ''
-  }
+  const blob = await fetchAvatarBlob(userId)
+  if (generation !== requestGeneration || props.userId !== userId || !isUpload.value) return
+  if (blob) uploadUrl.value = setCachedAvatarUrl(userId, URL.createObjectURL(blob))
 }
 
-watch(() => [props.avatar, props.userId] as const, () => { void loadUploadImage() }, { immediate: true })
+watch(() => [props.avatar, props.userId, avatarCacheRevision.value] as const, () => { void loadUploadImage() }, { immediate: true })
+onBeforeUnmount(() => { requestGeneration += 1 })
 </script>
 
 <template>
   <span class="user-avatar-wrap" :style="{ width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.42)}px` }">
-    <img v-if="isUpload && uploadUrl" :src="uploadUrl" alt="头像" class="avatar-img" >
+    <img v-if="isUpload && uploadUrl" :src="uploadUrl" alt="头像" class="avatar-img" @error="uploadUrl = ''" >
     <svg v-else-if="builtinKey === 'cat'" viewBox="0 0 64 64" class="avatar-svg"><circle cx="32" cy="36" r="22" fill="#FFD9A0"/><path d="M14 24 L18 6 L30 18 Z" fill="#FFD9A0"/><path d="M50 24 L46 6 L34 18 Z" fill="#FFD9A0"/><path d="M16.5 21 L18.6 10.5 L26 16.8 Z" fill="#FFB9C4"/><path d="M47.5 21 L45.4 10.5 L38 16.8 Z" fill="#FFB9C4"/><circle cx="24" cy="34" r="2.8" fill="#4A3B2A"/><circle cx="40" cy="34" r="2.8" fill="#4A3B2A"/><path d="M29 40 Q32 43 35 40" stroke="#4A3B2A" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="19" cy="40" r="2.4" fill="#FFB9C4" opacity=".8"/><circle cx="45" cy="40" r="2.4" fill="#FFB9C4" opacity=".8"/><path d="M8 36 L16 37 M8 41 L16 40 M56 36 L48 37 M56 41 L48 40" stroke="#C9A06C" stroke-width="1.4" stroke-linecap="round"/></svg>
     <svg v-else-if="builtinKey === 'fox'" viewBox="0 0 64 64" class="avatar-svg"><circle cx="32" cy="37" r="21" fill="#F5A25D"/><path d="M13 26 L16 7 L30 19 Z" fill="#F5A25D"/><path d="M51 26 L48 7 L34 19 Z" fill="#F5A25D"/><path d="M15.5 21 L17.4 11.5 L24.5 17.3 Z" fill="#5B4636"/><path d="M48.5 21 L46.6 11.5 L39.5 17.3 Z" fill="#5B4636"/><ellipse cx="32" cy="44" rx="10" ry="7.5" fill="#FFF4E8"/><circle cx="25" cy="35" r="2.7" fill="#43301F"/><circle cx="39" cy="35" r="2.7" fill="#43301F"/><ellipse cx="32" cy="42" rx="3" ry="2.2" fill="#43301F"/><path d="M32 44 Q32 48 28 49 M32 44 Q32 48 36 49" stroke="#43301F" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
     <svg v-else-if="builtinKey === 'panda'" viewBox="0 0 64 64" class="avatar-svg"><circle cx="32" cy="36" r="22" fill="#FDFDFE"/><circle cx="15" cy="17" r="7" fill="#3B3B44"/><circle cx="49" cy="17" r="7" fill="#3B3B44"/><ellipse cx="23" cy="34" rx="5.5" ry="6.5" fill="#3B3B44" transform="rotate(-14 23 34)"/><ellipse cx="41" cy="34" rx="5.5" ry="6.5" fill="#3B3B44" transform="rotate(14 41 34)"/><circle cx="24" cy="34" r="2" fill="#FDFDFE"/><circle cx="40" cy="34" r="2" fill="#FDFDFE"/><ellipse cx="32" cy="44" rx="3.4" ry="2.4" fill="#3B3B44"/><path d="M28 49 Q32 51.5 36 49" stroke="#3B3B44" stroke-width="1.8" fill="none" stroke-linecap="round"/><circle cx="19" cy="44" r="2.6" fill="#FFC7D2" opacity=".9"/><circle cx="45" cy="44" r="2.6" fill="#FFC7D2" opacity=".9"/></svg>

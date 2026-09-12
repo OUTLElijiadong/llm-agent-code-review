@@ -10,16 +10,18 @@
         placeholder="按项目名搜索"
         clearable
         class="search-input"
-        @input="handleSearch"
       >
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
     </div>
 
+    <el-alert v-if="loadError" title="项目列表加载失败" :description="loadError" type="error" :closable="false" show-icon>
+      <el-button :loading="loading" @click="loadProjects">重新加载</el-button>
+    </el-alert>
     <el-alert
-      v-if="!filteredProjects.length && !loading"
-      title="还没有项目"
-      description="先在「项目管理」创建项目并上传代码文件，这里会汇总展示。"
+      v-if="!filteredProjects.length && !loading && !loadError"
+      :title="projects.length ? '没有匹配的项目' : '还没有项目'"
+      :description="projects.length ? '请调整搜索关键词，或清空搜索查看全部已加载项目。' : '先在「项目管理」创建项目并上传代码文件，这里会汇总展示。'"
       type="info"
       :closable="false"
       show-icon
@@ -30,7 +32,12 @@
         v-for="proj in filteredProjects"
         :key="proj.id"
         class="project-card"
+        role="button"
+        tabindex="0"
+        :aria-label="`查看 ${proj.project_name} 的代码文件`"
         @click="goProjectCode(proj)"
+        @keydown.enter.prevent="goProjectCode(proj)"
+        @keydown.space.prevent="goProjectCode(proj)"
       >
         <header class="card-head">
           <span class="lang-tag">{{ proj.language || '未识别' }}</span>
@@ -39,7 +46,7 @@
         <h3 class="card-title">{{ proj.project_name }}</h3>
         <p class="card-desc">{{ proj.description || '无描述' }}</p>
         <footer class="card-foot">
-          <span class="meta">文件 {{ proj.file_count ?? 0 }}</span>
+          <span class="meta">{{ projectFileSummary(proj) }}</span>
           <span class="meta">最近审查 {{ formatDate(proj.last_review_at) }}</span>
         </footer>
       </article>
@@ -54,9 +61,11 @@ import dayjs from 'dayjs'
 import { Search } from '@element-plus/icons-vue'
 import { getProjects } from '@/api/project'
 import type { ProjectOut } from '@/types/project'
+import { projectFileSummary } from '@/utils/projectPresentation'
 
 const router = useRouter()
 const loading = ref(false)
+const loadError = ref('')
 const projects = ref<ProjectOut[]>([])
 const keyword = ref('')
 
@@ -74,15 +83,15 @@ function goProjectCode(proj: ProjectOut): void {
   router.push(`/code/${proj.id}`)
 }
 
-function handleSearch(): void {
-  /* 纯前端过滤，无需触发请求 */
-}
-
 async function loadProjects(): Promise<void> {
+  if (loading.value) return
   loading.value = true
   try {
     const data = await getProjects({ page: 1, page_size: 100 })
     projects.value = data.items
+    loadError.value = ''
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : '暂时无法读取项目，请稍后重试。'
   } finally {
     loading.value = false
   }
@@ -123,7 +132,7 @@ onMounted(loadProjects)
 
 .project-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   gap: var(--spacing-md);
   margin-top: var(--spacing-md);
 }
@@ -135,6 +144,11 @@ onMounted(loadProjects)
   border-radius: var(--border-radius-lg, 8px);
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+
+  &:focus-visible {
+    outline: 2px solid var(--brand-500, #409eff);
+    outline-offset: 3px;
+  }
 
   &:hover {
     transform: translateY(-2px);
@@ -178,6 +192,8 @@ onMounted(loadProjects)
 
 .card-foot {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   justify-content: space-between;
   font-size: 12px;
   color: var(--color-text-secondary, #909399);

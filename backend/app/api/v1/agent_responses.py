@@ -93,6 +93,15 @@ def get_asset_image(asset_id: int, db: Session = Depends(get_db),
     )
 
 
+def _schedule_profile_refresh(user_id: int) -> None:
+    """偏好聚合使用独立会话与线程，不能延迟或回滚已经完成的用户任务。"""
+    from app.services.profile_service import refresh_background
+
+    task = asyncio.create_task(asyncio.to_thread(refresh_background, user_id))
+    _BACKGROUND_RESPONSE_TASKS.add(task)
+    task.add_done_callback(_release_background_response_task)
+
+
 def _release_background_response_task(task: asyncio.Task[Any]) -> None:
     """释放后台任务引用并消费异常，避免断开 SSE 后产生未处理异常。"""
     _BACKGROUND_RESPONSE_TASKS.discard(task)
@@ -177,6 +186,9 @@ class AgentResponsesRequest(BaseModel):
     @model_validator(mode="after")
     def validate_action_fields(self) -> "AgentResponsesRequest":
         if self.action == "start":
+            for index, item in enumerate(self.messages):
+                if item.images and (item.role != "user" or index != len(self.messages) - 1):
+                    raise ValueError("图片只能附在最后一条用户消息中，请重新选择本次图片")
             has_user_message = any(
                 item.role == "user" and (item.content.strip() or item.images)
                 for item in self.messages
@@ -897,11 +909,24 @@ async def stream_agent_response(
         except (AttributeError, TypeError):
             # 轻量测试/非真实 Session 场景不阻断首个 response.created。
             api_config = None
+        from app.services.agent_model_service import resolve_agent_model
+
         response_model = (
-            api_config.model
-            if api_config is not None and api_config.source in {"user", "global"}
-            else settings.deepseek_orchestrator_model
+            resolve_agent_model(db, surface=payload.surface, config=api_config)
+            if api_config is not None else settings.deepseek_orchestrator_model
         )
+        if payload.action != "start":
+            owned_run = db.query(AgentResponseRun).filter(
+                AgentResponseRun.run_id == payload.run_id,
+                AgentResponseRun.user_id == user.id,
+                AgentResponseRun.surface == payload.surface,
+                AgentResponseRun.session_key == payload.session_id,
+            ).first()
+            if owned_run:
+                try:
+                    response_model = json.loads(owned_run.checkpoint_json).get("model") or response_model
+                except (TypeError, ValueError):
+                    pass
         # 多模态:含图消息本运行切到视觉模型,元数据同步(与服务层同口径)
         if payload.action == "start" and any(item.images for item in payload.messages):
             from app.services.multimodal_service import resolve_vision_model
@@ -1069,6 +1094,12 @@ async def stream_agent_response(
                                 summary=result.output_text,
                                 error=result.error,
                             )
+                    if result.status == "completed" and payload.surface == "user":
+                        try:
+                            if not _is_admin_actor(run_db, run_user):
+                                _schedule_profile_refresh(int(run_user.id))
+                        except Exception:  # noqa: BLE001 - 偏好学习失败不影响已完成任务
+                            logger.warning("小菱偏好更新暂未排入后台，保留本轮结果")
                     return result
                 except Exception as exc:
                     if payload.action in {"start", "resume", "approve"}:

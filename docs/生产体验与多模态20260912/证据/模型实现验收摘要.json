@@ -1,0 +1,27 @@
+{
+  "后端通过": 539,
+  "后端新增针对缺口": 19,
+  "前端通过": 12,
+  "类型检查退出码": 0,
+  "后端Ruff退出码": 0,
+  "前端ESLint退出码": 0,
+  "迁移新增": false,
+  "生产写入": false,
+  "基线提交": "bc207b273441e2f01f988122d28e2f2acb17f4c5",
+  "文件摘要": {
+    "backend/app/services/agent_model_service.py": "4a3d56d0c8e3210847ab7e39141084269cf47f1f91e074c8c2b5ccd1714453b6",
+    "backend/app/services/system_config_service.py": "b986ae2abe7b7fdc1791160f624c8dee1edd962514f39b741bb18c93631f0ef1",
+    "backend/app/services/multimodal_service.py": "c26aa9a8cf8714dc24a297addcfc0549a6f9276403fbbb1806266dc86217c4c5",
+    "backend/app/services/deepseek_responses_runtime.py": "9b6c62f6f61ac42fddc4d95505f1f6b83e75497b3afbfbee43565f8b66f0211d",
+    "backend/app/services/agent_responses_service.py": "266ce0cabb23855df7c7f71a29d5e5d7267f36b552258b96f098327e1c6880d4",
+    "backend/app/api/v1/agent_responses.py": "10ca2cb02644955bf1edbb21cbbdfbb1f9209055392c80b29ab430dd0077b8ae",
+    "backend/app/api/v1/llm_config.py": "fcf61d30261b05a7d2637fe94385132f723c45fc5eda68174bd431ab9409f7e7",
+    "backend/app/schemas/llm_config.py": "d20ad7cb97386fb2190f072330b19e3e4b49b6590c2e807e8b7e30711d90615d",
+    "backend/app/agents/base.py": "268c15db6e76edd1b2dd2a1cf6eeeb61af74f7e2a7560971c95a1dcbb33f40ec",
+    "backend/app/agents/orchestrator.py": "16b27bddbfc5bef1f4dad82e6c374817d2a04338b16a0397281dad1a6dfa3166",
+    "frontend/src/views/admin/LlmConfig.vue": "c1e87f96dad50549d58452ec9b351648b7a31fa12f31371bdf8baf1fd0e14e8d",
+    "frontend/src/api/llmConfig.ts": "e9e7e87983d12c7e7b2818eb2bb10c2a9c9fc201a44ba7b8f0b4ef2046b4233b",
+    "backend/tests/unit/services/test_multimodal_recovery_regressions.py": "bbf390e5509f2fc3a1b195b0343296adc0ba167efe04400f2ae48ad7898f9ccf"
+  },
+  "边界": "仅本地模拟上游验证，仍需生产真实模型调用及浏览器验收；共享文件若后续更新须重新记录摘要"
+}

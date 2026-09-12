@@ -1,0 +1,15 @@
+[
+  {
+    "case": "原始漏图红例",
+    "original_has_images": true,
+    "projected_has_images": true,
+    "compacted": true,
+    "passed": true
+  },
+  {
+    "case": "图文保留后超过预算",
+    "failed_explicitly": true,
+    "error": "首条目标、图片输入与最近完整调用预估 6026 tokens，超过可用输入预算 2500 tokens",
+    "passed": true
+  }
+]

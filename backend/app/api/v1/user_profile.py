@@ -1,6 +1,7 @@
 """
 用户画像 API 路由(本人维护;显式 + 隐式学习)
 """
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -17,21 +18,20 @@ router = APIRouter()
 @router.get("/profile", response_model=Resp[ProfileOut])
 def get_profile(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """获取本人画像(不存在则初始化空画像)"""
-    profile = profile_service.get_or_create(db, user.id)
-    return Resp(data=ProfileOut(**profile_service.to_dict(profile)))
+    return Resp(data=ProfileOut(**profile_service.read_profile(db, user.id)))
 
 
 @router.put("/profile", response_model=Resp[ProfileOut])
-def update_profile(payload: ProfileUpdateIn, db: Session = Depends(get_db),
-                   user: User = Depends(get_current_user)):
+def update_profile(payload: ProfileUpdateIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """更新本人显式画像"""
     profile = profile_service.update_profile(db, user.id, payload.model_dump(exclude_unset=True))
     return Resp(data=ProfileOut(**profile_service.to_dict(profile)))
 
 
 @router.post("/profile/preference-prompted", response_model=Resp[ProfileOut])
-def mark_preference_prompt(payload: PreferencePromptIn, db: Session = Depends(get_db),
-                           user: User = Depends(get_current_user)):
+def mark_preference_prompt(
+    payload: PreferencePromptIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
     """小菱偏好询问结果上报(已答/跳过),防反复打扰"""
     profile = profile_service.mark_preference_prompted(db, user.id, payload.state)
     return Resp(data=ProfileOut(**profile_service.to_dict(profile)))

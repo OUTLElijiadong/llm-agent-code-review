@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     # 总调度者与小菱(user/admin 两个 surface)使用的高能力模型。
     deepseek_orchestrator_model: str = "deepseek-v4-pro"
     # 小菱消息含图片时临时切换的视觉模型(仅该次运行;结束后同会话回默认)。
-    deepseek_vision_model: str = "deepseek-v4-flash-vision-exp"
+    deepseek_vision_model: str = "deepseek-flash"
     # pro 模型返回“模型不可用”时,允许在同一轮自动回退到 flash;关闭则直接失败。
     deepseek_orchestrator_fallback_to_flash: bool = True
     deepseek_timeout: int = Field(default=60, ge=5, le=600)

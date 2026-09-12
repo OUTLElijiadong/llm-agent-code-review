@@ -70,19 +70,21 @@ class ModelRegistryItemIn(BaseModel):
 
 class ModelRegistryItemOut(ModelRegistryItemIn):
     source: str = "manual"
+    capability_source: str = "manual"
     added_at: str = ""
 
 
 class ModelRegistryOut(BaseModel):
     """模型注册表 + 角色分配 + 角色说明。"""
     models: List[ModelRegistryItemOut] = Field(default_factory=list)
-    assignments: dict = Field(default_factory=dict)
+    assignments: dict[str, Optional[str]] = Field(default_factory=dict)
     roles: dict = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class ModelRegistryReplaceIn(BaseModel):
     """整表保存注册表(手工编辑)。"""
-    models: List[ModelRegistryItemIn] = Field(default_factory=list, max_length=200)
+    models: List[ModelRegistryItemIn] = Field(default_factory=list, max_length=500)
 
 
 class ModelRegistrySyncOut(BaseModel):
@@ -96,4 +98,4 @@ class ModelRegistrySyncOut(BaseModel):
 
 class ModelAssignmentsIn(BaseModel):
     """角色->模型分配;空串清除该角色回退全局默认。"""
-    assignments: dict = Field(default_factory=dict)
+    assignments: dict[str, Optional[str]] = Field(default_factory=dict)

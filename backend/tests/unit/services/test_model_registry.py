@@ -22,7 +22,7 @@ def test_merge_pulled_marks_vision_and_keeps_manual(clean_registry):
     ])
     assert added == ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]
     by_id = {m["id"]: m for m in models}
-    assert by_id["deepseek-v4-flash"]["vision"] is False
+    assert by_id["deepseek-v4-flash"]["vision"] is True  # 2026-09-10 起兼容路由至 V4.1 Flash
     assert by_id["deepseek-v4-flash-vision-exp"]["vision"] is True
     assert by_id["deepseek-v4-flash-vision-exp"]["source"] == "pulled"
     assert by_id["deepseek-v4-flash-vision-exp"]["added_at"]

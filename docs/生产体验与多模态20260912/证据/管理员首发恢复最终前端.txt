@@ -1,0 +1,184 @@
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 停止请求失败时保持服务端运行并给出同步提示
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 创建团队后主响应结束也持续展示真实子 Agent 协作城市
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 后台历史会话完成 Mesh 任务后不抢占当前管理新对话
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 恢复当前管理会话时拉取服务端团队并默认折叠展示协作过程
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 成员追问按钮关闭面板并预填管理输入框
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 刷新恢复后仍先显示工具调用，再显示最终结论
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 初始会话恢复完成前禁止发送
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 恢复运行态后轮询到待审批仍按低频间隔继续刷新
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 空闲时实时拉取子 Agent 交流过程并默认折叠详情
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 轮询失败时显示同步中断并在下一轮恢复
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 刷新后恢复待审批内容并在高危确认后续跑
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > opens empty and renders only the first meaningful streamed delta
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > keeps a streamed Markdown user table complete inside the chat bubble
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > approves by click and resumes without adding a fake user message
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > marks a resumed approval as failed when the terminal response has no tool result
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > does not mark a tool completed without response.tool.completed evidence
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > shows one-time sensitive results without sending them into the next model request
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > streams function arguments and submits a structured option immediately
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > does not submit Enter while the Chinese IME is composing
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 历史bug回归(本PR补齐项) > 【修复】协议错误必须留在消息流(旧版只有几秒即逝的Toast,回来后零痕迹)
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 历史bug回归(本PR补齐项) > 【修复】助手消息必须有一键复制(旧版只能手动拖选悬浮窗文本)
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 历史bug回归(本PR补齐项) > 【修复】面板可见时按 / 必须聚焦输入框(旧版只支持 Escape)
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 窄桌面布局回归 > 1280x800 默认展开时不覆盖用户管理表格右侧操作区
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 窄桌面布局回归 > 1280x800 安全停靠后仍可拖动并保存位置
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot 窄桌面布局回归 > 520px 以下仍由移动端 inset 布局接管且禁止拖动
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 管理审计阶段属于真实助手运行，completed 后立即停止活动标记
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 管理审计阶段属于真实助手运行，failed 后立即停止活动标记
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 管理审计阶段属于真实助手运行，cancelled 后立即停止活动标记
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 管理端可选择图片单独发送，移除附件后恢复禁用
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 首发图片在创建运行前失败可核对服务端后重试，保留原图
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 首发断网但服务端已创建运行时恢复快照，不重复发起 start
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 提交确认接口失败时保留可重试原请求，不冒险重复 start
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 核对请求返回前切换会话，不将旧图片或旧请求发往新会话
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 核对仅返回旧的已完成运行时重发原提交，不把旧run当成本次已接收
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/components/admin/AdminCopilot.test.ts > 重复点击提交核对只发一个GET，卸载后的核对结果不再创建运行
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+ ✓ src/components/admin/AdminCopilot.test.ts (35 tests) 976ms
+
+ Test Files  1 passed (1)
+      Tests  35 passed (35)
+   Start at  22:21:06
+   Duration  2.19s (transform 530ms, setup 11ms, collect 719ms, tests 976ms, environment 241ms, prepare 60ms)

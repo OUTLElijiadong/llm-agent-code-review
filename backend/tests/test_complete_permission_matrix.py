@@ -12,7 +12,6 @@ import re
 from datetime import datetime
 
 import pytest
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -31,6 +30,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from scripts.verify_permission_acceptance_https import iter_api_route_contexts
 
 
 def _walk_dependencies(dependant):
@@ -42,32 +42,46 @@ def _walk_dependencies(dependant):
 def route_inventory():
     """从实际注册路由提取清单；测试逐条发 HTTP 请求，而非以枚举算通过。"""
     rows = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route in iter_api_route_contexts(app.routes):
         calls = [item.call for item in _walk_dependencies(route.dependant)]
         guards = []
         for call in calls:
             name = getattr(call, "__qualname__", "")
             if name == "require_permission.<locals>._dependency":
                 guards.append(inspect.getclosurevars(call).nonlocals["permission_code"])
-            elif name in {"require_admin", "require_super_admin", "_require_report_export_permission"}:
+            elif name in {
+                "require_admin", "require_super_admin", "_require_report_export_permission", "require_studio_role",
+            }:
                 guards.append(name)
+        endpoint = inspect.unwrap(route.endpoint)
         for method in sorted(route.methods):
             rows.append({
                 "method": method,
                 "path": route.path,
                 "authenticated": get_current_user in calls,
                 "guards": sorted(set(guards)),
-                "source": inspect.getsourcefile(route.endpoint),
-                "line": inspect.getsourcelines(route.endpoint)[1],
+                "source": inspect.getsourcefile(endpoint),
+                "line": inspect.getsourcelines(endpoint)[1],
             })
+    # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
+    assert len(rows) == 325, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
 ROUTES = route_inventory()
 AUTHENTICATED_ROUTES = [row for row in ROUTES if row["authenticated"]]
 GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
+
+
+def test_route_inventory_is_complete_and_studio_guard_is_included():
+    assert len(ROUTES) == 325
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 325
+    assert len({row["source"] for row in ROUTES}) == 42
+    assert len(AUTHENTICATED_ROUTES) == 311
+    assert len(GUARDED_ROUTES) == 243
+    studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
+    assert len(studio) == 15
+    assert all("require_studio_role" in row["guards"] for row in studio)
 
 
 def _route_id(row):

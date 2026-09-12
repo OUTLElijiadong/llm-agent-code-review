@@ -91,7 +91,7 @@
           <span class="tc-band" :data-status="row.status" aria-hidden="true"></span>
           <div class="tc-main">
             <div class="tc-line1">
-              <b class="tc-name">{{ row.task_name || `审查 #${row.id}` }}</b>
+              <button class="tc-name" type="button" @click.stop="onRowClick(row)">{{ row.task_name || `审查 #${row.id}` }}</button>
               <el-tag size="small" type="info" effect="plain">{{ reviewTypeLabel(row.review_type) }}</el-tag>
               <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
             </div>
@@ -120,11 +120,11 @@
           </div>
           <div class="tc-actions" @click.stop>
             <el-button
-              v-if="row.status === 'running'"
+              v-if="canCancelReview && row.status === 'running'"
               link type="warning" size="small"
               @click="handleCancel(row)"
             >停止</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button v-if="canCancelReview" link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
           </div>
         </article>
       </div>
@@ -235,12 +235,6 @@ function scoreClass(score: number) {
   if (score >= 80) return 'score-high'
   if (score >= 60) return 'score-medium'
   return 'score-low'
-}
-
-function compareScores(first: TaskOut, second: TaskOut): number {
-  const firstScore = first.status === 'success' ? first.score : -1
-  const secondScore = second.status === 'success' ? second.score : -1
-  return firstScore - secondScore
 }
 
 function formatDuration(ms: number): string {
@@ -473,8 +467,9 @@ onUnmounted(() => {
 .tc-band[data-status='failed'] { background: var(--sev-severe, #dc4961); }
 .tc-band[data-status='cancelled'] { background: var(--gray-200, #e3e6eb); }
 .tc-main { display: grid; gap: 5px; min-width: 0; }
+.tc-name:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 3px; }
 .tc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tc-name { font-size: 13.5px; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-name { background: transparent; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; font-family: inherit; font-size: 13.5px; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
 .tc-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-progress { position: relative; height: 5px; border-radius: 999px; background: var(--gray-100, #eef0f4); overflow: hidden; max-width: 360px; }

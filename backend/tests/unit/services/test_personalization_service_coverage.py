@@ -251,7 +251,8 @@ def test_profile_create_update_serialization_and_summary_helpers(db):
     assert data["experience_level"] == "advanced"
     assert data["auto_learn"] is False
     assert data["derived_stats"] == {"top_languages": ["Python"]}
-    assert profile_service.get_summary_text(db, user.id) == "资深 Python 开发者"
+    assert "自述兴趣: 开源项目" in profile_service.get_summary_text(db, user.id)
+    assert "资深 Python 开发者" not in profile_service.get_summary_text(db, user.id)
     assert profile_service.get_summary_text(db, 999999) == ""
 
     profile_service.update_profile(
@@ -873,6 +874,7 @@ def test_forum_assist_and_chat_wrapper_use_llm_or_safe_fallback(db, monkeypatch)
     monkeypatch.setattr(personalization_service.knowledge_service, "retrieve", fake_retrieve)
     monkeypatch.setattr(personalization_service.profile_service, "get_summary_text", fake_summary)
     monkeypatch.setattr(api_resolver, "resolve_api_config", fake_resolve)
+    monkeypatch.setattr(personalization_service, "resolve_subagent_config", lambda _db, cfg, **kwargs: cfg)
     monkeypatch.setattr(deepseek_agent, "DeepSeekAgent", FakeAgent)
 
     result = personalization_service.assist_forum_draft(db, 7, "标题", "草稿")

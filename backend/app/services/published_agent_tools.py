@@ -15,6 +15,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.models.user import User
 from app.services import agent_studio_service, capability_catalog_service, rbac_service
+from app.services.agent_model_service import resolve_subagent_config
 from app.services.ai_usage_context import current_attribution, usage_context
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 from app.utils.api_resolver import resolve_api_config
@@ -129,7 +130,7 @@ def invoke_published_agent(
         "不得执行命令、访问网络、写文件或修改数据。\n\n"
         f"{system_prompt}"
     )
-    client = DeepSeekAgent(api_config=resolve_api_config(db, user.id))
+    client = DeepSeekAgent(api_config=resolve_subagent_config(db, resolve_api_config(db, user.id)))
     with usage_context(int(user.id), current_attribution(int(user.id)), db=db):
         raw, meta = client.call_raw(
             system_prompt=system_prompt,

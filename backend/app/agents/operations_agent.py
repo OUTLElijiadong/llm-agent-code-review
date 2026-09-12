@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.models.user import User
 from app.services import ops_service
+from app.services.agent_model_service import resolve_subagent_config
 from app.utils.api_resolver import resolve_api_config
 
 
@@ -77,7 +78,8 @@ class OperationsAgent(BaseAgent):
         )
         prompt = json.dumps(facts, ensure_ascii=False, default=str)
         self.bind_usage_source(db, actor)
-        result = self.call(prompt, ctx, api_config=resolve_api_config(db, None))
+        config = resolve_subagent_config(db, resolve_api_config(db, None), agent_name=self.name)
+        result = self.call(prompt, ctx, api_config=config)
         self._log_call(
             db,
             user_id=actor.id if actor else None,

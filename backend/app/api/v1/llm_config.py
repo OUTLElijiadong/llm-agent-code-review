@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import require_super_admin
-from app.core.exceptions import ValidationError
 from app.models.user import User
 from app.schemas.api_config import ApiConfigTestIn, ApiConfigTestOut
 from app.schemas.common import Resp
@@ -146,13 +145,25 @@ def list_models(payload: LlmModelsIn, db: Session = Depends(get_db),
 
 
 def _registry_view(db: Session) -> ModelRegistryOut:
+    roles = system_config_service.get_model_assignment_roles()
+    assignments = system_config_service.get_model_assignments(db)
+    registry = {item["id"]: item for item in system_config_service.get_model_registry(db)}
+    warnings = []
+    for role, model_id in assignments.items():
+        if (
+            role not in roles or model_id not in registry
+            or (role == "chat_vision" and not registry[model_id]["vision"])
+        ):
+            warnings.append(f"分配 {role} → {model_id} 已失效，运行使用默认模型，请清除或重新分配")
+            roles.setdefault(role, f"已失效分配：{role}")
     return ModelRegistryOut(
         models=[
             ModelRegistryItemOut(**item)
             for item in system_config_service.get_model_registry(db)
         ],
-        assignments=system_config_service.get_model_assignments(db),
-        roles=dict(system_config_service.MODEL_ASSIGNMENT_ROLES),
+        assignments=assignments,
+        roles=roles,
+        warnings=warnings,
     )
 
 
@@ -176,20 +187,34 @@ def sync_registry(payload: LlmModelsIn, db: Session = Depends(get_db),
             ),
             message="配置不完整",
         )
+    effective = _resolve_draft(LlmTestIn(), db)
+    if (
+        _endpoint_identity(draft["base_url"]) != _endpoint_identity(effective["base_url"])
+        or draft["api_key"] != effective["api_key"]
+    ):
+        return Resp(data=ModelRegistrySyncOut(
+            success=False,
+            message="端点或凭据尚未生效，请先保存全局配置，再同步可分配的模型",
+            models=[ModelRegistryItemOut(**item) for item in system_config_service.get_model_registry(db)],
+        ))
     result = api_config_service.fetch_models(LlmModelsIn(**draft))
-    models, added = system_config_service.merge_pulled_models(db, result.models)
-    fetched = result.models if result.success else []
+    success = result.success and not result.fallback
+    if success:
+        models, added = system_config_service.merge_pulled_models(db, result.models)
+    else:
+        models, added = system_config_service.get_model_registry(db), []
+    fetched = result.models if success else []
     message = (
         f"已拉取 {len(fetched)} 个模型,新增 {len(added)} 个"
-        if result.success else f"拉取失败:{result.message},注册表保持不变"
+        if success else f"未取得最新模型列表:{result.message},注册表保持不变"
     )
     audit_service.log(
         db, admin, "llm_model_registry_sync",
         target_type="system_config", target_id="model_registry",
-        detail=f"模型注册表同步 success={result.success} fetched={len(fetched)} added={added[:10]}",
+        detail=f"模型注册表同步 success={success} fetched={len(fetched)} added={added[:10]}",
     )
     return Resp(data=ModelRegistrySyncOut(
-        success=result.success,
+        success=success,
         message=message,
         fetched=fetched,
         added=added,
@@ -210,6 +235,10 @@ def replace_registry(payload: ModelRegistryReplaceIn, db: Session = Depends(get_
             "id": item.id,
             "label": item.label or item.id,
             "vision": bool(item.vision),
+            "capability_source": (
+                prior.get("capability_source", "manual")
+                if prior and bool(item.vision) == bool(prior.get("vision")) else "manual"
+            ),
             "source": prior.get("source", "manual"),
             "added_at": prior.get("added_at", ""),
         })
@@ -226,10 +255,7 @@ def replace_registry(payload: ModelRegistryReplaceIn, db: Session = Depends(get_
 def update_assignments(payload: ModelAssignmentsIn, db: Session = Depends(get_db),
                        admin: User = Depends(require_super_admin)):
     """更新角色->模型分配;空串清除。"""
-    try:
-        system_config_service.update_model_assignments(db, payload.assignments)
-    except ValidationError as exc:
-        return Resp(message=exc.message)
+    system_config_service.update_model_assignments(db, payload.assignments)
     audit_service.log(
         db, admin, "llm_model_assignments_update",
         target_type="system_config", target_id="model_assignments",

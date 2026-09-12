@@ -24,11 +24,7 @@ export default defineConfig({
     // 「global 已有同名键」便跳过 jsdom 实现的注入,测试里 localStorage 恒为
     // undefined。在 worker 启动 Node 时临时移除这两个键,让 jsdom 正常接管。
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        execArgv: ['--import', 'data:text/javascript,delete globalThis.localStorage;delete globalThis.sessionStorage'],
-      },
-    },
+    execArgv: ['--import', 'data:text/javascript,delete globalThis.localStorage;delete globalThis.sessionStorage'],
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.ts'],
     clearMocks: true,

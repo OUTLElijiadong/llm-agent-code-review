@@ -26,6 +26,7 @@ class TaskOut(BaseModel):
     review_type: str
     status: str
     total_files: int
+    processed_files: int
     total_issues: int
     report_issue_summary: Optional[dict] = None
     severe_issues: int

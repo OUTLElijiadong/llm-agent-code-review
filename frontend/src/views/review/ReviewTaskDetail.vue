@@ -85,7 +85,7 @@
           <span class="score-out font-mono">/100</span>
         </div>
         <div class="score-meta">
-          <div class="score-label">{{ isSandboxReport ? '测试评分' : '代码质量' }}</div>
+          <div class="score-label">{{ isTestScore ? '测试评分' : '代码质量' }}</div>
           <div class="score-status" :style="{ color: scoreFlatColor(displayScore) }">{{ riskLevel }}</div>
         </div>
       </div>
@@ -414,6 +414,7 @@ let detailRequest: { generation: number; promise: Promise<void> } | null = null
 let issueRequest: { key: string; promise: Promise<void> } | null = null
 const task = ref<TaskDetailOut | null>(null)
 const isSandboxReport = computed(() => task.value?.review_type === 'sandbox_test')
+const isTestScore = computed(() => ['sandbox_test', 'pentest'].includes(task.value?.review_type || ''))
 function tallyCount(level: string, fallback: number | undefined): number | string {
   if (!isSandboxReport.value) return fallback ?? 0
   const summary = task.value?.report_issue_summary
@@ -577,7 +578,7 @@ const severityChips = computed(() => {
 const dimChips = computed(() => dimMeta)
 
 const riskLevel = computed(() => {
-  if (isSandboxReport.value) return '测试得分不代表安全风险评级'
+  if (isTestScore.value) return '测试得分不代表安全风险评级'
   const score = displayScore.value
   if (score === null) return ''
   if (score >= 90) return '优秀 · 以审查范围为准'
@@ -1195,7 +1196,10 @@ onUnmounted(() => {
   height: 58px;
   border-radius: 50%;
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 2px;
   justify-content: center;
   color: #fff;
   font-weight: 600;

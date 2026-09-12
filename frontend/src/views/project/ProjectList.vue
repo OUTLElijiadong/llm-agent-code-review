@@ -173,7 +173,7 @@
               <span v-else class="muted font-mono" title="尚未审查或后端未返回评分">—</span>
             </td>
             <td>
-              <span class="file-count font-mono">{{ row.file_count }}</span>
+              <span class="file-count font-mono">{{ projectFileSummary(row) }}</span>
             </td>
             <td>
               <span v-if="(row.agent_run_count ?? 0) > 0" class="font-mono muted-2" :title="formatDate(row.last_agent_run_at ?? undefined) || ''">
@@ -219,7 +219,7 @@
           </span>
           <div class="head-meta">
             <div class="card-name">{{ row.project_name }}</div>
-            <div class="card-sub font-mono">{{ row.language || 'unknown' }} · {{ row.file_count }} files</div>
+            <div class="card-sub font-mono">{{ row.language || '未识别语言' }} · {{ projectFileSummary(row) }}</div>
           </div>
           <span class="status-pill" :class="`s-${row.status}`">
             <span class="pill-dot"></span>{{ row.status === 'active' ? '活跃' : '归档' }}
@@ -358,6 +358,7 @@ import {
 import { uploadFolder } from '@/api/codeFile'
 import { useUserStore } from '@/stores/user'
 import type { ProjectOut } from '@/types/project'
+import { projectFileSummary } from '@/utils/projectPresentation'
 import type {
   RemoteProjectImportInput,
   RemoteProjectImportTask,
@@ -485,6 +486,7 @@ function languageColor(lang?: string): string {
   if (!lang) return 'linear-gradient(135deg,#6E7689,#9BA3B0)'
   return langPalette[lang.toLowerCase()] ?? 'linear-gradient(135deg,#5B58E8,#8E88F5)'
 }
+
 
 function displayScore(row: ProjectOut): number {
   // v2.0: 必须来自后端真实评分,不再用 id hash 派生假数字

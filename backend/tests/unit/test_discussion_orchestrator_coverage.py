@@ -1403,7 +1403,12 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
         """
         return "trace-roundtable"
 
-    monkeypatch.setattr(module, "DeepSeekAgent", create_agent)
+    monkeypatch.setattr(
+        module, "_build_discussion_agents",
+        lambda _user_id, _profiles: (
+            create_agent(), {"code_reviewer": create_agent(), "security_sentinel": create_agent()},
+        ),
+    )
     monkeypatch.setattr(module, "build_discussion_environment", build_environment)
     monkeypatch.setattr(module, "_create_review_task", create_task)
     monkeypatch.setattr(module, "_finalize_review", finalize_review)
@@ -1504,7 +1509,10 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
     def fail_environment(**_kwargs: Any) -> Any:
         raise RuntimeError("environment disabled")
 
-    monkeypatch.setattr(module, "DeepSeekAgent", lambda: RecordingAgent())
+    monkeypatch.setattr(
+        module, "_build_discussion_agents",
+        lambda _user_id, _profiles: (RecordingAgent(), {"code_reviewer": RecordingAgent()}),
+    )
     monkeypatch.setattr(module, "build_discussion_environment", fail_environment)
     monkeypatch.setattr(module, "_create_review_task", create_task)
     monkeypatch.setattr(module, "_cancel_review_task", cancel_review)
@@ -1613,7 +1621,12 @@ async def test_start_discussion_handles_missing_session_and_setup_failures(
         """
         return None
 
-    monkeypatch.setattr(module, "DeepSeekAgent", create_agent)
+    monkeypatch.setattr(
+        module, "_build_discussion_agents",
+        lambda _user_id, _profiles: (
+            create_agent(), {"code_reviewer": create_agent(), "security_sentinel": create_agent()},
+        ),
+    )
     monkeypatch.setattr(module, "build_discussion_environment", fail_environment)
     monkeypatch.setattr(module, "_create_review_task", fail_task)
     monkeypatch.setattr(module.asyncio, "sleep", no_sleep)

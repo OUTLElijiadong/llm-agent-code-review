@@ -12,6 +12,7 @@ export interface UserProfile {
   derived_summary: string
   derived_stats: Record<string, unknown>
   last_learned_at?: string | null
+  should_prompt?: boolean
   preference_prompted?: number
   preference_prompted_at?: string | null
   update_time?: string | null
@@ -31,6 +32,8 @@ export function updateProfile(data: Partial<{
   preferred_language: string
   experience_level: string
   auto_learn: boolean
+  preference_prompted: 1 | 2
+  clear_learned: boolean
 }>): Promise<UserProfile> {
   return put<UserProfile>('/me/profile', data)
 }

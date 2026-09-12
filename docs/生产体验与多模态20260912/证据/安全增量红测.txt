@@ -1,0 +1,25 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/Prism-production-ux-20260912/backend
+configfile: pyproject.toml
+plugins: anyio-4.12.1, cov-5.0.0, asyncio-0.26.0
+asyncio: mode=auto, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 8 items
+
+tests/test_security_catalog_current.py .......F                          [100%]
+
+=================================== FAILURES ===================================
+_ test_cve_refresh_keeps_independent_verification_date_and_latest_official_record _
+
+    def test_cve_refresh_keeps_independent_verification_date_and_latest_official_record():
+        """分类快照日期与参考记录重核日期分开，保留官方新增ADP及准确时间。"""
+        path = Path(__file__).resolve().parents[1] / 'app/constants/data/verified_advisories.json'
+        data = json.loads(path.read_text())
+        metadata = catalog_metadata()
+>       assert metadata['cve_verified_at'] == data['verified_at'] == '2026-09-12'
+E       KeyError: 'cve_verified_at'
+
+tests/test_security_catalog_current.py:128: KeyError
+=========================== short test summary info ============================
+FAILED tests/test_security_catalog_current.py::test_cve_refresh_keeps_independent_verification_date_and_latest_official_record
+========================= 1 failed, 7 passed in 0.37s ==========================

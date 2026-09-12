@@ -11,11 +11,10 @@ ENV VITE_APP_VERSION=${VITE_APP_VERSION}
 ENV VITE_APP_RELEASE_SHA=${VITE_APP_RELEASE_SHA}
 RUN npm ci --registry=${NPM_CONFIG_REGISTRY}
 COPY . .
-# 生产构建跳过 vue-tsc:服务器内存有限(1.9G),vue-tsc+vite 并联易 OOM。
-# 类型检查已在本地 CI/开发期通过(vue-tsc --noEmit),镜像内只做 vite 打包。
-# NODE_OPTIONS 限堆内存,防止 vite 构建期 OOM。
+# npm run build 先完成类型检查，再顺序运行 Vite；任一步失败均阻止镜像发布。
+# 保留堆上限，两个进程不会同时常驻，不以服务器内存为由跳过类型门禁。
 ENV NODE_OPTIONS=--max-old-space-size=1536
-RUN npx vite build
+RUN npm run build
 
 FROM nginx:1.27-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html

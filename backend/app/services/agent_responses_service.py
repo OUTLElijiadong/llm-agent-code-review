@@ -2445,6 +2445,8 @@ class AgentResponsesService:
         run_id: str,
         event_sink: Optional[EventSink] = None,
     ) -> RuntimeResult:
+        if self._db.query(AgentResponseRun).filter(AgentResponseRun.run_id == run_id).first() is not None:
+            raise InvalidRunStateError("运行标识已存在，请恢复原任务或使用新的运行标识")
         # 多模态:抽取消息内图片,留档并把该条消息升级为 content parts;
         # 含图运行切换视觉模型,仅本次运行生效。
         vision_model = ""
@@ -2458,6 +2460,7 @@ class AgentResponsesService:
         if image_urls:
             from app.services import multimodal_service
 
+            vision_model = multimodal_service.resolve_vision_model(self._db)
             assets = multimodal_service.store_message_images(
                 self._db,
                 user_id=int(self._user.id),
@@ -2474,7 +2477,6 @@ class AgentResponsesService:
                     content = multimodal_service.multimodal_content_parts(content, assets)  # type: ignore[assignment]
                 prepared_messages.append({"role": message.get("role", "user"), "content": content})
             image_assets_map = multimodal_service.image_asset_map(assets)
-            vision_model = multimodal_service.resolve_vision_model(self._db)
         executor, runtime = await self._runtime(
             run_id, event_sink, vision_model=vision_model, image_assets=image_assets_map,
         )
@@ -2504,7 +2506,10 @@ class AgentResponsesService:
         用户可选填取消原因，随检查点持久化，用于历史回看与原因沉淀；
         有原因时额外累计一次带维度的事件计数。
         """
-        _, runtime = await self._runtime(run_id, None)
+        # 取消只修改本会话检查点，不依赖模型配置、MCP 或图片是否仍完整。
+        runtime = DeepSeekResponsesRuntime(
+            transport=None, tool_executor=None, checkpoint_store=self._store, model="",
+        )
         result = await runtime.cancel(run_id, reason=reason)
         observe_event("xiaoling_cancel", labels={"surface": self._surface})
         if reason.strip():
@@ -2562,6 +2567,23 @@ class AgentResponsesService:
         image_assets: Optional[Mapping[str, str]] = None,
     ) -> tuple[PrismToolExecutor, DeepSeekResponsesRuntime]:
         config = resolve_api_config(self._db, self._user.id)
+        from app.services import multimodal_service
+        from app.services.agent_model_service import resolve_agent_model
+
+        # 只有本账号、本界面、本会话能恢复图片与检查点。先校验归属再读资产。
+        existing = self._db.query(AgentResponseRun).filter(AgentResponseRun.run_id == run_id).first()
+        checkpoint = None
+        if existing is not None:
+            self._store._assert_owner(existing)
+            checkpoint = await self._store.load(run_id)
+        if checkpoint and multimodal_service.transcript_has_images(checkpoint.transcript):
+            vision_model = checkpoint.model
+            image_assets = multimodal_service.load_run_image_assets(
+                self._db, user_id=int(self._user.id), run_id=run_id, surface=self._surface,
+            )
+        # 视觉分配属于管理员管理的平台端点；不将平台模型名配上用户自有端点/Key。
+        if vision_model and config.source == "user":
+            config = resolve_api_config(self._db)
         mcp = McpToolProvider(db=self._db, user=self._user)
         executor = PrismToolExecutor(
             self._db,
@@ -2579,11 +2601,7 @@ class AgentResponsesService:
         # 只有用户/全局自定义配置才覆盖该默认值。系统默认 config.model 是子 Agent 的
         # deepseek-v4-flash,不能在这里覆盖成 flash,否则模型分层永远不会生效。
         # AiCallLog 的 model_name 兜底值也复用该变量,因此模型分层调整会同步落到调用日志。
-        fallback_model = (
-            config.model
-            if config.source in {"user", "global"}
-            else settings.deepseek_orchestrator_model
-        )
+        fallback_model = resolve_agent_model(self._db, surface=self._surface, config=config)
         # 多模态:消息含图片时本运行切换视觉模型(角色分配 chat_vision 优先);
         # 仅本次运行生效,任务结束后同会话下一条消息自动回到默认模型配置。
         # 视觉运行不做 pro→flash 回退,避免回退到不支持图片的模型。

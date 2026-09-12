@@ -1,167 +1,115 @@
 <script setup lang="ts">
-/**
- * 小菱偏好询问弹窗:非管理员且尚未做过偏好设置的用户,首次进入工作台时
- * 由小菱主动询问基础偏好(技术栈/经验水平/关注方向/兴趣),写入用户画像
- * (PUT /me/profile),立即进入个性化注入链(聊天/审查)。
- * 更多长期爱好不靠本弹窗——由系统隐式学习(画像 relearn)持续沉淀。
- */
-import { computed, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-
-import { markPreferencePrompted, updateProfile } from '@/api/profile'
+import { reactive, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { getProfile, markPreferencePrompted, updateProfile } from '@/api/profile'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
 
 const emit = defineEmits<{ (e: 'closed'): void }>()
-
 const visible = defineModel<boolean>({ default: false })
-
-const TECH_OPTIONS = ['Python', 'JavaScript', 'TypeScript', 'Java', 'Go', 'C/C++', 'PHP', 'Rust', '前端', '后端', 'DevOps']
-const LEVEL_OPTIONS = [
-  { label: '入门新手', value: 'beginner' },
-  { label: '有一些经验', value: 'intermediate' },
-  { label: '老手了', value: 'advanced' },
-]
-const FOCUS_OPTIONS = ['安全漏洞', '性能', '代码规范', '架构设计', '潜在Bug', '可维护性']
-const HOBBY_OPTIONS = ['看动漫', '打游戏', '写博客', '搞硬件', '摄影', '听歌', '健身', '读小说']
-
-const form = reactive({
-  tech_stack: [] as string[],
-  experience_level: '',
-  focus_areas: [] as string[],
-  hobbies: [] as string[],
-})
+const TECH = ['Python', 'JavaScript', 'TypeScript', 'Java', 'Go', 'Rust']
+const FOCUS = ['安全漏洞', '性能', '代码规范', '架构设计', '潜在Bug', '可维护性']
+const form = reactive({ tech_stack: '', hobbies: '', goals: '', preferred_language: '', experience_level: '', focus_areas: [] as string[], auto_learn: true })
+const loading = ref(false)
 const saving = ref(false)
+const loaded = ref(false)
+const error = ref('')
+const summary = ref('')
+const clearLearned = ref(false)
+let generation = 0
 
-const canSave = computed(() =>
-  form.tech_stack.length > 0 || form.experience_level !== '' || form.focus_areas.length > 0 || form.hobbies.length > 0,
-)
-
-function toggle(list: string[], item: string) {
-  const index = list.indexOf(item)
-  if (index >= 0) list.splice(index, 1)
-  else list.push(item)
+async function load() {
+  const request = ++generation
+  loading.value = true
+  loaded.value = false
+  error.value = ''
+  try {
+    const profile = await getProfile()
+    if (request !== generation || !visible.value) return
+    for (const key of ['tech_stack', 'hobbies', 'goals', 'preferred_language', 'experience_level'] as const) form[key] = profile[key]
+    form.focus_areas = [...profile.focus_areas]
+    form.auto_learn = profile.auto_learn
+    summary.value = profile.derived_summary
+    clearLearned.value = false
+    loaded.value = true
+  } catch { error.value = '偏好读取失败，原有设置未改变，请重新读取。' }
+  finally { if (request === generation) loading.value = false }
 }
+watch(visible, open => {
+  if (open) void load()
+  else { generation += 1; emit('closed') }
+}, { immediate: true })
 
+function addTech(value: string) {
+  const current = form.tech_stack.split(',').map(v => v.trim()).filter(Boolean)
+  form.tech_stack = [...new Set([...current, value])].join(',')
+}
+function toggleFocus(value: string) {
+  const index = form.focus_areas.indexOf(value)
+  if (index < 0) form.focus_areas.push(value)
+  else form.focus_areas.splice(index, 1)
+}
 async function save() {
+  if (saving.value || !loaded.value) return
   saving.value = true
+  error.value = ''
   try {
-    await updateProfile({
-      tech_stack: form.tech_stack.join(','),
-      experience_level: form.experience_level || undefined,
-      focus_areas: form.focus_areas,
-      hobbies: form.hobbies.join(','),
-    })
-    await markPreferencePrompted(1)
-    ElMessage.success('小菱记住你的偏好了,之后会更懂你~')
+    await updateProfile({ ...form, preference_prompted: 1, clear_learned: clearLearned.value })
+    ElMessage.success('偏好已保存，小菱会按你的设置陪伴你')
     visible.value = false
-    emit('closed')
-  } finally {
-    saving.value = false
-  }
+  } catch { error.value = '保存失败，已保留你的填写内容，请重试。' }
+  finally { saving.value = false }
 }
-
 async function skip() {
+  if (saving.value) return
   saving.value = true
-  try {
-    await markPreferencePrompted(2)
-    visible.value = false
-    emit('closed')
-  } catch {
-    visible.value = false
-  } finally {
-    saving.value = false
-  }
+  error.value = ''
+  try { await markPreferencePrompted(2); visible.value = false }
+  catch { error.value = '未能保存不再提醒状态，请重试，或选择稍后再说。' }
+  finally { saving.value = false }
 }
-
-async function later() {
-  // 稍后再说:不落库,本会话不再弹,下次登录还会温和提醒
-  visible.value = false
-  emit('closed')
-}
-
 </script>
 
 <template>
-  <el-dialog v-model="visible" width="520px" :show-close="false" align-center class="pref-dialog" append-to-body>
-    <div class="pref-hero">
-      <PrismMascot :size="64" status="idle" />
-      <div>
-        <h3 class="font-display">你好呀,我是小菱 ✨</h3>
-        <p>花 20 秒告诉我你的偏好,我审查代码、陪你聊天时会更懂你。</p>
-      </div>
-    </div>
-
-    <div class="pref-section">
-      <p class="q"><b>1.</b> 你常用的技术栈?(可多选)</p>
-      <div class="chips">
-        <button v-for="t in TECH_OPTIONS" :key="t" type="button" class="chip" :class="{ on: form.tech_stack.includes(t) }" @click="toggle(form.tech_stack, t)">{{ t }}</button>
-      </div>
-    </div>
-
-    <div class="pref-section">
-      <p class="q"><b>2.</b> 编程经验大概在哪个阶段?</p>
-      <div class="chips">
-        <button v-for="l in LEVEL_OPTIONS" :key="l.value" type="button" class="chip" :class="{ on: form.experience_level === l.value }" @click="form.experience_level = l.value">{{ l.label }}</button>
-      </div>
-    </div>
-
-    <div class="pref-section">
-      <p class="q"><b>3.</b> 审查时最关注什么?(可多选)</p>
-      <div class="chips">
-        <button v-for="f in FOCUS_OPTIONS" :key="f" type="button" class="chip" :class="{ on: form.focus_areas.includes(f) }" @click="toggle(form.focus_areas, f)">{{ f }}</button>
-      </div>
-    </div>
-
-    <div class="pref-section">
-      <p class="q"><b>4.</b> 平时喜欢?(可多选,也可以先跳过~)</p>
-      <div class="chips">
-        <button v-for="h in HOBBY_OPTIONS" :key="h" type="button" class="chip" :class="{ on: form.hobbies.includes(h) }" @click="toggle(form.hobbies, h)">{{ h }}</button>
-      </div>
-    </div>
-
-    <template #footer>
-      <div class="pref-footer">
-        <button class="link-btn ghost" type="button" @click="later">稍后再说</button>
-        <button class="link-btn ghost" type="button" @click="skip">跳过</button>
-        <button class="link-btn primary" type="button" :disabled="!canSave || saving" @click="save">
-          {{ saving ? '保存中…' : '好啦,记住吧' }}
-        </button>
-      </div>
-    </template>
+  <el-dialog v-model="visible" title="和小菱聊聊你的偏好" width="min(520px, calc(100vw - 24px))" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving" align-center append-to-body>
+    <div class="pref-hero"><PrismMascot :size="64" status="idle" /><div><h3>你好呀，我是小菱 ✨</h3><p>愿意告诉我一点你的习惯吗？随时可以修改，也可以跳过。</p></div></div>
+    <p v-if="loading" role="status">正在读取你的设置…</p>
+    <div v-if="error" role="alert" class="pref-error">{{ error }}<el-button v-if="!loaded" text @click="load">重新读取</el-button></div>
+    <fieldset :disabled="loading || saving || !loaded" class="pref-fields">
+      <label for="pref-tech">常用技术栈</label>
+      <input id="pref-tech" v-model="form.tech_stack" maxlength="2000" placeholder="例如 Python、Vue，也可以自由填写">
+      <div class="chips"><button v-for="item in TECH" :key="item" type="button" @click="addTech(item)">+ {{ item }}</button></div>
+      <label for="pref-level">编程经验</label>
+      <select id="pref-level" v-model="form.experience_level"><option value="">暂不设置</option><option value="beginner">入门新手</option><option value="intermediate">有一些经验</option><option value="advanced">经验丰富</option></select>
+      <p class="field-label">审查关注方向</p>
+      <div class="chips"><button v-for="item in [...new Set([...FOCUS, ...form.focus_areas])]" :key="item" type="button" :aria-pressed="form.focus_areas.includes(item)" @click="toggleFocus(item)">{{ item }}</button></div>
+      <label for="pref-hobby">平时喜欢什么？</label><input id="pref-hobby" v-model="form.hobbies" maxlength="2000" placeholder="听歌、游戏、摄影…也可以留空">
+      <details><summary>更多设置与小菱的学习记录</summary>
+        <label for="pref-goal">学习或工作目标</label><input id="pref-goal" v-model="form.goals" maxlength="2000">
+        <label for="pref-language">偏好语言</label><input id="pref-language" v-model="form.preferred_language" maxlength="50">
+        <label class="check"><input v-model="form.auto_learn" type="checkbox">允许根据本人的使用记录学习</label>
+        <p>仅汇总本人项目语言、问题处理和社区使用记录；兴趣以你的自述为准。记录保存在你的个人知识库。</p>
+        <p>{{ summary || '暂无学习记录' }}</p>
+        <label class="check"><input v-model="clearLearned" type="checkbox">保存时清除已有学习记录</label>
+      </details>
+    </fieldset>
+    <template #footer><div class="pref-footer">
+      <el-button :disabled="saving" @click="visible = false">稍后再说</el-button>
+      <el-button :disabled="saving" @click="skip">不再提醒</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!loaded || loading" @click="save">保存偏好</el-button>
+    </div></template>
   </el-dialog>
 </template>
 
-<style scoped lang="scss">
-.pref-hero {
-  display: flex; gap: 16px; align-items: center; padding: 6px 4px 16px;
-  border-bottom: 1px dashed var(--gray-200); margin-bottom: 14px;
-  h3 { margin: 0 0 4px; font-size: 17px; }
-  p { margin: 0; color: var(--gray-500); font-size: 12.5px; }
-}
-.pref-section { margin-bottom: 13px; }
-.q { margin: 0 0 7px; font-size: 13px; color: var(--gray-700); b { color: var(--brand-500); margin-right: 2px; } }
-.chips { display: flex; flex-wrap: wrap; gap: 7px; }
-.chip {
-  padding: 5px 13px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
-  border: 1px solid var(--gray-200); background: #fff; color: var(--gray-600);
-  transition: all .16s ease;
-  &:hover { border-color: var(--brand-300, #a8c4fa); color: var(--brand-500); }
-  &.on {
-    background: var(--brand-50, #eef4ff); border-color: var(--brand-400, #6f9df7);
-    color: var(--brand-600, #2f5ce0); font-weight: 600;
-  }
-}
-.pref-footer { display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
-.link-btn {
-  padding: 8px 18px; border-radius: 999px; font-size: 13px; cursor: pointer; border: 1px solid transparent;
-  &.ghost { background: none; color: var(--gray-500); &:hover { color: var(--gray-700); } }
-  &.primary {
-    background: linear-gradient(135deg, var(--brand-500, #4078f4), var(--brand-600, #2f5ce0));
-    color: #fff; font-weight: 600;
-    &:disabled { opacity: .5; cursor: not-allowed; }
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .chip { transition: none; }
-}
+<style scoped>
+.pref-hero { display:flex; gap:14px; align-items:center; margin-bottom:16px; }
+h3 { margin:0 0 6px; } p { font-size:13px; line-height:1.7; color:var(--el-text-color-secondary); }
+.pref-fields { border:0; margin:0; padding:0; min-width:0; }
+label,.field-label { display:block; margin:12px 0 6px; font-size:13px; }
+input:not([type=checkbox]),select { width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--el-border-color); border-radius:10px; background:var(--el-bg-color); color:var(--el-text-color-primary); }
+.chips { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+.chips button { border:1px solid var(--el-border-color); border-radius:20px; background:var(--el-fill-color-blank); padding:6px 12px; color:var(--el-text-color-primary); cursor:pointer; }
+.chips button[aria-pressed=true] { color:var(--el-color-primary); border-color:var(--el-color-primary); background:var(--el-color-primary-light-9); }
+.check { display:flex; gap:8px; align-items:center; } details { margin-top:16px; } summary { cursor:pointer; font-size:13px; }
+.pref-footer { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }.pref-footer :deep(.el-button) { margin:0; }
+.pref-error { padding:10px; border-radius:8px; background:var(--el-color-danger-light-9); color:var(--el-color-danger); }
 </style>

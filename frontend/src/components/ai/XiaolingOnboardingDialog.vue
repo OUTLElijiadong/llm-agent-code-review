@@ -3,9 +3,11 @@
  * 小菱新手引导:注册后首次登录(first_login)弹一次,4 步带按钮的真实跳转引导。
  * 老用户/常用用户后端 first_login=false,永不弹;关闭后本账号不再弹。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { useUserStore } from '@/stores/user'
+import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
 
 const visible = defineModel<boolean>({ default: false })
@@ -13,6 +15,7 @@ const visible = defineModel<boolean>({ default: false })
 const emit = defineEmits<{ (e: 'finished'): void }>()
 
 const router = useRouter()
+const userStore = useUserStore()
 const step = ref(0)
 
 const STEPS = [
@@ -44,22 +47,22 @@ const isLast = computed(() => step.value === STEPS.length - 1)
 function next() {
   if (isLast.value) {
     visible.value = false
-    emit('finished')
     return
   }
   step.value += 1
 }
 
+watch(visible, open => { if (open) step.value = 0; else emit('finished') })
+
 function go(action: string) {
-  if (!action) return
+  if (!action || !isNavigationPathAllowed(router, action, userStore)) return
   visible.value = false
-  emit('finished')
   router.push(action)
 }
 </script>
 
 <template>
-  <el-dialog v-model="visible" width="440px" :show-close="false" align-center class="onboard-dialog" append-to-body>
+  <el-dialog v-model="visible" width="min(440px, calc(100vw - 24px))" :show-close="false" align-center class="onboard-dialog" append-to-body>
     <div class="onboard-hero">
       <span class="mascot-stage"><PrismMascot :size="76" :status="step === 0 ? 'waiting' : 'idle'" /></span>
       <div class="step-dots" aria-label="引导进度">
@@ -72,9 +75,9 @@ function go(action: string) {
 
     <template #footer>
       <div class="onboard-footer">
-        <button class="ghost-btn" type="button" @click="visible = false; emit('finished')">跳过引导</button>
-        <button v-if="current.action" class="primary-btn" type="button" @click="go(current.action)">{{ current.actionText }} →</button>
-        <button v-else class="primary-btn" type="button" @click="next">{{ isLast ? '开始使用 ✨' : '下一步' }}</button>
+        <button class="ghost-btn" type="button" @click="visible = false">跳过引导</button>
+        <button v-if="current.action && isNavigationPathAllowed(router, current.action, userStore)" class="primary-btn" type="button" @click="go(current.action)">{{ current.actionText }} →</button>
+        <button class="primary-btn" type="button" @click="next">{{ isLast ? '开始使用 ✨' : '下一步' }}</button>
       </div>
     </template>
   </el-dialog>
@@ -97,7 +100,7 @@ function go(action: string) {
 }
 .onboard-title { margin: 10px 0 8px; text-align: center; font-size: 18px; }
 .onboard-line { margin: 0 0 6px; text-align: center; color: var(--gray-600); font-size: 13px; line-height: 1.75; }
-.onboard-footer { display: flex; justify-content: space-between; align-items: center; }
+.onboard-footer { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
 .ghost-btn {
   background: none; border: none; color: var(--gray-400); font-size: 12.5px; cursor: pointer;
   &:hover { color: var(--gray-600); }

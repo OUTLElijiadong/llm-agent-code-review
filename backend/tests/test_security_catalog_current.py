@@ -1,16 +1,21 @@
 """官方快照、扫描新标签和历史标签边界的回归验证。"""
-from collections import Counter
+
 import importlib.util
 import json
-from pathlib import Path
 import re
+from collections import Counter
+from pathlib import Path
 
 from app.agents.security_sentinel_agent import SecuritySentinelAgent
 from app.ai.result_parser import _infer_owasp_cwe, parse
 from app.ai.security_patterns import list_patterns
 from app.ai.security_static_rules import list_static_rules
 from app.constants.security_catalog import (
-    OWASP_CATEGORIES, catalog_metadata, get_cwe, owasp_for_cwe, owasp_reference,
+    OWASP_CATEGORIES,
+    catalog_metadata,
+    get_cwe,
+    owasp_for_cwe,
+    owasp_reference,
 )
 from app.models.knowledge_chunk import KnowledgeChunk  # noqa: F401 -- register isolated tables
 from app.models.knowledge_doc import KnowledgeDoc  # noqa: F401
@@ -47,7 +52,15 @@ def test_ssrf_injection_exception_and_secret_categories():
 
 
 def test_historical_model_result_label_is_not_rewritten():
-    result = parse(json.dumps({"issues": [{"issue_type": "安全漏洞", "title": "SQL 注入", "owasp": "A03:2021-Injection", "cwe": "CWE-89"}]}))
+    result = parse(
+        json.dumps(
+            {
+                "issues": [
+                    {"issue_type": "安全漏洞", "title": "SQL 注入", "owasp": "A03:2021-Injection", "cwe": "CWE-89"}
+                ]
+            }
+        )
+    )
     assert result.issues[0].owasp == "A03:2021-Injection"
     assert owasp_reference(result.issues[0].owasp) == "https://owasp.org/Top10/2021/"
 
@@ -61,6 +74,7 @@ def test_scan_prompt_contains_actual_current_categories():
 
 def test_verified_cve_reference_set_and_prompt_loading():
     from app.ai.audit_knowledge_loader import _read, build_prompt_context
+
     data_path = Path(__file__).resolve().parents[1] / "app/constants/data/verified_advisories.json"
     data = json.loads(data_path.read_text())
     records = data["records"]
@@ -84,7 +98,14 @@ def test_storage_inspection_is_read_only_and_detects_old_cve_copy(db):
     audit = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(audit)
     from app.models.agent_governance import AgentKnowledgeChunk, AgentKnowledgeDoc
-    doc = AgentKnowledgeDoc(agent_code="security_sentinel", title="内置漏洞参考", source_type="playbook", source_ref="known_cves.md", chunk_count=1)
+
+    doc = AgentKnowledgeDoc(
+        agent_code="security_sentinel",
+        title="内置漏洞参考",
+        source_type="playbook",
+        source_ref="known_cves.md",
+        chunk_count=1,
+    )
     db.add(doc)
     db.flush()
     db.add(AgentKnowledgeChunk(doc_id=doc.id, agent_code="security_sentinel", seq=0, content="old CVE-2021-21381"))
@@ -97,3 +118,39 @@ def test_storage_inspection_is_read_only_and_detects_old_cve_copy(db):
     assert "content" not in match
     assert not db.dirty and not db.deleted
     assert db.query(AgentKnowledgeChunk).count() == before
+
+
+def test_cve_refresh_keeps_independent_verification_date_and_latest_official_record():
+    """分类快照日期与参考记录重核日期分开，保留官方新增ADP及准确时间。"""
+    path = Path(__file__).resolve().parents[1] / "app/constants/data/verified_advisories.json"
+    data = json.loads(path.read_text())
+    metadata = catalog_metadata()
+    assert metadata["cve_verified_at"] == data["verified_at"] == "2026-09-12"
+    assert metadata["verified_at"] == "2026-09-07"
+    record = next(row for row in data["records"] if row["id"] == "CVE-2026-48019")
+    assert record["updated_at"] == "2026-09-08T13:01:38.157Z"
+    assert record["additional_provider_data"][0]["providerMetadata"]["shortName"] == "CISA-ADP"
+    assert record["affected"][0]["versions"] == [
+        {"version": ">= 13.0.0, < 13.10.0", "status": "affected"},
+        {"version": "< 12.60.0", "status": "affected"},
+    ]
+    known = (Path(__file__).resolve().parents[1] / "app/ai/audit_knowledge/known_cves.md").read_text()
+    assert "核验日期：2026-09-12" in known
+
+
+def test_supplementary_maintainer_advisory_is_not_counted_as_a_cve():
+    from app.ai.audit_knowledge_loader import _read
+
+    path = Path(__file__).resolve().parents[1] / "app/constants/data/verified_advisories.json"
+    data = json.loads(path.read_text())
+    records = data["supplementary_advisories"]
+    assert len(records) == catalog_metadata()["supplementary_advisory_count"] == 1
+    assert catalog_metadata()["cve_reference_count"] == len(data["records"]) == 41
+    row = records[0]
+    assert row["id"] == "GHSA-jh5r-qr3c-85q8" and row["cve_id"] is None
+    assert row["published_at"] == "2026-09-10T09:56:39Z"
+    assert "APP_DEBUG=true" in row["description"]
+    assert row["vulnerabilities"][0]["vulnerable_version_range"] == "<v12.69.0"
+    assert row["vulnerabilities"][1]["vulnerable_version_range"] == "<v13.30.0"
+    assert "GHSA-jh5r-qr3c-85q8" in _read("known_cves")
+    assert "不计入 CVE 参考数量" in _read("known_cves")

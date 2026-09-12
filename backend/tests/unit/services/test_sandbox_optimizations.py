@@ -32,7 +32,9 @@ def _zip_with(files: dict[str, str]) -> str:
 
 
 @pytest.fixture(autouse=True)
-def _clear_agent_test_cache():
+def _clear_agent_test_cache(monkeypatch):
+    # 缓存行为测试隔离模型配置，真实配置消费由独立入口回归覆盖。
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda _db, agent, user_id: agent)
     sandbox_service._AGENT_TEST_CACHE.clear()
     yield
     sandbox_service._AGENT_TEST_CACHE.clear()

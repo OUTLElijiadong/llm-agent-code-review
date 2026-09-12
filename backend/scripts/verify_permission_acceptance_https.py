@@ -59,6 +59,7 @@ READ_DEPENDENCIES = {
     "app.core.rbac_dependency.require_admin",
     "app.core.rbac_dependency.require_permission.<locals>._dependency",
     "app.api.v1.reports._require_report_export_permission",
+    "app.api.v1.agent_studio.require_studio_role",
 }
 AUTH = "app.core.dependencies.get_current_user"
 GUARDS = READ_DEPENDENCIES - {AUTH, "app.core.database.get_db"}
@@ -88,9 +89,9 @@ def write_private(path, value, *, exclusive=False):
         os.fsync(stream.fileno())
 
 
-# 已独立复核的3.8.7基线；合法删除路由时须复核并显式更新此门禁。
-MIN_ROUTE_METHODS = 313
-MIN_ENDPOINT_SOURCES = 41
+# 已独立复核的2026-09-12基线（含画像、头像、模型注册表）；合法删除路由时须复核并显式更新此门禁。
+MIN_ROUTE_METHODS = 325
+MIN_ENDPOINT_SOURCES = 42
 REQUIRED_ROUTES = {
     ("POST", "/api/auth/login"), ("POST", "/v1/responses"),
     ("GET", "/api/discuss/start"), ("GET", "/api/review/tasks/{task_id}"),
@@ -176,6 +177,8 @@ def build_plan():
         "app/core/super_admin.py",
         "app/core/observability.py",
         "app/services/rbac_service.py",
+        # require_studio_role 委托此服务做只读角色校验，必须同样绑定源码。
+        "app/services/agent_studio_service.py",
         "app/api/v1/reports.py",
     }
     rows = []

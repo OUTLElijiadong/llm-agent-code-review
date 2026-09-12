@@ -19,8 +19,8 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 313
-    assert len({row["endpoint"] for row in plan["routes"]}) == 41
+    assert len(plan["routes"]) == 325
+    assert len({row["endpoint"] for row in plan["routes"]}) == 42
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
         ("POST", "/api/auth/login"),
@@ -29,9 +29,13 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/healthz"),
         ("GET", "/readyz"),
         ("GET", "/metrics"),
+        ("GET", "/api/admin/llm/models/registry"),
+        ("PUT", "/api/admin/llm/models/assignments"),
+        ("GET", "/api/me/profile"),
+        ("POST", "/api/me/profile/preference-prompted"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 299
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 239
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 311
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 243
 
 
 @pytest.mark.parametrize(
@@ -237,3 +241,12 @@ def test_existing_websocket_is_explicitly_unverified_and_source_bound():
     plan["excluded_routes"] = []
     with pytest.raises(ValueError, match="完整路由"):
         m.validate_plan(plan, PATH.parents[1])
+
+
+def test_studio_guard_is_source_bound_and_all_studio_routes_are_negative_tested():
+    plan = m.build_plan()
+    studio = [row for row in plan["routes"] if row["endpoint"] == "app/api/v1/agent_studio.py"]
+    assert len(studio) == 15
+    assert all(row["anonymous"] == row["no_permission"] == "ready" for row in studio)
+    assert "app/services/agent_studio_service.py" in plan["source_sha256"]
+    assert all(not row["unknown_dependencies"] for row in studio)

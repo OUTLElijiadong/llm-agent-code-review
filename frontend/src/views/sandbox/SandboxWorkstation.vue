@@ -429,7 +429,7 @@ onBeforeUnmount(() => {
 
           <el-form-item v-if="form.purpose === 'test'" label="数据库">
             <div class="mode-options">
-              <label v-for="db in dbTypes" :key="db.value" class="mode-option">
+              <label v-for="db in dbTypes" :key="db.value" class="mode-option" :class="{ active: form.db_type === db.value }">
                 <input v-model="form.db_type" type="radio" :value="db.value">
                 <span class="mode-option-body">
                   <b>{{ db.label }}</b>
@@ -611,6 +611,8 @@ onBeforeUnmount(() => {
 .mode-options { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .mode-option { min-width: 0; min-height: 76px; padding: 10px; display: flex; flex-direction: column; gap: 5px; border: 1px solid var(--color-border-base); border-radius: 6px; cursor: pointer; background: var(--surface-2); }
 .mode-option:hover, .mode-option.active { border-color: var(--color-primary); background: var(--color-primary-light-9); }
+.mode-option:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.mode-option-body { display: flex; flex-direction: column; gap: 6px; line-height: 1.5; small { font-size: 11px; color: var(--gray-500); overflow-wrap: anywhere; } }
 .mode-option input { position: absolute; opacity: 0; pointer-events: none; }
 .mode-title { font-size: 13px; font-weight: 650; color: var(--gray-800); }
 .mode-hint { font-size: 11px; line-height: 1.4; color: var(--gray-500); }

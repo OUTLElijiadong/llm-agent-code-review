@@ -18,6 +18,9 @@ const form = reactive({
 const derived = ref<{ summary: string; stats: Record<string, unknown>; learnedAt?: string | null }>({
   summary: '', stats: {}, learnedAt: null,
 })
+const loading = ref(false)
+const loadFailed = ref(false)
+const feedback = ref('')
 const saving = ref(false)
 const learning = ref(false)
 
@@ -31,15 +34,21 @@ function apply(p: UserProfile) {
 }
 
 async function load() {
-  apply(await getProfile())
+  loading.value = true
+  loadFailed.value = false
+  feedback.value = ''
+  try { apply(await getProfile()) }
+  catch { loadFailed.value = true; feedback.value = '偏好读取失败，原有数据未改变，请重新加载。' }
+  finally { loading.value = false }
 }
 
 async function save() {
   saving.value = true
   try {
     apply(await updateProfile({ ...form }))
-    ElMessage.success('画像已保存')
-  } finally {
+    ElMessage.success('偏好已保存')
+    feedback.value = ''
+  } catch { feedback.value = '保存失败，填写内容已保留，可重试保存。' } finally {
     saving.value = false
   }
 }
@@ -48,8 +57,9 @@ async function relearn() {
   learning.value = true
   try {
     apply(await relearnProfile())
-    ElMessage.success('已根据你的行为重新学习画像')
-  } finally {
+    ElMessage.success('已根据本人使用记录更新统计')
+    feedback.value = ''
+  } catch { feedback.value = '学习暂不可用，原有记录已保留，可稍后重试。' } finally {
     learning.value = false
   }
 }
@@ -66,10 +76,12 @@ onMounted(load)
       </div>
     </div>
 
+    <div v-if="feedback" role="alert">{{ feedback }} <el-button v-if="loadFailed" @click="load">重新加载</el-button></div>
+    <p v-if="loading" role="status">正在读取偏好…</p>
     <div class="grid">
       <el-card shadow="never" class="form-card">
         <h3 class="block-title">我的偏好(显式)</h3>
-        <el-form label-width="100px">
+        <el-form label-width="100px" :disabled="loading || loadFailed || saving || learning">
           <el-form-item label="爱好/兴趣">
             <el-input v-model="form.hobbies" type="textarea" :rows="2"
               placeholder="如:开源贡献、算法竞赛、独立开发…" />
@@ -108,7 +120,7 @@ onMounted(load)
       <el-card shadow="never" class="derived-card">
         <div class="derived-head">
           <h3 class="block-title">AI 学到的我(隐式)</h3>
-          <el-button size="small" :loading="learning" @click="relearn">重新学习</el-button>
+          <el-button size="small" :loading="learning" :disabled="loading || loadFailed || saving" @click="relearn">重新学习</el-button>
         </div>
         <el-alert v-if="derived.summary" type="success" :closable="false" class="summary">
           {{ derived.summary }}

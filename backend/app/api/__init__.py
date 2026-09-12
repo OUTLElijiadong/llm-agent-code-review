@@ -1,6 +1,7 @@
 """
 API路由聚合模块
 """
+
 from fastapi import APIRouter
 
 from app.api.v1 import (
@@ -20,6 +21,7 @@ from app.api.v1 import (
     api_config,
     audit,
     auth,
+    avatars,
     beta_invites,
     code_files,
     dashboard,
@@ -32,7 +34,6 @@ from app.api.v1 import (
     maintenance,
     mcp_governance,
     pentest,
-    avatars,
     project_members,
     projects,
     rbac,

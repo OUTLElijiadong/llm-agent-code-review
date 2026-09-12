@@ -65,6 +65,7 @@ from app.services import (
     rbac_service,
     strategy_learning_service,
 )
+from app.services.agent_model_service import configure_subagent
 from app.services.ai_usage_context import ATTRIBUTION_FIELDS, current_attribution, model_attribution, usage_context
 from app.services.project_member_service import get_visible_project_ids, require_project_access
 from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
@@ -1689,7 +1690,7 @@ def _generate_agent_test_cases(
         from app.agents.base import AgentContext
         from app.agents.test_case_generator_agent import TestCaseGeneratorAgent
 
-        agent = TestCaseGeneratorAgent()
+        agent = configure_subagent(db, TestCaseGeneratorAgent(), environment.owner_id)
         if not agent._api_key:
             _append_event(db, environment, "progress", "agent_tests", "LLM 未配置,跳过快照 agent 测试用例生成")
             db.commit()
@@ -1812,7 +1813,7 @@ def _generate_deployment_patch(
         from app.agents.base import AgentContext
         from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
 
-        agent = DeploymentCoordinatorAgent()
+        agent = configure_subagent(db, DeploymentCoordinatorAgent(), environment.owner_id)
         if not agent._api_key:
             return None
         summary = _source_summary_for_agent_tests(source_archive_base64, language)
@@ -2344,7 +2345,7 @@ def _run_test_review_report(
         from app.agents.base import AgentContext
         from app.agents.test_review_reporter_agent import TestReviewReporterAgent
 
-        agent = TestReviewReporterAgent()
+        agent = configure_subagent(db, TestReviewReporterAgent(), environment.owner_id)
         data: dict[str, Any] = {}
         roles: dict[str, Any] = {}
         report_md = _build_deterministic_test_report(conclusion)
@@ -3641,7 +3642,7 @@ def _syntax_repair_round(
                 errors_payload.extend(target["errors"])
         if not files:
             return None
-        agent = SyntaxRepairAgent()
+        agent = configure_subagent(db, SyntaxRepairAgent(), environment.owner_id)
         if not agent._api_key:
             _append_event(db, environment, "progress", "syntax_repair", "LLM 未配置,跳过后端语法修复")
             db.commit()

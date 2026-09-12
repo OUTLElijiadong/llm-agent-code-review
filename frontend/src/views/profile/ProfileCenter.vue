@@ -36,18 +36,18 @@
           <div class="avatar-meta">
             <p class="avatar-tip">挑一只喜欢的伙伴,或上传自己的图片(≤512KB,支持 PNG/JPEG/WebP/GIF)</p>
             <div class="avatar-buttons">
-              <label class="upload-label">
-                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden @change="onUploadChange">
-                <span role="button" class="upload-btn">上传图片</span>
-              </label>
-              <el-button v-if="currentAvatar" size="small" text type="danger" @click="onClearAvatar">恢复默认</el-button>
+              <input ref="avatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden @change="onUploadChange">
+              <el-button :loading="avatarBusy" :disabled="avatarBusy" @click="avatarInput?.click()">上传图片</el-button>
+              <el-button v-if="currentAvatar" :disabled="avatarBusy" size="small" text type="danger" @click="onClearAvatar">恢复默认</el-button>
             </div>
           </div>
         </div>
+        <p v-if="avatarError" role="alert" class="avatar-error">{{ avatarError }}</p>
         <div class="builtin-grid">
           <button
             v-for="item in BUILTIN_AVATARS"
             :key="item.key"
+            :disabled="avatarBusy"
             type="button"
             class="builtin-item"
             :class="{ on: currentAvatar === `builtin:${item.key}` }"
@@ -91,32 +91,13 @@
           <el-button @click="handleLogout">退出</el-button>
         </div>
 
-        <h3 class="block-title" style="margin-top: 24px">默认审查偏好</h3>
-        <el-form label-width="120px" class="pref-form">
-          <el-form-item label="默认审查类型">
-            <el-select v-model="prefs.reviewType" style="width: 220px">
-              <el-option label="quick · 快速" value="quick" />
-              <el-option label="standard · 标准" value="standard" />
-              <el-option label="security · 安全" value="security" />
-              <el-option label="performance · 性能" value="performance" />
-              <el-option label="full · 全面" value="full" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="完成通知">
-            <el-switch v-model="prefs.notify" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="savePrefs">保存偏好</el-button>
-            <span class="pref-tip">偏好保存在本机 localStorage，不上传服务器</span>
-          </el-form-item>
-        </el-form>
       </el-card>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import dayjs from 'dayjs'
@@ -153,13 +134,9 @@ const roleTagType = computed<'danger' | 'warning' | 'primary'>(() => {
   return 'primary'
 })
 
-const PREF_KEY = 'prism:user-prefs'
-
-const prefs = reactive({
-  reviewType: 'standard',
-  notify: true,
-})
-
+const avatarInput = ref<HTMLInputElement | null>(null)
+const avatarBusy = ref(false)
+const avatarError = ref('')
 function formatDate(time?: string): string {
   return time ? dayjs(time).format('YYYY-MM-DD HH:mm') : '-'
 }
@@ -170,67 +147,35 @@ function syncAvatarFromProfile(): void {
 }
 syncAvatarFromProfile()
 
-async function refreshProfile(): Promise<void> {
-  await userStore.fetchProfile()
-  syncAvatarFromProfile()
-}
-
-async function onPickBuiltin(key: string): Promise<void> {
+async function changeAvatar(action: () => Promise<{ avatar: string | null }>): Promise<void> {
+  if (avatarBusy.value) return
+  const userId = profile.value?.id
+  avatarBusy.value = true
+  avatarError.value = ''
   try {
-    await setBuiltinAvatar(key)
-    currentAvatar.value = `builtin:${key}`
-    ElMessage.success('头像已更换')
-    await refreshProfile()
-  } catch { /* http 层已提示 */ }
+    const result = await action()
+    if (!userId || profile.value?.id !== userId) return
+    invalidateAvatarCache(userId)
+    currentAvatar.value = result.avatar || ''
+    if (userStore.profile) userStore.profile.avatar = result.avatar
+    ElMessage.success('头像已更新')
+  } catch { avatarError.value = '头像更新失败，保留原有头像，请重新选择或上传。' }
+  finally { avatarBusy.value = false }
 }
-
+function onPickBuiltin(key: string) { return changeAvatar(() => setBuiltinAvatar(key)) }
 async function onUploadChange(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  if (file.size > 512 * 1024) {
-    ElMessage.warning('图片不能超过 512KB')
-    return
-  }
-  try {
-    await uploadAvatarImage(file)
-    invalidateAvatarCache(profile.value?.id)
-    currentAvatar.value = 'upload'
-    ElMessage.success('头像已上传')
-    await refreshProfile()
-  } catch { /* http 层已提示 */ }
+  if (file.size > 512 * 1024) { avatarError.value = '图片不能超过 512KB'; return }
+  await changeAvatar(() => uploadAvatarImage(file))
 }
-
-async function onClearAvatar(): Promise<void> {
-  try {
-    await clearAvatar()
-    invalidateAvatarCache(profile.value?.id)
-    currentAvatar.value = ''
-    ElMessage.success('已恢复默认头像')
-    await refreshProfile()
-  } catch { /* http 层已提示 */ }
-}
+function onClearAvatar() { return changeAvatar(() => clearAvatar()) }
+watch(() => profile.value?.avatar, syncAvatarFromProfile)
 
 function openPreferenceDialog(): void {
   window.dispatchEvent(new Event('prism:open-preference-dialog'))
-}
-
-function loadPrefs(): void {
-  try {
-    const raw = localStorage.getItem(PREF_KEY)
-    if (!raw) return
-    const parsed = JSON.parse(raw)
-    if (parsed.reviewType) prefs.reviewType = parsed.reviewType
-    if (typeof parsed.notify === 'boolean') prefs.notify = parsed.notify
-  } catch {
-    /* ignore corrupt storage */
-  }
-}
-
-function savePrefs(): void {
-  localStorage.setItem(PREF_KEY, JSON.stringify({ reviewType: prefs.reviewType, notify: prefs.notify }))
-  ElMessage.success('偏好已保存')
 }
 
 function goChangePassword(): void {
@@ -251,7 +196,7 @@ async function handleLogout(): Promise<void> {
   }
 }
 
-onMounted(loadPrefs)
+
 </script>
 
 <style scoped lang="scss">
@@ -296,7 +241,9 @@ onMounted(loadPrefs)
   display: flex; gap: 16px; align-items: center; padding-bottom: 14px;
   border-bottom: 1px dashed var(--color-border-light, #ebeef5); margin-bottom: 14px;
 }
-.avatar-meta { flex: 1; }
+.avatar-meta { flex: 1; min-width: 0; }
+.avatar-error { color: var(--el-color-danger); }
+.builtin-item:disabled { opacity: .6; cursor: wait; }
 .avatar-tip { margin: 0 0 8px; font-size: 12px; color: var(--color-text-secondary, #909399); line-height: 1.6; }
 .avatar-buttons { display: flex; gap: 10px; align-items: center; }
 .upload-label { cursor: pointer; }

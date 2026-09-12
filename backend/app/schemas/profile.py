@@ -1,6 +1,7 @@
 """
 用户画像 Pydantic Schema
 """
+
 from datetime import datetime
 from typing import List, Optional
 
@@ -9,14 +10,16 @@ from pydantic import BaseModel, Field
 
 class ProfileUpdateIn(BaseModel):
     """更新显式画像(全部可选,部分更新)"""
+
     hobbies: Optional[str] = Field(default=None, max_length=2000)
     goals: Optional[str] = Field(default=None, max_length=2000)
     tech_stack: Optional[str] = Field(default=None, max_length=2000)
     focus_areas: Optional[List[str]] = None
     preferred_language: Optional[str] = Field(default=None, max_length=50)
-    experience_level: Optional[str] = Field(
-        default=None, pattern="^(beginner|intermediate|advanced)$")
+    experience_level: Optional[str] = Field(default=None, pattern="^(|beginner|intermediate|advanced)$")
     auto_learn: Optional[bool] = None
+    preference_prompted: Optional[int] = Field(default=None, ge=1, le=2)
+    clear_learned: bool = False
 
 
 class ProfileOut(BaseModel):
@@ -31,6 +34,7 @@ class ProfileOut(BaseModel):
     derived_summary: str = ""
     derived_stats: dict = {}
     last_learned_at: Optional[datetime] = None
+    should_prompt: bool = True
     preference_prompted: int = 0
     preference_prompted_at: Optional[datetime] = None
     update_time: Optional[datetime] = None
@@ -38,4 +42,5 @@ class ProfileOut(BaseModel):
 
 class PreferencePromptIn(BaseModel):
     """小菱偏好询问结果上报(已答/跳过)"""
+
     state: int = Field(ge=1, le=2, description="1=已答 2=跳过")

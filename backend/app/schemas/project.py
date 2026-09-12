@@ -100,6 +100,8 @@ class ProjectOut(BaseModel):
     language: Optional[str] = None
     status: str
     file_count: int = 0
+    active_file_count: int = 0
+    archive_file_count: int = 0
     source_mode: str = "files"
     source_malware_status: Optional[str] = None
     can_update: bool = False
@@ -118,6 +120,7 @@ class ProjectOut(BaseModel):
 class RecentTaskOut(BaseModel):
     """最近审查任务概要"""
     id: int
+    review_type: str = ""
     score: int
     total_issues: int
     status: str
@@ -143,6 +146,8 @@ class ProjectDetailOut(BaseModel):
     language: Optional[str] = None
     status: str
     file_count: int = 0
+    active_file_count: int = 0
+    archive_file_count: int = 0
     source_mode: str = "files"
     source_archive: Optional[ProjectSourceArchiveOut] = None
     can_update: bool = False

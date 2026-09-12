@@ -30,8 +30,14 @@ def avatar_env(tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as db:
-        user = User(id=901, username="avatar-user", password=hash_password("password123"),
-                    nickname="头像君", role="user", status=1)
+        user = User(
+            id=901,
+            username="avatar-user",
+            password=hash_password("password123"),
+            nickname="头像君",
+            role="user",
+            status=1,
+        )
         db.add(user)
         db.commit()
 
@@ -102,11 +108,32 @@ def test_preference_prompt_state(db):
 
 
 def test_first_login_flag(db):
-    user = User(username="first-login-user", password=hash_password("password123"),
-                role="user", status=1)
+    user = User(username="first-login-user", password=hash_password("password123"), role="user", status=1)
     db.add(user)
     db.commit()
     _, _, first = auth_service.login(db, "first-login-user", "password123")
     assert first is True
     _, _, second = auth_service.login(db, "first-login-user", "password123")
     assert second is False
+
+
+def test_avatar_invalid_replacement_preserves_previous_and_isolation(avatar_env):
+    client, db, _, user = avatar_env
+    assert client.post("/api/me/avatar/image", files={"file": ("me.png", PNG_1PX, "image/png")}).status_code == 200
+    original = db.query(UserAvatar).one().data
+    assert (
+        client.post(
+            "/api/me/avatar/image", files={"file": ("truncated.png", b"\x89PNG\r\n\x1a\n", "image/png")}
+        ).status_code
+        == 400
+    )
+    assert db.query(UserAvatar).one().data == original
+    assert (
+        client.post(
+            "/api/me/avatar/image", files={"file": ("large.png", b"x" * (512 * 1024 + 1), "image/png")}
+        ).status_code
+        == 400
+    )
+    assert client.put("/api/me/avatar", json={"avatar": "unregistered-animal"}).status_code == 400
+    assert db.query(User).filter(User.id == user.id).one().avatar == "upload"
+    assert client.get("/api/users/902/avatar/image").status_code == 403

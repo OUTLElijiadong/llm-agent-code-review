@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-07",
+  "verified_at": "2026-09-12",
   "scope": "原 PHP 生态 CVE 参考集逐条复核，加 PHP 官方 2026 年变更日志全部 18 个 CVE 标识及 Laravel 2024—2026 新公告。",
   "sources": [
     "https://cveawg.mitre.org/api/cve/",
@@ -31,8 +31,8 @@
       ],
       "source_kind": "CVE 官方记录（CNA）",
       "source_url": "https://cveawg.mitre.org/api/cve/CVE-2026-48019",
-      "source_sha256": "b99fb49b94afd64323ecadf51d7e633a259e41f21172541e6c14f354473b8131",
-      "updated_at": "2026-09-04T22:11:40.811Z",
+      "source_sha256": "c52aad86bccbd154ba249766e951e961dd8888085252d08a4f36a3be6079bdb8",
+      "updated_at": "2026-09-08T13:01:38.157Z",
       "published_at": "2026-09-04T22:11:40.811Z",
       "references": [
         {
@@ -76,6 +76,40 @@
             "x_refsource_MISC"
           ],
           "url": "https://github.com/laravel/framework/releases/tag/v13.10.0"
+        }
+      ],
+      "additional_provider_data": [
+        {
+          "metrics": [
+            {
+              "other": {
+                "type": "ssvc",
+                "content": {
+                  "timestamp": "2026-09-08T13:01:14.091808Z",
+                  "id": "CVE-2026-48019",
+                  "options": [
+                    {
+                      "Exploitation": "none"
+                    },
+                    {
+                      "Automatable": "no"
+                    },
+                    {
+                      "Technical Impact": "total"
+                    }
+                  ],
+                  "role": "CISA Coordinator",
+                  "version": "2.0.3"
+                }
+              }
+            }
+          ],
+          "title": "CISA ADP Vulnrichment",
+          "providerMetadata": {
+            "orgId": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "shortName": "CISA-ADP",
+            "dateUpdated": "2026-09-08T13:01:38.157Z"
+          }
         }
       ]
     },
@@ -2651,6 +2685,42 @@
           "url": "https://www.exploit-db.com/exploits/42024/"
         }
       ]
+    }
+  ],
+  "supplementary_advisories": [
+    {
+      "id": "GHSA-jh5r-qr3c-85q8",
+      "cve_id": null,
+      "title": "XSS in Debug Page Information",
+      "description": "仅在 APP_DEBUG=true 时，攻击者可控输入被传入 allowHTML: true 的 Tippy.js 提示框，鼠标悬停可能触发 DOM XSS。需要同时核对调试开关、依赖版本与输入可达性。",
+      "affected_summary": "laravel/framework：官方列出 <v12.69.0 和 <v13.30.0 两个分支范围，修补版本分别为 >=v12.69.0、>=v13.30.0；应按实际主版本分支判断，不将两个区间合并为单一区间。",
+      "vulnerabilities": [
+        {
+          "package": {
+            "ecosystem": "composer",
+            "name": "laravel/framework"
+          },
+          "vulnerable_version_range": "<v12.69.0",
+          "patched_versions": ">=v12.69.0",
+          "vulnerable_functions": []
+        },
+        {
+          "package": {
+            "ecosystem": "composer",
+            "name": "laravel/framework"
+          },
+          "vulnerable_version_range": "<v13.30.0",
+          "patched_versions": ">=v13.30.0",
+          "vulnerable_functions": []
+        }
+      ],
+      "severity": "low",
+      "source_kind": "组件维护者官方公告（尚无 CVE 编号）",
+      "source_url": "https://github.com/laravel/framework/security/advisories/GHSA-jh5r-qr3c-85q8",
+      "source_data_url": "https://api.github.com/repos/laravel/framework/security-advisories/GHSA-jh5r-qr3c-85q8",
+      "source_sha256": "46b85c097abb27c4215de3c83f0659e2db0acec6c95d5be6fc5b5e499925f897",
+      "published_at": "2026-09-10T09:56:39Z",
+      "updated_at": "2026-09-10T09:56:39Z"
     }
   ]
 }

@@ -66,7 +66,7 @@ def running(db: Session = Depends(get_db), user: User = Depends(get_current_user
 
 
 @router.get("/review-frequency", response_model=Resp[list[FrequencyItem]])
-def review_frequency(days: int = Query(30), db: Session = Depends(get_db),
+def review_frequency(days: int = Query(30, ge=0, le=3650), db: Session = Depends(get_db),
                      user: User = Depends(get_current_user)):
     """审查频次趋势"""
     data = dashboard_service.get_review_frequency(db, user, days)

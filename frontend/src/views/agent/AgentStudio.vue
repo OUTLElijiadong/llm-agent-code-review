@@ -24,7 +24,7 @@ const steps = [
   { title: '系统提示词', hint: '人格与规则' },
   { title: 'Skill', hint: '绑定能力' },
   { title: '能力权限', hint: '最小权限' },
-  { title: '测试', hint: '沙箱试跑' },
+  { title: '测试', hint: '结构与权限校验' },
   { title: '提交审批', hint: '管理员审核' },
 ]
 const activeStep = ref(0)
@@ -34,6 +34,8 @@ const skills = ref<StudioAsset[]>([])
 const currentAgent = ref<StudioAsset | null>(null)
 const currentVersion = ref<AgentVersionDetail | null>(null)
 const createdSkillVersionId = ref<number | null>(null)
+const savedAgentVersionId = ref<number | null>(null)
+const actionError = ref('')
 const testPassed = computed(() => currentVersion.value?.status === 'testing')
 
 /* 状态中文标签(界面枚举必须中文,勿直接展示英文原值) */
@@ -81,11 +83,13 @@ const readonlyTools = [
 
 async function loadAssets(): Promise<void> {
   loading.value = true
+  actionError.value = ''
   try {
-    ;[agents.value, skills.value] = await Promise.all([listStudioAgents(), listStudioSkills()])
-  } finally {
-    loading.value = false
-  }
+    const results = await Promise.allSettled([listStudioAgents(), listStudioSkills()])
+    if (results[0].status === 'fulfilled') agents.value = results[0].value
+    if (results[1].status === 'fulfilled') skills.value = results[1].value
+    if (results.some(result => result.status === 'rejected')) actionError.value = '部分目录读取失败，已保留可用内容，请刷新重试。'
+  } finally { loading.value = false }
 }
 
 function validateStep(): boolean {
@@ -117,9 +121,11 @@ function skillDefinition(): Record<string, unknown> {
 }
 
 async function persistAndTest(): Promise<void> {
+  if (loading.value) return
   loading.value = true
+  actionError.value = ''
   try {
-    if (!currentVersion.value) {
+    if (!savedAgentVersionId.value) {
       const created = await createStudioAgent({
         code: agentForm.code,
         name: agentForm.name,
@@ -129,8 +135,9 @@ async function persistAndTest(): Promise<void> {
         model_config_json: { temperature: agentForm.temperature, max_tokens: agentForm.max_tokens },
       })
       currentAgent.value = created.agent
-      currentVersion.value = await getAgentVersion(created.version.id)
+      savedAgentVersionId.value = created.version.id
     }
+    currentVersion.value = await getAgentVersion(savedAgentVersionId.value)
     if (skillForm.enabled && !createdSkillVersionId.value) {
       const skill = await createStudioSkill({
         code: skillForm.code,
@@ -141,8 +148,10 @@ async function persistAndTest(): Promise<void> {
         requested_capabilities: skillForm.skill_type === 'readonly_tool' ? ['readonly_tool'] : [],
       })
       createdSkillVersionId.value = skill.version.id
+    }
+    if (skillForm.enabled && createdSkillVersionId.value && !currentVersion.value.bindings.some(item => item.skill_version_id === createdSkillVersionId.value)) {
       await bindStudioSkill(currentVersion.value.id, {
-        skill_version_id: skill.version.id,
+        skill_version_id: createdSkillVersionId.value,
         position: currentVersion.value.bindings.length,
         config: {},
       })
@@ -152,29 +161,40 @@ async function persistAndTest(): Promise<void> {
     ElMessage.success('版本测试通过')
     await loadAssets()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '测试失败')
+    actionError.value = error instanceof Error ? error.message : '校验未完成，已保存的草稿仍保留，请重试当前步骤。'
+    ElMessage.error(actionError.value)
   } finally {
     loading.value = false
   }
 }
 
 async function submit(): Promise<void> {
-  if (!currentVersion.value || !testPassed.value) return
-  const { value } = await ElMessageBox.prompt('填写提交说明', '提交发布审批', {
-    inputPlaceholder: '变更目标与风险说明',
-    confirmButtonText: '提交',
-    cancelButtonText: '取消',
-  })
-  await submitStudioAgent(currentVersion.value.id, value)
-  currentVersion.value = await getAgentVersion(currentVersion.value.id)
-  ElMessage.success('已提交管理员审批')
-  await loadAssets()
+  if (loading.value || !currentVersion.value || !testPassed.value) return
+  try {
+    const { value } = await ElMessageBox.prompt('填写提交说明', '提交发布审批', { inputPlaceholder: '变更目标与风险说明', confirmButtonText: '提交', cancelButtonText: '取消' })
+    loading.value = true
+    actionError.value = ''
+    await submitStudioAgent(currentVersion.value.id, value)
+    currentVersion.value.status = 'pending_approval'
+    ElMessage.success('已提交管理员审批')
+    currentVersion.value = await getAgentVersion(currentVersion.value.id)
+    await loadAssets()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') actionError.value = '提交或详情更新未完成，已保存的版本保留，请重新打开该草稿核验后重试。'
+  } finally { loading.value = false }
 }
 
 async function resume(agent: StudioAsset): Promise<void> {
+  if (loading.value) return
+  loading.value = true
+  actionError.value = ''
+  try {
   const versions = await listAgentVersions(agent.id)
   if (!versions.length) return
   const detail = await getAgentVersion(versions[0].id)
+  createdSkillVersionId.value = null
+  savedAgentVersionId.value = detail.id
+  skillForm.enabled = false
   currentAgent.value = agent
   currentVersion.value = detail
   Object.assign(agentForm, {
@@ -187,21 +207,38 @@ async function resume(agent: StudioAsset): Promise<void> {
     max_tokens: detail.model_config.max_tokens ?? 4096,
   })
   activeStep.value = detail.status === 'pending_approval' ? 6 : 5
+  } catch { actionError.value = '草稿读取失败，当前内容保留，请重试。' }
+  finally { loading.value = false }
 }
 
 async function removeBinding(bindingId: number): Promise<void> {
-  await unbindStudioSkill(bindingId)
-  if (currentVersion.value) currentVersion.value = await getAgentVersion(currentVersion.value.id)
+  if (loading.value) return
+  loading.value = true
+  actionError.value = ''
+  try {
+    await unbindStudioSkill(bindingId)
+    if (currentVersion.value) currentVersion.value = await getAgentVersion(currentVersion.value.id)
+  } catch { actionError.value = '解绑或详情更新失败，请重新打开当前草稿核验后重试。' }
+  finally { loading.value = false }
 }
 
 async function withdraw(): Promise<void> {
-  if (!currentVersion.value) return
-  await withdrawStudioAgent(currentVersion.value.id, '审查员撤回修订')
-  currentVersion.value = await getAgentVersion(currentVersion.value.id)
-  ElMessage.success('已撤回审批')
+  if (loading.value || !currentVersion.value) return
+  loading.value = true
+  actionError.value = ''
+  try {
+    const result = await withdrawStudioAgent(currentVersion.value.id, '审查员撤回修订')
+    currentVersion.value.status = result.status
+    ElMessage.success('已撤回审批')
+    currentVersion.value = await getAgentVersion(currentVersion.value.id)
+  } catch { actionError.value = '撤回或详情更新失败，请重新打开当前草稿核验后重试。' }
+  finally { loading.value = false }
 }
 
 function resetWizard(): void {
+  if (loading.value) return
+  actionError.value = ''
+  savedAgentVersionId.value = null
   currentAgent.value = null
   currentVersion.value = null
   createdSkillVersionId.value = null
@@ -237,8 +274,10 @@ onMounted(loadAssets)
       </div>
     </header>
 
+    <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" role="alert" />
+
     <section class="asset-grid prism-stagger" v-loading="loading">
-      <button v-for="item in agents" :key="item.id" type="button" class="asset-card" :class="{ active: currentAgent?.id === item.id }" @click="resume(item)">
+      <button v-for="item in agents" :key="item.id" type="button" class="asset-card" :disabled="loading" :class="{ active: currentAgent?.id === item.id }" @click="resume(item)">
         <span class="asset-ico">🤖</span>
         <span class="asset-main">
           <b>{{ item.name }}</b>
@@ -251,6 +290,8 @@ onMounted(loadAssets)
         <span class="asset-main"><b>创建第一个审查 Agent</b><code>草稿仅自己可见,审批通过后全站生效</code></span>
       </button>
     </section>
+
+    <p v-if="savedAgentVersionId" class="saved-version-hint">已保存版本的基础配置为只读；下方可重试绑定、结构校验与提交，避免误改已保存内容。</p>
 
     <section class="workflow-shell prism-rise" style="--rise-delay: 120ms" v-loading="loading">
       <nav class="steps-rail">
@@ -271,21 +312,21 @@ onMounted(loadAssets)
       <div class="step-body">
         <el-form v-if="activeStep === 0" :model="agentForm" label-position="top">
           <div class="form-grid three">
-            <el-form-item label="Agent 编码"><el-input v-model="agentForm.code" :disabled="!!currentAgent" placeholder="reliability_reviewer" /></el-form-item>
-            <el-form-item label="名称"><el-input v-model="agentForm.name" maxlength="120" /></el-form-item>
-            <el-form-item label="说明"><el-input v-model="agentForm.description" maxlength="500" /></el-form-item>
+            <el-form-item label="Agent 编码"><el-input v-model="agentForm.code" :disabled="!!savedAgentVersionId || !!currentAgent" placeholder="reliability_reviewer" /></el-form-item>
+            <el-form-item label="名称"><el-input v-model="agentForm.name" :disabled="!!savedAgentVersionId" maxlength="120" /></el-form-item>
+            <el-form-item label="说明"><el-input v-model="agentForm.description" :disabled="!!savedAgentVersionId" maxlength="500" /></el-form-item>
           </div>
         </el-form>
 
         <el-form v-else-if="activeStep === 1" :model="agentForm" label-position="top">
-          <el-form-item label="审查重点"><el-input v-model="agentForm.review_focus" type="textarea" :rows="8" maxlength="4000" show-word-limit /></el-form-item>
+          <el-form-item label="审查重点"><el-input v-model="agentForm.review_focus" :disabled="!!savedAgentVersionId" type="textarea" :rows="8" maxlength="4000" show-word-limit /></el-form-item>
         </el-form>
 
         <el-form v-else-if="activeStep === 2" :model="agentForm" label-position="top">
-          <el-form-item label="系统提示词"><el-input v-model="agentForm.prompt" type="textarea" :rows="12" maxlength="30000" show-word-limit /></el-form-item>
+          <el-form-item label="系统提示词"><el-input v-model="agentForm.prompt" :disabled="!!savedAgentVersionId" type="textarea" :rows="12" maxlength="30000" show-word-limit /></el-form-item>
           <div class="form-grid two compact">
             <el-form-item label="Temperature"><el-slider v-model="agentForm.temperature" :min="0" :max="1" :step="0.1" show-input /></el-form-item>
-            <el-form-item label="最大输出 Token"><el-input-number v-model="agentForm.max_tokens" :min="128" :max="4096" :step="128" /></el-form-item>
+            <el-form-item label="最大输出 Token"><el-input-number v-model="agentForm.max_tokens" :disabled="!!savedAgentVersionId" :min="128" :max="4096" :step="128" /></el-form-item>
           </div>
         </el-form>
 
@@ -293,18 +334,18 @@ onMounted(loadAssets)
           <el-form-item><el-switch v-model="skillForm.enabled" active-text="绑定专属 Skill" inactive-text="无 Skill" /></el-form-item>
           <template v-if="skillForm.enabled">
             <div class="form-grid three">
-              <el-form-item label="Skill 编码"><el-input v-model="skillForm.code" placeholder="normalize_findings" /></el-form-item>
-              <el-form-item label="名称"><el-input v-model="skillForm.name" /></el-form-item>
-              <el-form-item label="类型"><el-select v-model="skillForm.skill_type"><el-option v-for="item in skillTypeOptions" :key="item.value" v-bind="item" /></el-select></el-form-item>
+              <el-form-item label="Skill 编码"><el-input v-model="skillForm.code" :disabled="!!createdSkillVersionId" placeholder="normalize_findings" /></el-form-item>
+              <el-form-item label="名称"><el-input v-model="skillForm.name" :disabled="!!createdSkillVersionId" /></el-form-item>
+              <el-form-item label="类型"><el-select v-model="skillForm.skill_type" :disabled="!!createdSkillVersionId"><el-option v-for="item in skillTypeOptions" :key="item.value" v-bind="item" /></el-select></el-form-item>
             </div>
-            <el-form-item label="说明"><el-input v-model="skillForm.description" /></el-form-item>
-            <el-form-item v-if="skillForm.skill_type === 'llm_transform'" label="转换提示词"><el-input v-model="skillForm.prompt" type="textarea" :rows="6" /></el-form-item>
+            <el-form-item label="说明"><el-input v-model="skillForm.description" :disabled="!!createdSkillVersionId" /></el-form-item>
+            <el-form-item v-if="skillForm.skill_type === 'llm_transform'" label="转换提示词"><el-input v-model="skillForm.prompt" :disabled="!!createdSkillVersionId" type="textarea" :rows="6" /></el-form-item>
             <template v-else-if="skillForm.skill_type === 'readonly_tool'">
-              <el-form-item label="只读工具"><el-select v-model="skillForm.tool_code" filterable><el-option v-for="tool in readonlyTools" :key="tool" :label="tool" :value="tool" /></el-select></el-form-item>
-              <el-form-item label="固定参数 JSON"><el-input v-model="skillForm.arguments_json" type="textarea" :rows="5" class="mono-input" /></el-form-item>
+              <el-form-item label="只读工具"><el-select v-model="skillForm.tool_code" :disabled="!!createdSkillVersionId" filterable><el-option v-for="tool in readonlyTools" :key="tool" :label="tool" :value="tool" /></el-select></el-form-item>
+              <el-form-item label="固定参数 JSON"><el-input v-model="skillForm.arguments_json" :disabled="!!createdSkillVersionId" type="textarea" :rows="5" class="mono-input" /></el-form-item>
             </template>
-            <el-form-item v-else-if="skillForm.skill_type === 'agent_delegate'" label="已发布 Agent 编码"><el-input v-model="skillForm.agent_code" /></el-form-item>
-            <el-form-item v-else label="Skill 版本 ID（逗号分隔）"><el-input v-model="skillForm.workflow_ids" /></el-form-item>
+            <el-form-item v-else-if="skillForm.skill_type === 'agent_delegate'" label="已发布 Agent 编码"><el-input v-model="skillForm.agent_code" :disabled="!!createdSkillVersionId" /></el-form-item>
+            <el-form-item v-else label="Skill 版本 ID（逗号分隔）"><el-input v-model="skillForm.workflow_ids" :disabled="!!createdSkillVersionId" /></el-form-item>
           </template>
         </el-form>
 
@@ -323,7 +364,8 @@ onMounted(loadAssets)
           <div class="test-result-card" :class="{ passed: testPassed }">
             <span class="test-emoji">{{ testPassed ? '✅' : '🧪' }}</span>
             <div>
-              <b>{{ testPassed ? '测试已通过' : '等待测试' }}</b>
+              <b>{{ testPassed ? '结构校验已通过' : '等待结构校验' }}</b>
+              <p>检查声明、权限与输出格式；不运行真实模型或沙箱。</p>
               <p class="font-mono">{{ currentVersion ? `checksum ${currentVersion.checksum.slice(0, 16)}…` : '版本尚未落库' }}</p>
             </div>
             <el-button type="primary" :icon="Check" :loading="loading" round @click="persistAndTest">执行测试</el-button>

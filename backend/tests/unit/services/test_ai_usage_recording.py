@@ -32,15 +32,52 @@ def ledger_db(tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as db:
-        root = AgentResponseRun(user_id=7, run_id="ledger-root", surface="user", session_key="unit", status="completed", checkpoint_json="{}")
+        root = AgentResponseRun(
+            user_id=7,
+            run_id="ledger-root",
+            surface="user",
+            session_key="unit",
+            status="completed",
+            checkpoint_json="{}",
+        )
         db.add(root)
         db.commit()
-        tool = AgentToolExecution(run_id=root.run_id, user_id=7, call_id="tool-call", tool_name="scan", request_id="a" * 64, arguments_json="{}", status="success")
-        task = ReviewTask(user_id=7, project_id=1, task_name="ledger-review", review_type="full", status="running", root_agent_run_id=root.id, agent_run_id=root.id)
-        code = CodeFile(project_id=1, file_name="unit.py", file_path="unit.py", language="python", content="x=1", version_no=1, is_binary=0, status="active")
+        tool = AgentToolExecution(
+            run_id=root.run_id,
+            user_id=7,
+            call_id="tool-call",
+            tool_name="scan",
+            request_id="a" * 64,
+            arguments_json="{}",
+            status="success",
+        )
+        task = ReviewTask(
+            user_id=7,
+            project_id=1,
+            task_name="ledger-review",
+            review_type="full",
+            status="running",
+            root_agent_run_id=root.id,
+            agent_run_id=root.id,
+        )
+        code = CodeFile(
+            project_id=1,
+            file_name="unit.py",
+            file_path="unit.py",
+            language="python",
+            content="x=1",
+            version_no=1,
+            is_binary=0,
+            status="active",
+        )
         db.add_all([tool, task, code])
         db.commit()
-        yield db, {"root_agent_run_id": root.id, "agent_run_id": root.id, "tool_execution_id": tool.id}, task.id, code.id
+        yield (
+            db,
+            {"root_agent_run_id": root.id, "agent_run_id": root.id, "tool_execution_id": tool.id},
+            task.id,
+            code.id,
+        )
     engine.dispose()
 
 
@@ -64,8 +101,14 @@ def _base(monkeypatch, script):
             raise action
         return httpx.Response(action[0], json=action[1])
 
-    monkeypatch.setattr(base.httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs))
-    monkeypatch.setattr(base, "pin_public_http_url", lambda url: SimpleNamespace(request_url=url, host_header="unit.example", request_extensions={}))
+    monkeypatch.setattr(
+        base.httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs)
+    )
+    monkeypatch.setattr(
+        base,
+        "pin_public_http_url",
+        lambda url: SimpleNamespace(request_url=url, host_header="unit.example", request_extensions={}),
+    )
     monkeypatch.setattr(base.time, "sleep", lambda _seconds: None)
     agent = BaseAgent(system_prompt="unit", model="requested-model")
     agent._base_url, agent._api_key, agent._max_retries = "https://unit.example/v1", "unit", 1
@@ -91,13 +134,18 @@ def test_real_base_retry_each_attempt_and_deferred_enrichment_are_exactly_once(l
     assert all(model_attribution(row) == origin for row in rows)
 
 
-@pytest.mark.parametrize("status,body,total,success", [
-    (200, _body(usage=False), None, True),
-    (400, {"usage": {"total_tokens": 6}}, 6, False),
-    (200, _body(finish="length"), 9, False),
-    (200, _body(content="not-json"), 9, False),
-])
-def test_real_base_missing_usage_errors_and_truncation_are_recorded(ledger_db, monkeypatch, status, body, total, success):
+@pytest.mark.parametrize(
+    "status,body,total,success",
+    [
+        (200, _body(usage=False), None, True),
+        (400, {"usage": {"total_tokens": 6}}, 6, False),
+        (200, _body(finish="length"), 9, False),
+        (200, _body(content="not-json"), 9, False),
+    ],
+)
+def test_real_base_missing_usage_errors_and_truncation_are_recorded(
+    ledger_db, monkeypatch, status, body, total, success
+):
     db, origin, _task, _file = ledger_db
     agent, requests = _base(monkeypatch, [(status, body)])
     with usage_context(7, origin, db=db):
@@ -138,20 +186,29 @@ def test_accounting_commit_failure_does_not_resend_successful_model_request(ledg
     db, origin, _task, _file = ledger_db
     if kind == "base":
         agent, requests = _base(monkeypatch, [(200, _body())])
-        invoke = lambda: agent.call("unit")
+        def invoke():
+            return agent.call("unit")
     else:
         agent = DeepSeekAgent(api_key="unit", model="unit", max_retries=2)
         requests = []
+
         def request(*_args):
             requests.append(True)
             return httpx.Response(200, json=_body()), 2
+
         monkeypatch.setattr(agent, "_do_request", request)
-        invoke = (lambda: agent.call_raw("unit", "unit")) if kind == "raw" else (lambda: agent.chat(system_prompt="unit", user_prompt="unit", db=db, user_id=7))
+        invoke = (
+            (lambda: agent.call_raw("unit", "unit"))
+            if kind == "raw"
+            else (lambda: agent.chat(system_prompt="unit", user_prompt="unit", db=db, user_id=7))
+        )
     original_commit = Session.commit
+
     def fail_audit(session):
         if any(isinstance(row, AiCallLog) for row in session.new):
             raise OperationalError("INSERT ai_call_log", {}, RuntimeError("audit unavailable"))
         return original_commit(session)
+
     monkeypatch.setattr(Session, "commit", fail_audit)
     with usage_context(7, origin, db=db), pytest.raises(UsageAccountingError, match="不能重发"):
         invoke()
@@ -164,14 +221,23 @@ def test_deepseek_failed_response_preserves_reported_usage_after_rollback(ledger
     db, origin, task_id, file_id = ledger_db
     agent = DeepSeekAgent(api_key="unit", model="unit", max_retries=0)
     monkeypatch.setattr(agent, "_do_request", lambda *_a: (httpx.Response(400, json={"usage": {"total_tokens": 6}}), 2))
-    with usage_context(7, {**origin, "_review_task_id": task_id, "_file_id": file_id, "_chunk_index": 3}, db=db), pytest.raises(Exception):
+    with (
+        usage_context(7, {**origin, "_review_task_id": task_id, "_file_id": file_id, "_chunk_index": 3}, db=db),
+        pytest.raises(Exception),
+    ):
         if kind == "raw":
             agent.call_raw("unit", "unit")
         else:
             agent.chat(system_prompt="unit", user_prompt="unit", db=db, user_id=7)
     db.rollback()
     row = db.query(AiCallLog).one()
-    assert (row.total_tokens, row.status, row.task_id, row.file_id, row.chunk_index) == (6, "failed", task_id, file_id, 3)
+    assert (row.total_tokens, row.status, row.task_id, row.file_id, row.chunk_index) == (
+        6,
+        "failed",
+        task_id,
+        file_id,
+        3,
+    )
     assert model_attribution(row) == origin
 
 
@@ -179,11 +245,13 @@ def test_raw_network_retry_and_success_deferred_ids_do_not_duplicate(ledger_db, 
     db, origin, task_id, file_id = ledger_db
     agent = DeepSeekAgent(api_key="unit", model="unit", max_retries=1)
     script = [httpx.ReadTimeout("upstream timeout"), httpx.Response(200, json=_body())]
+
     def request(*_args):
         action = script.pop(0)
         if isinstance(action, Exception):
             raise action
         return action, 2
+
     monkeypatch.setattr(agent, "_do_request", request)
     monkeypatch.setattr("app.ai.deepseek_agent.time.sleep", lambda _s: None)
     with usage_context(7, origin, db=db):
@@ -197,12 +265,16 @@ def test_raw_network_retry_and_success_deferred_ids_do_not_duplicate(ledger_db, 
 
 
 def test_chat_assistant_history_request_records_one_actual_call(ledger_db, monkeypatch):
-    from app.agents.chat_agent import ChatAssistantAgent
     from app.agents import chat_agent
+    from app.agents.chat_agent import ChatAssistantAgent
 
     db, origin, task_id, _file = ledger_db
     configured, requests = _base(monkeypatch, [(200, _body())])
-    monkeypatch.setattr(chat_agent, "pin_public_http_url", lambda url: SimpleNamespace(request_url=url, host_header="unit.example", request_extensions={}))
+    monkeypatch.setattr(
+        chat_agent,
+        "pin_public_http_url",
+        lambda url: SimpleNamespace(request_url=url, host_header="unit.example", request_extensions={}),
+    )
     agent = ChatAssistantAgent()
     agent._base_url, agent._api_key = configured._base_url, configured._api_key
     agent._max_retries = 0
@@ -231,11 +303,14 @@ def test_explicit_empty_execution_scope_does_not_borrow_target_task_root(ledger_
 @pytest.mark.parametrize("rejection", ["pin", "budget"])
 def test_base_preflight_rejection_cannot_be_backfilled_as_model_call(ledger_db, monkeypatch, rejection):
     import time
+
     db, origin, _task_id, _file_id = ledger_db
     agent, requests = _base(monkeypatch, [])
     if rejection == "pin":
+
         def reject(_url):
             raise ValueError("private address denied")
+
         monkeypatch.setattr("app.agents.base.pin_public_http_url", reject)
     with usage_context(7, origin, db=db):
         result = agent.call("unit", deadline_monotonic=time.monotonic() - 1 if rejection == "budget" else None)
@@ -262,11 +337,21 @@ def test_real_request_orchestrator_binds_plain_language_and_folder_models(ledger
     from app.utils.api_resolver import ApiConfig
 
     db, _origin, _task_id, _file_id = ledger_db
-    _, requests = _base(monkeypatch, [(200, _body(content='{"language":"python"}')), (200, _body(content='{"language":"python","project_name":"示例"}'))])
+    _, requests = _base(
+        monkeypatch,
+        [
+            (200, _body(content='{"language":"python"}')),
+            (200, _body(content='{"language":"python","project_name":"示例"}')),
+        ],
+    )
     user = User(id=7, username="real-binding", password="unit-hash", role="user", status=1)
     db.add(user)
     db.commit()
-    monkeypatch.setattr(module, "resolve_api_config", lambda *_a: ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit", max_retries=0))
+    monkeypatch.setattr(
+        module,
+        "resolve_api_config",
+        lambda *_a: ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit", max_retries=0),
+    )
     orch = module.get_request_orchestrator(db, user=user)
     assert current_attribution(7) == {}
     language = orch.detect_language("普通项目", "语言识别")

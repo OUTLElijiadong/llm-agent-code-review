@@ -1,0 +1,27 @@
+{
+  "基线": "bc207b273441e2f01f988122d28e2f2acb17f4c5",
+  "后端通过": 37,
+  "前端通过": 8,
+  "工坊严格角色接口数": 15,
+  "源码摘要": {
+    "backend/app/api/v1/avatars.py": "f59bf9dfb7e42d723aa052df2acee2a2c61ecc5ad7ed9403f737e876128fb159",
+    "backend/app/api/v1/agent_studio.py": "8ba24a9b1e4502c5e827c75cb325da2d5b26073f1e6e55728cf0fce9bab18e06",
+    "backend/app/api/v1/user_profile.py": "f1978dcfcd6615f0198aca16c2ef03005d75b7107e5466becdd9e4e323df925d",
+    "backend/app/services/profile_service.py": "21b267c20725ce61d847a69533b29a9ecf12ab6d52cdfadbf8c117137af3eda9",
+    "backend/app/services/agent_studio_service.py": "204a92ee28602b997aaa4dd2c2e67660315bc8e2a205dbfa031ae899913d78cb",
+    "backend/app/services/personalization_service.py": "6e1677a3b64e9c841f081d964015bb6259c1ac03c89da5c1bcf29e4741ac58d5",
+    "backend/app/services/embedding_service.py": "60fbe64370d8ce4cdc442b831dc979d897ee9aa4a6a6a9056fdbeef21ceece4e",
+    "backend/app/utils/image_utils.py": "4268e38fa3b54e4dafe9eb2745ee2f5a7ba4c44ec1d97928bf78bcd410fde923",
+    "backend/app/schemas/profile.py": "0b593cd2740c16f3e2bb50058731fc76c07182b165c3269085ecc242e2ef9887",
+    "frontend/src/api/profile.ts": "96fbc50d4e075635a7e2c89623d0a77d9d499176ec64b45b6fb0e8042351a1d7",
+    "frontend/src/components/common/UserAvatar.vue": "a437613003b5d8bc9d92592891c516538fe9dce5192ea360cbe6c8b7bff2d30d",
+    "frontend/src/constants/avatars.ts": "7d20b18dae2889b4761644721af080a78498e6fa2493170b7d0efecec98c2f55",
+    "frontend/src/components/ai/XiaolingGreeter.vue": "07adccd277941e330d3dc2e4a85e68ac52a23d01ab0ef3faaf3a1772e59e4874",
+    "frontend/src/components/ai/XiaolingOnboardingDialog.vue": "ba69a504361be14dadc40c3b88dccdb8bc6cfb3564dd6a8ab3cbee111c074bea",
+    "frontend/src/components/ai/XiaolingPreferenceDialog.vue": "b19990826c9ad59d01539cc5acfaeaf2c141ac7a07a5ecd5497bd9a4c54f00e2",
+    "frontend/src/views/profile/ProfileCenter.vue": "7cf479886a45ce29e09c33c270d7a5b03b4089ebc376257784d1c48e5694dd1c",
+    "frontend/src/views/profile/PersonalizationCenter.vue": "8eb09f79db6f37b8a23e502f92adfe418e996b57f2269fc470a93fd4bf2ade8b",
+    "frontend/src/views/agent/AgentStudio.vue": "62320f3dfc74c527302976049cd8476768144ca90bf35d659b3ad068aaf740e8"
+  },
+  "真实生产浏览器验收": "由根任务另行执行，本组未冒领"
+}

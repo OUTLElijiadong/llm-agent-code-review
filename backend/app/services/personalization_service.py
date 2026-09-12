@@ -15,6 +15,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.services import knowledge_service, profile_service
+from app.services.agent_model_service import resolve_subagent_config
 
 
 def _kb_block(db: Session, user_id: int, query: str, top_k: int = 4,
@@ -48,7 +49,7 @@ def build_review_context(db: Session, user_id: int, language: str = "") -> str:
     """代码审查:把画像关注点转成审查偏好,追加到经验段落"""
     profile = profile_service.get_or_create(db, user_id)
     stats = {}
-    if profile.derived_stats:
+    if profile.auto_learn and profile.derived_stats:
         try:
             stats = json.loads(profile.derived_stats)
         except (json.JSONDecodeError, TypeError):
@@ -96,7 +97,7 @@ def assist_forum_draft(db: Session, user_id: int, title: str, draft: str) -> dic
     try:
         from app.ai.deepseek_agent import DeepSeekAgent
         from app.utils.api_resolver import resolve_api_config
-        cfg = resolve_api_config(db, user_id)
+        cfg = resolve_subagent_config(db, resolve_api_config(db, user_id))
         agent = DeepSeekAgent(api_config=cfg)
         system = (
             "你是开发者论坛的发帖助手。基于用户画像和其个人知识库片段,"

@@ -1,0 +1,14 @@
+{
+  "commit": "bc207b273441e2f01f988122d28e2f2acb17f4c5",
+  "environment": "in-memory SQLite and mock transport only",
+  "findings": {
+    "latest_flash_incorrect_vision_flag": true,
+    "nonvision_assignment_accepted": true,
+    "deleted_model_assignment_still_resolves": true,
+    "header_only_invalid_png_accepted": true,
+    "resume_sends_unresolved_prism_asset_url": true
+  },
+  "first_request_image_url_scheme": "data",
+  "resumed_request_image_url_scheme": "prism-asset",
+  "resumed_checkpoint_model": "deepseek-flash"
+}

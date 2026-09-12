@@ -1173,3 +1173,25 @@ it.each(['completed', 'failed', 'cancelled'])('审计阶段属于真实助手运
     expect(wrapper.text()).toContain('分析师')
   } finally { wrapper.unmount() }
 })
+
+
+it('仅图片可发送，接口失败保留图片用于重试且不落本地存储', async () => {
+  const wrapper = await mountReadyDrawer()
+  const input = wrapper.find('input[type="file"]')
+  const file = new File(['image-content'], 'sample.png', { type: 'image/png' })
+  Object.defineProperty(input.element, 'files', {value:[file], configurable:true})
+  await input.trigger('change')
+  await vi.waitFor(() => expect(wrapper.find('.chat-image-chip').exists()).toBe(true))
+  expect(wrapper.find('.send-btn').attributes('disabled')).toBeUndefined()
+  void wrapper.find('.send-btn').trigger('click')
+  await flushPromises()
+  const history = streams.records[0].body.messages as Array<{images?: string[]}>
+  expect(history.at(-1)?.images?.[0]).toContain('data:image/png;base64,')
+  await failStream(0, new Error('网络断开'))
+  expect(wrapper.find('.msg-error-card').text()).toContain('网络断开')
+  expect(JSON.stringify(localStorage)).not.toContain('data:image/png;base64,')
+  await wrapper.find('.msg-error-btn.is-retry').trigger('click')
+  await flushPromises()
+  expect((streams.records[1].body.messages as Array<{images?: string[]}>).at(-1)?.images).toEqual(history.at(-1)?.images)
+  wrapper.unmount()
+})

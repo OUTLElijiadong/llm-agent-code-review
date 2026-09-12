@@ -1,0 +1,11 @@
+{
+  "python": "3.12.14",
+  "cryptography": "50.0.1",
+  "source_cipher_version": "48.0.1",
+  "fernet_cross_version": true,
+  "invalid_cipher_rejected": true,
+  "rsa_pem_roundtrip": true,
+  "rsa_signature": true,
+  "tampered_message_rejected": true,
+  "pyjwt_rs256": true
+}

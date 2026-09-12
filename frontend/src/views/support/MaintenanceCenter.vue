@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 
 import { useUserStore } from '@/stores/user'
 import { formatDate } from '@/utils/format'
+import { mustDiscardReadSnapshot, readableError } from '@/composables/withFeedback'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import {
@@ -30,6 +31,9 @@ const page = ref(1)
 const pageSize = ref(10)
 const statusFilter = ref('')
 const scope = ref<'mine' | 'all'>('mine')
+const loadError = ref('')
+const actionError = ref('')
+let loadGeneration = 0
 const loading = ref(false)
 const submitting = ref(false)
 
@@ -41,16 +45,23 @@ const current = ref<Ticket | null>(null)
 const handleForm = reactive({ status: '', admin_reply: '', priority: '' })
 
 async function load() {
+  const generation = ++loadGeneration
   loading.value = true
+  loadError.value = ''
   try {
     const res = await getTickets({
       page: page.value, page_size: pageSize.value,
       status: statusFilter.value, scope: isAdmin.value ? scope.value : 'mine',
     })
+    if (generation !== loadGeneration) return
     tickets.value = res.items
     total.value = res.total
+  } catch (error) {
+    if (generation !== loadGeneration) return
+    if (mustDiscardReadSnapshot(error)) { tickets.value = []; total.value = 0 }
+    loadError.value = readableError(error, '工单读取失败，请重试')
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) loading.value = false
   }
 }
 
@@ -61,6 +72,7 @@ async function submit() {
   }
   if (submitting.value) return
   submitting.value = true
+  actionError.value = ''
   try {
     await createTicket({ ...form })
     ElMessage.success('工单已提交')
@@ -68,6 +80,8 @@ async function submit() {
     Object.assign(form, { title: '', description: '', category: 'bug', priority: 'medium' })
     page.value = 1
     load()
+  } catch (error) {
+    actionError.value = readableError(error, '提交失败，内容已保留，请核对列表后再试')
   } finally {
     submitting.value = false
   }
@@ -79,19 +93,32 @@ function openHandle(t: Ticket) {
   handleVisible.value = true
 }
 
+const actionBusy = ref(false)
 async function submitHandle() {
-  if (!current.value) return
-  await handleTicket(current.value.id, { ...handleForm })
-  ElMessage.success('已更新工单')
-  handleVisible.value = false
-  load()
+  if (!current.value || actionBusy.value) return
+  actionBusy.value = true
+  actionError.value = ''
+  try {
+    await handleTicket(current.value.id, { ...handleForm })
+    ElMessage.success('已更新工单')
+    handleVisible.value = false
+    await load()
+  } catch (error) { actionError.value = readableError(error, '更新失败，内容已保留') }
+  finally { actionBusy.value = false }
 }
 
 async function close(t: Ticket) {
-  await ElMessageBox.confirm('确认关闭该工单?', '提示', { type: 'warning' })
-  await closeTicket(t.id)
-  ElMessage.success('已关闭')
-  load()
+  if (actionBusy.value) return
+  actionBusy.value = true
+  actionError.value = ''
+  try {
+    await ElMessageBox.confirm('确认关闭该工单?', '提示', { type: 'warning' })
+    await closeTicket(t.id)
+    ElMessage.success('已关闭')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') actionError.value = readableError(error, '关闭失败，请重新核对工单状态')
+  } finally { actionBusy.value = false }
 }
 
 onMounted(load)
@@ -120,39 +147,18 @@ onMounted(load)
       </div>
     </el-card>
 
+    <el-alert v-if="loadError" type="error" :closable="false" :title="loadError"><el-button :loading="loading" @click="load">重新加载</el-button></el-alert>
+    <el-alert v-if="actionError && !submitVisible" type="error" :closable="false" :title="actionError" />
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="tickets" style="width: 100%">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
-        <el-table-column label="分类" width="110">
-          <template #default="{ row }">{{ CATEGORY[row.category] || row.category }}</template>
-        </el-table-column>
-        <el-table-column label="优先级" width="90">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.priority === 'high' ? 'danger' : row.priority === 'low' ? 'info' : 'warning'">
-              {{ PRIORITY[row.priority] }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" :type="STATUS_TAG[row.status] as any">{{ STATUS[row.status] }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="提交时间" width="170">
-          <template #default="{ row }">{{ formatDate(row.create_time) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="isAdmin" link type="primary" size="small" @click="openHandle(row)">受理</el-button>
-            <el-button v-if="row.status !== 'closed'" link type="info" size="small" @click="close(row)">关闭</el-button>
-            <el-popover v-if="row.admin_reply" placement="left" width="320" trigger="click">
-              <template #reference><el-button link size="small">查看回复</el-button></template>
-              <p style="white-space: pre-wrap; margin: 0">{{ row.admin_reply }}</p>
-            </el-popover>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div v-loading="loading" class="support-records">
+        <article v-for="row in tickets" :key="row.id" class="support-record">
+          <header><strong>{{ row.title }}</strong><el-tag size="small" :type="STATUS_TAG[row.status] as any">{{ STATUS[row.status] }}</el-tag></header>
+          <p>{{ CATEGORY[row.category] || row.category }} · {{ PRIORITY[row.priority] }}优先级 · #{{ row.id }}</p>
+          <details><summary>查看问题与回复</summary><p>{{ row.description }}</p><p v-if="row.admin_reply">管理员回复：{{ row.admin_reply }}</p></details>
+          <footer><time>{{ formatDate(row.create_time) }}</time><div><el-button v-if="isAdmin" link type="primary" :disabled="loading || actionBusy" @click="openHandle(row)">受理</el-button><el-button v-if="row.status !== 'closed'" link type="info" :disabled="loading || actionBusy" @click="close(row)">关闭工单</el-button></div></footer>
+        </article>
+        <el-empty v-if="!loading && !loadError && !tickets.length" description="暂无工单，需要帮助时可提交问题" />
+      </div>
       <div class="pager">
         <el-pagination layout="total, prev, pager, next" :total="total" :page-size="pageSize"
           :current-page="page" @current-change="(p: number) => { page = p; load() }" />
@@ -161,6 +167,7 @@ onMounted(load)
 
     <!-- 提交工单 -->
     <el-dialog v-model="submitVisible" title="提交维修工单" width="560px">
+      <el-alert v-if="actionError" type="error" :closable="false" :title="actionError" />
       <el-form label-width="80px">
         <el-form-item label="标题" required>
           <el-input v-model="form.title" maxlength="150" placeholder="一句话描述问题" />
@@ -188,6 +195,7 @@ onMounted(load)
 
     <!-- 管理员受理 -->
     <el-dialog v-model="handleVisible" title="受理工单" width="560px">
+      <el-alert v-if="actionError" type="error" :closable="false" :title="actionError" />
       <template v-if="current">
         <el-descriptions :column="1" border size="small" style="margin-bottom: 16px">
           <el-descriptions-item label="标题">{{ current.title }}</el-descriptions-item>
@@ -208,13 +216,23 @@ onMounted(load)
       </template>
       <template #footer>
         <el-button @click="handleVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitHandle">保存</el-button>
+        <el-button type="primary" :loading="actionBusy" @click="submitHandle">保存</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
+.support-records { display: grid; gap: 14px; }
+.support-record { padding: 18px; border: 1px solid var(--el-border-color-light); border-radius: 14px; min-width: 0; }
+.support-record header, .support-record footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.support-record header strong { min-width: 0; overflow-wrap: anywhere; }
+.support-record p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.support-record summary { cursor: pointer; color: var(--el-color-primary); }
+.support-record footer { margin-top: 14px; font-size: 12px; color: var(--el-text-color-secondary); }
+.record-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.page-header { flex-wrap: wrap; gap: 14px; }
+
 .maintenance-page { padding: 4px; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; }
 .page-header h2 { margin: 0; }

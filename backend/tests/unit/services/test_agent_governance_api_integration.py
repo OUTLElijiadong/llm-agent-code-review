@@ -1,4 +1,5 @@
 """Agent 治理管理端 API 集成测试。"""
+
 import re
 from pathlib import Path
 
@@ -8,8 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base, get_db
 from app.core.config import settings
+from app.core.database import Base, get_db
 from app.core.dependencies import require_admin, require_super_admin
 from app.core.security import create_access_token
 from app.main import app

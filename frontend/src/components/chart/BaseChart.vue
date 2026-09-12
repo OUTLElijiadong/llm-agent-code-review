@@ -1,5 +1,11 @@
 <template>
-  <div ref="chartRef" class="base-chart" :style="{ height }" />
+  <div class="base-chart" :style="{ height }">
+    <div ref="chartRef" class="chart-canvas" />
+    <div v-if="chartError" class="chart-fallback" role="alert">
+      <span>图表暂时无法显示。</span>
+      <button type="button" @click="retryChart">重新绘制</button>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -57,35 +63,73 @@ const props = withDefaults(defineProps<{
 
 const chartRef = ref<HTMLElement | null>(null)
 let chart: echarts.EChartsType | null = null
+const chartError = ref(false)
+let resizeObserver: ResizeObserver | null = null
+let disposed = false
 
-function initChart() {
-  if (!chartRef.value) return
-  ensurePrismTheme()
-  chart = echarts.init(chartRef.value, PRISM_THEME_NAME)
-  chart.setOption(props.option)
+function failChart(): void {
+  chartError.value = true
+  try { chart?.dispose() } catch { /* 已失效的渲染器无需再次回收。 */ }
+  chart = null
 }
 
-function resizeChart() {
-  chart?.resize()
+function resizeChart(): void {
+  const element = chartRef.value
+  if (disposed || chartError.value || !element || element.clientWidth <= 0 || element.clientHeight <= 0) return
+  try {
+    if (!chart) {
+      ensurePrismTheme()
+      chart = echarts.init(element, PRISM_THEME_NAME)
+      chart.setOption(props.option)
+    } else {
+      chart.resize()
+    }
+  } catch {
+    failChart()
+  }
 }
 
-watch(() => props.option, (opt) => {
-  chart?.setOption(opt, true)
+function retryChart(): void {
+  chartError.value = false
+  resizeChart()
+}
+
+watch(() => props.option, (option) => {
+  if (disposed || chartError.value) return
+  try {
+    if (chart) chart.setOption(option, true)
+    else resizeChart()
+  } catch {
+    failChart()
+  }
 }, { deep: true })
 
 onMounted(() => {
-  initChart()
+  // v-show、侧栏、分栏会改变容器尺寸，却不触发 window.resize。
+  if (typeof ResizeObserver !== 'undefined' && chartRef.value) {
+    resizeObserver = new ResizeObserver(resizeChart)
+    resizeObserver.observe(chartRef.value)
+  }
+  resizeChart()
   window.addEventListener('resize', resizeChart)
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  resizeObserver?.disconnect()
   window.removeEventListener('resize', resizeChart)
-  chart?.dispose()
+  try { chart?.dispose() } catch { /* 渲染器失效不阻塞页面离开。 */ }
+  chart = null
 })
 </script>
 
 <style scoped lang="scss">
-.base-chart {
-  width: 100%;
+.base-chart { position: relative; width: 100%; min-width: 0; }
+.chart-canvas { width: 100%; height: 100%; }
+.chart-fallback {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  gap: 8px; flex-wrap: wrap; padding: 16px; font-size: 13px; color: var(--gray-600);
+  button { border: 0; background: transparent; color: var(--brand-600); cursor: pointer; font: inherit; }
+  button:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
 }
 </style>

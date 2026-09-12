@@ -82,6 +82,7 @@ export interface ModelRegistryItem {
   label: string
   vision: boolean
   source: 'pulled' | 'manual'
+  capability_source?: 'official' | 'manual' | 'unverified'
   added_at: string
 }
 
@@ -89,6 +90,7 @@ export interface ModelRegistryView {
   models: ModelRegistryItem[]
   assignments: Record<string, string>
   roles: Record<string, string>
+  warnings?: string[]
 }
 
 export interface RegistrySyncResult {

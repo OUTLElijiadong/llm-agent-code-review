@@ -12,13 +12,15 @@
     "mapped_weakness_count": 246,
     "verified_at": "2026-09-07",
     "mapping_note": "OWASP 各分类页面合计列出 249 个 CWE 标识；按 MITRE 4.20 类型核对为 246 个 Weakness 和 3 个 Category（16、320、1035）。官网介绍页另称 248，本库按可复核列表计数。",
-    "cve_scope": "已核验 41 条 PHP 生态 CVE 参考记录；不代表全量 CVE/NVD 数据库，也不代表项目已命中漏洞。",
+    "cve_scope": "已核验 41 条 PHP 生态 CVE 参考记录，另有 1 条尚无 CVE 编号的维护者公告；参考记录核验于 2026-09-12。不代表全量 CVE/NVD 数据库，也不代表项目已命中漏洞。",
     "licenses": [
       "OWASP CC BY 3.0",
       "MITRE CWE Terms of Use: https://cwe.mitre.org/about/termsofuse.html"
     ],
     "cve_reference_count": 41,
-    "cve_reference_sha256": "c3bd2185d9505a1eb2d5a0c94059afaaeaf6161ec424ae334cdd37556c39681c",
+    "cve_verified_at": "2026-09-12",
+    "supplementary_advisory_count": 1,
+    "cve_reference_sha256": "6c19ae6ed5f89a1da7df4d58629d390da9c4036ac45c1b15a7d3d348e9a66413",
     "cve_sources": [
       "https://cveawg.mitre.org/api/cve/",
       "https://www.php.net/ChangeLog-8.php",

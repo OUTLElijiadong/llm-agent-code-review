@@ -47,7 +47,7 @@ def test_ttl_zero_always_recomputes(db, cache_user, cache_project, monkeypatch):
     db.commit()
     assert dashboard_service.get_summary(db, cache_user)["avg_score"] == 88.0
 
-    task2 = _success_task(db, cache_user, cache_project, score=92)
+    _success_task(db, cache_user, cache_project, score=92)
     db.commit()
     assert dashboard_service.get_summary(db, cache_user)["avg_score"] == 90.0
 

@@ -2,7 +2,7 @@
 /**
  * 小菱迎宾组件(用户端全局挂载):
  * 1) 新手引导:注册后首次登录弹一次(后端 first_login 标志驱动,常用用户不弹)。
- * 2) 偏好询问:非管理员且未做过偏好设置时温和询问一次;"稍后再说"仅本会话跳过。
+ * 2) 偏好询问:非管理员且未做过偏好设置时温和询问一次;"稍后再说"七天内不主动提醒。
  * 3) 监听 prism:open-preference-dialog 事件(用户菜单"偏好设置"入口)随时重开。
  */
 import { onBeforeUnmount, onMounted, ref } from 'vue'
@@ -18,13 +18,14 @@ const onboardingVisible = ref(false)
 const preferenceVisible = ref(false)
 let preferenceLaterKey = ''
 let onboardingKey = ''
+let mounted = true
 
 function finishOnboarding() {
   try { if (onboardingKey) sessionStorage.setItem(onboardingKey, 'done') } catch { /* 配额忽略 */ }
 }
 
 function preferenceClosedByLater() {
-  try { if (preferenceLaterKey) sessionStorage.setItem(preferenceLaterKey, '1') } catch { /* 配额忽略 */ }
+  try { if (preferenceLaterKey) localStorage.setItem(preferenceLaterKey, String(Date.now())) } catch { /* 配额忽略 */ }
 }
 
 function openPreferenceDialog() {
@@ -44,14 +45,16 @@ async function evaluateTriggers() {
     }
   } catch { /* ignore */ }
 
-  const role = user.role
-  if (role === 'admin' || role === 'super_admin') return
+  if (userStore.isAdmin()) return
   try {
-    if (sessionStorage.getItem(preferenceLaterKey)) return
+    const last = Number(localStorage.getItem(preferenceLaterKey) || 0)
+    if (Date.now() - last < 7 * 86400_000) return
   } catch { /* ignore */ }
   try {
     const profile = await getProfile()
-    if (!profile.preference_prompted) preferenceVisible.value = true
+    if (!mounted || userStore.profile?.id !== user.id || userStore.isAdmin()) return
+    const hasPreferences = [profile.hobbies, profile.goals, profile.tech_stack, profile.preferred_language, profile.experience_level].some(value => value?.trim()) || profile.focus_areas.length > 0
+    if (!profile.preference_prompted && !hasPreferences && profile.should_prompt !== false) preferenceVisible.value = true
   } catch { /* 画像接口失败不弹,下次再问 */ }
 }
 
@@ -65,6 +68,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  mounted = false
   window.removeEventListener('prism:open-preference-dialog', onOpenPreference)
 })
 </script>

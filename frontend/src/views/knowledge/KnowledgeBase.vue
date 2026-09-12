@@ -10,11 +10,11 @@ import {
 } from '@/api/knowledge'
 
 const SOURCE: Record<string, string> = {
-  upload: '手动上传', code: '项目代码', issue: '审查问题',
+  preference: '小菱偏好（本地记录）', upload: '手动上传', code: '项目代码', issue: '审查问题',
   forum: '论坛', feedback: '反馈', ticket: '工单',
 }
 const SOURCE_TAG: Record<string, string> = {
-  upload: 'primary', code: 'success', issue: 'warning',
+  preference: 'info', upload: 'primary', code: 'success', issue: 'warning',
   forum: 'info', feedback: 'danger', ticket: '',
 }
 

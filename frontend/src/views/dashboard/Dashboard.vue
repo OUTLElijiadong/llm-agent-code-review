@@ -55,7 +55,7 @@
           </div>
           <div class="gauge-label">
             <span>风险等级 · {{ riskLevel }}</span>
-            <span>已完成审查均分</span>
+            <span>有效代码审查均分</span>
           </div>
         </div>
       </div>
@@ -64,7 +64,7 @@
 
     <!-- ============ 后台进行中(隐藏设计:无任务时整块不渲染) ============ -->
     <section
-      v-if="runningLoaded && runningData && (runningData.reviews.length || runningData.agents.length)"
+      v-if="runningState !== 'success' || hasRunningTasks"
       class="running-panel prism-rise"
       data-testid="running-panel"
     >
@@ -72,23 +72,33 @@
         <h3 class="font-display">
           <span class="running-pulse" aria-hidden="true"></span>
           后台进行中
-          <span class="running-count font-mono">{{ runningData.reviews.length + runningData.agents.length }}</span>
+          <span class="running-count font-mono">{{ (runningData?.reviews.length ?? 0) + (runningData?.agents.length ?? 0) }}</span>
         </h3>
-        <p class="running-sub">审查与 Agent 任务进度实时更新(5 秒)</p>
+        <p class="running-sub">进行中每 5 秒更新</p>
       </header>
-      <div class="running-list">
+      <p v-if="runningState === 'loading' && !runningData" class="load-feedback" role="status">正在读取后台进度</p>
+      <p v-if="runningState === 'error'" class="load-feedback error" role="alert">
+        后台进度读取失败。<span v-if="runningData">以下为上次读取结果，尚未确认最新状态。</span>
+        <button class="link" type="button" @click="loadRunning">重试后台进度</button>
+      </p>
+      <div v-if="runningData" class="running-list">
         <button
           v-for="item in runningData.reviews"
           :key="`r-${item.id}`"
           type="button"
           class="running-item review"
+          :disabled="!canViewReviews"
           @click="goReviewDetail(item.id)"
         >
           <span class="ri-main">
             <b>{{ item.task_name }}</b>
             <span class="ri-meta font-mono">{{ item.project_name }} · {{ item.status === 'pending' ? '排队中' : `${item.processed_files}/${item.total_files || '?'} 文件` }}</span>
           </span>
-          <span class="ri-bar" :class="{ indeterminate: item.status === 'pending' || !item.total_files }">
+          <span class="ri-bar" :class="{ indeterminate: item.status === 'pending' || !item.total_files }"
+            role="progressbar" :aria-label="`${item.task_name}已处理文件`"
+            :aria-valuenow="item.status === 'pending' || !item.total_files ? undefined : reviewProgress(item)"
+            :aria-valuemin="0" :aria-valuemax="100"
+          >
             <span class="ri-fill" :style="{ width: `${reviewProgress(item)}%` }"></span>
           </span>
           <span class="ri-pct font-mono">{{ item.status === 'pending' ? '…' : item.total_files ? `${reviewProgress(item)}%` : '运行中' }}</span>
@@ -194,7 +204,15 @@
         </header>
         <p v-if="chartStates.risk === 'loading'" role="status">正在读取严重度数据</p>
         <p v-else-if="chartStates.risk === 'error'" class="load-feedback error" role="alert">严重度数据读取失败。<button class="link" type="button" @click="loadRiskDistribution">重试严重度数据</button></p>
-        <BaseChart v-else-if="riskData.some((item) => item.value > 0)" :option="severityOption" height="220px" />
+        <template v-else-if="riskData.some((item) => item.value > 0)">
+          <BaseChart :option="severityOption" height="220px" />
+          <ul class="severity-values" aria-label="严重度数量">
+            <li v-for="item in riskData" :key="item.severity">
+              <span><i :style="{ background: severityColor(item.severity) }" aria-hidden="true" />{{ item.name }}</span>
+              <b class="font-mono">{{ item.value }}</b>
+            </li>
+          </ul>
+        </template>
         <template v-else>
           <EmptyState :description="`${rangeLabel}暂无严重度数据`" compact />
           <p v-if="timeRange !== 0 && cumulativeIssueCount > 0" class="empty-hint" data-testid="risk-cumulative-hint">
@@ -257,6 +275,7 @@ import {
   getIssueTypeStatistics,
   getScoreTrend,
   getReviewFrequency,
+  getRunning,
 } from '@/api/dashboard'
 import type { RunningOut, RunningReviewItem, RiskItem, IssueTypeItem, ScoreTrendItem, FrequencyItem, SummaryOut, RecentTaskOut } from '@/types/dashboard'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -282,7 +301,7 @@ const loading = computed(() => readStates.value.includes('loading'))
 const completedReads = computed(() => readStates.value.filter((state) => state !== 'loading').length)
 const failedReads = computed(() => readStates.value.filter((state) => state === 'error').length)
 const canExportCurrentData = computed(() => readStates.value.every((state) => state === 'success'))
-const hasAverageScore = computed(() => Boolean(summary.value && summary.value.review_count > 0 && Number.isFinite(summary.value.avg_score)))
+const hasAverageScore = computed(() => Boolean(summary.value && (summary.value.code_review_count ?? 0) > 0 && Number.isFinite(summary.value.avg_score)))
 
 /* 数字滚动:统计卡数值从旧值平滑滚动到新值 */
 const reviewCountSrc = computed(() => summary.value?.review_count ?? 0)
@@ -300,45 +319,74 @@ const fileCountAnim = useCountUp(fileCountSrc)
 
 const riskData = ref<{ name: string; value: number; severity: string }[]>([])
 
-/* ── 后台进行中面板:有任务才显示(隐藏设计);运行期间 5s 轮询 ── */
+/* 后台进度独立读取；单次请求结束后再调度，隐藏页面不轮询。 */
 const runningData = ref<RunningOut | null>(null)
-const runningLoaded = ref(false)
+const runningState = ref<LoadState>('loading')
+const hasRunningTasks = computed(() => Boolean(runningData.value && (runningData.value.reviews.length || runningData.value.agents.length)))
 const AGENT_RUN_STATUS_LABELS: Record<string, string> = {
-  running: '运行中', approving: '待审批确认', rejecting: '驳回处理中',
-  answering: '等待补充回答', waiting_approval: '等待审批', waiting_input: '等待输入',
+  running: '运行中', approving: '审批处理中', rejecting: '驳回处理中',
+  answering: '回答处理中', waiting_approval: '等待审批', waiting_input: '等待输入',
 }
-let runningTimer: ReturnType<typeof setInterval> | null = null
+let runningTimer: ReturnType<typeof setTimeout> | undefined
+let runningRequest: Promise<void> | null = null
 
-async function loadRunning(): Promise<void> {
-  try {
-    runningData.value = await getRunning()
-    runningLoaded.value = true
-  } catch {
-    /* 面板静默失败:不打扰主数据 */
-  }
+function stopRunningPolling(): void {
+  if (runningTimer) clearTimeout(runningTimer)
+  runningTimer = undefined
+}
+
+function validateRunning(data: RunningOut): void {
+  if (!data || typeof data !== 'object') throw new Error('Invalid running data')
+  assertRows(data.reviews, (item) => isCount(item.id) && item.id > 0 && isCount(item.project_id) && item.project_id > 0
+    && isText(item.task_name) && isText(item.project_name) && isText(item.review_type)
+    && ['pending', 'running'].includes(String(item.status)) && isCount(item.processed_files) && isCount(item.total_files))
+  assertRows(data.agents, (item) => isText(item.run_id) && isText(item.session_key)
+    && ['user', 'admin'].includes(String(item.surface)) && Object.prototype.hasOwnProperty.call(AGENT_RUN_STATUS_LABELS, String(item.status)))
+}
+
+function loadRunning(): Promise<void> {
+  if (disposed) return Promise.resolve()
+  if (runningRequest) return runningRequest
+  stopRunningPolling()
+  runningState.value = 'loading'
+  runningRequest = (async () => {
+    // 先让出一次微任务，确保同步抛错也发生在 request 引用赋值之后。
+    await Promise.resolve()
+    if (disposed) return
+    try {
+      const data = await getRunning()
+      if (disposed) return
+      validateRunning(data)
+      runningData.value = data
+      runningState.value = 'success'
+    } catch {
+      if (!disposed) runningState.value = 'error'
+    } finally {
+      runningRequest = null
+      if (!disposed && !document.hidden) {
+        const interval = runningState.value === 'error' ? 15000 : hasRunningTasks.value ? 5000 : 30000
+        runningTimer = setTimeout(() => { void loadRunning() }, interval)
+      }
+    }
+  })()
+  return runningRequest
 }
 
 function reviewProgress(item: RunningReviewItem): number {
-  if (item.status === 'pending') return 0
-  if (!item.total_files) return 8
-  return Math.min(100, Math.round((item.processed_files / item.total_files) * 100))
+  if (item.status === 'pending' || !item.total_files) return 0
+  return Math.max(0, Math.min(100, Math.round((item.processed_files / item.total_files) * 100)))
 }
 
-function startRunningPolling(): void {
-  if (runningTimer) return
-  runningTimer = setInterval(() => { void loadRunning() }, 5000)
+function onRunningVisibility(): void {
+  if (document.hidden) stopRunningPolling()
+  else void loadRunning()
 }
-function stopRunningPolling(): void {
-  if (runningTimer) { clearInterval(runningTimer); runningTimer = null }
-}
-watch(() => runningData.value, (data) => {
-  const active = Boolean(data && (data.reviews.length || data.agents.length))
-  if (active) startRunningPolling()
-  else stopRunningPolling()
-})
 
 /* 分析区折叠(不重要内容渐进披露),偏好持久化 */
-const analysisOpen = ref(localStorage.getItem('prism:dashboard-analysis-open') !== '0')
+function readAnalysisOpen(): boolean {
+  try { return localStorage.getItem('prism:dashboard-analysis-open') !== '0' } catch { return true }
+}
+const analysisOpen = ref(readAnalysisOpen())
 watch(analysisOpen, (open) => {
   try { localStorage.setItem('prism:dashboard-analysis-open', open ? '1' : '0') } catch { /* ignore */ }
 })
@@ -378,9 +426,9 @@ const statCards = computed(() => {
   const hasFile = fileCountSrc.value > 0
   return [
     {
-      label: '累计成功审查', value: Math.round(reviewCountAnim.value), unit: '次', icon: 'DocumentChecked',
+      label: '累计成功任务', value: Math.round(reviewCountAnim.value), unit: '次', icon: 'DocumentChecked',
       iconStyle: { background: 'var(--brand-50)', color: 'var(--brand-600)' },
-      delta: hasReview ? '持续积累中' : '— 暂无数据', deltaDir: 'flat',
+      delta: hasReview ? '含代码审查与测试' : '— 暂无数据', deltaDir: 'flat',
       feature: false,
     },
     {
@@ -400,20 +448,20 @@ const statCards = computed(() => {
     {
       label: '平均代码评分', value: hasAverageScore.value ? avgScoreAnim.value.toFixed(1) : '—', unit: '/100', icon: 'TrendCharts',
       iconStyle: { background: 'rgba(255,255,255,.16)', color: '#fff' },
-      delta: hasReview ? null : '— 暂无已完成审查',
+      delta: hasAverageScore.value ? `${summary.value?.code_review_count} 份有效代码审查 · 不含测试` : '— 暂无代码评分样本',
       deltaDir: 'flat',
       feature: true,
     },
     {
-      label: '活跃项目', value: Math.round(projectCountAnim.value), unit: '个', icon: 'FolderOpened',
+      label: '可见项目', value: Math.round(projectCountAnim.value), unit: '个', icon: 'FolderOpened',
       iconStyle: { background: 'rgba(75,155,255,.10)', color: 'var(--dim-naming)' },
       delta: hasProject ? '持续更新中' : '— 暂无', deltaDir: 'flat',
       feature: false,
     },
     {
-      label: '代码文件', value: Math.round(fileCountAnim.value), unit: '份', icon: 'Document',
+      label: '代码库文件', value: Math.round(fileCountAnim.value), unit: '份', icon: 'Document',
       iconStyle: { background: 'rgba(61,188,217,.12)', color: 'var(--accent-600)' },
-      delta: hasFile ? '持续更新中' : '— 暂无', deltaDir: 'flat',
+      delta: (summary.value?.archive_file_count ?? 0) > 0 ? `另有 ${summary.value?.archive_file_count} 个整包归档文件` : hasFile ? '当前有效的入库文件' : '— 暂无入库文件', deltaDir: 'flat',
       feature: false,
     },
   ]
@@ -546,11 +594,18 @@ interface ActivityItem {
   live?: boolean
 }
 
+function taskScoreLabel(task: RecentTaskOut): string {
+  if (['sandbox_test', 'pentest'].includes(task.review_type || '')) return '测试评分'
+  if (['quick', 'standard', 'security', 'performance', 'full'].includes(task.review_type || '')) return '代码评分'
+  return '历史评分（类型未确认）'
+}
+
 const activityFeed = computed<ActivityItem[]>(() => {
   const tasks = (summary.value?.recent_tasks ?? []) as RecentTaskOut[]
   return tasks.slice(0, 6).map((t, i) => {
     const id = t.id ?? i
-    const score = t.score ?? 0
+    const score = t.score ?? '未提供'
+    const scoreLabel = taskScoreLabel(t)
     const status = t.status || 'pending'
     const taskName = t.task_name || `任务 #${id}`
     const projectName = t.project_name || ''
@@ -566,9 +621,9 @@ const activityFeed = computed<ActivityItem[]>(() => {
       title: live
         ? `正在审查 <b>${safeDisplayName}</b>`
         : ok
-          ? `完成 <b>${safeDisplayName}</b>，评分 <b style="color: var(--status-fixed);">${score}</b>`
+          ? `完成 <b>${safeDisplayName}</b>，${scoreLabel} <b style="color: var(--status-fixed);">${score}</b>`
           : `<b>${safeDisplayName}</b> 检出问题`,
-      meta: `状态：${status}${ok ? ` · 评分 ${score}` : ''}`,
+      meta: `状态：${status}${ok ? ` · ${scoreLabel} ${score}` : ''}`,
       when: created || '时间未记录',
       live,
     }
@@ -604,7 +659,8 @@ function isRecentTask(value: unknown): value is RecentTaskOut {
   const task = value as RecentTaskOut
   return isCount(task.id) && task.id > 0 && isCount(task.project_id) && task.project_id > 0
     && isText(task.task_name) && isText(task.project_name) && task.status === 'success'
-    && isScore(task.score) && (task.create_time === null || isTimestamp(task.create_time))
+    && (task.score === null || isScore(task.score))
+    && (task.review_type == null || isText(task.review_type)) && (task.create_time === null || isTimestamp(task.create_time))
 }
 
 function assertRows(data: unknown, validate: (row: Record<string, unknown>) => boolean): void {
@@ -621,6 +677,8 @@ async function loadSummary() {
     if (disposed || version !== summaryVersion) return
     const counts = data && [data.project_count, data.file_count, data.review_count, data.total_issues, data.severe_issues]
     if (!counts || !counts.every(isCount) || !isScore(data.avg_score)
+      || (data.code_review_count !== undefined && (!isCount(data.code_review_count) || data.code_review_count > data.review_count))
+      || (data.archive_file_count !== undefined && !isCount(data.archive_file_count))
       || !Array.isArray(data.recent_tasks) || !data.recent_tasks.every(isRecentTask)) throw new Error('Invalid dashboard summary')
     summary.value = data
     summaryState.value = 'success'
@@ -682,10 +740,10 @@ async function loadScoreTrend() {
 }
 
 async function loadReviewFrequency() {
-  await loadChart('frequency', () => getReviewFrequency(timeRange.value === 0 ? 3650 : timeRange.value), (data) => {
+  await loadChart('frequency', () => getReviewFrequency(timeRange.value), (data) => {
     assertRows(data, (row) => isCalendarDate(row.date) && isCount(row.count))
     frequencyData.value = data.map((item: FrequencyItem) => ({
-      name: dayjs(item.date).format('M/D'),
+      name: timeRange.value === 0 ? dayjs(item.date).format('YYYY/M/D') : dayjs(item.date).format('M/D'),
       value: item.count,
     }))
   })
@@ -715,7 +773,7 @@ function onWeeklyReport() {
       : '<tr><td colspan="2" style="color:#999">暂无数据</td></tr>'
   const taskRows = (s.recent_tasks || []).length
     ? (s.recent_tasks || []).map((t) =>
-        `<tr><td>#${esc(t.id)}</td><td>${esc(t.project_name)}</td><td>${esc(t.task_name)}</td><td style="text-align:right">${esc(t.score)}</td><td>${esc(String(t.create_time || '').slice(0, 10))}</td></tr>`).join('')
+        `<tr><td>#${esc(t.id)}</td><td>${esc(t.project_name)}</td><td>${esc(t.task_name)}</td><td style="text-align:right">${esc(taskScoreLabel(t))}：${esc(t.score ?? '未提供')}</td><td>${esc(String(t.create_time || '').slice(0, 10))}</td></tr>`).join('')
     : '<tr><td colspan="5" style="color:#999">暂无审查记录</td></tr>'
 
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
@@ -731,16 +789,17 @@ function onWeeklyReport() {
   @media print{body{margin:16px}}
 </style></head><body>
   <h1>棱镜 Prism · 代码审查统计报告</h1>
-  <div class="sub">风险与问题类型图表区间:近 ${esc(timeRange.value)} 天；概览为累计值，最近审查不受区间限制。生成时间:${esc(dayjs().format('YYYY-MM-DD HH:mm'))}</div>
+  <div class="sub">风险与问题类型图表区间:${esc(rangeLabel.value)}；概览为累计值，最近审查不受区间限制。生成时间:${esc(dayjs().format('YYYY-MM-DD HH:mm'))}</div>
   <h2>累计概览</h2>
   <div class="cards">
-    <div class="card"><div class="n">${esc(s.review_count)}</div><div class="l">累计成功审查</div></div>
+    <div class="card"><div class="n">${esc(s.review_count)}</div><div class="l">累计成功任务（含测试）</div></div>
     <div class="card"><div class="n">${esc(s.total_issues)}</div><div class="l">累计发现问题</div></div>
     <div class="card"><div class="n">${esc(s.severe_issues)}</div><div class="l">严重问题</div></div>
-    <div class="card"><div class="n">${hasAverageScore.value ? esc(s.avg_score) : '暂无已完成审查'}</div><div class="l">平均代码评分</div></div>
-    <div class="card"><div class="n">${esc(s.project_count)}</div><div class="l">活跃项目</div></div>
-    <div class="card"><div class="n">${esc(s.file_count)}</div><div class="l">代码文件</div></div>
+    <div class="card"><div class="n">${hasAverageScore.value ? esc(s.avg_score) : '暂无代码评分样本'}</div><div class="l">平均代码评分（${esc(s.code_review_count ?? 0)} 份有效代码审查，不含测试）</div></div>
+    <div class="card"><div class="n">${esc(s.project_count)}</div><div class="l">可见项目</div></div>
+    <div class="card"><div class="n">${esc(s.file_count)}</div><div class="l">代码库文件</div></div>
   </div>
+  <p>代码库文件为当前有效入库文件；另有 ${esc(s.archive_file_count ?? 0)} 个整包归档文件。</p>
   <h2>风险等级分布</h2><table><thead><tr><th>等级</th><th style="text-align:right">数量</th></tr></thead><tbody>${rows(riskData.value)}</tbody></table>
   <h2>问题类型分布</h2><table><thead><tr><th>类型</th><th style="text-align:right">数量</th></tr></thead><tbody>${rows(issueTypeData.value)}</tbody></table>
   <h2>最近审查任务</h2><table><thead><tr><th>ID</th><th>项目</th><th>任务</th><th style="text-align:right">评分</th><th>日期</th></tr></thead><tbody>${taskRows}</tbody></table>
@@ -776,6 +835,7 @@ function onNewReview() {
 }
 
 function goReviewDetail(id: number) {
+  if (!canViewReviews.value) return
   router.push(`/reviews/${id}`)
 }
 
@@ -795,17 +855,19 @@ function onAgentTaskComplete(): void {
 }
 
 async function loadDashboard(): Promise<void> {
-  await Promise.allSettled([loadSummary(), loadCharts()])
+  await Promise.allSettled([loadSummary(), loadCharts(), loadRunning()])
 }
 
 onMounted(() => {
-  void loadRunning()
   loadDashboard()
+  document.addEventListener('visibilitychange', onRunningVisibility)
   window.addEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
 
 onBeforeUnmount(() => {
   disposed = true
+  stopRunningPolling()
+  document.removeEventListener('visibilitychange', onRunningVisibility)
   if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
   window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
 })
@@ -873,12 +935,12 @@ button.link {
 /* ============ 6 卡 ============ */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
-@media (max-width: 1280px) {
-  .stat-grid { grid-template-columns: repeat(3, 1fr); }
+@media (min-width: 1680px) {
+  .stat-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
@@ -913,11 +975,13 @@ button.link {
   background: #fff; border: 1px solid var(--gray-100, #eef0f4); text-align: left;
 }
 .running-item.review { cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
-.running-item.review:hover { border-color: var(--brand-300, #a8c4fa); transform: translateY(-1px); }
+.running-item.review:disabled { cursor: default; color: inherit; }
+.running-item.review:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
+.running-item.review:not(:disabled):hover { border-color: var(--brand-300, #a8c4fa); transform: translateY(-1px); }
 .running-item.agent { grid-template-columns: auto minmax(0, 1fr) auto; }
 .ri-main { display: grid; min-width: 0; }
 .ri-main b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ri-meta { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+.ri-meta { overflow-wrap: anywhere; font-size: 11px; color: var(--gray-500); margin-top: 2px; }
 .ri-bar { position: relative; height: 7px; border-radius: 999px; background: var(--gray-100, #eef0f4); overflow: hidden; }
 .ri-fill {
   position: absolute; inset: 0 auto 0 0; border-radius: 999px;
@@ -939,6 +1003,16 @@ button.link {
   width: 8px; height: 8px; border-radius: 50%; background: #8f8bff;
   animation: running-ping 1.6s ease-out infinite;
 }
+
+@media (max-width: 640px) {
+  .running-head { flex-wrap: wrap; }
+  .running-item { grid-template-columns: minmax(0, 1fr) 48px; gap: 8px; padding: 10px; }
+  .running-item.review .ri-main { grid-column: 1 / -1; }
+}
+.severity-values { display: grid; gap: 6px; list-style: none; padding: 0; margin: 8px 0 0; }
+.severity-values li, .severity-values li > span { display: flex; align-items: center; gap: 7px; }
+.severity-values li { justify-content: space-between; font-size: 12px; }
+.severity-values i { width: 8px; height: 8px; border-radius: 50%; }
 
 /* ── 分析区折叠 ── */
 .analysis-fold { border: 1px dashed var(--gray-200); border-radius: 12px; overflow: hidden; }
@@ -1072,6 +1146,11 @@ button.link {
 }
 
 .stat-num {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
   font-size: 28px;
   font-weight: 600;
   letter-spacing: 0;
@@ -1083,7 +1162,7 @@ button.link {
 .stat-unit {
   font-size: 13px;
   color: var(--gray-400);
-  margin-left: 4px;
+  margin-left: 0;
   font-weight: 500;
 }
 
@@ -1112,7 +1191,10 @@ button.link {
   }
   .gauge-label {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    line-height: 1.5;
     font-family: var(--font-mono);
     font-size: 10px;
     color: rgba(255, 255, 255, 0.55);

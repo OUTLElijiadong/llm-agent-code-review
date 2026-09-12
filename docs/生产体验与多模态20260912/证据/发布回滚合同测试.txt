@@ -1,0 +1,35 @@
+test_artifacts=/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-deploy-tests.KE06rT
+PASS write_version
+PASS legacy_labels
+PASS legacy_git
+PASS missing_evidence
+PASS conflicting_labels
+PASS wrong_revision
+PASS invalid_version
+PASS digest_changed
+PASS ops_default_drift
+PASS ops_masked_drift
+PASS ops_running_drift
+PASS ops_consistent
+PASS restore_missing_image
+PASS restore_missing_evidence
+PASS restore_invalid_heads
+PASS restore_pinned_image
+PASS rollback_version
+PASS rollback_legacy
+PASS rollback_missing_evidence
+release binding tests: passed=19 failed=0
+failure_case=backup exit=41 recovery=not_switched PASS
+failure_case=verify exit=42 recovery=not_switched PASS
+failure_case=backend_build exit=44 recovery=not_switched PASS
+failure_case=migration exit=44 recovery=not_switched PASS
+failure_case=backend_up exit=44 recovery=restored PASS
+failure_case=backend_health exit=1 recovery=restored PASS
+failure_case=backend_smoke exit=1 recovery=restored PASS
+failure_case=frontend_build exit=44 recovery=restored PASS
+failure_case=frontend_up exit=44 recovery=restored PASS
+failure_case=assets exit=43 recovery=restored PASS
+failure_case=frontend_health exit=1 recovery=restored PASS
+failure_case=https exit=1 recovery=restored PASS
+failure_case=rollback_failed exit=1 recovery=failed PASS
+deploy shell and operations tests: PASS

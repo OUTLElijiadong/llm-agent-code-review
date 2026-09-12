@@ -1,0 +1,51 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/Prism-production-ux-20260912/backend
+configfile: pyproject.toml
+plugins: anyio-4.12.1, cov-5.0.0, asyncio-0.26.0
+asyncio: mode=auto, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 8 items
+
+tests/unit/services/test_dashboard_live_progress.py ......FF             [100%]
+
+=================================== FAILURES ===================================
+______ test_average_code_score_excludes_sandbox_pentest_and_unknown_types ______
+
+db = <sqlalchemy.orm.session.Session object at 0x10efb0640>
+
+    def test_average_code_score_excludes_sandbox_pentest_and_unknown_types(db):
+        owner, _, project, _ = seed(db)
+        code = task(db, owner, project, status='success', score=0)
+        sandbox = task(db, owner, project, status='success', score=100)
+        sandbox.review_type = 'sandbox_test'
+        pentest = task(db, owner, project, status='success', score=100)
+        pentest.review_type = 'pentest'
+        old = task(db, owner, project, status='success', score=100)
+        old.review_type = 'legacy_unknown'
+        invalid = task(db, owner, project, status='success', score=101)
+        db.flush()
+        result = dashboard_service.get_summary(db, owner)
+        assert result['review_count'] == 5
+>       assert result['code_review_count'] == 1
+E       KeyError: 'code_review_count'
+
+tests/unit/services/test_dashboard_live_progress.py:187: KeyError
+_________________ test_sandbox_only_has_no_code_score_samples __________________
+
+db = <sqlalchemy.orm.session.Session object at 0x10f0e3f70>
+
+    def test_sandbox_only_has_no_code_score_samples(db):
+        owner, _, project, _ = seed(db)
+        sandbox = task(db, owner, project, status='success', score=100)
+        sandbox.review_type = 'sandbox_test'
+        db.flush()
+        result = dashboard_service.get_summary(db, owner)
+        assert result['review_count'] == 1
+>       assert result['code_review_count'] == 0
+E       KeyError: 'code_review_count'
+
+tests/unit/services/test_dashboard_live_progress.py:200: KeyError
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_dashboard_live_progress.py::test_average_code_score_excludes_sandbox_pentest_and_unknown_types
+FAILED tests/unit/services/test_dashboard_live_progress.py::test_sandbox_only_has_no_code_score_samples
+========================= 2 failed, 6 passed in 0.76s ==========================

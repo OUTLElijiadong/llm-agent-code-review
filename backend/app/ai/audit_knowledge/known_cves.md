@@ -1,6 +1,6 @@
 # PHP 生态漏洞参考库
 
-核验日期：2026-09-07。共 41 条参考记录，来源为 CVE 官方记录和组件维护者公告。
+核验日期：2026-09-12。共 41 条 CVE 参考记录，另有 1 条尚无 CVE 编号的维护者公告。
 
 **判定**：必须核对目标的精确组件版本、运行环境、配置及可达代码路径。版本命中只能形成候选，不能直接确认可利用。HTTP 非 404、500 或版本号相似均不足以确认漏洞。此参考集不是全量 NVD 数据库，不执行主动探测。
 
@@ -11,7 +11,7 @@
 - **组件与受影响范围**：laravel / framework：>= 13.0.0, < 13.10.0；< 12.60.0
 - **判定依据（官方原文）**：Laravel is a web application framework. Prior to versions 12.60.0 and 13.10.0, a CRLF injection vulnerability in Laravel's email validation, in combination with how Symfony Mailer and Symfony Mime handle certain character sequences, may allow an unauthenticated attacker to interfere with outbound email processing in applications that send mail to user-supplied addresses. This issue has been patched in versions 12.60.0 and 13.10.0.
 - **官方来源**：https://cveawg.mitre.org/api/cve/CVE-2026-48019
-- **来源类型**：CVE 官方记录（CNA）；记录更新时间：2026-09-04T22:11:40.811Z。
+- **来源类型**：CVE 官方记录（CNA）；记录更新时间：2026-09-08T13:01:38.157Z。
 
 ## 漏洞参考：CVE-2026-7260
 - **来源标题**：Stack overflow in phar with circular symlinks
@@ -292,6 +292,14 @@
 - **判定依据（官方原文）**：The mailSend function in the isMail transport in PHPMailer before 5.2.18 might allow remote attackers to pass extra parameters to the mail command and consequently execute arbitrary code via a \" (backslash double quote) in a crafted Sender property.
 - **官方来源**：https://cveawg.mitre.org/api/cve/CVE-2016-10033
 - **来源类型**：CVE 官方记录（CNA）；记录更新时间：2025-10-21T23:55:47.202Z。
+
+## 补充维护者公告：GHSA-jh5r-qr3c-85q8
+- **来源标题**：XSS in Debug Page Information
+- **CVE 编号**：官方尚未提供；不计入 CVE 参考数量。
+- **组件与受影响范围**：laravel/framework：官方列出 <v12.69.0 和 <v13.30.0 两个分支范围，修补版本分别为 >=v12.69.0、>=v13.30.0；应按实际主版本分支判断，不将两个区间合并为单一区间。
+- **判定依据**：仅在 APP_DEBUG=true 时，攻击者可控输入被传入 allowHTML: true 的 Tippy.js 提示框，鼠标悬停可能触发 DOM XSS。需要同时核对调试开关、依赖版本与输入可达性。
+- **官方来源**：https://github.com/laravel/framework/security/advisories/GHSA-jh5r-qr3c-85q8
+- **来源类型**：组件维护者官方公告（尚无 CVE 编号）；记录更新时间：2026-09-10T09:56:39Z。
 
 ## 历史资料纠正
 

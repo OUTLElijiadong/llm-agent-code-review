@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models.eval_case import EvalCase
 from app.models.review_rule import ReviewRule
+from app.services.agent_model_service import resolve_subagent_config
 
 # 召回不退化容差(召回是安全关键指标,从严)
 _RECALL_EPS = 1e-6
@@ -285,8 +286,9 @@ def _default_reviewer(db: Session) -> Callable:
     from app.ai.deepseek_agent import DeepSeekAgent
     from app.ai.prompt_builder import build_prompt
     from app.ai.result_parser import parse
+    from app.utils.api_resolver import resolve_api_config
 
-    agent = DeepSeekAgent()
+    agent = DeepSeekAgent(api_config=resolve_subagent_config(db, resolve_api_config(db), agent_name="code_reviewer"))
 
     def _review(code: str, language: str, rules: list) -> list[dict]:
         system_prompt, user_prompt = build_prompt(

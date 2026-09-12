@@ -102,6 +102,7 @@ export interface TaskOut {
   review_type: string
   status: string
   total_files: number
+  processed_files: number
   total_issues: number
   report_issue_summary?: TaskDetailOut['report_issue_summary']
   severe_issues: number

@@ -26,9 +26,13 @@ ASSET_URL_PREFIX = "prism-asset://"
 
 
 def validate_images(images: Sequence[str]) -> list[str]:
-    """逐张校验 data URL 图片,返回合法列表;超量直接截断到上限。"""
+    """逐张校验 data URL 图片；超量明确拒绝，不静默丢弃附件。"""
+    if len(images) > MAX_IMAGES_PER_MESSAGE:
+        from app.core.exceptions import BadRequestError
+
+        raise BadRequestError("每条消息最多上传 4 张图片，请移除多余图片后重试")
     result: list[str] = []
-    for url in list(images)[:MAX_IMAGES_PER_MESSAGE]:
+    for url in images:
         decoded = decode_data_image_url(url, max_bytes=MAX_IMAGE_BYTES)
         if decoded is None:
             from app.core.exceptions import BadRequestError
@@ -64,6 +68,8 @@ def store_message_images(
             db.query(AgentMultimodalAsset)
             .filter(
                 AgentMultimodalAsset.run_id == run_id,
+                AgentMultimodalAsset.user_id == user_id,
+                AgentMultimodalAsset.surface == surface,
                 AgentMultimodalAsset.sha256 == digest,
             )
             .first()
@@ -105,14 +111,22 @@ def image_asset_map(assets: Sequence[Mapping[str, Any]]) -> dict[str, str]:
 
 def resolve_vision_model(db: Session) -> str:
     """视觉模型:管理员角色分配(chat_vision)优先,否则系统默认视觉模型。"""
-    from app.services.system_config_service import resolve_model_assignment
+    from app.core.exceptions import ValidationError
+    from app.services.system_config_service import get_model_registry, guess_vision_capability, resolve_model_assignment
 
-    return resolve_model_assignment(db, "chat_vision", settings.deepseek_vision_model)
+    model = resolve_model_assignment(db, "chat_vision", settings.deepseek_vision_model)
+    entry = next((item for item in get_model_registry(db) if item["id"] == model), None)
+    supported = entry["vision"] if entry else guess_vision_capability(model)
+    if not supported:
+        raise ValidationError("尚未配置可用的视觉模型，请管理员在大模型管理中确认能力与分配")
+    return model
 
 
 def restore_image_placeholders(
     items: Sequence[Mapping[str, Any]],
     assets: Mapping[str, str],
+    *,
+    strict: bool = False,
 ) -> list[dict[str, Any]]:
     """把 transcript 中的 prism-asset:// 占位符还原为 data URL(仅用于发往上游的 payload)。
 
@@ -139,9 +153,44 @@ def restore_image_placeholders(
                 if data_url:
                     new_parts.append({**dict(part), "image_url": data_url})
                 else:
+                    if strict:
+                        from app.core.exceptions import ValidationError
+
+                        raise ValidationError("本次任务的图片留档缺失，请重新上传图片后重试")
                     new_parts.append({"type": "input_text", "text": "[历史图片已归档,无法再次查看]"})
                 changed = True
             else:
                 new_parts.append(part)
         restored.append({**dict(item), "content": new_parts} if changed else dict(item))
     return restored
+
+
+def load_run_image_assets(db: Session, *, user_id: int, run_id: str, surface: str) -> dict[str, str]:
+    """从已通过运行归属校验的资产重建请求图片，不跨账号或界面读取。"""
+    import base64
+
+    rows = db.query(AgentMultimodalAsset).filter(
+        AgentMultimodalAsset.run_id == run_id,
+        AgentMultimodalAsset.user_id == user_id,
+        AgentMultimodalAsset.surface == surface,
+    ).all()
+    assets = {}
+    for row in rows:
+        binary = bytes(row.data)
+        if hashlib.sha256(binary).hexdigest() != row.sha256:
+            from app.core.exceptions import ValidationError
+
+            raise ValidationError("图片留档校验失败，请重新上传图片后重试")
+        assets[row.sha256] = f"data:{row.mime};base64,{base64.b64encode(binary).decode()}"
+    return assets
+
+
+def transcript_has_images(items: Sequence[Mapping[str, Any]]) -> bool:
+    for item in items:
+        for key in ("content", "output"):
+            parts = item.get(key)
+            if isinstance(parts, list) and any(
+                isinstance(part, Mapping) and part.get("type") == "input_image" for part in parts
+            ):
+                return True
+    return False

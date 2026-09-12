@@ -58,9 +58,11 @@ from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
+from app.services.agent_model_service import resolve_subagent_config
 from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 from app.services.issue_merger import merge_findings_and_issues
 from app.services.review_input_service import freeze_task_inputs, validate_review_input
+from app.utils.api_resolver import resolve_api_config
 
 # 讨论画像 code → 注册中心 BaseAgent code(与 review_service 保持一致),
 # 用于向 Agent 办公室广播事件时点亮正确的工位卡。
@@ -87,6 +89,21 @@ _STANCE_ALIASES = {
     "补充": "supplement", "中立": "neutral",
 }
 _SILENT_DEFAULT = "本轮没有新增证据或不同观点，选择静音。"
+
+
+def _build_discussion_agents(user_id: int, profiles):
+    """短连接读取用户/平台配置，按真实注册角色创建此次圆桌的客户端。"""
+    db = SessionLocal()
+    try:
+        config = resolve_api_config(db, user_id)
+        names = {"code_reviewer"} | {_PROFILE_TO_AGENT_CODE.get(profile.code, profile.code) for profile in profiles}
+        clients = {
+            name: DeepSeekAgent(api_config=resolve_subagent_config(db, config, agent_name=name))
+            for name in names
+        }
+        return clients["code_reviewer"], clients
+    finally:
+        db.close()
 
 
 class _DiscussionInactive(RuntimeError):
@@ -329,7 +346,9 @@ class DiscussionOrchestrator:
             validate_review_input(SimpleNamespace(content=code, file_name=file_name, is_binary=0))
             if not profiles or max_rounds <= 0:
                 raise ValidationError("圆桌讨论必须包含审查专家和有效轮次", code=40001)
-            agent = DeepSeekAgent()
+            agent, speaker_agents = await loop.run_in_executor(
+                None, copy_context().run, lambda: _build_discussion_agents(user_id, profiles),
+            )
         except Exception as exc:
             self._publish_terminal(session_id, 0, "failed", str(exc))
             return
@@ -476,7 +495,7 @@ class DiscussionOrchestrator:
 
                     coverage["attempted_turns"] += 1
                     decision, meta, ok = await self._speaker_turn(
-                        agent=agent,
+                        agent=speaker_agents[target_code],
                         profile=profile,
                         code=code,
                         language=language,
