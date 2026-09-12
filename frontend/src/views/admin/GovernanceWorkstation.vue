@@ -71,6 +71,12 @@ const overview = ref<GovernanceOverview | null>(null)
 const agents = ref<GovernanceAgent[]>([])
 const agentsLoaded = ref(false)
 const agentLoadError = ref('')
+const expandedAgentCodes = ref(new Set<string>())
+
+function toggleAgentDetails(code: string): void {
+  if (expandedAgentCodes.value.has(code)) expandedAgentCodes.value.delete(code)
+  else expandedAgentCodes.value.add(code)
+}
 const approvals = ref<ApprovalItem[]>([])
 const policies = ref<PolicyRule[]>([])
 const decisions = ref<PolicyDecision[]>([])
@@ -702,7 +708,7 @@ onMounted(loadData)
       </div>
     </template>
 
-    <section v-else-if="mode === 'agents'" class="panel">
+    <section v-else-if="mode === 'agents'" class="panel agent-directory">
       <p class="agent-load-status" role="status" aria-live="polite" aria-atomic="true">
         <template v-if="loading">{{ agentsLoaded ? '正在刷新 Agent 列表，保留上次成功结果。' : '正在加载 Agent 列表…' }}</template>
         <template v-else-if="agentsLoaded && !agentLoadError">已加载 {{ agents.length }} 个 Agent</template>
@@ -711,30 +717,50 @@ onMounted(loadData)
         v-if="agentLoadError"
         type="error"
         :title="agentLoadError"
-        :description="agentsLoaded ? '当前保留上次成功加载的列表，请刷新重试。' : '尚未获取 Agent 列表，请刷新重试。'"
         :closable="false"
         show-icon
-      />
-      <el-table :data="agents" stripe>
-          <template #empty>
-            <EmptyState compact :description="agentsLoaded ? '暂无 Agent 记录' : loading ? '正在加载 Agent 列表' : '尚未获取 Agent 列表'" />
-          </template>
-        <el-table-column prop="name" label="Agent(智能体)" min-width="150" />
-        <el-table-column prop="code" label="内部编码" min-width="140" />
-        <el-table-column label="分类" width="120">
-            <template #default="{ row }"><span :title="typeof row.category === 'string' ? row.category : undefined">{{ agentCategoryText(row.category) }}</span></template>
-          </el-table-column>
-        <el-table-column label="职责边界" min-width="260" show-overflow-tooltip>
-          <template #default="{ row }">{{ agentBoundaryText(row) }}</template>
-        </el-table-column>
-        <el-table-column label="Skill(技能)" min-width="220">
-          <template #default="{ row }"><span :title="row.skills.join(', ')">{{ row.skills.map((s: string) => toolCodeText(s)).join('、') }}</span></template>
-        </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="90" />
-        <el-table-column prop="auto_approval_threshold" label="审批阈值" width="100" />
-        <el-table-column prop="memory_count" label="记忆" width="80" />
-        <el-table-column prop="knowledge_count" label="知识" width="80" />
-      </el-table>
+      >
+        <p>{{ agentsLoaded ? '当前保留上次成功加载的列表，请重新加载。' : '尚未获取 Agent 列表，请重新加载。' }}</p>
+        <el-button :loading="loading" :disabled="loading" @click="loadData">重新加载</el-button>
+      </el-alert>
+      <div v-if="agents.length" class="agent-card-grid">
+        <article v-for="(agent, index) in agents" :key="agent.code" class="agent-card" :aria-labelledby="`agent-name-${index}`">
+          <header class="agent-card-head">
+            <div>
+              <span class="agent-category" :title="typeof agent.category === 'string' ? agent.category : undefined">{{ agentCategoryText(agent.category) }}</span>
+              <h3 :id="`agent-name-${index}`">{{ agent.name }}</h3>
+            </div>
+            <span class="agent-enabled" :class="{ 'is-disabled': agent.is_enabled === 0 }">{{ agent.is_enabled === 1 ? '已启用' : agent.is_enabled === 0 ? '已停用' : '状态未提供' }}</span>
+          </header>
+          <p class="agent-responsibility" :title="agent.description">{{ agent.description || '暂未提供职责说明' }}</p>
+          <dl class="agent-card-metrics">
+            <div><dt>优先级</dt><dd>{{ agent.priority ?? '—' }}</dd></div>
+            <div><dt>审批阈值</dt><dd>{{ agent.auto_approval_threshold ?? '—' }}</dd></div>
+            <div><dt>记忆</dt><dd>{{ agent.memory_count ?? '—' }}</dd></div>
+            <div><dt>知识</dt><dd>{{ agent.knowledge_count ?? '—' }}</dd></div>
+          </dl>
+          <button
+            type="button"
+            class="agent-detail-toggle"
+            :aria-expanded="expandedAgentCodes.has(agent.code)"
+            :aria-controls="`agent-details-${index}`"
+            @click="toggleAgentDetails(agent.code)"
+          >{{ expandedAgentCodes.has(agent.code) ? '收起能力与治理详情' : '查看能力与治理详情' }} <span aria-hidden="true">{{ expandedAgentCodes.has(agent.code) ? '−' : '+' }}</span></button>
+          <div v-if="expandedAgentCodes.has(agent.code)" :id="`agent-details-${index}`" class="agent-card-details">
+            <dl>
+              <div><dt>内部编码</dt><dd><code>{{ agent.code }}</code></dd></div>
+              <div><dt>完整职责</dt><dd>{{ agent.description || '暂未提供职责说明' }}</dd></div>
+              <div><dt>授权边界</dt><dd>{{ agentBoundaryText(agent) }}</dd></div>
+              <div>
+                <dt>已登记能力（{{ agent.skills?.length ?? 0 }}）</dt>
+                <dd v-if="agent.skills?.length" class="agent-skill-list"><span v-for="skill in agent.skills" :key="skill" :title="skill">{{ toolCodeText(skill) }}</span></dd>
+                <dd v-else>暂无已登记能力</dd>
+              </div>
+            </dl>
+          </div>
+        </article>
+      </div>
+      <EmptyState v-else compact :description="agentsLoaded ? '暂无 Agent 记录' : loading ? '正在加载 Agent 列表' : '尚未获取 Agent 列表'" />
     </section>
 
     <section v-else-if="mode === 'approvals'" class="panel">
@@ -1328,6 +1354,41 @@ onMounted(loadData)
   color: var(--gray-700);
   font-size: 13px;
 }
+
+.agent-directory { overflow-x: visible; }
+.agent-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  align-items: start;
+  gap: 16px;
+  margin-top: 12px;
+}
+.agent-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 12px;
+  background: var(--color-bg-card, #fff);
+  overflow-wrap: anywhere;
+}
+.agent-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.agent-card-head > div { min-width: 0; }
+.agent-card-head h3 { margin: 8px 0 0; font-size: 16px; line-height: 1.45; }
+.agent-category { color: var(--brand-600, #5751ce); background: var(--brand-50, #f1efff); border-radius: 6px; padding: 3px 7px; font-size: 12px; }
+.agent-enabled { flex-shrink: 0; padding-top: 3px; color: var(--color-text-secondary, #646b7a); font-size: 12px; }
+.agent-enabled.is-disabled { color: var(--color-text-placeholder, #7c8493); }
+.agent-responsibility { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 40px; margin: 12px 0 16px; color: var(--color-text-secondary, #646b7a); font-size: 13px; line-height: 20px; }
+.agent-card-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; padding: 12px 0; border-top: 1px solid var(--color-border-light, #e5e7eb); border-bottom: 1px solid var(--color-border-light, #e5e7eb); }
+.agent-card-metrics dt, .agent-card-details dt { color: var(--color-text-secondary, #646b7a); font-size: 12px; }
+.agent-card-metrics dd { margin: 6px 0 0; color: var(--color-text-primary, #303133); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.agent-detail-toggle { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 6px 0; border: 0; background: transparent; color: var(--brand-600, #5751ce); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.agent-detail-toggle:focus-visible { outline: 2px solid var(--brand-500, #6a63df); outline-offset: 3px; border-radius: 3px; }
+.agent-card-details { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--color-border-light, #e5e7eb); }
+.agent-card-details dl { display: grid; gap: 12px; margin: 0; }
+.agent-card-details dd { margin: 5px 0 0; font-size: 13px; line-height: 1.6; }
+.agent-card-details code { white-space: normal; overflow-wrap: anywhere; }
+.agent-skill-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.agent-skill-list span { max-width: 100%; padding: 3px 7px; border-radius: 5px; background: var(--color-bg-page, #f5f6fa); }
 
 .panel-heading {
   display: flex;

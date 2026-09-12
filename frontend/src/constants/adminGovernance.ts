@@ -181,6 +181,8 @@ export function memoryTypeText(value: string | null | undefined): string {
 export const CATEGORY_LABELS: Record<string, string> = {
   meta: '主控', frontline: '前台', governance: '治理', operations: '运维',
   security: '安全', knowledge: '知识', quality: '质量', general: '通用',
+  analytics: '数据分析', analyzer: '分析检测', custom_review: '自定义审查',
+  manager: '协调管理', orchestrator: '任务编排', output: '报告输出', reviewer: '代码审查',
 }
 
 export function categoryText(value: string | null | undefined): string {

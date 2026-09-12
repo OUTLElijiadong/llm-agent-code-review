@@ -274,3 +274,49 @@ it('Retry-After 的零秒与已过去 HTTP-date 都不会被改成默认冷却',
     })).rejects.toMatchObject({ retry_after_seconds: 0 })
   }
 })
+
+describe('退出或换账号后的迟到401', () => {
+  it.each([null, 'new-account-token'])('请求携带旧Token而当前为%s时，不清理或打断当前会话', async (currentToken) => {
+    harness.getToken.mockReturnValue('old-token')
+    const config = harness.state.requestFulfilled!({ url: '/agent-mesh/inbox', headers: {} })
+    harness.getToken.mockReturnValue(currentToken)
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
+    const data = { code: 40100, message: '缺少token', data: null }
+    await expect(harness.state.responseRejected!({ config, response: { status: 401, data } })).rejects.toBe(data)
+    expect(harness.clearToken).not.toHaveBeenCalled()
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(harness.messageError).not.toHaveBeenCalled()
+    expect(harness.routerReplace).not.toHaveBeenCalled()
+    expect(window.__prismAuthExpiredHandled).not.toBe(true)
+  })
+
+  it('旧账号迟到40102不踢掉新账号，新账号自己的过期401仍提示', async () => {
+    harness.getToken.mockReturnValue('new-token')
+    const oldError = { config: { url: '/agent-mesh/inbox', headers: { authorization: 'Bearer old-token' } },
+      response: { status: 401, data: { code: 40102, message: '已下线', data: null } } }
+    await expect(harness.state.responseRejected!(oldError)).rejects.toBe(oldError.response.data)
+    expect(harness.messageError).not.toHaveBeenCalled()
+    const currentError = { config: { url: '/projects', headers: { get: () => 'Bearer new-token' } },
+      response: { status: 401, data: { code: 40100, message: '当前登录已过期', data: null } } }
+    await expect(harness.state.responseRejected!(currentError)).rejects.toBe(currentError.response.data)
+    expect(harness.messageError).toHaveBeenCalledWith('当前登录已过期')
+    expect(harness.clearToken).toHaveBeenCalledOnce()
+    expect(harness.routerReplace).toHaveBeenCalledWith('/login')
+  })
+
+  it('真正匿名访问受限资源的401仍提示登录', async () => {
+    harness.getToken.mockReturnValue(null)
+    const data = { code: 40100, message: '缺少token', data: null }
+    await expect(harness.state.responseRejected!({ config: { url: '/projects', headers: {} }, response: { status: 401, data } })).rejects.toBe(data)
+    expect(harness.messageError).toHaveBeenCalledWith('缺少token')
+    expect(harness.routerReplace).toHaveBeenCalledWith('/login')
+  })
+
+  it('当前账号的40102仍提供单设备下线提示', async () => {
+    harness.getToken.mockReturnValue('same-token')
+    const data = { code: 40102, message: '已下线', data: null }
+    await expect(harness.state.responseRejected!({ config: { url: '/projects', headers: { Authorization: 'Bearer same-token' } }, response: { status: 401, data } })).rejects.toBe(data)
+    expect(harness.messageError).toHaveBeenCalledWith('账号已在另一台设备登录，当前设备已下线')
+    expect(harness.clearToken).toHaveBeenCalledOnce()
+  })
+})

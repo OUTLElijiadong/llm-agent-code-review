@@ -128,7 +128,7 @@ afterEach(() => {
   expect(renderErrors).toEqual([])
 })
 
-describe('admin governance interpolation in real table cells', () => {
+describe('admin governance interpolation in real cells and agent cards', () => {
   it('has no single-brace function-call text in any admin Vue template', () => {
     const directory = path.resolve('src/views/admin')
     const candidates: string[] = []
@@ -148,7 +148,6 @@ describe('admin governance interpolation in real table cells', () => {
 
   const cases: Array<{ mode: TestedMode; cells: Array<[number, number, string]> }> = [
     { mode: 'overview', cells: [[0, 1, '治理']] },
-    { mode: 'agents', cells: [[0, 2, '治理']] },
     { mode: 'approvals', cells: [[0, 1, '审查编排'], [0, 2, '读取知识']] },
     { mode: 'tools', cells: [
       [0, 0, '贾维斯(全局运维)'], [0, 1, '命令执行'], [0, 2, '升级审批'], [0, 3, '高风险'],
@@ -166,7 +165,7 @@ describe('admin governance interpolation in real table cells', () => {
     for (const cell of wrapper.findAll('tbody td')) expect(cell.text()).not.toMatch(/\{\s*\w+\([^{}]*\)\s*\}/)
   })
 
-  it('renders all 35 agent category rows using the existing eight category labels', async () => {
+  it('renders all 35 agent cards using the existing eight category labels', async () => {
     const categories = [
       ['meta', '主控'], ['frontline', '前台'], ['governance', '治理'], ['operations', '运维'],
       ['security', '安全'], ['knowledge', '知识'], ['quality', '质量'], ['general', '通用'],
@@ -176,8 +175,9 @@ describe('admin governance interpolation in real table cells', () => {
     })))
     const wrapper = mountMode('agents')
     await settle()
-    expect(wrapper.findAllComponents(ElTable)[0]!.findAll('tbody tr.el-table__row')).toHaveLength(35)
-    for (let index = 0; index < 35; index++) expect(tableCells(wrapper, 0, index)[2]).toBe(categories[index % categories.length]![1])
+    const cards = wrapper.findAll('.agent-card')
+    expect(cards).toHaveLength(35)
+    for (let index = 0; index < 35; index++) expect(cards[index]!.get('.agent-category').text()).toBe(categories[index % categories.length]![1])
   })
 
   it.each([
@@ -194,7 +194,7 @@ describe('admin governance interpolation in real table cells', () => {
     api.listGovernanceAgents.mockResolvedValue([{ ...makeAgent(), category }])
     const wrapper = mountMode('agents')
     await settle()
-    expect(tableCells(wrapper)[2]).toBe(text)
+    expect(wrapper.get('.agent-category').text()).toBe(text)
   })
 
   it('keeps unknown category markup as inert text', async () => {
@@ -202,8 +202,8 @@ describe('admin governance interpolation in real table cells', () => {
     api.listGovernanceAgents.mockResolvedValue([makeAgent(category)])
     const wrapper = mountMode('agents')
     await settle()
-    expect(tableCells(wrapper)[2]).toBe(`未知分类（${category}）`)
-    expect(wrapper.find('tbody img').exists()).toBe(false)
+    expect(wrapper.get('.agent-category').text()).toBe(`未知分类（${category}）`)
+    expect(wrapper.find('.agent-card img').exists()).toBe(false)
   })
 })
 
@@ -235,20 +235,20 @@ describe('AgentGovernance refresh feedback only', () => {
     await refresh.trigger('click')
     expect(refresh.attributes('disabled')).toBeDefined()
     expect(wrapper.get('[role="status"]').text()).toContain('正在刷新 Agent 列表')
-    expect(tableCells(wrapper)[0]).toBe('审查编排测试')
+    expect(wrapper.get('.agent-card h3').text()).toBe('审查编排测试')
     await refresh.trigger('click')
     expect(api.listGovernanceAgents).toHaveBeenCalledTimes(2)
     request.reject({ message: '读取超时，请稍后重试' })
     await settle()
     expect(wrapper.get('[role="alert"]').text()).toContain('读取超时，请稍后重试')
     expect(wrapper.get('[role="alert"]').text()).toContain('上次成功')
-    expect(tableCells(wrapper)[0]).toBe('审查编排测试')
+    expect(wrapper.get('.agent-card h3').text()).toBe('审查编排测试')
     expect(refresh.attributes('disabled')).toBeUndefined()
     api.listGovernanceAgents.mockResolvedValueOnce([{ ...makeAgent(), name: '更新后的隔离样例' }])
     await refresh.trigger('click')
     await settle()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-    expect(tableCells(wrapper)[0]).toBe('更新后的隔离样例')
+    expect(wrapper.get('.agent-card h3').text()).toBe('更新后的隔离样例')
     expect(wrapper.get('[role="status"]').text()).toContain('已加载 1 个 Agent')
   })
 

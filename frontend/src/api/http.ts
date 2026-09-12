@@ -45,6 +45,17 @@ function isLoginRequest(config: AxiosRequestConfig | undefined): boolean {
   return (config?.url ?? '').split('?')[0].replace(/\/$/, '').endsWith('/auth/login')
 }
 
+/** 已发请求属于旧登录会话时，其迟到401不能清除新会话或打扰正常退出。 */
+function hasStaleAuthentication(config: AxiosRequestConfig | undefined): boolean {
+  const headers = config?.headers
+  const authorization = typeof headers?.get === 'function'
+    ? headers.get('Authorization')
+    : headers?.Authorization ?? headers?.authorization
+  if (typeof authorization !== 'string') return false
+  const token = /^Bearer\s+(.+)$/i.exec(authorization)?.[1]
+  return Boolean(token && token !== getToken())
+}
+
 /** Retry-After 支持秒数与 HTTP-date；优先服务器 Date，避免本机时钟偏差。 */
 function retryAfterSeconds(headers: AxiosResponse['headers'] | undefined, body: unknown): number | undefined {
   const readHeader = (name: string) => {
@@ -136,6 +147,8 @@ http.interceptors.response.use(
       }
     }
     if (status === 401 && !loginRequest) {
+      // 仅忽略携带旧凭据的响应；真正匿名的401和当前会话401仍正常处理。
+      if (hasStaleAuthentication(err.config)) return Promise.reject(data || err)
       // 并发请求可能同时 401,只处理一次:清 token、跳登录、弹一次错,
       // 避免"缺少token"等错误消息反复弹出刷屏。
       if (!window.__prismAuthExpiredHandled) {
