@@ -22,6 +22,6 @@
 
 每例通过真实 `redis-cli EVAL` 执行Lua，并使用唯一测试键；fixture结束删除自己的键。测试进程完成后通过EXIT清理专用容器，停止及移除均成功；再次按完整容器名查询，残留数量为0。没有接触生产Redis或其它容器。
 
-证据位于同目录 `证据/真实Redis-创建.log`、`真实Redis-隔离核验.log`、`真实Redis-Lua验收.log`、`真实Redis-停止.log`、`真实Redis-清理核验.log`。
+证据位于同目录 `证据/真实Redis-创建.txt`、`真实Redis-隔离核验.txt`、`真实Redis-Lua验收.txt`、`真实Redis-停止.txt`、`真实Redis-清理核验.txt`。
 
 本结论补齐这5个真实Redis跳过项；不把一次隔离Lua测试等同于生产账号完整登录界面验收，后者由根代理继续完成。

@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/Prism-production-ux-20260912/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, anyio-4.14.1, asyncio-0.26.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 5 items
+
+tests/unit/core/test_login_rate_limit_real_redis.py .....                [100%]
+
+============================== 5 passed in 6.48s ===============================

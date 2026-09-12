@@ -1,0 +1,1 @@
+"/prism-login-audit-20260912-fabeb254" "none" "redis:6.2-alpine" true []

@@ -7,9 +7,11 @@ SQLite；TestClient 不启动应用 lifespan，因此不会启动调度器或付
 
 from __future__ import annotations
 
+import importlib.util
 import inspect
 import re
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +32,12 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.user import User
-from scripts.verify_permission_acceptance_https import iter_api_route_contexts
+
+_RUNNER_PATH = Path(__file__).resolve().parents[1] / "scripts/verify_permission_acceptance_https.py"
+_RUNNER_SPEC = importlib.util.spec_from_file_location("complete_permission_matrix_runner", _RUNNER_PATH)
+_RUNNER = importlib.util.module_from_spec(_RUNNER_SPEC)
+_RUNNER_SPEC.loader.exec_module(_RUNNER)
+iter_api_route_contexts = _RUNNER.iter_api_route_contexts
 
 
 def _walk_dependencies(dependant):
