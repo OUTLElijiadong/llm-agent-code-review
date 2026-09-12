@@ -68,14 +68,18 @@ function closeSidebar(): void {
 }
 
 .app-layout-main {
+  // 60px 悬浮入口 + 24px 底距 + 16px 间隔，确保页尾分页能滚动到入口上方。
+  --assistant-action-clearance: calc(100px + env(safe-area-inset-bottom, 0px));
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--layout-main-padding);
+  padding-bottom: max(var(--layout-main-padding), var(--assistant-action-clearance));
   background: transparent;
   scroll-padding-top: var(--layout-main-padding);
+  scroll-padding-bottom: var(--assistant-action-clearance);
 }
 
 .sidebar-mask {
@@ -114,7 +118,7 @@ function closeSidebar(): void {
   }
 
   .app-layout-main {
-    padding: var(--layout-main-padding) 12px 24px;
+    padding-inline: 12px;
   }
 
   .sidebar-mask {
@@ -128,7 +132,7 @@ function closeSidebar(): void {
 
 @media (max-width: 420px) {
   .app-layout-main {
-    padding: var(--layout-main-padding) 10px 22px;
+    padding-inline: 10px;
   }
 }
 
