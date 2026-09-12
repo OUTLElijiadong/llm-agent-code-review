@@ -1,0 +1,36 @@
+{
+  "observed_at_utc": "2026-09-12T16:23:47.058554+00:00",
+  "business_writes": false,
+  "llm_requests": 0,
+  "transaction_read_only": 1,
+  "stored_row_present": true,
+  "stored_json_object": true,
+  "stored": {
+    "active": false,
+    "model": "gpt-5.5",
+    "endpoint_kind": "other_or_missing",
+    "encrypted_credential_present": true,
+    "decryptable_by_current_keyring": false,
+    "decrypted_credential_nonempty": false,
+    "decryption_source": null,
+    "needs_rotation": null
+  },
+  "runtime_default": {
+    "model": "deepseek-v4-flash",
+    "orchestrator_model": "deepseek-v4-pro",
+    "endpoint_kind": "official_deepseek",
+    "credential_present": true,
+    "configured_encryption_key_count": 1,
+    "legacy_jwt_decryption_available": true
+  },
+  "last_24h_logged_calls": [
+    {
+      "model": "deepseek-v4-pro",
+      "status": "success",
+      "count": 7,
+      "latest_utc": "2026-09-11 19:24:07"
+    }
+  ],
+  "availability_limit": "配置存在和历史成功日志不证明当前凭据可用；未发模型请求，也不能把调用日志归因到某个密钥",
+  "status": "passed"
+}

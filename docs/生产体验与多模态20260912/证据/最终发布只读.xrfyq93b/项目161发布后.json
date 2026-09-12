@@ -1,0 +1,59 @@
+{
+  "status": "passed",
+  "release": "7a2368f20453606ed09691ee0002d07df4629ec3",
+  "current": {
+    "kind": "count",
+    "rows": 104,
+    "readonly": 1,
+    "target_rows": 1,
+    "observed_at_utc": "2026-09-12 16:19:13.395245"
+  },
+  "schema_equal": true,
+  "field_comparison": [
+    {
+      "field": "id",
+      "sha256": "199544bc7dab55aef31c05638b48f3d01adf4844715cef65602298ab8a9389ec",
+      "equals_before_release": true
+    },
+    {
+      "field": "user_id",
+      "sha256": "cda5a1ba35745edc34db68ca4b10db94066ab5ec660f1792772f3ee56c3c82df",
+      "equals_before_release": true
+    },
+    {
+      "field": "project_name",
+      "sha256": "42f8daeac5c7c6fe88548d11719bff2a305a3b6530f87d4da564a7747fd15d27",
+      "equals_before_release": true
+    },
+    {
+      "field": "description",
+      "sha256": "d5c2d953549d12397106b3c70f291b35f6b317e25341fb60e1e960324fe8beb1",
+      "equals_before_release": true
+    },
+    {
+      "field": "language",
+      "sha256": "b1dc63940482e6e34df0909ba17de3342a61d3a26a4a39b3dfd3b30165c3ff75",
+      "equals_before_release": true
+    },
+    {
+      "field": "status",
+      "sha256": "9fb86d9bbd1698923250f1da4aa03315d807974b5b0d9a88db922495cf6771fd",
+      "equals_before_release": true
+    },
+    {
+      "field": "create_time",
+      "sha256": "ff3fe06e86fdc6c97d6b5a86bc399d6e35ce31f610ad67886e051ac9af3a4fc7",
+      "equals_before_release": true
+    },
+    {
+      "field": "update_time",
+      "sha256": "241660b02b00824b6a05e62eb70830ad046206b5d9d5887c8a53358f50ab6b9f",
+      "equals_before_release": true
+    }
+  ],
+  "row_sha256": "9e49ca15c51357ed0fc9c71703c8371ab9b67593e493b8385b4e753826131194",
+  "all_eight_fields_equal": true,
+  "baseline_file_sha256": "95cf1f72edfd732723980600e52edf0953fb999612b2aec39fcff5eed6ca5bbf",
+  "backup_reread": false,
+  "sql_write_executed": false
+}

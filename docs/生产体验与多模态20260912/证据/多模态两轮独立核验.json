@@ -1,0 +1,36 @@
+{
+  "status": "passed",
+  "release": "7a2368f20453606ed09691ee0002d07df4629ec3",
+  "runs": [
+    814,
+    815
+  ],
+  "fixture_sha256": "6e4b8c54f886cdd61177a5e0be13ae84161f36be535343b5108ce34ddd0ad560",
+  "fixture_bytes": 1308,
+  "input_asset_matches_fixture": true,
+  "image_model": "deepseek-flash",
+  "following_text_model": "deepseek-v4-pro",
+  "resolved_default_model": "deepseek-v4-pro",
+  "api_config_source": "system",
+  "api_base_model": "deepseek-v4-flash",
+  "restored_effective_default": true,
+  "ai_call_ids": [
+    9802,
+    9803
+  ],
+  "ai_call_fk_owners_consistent": true,
+  "output_checkpoint_chars": [
+    215,
+    4
+  ],
+  "third_run_cancel_attempt": {
+    "run_id": 816,
+    "status": "completed",
+    "cancellation_proven": false
+  },
+  "limits": [
+    "Both runs have one round; production tool-loop vision was not exercised.",
+    "AI log prompt/response are NULL; outputs are in checkpoint and image bytes in asset table.",
+    "Run 816 stop attempt completed; feedback race awaits fix. Evidence remains for release 7a2368."
+  ]
+}

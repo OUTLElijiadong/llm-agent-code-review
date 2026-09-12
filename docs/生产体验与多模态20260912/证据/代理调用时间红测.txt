@@ -1,0 +1,68 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/Prism-production-ux-20260912/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, anyio-4.14.1, asyncio-0.26.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 5 items
+
+tests/unit/services/test_agent_service.py ...FF                          [100%]
+
+=================================== FAILURES ===================================
+________ test_persisted_utc_call_time_keeps_timezone_in_both_agent_apis ________
+
+db = <sqlalchemy.orm.session.Session object at 0x10cfac110>
+admin_user = <app.models.user.User object at 0x10de67e10>
+
+    def test_persisted_utc_call_time_keeps_timezone_in_both_agent_apis(db, admin_user):
+        """数据库无时区UTC不能被东八区客户端理解为八小时前。"""
+        from datetime import timedelta, timezone
+
+        from app.models.ai_call_log import AiCallLog
+        from app.schemas.agent import AgentUsageOut
+
+        instant = datetime(2026, 9, 12, 16, 30)
+        db.add(AiCallLog(user_id=admin_user.id, model_name="deepseek-v4-pro",
+                         agent_label="chat_assistant", status="success", create_time=instant))
+        db.commit()
+        legacy = next(row for row in agent_service.get_usage(db, admin_user.id) if row["code"] == "general")
+        runtime = agent_service._aggregate_log_stats(db, admin_user.id, {"chat_assistant"})["chat_assistant"]
+        for value in [AgentUsageOut(**legacy).last_called_at, runtime["last_called_at"]]:
+            parsed = datetime.fromisoformat(value)
+>           assert parsed.tzinfo is not None
+E           assert None is not None
+E            +  where None = datetime.datetime(2026, 9, 12, 16, 30).tzinfo
+
+tests/unit/services/test_agent_service.py:98: AssertionError
+_____ test_agent_last_called_uses_actual_instant_when_input_offsets_differ _____
+
+    def test_agent_last_called_uses_actual_instant_when_input_offsets_differ():
+        """兼容带时区记录时先归一UTC，再比较最近一次，防字符串顺序错位。"""
+        from datetime import timedelta, timezone
+
+        earlier = datetime(2026, 9, 13, 0, 1, tzinfo=timezone(timedelta(hours=8)))
+        later = datetime(2026, 9, 12, 16, 5)
+        rows = [("deepseek-v4-pro", "success", earlier), ("deepseek-v4-pro", "success", later)]
+        legacy = next(row for row in agent_service.get_usage(_FakeDb(rows)) if row["code"] == "general")
+        runtime_rows = [(*row, "chat_assistant") for row in rows]
+        runtime = agent_service._aggregate_log_stats(_FakeDb(runtime_rows), None, {"chat_assistant"})["chat_assistant"]
+        for result in [legacy, runtime]:
+>           assert result["last_called_at"] == "2026-09-12T16:05:00+00:00"
+E           AssertionError: assert '2026-09-13T00:01:00+08:00' == '2026-09-12T16:05:00+00:00'
+E
+E             - 2026-09-12T16:05:00+00:00
+E             ?          ^ ^^  ^     ^
+E             + 2026-09-13T00:01:00+08:00
+E             ?          ^ ^^  ^     ^
+
+tests/unit/services/test_agent_service.py:115: AssertionError
+=============================== warnings summary ===============================
+../../../../../../private/tmp/prism-0912-dependency-security/venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /private/tmp/prism-0912-dependency-security/venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_agent_service.py::test_persisted_utc_call_time_keeps_timezone_in_both_agent_apis
+FAILED tests/unit/services/test_agent_service.py::test_agent_last_called_uses_actual_instant_when_input_offsets_differ
+==================== 2 failed, 3 passed, 1 warning in 1.16s ====================

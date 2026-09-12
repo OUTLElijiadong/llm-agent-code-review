@@ -1,0 +1,271 @@
+{
+  "status": "passed",
+  "base_url": "https://lijiadong.cn",
+  "marker": "20260908",
+  "phase": "existing_member_original_description_403",
+  "started_at": "2026-09-12T16:24:03.665767+00:00",
+  "requests": [
+    {
+      "account": "owner_a",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-014a0951e0784fd2b5c396366ac6269e",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 497,
+      "response_sha256": "a925f22c4d02b83d6cbbb1e64bf66bdc11f0292ab34784e5a9dfb7889394fe7b",
+      "response_request_id": "3fbdfc85b44eec141780364e8bfd17ed",
+      "elapsed_ms": 318
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/rbac/users/107/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-5ede635cb36c44fd8cc3ed3663b179d1",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "eeed3248b23e16a61ed3a57b05694fb30bbb8299b81cc01f6a793e96a7248d1d",
+      "response_request_id": "17ba48c42d4645ceb1949d323dec5012",
+      "elapsed_ms": 52
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/rbac/users/107/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-2bf4f402f40744deb4057d820b906120",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "c5481abe625cb03842da751c0a2fbb06",
+      "elapsed_ms": 34
+    },
+    {
+      "account": "member_a",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-20ade2d3b502433fa06017ce746b3ba5",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 499,
+      "response_sha256": "e540447246ee1265354ceba3f5abf3faf02a035ae3a2df0b93771f41d41f4cb1",
+      "response_request_id": "3c86ef19350651118bcb04c0d959026f",
+      "elapsed_ms": 309
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/rbac/users/108/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-e947b76192ad437db7ba3f75ad6103de",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "eeed3248b23e16a61ed3a57b05694fb30bbb8299b81cc01f6a793e96a7248d1d",
+      "response_request_id": "e2d14a5a31c47378af8b17eee3958294",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/rbac/users/108/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-68701e29fe9f4adea8b5807ab3e5b5f3",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "a01aa9de0f287995f39c60d0e07afbd3",
+      "elapsed_ms": 31
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/164",
+      "expected": 200,
+      "purpose": "保留完整项目前态，仅摘要落日志",
+      "request_id": "qa-34228217f5e1486186acfa657b55b746",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 479,
+      "response_sha256": "8423fb264d58d726ae68e8326772769207d387fa8783a98b8490c920b2ca8bb0",
+      "response_request_id": "5627cfd628ff2fa7f179bdd9b141a57b",
+      "elapsed_ms": 42
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/164/members",
+      "expected": 200,
+      "purpose": "确认owner107与项目reviewer108",
+      "request_id": "qa-802032006e2d49baa360ec9403c75254",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 419,
+      "response_sha256": "f6a0759a1bdba657b8b94b243e0f558531e9e17cd2232cf843ae6337a8b18bcb",
+      "response_request_id": "0363ffa85227d72e1798bb4b32a2c69c",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "member_a",
+      "method": "PUT",
+      "path": "/api/projects/164",
+      "expected": 403,
+      "purpose": "真实reviewer有效原描述PUT应403，禁止把200或422记为通过",
+      "request_id": "qa-6ba7bb7fa84044dab65d9bf7ffa23759",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 167,
+      "response_sha256": "0949d903620899c99c6dd97b18ebf198554a49c12bf411caab55c93bcf187cd5",
+      "response_request_id": "a828ad35fcca332e967eae99b4b87ec7",
+      "elapsed_ms": 39
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/164",
+      "expected": 200,
+      "purpose": "写拒绝尝试后的全字段回显核对",
+      "request_id": "qa-4083fd77c0194537bc09eacc3964a23b",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 479,
+      "response_sha256": "8423fb264d58d726ae68e8326772769207d387fa8783a98b8490c920b2ca8bb0",
+      "response_request_id": "f031a00972b5c5ce627ad41fc45bd54c",
+      "elapsed_ms": 32
+    }
+  ],
+  "assertions": [
+    {
+      "check": "权限合同包含project:update且精确20项",
+      "passed": true
+    },
+    {
+      "check": "owner_a身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_a仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "owner_a权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "member_a身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "member_a仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "member_a权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "既有QA项目身份和owner写能力符合固定合同",
+      "passed": true
+    },
+    {
+      "check": "原描述为有效字符串且不超过500字；不规范时停止不补写",
+      "passed": true
+    },
+    {
+      "check": "项目成员合同精确核对",
+      "passed": true
+    },
+    {
+      "check": "项目全字段前后完全一致，包含update_time与嵌套字段",
+      "passed": true
+    },
+    {
+      "check": "原描述写尝试严格403，意外200也是安全失败",
+      "passed": true
+    },
+    {
+      "check": "仅执行固定10请求",
+      "passed": true
+    }
+  ],
+  "resources": {
+    "project_id": 164,
+    "before_sha256": "fb8ae55c32c5a3e4c976e7b6a79927ba3d7463578d6f93e6b8356341bad47f21",
+    "before_fields_sha256": {
+      "id": "3f9807cb9ae9fb6c30942af6139909d27753a5e03fe5a5c6e93b014f5b17366f",
+      "project_name": "f81182d384f45dc47e27be62b7170d039fa44bf3d5f875c998f22cb230e584a5",
+      "description": "5b11f279fac0f226185bbc6cdbb833c2d49abe626d0fcb1a7096a42c7571c61d",
+      "language": "2d0edc2f0650c5218a2cbe6022e4bad2f146e015c465a29754ad6407b054d6b3",
+      "status": "db0fb2bf5ebc424454c3e11b5ee8bfb43af24a52e561aa49e94143831dc6fd93",
+      "file_count": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "active_file_count": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "archive_file_count": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "source_mode": "5227e558b8d5353515cf6b89b6766028ca0773ba56a348371c4d61b13d4b3165",
+      "source_archive": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "can_update": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+      "can_delete": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+      "agent_run_count": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "last_agent_run_at": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "create_time": "7b94dae8690885bcc6977b4c2b73b485c8bdc62b2cbceda46852fca1b31edc95",
+      "update_time": "eb9888bfedcbfaf0647101421c68ae75db3fb1fd5f714daa7aa71078a081c4f7",
+      "recent_tasks": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_revisions": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "description_chars": 19,
+    "description_sha256": "5b11f279fac0f226185bbc6cdbb833c2d49abe626d0fcb1a7096a42c7571c61d",
+    "after_sha256": "fb8ae55c32c5a3e4c976e7b6a79927ba3d7463578d6f93e6b8356341bad47f21",
+    "after_fields_sha256": {
+      "id": "3f9807cb9ae9fb6c30942af6139909d27753a5e03fe5a5c6e93b014f5b17366f",
+      "project_name": "f81182d384f45dc47e27be62b7170d039fa44bf3d5f875c998f22cb230e584a5",
+      "description": "5b11f279fac0f226185bbc6cdbb833c2d49abe626d0fcb1a7096a42c7571c61d",
+      "language": "2d0edc2f0650c5218a2cbe6022e4bad2f146e015c465a29754ad6407b054d6b3",
+      "status": "db0fb2bf5ebc424454c3e11b5ee8bfb43af24a52e561aa49e94143831dc6fd93",
+      "file_count": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "active_file_count": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "archive_file_count": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "source_mode": "5227e558b8d5353515cf6b89b6766028ca0773ba56a348371c4d61b13d4b3165",
+      "source_archive": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "can_update": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+      "can_delete": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+      "agent_run_count": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "last_agent_run_at": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "create_time": "7b94dae8690885bcc6977b4c2b73b485c8bdc62b2cbceda46852fca1b31edc95",
+      "update_time": "eb9888bfedcbfaf0647101421c68ae75db3fb1fd5f714daa7aa71078a081c4f7",
+      "recent_tasks": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_revisions": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "changed_fields": []
+  },
+  "blocked": [],
+  "plan_sha256": "5addffe53f41e2143b13340366bc7daa25487138758db52b45b6f2e22ef59538",
+  "planned_requests": 10,
+  "reviewed_source_sha256": {
+    "scripts/verify_permission_acceptance_https.py": "7fdf72a02e6f612c5a38ff4aba3dee1d6326fb7c7b6f8724d40a3aae0052b5b4",
+    "app/api/v1/projects.py": "00cc0215fe54e86c035fdfdfe6ff941717713ad0f2442adf5f38de49c3fa1411",
+    "app/schemas/project.py": "7a69e3dcfda62d779b7e5e6dde1ffb0aa4746dc21dc984c00a88114beb18729d",
+    "app/services/project_service.py": "e1ffeff1544e0a0fa920689f33b37c20ebe9ce98fbb269fb031f7d229b5a6bb5",
+    "app/api/v1/project_members.py": "0d5ec973eb523d2bc9a1732b77ec82e49aa7fe32a81bfbb0efeb1f5b885f49d6",
+    "app/services/project_member_service.py": "e5d4923b8ac250451b7464d05bad4b6988c6f29dd34871122bff439dc64a6d8a",
+    "app/services/project_source_revision_service.py": "188e63e102bf1b648bc1a95b0318d68987d8ced356903901b4a2148e5d6e0869"
+  },
+  "authentication_writes": "仅QA107/108各正常登录一次；登录修改认证状态/撤销旧令牌，不并发使用这两会话",
+  "expected_audit_write": "项目写权限检查会保存允许或拒绝的访问审计；不宣称本次零数据库写入",
+  "scope": "仅项目164原描述有效PUT一次，预期403；失败不重试，不写源码/版本/删除/历史状态",
+  "finished_at": "2026-09-12T16:24:06.146703+00:00",
+  "summary": {
+    "passed": 10
+  },
+  "actual_requests": 10
+}

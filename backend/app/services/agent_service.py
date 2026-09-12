@@ -138,7 +138,10 @@ def get_usage(db: Session, user_id: Optional[int] = None) -> list[dict]:
             elif status == "failed":
                 slot["failed_count"] += 1
             if create_time is not None:
-                iso = create_time.isoformat() if isinstance(create_time, datetime) else str(create_time)
+                called_at = _parse_event_timestamp(str(create_time))
+                if called_at is None:
+                    continue
+                iso = called_at.isoformat()
                 if slot["last_called_at"] is None or iso > slot["last_called_at"]:
                     slot["last_called_at"] = iso
 
@@ -242,10 +245,10 @@ def _agent_codes_from_model_name(model_name: str, all_codes: set[str]) -> set[st
 
 
 def _parse_event_timestamp(value: str) -> Optional[datetime]:
-    """将 AgentEvent.timestamp 解析为 UTC datetime。
+    """将 Agent 事件或调用时间解析为 UTC datetime。
 
     Args:
-        value: 事件时间字符串，通常为 ISO-8601。
+        value: ISO-8601 时间字符串；数据库无时区时间按既有 UTC 存储约定解释。
 
     Returns:
         Optional[datetime]: 可解析时返回 UTC 时间，否则返回 None。
@@ -339,7 +342,10 @@ def _aggregate_log_stats(
             elif status == "failed":
                 slot["failed_count"] += 1
             if ctime is not None:
-                iso = ctime.isoformat() if isinstance(ctime, datetime) else str(ctime)
+                called_at = _parse_event_timestamp(str(ctime))
+                if called_at is None:
+                    continue
+                iso = called_at.isoformat()
                 if slot["last_called_at"] is None or iso > slot["last_called_at"]:
                     slot["last_called_at"] = iso
     return stats

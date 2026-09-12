@@ -1,0 +1,48 @@
+{
+  "status": "passed",
+  "scope": "本地逐条证据审计，不新增生产请求，不复原脱敏正文",
+  "release": "7a2368f20453606ed09691ee0002d07df4629ec3",
+  "total_requests": 704,
+  "total_assertions": 87,
+  "unique_request_ids": 704,
+  "status_codes": {
+    "200": 81,
+    "401": 319,
+    "403": 286,
+    "404": 18
+  },
+  "694_audit": "694逐条独立复核.json",
+  "shared_plan_hash_recomputed": "149f54841b7c9842eea79c6c166539c5ca9996a63849f847191bfe7d7422d68f",
+  "shared_plan_sources_match_final_git_blob": 54,
+  "member": {
+    "requests": 10,
+    "status_codes": {
+      "200": 9,
+      "403": 1
+    },
+    "assertions": 13,
+    "exact_sequence_verified": true,
+    "strict_valid_description_put_403": true,
+    "before_after_equal_fields": 18,
+    "response_before_after_sha_equal": true,
+    "source_files_match_final_git_blob": 7,
+    "plan_sha256": "5addffe53f41e2143b13340366bc7daa25487138758db52b45b6f2e22ef59538",
+    "original_plan_hash_recomputed": true,
+    "plan_sources_match_final_git_blob": 54,
+    "plan_diff_from_shared_only_generated_at": true
+  },
+  "input_sha256": {
+    "plan.json": "414d8f5f48ecfa4567cc21997f05d0f2c92ff1324e501f3bdd9f33297e0f7208",
+    "matrix.json": "6ab672ac46b47bb120ab2c35f868ac66f717191a36c9e7f97315f31d1f23eab9",
+    "reads.json": "7a3df7d72e138b1db6521bda5cb2deae79f53e03ba3e0ee6b2b170a2119fd18f",
+    "extra.json": "f8fbd0d13014894f5935784e289063903e2bb59896203033dc097f36fc0c35af",
+    "成员有效写拒绝10.json": "e6b5f4112e6a9bd3b956601e54bfec1a1950d2c7205a89202bf4406ca4fff3b4",
+    "成员plan.json": "966ab502f2c080f2047263337579cc37042d074fdaeb0a4c0b61b7ebf9b93ad2"
+  },
+  "request_id_note": "发送端qa-ID与服务端返回ID均完整留存；nginx.conf.template固定proxy_set_header X-Request-Id $request_id覆盖客户端ID，不能声称原样回显。",
+  "limitations": [
+    "704为含认证前置请求数，不是704个不同按钮或不同路由。",
+    "脱敏日志没有原始响应正文，内容核验限已记录87项真实执行断言及对应冻结源实现。",
+    "原矩阵96 blocked按合同分类；部分公开或本人能力不适用统一403，WebSocket及完整正向业务仍不由此证明。"
+  ]
+}

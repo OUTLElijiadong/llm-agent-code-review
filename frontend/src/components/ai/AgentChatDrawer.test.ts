@@ -160,6 +160,65 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
 }
 
 describe('AgentChatDrawer Responses stream', () => {
+  it('模型最终输出等于用户原话时仍补齐真正的助手结果', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('重复这句话')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-echo-cancel', model: 'deepseek-v4-pro' } })
+    responseApi.cancel.mockResolvedValueOnce({ run_id: 'run-echo-cancel', status: 'completed', output_text: '重复这句话', error: '' })
+    await wrapper.find('.stop-btn').trigger('click')
+    await settleAll()
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await settleAll()
+    expect(wrapper.findAll('.msg-row.assistant .markdown-body').filter((bubble) => bubble.text() === '重复这句话')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('取消尚未确认时重复点击只发送一次请求，切换会话后不污染新会话', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('等待停止确认')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-pending-cancel', model: 'deepseek-v4-pro' } })
+    let resolveCancel!: (value: unknown) => void
+    responseApi.cancel.mockImplementationOnce(() => new Promise((resolve) => { resolveCancel = resolve }))
+    for (let i = 0; i < 2; i++) {
+      await wrapper.find('.stop-btn').trigger('click')
+      await settleAll()
+      await wrapper.find('.cancel-confirm-stop').trigger('click')
+      await settleAll()
+    }
+    expect(responseApi.cancel).toHaveBeenCalledOnce()
+    await wrapper.find('.session-current').trigger('click')
+    await wrapper.find('.session-new').trigger('click')
+    await settleAll()
+    resolveCancel({ run_id: 'run-pending-cancel', status: 'completed', output_text: '旧会话结果', error: '' })
+    await settleAll()
+    expect(wrapper.text()).not.toContain('旧会话结果')
+    expect(wrapper.text()).not.toContain('任务已完成，无需停止')
+    wrapper.unmount()
+  })
+
+  it.each(['completed', 'failed'])('停止请求返回%s时不冒称取消', async (status) => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('处理到完成')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-late-stop', model: 'deepseek-v4-pro' } })
+    responseApi.cancel.mockResolvedValueOnce({ run_id: 'run-late-stop', status, error: '已执行失败', output_text: '服务端最终结果' })
+    await wrapper.find('.stop-btn').trigger('click')
+    await settleAll()
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await settleAll()
+    expect(wrapper.text()).toContain(status === 'completed' ? '任务已完成，无需停止' : '任务已失败')
+    expect(wrapper.text()).not.toContain('已停止任务')
+    expect(wrapper.text()).not.toContain('已停止本次回答')
+    expect(wrapper.find('.stop-btn').exists()).toBe(false)
+    expect(responseApi.cancel).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
   it('服务端拒绝停止时不把本地运行误标记为已取消', async () => {
     const wrapper = await mountReadyDrawer()
     await wrapper.find('.chat-input').setValue('继续处理')
@@ -1193,5 +1252,21 @@ it('仅图片可发送，接口失败保留图片用于重试且不落本地存�
   await wrapper.find('.msg-error-btn.is-retry').trigger('click')
   await flushPromises()
   expect((streams.records[1].body.messages as Array<{images?: string[]}>).at(-1)?.images).toEqual(history.at(-1)?.images)
+  wrapper.unmount()
+})
+
+it('服务器历史恢复保留资产缩略图，不把整轮更新时间伪装成逐条消息时间', async () => {
+  sessionApi.get.mockResolvedValue({
+    surface: 'user', session_id: 'user-test',
+    run: { run_id: 'run-history-image', status: 'completed', model: 'vision', rounds: 1, error: '', updated_at: '2026-09-12T16:33:00' },
+    messages: [
+      { role: 'user', content: '描述合成蓝圆', image_assets: [{ id: 12, mime: 'image/png', sha256: 'a'.repeat(64) }] },
+      { role: 'assistant', content: '图中是蓝色圆形' },
+    ], pending: null,
+  })
+  const wrapper = await mountReadyDrawer()
+  expect(wrapper.findComponent({ name: 'AuthenticatedChatImage' }).exists()).toBe(true)
+  expect(wrapper.findAll('.msg-time')).toHaveLength(0)
+  expect(wrapper.text()).not.toContain('[图片]')
   wrapper.unmount()
 })

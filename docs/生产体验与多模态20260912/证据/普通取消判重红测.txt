@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+stderr | src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 模型最终输出等于用户原话时仍补齐真正的助手结果
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AgentChatDrawer visible=true prefill=undefined ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+ ❯ src/components/ai/AgentChatDrawer.test.ts (37 tests | 1 failed | 36 skipped) 109ms
+     × 模型最终输出等于用户原话时仍补齐真正的助手结果 108ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ai/AgentChatDrawer.test.ts > AgentChatDrawer Responses stream > 模型最终输出等于用户原话时仍补齐真正的助手结果
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/components/ai/AgentChatDrawer.test.ts:174:112
+    172|     await wrapper.find('.cancel-confirm-stop').trigger('click')
+    173|     await settleAll()
+    174|     expect(wrapper.findAll('.msg-row.assistant .markdown-body').filter…
+       |                                                                                                                ^
+    175|     wrapper.unmount()
+    176|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 36 skipped (37)
+   Start at  00:50:22
+   Duration  1.26s (transform 572ms, setup 21ms, import 896ms, tests 109ms, environment 159ms)

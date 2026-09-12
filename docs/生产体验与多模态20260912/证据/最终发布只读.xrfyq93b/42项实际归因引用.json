@@ -1,0 +1,516 @@
+{
+  "business_writes": false,
+  "query_sha256": "426c889e25d2a33641e6eff77748c188602afaa2dee852c63eefe91cab297679",
+  "observed_at_utc": "2026-09-12T16:19:19.161201+00:00",
+  "status": "passed",
+  "transaction": {
+    "utc": "2026-09-12 16:19:19.240251",
+    "kind": "transaction",
+    "schema": "code_review",
+    "isolation": "REPEATABLE-READ",
+    "read_only": 1
+  },
+  "snapshot_end": {
+    "utc": "2026-09-12 16:19:19.454804",
+    "kind": "snapshot_end",
+    "read_only": 1
+  },
+  "reference_contracts": [
+    {
+      "kind": "reference",
+      "table": "agent_response_run",
+      "column": "root_agent_run_id",
+      "populated": 0,
+      "total_rows": 789,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_response_run",
+      "column": "agent_run_id",
+      "populated": 0,
+      "total_rows": 789,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_response_run",
+      "column": "tool_execution_id",
+      "populated": 0,
+      "total_rows": 789,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_response_run",
+      "column": "agent_team_id",
+      "populated": 0,
+      "total_rows": 789,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_response_run",
+      "column": "agent_team_task_id",
+      "populated": 0,
+      "total_rows": 789,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_response_run",
+      "column": "agent_execution_event_id",
+      "populated": 0,
+      "total_rows": 789,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_team",
+      "column": "root_agent_run_id",
+      "populated": 0,
+      "total_rows": 63,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_team",
+      "column": "agent_run_id",
+      "populated": 0,
+      "total_rows": 63,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_team",
+      "column": "tool_execution_id",
+      "populated": 0,
+      "total_rows": 63,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_team",
+      "column": "agent_team_id",
+      "populated": 0,
+      "total_rows": 63,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_team",
+      "column": "agent_team_task_id",
+      "populated": 0,
+      "total_rows": 63,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_team",
+      "column": "agent_execution_event_id",
+      "populated": 0,
+      "total_rows": 63,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "review_task",
+      "column": "root_agent_run_id",
+      "populated": 1,
+      "total_rows": 147,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "review_task",
+      "column": "agent_run_id",
+      "populated": 1,
+      "total_rows": 147,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "review_task",
+      "column": "tool_execution_id",
+      "populated": 1,
+      "total_rows": 147,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "review_task",
+      "column": "agent_team_id",
+      "populated": 0,
+      "total_rows": 147,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "review_task",
+      "column": "agent_team_task_id",
+      "populated": 0,
+      "total_rows": 147,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "review_task",
+      "column": "agent_execution_event_id",
+      "populated": 0,
+      "total_rows": 147,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "ai_call_log",
+      "column": "root_agent_run_id",
+      "populated": 64,
+      "total_rows": 9602,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "ai_call_log",
+      "column": "agent_run_id",
+      "populated": 64,
+      "total_rows": 9602,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "ai_call_log",
+      "column": "tool_execution_id",
+      "populated": 14,
+      "total_rows": 9602,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "ai_call_log",
+      "column": "agent_team_id",
+      "populated": 0,
+      "total_rows": 9602,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "ai_call_log",
+      "column": "agent_team_task_id",
+      "populated": 0,
+      "total_rows": 9602,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "ai_call_log",
+      "column": "agent_execution_event_id",
+      "populated": 0,
+      "total_rows": 9602,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_mesh_message",
+      "column": "root_agent_run_id",
+      "populated": 0,
+      "total_rows": 850,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_mesh_message",
+      "column": "agent_run_id",
+      "populated": 0,
+      "total_rows": 850,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_mesh_message",
+      "column": "tool_execution_id",
+      "populated": 0,
+      "total_rows": 850,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_mesh_message",
+      "column": "agent_team_id",
+      "populated": 0,
+      "total_rows": 850,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_mesh_message",
+      "column": "agent_team_task_id",
+      "populated": 0,
+      "total_rows": 850,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "agent_mesh_message",
+      "column": "agent_execution_event_id",
+      "populated": 0,
+      "total_rows": 850,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "pentest_engagement",
+      "column": "root_agent_run_id",
+      "populated": 0,
+      "total_rows": 3,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "pentest_engagement",
+      "column": "agent_run_id",
+      "populated": 0,
+      "total_rows": 3,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "pentest_engagement",
+      "column": "tool_execution_id",
+      "populated": 0,
+      "total_rows": 3,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "pentest_engagement",
+      "column": "agent_team_id",
+      "populated": 0,
+      "total_rows": 3,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "pentest_engagement",
+      "column": "agent_team_task_id",
+      "populated": 0,
+      "total_rows": 3,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "pentest_engagement",
+      "column": "agent_execution_event_id",
+      "populated": 0,
+      "total_rows": 3,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "sandbox_environment",
+      "column": "root_agent_run_id",
+      "populated": 0,
+      "total_rows": 159,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "sandbox_environment",
+      "column": "agent_run_id",
+      "populated": 0,
+      "total_rows": 159,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "sandbox_environment",
+      "column": "tool_execution_id",
+      "populated": 0,
+      "total_rows": 159,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "sandbox_environment",
+      "column": "agent_team_id",
+      "populated": 0,
+      "total_rows": 159,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "sandbox_environment",
+      "column": "agent_team_task_id",
+      "populated": 0,
+      "total_rows": 159,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    },
+    {
+      "kind": "reference",
+      "table": "sandbox_environment",
+      "column": "agent_execution_event_id",
+      "populated": 0,
+      "total_rows": 159,
+      "missing_target": 0,
+      "owner_mismatch": 0,
+      "source_owner_unknown": 0,
+      "target_owner_unknown": 0
+    }
+  ],
+  "anomalies": [],
+  "source_attribution_fingerprints": {
+    "agent_response_run": {
+      "rows": 789,
+      "sha256": "c5024abe366feadcf9be469039d1a284be091c85d18c1b312c9234b8661e5a95"
+    },
+    "agent_team": {
+      "rows": 63,
+      "sha256": "0889510039cd4d6b249776c40f0b219ebdc88a8a55586d9ffb2cd85fc96871da"
+    },
+    "review_task": {
+      "rows": 147,
+      "sha256": "69c7c95cc342f7d70c03c3557e4d4493ce9951a181d981c9c1fabca3212b40d5"
+    },
+    "ai_call_log": {
+      "rows": 9602,
+      "sha256": "f87c32560dd3f21ce6ad4e1e3d1dc78fe8ccadd68fa55b89ae29c05b366c1971"
+    },
+    "agent_mesh_message": {
+      "rows": 850,
+      "sha256": "75b7daf25eca6e21bc176cd8801cf2bf06be17349a1a846e871369484f7bb2a7"
+    },
+    "pentest_engagement": {
+      "rows": 3,
+      "sha256": "a8d25c365c9e61726dc730a637c6fc2491cd63c8a17ef8e30bc2f0848cf5961a"
+    },
+    "sandbox_environment": {
+      "rows": 159,
+      "sha256": "c7072eec6a05c5152cda2b6a1f6623b05d4277751653ca81d5bb9aa7f4f37e56"
+    }
+  },
+  "scope": "42项非NULL引用的存在性与owner相等；team_task的owner经team解析，sandbox使用owner_id",
+  "limits": "历史NULL只计未填不猜补；引用存在和owner相同不证明所有真实调用链语义，须结合执行验收",
+  "expected_release": "7a2368f20453606ed09691ee0002d07df4629ec3"
+}

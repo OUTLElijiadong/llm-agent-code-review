@@ -1,0 +1,17 @@
+{
+  "user_id": 5,
+  "runs": [],
+  "missing_owned_run_ids": [],
+  "user_exists": true,
+  "avatar": "upload",
+  "avatar_assets": [
+    {
+      "id": 1,
+      "mime": "image/png",
+      "bytes": 1308,
+      "sha256": "6e4b8c54f886cdd61177a5e0be13ae84161f36be535343b5108ce34ddd0ad560",
+      "create_time": "2026-09-12 16:28:17",
+      "update_time": "2026-09-12 16:28:17"
+    }
+  ]
+}

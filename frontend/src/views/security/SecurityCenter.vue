@@ -183,23 +183,27 @@ onBeforeUnmount(() => { disposed = true })
           <div class="hint-icon">🛡</div>
           <div class="hint-text">
             你有 <b>{{ dashboardData.project_count }}</b> 个项目还未进行安全审计。
-            <template v-if="canScan">点击「立即扫描」开始分析。</template>
+            <template v-if="canScan">点击「全量扫描」开始分析。</template>
           </div>
-          <el-button v-if="canScan" size="small" type="primary" :icon="Lock" @click="openAllProjectScan">
-            全量扫描
-          </el-button>
-          <el-button v-if="canScan && canViewProjects" size="small" :icon="ArrowRight" @click="gotoProjects">
-            单项目扫描
-          </el-button>
+          <div v-if="canScan" class="hint-actions">
+            <el-button size="small" type="primary" :icon="Lock" @click="openAllProjectScan">
+              全量扫描
+            </el-button>
+            <el-button v-if="canViewProjects" size="small" :icon="ArrowRight" @click="gotoProjects">
+              单项目扫描
+            </el-button>
+          </div>
         </div>
 
         <!-- 无项目 -->
         <div v-else-if="!hasProjectData" class="overview-hint">
           <div class="hint-icon">📁</div>
           <div class="hint-text">还没有项目可分析。</div>
-          <el-button v-if="canCreateProject && canViewProjects" size="small" type="primary" @click="gotoProjects">
-            创建项目
-          </el-button>
+          <div v-if="canCreateProject && canViewProjects" class="hint-actions">
+            <el-button size="small" type="primary" @click="gotoProjects">
+              创建项目
+            </el-button>
+          </div>
         </div>
 
         <!-- 完整数据 -->
@@ -630,15 +634,50 @@ onBeforeUnmount(() => { disposed = true })
 }
 
 .hint-icon {
+  flex-shrink: 0;
   font-size: 32px;
   line-height: 1;
 }
 
 .hint-text {
   flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: var(--gray-800);
   line-height: 1.6;
+}
+
+.hint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hint-actions > .el-button {
+  margin-left: 0;
+}
+
+@media (max-width: 640px) {
+  .overview-hint {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 16px;
+  }
+
+  .hint-text,
+  .hint-actions {
+    width: 100%;
+  }
+
+  .hint-text {
+    flex: none;
+  }
+
+  .hint-actions > .el-button {
+    max-width: 100%;
+    min-height: 36px;
+  }
 }
 
 .hint-text b {

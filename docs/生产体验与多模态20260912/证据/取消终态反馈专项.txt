@@ -1,0 +1,8 @@
+
+ RUN  v4.1.11 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+
+ Test Files  3 passed (3)
+      Tests  84 passed (84)
+   Start at  00:50:45
+   Duration  2.22s (transform 1.26s, setup 72ms, import 1.79s, tests 1.91s, environment 738ms)

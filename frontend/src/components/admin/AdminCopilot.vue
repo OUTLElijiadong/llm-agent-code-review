@@ -16,7 +16,7 @@ import { useAgentActivityStore } from '@/stores/agentActivity'
 import {
   type AdminCopilotMessage,
 } from '@/api/adminCopilot'
-import { cancelAgentResponseRun, getAgentResponseSession, type AgentResponseSession } from '@/api/agentResponses'
+import { cancelAgentResponseRun, getAgentResponseSession, type AgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
 import {
   acknowledgeAgentMeshMessage,
   archiveAgentMeshSession,
@@ -26,6 +26,7 @@ import { getAgentTeam, listAgentTeams, type AgentTeamDetail } from '@/api/agentT
 import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
+import AuthenticatedChatImage from '@/components/ai/AuthenticatedChatImage.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ThinkingCity from '@/components/ai/ThinkingCity.vue'
 import AiOrb from '@/components/common/AiOrb.vue'
@@ -100,6 +101,9 @@ interface ChatEntry {
   runId?: string
   /** 多模态:该条用户消息携带的图片 data URL(仅内存展示,不落本地快照) */
   images?: string[]
+  /** 历史资产仅供鉴权展示，与发送给模型的images分离。 */
+  imageAssets?: AgentResponseImageAsset[]
+  assetOwnerId?: number
   payload: AdminCopilotMessage
   approval?: ResponseApprovalRequiredEvent & {
     status: 'pending' | 'submitting' | 'approved' | 'rejected'
@@ -378,7 +382,7 @@ const meshBridge = createAgentMeshBridge({
 })
 
 function welcomeEntry(): ChatEntry {
-  return assistantEntry({ type: 'text', content: WELCOME_TEXT, status: 'completed' })
+  return { ...assistantEntry({ type: 'text', content: WELCOME_TEXT, status: 'completed' }), time: '' }
 }
 
 /** 空状态快捷问题:点击填入并直接发送,降低首次使用成本。 */
@@ -604,6 +608,8 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
           id: crypto.randomUUID(),
           role: message.role,
           time: restoredTime,
+          imageAssets: message.image_assets,
+          assetOwnerId: userStore.profile?.id,
           payload: { type: 'text' as const, content: message.content },
         }
       }
@@ -671,9 +677,8 @@ function applySessionSnapshot(session: AgentResponseSession): void {
   // stale database read cannot erase text that is still arriving over SSE.
   if (loading.value) return
   sessionSnapshotSignature = signature
-  const restoredTime = session.run?.updated_at
-    ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(session.run.updated_at))
-    : now()
+  // 检查点没有逐条发送时间，不能把整轮同步时间冒充历史消息时间。
+  const restoredTime = ''
   const restored = restoredEntries(session, restoredTime)
   // 服务端恢复出历史时,按欢迎语+历史整体重建,避免与本地占位重复
   if (restored.length) messages.value = [welcomeEntry(), ...restored]
@@ -688,6 +693,7 @@ function applySessionSnapshot(session: AgentResponseSession): void {
   ) {
     messages.value.push({
       ...assistantEntry({ type: 'error', title: '上次任务没有完成', content: failedError }),
+      time: '',
     })
   }
 }
@@ -698,8 +704,9 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
     || generation !== sessionPollGeneration
   ) return
   try {
+    const requestedUserId = userStore.profile?.id
     const session = await getAgentResponseSession('admin', sessionId.value)
-    if (sessionPollStopped || generation !== sessionPollGeneration) return
+    if (sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
     sessionPollError.value = ''
     sessionPollFailures = 0
     sessionLastPolledAt.value = now()
@@ -720,9 +727,10 @@ async function restoreSession(generation = restoreGeneration + 1): Promise<void>
   restoreGeneration = generation
   try {
     const requestedSessionId = sessionId.value
+    const requestedUserId = userStore.profile?.id
     const session = await getAgentResponseSession('admin', requestedSessionId)
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。
-    if (generation !== restoreGeneration || requestedSessionId !== sessionId.value || loading.value || activeResponse) {
+    if (generation !== restoreGeneration || requestedSessionId !== sessionId.value || requestedUserId !== userStore.profile?.id || loading.value || activeResponse) {
       scheduleSessionPoll()
       return
     }
@@ -1336,7 +1344,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         requestId: info.requestId,
       })
       if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
-    } else {
+    } else if (sessionRun.value?.status !== 'completed' && sessionRun.value?.status !== 'failed' && sessionRun.value?.status !== 'incomplete') {
       appendErrorCard('已停止本次回答,可点「重试运行」继续,或新建对话')
     }
     return false
@@ -1353,42 +1361,62 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
 }
 
 /** 取消当前正在运行的 Agent 响应,可选附带取消原因用于历史沉淀。 */
+let pendingCancelKey = ''
 async function cancelResponse(reason = ''): Promise<void> {
   const runId = sessionRun.value?.run_id
-  if (runId && sessionId.value) {
-    try {
-      await cancelAgentResponseRun('admin', sessionId.value, runId, reason)
-    } catch (error) {
-      const info = actionableError(error, '停止请求未确认')
-      const content = info.message.includes('停止请求未确认')
-        ? info.message
-        : `停止请求未确认：${info.message}`
-      ElMessage.error(content)
-      appendErrorCard(content, {
-        retryable: false,
-        nextAction: info.nextAction || '当前任务仍在运行，可再次点击取消，或等待状态同步',
-        requestId: info.requestId,
-      })
-      scheduleSessionPoll()
-      return
-    }
-    if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: 'cancelled' }
+  const requestedSessionId = sessionId.value
+  const requestedUserId = userStore.profile?.id
+  if (!runId || !requestedSessionId) {
+    ElMessage.warning('尚未收到运行标识，请等待状态同步后再停止')
+    return
   }
-  activeResponse?.abort()
-  activeResponse = null
-  activityStore.clear()
-  loading.value = false
-  syncBusy()
-  sessionPollStopped = true
-  invalidateSessionPoll()
-  sessionPollStopped = false
-  // 立即给出回滚提示;服务端检查点已带上原因,下一次轮询会用权威文本替换本地占位。
-  const hint = reason.trim()
-    ? `已停止任务（原因：${reason.trim()}），未执行剩余操作；如需继续可重新发起。`
-    : '已停止任务，未执行剩余操作；如需继续可重新发起。'
-  messages.value.push(assistantEntry({ type: 'text', content: hint, status: 'completed' }))
-  await scrollToBottom()
-  scheduleSessionPoll()
+  const key = `${requestedUserId}:${requestedSessionId}:${runId}`
+  if (pendingCancelKey === key) return
+  pendingCancelKey = key
+  const isCurrent = () => !sessionPollStopped && requestedSessionId === sessionId.value
+    && requestedUserId === userStore.profile?.id && sessionRun.value?.run_id === runId
+  try {
+    const result = await cancelAgentResponseRun('admin', requestedSessionId, runId, reason)
+    if (!isCurrent()) return
+    sessionRun.value = { ...sessionRun.value!, status: result.status, error: result.error || '', output_text: result.output_text }
+    activeResponse?.abort()
+    activeResponse = null
+    activityStore.clear()
+    loading.value = false
+    showTyping.value = false
+    syncBusy()
+    invalidateSessionPoll()
+    if (result.status === 'failed' || result.status === 'incomplete') {
+      appendErrorCard(result.status === 'failed'
+        ? `任务已失败：${result.error || '请查看运行详情'}`
+        : `任务未完成：${result.error || '请查看运行详情'}`)
+    } else {
+      if (result.status === 'completed' && result.output_text && !messages.value.some((message) => message.role === 'assistant' && message.payload.content === result.output_text)) {
+        messages.value.push(assistantEntry({ type: 'text', content: result.output_text, status: 'completed' }))
+      }
+      const hint = result.status === 'completed'
+        ? '任务已完成，无需停止；已保留最终结果。'
+        : reason.trim()
+          ? `已停止任务（原因：${reason.trim()}），未执行剩余操作；如需继续可重新发起。`
+          : '已停止任务，未执行剩余操作；如需继续可重新发起。'
+      messages.value.push(assistantEntry({ type: 'text', content: hint, status: 'completed' }))
+    }
+    await scrollToBottom()
+    if (isCurrent()) scheduleSessionPoll()
+  } catch (error) {
+    if (!isCurrent()) return
+    const info = actionableError(error, '停止请求未确认')
+    const content = info.message.includes('停止请求未确认') ? info.message : `停止请求未确认：${info.message}`
+    ElMessage.error(content)
+    appendErrorCard(content, {
+      retryable: false,
+      nextAction: info.nextAction || '当前任务状态尚未确认，可再次点击取消，或等待状态同步',
+      requestId: info.requestId,
+    })
+    scheduleSessionPoll()
+  } finally {
+    if (pendingCancelKey === key) pendingCancelKey = ''
+  }
 }
 
 /** 用户在取消确认弹层中确认取消,把原因透传给后端。 */
@@ -1795,11 +1823,17 @@ onMounted(() => {
               <el-icon v-else aria-hidden="true"><DocumentCopy /></el-icon>
             </button>
             <div
-              v-else-if="entry.payload.type === 'text' && (entry.payload.content || entry.images?.length)"
+              v-else-if="entry.payload.type === 'text' && (entry.payload.content || entry.images?.length || entry.imageAssets?.length)"
               class="message-bubble"
             >
               <div v-if="entry.images?.length" class="msg-images">
                 <img v-for="(img, imgIndex) in entry.images" :key="imgIndex" :src="img" alt="图片附件" >
+              </div>
+              <div v-if="entry.imageAssets?.length" class="msg-images">
+                <AuthenticatedChatImage
+                  v-for="asset in entry.imageAssets" :key="asset.id"
+                  :asset-id="asset.id" :owner-id="entry.assetOwnerId"
+                />
               </div>
               {{ entry.payload.content }}
             </div>
@@ -1939,7 +1973,7 @@ onMounted(() => {
               @submit="submitInput(entry, $event)"
             />
 
-            <time>{{ entry.time }}</time>
+            <time v-if="entry.time">{{ entry.time }}</time>
           </div>
         </article>
 

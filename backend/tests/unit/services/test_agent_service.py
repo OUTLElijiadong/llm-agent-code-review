@@ -78,3 +78,39 @@ def test_get_usage_buckets_calls_by_model_name():
     for code in ("reliability", "performance", "maintainability"):
         assert by_code[code]["call_count"] == 1, code
         assert by_code[code]["success_count"] == 1, code
+
+
+def test_persisted_utc_call_time_keeps_timezone_in_both_agent_apis(db, admin_user):
+    """数据库无时区UTC不能被东八区客户端理解为八小时前。"""
+    from datetime import timedelta, timezone
+
+    from app.models.ai_call_log import AiCallLog
+    from app.schemas.agent import AgentUsageOut
+
+    instant = datetime(2026, 9, 12, 16, 30)
+    db.add(AiCallLog(user_id=admin_user.id, model_name="deepseek-v4-pro",
+                     agent_label="chat_assistant", status="success", create_time=instant))
+    db.commit()
+    legacy = next(row for row in agent_service.get_usage(db, admin_user.id) if row["code"] == "general")
+    runtime = agent_service._aggregate_log_stats(db, admin_user.id, {"chat_assistant"})["chat_assistant"]
+    for value in [AgentUsageOut(**legacy).last_called_at, runtime["last_called_at"]]:
+        parsed = datetime.fromisoformat(value)
+        assert parsed.tzinfo is not None
+        assert parsed == instant.replace(tzinfo=timezone.utc)
+        local_now = datetime(2026, 9, 13, 0, 32, tzinfo=timezone(timedelta(hours=8)))
+        assert (local_now - parsed).total_seconds() == 120
+
+
+def test_agent_last_called_uses_actual_instant_when_input_offsets_differ():
+    """兼容带时区记录时先归一UTC，再比较最近一次，防字符串顺序错位。"""
+    from datetime import timedelta, timezone
+
+    earlier = datetime(2026, 9, 13, 0, 1, tzinfo=timezone(timedelta(hours=8)))
+    later = datetime(2026, 9, 12, 16, 5)
+    rows = [("deepseek-v4-pro", "success", earlier), ("deepseek-v4-pro", "success", later)]
+    legacy = next(row for row in agent_service.get_usage(_FakeDb(rows)) if row["code"] == "general")
+    runtime_rows = [(*row, "chat_assistant") for row in rows]
+    runtime = agent_service._aggregate_log_stats(_FakeDb(runtime_rows), None, {"chat_assistant"})["chat_assistant"]
+    for result in [legacy, runtime]:
+        assert result["last_called_at"] == "2026-09-12T16:05:00+00:00"
+        assert result["call_count"] == 2

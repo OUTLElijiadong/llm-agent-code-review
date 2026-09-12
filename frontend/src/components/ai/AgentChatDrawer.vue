@@ -4,7 +4,7 @@ import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument,
 
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
-import { cancelAgentResponseRun, getAgentResponseSession } from '@/api/agentResponses'
+import { cancelAgentResponseRun, getAgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
 import { archiveAgentMeshSession, type AgentMeshMessage } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail, type AgentTeamSummary } from '@/api/agentTeams'
 import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
@@ -13,6 +13,7 @@ import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
+import AuthenticatedChatImage from '@/components/ai/AuthenticatedChatImage.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ThinkingCity from '@/components/ai/ThinkingCity.vue'
 import AiOrb from '@/components/common/AiOrb.vue'
@@ -120,6 +121,9 @@ interface ChatMessage {
   time: string
   /** 多模态:该条用户消息携带的图片 data URL(仅内存展示,不落本地快照) */
   images?: string[]
+  /** 历史图片仅保留受鉴权的资产编号，与发送到模型的images分离。 */
+  imageAssets?: AgentResponseImageAsset[]
+  assetOwnerId?: number
   /** 错误卡片:失败后留在消息流里,带「重试」与「新建对话」 */
   errorCard?: { retryable: boolean; nextAction?: string; requestId?: string }
   runId?: string
@@ -367,7 +371,7 @@ function welcomeMessage(): ChatMessage {
     id: messageId(),
     role: 'assistant',
     content: WELCOME_TEXT,
-    time: dayjs().format('HH:mm'),
+    time: '',
   }
 }
 
@@ -379,7 +383,7 @@ function persistSnapshot(): void {
       role: message.role === 'error' ? 'assistant' : message.role,
       content: message.images?.length && !message.content.trim() ? '(图片)' : message.content,
       teamIds: message.teamIds?.length ? [...message.teamIds] : undefined,
-      // data URL 过大,不落本地快照;恢复后以文字占位
+      // 图片字节不落本地快照，历史缩略图从服务器的本人资产恢复。
     })),
     teams: visibleAgentTeams.value.map(snapshotTeam),
     runStatus: sessionRun.value?.status ?? null,
@@ -513,6 +517,8 @@ function restoredSessionMessages(
       if (message.role !== 'assistant') {
         return {
           id: messageId(), role: message.role, content: message.content, time: restoredTime,
+          imageAssets: message.image_assets,
+          assetOwnerId: userStore.profile?.id,
           teamIds: takePersistedTeamIds(teamBuckets, message.role, message.content),
         }
       }
@@ -594,18 +600,18 @@ async function restoreSession(): Promise<void> {
   sessionRestoreStarted = true
   try {
     const requestedSessionId = sessionId.value
+    const requestedUserId = userStore.profile?.id
     restoreCachedTeams(loadAgentChatSnapshot(requestedSessionId)?.teams)
     const session = await getAgentResponseSession('user', requestedSessionId)
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。
-    if (requestedSessionId !== sessionId.value || loading.value || activeResponse) {
+    if (requestedSessionId !== sessionId.value || requestedUserId !== userStore.profile?.id || loading.value || activeResponse) {
       scheduleSessionPoll()
       return
     }
     sessionRun.value = session.run
     if (session.run?.model) modelName.value = session.run.model
-    const restoredTime = session.run?.updated_at
-      ? dayjs(session.run.updated_at).format('HH:mm')
-      : dayjs().format('HH:mm')
+    // 服务端检查点没有逐条消息时间，不能用整轮更新时间冒充发送时间。
+    const restoredTime = ''
     const restored = restoredMessages(session, restoredTime)
     // 服务端恢复出历史时,按欢迎语+历史整体重建,避免与本地占位重复
     if (restored.length) messages.value = [welcomeMessage(), ...restored]
@@ -843,8 +849,9 @@ function scheduleSessionPoll(immediate = false): void {
 async function pollSessionSnapshot(generation: number): Promise<void> {
   if (sessionPollStopped || generation !== sessionPollGeneration) return
   try {
+    const requestedUserId = userStore.profile?.id
     const session = await getAgentResponseSession('user', sessionId.value)
-    if (sessionPollStopped || generation !== sessionPollGeneration) return
+    if (sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
     sessionPollError.value = ''
     sessionPollFailures = 0
     sessionLastPolledAt.value = dayjs().format('HH:mm:ss')
@@ -862,7 +869,7 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
       })
       if (signature !== sessionSnapshotSignature) {
         sessionSnapshotSignature = signature
-        const restoredTime = session.run?.updated_at ? dayjs(session.run.updated_at).format('HH:mm') : dayjs().format('HH:mm')
+        const restoredTime = ''
         const restored = restoredMessages(session, restoredTime)
         // 轮询恢复快照:欢迎语置顶 + 服务端历史,替换本地占位
         messages.value = restored.length ? [welcomeMessage(), ...restored] : restored
@@ -1036,43 +1043,68 @@ async function handleSessionArchive(sessionId: string): Promise<void> {
 }
 
 /**
- * 停止响应:先弹原因确认;确认后调用服务端取消,并把回滚提示留在消息流里。
+ * 停止响应:先弹原因确认;确认后读取服务端实际终态并给出对应反馈。
  */
 function requestStopResponse(): void {
   if (!canStopResponse.value) return
   cancelPromptVisible.value = true
 }
 
+let pendingCancelKey = ''
 async function cancelResponse(reason = ''): Promise<void> {
   const runId = sessionRun.value?.run_id
-  if (runId && sessionId.value) {
-    try {
-      await cancelAgentResponseRun('user', sessionId.value, runId, reason)
-    } catch (error) {
-      const info = actionableError(error, '停止请求未确认')
-      const content = info.message.includes('停止请求未确认')
-        ? info.message
-        : `停止请求未确认：${info.message}`
-      ElMessage.error(content)
-      appendErrorCard(content, false, {
-        nextAction: info.nextAction || '当前任务仍在运行，可再次点击“停止响应”，或等待状态同步',
-        requestId: info.requestId,
-      })
-      scheduleSessionPoll()
-      return
-    }
-    if (sessionRun.value) sessionRun.value = { ...sessionRun.value, status: 'cancelled' }
+  const requestedSessionId = sessionId.value
+  const requestedUserId = userStore.profile?.id
+  if (!runId || !requestedSessionId) {
+    ElMessage.warning('尚未收到运行标识，请等待状态同步后再停止')
+    return
   }
-  syncBusy()
-  activeResponse?.abort()
-  activityStore.clear()
-  const hint = reason.trim()
-    ? `已停止任务（原因：${reason.trim()}），未执行剩余操作；如需继续可重新发起。`
-    : '已停止任务，未执行剩余操作；如需继续可重新发起。'
-  messages.value.push({ id: messageId(), role: 'assistant', content: hint, time: dayjs().format('HH:mm') })
-  await nextTick()
-  scrollToBottom()
-  scheduleSessionPoll()
+  const key = `${requestedUserId}:${requestedSessionId}:${runId}`
+  if (pendingCancelKey === key) return
+  pendingCancelKey = key
+  const isCurrent = () => !sessionPollStopped && requestedSessionId === sessionId.value
+    && requestedUserId === userStore.profile?.id && sessionRun.value?.run_id === runId
+  try {
+    const result = await cancelAgentResponseRun('user', requestedSessionId, runId, reason)
+    if (!isCurrent()) return
+    sessionRun.value = { ...sessionRun.value!, status: result.status, error: result.error || '', output_text: result.output_text }
+    activeResponse?.abort()
+    activityStore.clear()
+    loading.value = false
+    showTyping.value = false
+    syncBusy()
+    if (result.status === 'failed' || result.status === 'incomplete') {
+      appendErrorCard(result.status === 'failed'
+        ? `任务已失败：${result.error || '请查看运行详情'}`
+        : `任务未完成：${result.error || '请查看运行详情'}`, true)
+    } else {
+      if (result.status === 'completed' && result.output_text && !messages.value.some((message) => message.role === 'assistant' && message.content === result.output_text)) {
+        messages.value.push({ id: messageId(), role: 'assistant', content: result.output_text, time: dayjs().format('HH:mm'), runId })
+      }
+      const hint = result.status === 'completed'
+        ? '任务已完成，无需停止；已保留最终结果。'
+        : reason.trim()
+          ? `已停止任务（原因：${reason.trim()}），未执行剩余操作；如需继续可重新发起。`
+          : '已停止任务，未执行剩余操作；如需继续可重新发起。'
+      messages.value.push({ id: messageId(), role: 'assistant', content: hint, time: dayjs().format('HH:mm') })
+    }
+    await nextTick()
+    if (!isCurrent()) return
+    scrollToBottom()
+    scheduleSessionPoll()
+  } catch (error) {
+    if (!isCurrent()) return
+    const info = actionableError(error, '停止请求未确认')
+    const content = info.message.includes('停止请求未确认') ? info.message : `停止请求未确认：${info.message}`
+    ElMessage.error(content)
+    appendErrorCard(content, false, {
+      nextAction: info.nextAction || '当前任务状态尚未确认，可再次点击“停止响应”，或等待状态同步',
+      requestId: info.requestId,
+    })
+    scheduleSessionPoll()
+  } finally {
+    if (pendingCancelKey === key) pendingCancelKey = ''
+  }
 }
 
 function handleCancelConfirm(reason: string): void {
@@ -1368,7 +1400,9 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   } catch (error) {
     activityStore.clear()
     if (error instanceof Error && error.name === 'AbortError') {
-      // 用户主动「停止响应」:部分内容保留,留一张可重试的取消卡片。
+      // 停止请求可能晚于真实完成；仅服务端确认cancelled才显示取消卡片。
+      if (sessionRun.value?.status === 'completed') return true
+      if (sessionRun.value?.status === 'failed' || sessionRun.value?.status === 'incomplete') return false
       appendErrorCard('已停止本次回答,你可以点「重试」继续,或新建对话', true)
       return false
     }
@@ -2364,6 +2398,12 @@ onMounted(() => {
                   <div v-if="msg.images?.length" class="msg-images">
                     <img v-for="(img, imgIndex) in msg.images" :key="imgIndex" :src="img" alt="用户图片" >
                   </div>
+                  <div v-if="msg.imageAssets?.length" class="msg-images">
+                    <AuthenticatedChatImage
+                      v-for="asset in msg.imageAssets" :key="asset.id"
+                      :asset-id="asset.id" :owner-id="msg.assetOwnerId"
+                    />
+                  </div>
                   {{ msg.content }}
                 </div>
                 <!-- 助手消息 hover 显示复制按钮 -->
@@ -2575,7 +2615,7 @@ onMounted(() => {
                   </footer>
                 </div>
 
-                <div class="msg-time">{{ msg.time }}</div>
+                <div v-if="msg.time" class="msg-time">{{ msg.time }}</div>
               </div>
             </div>
 

@@ -25,6 +25,7 @@ from app.models.agent_governance import (
     PolicyDecisionLog,
     PolicyRule,
 )
+from app.models.agent_multimodal import AgentMultimodalAsset
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.services import agent_responses_service as service_module
 from app.services.agent_responses_service import DatabaseCheckpointStore, PrismToolExecutor
@@ -106,6 +107,7 @@ def db():
 
     SystemConfig.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
+    AgentMultimodalAsset.__table__.create(engine)
     AgentToolExecution.__table__.create(engine)
     AgentMemory.__table__.create(engine)
     ApprovalItem.__table__.create(engine)

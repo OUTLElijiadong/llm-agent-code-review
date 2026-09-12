@@ -283,9 +283,9 @@ def get_agent_response_session(
                 "error": _public_text(checkpoint.get("error")),
                 "output_text": _public_text(checkpoint.get("output_text"), limit=4000),
                 "cancel_reason": _public_text(checkpoint.get("cancel_reason")),
-                "updated_at": row.update_time.isoformat() if row.update_time else "",
+                "updated_at": _public_utc_time(row.update_time),
             },
-            "messages": _public_transcript_messages(checkpoint.get("transcript")),
+            "messages": _public_session_messages(db, row, checkpoint),
             "events": replay_events,
             "last_sequence_number": len(replay_events),
             "pending": _public_pending_event(row.run_id, row.status, checkpoint.get("pending")),
@@ -414,12 +414,88 @@ def _recover_stale_active_run(
     db.commit()
 
 
-def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
+def _public_utc_time(value: Optional[datetime]) -> str:
+    if value is None:
+        return ""
+    aware = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    return aware.astimezone(timezone.utc).isoformat()
+
+
+def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """恢复同账号、同会话的图片元数据；旧轮次只在历史前缀精确一致时关联。"""
+    from app.models.agent_multimodal import AgentMultimodalAsset
+
+    runs = (
+        db.query(AgentResponseRun)
+        .join(AgentMultimodalAsset, AgentMultimodalAsset.run_id == AgentResponseRun.run_id)
+        .filter(
+            AgentResponseRun.user_id == row.user_id,
+            AgentResponseRun.surface == row.surface,
+            AgentResponseRun.session_key == row.session_key,
+            AgentResponseRun.id <= row.id,
+            AgentMultimodalAsset.user_id == row.user_id,
+            AgentMultimodalAsset.surface == row.surface,
+            AgentMultimodalAsset.role == "input",
+        ).distinct().order_by(AgentResponseRun.id.desc()).limit(100).all()
+    )
+    assets_by_run: dict[str, dict[str, dict[str, Any]]] = {}
+    if runs:
+        assets = db.query(
+            AgentMultimodalAsset.id, AgentMultimodalAsset.run_id,
+            AgentMultimodalAsset.sha256, AgentMultimodalAsset.mime,
+        ).filter(
+            AgentMultimodalAsset.run_id.in_([run.run_id for run in runs]),
+            AgentMultimodalAsset.user_id == row.user_id,
+            AgentMultimodalAsset.surface == row.surface,
+            AgentMultimodalAsset.role == "input",
+        ).all()
+        for asset in assets:
+            assets_by_run.setdefault(asset.run_id, {})[asset.sha256] = {
+                "id": int(asset.id), "mime": asset.mime, "sha256": asset.sha256,
+            }
+    messages = _public_transcript_messages(
+        checkpoint.get("transcript"), image_assets=assets_by_run.get(row.run_id, {}),
+    )
+    # 达到公开历史截断窗口时无法证明位置未平移，只恢复本轮显式资产引用。
+    if len(messages) >= 100:
+        return messages
+    for previous in runs:
+        if previous.id == row.id:
+            continue
+        try:
+            old_checkpoint = json.loads(previous.checkpoint_json)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(old_checkpoint, dict):
+            continue
+        old_messages = _public_transcript_messages(
+            old_checkpoint.get("transcript"), image_assets=assets_by_run.get(previous.run_id, {}),
+        )
+        if len(old_messages) >= 100 or len(old_messages) > len(messages):
+            continue
+        # 先验证完整旧历史是当前历史前缀，再整体回填；后续分支不同时不能先挂上首问图片。
+        if not all(
+            current["role"] == old["role"] and current["content"] in {
+                old["content"], old["content"] + "\n" + "\n".join(["[图片]"] * len(old.get("image_assets", []))),
+            }
+            for current, old in zip(messages, old_messages)
+        ):
+            continue
+        for current, old in zip(messages, old_messages):
+            if old.get("image_assets") and not current.get("image_assets"):
+                current["image_assets"] = old["image_assets"]
+                current["content"] = old["content"]
+    return messages
+
+
+def _public_transcript_messages(
+    value: Any, *, image_assets: Optional[Mapping[str, dict[str, Any]]] = None,
+) -> list[dict[str, Any]]:
     """只恢复用户可见文本，排除 reasoning、函数参数和工具结果。"""
 
     if not isinstance(value, list):
         return []
-    messages: list[dict[str, str]] = []
+    messages: list[dict[str, Any]] = []
     for item in value:
         if not isinstance(item, Mapping):
             continue
@@ -430,6 +506,7 @@ def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
         if item_type and item_type != "message":
             continue
         content = item.get("content")
+        visible_assets = []
         if isinstance(content, str):
             text = content.strip()
         elif isinstance(content, list):
@@ -440,8 +517,15 @@ def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
                 part_type = str(part.get("type") or "")
                 visible_types = {"input_text", "text"} if role == "user" else {"output_text", "refusal"}
                 if part_type == "input_image":
-                    # 多模态:恢复会话时以标记呈现已归档图片
-                    parts.append("[图片]")
+                    url = str(part.get("image_url") or "")
+                    asset = (
+                        (image_assets or {}).get(url.removeprefix("prism-asset://"))
+                        if url.startswith("prism-asset://") else None
+                    )
+                    if role == "user" and asset:
+                        visible_assets.append(asset)
+                    else:
+                        parts.append("[图片]")
                     continue
                 if part_type not in visible_types:
                     continue
@@ -454,8 +538,11 @@ def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
             text = ""
         if text and role == "assistant":
             text = redact_agent_output_text(text)
-        if text:
-            messages.append({"role": role, "content": text})
+        if text or visible_assets:
+            message: dict[str, Any] = {"role": role, "content": text}
+            if visible_assets:
+                message["image_assets"] = visible_assets
+            messages.append(message)
     return messages[-100:]
 
 

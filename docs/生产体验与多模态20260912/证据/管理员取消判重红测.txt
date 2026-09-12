@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+stderr | src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 取消晚到completed时按真实助手payload判重（已有最终回复=true）
+[Vue warn]: injection "Symbol(router)" not found.
+  at <AdminCopilot ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+ ❯ src/components/admin/AdminCopilot.test.ts (40 tests | 1 failed | 38 skipped) 113ms
+     × 取消晚到completed时按真实助手payload判重（已有最终回复=true） 79ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/admin/AdminCopilot.test.ts > AdminCopilot Responses stream > 取消晚到completed时按真实助手payload判重（已有最终回复=true）
+AssertionError: expected [ DOMWrapper{ …(2) }, …(1) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/components/admin/AdminCopilot.test.ts:147:21
+    145|     await flushPromises()
+    146|     const matches = wrapper.findAll('.message-row.is-assistant').filte…
+    147|     expect(matches).toHaveLength(1)
+       |                     ^
+    148|     expect(wrapper.text()).toContain('任务已完成，无需停止')
+    149|     expect(wrapper.text()).not.toContain('已停止任务')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 38 skipped (40)
+   Start at  00:47:47
+   Duration  1.24s (transform 625ms, setup 20ms, import 774ms, tests 113ms, environment 254ms)
