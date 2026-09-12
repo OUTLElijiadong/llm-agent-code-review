@@ -328,15 +328,19 @@ async function logout(): Promise<void> {
 }
 
 .admin-content {
+  // 60px 副驾入口 + 24px 底距 + 16px 间隔，让页尾操作可滚动至入口上方。
+  --assistant-action-clearance: calc(100px + env(safe-area-inset-bottom, 0px));
   flex: 1;
   min-width: 0;
   min-height: 0;
   padding: 24px 28px 36px;
+  padding-bottom: max(36px, var(--assistant-action-clearance));
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   overflow-anchor: none;
   scrollbar-gutter: stable;
+  scroll-padding-bottom: var(--assistant-action-clearance);
 }
 
 .admin-route-enter-active,
@@ -386,7 +390,8 @@ async function logout(): Promise<void> {
   }
 
   .admin-content {
-    padding: 16px;
+    padding-top: 16px;
+    padding-inline: 16px;
   }
 
   .admin-header {
@@ -431,7 +436,8 @@ async function logout(): Promise<void> {
   }
 
   .admin-content {
-    padding: 12px 10px 24px;
+    padding-top: 12px;
+    padding-inline: 10px;
   }
 
   .admin-header h1 {
