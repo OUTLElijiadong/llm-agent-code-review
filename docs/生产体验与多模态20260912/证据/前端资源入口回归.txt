@@ -1,0 +1,3 @@
+sequential_sync_and_entrypoint=PASS current_hashes=complete previous_hash=retained expired_hash=removed
+restart_and_rollback=PASS previous_hash=complete new_hash=retained
+invalid_retention_and_missing_source=PASS errors_preserved

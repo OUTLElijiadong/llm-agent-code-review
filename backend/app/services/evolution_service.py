@@ -122,6 +122,10 @@ def approve_proposal(
         raise ValidationError("提案已生效", code=40001)
     if require_eval and p.status != "eval_passed":
         raise ValidationError("需先通过评估闸门(eval_passed)才能审批生效", code=40001)
+    if require_eval:
+        score = _json_load(p.eval_score)
+        if not isinstance(score, dict) or score.get("passed") is not True:
+            raise ValidationError("评估证据缺失，请重新评估", code=40001)
 
     payload = _json_load(p.payload)
     snapshot = _apply_proposal(db, p, payload)

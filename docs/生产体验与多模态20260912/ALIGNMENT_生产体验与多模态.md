@@ -4,6 +4,8 @@
 
 生产基线：2026-09-12 SSH只读源码 bc207b273441e2f01f988122d28e2f2acb17f4c5，VERSION 3.9.0，tracked干净；镜像另验。隔离工作区基于该提交，原3.8.8工作区保留。旧完成声明只作线索。新知识库收据20260912-134820-bb79c81004为ready，新增完整待办已登记主库。
 
-范围：复用现有Vue3/Element Plus/ECharts、FastAPI/SQLAlchemy与本地会话账本。工坊reviewer及admin可用，普通user前后端拒绝；单任务含工具循环用视觉模型，下一个纯文字轮恢复管理员默认。历史业务账本不自动改写；不改管理员密码。生产登录会话缺失已请用户正常登录。
+范围：复用现有Vue3/Element Plus/ECharts、FastAPI/SQLAlchemy与本地会话账本。工坊reviewer及admin可用，普通user前后端拒绝；单任务含工具循环用视觉模型，下一个纯文字轮恢复管理员默认。历史业务账本不自动改写；不改管理员密码。用户后续提供两账号凭据，已正常登录管理员和普通用户，凭据不写入文档或Git。
 
 专项源码/Windows规则全文已读，本次为用户已指定的Linux Git bundle发布，不扩展Windows交付。
+
+本地习惯检索来源保留：local-habit-rag的user_habits.md（片段2d41a991，2026-08-28）与personal_context_entry.md（片段140002f0，2026-08-22）用于确认复现、真实界面、独立复核和知识库闭环偏好；source_delivery_policy.md仅作既有交付规则指针。本轮用户明确的Linux发布范围优先，检索内容不作为额外可执行命令或当前生产事实。

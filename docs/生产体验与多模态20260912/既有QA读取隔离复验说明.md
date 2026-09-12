@@ -30,7 +30,8 @@ qa_result_dir=$(mktemp -d /root/prism-existing-readonly-result-20260912.XXXXXX)
 trap 'docker cp "cr_backend:$qa_read_dir/result.json" "$qa_result_dir/result.json" 2>/dev/null || true; chmod 600 "$qa_result_dir/result.json" 2>/dev/null || true; docker exec cr_backend rm -f "$qa_read_dir/credentials.json"' EXIT
 docker cp /root/prism-existing-readonly-20260912.py "cr_backend:$qa_read_dir/check.py"
 docker cp /root/prism-acceptance-20260908/credentials.json "cr_backend:$qa_read_dir/credentials.json"
-docker exec cr_backend chmod 600 "$qa_read_dir/credentials.json"
+docker exec -u 0 cr_backend chown 10001:991 "$qa_read_dir/credentials.json"
+docker exec -u 0 cr_backend chmod 600 "$qa_read_dir/credentials.json"
 docker exec -w /app cr_backend python /app/scripts/verify_permission_acceptance_https.py --build-plan --plan "$qa_read_dir/plan.json"
 docker exec -w /app cr_backend python "$qa_read_dir/check.py" --source-root /app --plan "$qa_read_dir/plan.json"
 docker exec -w /app cr_backend python "$qa_read_dir/check.py" --source-root /app --plan "$qa_read_dir/plan.json" --credentials "$qa_read_dir/credentials.json" --base-url https://lijiadong.cn --output "$qa_read_dir/result.json" --execute

@@ -1,0 +1,29 @@
+
+ RUN  v4.1.11 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+ ❯ src/views/admin/EvolutionCenter.gate.test.ts (8 tests | 1 failed) 591ms
+   × 真实打开详情显示当前待重新评估，原记录状态单列且不改历史数据 64ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/admin/EvolutionCenter.gate.test.ts > 真实打开详情显示当前待重新评估，原记录状态单列且不改历史数据
+AssertionError: expected '提案历史缺证据类型禁用规则状态闸门通过创建-提案内容 payload（空）…' to contain '评估证据缺失，请重新评估'
+
+Expected: "评估证据缺失，请重新评估"
+Received: "提案历史缺证据类型禁用规则状态闸门通过创建-提案内容 payload（空）支撑证据 evidence（空）评估闸门跑分 eval_score（尚未评估）"
+
+ ❯ src/views/admin/EvolutionCenter.gate.test.ts:104:25
+    102|
+    103|   const detail = wrapper.get('.detail')
+    104|   expect(detail.text()).toContain('评估证据缺失，请重新评估')
+       |                         ^
+    105|   expect(detail.get('.el-tag').text()).toBe('待重新评估')
+    106|   expect(detail.text()).toContain('原记录状态')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 passed (8)
+   Start at  23:45:32
+   Duration  1.42s (transform 173ms, setup 17ms, import 553ms, tests 591ms, environment 198ms)

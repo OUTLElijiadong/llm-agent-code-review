@@ -152,9 +152,10 @@
                 <span class="text-muted">{{ evidenceBrief(row) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="闸门" width="120">
+            <el-table-column label="闸门" min-width="180">
               <template #default="{ row }">
-                <span v-if="row.eval_score" :class="gatePassed(row) ? 'gate-ok' : 'gate-bad'">
+                <span v-if="missingGateEvidence(row)" class="gate-bad">评估证据缺失，请重新评估</span>
+                <span v-else-if="row.eval_score" :class="gatePassed(row) ? 'gate-ok' : 'gate-bad'">
                   {{ gateBrief(row) }}
                 </span>
                 <span v-else class="text-muted">未评估</span>
@@ -162,7 +163,7 @@
             </el-table-column>
             <el-table-column label="状态" width="110">
               <template #default="{ row }">
-                <el-tag size="small" :type="statusTag(row.status)">{{ statusLabel(row.status) }}</el-tag>
+                <el-tag size="small" :type="missingGateEvidence(row) ? 'warning' : statusTag(row.status)">{{ missingGateEvidence(row) ? '待重新评估' : statusLabel(row.status) }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="280" fixed="right">
@@ -174,6 +175,7 @@
                 >评估</el-button>
                 <el-button
                   v-if="row.status === 'eval_passed'" link type="success" size="small"
+                  :disabled="!gatePassed(row)"
                   :loading="busyId === row.id" @click="onApprove(row)"
                 >审批生效</el-button>
                 <el-button
@@ -265,7 +267,12 @@
           <el-descriptions-item label="提案">{{ detail.title }}</el-descriptions-item>
           <el-descriptions-item label="类型">{{ typeLabel(detail.proposal_type) }}</el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag size="small" :type="statusTag(detail.status)">{{ statusLabel(detail.status) }}</el-tag>
+            <el-tag size="small" :type="missingGateEvidence(detail) ? 'warning' : statusTag(detail.status)">
+              {{ missingGateEvidence(detail) ? '待重新评估' : statusLabel(detail.status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="missingGateEvidence(detail)" label="原记录状态">
+            {{ statusLabel(detail.status) }}（历史记录，当前评估证据不足）
           </el-descriptions-item>
           <el-descriptions-item label="创建">{{ detail.create_time ? formatDateTime(detail.create_time) : '-' }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.note" label="备注">{{ detail.note }}</el-descriptions-item>
@@ -275,7 +282,8 @@
         <h4>支撑证据 evidence</h4>
         <pre class="json">{{ pretty(detail.evidence) }}</pre>
         <h4>评估闸门跑分 eval_score</h4>
-        <pre class="json">{{ detail.eval_score ? pretty(detail.eval_score) : '（尚未评估）' }}</pre>
+        <p v-if="missingGateEvidence(detail)" class="gate-bad">评估证据缺失，请重新评估</p>
+        <pre class="json">{{ detail.eval_score ? pretty(detail.eval_score) : missingGateEvidence(detail) ? '（无评估证据）' : '（尚未评估）' }}</pre>
       </div>
     </el-drawer>
   </div>
@@ -513,7 +521,10 @@ function evidenceBrief(row: EvolutionProposal): string {
   return '-'
 }
 function gatePassed(row: EvolutionProposal): boolean {
-  return !!(row.eval_score as Record<string, unknown> | null)?.passed
+  return !Array.isArray(row.eval_score) && row.eval_score?.passed === true
+}
+function missingGateEvidence(row: EvolutionProposal): boolean {
+  return row.status === 'eval_passed' && !gatePassed(row)
 }
 function gateBrief(row: EvolutionProposal): string {
   const s = (row.eval_score ?? {}) as Record<string, unknown>
@@ -597,6 +608,10 @@ async function onEvaluate(row: EvolutionProposal): Promise<void> {
 }
 
 async function onApprove(row: EvolutionProposal): Promise<void> {
+  if (missingGateEvidence(row)) {
+    ElMessage.warning('评估证据缺失，请重新评估')
+    return
+  }
   const ok = await confirmDanger({
     target: '审批生效该提案',
     consequence: '将写入审查规则并在下次审查自动生效',

@@ -1,0 +1,69 @@
+
+ RUN  v4.1.11 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+ ❯ src/views/admin/EvolutionCenter.gate.test.ts (7 tests | 6 failed) 526ms
+   × 缺失或非法评估证据禁用审批且保留重新评估入口 null 136ms
+   × 缺失或非法评估证据禁用审批且保留重新评估入口 {} 76ms
+   × 缺失或非法评估证据禁用审批且保留重新评估入口 undefined 63ms
+   × 缺失或非法评估证据禁用审批且保留重新评估入口 {"passed":false} 63ms
+   × 缺失或非法评估证据禁用审批且保留重新评估入口 {"passed":"true"} 63ms
+   × 缺失或非法评估证据禁用审批且保留重新评估入口 {"passed":1} 58ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/admin/EvolutionCenter.gate.test.ts > 缺失或非法评估证据禁用审批且保留重新评估入口 null
+AssertionError: expected 'Agent 自进化中心 从审查反馈沉淀经验、蒸馏规则提案；经黄金集评估闸门…' to contain '评估证据缺失，请重新评估'
+
+Expected: "评估证据缺失，请重新评估"
+Received: "Agent 自进化中心 从审查反馈沉淀经验、蒸馏规则提案；经黄金集评估闸门 + 人工审批后生效，全程可解释、可回滚 反馈窗口近 90 天运行一轮进化刷新意见采纳率-已决样本 0 · 修复 0假阳性率（噪声）-忽略 0 条待审批提案1提案总数 1经验记忆 / 黄金集0 / 0高权重经验注入审查 Promptper-Agent 自进化控制台 选择单个 Agent 触发其专属 self_improve Skill,查看该 Agent 最近的自进化调用记录; 与全局"运行一轮进化"互补,支持细粒度按 Agent 治理 选择 Agent 触发该 Agent 自进化  刷新记录 Skill(技能)触发类型效果耗时触发来源输出摘要时间选择 Agent 后展示其 self_improve / proactive Skill 调用记录提案审批台 1经验记忆黄金回归集反馈明细全部状态提案默认不生效，需先「评估」过闸门，再由管理员「审批」写入规则；已生效可「回滚」。类型提案证据闸门状态操作禁用规则历史缺证据-未评估闸门通过详情评估审批生效驳回类型代表问题语言确认/忽略权重参考修复最近出现暂无经验，运行进化后从已修复问题沉淀评估闸门基准：进化提案 promote 前须在这些人工锚点上召回不退化、噪声不上升。用例语言标签期望命中来源启用暂无黄金集问题类型规则类型采纳率假阳性率已决数修复忽略忽略跨任务暂无已决反馈进化提案详情"
+
+ ❯ src/views/admin/EvolutionCenter.gate.test.ts:18:20
+     16|   api.list.mockResolvedValue([{ ...sample, eval_score: score }])
+     17|   const w = render(); await flushPromises()
+     18|   expect(w.text()).toContain('评估证据缺失，请重新评估')
+       |                    ^
+     19|   const approve = w.findAll('button').find(b => b.text() === '审批生效')!
+     20|   expect(approve.attributes('disabled')).toBeDefined()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/views/admin/EvolutionCenter.gate.test.ts > 缺失或非法评估证据禁用审批且保留重新评估入口 {}
+ FAIL  src/views/admin/EvolutionCenter.gate.test.ts > 缺失或非法评估证据禁用审批且保留重新评估入口 undefined
+ FAIL  src/views/admin/EvolutionCenter.gate.test.ts > 缺失或非法评估证据禁用审批且保留重新评估入口 {"passed":false}
+AssertionError: expected 'Agent 自进化中心 从审查反馈沉淀经验、蒸馏规则提案；经黄金集评估闸门…' to contain '评估证据缺失，请重新评估'
+
+Expected: "评估证据缺失，请重新评估"
+Received: "Agent 自进化中心 从审查反馈沉淀经验、蒸馏规则提案；经黄金集评估闸门 + 人工审批后生效，全程可解释、可回滚 反馈窗口近 90 天运行一轮进化刷新意见采纳率-已决样本 0 · 修复 0假阳性率（噪声）-忽略 0 条待审批提案1提案总数 1经验记忆 / 黄金集0 / 0高权重经验注入审查 Promptper-Agent 自进化控制台 选择单个 Agent 触发其专属 self_improve Skill,查看该 Agent 最近的自进化调用记录; 与全局"运行一轮进化"互补,支持细粒度按 Agent 治理 选择 Agent 触发该 Agent 自进化  刷新记录 Skill(技能)触发类型效果耗时触发来源输出摘要时间选择 Agent 后展示其 self_improve / proactive Skill 调用记录提案审批台 1经验记忆黄金回归集反馈明细全部状态提案默认不生效，需先「评估」过闸门，再由管理员「审批」写入规则；已生效可「回滚」。类型提案证据闸门状态操作禁用规则历史缺证据-未过闸门通过详情评估审批生效驳回类型代表问题语言确认/忽略权重参考修复最近出现暂无经验，运行进化后从已修复问题沉淀评估闸门基准：进化提案 promote 前须在这些人工锚点上召回不退化、噪声不上升。用例语言标签期望命中来源启用暂无黄金集问题类型规则类型采纳率假阳性率已决数修复忽略忽略跨任务暂无已决反馈进化提案详情"
+
+ ❯ src/views/admin/EvolutionCenter.gate.test.ts:18:20
+     16|   api.list.mockResolvedValue([{ ...sample, eval_score: score }])
+     17|   const w = render(); await flushPromises()
+     18|   expect(w.text()).toContain('评估证据缺失，请重新评估')
+       |                    ^
+     19|   const approve = w.findAll('button').find(b => b.text() === '审批生效')!
+     20|   expect(approve.attributes('disabled')).toBeDefined()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/views/admin/EvolutionCenter.gate.test.ts > 缺失或非法评估证据禁用审批且保留重新评估入口 {"passed":"true"}
+ FAIL  src/views/admin/EvolutionCenter.gate.test.ts > 缺失或非法评估证据禁用审批且保留重新评估入口 {"passed":1}
+AssertionError: expected 'Agent 自进化中心 从审查反馈沉淀经验、蒸馏规则提案；经黄金集评估闸门…' to contain '评估证据缺失，请重新评估'
+
+Expected: "评估证据缺失，请重新评估"
+Received: "Agent 自进化中心 从审查反馈沉淀经验、蒸馏规则提案；经黄金集评估闸门 + 人工审批后生效，全程可解释、可回滚 反馈窗口近 90 天运行一轮进化刷新意见采纳率-已决样本 0 · 修复 0假阳性率（噪声）-忽略 0 条待审批提案1提案总数 1经验记忆 / 黄金集0 / 0高权重经验注入审查 Promptper-Agent 自进化控制台 选择单个 Agent 触发其专属 self_improve Skill,查看该 Agent 最近的自进化调用记录; 与全局"运行一轮进化"互补,支持细粒度按 Agent 治理 选择 Agent 触发该 Agent 自进化  刷新记录 Skill(技能)触发类型效果耗时触发来源输出摘要时间选择 Agent 后展示其 self_improve / proactive Skill 调用记录提案审批台 1经验记忆黄金回归集反馈明细全部状态提案默认不生效，需先「评估」过闸门，再由管理员「审批」写入规则；已生效可「回滚」。类型提案证据闸门状态操作禁用规则历史缺证据-通过闸门通过详情评估审批生效驳回类型代表问题语言确认/忽略权重参考修复最近出现暂无经验，运行进化后从已修复问题沉淀评估闸门基准：进化提案 promote 前须在这些人工锚点上召回不退化、噪声不上升。用例语言标签期望命中来源启用暂无黄金集问题类型规则类型采纳率假阳性率已决数修复忽略忽略跨任务暂无已决反馈进化提案详情"
+
+ ❯ src/views/admin/EvolutionCenter.gate.test.ts:18:20
+     16|   api.list.mockResolvedValue([{ ...sample, eval_score: score }])
+     17|   const w = render(); await flushPromises()
+     18|   expect(w.text()).toContain('评估证据缺失，请重新评估')
+       |                    ^
+     19|   const approve = w.findAll('button').find(b => b.text() === '审批生效')!
+     20|   expect(approve.attributes('disabled')).toBeDefined()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 1 passed (7)
+   Start at  23:39:48
+   Duration  1.52s (transform 184ms, setup 26ms, import 629ms, tests 526ms, environment 261ms)

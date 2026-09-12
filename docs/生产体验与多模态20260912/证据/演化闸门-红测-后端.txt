@@ -1,0 +1,547 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/Prism-production-ux-20260912/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, anyio-4.14.1, asyncio-0.26.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 14 items
+
+tests/unit/services/test_evolution_service.py ...FFFFFFFFF..             [100%]
+
+=================================== FAILURES ===================================
+_____ test_passed_status_without_valid_evidence_cannot_change_rules[None] ______
+
+db = <sqlalchemy.orm.session.Session object at 0x10dae5050>
+admin_user = <app.models.user.User object at 0x10db0dd90>
+mk_rule = <function mk_rule.<locals>._f at 0x10daeb600>, score = None
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.435 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+_______ test_passed_status_without_valid_evidence_cannot_change_rules[] ________
+
+db = <sqlalchemy.orm.session.Session object at 0x10db1a050>
+admin_user = <app.models.user.User object at 0x10da5e350>
+mk_rule = <function mk_rule.<locals>._f at 0x10db15800>, score = ''
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.509 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+____ test_passed_status_without_valid_evidence_cannot_change_rules[{broken] ____
+
+db = <sqlalchemy.orm.session.Session object at 0x10db95f90>
+admin_user = <app.models.user.User object at 0x10db96b90>
+mk_rule = <function mk_rule.<locals>._f at 0x10daeb1a0>, score = '{broken'
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.562 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+______ test_passed_status_without_valid_evidence_cannot_change_rules[[]] _______
+
+db = <sqlalchemy.orm.session.Session object at 0x10db0cd90>
+admin_user = <app.models.user.User object at 0x10db19c10>
+mk_rule = <function mk_rule.<locals>._f at 0x10dbb9760>, score = '[]'
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.611 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+_____ test_passed_status_without_valid_evidence_cannot_change_rules[null] ______
+
+db = <sqlalchemy.orm.session.Session object at 0x10db230d0>
+admin_user = <app.models.user.User object at 0x10db22850>
+mk_rule = <function mk_rule.<locals>._f at 0x10dbe2340>, score = 'null'
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.654 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+______ test_passed_status_without_valid_evidence_cannot_change_rules[{}] _______
+
+db = <sqlalchemy.orm.session.Session object at 0x10dc1b510>
+admin_user = <app.models.user.User object at 0x10dc18a10>
+mk_rule = <function mk_rule.<locals>._f at 0x10c1eb6a0>, score = '{}'
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.690 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+_ test_passed_status_without_valid_evidence_cannot_change_rules[{"passed":false}] _
+
+db = <sqlalchemy.orm.session.Session object at 0x10dbdc510>
+admin_user = <app.models.user.User object at 0x10dc0f5d0>
+mk_rule = <function mk_rule.<locals>._f at 0x10da84d60>
+score = '{"passed":false}'
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.735 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+_ test_passed_status_without_valid_evidence_cannot_change_rules[{"passed":"true"}] _
+
+db = <sqlalchemy.orm.session.Session object at 0x10b138c10>
+admin_user = <app.models.user.User object at 0x10dbe9590>
+mk_rule = <function mk_rule.<locals>._f at 0x10dc2b1a0>
+score = '{"passed":"true"}'
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.770 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+_ test_passed_status_without_valid_evidence_cannot_change_rules[{"passed":1}] __
+
+db = <sqlalchemy.orm.session.Session object at 0x10dc7d1d0>
+admin_user = <app.models.user.User object at 0x10dc7d250>
+mk_rule = <function mk_rule.<locals>._f at 0x10dc21d00>, score = '{"passed":1}'
+
+    @pytest.mark.parametrize("score", [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'])
+    def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+        rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+        p = EvolutionProposal(
+            proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+            payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+        )
+        db.add(p)
+        db.commit()
+>       with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+E       Failed: DID NOT RAISE <class 'app.core.exceptions.ValidationError'>
+
+tests/unit/services/test_evolution_service.py:101: Failed
+----------------------------- Captured stderr call -----------------------------
+2026-09-12 23:39:48.807 | INFO     | app.services.evolution_service:approve_proposal:141 - [evolution] 提案#1 已 promote,applied_rule_id=1
+=============================== warnings summary ===============================
+tests/unit/services/test_evolution_service.py::test_run_evolution_creates_fp_proposal_and_dedups
+  /private/tmp/prism-0912-dependency-security/venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+
+--------- coverage: platform darwin, python 3.11.15-final-0 ----------
+Name                                              Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------------
+app/__init__.py                                       0      0   100%
+app/agents/__init__.py                               17      0   100%
+app/agents/admin_copilot_agent.py                    45     45     0%   3-133
+app/agents/ai_prompt_agent.py                       249    195    22%   55, 59-63, 67-81, 113-129, 137-143, 146-147, 150-152, 155-160, 164-180, 186-207, 213-235, 239-251, 255-273, 295-361, 380-390, 405-434, 451-501, 516
+app/agents/audit_board.py                           100    100     0%   23-169
+app/agents/base.py                                  248    190    23%   78-81, 86-101, 111-118, 122-127, 150-434, 449-502, 540-578, 606
+app/agents/chat_agent.py                            775    712     8%   85-92, 100-106, 109, 113-119, 158-214, 234-261, 272-276, 285-293, 317-409, 431-449, 575-640, 660-716, 743-771, 776-788, 796-812, 816-826, 830-839, 844-889, 897-902, 907-982, 1007-1065, 1093-1171, 1196-1254, 1270-1304, 1309-1330, 1334-1347, 1352-1372, 1381-1401, 1410-1456, 1463, 1466-1483, 1487-1497, 1508-1516, 1522-1541, 1545-1567, 1571-1591, 1594-1600, 1614-1627, 1630-1646, 1665-1683, 1696-1800
+app/agents/chat_planner.py                          124    124     0%   12-370
+app/agents/clarify_store.py                          74     74     0%   8-103
+app/agents/contracts.py                              99     40    60%   25, 55-71, 91-94, 590, 602, 606, 612, 614, 621, 625, 630-634, 638-641, 646-656
+app/agents/dashboard_agent.py                        42     24    43%   23-25, 33-39, 42-43, 46-49, 52-55, 59-62, 66-69
+app/agents/deployment_coordinator_agent.py           37     37     0%   7-84
+app/agents/discussion_bus.py                        151    151     0%   12-280
+app/agents/event_bus.py                             292    245    16%   33-36, 40-42, 46-57, 61-64, 69-71, 74-75, 79-88, 92, 104-127, 137-142, 145-161, 164-179, 182-200, 204-219, 224-242, 245-264, 287, 339-347, 356-360, 374-385, 405-450, 462-497, 509-522, 532-541
+app/agents/events.py                                 50      5    90%   35, 54-56, 82
+app/agents/evolution_agent.py                       130     55    58%   38-39, 41, 48, 53-54, 93, 95, 97, 101, 115-126, 131, 233, 248-266, 272-304, 308-330
+app/agents/file_agent.py                             36     20    44%   23-25, 33-39, 42-43, 48-60, 66-76
+app/agents/fullchain_audit_agent.py                 257    257     0%   19-576
+app/agents/language_agent.py                         28     16    43%   19-30, 42-48, 51-67
+app/agents/metagpt/__init__.py                        6      6     0%   25-36
+app/agents/metagpt/environment.py                    81     81     0%   25-260
+app/agents/metagpt/factory.py                        49     49     0%   12-223
+app/agents/metagpt/messages.py                       48     48     0%   15-179
+app/agents/metagpt/role.py                           49     49     0%   27-162
+app/agents/metagpt/role_adapter.py                   55     55     0%   21-207
+app/agents/operations_agent.py                       32     13    59%   40, 60-72, 75-92
+app/agents/orchestrator.py                          542    435    20%   64-78, 90-96, 99-136, 147-171, 175, 187-230, 234-240, 243-246, 249-252, 255-258, 261-263, 266-268, 273-281, 284-286, 293-317, 325, 345-367, 376-388, 393-421, 446-466, 470-472, 475-477, 480-482, 485-487, 490-492, 495-497, 502-504, 510-512, 518-520, 525-531, 535-541, 547-557, 561-563, 577-586, 600-606, 616-618, 621-623, 626-628, 634-636, 640-642, 645-647, 650-652, 655-657, 660-662, 671-673, 683-685, 688-690, 693-695, 702-703, 706-708, 717-718, 726-740, 753-772, 777-790, 797-802, 823-862, 877-903, 911-919, 928-945, 955-978, 981, 1006-1052, 1081-1105, 1115-1117, 1129-1131, 1151-1155, 1174-1176, 1185-1187
+app/agents/project_agent.py                          33     20    39%   21-31, 45-51, 59-82
+app/agents/project_manager_agent.py                  81     55    32%   35-36, 44-50, 53-54, 59-78, 84-110, 116-123, 138-150, 154-164
+app/agents/registry.py                               61     48    21%   22, 26-28, 31-37, 40, 43-44, 59-94, 97-116, 128-133
+app/agents/report_agent.py                           35     19    46%   23-25, 33-39, 42-43, 48-54, 61-68
+app/agents/review_agent.py                           51     30    41%   36-43, 55-61, 77-84, 121-165, 192-198
+app/agents/review_orchestrator_agent.py              55     34    38%   26-28, 36-42, 45-46, 52-66, 71-84, 90-96, 101-114
+app/agents/rule_agent.py                             39     23    41%   23-25, 33-39, 42-43, 46-55, 59-67
+app/agents/sandbox_agents.py                         70     40    43%   18-20, 23-24, 27-29, 33-45, 67-87, 107-125, 128-133, 136-141
+app/agents/security_sentinel_agent.py              1469   1326    10%   119-126, 178-187, 195-201, 206-207, 243-298, 312-314, 317-333, 336-352, 355-371, 376-405, 417-500, 523-588, 610-648, 665-1435, 1455-1753, 1785-1906, 1917-1927, 1939-1956, 1968-1979, 1999-2080, 2101-2183, 2193-2226, 2233-2266, 2270, 2276-2277, 2282-2329, 2343-2410, 2417-2456, 2467-2557, 2561-2573, 2579-2597, 2607-2882, 2889-2899, 2904, 2956-3015, 3033-3062, 3095-3114, 3118, 3121-3124, 3127-3128, 3131-3135, 3139-3144, 3154-3164, 3174-3192, 3196, 3200-3204, 3207-3211, 3225-3270, 3273-3372, 3376-3382, 3393-3464, 3469-3482, 3485-3488, 3509-3514, 3526-3528, 3559-3564
+app/agents/skills/__init__.py                         4      0   100%
+app/agents/skills/ai_prompt.py                       70     70     0%   8-271
+app/agents/skills/base.py                            26      4    85%   83, 101, 116, 125
+app/agents/skills/chat_assistant.py                  70     70     0%   8-271
+app/agents/skills/code_file_manager.py               70     70     0%   8-270
+app/agents/skills/code_reviewer.py                   72     72     0%   14-265
+app/agents/skills/dashboard.py                       70     70     0%   8-271
+app/agents/skills/evolution.py                       99     55    44%   165-175, 203-215, 250-272, 283, 297-319, 333-363
+app/agents/skills/language_detector.py               70     70     0%   8-271
+app/agents/skills/orchestrator_skill.py              70     70     0%   10-273
+app/agents/skills/proactive.py                       88     66    25%   80, 93, 107, 118, 132, 152-320, 333
+app/agents/skills/project_analyzer.py                70     70     0%   8-270
+app/agents/skills/project_manager.py                 70     70     0%   8-270
+app/agents/skills/registry.py                        61     29    52%   90-94, 105, 113-116, 124, 143-152, 166-170, 178-182
+app/agents/skills/reporter.py                        70     70     0%   8-270
+app/agents/skills/review_orchestrator.py             70     70     0%   8-271
+app/agents/skills/rule_manager.py                    70     70     0%   8-271
+app/agents/skills/security_sentinel.py               74     74     0%   13-315
+app/agents/skills/self_improvement.py               162     62    62%   161-162, 186, 217-223, 249, 267, 282, 332-338, 350-354, 405-411, 435-444, 463-533, 545
+app/agents/syntax_repair_agent.py                    87     68    22%   30-31, 43-56, 75-136, 147-162
+app/agents/test_case_generator_agent.py             125    125     0%   8-324
+app/agents/test_review_reporter_agent.py            124    124     0%   3-321
+app/agents/tool_contracts.py                        314     46    85%   45-55, 346-350, 559-562, 759, 764, 769-770, 775, 780, 785-790, 795-798, 803-824
+app/ai/__init__.py                                    0      0   100%
+app/ai/audit_knowledge_loader.py                     65     65     0%   14-141
+app/ai/code_chunker.py                              303    232    23%   69-79, 84, 89-111, 116-140, 145-148, 153-157, 161, 166-184, 202-205, 208, 211-212, 221-228, 231, 234, 237-250, 253-256, 259-262, 265-267, 270, 273-274, 277-278, 292-296, 299, 302, 305, 308-312, 315-324, 328-332, 341-355, 359-368, 372-377, 381-384, 388-398, 403-423, 427, 435-496, 500
+app/ai/cvss.py                                       35     26    26%   16-28, 33-39, 52-57
+app/ai/deepseek_agent.py                            243    212    13%   45-46, 59-122, 130-148, 153-155, 171-192, 202-220, 227-241, 272-385, 403-507, 530-554, 567-592
+app/ai/discussion_orchestrator.py                   595    595     0%   25-1366
+app/ai/exceptions.py                                 11      0   100%
+app/ai/finding_aggregator.py                        237    197    17%   45-63, 75-135, 165-174, 191-230, 261-304, 363-389, 425-441, 445-452, 456-474, 478-548, 588-591, 595-597, 601, 605-608, 612-616
+app/ai/language_detector.py                           5      2    60%   58-59
+app/ai/multi_agent.py                                45     13    71%   106-107, 117, 129-130, 147-149, 162-166
+app/ai/php_attack_surface.py                        130    130     0%   22-306
+app/ai/prompt_builder.py                             51     41    20%   80, 85, 98-152, 164-180, 201-215
+app/ai/result_parser.py                             187    113    40%   66-70, 164-168, 181-184, 197-200, 212-213, 225, 237-239, 253-271, 283-289, 305-334, 346-387, 423-480
+app/ai/scoring.py                                    22     15    32%   13-20, 25-30, 52
+app/ai/security_patterns.py                          66     37    44%   226-228, 233-242, 255-284, 289, 302-305
+app/ai/security_static_rules.py                     237    175    26%   594-596, 609-683, 695-702, 705-707, 710-714, 717-727, 732-735, 738-740, 743-756, 759-764, 767-773, 776-796, 799-812, 826-832, 837-844, 849, 854, 867, 886-904
+app/ai/static_analyzer.py                           108     54    50%   50-52, 64-80, 94-226, 309-329, 341-346, 364-365, 414, 452-475, 488-494
+app/api/__init__.py                                  42     42     0%   5-91
+app/api/responses.py                                 71     71     0%   8-179
+app/api/v1/__init__.py                                0      0   100%
+app/api/v1/admin_agent_releases.py                   61     61     0%   3-196
+app/api/v1/admin_copilot.py                          56     56     0%   2-84
+app/api/v1/admin_overview.py                        148    148     0%   6-310
+app/api/v1/agent_catalog.py                          16     16     0%   3-32
+app/api/v1/agent_governance.py                      216    216     0%   2-979
+app/api/v1/agent_mesh.py                             75     75     0%   3-205
+app/api/v1/agent_responses.py                       603    603     0%   3-1244
+app/api/v1/agent_studio.py                           84     84     0%   3-298
+app/api/v1/agent_teams.py                            83     83     0%   3-220
+app/api/v1/agents.py                                215    215     0%   17-564
+app/api/v1/ai_chat.py                               104    104     0%   5-211
+app/api/v1/ai_logs.py                                17     17     0%   4-46
+app/api/v1/ai_prompt.py                              39     39     0%   6-95
+app/api/v1/api_config.py                             25     25     0%   4-74
+app/api/v1/audit.py                                  14     14     0%   4-33
+app/api/v1/auth.py                                   66     66     0%   5-169
+app/api/v1/avatars.py                                70     70     0%   9-109
+app/api/v1/beta_invites.py                           40     40     0%   3-123
+app/api/v1/code_files.py                             85     85     0%   4-250
+app/api/v1/dashboard.py                              33     33     0%   4-73
+app/api/v1/discussion.py                             40     40     0%   6-115
+app/api/v1/evolution.py                              68     68     0%   9-197
+app/api/v1/feedback.py                               28     28     0%   4-59
+app/api/v1/forum.py                                  44     44     0%   4-99
+app/api/v1/issues.py                                 33     33     0%   4-95
+app/api/v1/knowledge.py                              46     46     0%   10-118
+app/api/v1/llm_config.py                             96     96     0%   7-264
+app/api/v1/maintenance.py                            31     31     0%   4-65
+app/api/v1/mcp_governance.py                         70     70     0%   3-206
+app/api/v1/pentest.py                                80     80     0%   3-199
+app/api/v1/project_members.py                        35     35     0%   15-158
+app/api/v1/projects.py                              104    104     0%   4-331
+app/api/v1/rbac.py                                  135    135     0%   26-610
+app/api/v1/reports.py                               176    176     0%   29-551
+app/api/v1/review.py                                 36     36     0%   4-92
+app/api/v1/rules.py                                  39     39     0%   4-90
+app/api/v1/sandboxes.py                              74     74     0%   3-215
+app/api/v1/security.py                               69     69     0%   5-200
+app/api/v1/user_profile.py                           24     24     0%   5-44
+app/api/v1/users.py                                  38     38     0%   4-98
+app/api/v1/ws_discussion.py                         230    230     0%   25-402
+app/constants/__init__.py                             0      0   100%
+app/constants/compliance.py                          61     39    36%   440-448, 465-470, 483-486, 499-502, 528-553
+app/constants/security_catalog.py                    29     10    66%   18, 22-23, 33-40
+app/core/__init__.py                                  0      0   100%
+app/core/captcha.py                                  38     38     0%   10-71
+app/core/config.py                                  249     49    80%   273, 283, 285, 287, 290, 292, 297, 299, 301, 309, 319, 331, 342, 346, 358-394
+app/core/database.py                                 15      5    67%   11, 36-40
+app/core/dependencies.py                             40     40     0%   5-99
+app/core/error_handlers.py                           39     39     0%   2-92
+app/core/exceptions.py                               59      4    93%   32, 66, 137-138
+app/core/logger.py                                    8      8     0%   2-28
+app/core/observability.py                           101     66    35%   37-39, 53-63, 72-77, 82-83, 88-90, 127-129, 141-146, 158-160, 175, 188-230, 244-252, 261
+app/core/pagination.py                               10      6    40%   11-15, 26
+app/core/permission_codes.py                         64      0   100%
+app/core/rate_limit.py                              286    286     0%   3-563
+app/core/rbac_dependency.py                          36     36     0%   18-203
+app/core/security.py                                 15      6    60%   23, 36, 50-58, 74
+app/core/super_admin.py                              12      4    67%   22-39
+app/exporters/__init__.py                             0      0   100%
+app/exporters/pdf_exporter.py                        63     63     0%   4-129
+app/exporters/word_exporter.py                       37     37     0%   4-59
+app/main.py                                         153    153     0%   4-303
+app/models/__init__.py                                5      2    60%   53-54
+app/models/admin_chat.py                             39      0   100%
+app/models/agent_capability.py                      125      0   100%
+app/models/agent_governance.py                      217      0   100%
+app/models/agent_mesh.py                             58      0   100%
+app/models/agent_multimodal.py                       14      0   100%
+app/models/agent_response_run.py                     28      0   100%
+app/models/agent_skill_record.py                     15     15     0%   8-51
+app/models/agent_team.py                             77      0   100%
+app/models/ai_call_log.py                            26      1    96%   15
+app/models/api_config.py                             13      0   100%
+app/models/audit_log.py                              16      0   100%
+app/models/base.py                                    9      0   100%
+app/models/beta_invite_code.py                       14     14     0%   3-32
+app/models/code_file.py                              22      1    95%   26
+app/models/code_version.py                           13      0   100%
+app/models/custom_agent.py                           84      0   100%
+app/models/eval_case.py                              14      0   100%
+app/models/evolution_proposal.py                     20      0   100%
+app/models/forum_post.py                             14     14     0%   6-32
+app/models/forum_reply.py                            10     10     0%   4-20
+app/models/knowledge_chunk.py                        13     13     0%   8-32
+app/models/knowledge_doc.py                          13     13     0%   7-30
+app/models/maintenance_ticket.py                     15     15     0%   7-35
+app/models/malware_scan_log.py                       15     15     0%   6-37
+app/models/pentest.py                                73      0   100%
+app/models/project.py                                11      0   100%
+app/models/project_import_task.py                    28      0   100%
+app/models/project_member.py                          9      0   100%
+app/models/project_source_archive.py                 29      0   100%
+app/models/project_source_revision.py                18      0   100%
+app/models/rbac.py                                   48      0   100%
+app/models/report_template.py                        12     12     0%   6-31
+app/models/review_experience.py                      19      0   100%
+app/models/review_issue.py                           44      0   100%
+app/models/review_report.py                          12      0   100%
+app/models/review_rule.py                            16      0   100%
+app/models/review_task.py                            31      0   100%
+app/models/review_task_file.py                       12      0   100%
+app/models/system_config.py                           7      0   100%
+app/models/usage_attribution.py                       8      0   100%
+app/models/user.py                                   16      0   100%
+app/models/user_avatar.py                             8      0   100%
+app/models/user_feedback.py                          14     14     0%   8-35
+app/models/user_profile.py                           18      0   100%
+app/schemas/__init__.py                               0      0   100%
+app/schemas/agent.py                                103    103     0%   4-211
+app/schemas/agent_capability.py                     117    117     0%   3-144
+app/schemas/agent_governance.py                     340     32    91%   18-22, 34-42, 86, 99, 160, 173, 228, 241, 274, 287, 328, 357, 398, 426, 439, 490, 503, 536, 549, 599
+app/schemas/agent_mesh.py                            60     60     0%   3-88
+app/schemas/agent_studio.py                          98     98     0%   3-134
+app/schemas/agent_team.py                            76     76     0%   3-99
+app/schemas/ai_log.py                                70     70     0%   4-86
+app/schemas/ai_prompt.py                             37     37     0%   2-51
+app/schemas/api_config.py                            33     33     0%   4-49
+app/schemas/audit.py                                 15     15     0%   4-23
+app/schemas/auth.py                                  49      9    82%   25-30, 57-59
+app/schemas/beta_invite.py                           21     21     0%   3-37
+app/schemas/code_file.py                             51      0   100%
+app/schemas/code_version.py                          16     16     0%   4-28
+app/schemas/common.py                                13     13     0%   4-24
+app/schemas/dashboard.py                             55     55     0%   5-97
+app/schemas/evolution.py                             77     77     0%   2-105
+app/schemas/feedback.py                              23     23     0%   4-37
+app/schemas/forum.py                                 43     43     0%   4-77
+app/schemas/knowledge.py                             48     48     0%   4-77
+app/schemas/llm_config.py                            65     65     0%   4-101
+app/schemas/maintenance.py                           26     26     0%   4-39
+app/schemas/malware_scan_log.py                      23     23     0%   4-34
+app/schemas/pentest.py                               77     77     0%   3-108
+app/schemas/profile.py                               31     31     0%   5-46
+app/schemas/project.py                              107      0   100%
+app/schemas/project_member.py                        17     17     0%   6-37
+app/schemas/rbac.py                                  86      0   100%
+app/schemas/report.py                                31     31     0%   4-45
+app/schemas/report_template.py                       24     24     0%   4-38
+app/schemas/review.py                               151      6    96%   185-186, 199-200, 205-206
+app/schemas/rule.py                                  40      5    88%   54-58
+app/schemas/security.py                             140    140     0%   2-235
+app/schemas/user.py                                  27     27     0%   4-51
+app/services/__init__.py                              0      0   100%
+app/services/admin_agent_tools.py                   342    342     0%   10-890
+app/services/admin_capability_registry.py           118    118     0%   8-1171
+app/services/admin_capability_service.py             48     48     0%   3-94
+app/services/admin_chat_history_service.py           68     68     0%   3-153
+app/services/admin_copilot_service.py               366    366     0%   2-815
+app/services/agent_cost_budget_service.py            91     91     0%   3-197
+app/services/agent_governance_service.py            129    129     0%   3-483
+app/services/agent_knowledge_service.py             317    317     0%   2-769
+app/services/agent_memory_service.py                 13     13     0%   2-60
+app/services/agent_mesh_dispatcher.py               513    513     0%   3-1088
+app/services/agent_mesh_service.py                  600    600     0%   3-1408
+app/services/agent_model_service.py                  27      6    78%   9-12, 20, 41
+app/services/agent_responses_service.py            1480   1480     0%   3-3485
+app/services/agent_scheduler_runtime.py             224    224     0%   10-390
+app/services/agent_service.py                       220    220     0%   8-495
+app/services/agent_studio_service.py                532    532     0%   3-1014
+app/services/agent_team_dispatcher.py               116    116     0%   3-255
+app/services/agent_team_service.py                 1169   1169     0%   3-2655
+app/services/ai_log_service.py                       47     47     0%   4-127
+app/services/ai_usage_context.py                    124    101    19%   25, 29, 33-35, 43, 53-70, 74-86, 97-108, 113-118, 127, 156-202, 217-248
+app/services/api_config_service.py                  215    215     0%   6-511
+app/services/approval_service.py                    161    161     0%   3-354
+app/services/audit_service.py                        41     27    34%   57-60, 88-117
+app/services/auth_service.py                         92     79    14%   33-71, 90-141, 146-155, 170-183
+app/services/background_task_recovery.py             85     85     0%   3-141
+app/services/beta_invite_service.py                 107    107     0%   3-229
+app/services/capability_catalog_service.py          168    168     0%   3-364
+app/services/code_file_service.py                   269    222    17%   60-84, 119-146, 174-214, 219-231, 236-239, 260-268, 275-276, 296-317, 339-340, 361-374, 399-444, 464-482, 494-496, 510-527, 555-590, 595-609, 626-630, 647-658, 679-712, 746-764, 777-782, 793-795, 811-818, 833-838, 853-854
+app/services/dashboard_service.py                   124     87    30%   41, 45-65, 75-78, 93-94, 122-123, 159-174, 187-268, 292-297, 311-316, 330-341, 359-374, 388-477
+app/services/declarative_agent_runtime.py           161    161     0%   3-388
+app/services/decompilation_service.py               180    122    32%   70-73, 77-78, 82-90, 94-103, 108-141, 145-161, 172-186, 197-211, 216-218, 236-256, 273-302
+app/services/deepseek_responses_runtime.py          956    956     0%   10-1881
+app/services/deepseek_responses_service.py          432    432     0%   8-779
+app/services/embedding_service.py                   191    191     0%   12-302
+app/services/eval_gate.py                           139     37    73%   47, 50, 94, 119-129, 156, 164-165, 184-186, 277-278, 286-313
+app/services/evolution_service.py                   143     27    81%   36, 41, 85, 92, 104, 122, 150, 170, 195, 198, 221, 228-238, 252, 255-258, 265-266
+app/services/experience_service.py                   80      8    90%   71, 125, 127, 186, 198-201
+app/services/feedback_service.py                     33      5    85%   108-112
+app/services/forum_service.py                       115    115     0%   9-164
+app/services/geoip_service.py                        44     44     0%   7-80
+app/services/issue_merger.py                        474    405    15%   35-64, 69-73, 112-116, 155-156, 187, 197-246, 257-276, 280-287, 291-299, 303-307, 316-374, 378-383, 389-400, 404-408, 412-439, 443-462, 466-511, 515-516, 520-522, 526-529, 540-543, 547-600, 606-638, 681-720, 735-741, 750-756, 760-766, 770-781, 785-801, 805-814, 818-827, 831-839, 854-857, 870-874, 878, 883, 887, 895-899, 903-912, 916-917, 921-928, 932-936, 949-957
+app/services/issue_service.py                        85     85     0%   9-265
+app/services/jarvis_patrol_service.py                99     99     0%   8-285
+app/services/knowledge_service.py                   163    163     0%   12-330
+app/services/maintenance_service.py                  78     78     0%   9-111
+app/services/managed_mcp_adapter.py                 106    106     0%   7-274
+app/services/mcp_governance_service.py              426    426     0%   3-1050
+app/services/mcp_tool_provider.py                   243    243     0%   3-489
+app/services/multimodal_service.py                  105    105     0%   12-196
+app/services/observability_service.py                42     42     0%   2-166
+app/services/ops_service.py                         215    168    22%   235-237, 242, 246, 250-255, 259-265, 269-288, 301-335, 348-483, 488-512, 516-524, 528, 532-545, 549-568, 572, 584-604
+app/services/page_guide_service.py                   16     16     0%   15-108
+app/services/pentest_service.py                    1045   1045     0%   20-2237
+app/services/personalization_service.py              88     88     0%   11-138
+app/services/policy_engine.py                        75     75     0%   5-240
+app/services/profile_service.py                     192    192     0%   12-335
+app/services/project_import_dispatcher.py            71     71     0%   3-142
+app/services/project_import_service.py              406    336    17%   53, 57, 61-65, 69-71, 82, 92, 96, 100-103, 107-111, 135-138, 154-242, 248-258, 270-316, 326-373, 387-412, 421-455, 469-479, 482-502, 505-512, 515-517, 520-521, 526-532, 538-583, 592-616, 622-663, 673-700, 717-847, 865-904, 917-958, 964-966
+app/services/project_member_service.py              125    106    15%   24-32, 51-74, 95-120, 146-176, 205-221, 248-290, 315-341, 368-390, 403-420, 443-463
+app/services/project_service.py                     111     91    18%   33-43, 66-149, 173-202, 225-243, 301-313, 328-356
+app/services/project_source_revision_service.py      57     38    33%   34-41, 46-64, 74-78, 92-119, 132-137, 141
+app/services/project_source_service.py              521    434    17%   122-127, 132-134, 143-155, 163-216, 221-223, 234-245, 249, 261-272, 281-341, 350-356, 360-371, 376-377, 406-415, 423-425, 429-433, 438-457, 462-479, 491-514, 523-543, 560-571, 583-673, 678-730, 735-773, 777-788, 793, 802-821, 825-831, 843-929, 941-967, 973-974, 992-1044
+app/services/published_agent_tools.py                53     53     0%   3-145
+app/services/rbac_service.py                        171    141    18%   77-92, 98, 124-151, 166, 189-197, 214-219, 239-254, 271, 283, 301-329, 349-380, 400-414, 427, 458-478, 484-486, 501, 529-537, 558-577
+app/services/report_exporter.py                     173    140    19%   105-113, 129-148, 164-178, 183-188, 202-225, 237-239, 257-266, 281-287, 310-311, 328-338, 363-453, 484, 506-507, 530-559, 579-590
+app/services/report_pdf_exporter.py                 225    225     0%   15-651
+app/services/report_service.py                      249    218    12%   29, 55-87, 101-118, 157-160, 165-221, 230-261, 265, 273-283, 294-402, 410-436, 449-496, 509-515, 537-563
+app/services/report_template_service.py              58     58     0%   16-226
+app/services/report_word_exporter.py                240    240     0%   15-595
+app/services/review_input_service.py                 38     26    32%   14-15, 19-24, 40-54, 58-64
+app/services/review_service.py                      720    637    12%   87-89, 104-115, 137-219, 228-243, 248-315, 328-441, 453-454, 468-472, 527-531, 584-697, 734-816, 829, 869-990, 1029-1079, 1113-1295, 1307-1321, 1358-1380, 1388, 1432-1452, 1471-1473, 1489-1490, 1514-1564, 1569-1579, 1603-1619, 1645-1667, 1672-1680, 1700-1727, 1762-1780, 1795-1808, 1824-1839, 1843-1849, 1855-1858, 1863-1865, 1892-1909, 1930-1941
+app/services/reward_service.py                       24     24     0%   2-88
+app/services/rollback_service.py                     51     51     0%   2-130
+app/services/rule_service.py                         65     52    20%   27-35, 52-61, 77, 91-97, 102-121, 126-141, 146-152
+app/services/sandbox_report_summary.py               97     97     0%   2-119
+app/services/sandbox_service.py                    2324   2175     6%   132, 136-138, 142, 146-150, 154-155, 160, 165-185, 190-206, 212-249, 253-257, 264-360, 369-391, 396, 409-410, 415-425, 440-462, 474-499, 513-527, 536-563, 879-994, 1003-1020, 1025-1077, 1087-1096, 1101-1109, 1115-1634, 1639-1640, 1644-1653, 1657-1661, 1676-1798, 1812-1854, 1859-1863, 1885-1898, 1902-1914, 1919-2065, 2070-2125, 2144-2153, 2161-2252, 2257-2264, 2269-2312, 2317-2331, 2344-2407, 2421-2532, 2536, 2547-2549, 2559-2572, 2582-2590, 2599-2615, 2619-2629, 2633-2646, 2655-2692, 2696, 2717-2718, 2727-2748, 2756-2775, 2783, 2795-2842, 2846-2878, 2886-2910, 2923-2926, 2930-2973, 2977-2983, 2997-3005, 3009-3021, 3025-3031, 3040-3142, 3149-3168, 3172-3199, 3210-3220, 3229, 3240-3271, 3287-3291, 3299-3528, 3533-3587, 3592-3610, 3623-3709, 3718-3801, 3809-4379, 4392-4416, 4420-4422, 4426-4433, 4437-4443, 4479-4486, 4490, 4499-4516, 4520-4561, 4565-4599, 4603-4636, 4641-4648
+app/services/scheduler_service.py                   466    466     0%   11-1135
+app/services/security_monitor_service.py            290    290     0%   14-779
+app/services/security_posture_service.py             34     34     0%   10-139
+app/services/security_service.py                    106    106     0%   11-276
+app/services/skill_service.py                        83     83     0%   13-277
+app/services/strategy_learning_service.py           153    123    20%   46, 50-54, 58-76, 87-94, 98-111, 115-126, 130, 148-230, 239-261, 284-318
+app/services/system_config_service.py               341    291    15%   31-40, 50-82, 87-88, 98-113, 127-152, 160-166, 170, 184-192, 206-215, 228-259, 271-274, 291-314, 344-394, 415-423, 435, 439-449, 461-479, 484-499, 508-530, 538-551, 559-584, 592
+app/services/system_service.py                       21     21     0%   6-63
+app/services/tool_gateway.py                        134    134     0%   5-544
+app/services/user_capability_registry.py             50     50     0%   9-602
+app/services/user_feedback_service.py                68     68     0%   11-100
+app/services/user_service.py                         80     80     0%   5-186
+app/utils/__init__.py                                 0      0   100%
+app/utils/api_resolver.py                           185    102    45%   68-69, 78-85, 94-106, 118-121, 135, 147-168, 180-184, 196-198, 217, 229-230, 255, 259, 261, 263, 267, 270, 273, 277, 282-291, 317-318, 347-356, 386-427, 448-464
+app/utils/archive_extractor.py                      207    161    22%   70-71, 78-87, 90-95, 102-111, 114-124, 129-150, 161-237, 247-248, 252-258, 262-268, 278-302, 306-329, 340, 344-345
+app/utils/encoding_utils.py                          29     22    24%   27-43, 55-58, 70
+app/utils/file_validator.py                          39     29    26%   27-39, 51-52, 65-67, 103-115
+app/utils/image_utils.py                             54     54     0%   7-83
+app/utils/malware_scanner.py                        266    213    20%   26-28, 34-36, 122-149, 162-223, 241, 261-301, 305-326, 336-367, 381-408, 416-439, 447-456, 470-480, 494-506, 517-525, 541-563, 575-578, 590-594, 607-609
+app/utils/public_http.py                             63     47    25%   31, 48-105
+app/utils/sanitize.py                                21     12    43%   33-40, 58-70
+app/utils/source_archive_gate.py                     14      6    57%   21-27
+-------------------------------------------------------------------------------
+TOTAL                                             40557  34818    14%
+
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[None]
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[]
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[{broken]
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[[]]
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[null]
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[{}]
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[{"passed":false}]
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[{"passed":"true"}]
+FAILED tests/unit/services/test_evolution_service.py::test_passed_status_without_valid_evidence_cannot_change_rules[{"passed":1}]
+==================== 9 failed, 5 passed, 1 warning in 3.16s ====================
