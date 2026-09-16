@@ -160,6 +160,20 @@ describe('router guards', () => {
     expect(await before(route('/reports', { permissions: ['report:view'] }), route('/'))).toBe(true)
   })
 
+  it('rejects ordinary users from reviewer-only Agent Studio even if a stale permission remains', async () => {
+    const { before } = installHarness()
+    auth.user.token = 'token'
+    auth.user.profile = { id: 8, role: 'user' }
+    auth.user.hasPermission.mockReturnValue(true)
+
+    expect(
+      await before(
+        route('/agent-studio', { roles: ['reviewer', 'admin'], permissions: ['agent_asset:create'] }),
+        route('/'),
+      ),
+    ).toEqual({ path: '/403' })
+  })
+
   it('lets RBAC admins bypass roles and permissions', async () => {
     /** 验证 isAdmin 对新 RBAC 元数据检查的绕过。 */
     const { before } = installHarness()
