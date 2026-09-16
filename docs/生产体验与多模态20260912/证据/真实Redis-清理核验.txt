@@ -1,0 +1,3 @@
+container=prism-login-audit-20260912-fabeb254
+remaining_containers=0
+production_redis_accessed=false

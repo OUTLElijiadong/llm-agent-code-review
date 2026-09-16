@@ -1,0 +1,62 @@
+{
+  "status": "passed",
+  "scope": "纯本地逐请求/逐断言审计，不新增生产请求；不复原脱敏响应正文",
+  "total_requests": 694,
+  "total_assertions": 74,
+  "unique_request_ids": 694,
+  "shared_plan_sha256": "149f54841b7c9842eea79c6c166539c5ca9996a63849f847191bfe7d7422d68f",
+  "plan_file_hash_recomputed": true,
+  "plan_note": "原plan重算一致；全部源指纹直接核最终7a2368 Git blob。",
+  "files": {
+    "matrix": {
+      "file_sha256": "6ab672ac46b47bb120ab2c35f868ac66f717191a36c9e7f97315f31d1f23eab9",
+      "requests": 566,
+      "status_codes": {
+        "200": 12,
+        "401": 311,
+        "403": 243
+      },
+      "assertions": 11,
+      "all_expected_actual_equal": true,
+      "all_assertions_true": true,
+      "exact_source_derived_sequence": true,
+      "blocked": 96,
+      "response_request_id_matches": 0
+    },
+    "reads": {
+      "file_sha256": "7a3df7d72e138b1db6521bda5cb2deae79f53e03ba3e0ee6b2b170a2119fd18f",
+      "requests": 91,
+      "status_codes": {
+        "200": 54,
+        "404": 18,
+        "403": 19
+      },
+      "assertions": 57,
+      "all_expected_actual_equal": true,
+      "all_assertions_true": true,
+      "exact_source_derived_sequence": true,
+      "blocked": 0,
+      "response_request_id_matches": 0
+    },
+    "extra": {
+      "file_sha256": "f8fbd0d13014894f5935784e289063903e2bb59896203033dc097f36fc0c35af",
+      "requests": 37,
+      "status_codes": {
+        "200": 6,
+        "401": 8,
+        "403": 23
+      },
+      "assertions": 6,
+      "all_expected_actual_equal": true,
+      "all_assertions_true": true,
+      "exact_source_derived_sequence": true,
+      "blocked": 0,
+      "response_request_id_matches": 0
+    }
+  },
+  "limitations": [
+    "96个原矩阵blocked不是全部权限失败；另16补测及15普通工坊已按不同合同完成",
+    "日志故意不保留正文；内容断言核验true及对应执行器源/离线测试，不宣称重新解析了生产响应正文"
+  ],
+  "plan_source_files_verified": 54
+}

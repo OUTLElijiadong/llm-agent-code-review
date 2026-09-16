@@ -1,0 +1,49 @@
+{
+  "status": "passed",
+  "scope": "纯本地比较脱敏采集文件；多模态资产独立采集",
+  "expected_release": "7a2368f20453606ed09691ee0002d07df4629ec3",
+  "input_sha256": {
+    "ledger_before": "d067f4f5434190383201c4a761b67b4bd517c609ff891bf6352de6917fac3777",
+    "ledger_after": "74e8048eeea91b5565432e9e75a59880b0deffb31bb67c650d534bb62a52a778",
+    "project_before": "dfcb6dba85589c14cf9e951556a11a97bf14eb7f9261d9743438d2a9c01893cb",
+    "project_after": "c9e9581270399b1c6a966b84114b165ec698fc80c6356ced90102780528b15dd",
+    "release_start": "01ba5ff774d334876dcb0118448628228c09d3f832502543fd68810bc2a494f0",
+    "release_end": "6d5fe359acdd8285778b502b32bacc8e297cbbc787ec362819d095dddc388d73",
+    "attribution": "a7b3591386a7e3efa3aaf674f997cd429f0f7a5916bcbda1dadb7c2ac4d49297"
+  },
+  "historical_comparison": {
+    "historical_task": {
+      "baseline_rows": 2,
+      "all_baseline_fields_equal": true,
+      "new_observed_ids": []
+    },
+    "historical_team_tasks": {
+      "baseline_rows": 6,
+      "all_baseline_fields_equal": true,
+      "new_observed_ids": []
+    },
+    "historical_event": {
+      "baseline_rows": 23,
+      "all_baseline_fields_equal": true,
+      "new_observed_ids": []
+    },
+    "orphan_tool": {
+      "baseline_rows": 7,
+      "all_baseline_fields_equal": true,
+      "new_observed_ids": []
+    },
+    "unresolved_tool": {
+      "baseline_rows": 3,
+      "all_baseline_fields_equal": true,
+      "new_observed_ids": []
+    }
+  },
+  "project_comparison": {
+    "field_count": 8,
+    "all_fields_equal_this_release": true,
+    "row_sha256": "9e49ca15c51357ed0fc9c71703c8371ab9b67593e493b8385b4e753826131194"
+  },
+  "actual_attribution_contracts": 42,
+  "release_stable_during_collection": true,
+  "attribution_before_comparison": "未有本轮发布前实际42项引用采集；不虚构前后相等"
+}

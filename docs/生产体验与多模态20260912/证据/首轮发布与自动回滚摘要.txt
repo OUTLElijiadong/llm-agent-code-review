@@ -1,0 +1,25 @@
+The bundle contains this ref:
+62fe4f32dfeb4e8153ad14d1bbe4f44f4df867e0 refs/heads/codex/production-ux-multimodal-20260912
+The bundle records a complete history.
+The bundle uses this hash algorithm: sha1
+[2026-09-12T15:25:09Z] INFO  发布预检通过(target=all, version=3.9.1, sha=62fe4f32dfeb4e8153ad14d1bbe4f44f4df867e0)
+[2026-09-12T15:25:09Z] INFO  服务 mysql 已就绪(status=healthy)
+[2026-09-12T15:25:09Z] INFO  服务 clamav 已就绪(status=healthy)
+[2026-09-12T15:26:48Z] INFO  在独立容器 cr_testdb 创建隔离恢复库: prism_verify_20260912152648_28447
+[2026-09-12T15:27:48Z] INFO  独立恢复验证通过(container=cr_testdb, tables=91, alembic=051_agent_multimodal_assets)
+[2026-09-12T15:27:48Z] INFO  发布前备份已完成
+[2026-09-12T15:28:59Z] INFO  Alembic 已位于 head=051_agent_multimodal_assets
+[2026-09-12T15:29:06Z] INFO  服务 backend 已就绪(status=healthy)
+[2026-09-12T15:29:07Z] INFO  Backend API 冒烟通过(version=3.9.1, release=62fe4f32dfeb4e8153ad14d1bbe4f44f4df867e0)
+[2026-09-12T15:31:04Z] INFO  同步前端 assets: prism-frontend:62fe4f32dfeb4e8153ad14d1bbe4f44f4df867e0 -> 卷 deploy_frontend_assets
+cp: can't open '/assets/./SecurityCenter-DHDsx0cc.css': File exists
+[2026-09-12T15:31:04Z] WARN  发布事务失败(rc=1, stage=frontend_assets, target=all, sha=62fe4f32dfeb4e8153ad14d1bbe4f44f4df867e0): 前端 assets 卷同步失败
+[2026-09-12T15:31:04Z] WARN  数据库迁移已尝试，当前结构需核验；应用回滚不代表数据库已还原。备份: ../backups/code_review_20260912T152510Z_62fe4f32dfeb.sql.gz
+[2026-09-12T15:31:04Z] WARN  开始应用层自动回滚；数据库不会自动 downgrade/restore
+[2026-09-12T15:31:05Z] WARN  开始应用层回滚(target=all, release=c0e4e2ab270273808171da5518e77c9742d64eb2)；数据库保持当前 revision
+[2026-09-12T15:31:20Z] INFO  服务 backend 已就绪(status=healthy)
+[2026-09-12T15:31:28Z] INFO  服务 frontend 已就绪(status=healthy)
+[2026-09-12T15:31:28Z] INFO  Backend API 冒烟通过(version=3.9.0, release=c0e4e2ab270273808171da5518e77c9742d64eb2)
+[2026-09-12T15:31:28Z] INFO  HTTP→HTTPS 与同源 health/ready 冒烟通过(domain=lijiadong.cn)
+[2026-09-12T15:31:28Z] INFO  应用层回滚完成(release=c0e4e2ab270273808171da5518e77c9742d64eb2)；请确认数据库向后兼容性
+[2026-09-12T15:31:29Z] INFO  应用自动回滚完成；请核对数据库兼容性与公网冒烟结果

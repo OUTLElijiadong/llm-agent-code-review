@@ -16,6 +16,7 @@ class UserListItem(BaseModel):
     username: str
     nickname: Optional[str] = None
     email: Optional[str] = None
+    avatar: Optional[str] = None
     role: str
     status: int
     last_login: Optional[datetime] = None

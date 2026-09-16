@@ -174,14 +174,19 @@
         <div class="rg-card">
           <div class="rg-title font-display">严重度分布</div>
           <div class="sev-rows">
-            <div v-for="r in severityRows" :key="r.key" class="sev-row">
+            <div
+              v-for="r in severityRows"
+              :key="r.key"
+              class="sev-row"
+              :title="`${r.label} ${r.value} 个 · 占比 ${r.percent}%`"
+            >
               <span class="sr-label">
                 <span class="sr-dot" :style="{ background: r.color }"></span>{{ r.label }}
               </span>
               <div class="sr-bar">
                 <div class="sr-fill" :style="{ width: `${r.percent}%`, background: r.color }"></div>
               </div>
-              <span class="sr-val font-mono">{{ r.value }}</span>
+              <span class="sr-val font-mono">{{ r.value }}<span class="sr-pct"> · {{ r.percent }}%</span></span>
             </div>
           </div>
         </div>
@@ -1401,6 +1406,12 @@ onBeforeUnmount(() => {
   text-align: right;
   font-weight: 600;
   color: var(--gray-800);
+}
+
+.sr-pct {
+  font-weight: 400;
+  color: var(--gray-500);
+  font-size: 11px;
 }
 
 .fix-gauge {

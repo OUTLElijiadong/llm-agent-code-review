@@ -6,8 +6,13 @@
     </div>
 
     <el-card shadow="hover" class="config-card">
+      <p v-if="configState === 'loading'" role="status">正在读取当前 API 配置，请稍候…</p>
+      <div v-else-if="configState === 'error'" class="config-load-error" role="alert">
+        <p>未能读取当前 API 配置，当前来源尚未确认。仅可填写并测试连接；读取成功后才能保存或重置。</p>
+        <el-button @click="loadConfig">重新读取</el-button>
+      </div>
       <!-- 当前配置状态 -->
-      <div class="current-status">
+      <div v-if="configState === 'success'" class="current-status">
         <div class="status-left">
           <span class="status-label">当前 API 来源：</span>
           <el-tag :type="currentConfig.is_custom ? 'success' : 'info'" size="default">
@@ -32,7 +37,7 @@
         class="config-form"
       >
         <el-form-item label="提供商" prop="provider">
-          <el-select v-model="form.provider" style="width: 260px">
+          <el-select v-model="form.provider" :disabled="configState === 'loading'" style="width: 260px" @update:model-value="formEdited = true">
             <el-option label="DeepSeek" value="deepseek" />
             <el-option label="OpenAI 兼容" value="openai" />
             <el-option label="自定义" value="custom" />
@@ -45,6 +50,8 @@
         <el-form-item label="API Key" prop="api_key">
           <el-input
             v-model="form.api_key"
+            :disabled="configState === 'loading'"
+            @update:model-value="formEdited = true"
             :type="showKey ? 'text' : 'password'"
             placeholder="sk-xxxxxxxx"
             show-password
@@ -64,6 +71,8 @@
         <el-form-item label="API 地址" prop="base_url">
           <el-input
             v-model="form.base_url"
+            :disabled="configState === 'loading'"
+            @update:model-value="formEdited = true"
             placeholder="https://api.deepseek.com"
             maxlength="512"
           />
@@ -73,7 +82,9 @@
         <el-form-item label="模型名称" prop="model">
           <el-input
             v-model="form.model"
-            placeholder="deepseek-chat"
+            :disabled="configState === 'loading'"
+            @update:model-value="formEdited = true"
+            placeholder="deepseek-flash"
             maxlength="128"
           />
           <span class="form-tip">{{ modelHint }}</span>
@@ -84,12 +95,12 @@
             <el-button
               type="default"
               :loading="testing"
-              :disabled="!form.api_key"
+              :disabled="!form.api_key || configState === 'loading'"
               @click="handleTest"
             >
               {{ testing ? '测试中...' : '🔗 测试连接' }}
             </el-button>
-            <el-button type="primary" :loading="saving" @click="handleSave">
+            <el-button type="primary" :loading="saving" :disabled="configState !== 'success'" @click="handleSave">
               {{ saving ? '保存中...' : '💾 保存配置' }}
             </el-button>
             <el-button
@@ -97,6 +108,7 @@
               type="danger"
               plain
               :loading="resetting"
+              :disabled="configState !== 'success'"
               @click="handleReset"
             >
               恢复系统默认
@@ -175,13 +187,15 @@ const saving = ref(false)
 const testing = ref(false)
 const resetting = ref(false)
 const showKey = ref(false)
+const configState = ref<'loading' | 'success' | 'error'>('loading')
+const formEdited = ref(false)
 const testResult = ref<{ success: boolean; message: string; model: string; duration_ms: number } | null>(null)
 
 const currentConfig = reactive<ApiConfigOut>({
   provider: 'deepseek',
   api_key_masked: '',
   base_url: 'https://api.deepseek.com',
-  model: 'deepseek-chat',
+  model: 'deepseek-flash',
   is_active: true,
   is_custom: false,
 })
@@ -190,7 +204,7 @@ const form = reactive({
   provider: 'deepseek',
   api_key: '',
   base_url: 'https://api.deepseek.com',
-  model: 'deepseek-chat',
+  model: 'deepseek-flash',
 })
 
 const rules: FormRules = {
@@ -222,7 +236,7 @@ const providerHint = computed(() => {
 const modelHint = computed(() => {
   switch (form.provider) {
     case 'deepseek':
-      return '推荐 deepseek-chat 或 deepseek-reasoner'
+      return '推荐 deepseek-flash（支持图片输入）；纯文本任务也可填写 deepseek-v4-pro，或保留您的自定义模型。'
     case 'openai':
       return '如 gpt-4o / qwen2.5 / llama3 等'
     default:
@@ -231,21 +245,24 @@ const modelHint = computed(() => {
 })
 
 async function loadConfig(): Promise<void> {
+  configState.value = 'loading'
   try {
     const cfg = await getApiConfig()
     Object.assign(currentConfig, cfg)
-    if (cfg.is_custom) {
+    if (cfg.is_custom && !formEdited.value) {
       form.provider = cfg.provider
       form.base_url = cfg.base_url
       form.model = cfg.model
       // Key 已脱敏，不在 form 中回填
     }
+    configState.value = 'success'
   } catch {
-    /* 网络错误等，保持默认状态 */
+    configState.value = 'error'
   }
 }
 
 async function handleTest(): Promise<void> {
+  if (configState.value === 'loading') return
   const valid = await formRef.value?.validateField('api_key').catch(() => false)
   if (!valid && form.api_key.length < 3) {
     ElMessage.warning('请先填写 API Key')
@@ -280,6 +297,10 @@ async function handleTest(): Promise<void> {
 }
 
 async function handleSave(): Promise<void> {
+  if (configState.value !== 'success') {
+    ElMessage.warning('请先成功读取当前 API 配置，再保存修改')
+    return
+  }
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
@@ -302,6 +323,10 @@ async function handleSave(): Promise<void> {
 }
 
 async function handleReset(): Promise<void> {
+  if (configState.value !== 'success') {
+    ElMessage.warning('请先成功读取当前 API 配置，再恢复默认')
+    return
+  }
   try {
     await ElMessageBox.confirm('确认恢复系统默认 API 配置？您的自定义 Key 将被彻底删除。', '确认重置', {
       type: 'warning',
@@ -319,14 +344,15 @@ async function handleReset(): Promise<void> {
       provider: 'deepseek',
       api_key_masked: '',
       base_url: 'https://api.deepseek.com',
-      model: 'deepseek-chat',
+      model: 'deepseek-flash',
       is_active: true,
       is_custom: false,
     })
     form.provider = 'deepseek'
     form.api_key = ''
     form.base_url = 'https://api.deepseek.com'
-    form.model = 'deepseek-chat'
+    form.model = 'deepseek-flash'
+    formEdited.value = false
     ElMessage.success('已恢复系统默认 API 配置')
   } catch (e: any) {
     ElMessage.error(e?.message || '重置失败')
@@ -383,6 +409,16 @@ onMounted(loadConfig)
     font-size: 13px;
     color: var(--color-text-secondary, #909399);
   }
+}
+
+.config-load-error {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--el-color-danger-light-5);
+  border-radius: 8px;
+  color: var(--el-color-danger);
+
+  p { margin: 0 0 8px; }
 }
 
 .config-form {

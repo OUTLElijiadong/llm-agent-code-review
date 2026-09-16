@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--port", "5174", "--strictPort"],
-      "port": 5174
+      "name": "prism-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/pensive-banach-b7ce74/frontend/node_modules/vite/bin/vite.js", "serve", "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/pensive-banach-b7ce74/frontend", "--port", "5173", "--strictPort"],
+      "port": 5173
     }
   ]
 }

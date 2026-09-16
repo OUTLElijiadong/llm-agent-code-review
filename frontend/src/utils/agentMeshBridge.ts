@@ -50,7 +50,9 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
   /** 本轮已判定归档/未注册的会话:跳过轮询,避免对死会话反复 heartbeat+403。 */
   const goneSessions = new Set<string>()
   let timer: number | undefined
-  let syncing = false
+  let stopped = false
+  let generation = 0
+  let syncingGeneration: number | undefined
 
   function markGone(sessionId: string): void {
     if (goneSessions.has(sessionId)) return
@@ -59,7 +61,9 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
   }
 
   async function syncNow(): Promise<void> {
-    if (syncing) return
+    if (stopped || syncingGeneration === generation) return
+    const syncGeneration = generation
+    const isCurrentSync = () => !stopped && generation === syncGeneration
     const currentSessionId = options.getSessionId()
     const configuredSessions = options.getSessions?.() ?? []
     const sessions = configuredSessions.length
@@ -68,10 +72,11 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
         ? [{ id: currentSessionId, title: options.getTitle() }]
         : []
     if (!sessions.length) return
-    syncing = true
+    syncingGeneration = syncGeneration
     try {
       const activeRun = options.getActiveRun?.()
       for (const session of sessions) {
+        if (!isCurrentSync()) return
         // 已归档会话跳过 heartbeat:服务端本就不会复活它,徒增一次无效请求。
         if (goneSessions.has(session.id)) continue
         const isCurrent = session.id === currentSessionId
@@ -82,6 +87,7 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
           active_run_id: session.active_run_id ?? (isCurrent ? activeRun?.run_id : '') ?? '',
           active_run_status: session.active_run_status ?? (isCurrent ? activeRun?.status : '') ?? '',
         })
+        if (!isCurrentSync()) return
       }
       // 优先认领当前会话的收件箱,避免历史会话的主动简报占满串行处理队列,
       // 导致用户正在看的对话迟迟收不到 JARVIS 简报/团队结论等消息。
@@ -89,12 +95,15 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
         (left, right) => Number(right.id === currentSessionId) - Number(left.id === currentSessionId),
       )
       for (const session of orderedSessions) {
+        if (!isCurrentSync()) return
         if (goneSessions.has(session.id)) continue
         if (options.isBusy(session.id)) continue
         let inbox: AgentMeshMessage[]
         try {
           inbox = await pullAgentMeshInbox(options.surface, session.id, 20)
+          if (!isCurrentSync()) return
         } catch (reason) {
+          if (!isCurrentSync()) return
           // 会话已归档/未注册:正常生命周期,标记后跳过,并通知宿主收敛会话列表。
           if (errorCode(reason) === AGENT_MESH_SESSION_GONE_CODE) {
             markGone(session.id)
@@ -110,26 +119,33 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
           const deferred = options.onDeferredMessage
             ? await options.onDeferredMessage(message, session.id)
             : false
+          if (!isCurrentSync()) return
           if (deferred) handled.add(message.message_id)
           return
         }
-        if (await options.onMessage(message, session.id)) handled.add(message.message_id)
+        const received = await options.onMessage(message, session.id)
+        if (!isCurrentSync()) return
+        if (received) handled.add(message.message_id)
         return
       }
     } catch {
       // 短暂网络故障由下一轮心跳重试，不干扰用户当前对话。
     } finally {
-      syncing = false
+      if (syncingGeneration === syncGeneration) syncingGeneration = undefined
     }
   }
 
   function start(): void {
     if (timer !== undefined) return
+    stopped = false
     void syncNow()
     timer = window.setInterval(() => void syncNow(), options.intervalMs ?? 5_000)
   }
 
   function stop(): void {
+    stopped = true
+    generation += 1
+    syncingGeneration = undefined
     if (timer !== undefined) window.clearInterval(timer)
     timer = undefined
   }

@@ -1,6 +1,5 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import { deferred, pageOf, scanMountOptions } from './scanRegressionTestUtils'
 
 const api = vi.hoisted(() => ({ tasks: vi.fn(), projects: vi.fn() }))
@@ -139,7 +138,7 @@ describe('任务列表轮询恢复', () => {
     expect(api.tasks).toHaveBeenCalledTimes(before)
   })
 
-  it('真实表格只把success评分作为风险评级，失败历史100分和失败0分均显示未形成评分', async () => {
+  it('任务卡片只把success评分作为风险评级，失败历史100分和失败0分均显示未形成评分', async () => {
     const rows = [
       { status: 'failed', score: 100 }, { status: 'failed', score: 0 },
       { status: 'cancelled', score: 90 }, { status: 'pending', score: 0 },
@@ -151,23 +150,34 @@ describe('任务列表轮询恢复', () => {
     wrapper = mount(ReviewTaskList, {
       global: {
         ...scanMountOptions.global,
-        components: { ...scanMountOptions.global.components, ElTable, ElTableColumn },
-        stubs: { ...scanMountOptions.global.stubs, 'el-table': false, 'el-table-column': false },
       },
     })
     await flushPromises()
-    const renderedRows = wrapper.findAll('tbody tr')
+    const renderedRows = wrapper.findAll('.task-card')
     expect(renderedRows).toHaveLength(7)
     for (const row of renderedRows.slice(0, 5)) {
-      expect(row.findAll('td')[4].text()).toBe('未形成评分')
+      expect(row.get('.tc-score').text()).toBe('未形成评分')
       expect(row.find('.score-low, .score-medium, .score-high').exists()).toBe(false)
     }
-    expect(renderedRows[5].findAll('td')[4].text()).toBe('0')
+    expect(renderedRows[5].get('.tc-score').text()).toBe('0')
     expect(renderedRows[5].find('.score-low').exists()).toBe(true)
-    expect(renderedRows[6].findAll('td')[4].text()).toBe('100')
+    expect(renderedRows[6].get('.tc-score').text()).toBe('100')
     expect(renderedRows[6].find('.score-high').exists()).toBe(true)
-    const vm = wrapper.vm as any
-    expect(vm.compareScores(rows[0], rows[1])).toBe(0)
-    expect(vm.compareScores(rows[0], rows[5])).toBeLessThan(0)
+  })
+})
+
+
+describe('审查卡片进度与可操作权限', () => {
+  it('展示后端真实处理进度，并给详情保留可聚焦的按钮', async () => {
+    api.tasks.mockResolvedValue(pageOf([{ id: 8, task_name: '真实进度', status: 'running', total_files: 5, processed_files: 2 }]))
+    await render()
+    expect(wrapper.get('.tc-progress').attributes('title')).toBe('2/5 文件')
+    expect(wrapper.get('.tc-progress-fill').attributes('style')).toContain('width: 40%')
+    expect(wrapper.get('button.tc-name').text()).toBe('真实进度')
+  })
+  it('缺少取消权限时不显示点击无反应的停止和删除按钮', async () => {
+    await render()
+    expect(wrapper.text()).not.toContain('停止')
+    expect(wrapper.text()).not.toContain('删除')
   })
 })

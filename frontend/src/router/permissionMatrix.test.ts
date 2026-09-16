@@ -51,8 +51,10 @@ describe('全部已注册私有页面的真实路由守卫与用户 store 矩阵
     user.roles = ['user']
     user.permissions = new Set(allMemberPermissions)
     const target = resolve(record.path)
-    const adminOnly = target.path.startsWith('/admin/') || target.meta.superAdmin
-    expect(await installedGuard()(target, resolve('/dashboard'))).toEqual(adminOnly ? { path: '/403' } : true)
+    // 工坊等仅审查者页面对普通成员同样是拒绝面(meta.roles 不含 user)
+    const denied = target.path.startsWith('/admin/') || target.meta.superAdmin
+      || Boolean(target.meta.roles?.length && !target.meta.roles.includes('user'))
+    expect(await installedGuard()(target, resolve('/dashboard'))).toEqual(denied ? { path: '/403' } : true)
   })
 
   it.each(records)('普通管理员访问 $path 仍受超级管理员限制', async (record) => {

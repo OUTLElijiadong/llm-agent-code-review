@@ -1,0 +1,117 @@
+{
+  "user_id": 5,
+  "runs": [
+    {
+      "id": 814,
+      "run_id": "run_d451c96b69f34c16a6ecbfe68fd3a5dd",
+      "user_id": 5,
+      "surface": "user",
+      "session_key": "user-882f7fc3-943b-4717-b7ac-2de8a91e570e",
+      "status": "completed",
+      "root_agent_run_id": null,
+      "agent_run_id": null,
+      "create_time": "2026-09-12 16:33:51",
+      "update_time": "2026-09-12 16:33:54",
+      "checkpoint": {
+        "model": "deepseek-flash",
+        "status": "completed",
+        "rounds": 1,
+        "output_chars": 215,
+        "output_sha256": "b512e5f01257f1c7d15acc3b9e5c37b610df3e8c71395f794cf79b71f394c36f",
+        "last_response_model": "deepseek-flash",
+        "has_error": false,
+        "has_cancel_reason": false,
+        "pending_kind": null,
+        "image_sha256_refs": [
+          "6e4b8c54f886cdd61177a5e0be13ae84161f36be535343b5108ce34ddd0ad560"
+        ],
+        "has_image_data_url": false
+      },
+      "assets": [
+        {
+          "id": 2,
+          "user_id": 5,
+          "surface": "user",
+          "role": "input",
+          "mime": "image/png",
+          "sha256": "6e4b8c54f886cdd61177a5e0be13ae84161f36be535343b5108ce34ddd0ad560",
+          "create_time": "2026-09-12 16:33:51",
+          "bytes": 1308,
+          "actual_sha256": "6e4b8c54f886cdd61177a5e0be13ae84161f36be535343b5108ce34ddd0ad560",
+          "sha256_matches": true,
+          "surface_matches": true
+        }
+      ],
+      "call_logs": [
+        {
+          "id": 9802,
+          "user_id": 5,
+          "model_name": "deepseek-flash",
+          "agent_label": "chat_assistant",
+          "status": "success",
+          "prompt_tokens": 14457,
+          "completion_tokens": 336,
+          "total_tokens": 14793,
+          "root_agent_run_id": 814,
+          "agent_run_id": 814,
+          "tool_execution_id": null,
+          "create_time": "2026-09-12 16:33:54",
+          "prompt_bytes": null,
+          "response_bytes": null,
+          "root_owner": 5,
+          "agent_owner": 5
+        }
+      ]
+    },
+    {
+      "id": 815,
+      "run_id": "run_d0231507dc00466b9042493b061aea81",
+      "user_id": 5,
+      "surface": "user",
+      "session_key": "user-882f7fc3-943b-4717-b7ac-2de8a91e570e",
+      "status": "completed",
+      "root_agent_run_id": null,
+      "agent_run_id": null,
+      "create_time": "2026-09-12 16:34:26",
+      "update_time": "2026-09-12 16:34:27",
+      "checkpoint": {
+        "model": "deepseek-v4-pro",
+        "status": "completed",
+        "rounds": 1,
+        "output_chars": 4,
+        "output_sha256": "49cfd2249745a37870221fdb78be545de1d364bdaf5f02432e342c9f5c2dcb0f",
+        "last_response_model": "deepseek-v4-pro",
+        "has_error": false,
+        "has_cancel_reason": false,
+        "pending_kind": null,
+        "image_sha256_refs": [],
+        "has_image_data_url": false
+      },
+      "assets": [],
+      "call_logs": [
+        {
+          "id": 9803,
+          "user_id": 5,
+          "model_name": "deepseek-v4-pro",
+          "agent_label": "chat_assistant",
+          "status": "success",
+          "prompt_tokens": 14496,
+          "completion_tokens": 3,
+          "total_tokens": 14499,
+          "root_agent_run_id": 815,
+          "agent_run_id": 815,
+          "tool_execution_id": null,
+          "create_time": "2026-09-12 16:34:27",
+          "prompt_bytes": null,
+          "response_bytes": null,
+          "root_owner": 5,
+          "agent_owner": 5
+        }
+      ]
+    }
+  ],
+  "missing_owned_run_ids": [],
+  "user_exists": true,
+  "avatar": null,
+  "avatar_assets": []
+}

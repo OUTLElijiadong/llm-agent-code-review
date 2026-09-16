@@ -1,0 +1,98 @@
+{
+  "status": "passed",
+  "user_id": 5,
+  "app_release": "7a2368f20453606ed09691ee0002d07df4629ec3",
+  "readonly_snapshot": {
+    "db": "code_review",
+    "readonly": 1,
+    "isolation": "REPEATABLE-READ",
+    "captured_at_utc": "2026-09-12 16:27:26.549759"
+  },
+  "snapshot_end": {
+    "readonly": 1,
+    "captured_at_utc": "2026-09-12 16:27:26.794845"
+  },
+  "business_writes": false,
+  "http_requests": 0,
+  "direct_sql_sha256": "fe3d9a258477fcb6e5a815d324dc5b5d645fa6a7b86666ad6e7ad3707cfbeaa2",
+  "direct_sql": {
+    "project_count": 11,
+    "file_count": 630,
+    "archive_file_count": 7973,
+    "review_count": 27,
+    "code_avg": 49.3636,
+    "code_sample_count": 11,
+    "code_score_sum": 543,
+    "historical_mixed_average": 64.0741,
+    "code_avg_rounded": 49.4
+  },
+  "api_summary_recomputed": {
+    "project_count": 11,
+    "file_count": 630,
+    "archive_file_count": 7973,
+    "review_count": 27,
+    "total_issues": 648,
+    "severe_issues": 145,
+    "avg_score": 49.4,
+    "code_review_count": 11
+  },
+  "all_time_issue_sources": {
+    "task_count": 39,
+    "total_issues": 648,
+    "severity": {
+      "严重": 145,
+      "高": 214,
+      "中": 173,
+      "低": 87,
+      "未分级": 29
+    },
+    "source_totals": {
+      "review_issues": 616,
+      "report_headings": 32,
+      "legacy_task_snapshot": 0
+    },
+    "refuted": 0
+  },
+  "risk_30d": [
+    {
+      "severity": "严重",
+      "count": 0
+    },
+    {
+      "severity": "高",
+      "count": 1
+    },
+    {
+      "severity": "中",
+      "count": 2
+    },
+    {
+      "severity": "低",
+      "count": 0
+    },
+    {
+      "severity": "未分级",
+      "count": 21
+    }
+  ],
+  "window_issue_sources": {
+    "task_count": 39,
+    "total_issues": 24,
+    "severity": {
+      "严重": 0,
+      "高": 1,
+      "中": 2,
+      "低": 0,
+      "未分级": 21
+    },
+    "source_totals": {
+      "review_issues": 0,
+      "task_snapshot": 0,
+      "legacy_task_snapshot": 0,
+      "report_headings": 24
+    },
+    "refuted": 0
+  },
+  "window_cutoff_utc": "2026-08-13T16:27:26.787839+00:00",
+  "limits": "报告条目在进程内解析，仅输出汇总；未导出业务正文，不运行HTTP/LLM。日期窗口接近边界时以采集时刻为准。"
+}

@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from app.agents.contracts import CONTRACTS, PROTECTED_AGENT_CODES
 from app.agents.tool_contracts import FixedToolArgumentError, is_fixed_tool, validate_fixed_tool_arguments
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
-from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import AgentProfile, ApprovalItem
 from app.models.custom_agent import (
     CustomAgent,
@@ -26,7 +25,7 @@ from app.models.custom_agent import (
 )
 from app.models.user import User
 from app.services import audit_service
-from app.services.rbac_service import check_permission, is_admin_user
+from app.services.rbac_service import is_admin_user
 
 SKILL_TYPES = {"llm_transform", "readonly_tool", "agent_delegate", "sequence_workflow"}
 READONLY_TOOLS = {
@@ -94,7 +93,11 @@ def _is_admin(db: Session, user: User) -> bool:
 
 
 def _assert_reviewer(db: Session, user: User) -> None:
-    if user.role != "reviewer" and not check_permission(db, user.id, PermissionCode.AGENT_ASSET_CREATE):
+    from app.services.rbac_service import get_user_roles
+
+    if _is_admin(db, user) or user.role == "reviewer":
+        return
+    if not any(role.code == "reviewer" for role in get_user_roles(db, user.id)):
         raise ForbiddenError("仅审查员或管理员可使用 Agent 工坊", code=40300)
 
 

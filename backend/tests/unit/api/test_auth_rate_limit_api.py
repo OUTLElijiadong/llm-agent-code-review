@@ -86,7 +86,7 @@ def test_login_success_atomically_settles_and_clears_failures(monkeypatch) -> No
     limiter = _RecordingLimiter()
     user = User(id=9, username="user", password="hashed", role="user", status=1)
     monkeypatch.setattr(auth_api, "login_failure_limiter", limiter)
-    monkeypatch.setattr(auth_api.auth_service, "login", lambda *_args, **_kwargs: ("token", user))
+    monkeypatch.setattr(auth_api.auth_service, "login", lambda *_args, **_kwargs: ("token", user, False))
     monkeypatch.setattr(auth_api.audit_service, "log", lambda *_args, **_kwargs: None)
 
     response = auth_api.login(LoginIn(username="user", password="secret"), _request(), object())

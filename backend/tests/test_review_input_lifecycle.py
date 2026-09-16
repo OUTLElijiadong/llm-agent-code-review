@@ -100,6 +100,9 @@ def test_task_and_input_snapshot_are_atomic_and_immutable(db, admin_user, scan_r
     monkeypatch.setattr(review_service.threading, "Thread", Mock())
     monkeypatch.setattr(review_service, "get_enabled_rules", lambda *args, **kwargs: [])
     monkeypatch.setattr("app.utils.api_resolver.resolve_api_config", lambda *args: None)
+    monkeypatch.setattr(
+        "app.services.agent_model_service.resolve_subagent_config", lambda _db, config, **kwargs: config,
+    )
     monkeypatch.setattr(review_service, "DeepSeekAgent", lambda **kwargs: SimpleNamespace(model="isolated"))
     task = review_service.start(db, admin_user, ReviewStartIn(project_id=project.id, file_ids=[code_file.id]))
     link = db.query(ReviewTaskFile).filter_by(task_id=task.id).one()
@@ -124,6 +127,9 @@ def test_missing_version_rolls_back_task_and_links(db, admin_user, scan_rows, mo
     monkeypatch.setattr(review_service.threading, "Thread", Mock())
     monkeypatch.setattr(review_service, "get_enabled_rules", lambda *args, **kwargs: [])
     monkeypatch.setattr("app.utils.api_resolver.resolve_api_config", lambda *args: None)
+    monkeypatch.setattr(
+        "app.services.agent_model_service.resolve_subagent_config", lambda _db, config, **kwargs: config,
+    )
     monkeypatch.setattr(review_service, "DeepSeekAgent", lambda **kwargs: SimpleNamespace(model="isolated"))
     with pytest.raises(ValidationError, match="版本记录不一致"):
         review_service.start(db, admin_user, ReviewStartIn(project_id=project.id, file_ids=[code_file.id]))

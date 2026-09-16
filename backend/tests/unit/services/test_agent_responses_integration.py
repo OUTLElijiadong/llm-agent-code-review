@@ -25,6 +25,7 @@ from app.models.agent_governance import (
     PolicyDecisionLog,
     PolicyRule,
 )
+from app.models.agent_multimodal import AgentMultimodalAsset
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.services import agent_responses_service as service_module
 from app.services.agent_responses_service import DatabaseCheckpointStore, PrismToolExecutor
@@ -36,6 +37,11 @@ from app.services.deepseek_responses_runtime import (
     RuntimeResult,
     ToolCall,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_background_profile_refresh(monkeypatch):
+    monkeypatch.setattr(api_module, "_schedule_profile_refresh", lambda _user_id: None)
 
 
 @pytest.mark.asyncio
@@ -97,7 +103,11 @@ def test_agent_response_request_accepts_only_one_start_input_source() -> None:
 @pytest.fixture()
 def db():
     engine = create_engine("sqlite:///:memory:")
+    from app.models.system_config import SystemConfig
+
+    SystemConfig.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
+    AgentMultimodalAsset.__table__.create(engine)
     AgentToolExecution.__table__.create(engine)
     AgentMemory.__table__.create(engine)
     ApprovalItem.__table__.create(engine)
@@ -168,6 +178,9 @@ async def test_cancelled_is_terminal_across_independent_sessions(tmp_path) -> No
         f"sqlite:///{tmp_path / 'cancel-terminal.db'}",
         connect_args={"check_same_thread": False, "timeout": 10},
     )
+    from app.models.system_config import SystemConfig
+
+    SystemConfig.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     driver_db = factory()
@@ -289,6 +302,9 @@ async def test_database_checkpoint_store_claim_is_atomic_across_sessions(tmp_pat
         f"sqlite:///{tmp_path / 'response-retry-claim.db'}",
         connect_args={"check_same_thread": False, "timeout": 10},
     )
+    from app.models.system_config import SystemConfig
+
+    SystemConfig.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     seed = session_factory()

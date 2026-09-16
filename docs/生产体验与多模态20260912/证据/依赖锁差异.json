@@ -1,0 +1,143 @@
+{
+  "日期": "2026-09-12",
+  "生产解释器": "Dockerfile python:3.11-slim",
+  "验证解释器": [
+    "3.11.15",
+    "3.12.14"
+  ],
+  "后端": {
+    "requirements.lock": {
+      "版本变化": {
+        "cryptography": [
+          "48.0.1",
+          "50.0.1"
+        ]
+      },
+      "新增": {},
+      "删除": []
+    },
+    "requirements-dev.lock": {
+      "版本变化": {
+        "cryptography": [
+          "48.0.1",
+          "50.0.1"
+        ]
+      },
+      "新增": {
+        "bleach": "6.4.0",
+        "libarchive-c": "5.3",
+        "maxminddb": "2.8.2",
+        "psutil": "6.1.1",
+        "webencodings": "0.5.1"
+      },
+      "删除": []
+    }
+  },
+  "前端": {
+    "版本变化": {
+      "node_modules/@vitest/coverage-v8": [
+        "3.2.7",
+        "4.1.11"
+      ],
+      "node_modules/@vitest/expect": [
+        "3.2.7",
+        "4.1.11"
+      ],
+      "node_modules/@vitest/mocker": [
+        "3.2.7",
+        "4.1.11"
+      ],
+      "node_modules/@vitest/pretty-format": [
+        "3.2.7",
+        "4.1.11"
+      ],
+      "node_modules/@vitest/runner": [
+        "3.2.7",
+        "4.1.11"
+      ],
+      "node_modules/@vitest/snapshot": [
+        "3.2.7",
+        "4.1.11"
+      ],
+      "node_modules/@vitest/spy": [
+        "3.2.7",
+        "4.1.11"
+      ],
+      "node_modules/@vitest/utils": [
+        "3.2.7",
+        "4.1.11"
+      ],
+      "node_modules/ast-v8-to-istanbul": [
+        "0.3.12",
+        "1.0.6"
+      ],
+      "node_modules/chai": [
+        "5.3.3",
+        "6.2.2"
+      ],
+      "node_modules/dompurify": [
+        "3.4.12",
+        "3.4.15"
+      ],
+      "node_modules/es-module-lexer": [
+        "1.7.0",
+        "2.3.2"
+      ],
+      "node_modules/magicast": [
+        "0.3.5",
+        "0.5.5"
+      ],
+      "node_modules/nanoid": [
+        "3.3.16",
+        "3.3.19"
+      ],
+      "node_modules/std-env": [
+        "3.10.0",
+        "4.2.0"
+      ],
+      "node_modules/tinyexec": [
+        "0.3.2",
+        "1.3.1"
+      ],
+      "node_modules/tinyrainbow": [
+        "2.0.0",
+        "3.1.1"
+      ],
+      "node_modules/vitest": [
+        "3.2.7",
+        "4.1.11"
+      ]
+    },
+    "新增": {
+      "node_modules/@standard-schema/spec": "1.1.0",
+      "node_modules/convert-source-map": "2.0.0",
+      "node_modules/obug": "2.2.1"
+    },
+    "删除": [
+      "node_modules/@ampproject/remapping",
+      "node_modules/@istanbuljs/schema",
+      "node_modules/@jridgewell/gen-mapping",
+      "node_modules/cac",
+      "node_modules/check-error",
+      "node_modules/deep-eql",
+      "node_modules/istanbul-lib-source-maps",
+      "node_modules/loupe",
+      "node_modules/pathval",
+      "node_modules/strip-literal",
+      "node_modules/strip-literal/node_modules/js-tokens",
+      "node_modules/test-exclude",
+      "node_modules/test-exclude/node_modules/minimatch",
+      "node_modules/tinypool",
+      "node_modules/tinyspy",
+      "node_modules/vite-node"
+    ]
+  },
+  "文件摘要": {
+    "backend/requirements.txt": "1e9d6b359559ece36529b72074fb571af36bb96efabae694c3015867c2e4d5cc",
+    "backend/requirements.lock": "d5466a365c95206160590f31cf65fc6ec45eba9556d55652177633d1ed938ea8",
+    "backend/requirements-dev.lock": "f435af3fcc4dac52bd78c12a2003f9f8fe8df56aeab664e9b2d89c338664c1bf",
+    "frontend/package.json": "a73f67fc181660b151d4b3b8444d1b6792df6e12af7f4129c4dc60ae9952a263",
+    "frontend/package-lock.json": "455c954be293268e373b6113fd2c6ce8378bb8b7ebe74eea1307a6a3fedbf2a2",
+    "frontend/vitest.config.ts": "54e7208704add5788ba94344363abe8ac06d2c20819c4bf50e4a4256dea33672"
+  }
+}

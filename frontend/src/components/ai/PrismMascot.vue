@@ -46,6 +46,17 @@ withDefaults(defineProps<Props>(), {
       <path d="M48 33 L58.5 38" stroke="#B9B4FF" stroke-width="2" />
     </g>
 
+    <!-- 圆耳朵(可爱化:柔软的圆角小耳) -->
+    <path d="M20 14.5 Q17 8 23.5 9.5 Q28 10.5 26.5 16.5 Z" fill="#8F8BFF" stroke="#3E3AA6" stroke-opacity="0.3" stroke-width="1.2" stroke-linejoin="round" />
+    <path d="M44 14.5 Q47 8 40.5 9.5 Q36 10.5 37.5 16.5 Z" fill="#8F8BFF" stroke="#3E3AA6" stroke-opacity="0.3" stroke-width="1.2" stroke-linejoin="round" />
+    <path d="M21.6 13.6 Q20.6 10.8 23.4 11.4 Q25.2 11.9 24.4 14.6 Z" fill="#FFB3C7" fill-opacity="0.7" />
+    <path d="M42.4 13.6 Q43.4 10.8 40.6 11.4 Q38.8 11.9 39.6 14.6 Z" fill="#FFB3C7" fill-opacity="0.7" />
+
+    <!-- 头顶小星光(可爱化:随身小星星伙伴) -->
+    <g class="prismling-star">
+      <path d="M32 2.6 L33.1 5.4 L36 5.6 L33.8 7.5 L34.5 10.3 L32 8.8 L29.5 10.3 L30.2 7.5 L28 5.6 L30.9 5.4 Z" fill="#FFD66E" />
+    </g>
+
     <!-- 小脚 -->
     <rect x="20.5" y="52" width="7" height="5" rx="2.5" fill="#4540B8" />
     <rect x="36.5" y="52" width="7" height="5" rx="2.5" fill="#4540B8" />
@@ -63,21 +74,32 @@ withDefaults(defineProps<Props>(), {
     <path d="M32 13 L40 29 L32 46 L24 29 Z" fill="#FFFFFF" fill-opacity="0.14" />
     <path d="M32 13 L24 29 L14.5 46" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="1.2" />
 
-    <!-- 表情 -->
+    <!-- 表情(可爱化:亮晶晶大眼 + 猫猫嘴 + 软腮红) -->
     <g class="prismling-face">
       <g class="prismling-eyes">
-        <circle cx="25.5" cy="33.5" r="2.6" fill="#FFFFFF" />
-        <circle cx="38.5" cy="33.5" r="2.6" fill="#FFFFFF" />
+        <ellipse cx="25.5" cy="33.2" rx="2.9" ry="3.2" fill="#FFFFFF" />
+        <ellipse cx="38.5" cy="33.2" rx="2.9" ry="3.2" fill="#FFFFFF" />
+        <circle cx="24.7" cy="32.1" r="1" fill="#B9F0FA" fill-opacity="0.95" />
+        <circle cx="37.7" cy="32.1" r="1" fill="#B9F0FA" fill-opacity="0.95" />
+        <circle cx="26.3" cy="34.4" r="0.5" fill="#FFFFFF" />
+        <circle cx="39.3" cy="34.4" r="0.5" fill="#FFFFFF" />
       </g>
       <path
         class="prismling-mouth"
-        d="M27.5 40.5 Q32 44 36.5 40.5"
+        d="M27.5 40.2 Q29.7 42.8 32 40.2 Q34.3 42.8 36.5 40.2"
         stroke="#FFFFFF"
-        stroke-width="2.2"
+        stroke-width="2"
         stroke-linecap="round"
+        fill="none"
       />
-      <circle cx="20.5" cy="38.5" r="2" fill="#FFB3C7" fill-opacity="0.85" />
-      <circle cx="43.5" cy="38.5" r="2" fill="#FFB3C7" fill-opacity="0.85" />
+      <ellipse cx="19.8" cy="38.6" rx="2.7" ry="2.1" fill="#FFB3C7" fill-opacity="0.8" />
+      <ellipse cx="44.2" cy="38.6" rx="2.7" ry="2.1" fill="#FFB3C7" fill-opacity="0.8" />
+    </g>
+
+    <!-- 身旁闪烁小星(可爱化:陪伴星星) -->
+    <g class="prismling-sparkles">
+      <path d="M8.5 12 L9.3 14 L11.3 14.8 L9.3 15.6 L8.5 17.6 L7.7 15.6 L5.7 14.8 L7.7 14 Z" fill="#FFD66E" fill-opacity="0.9" />
+      <path d="M56 44 L56.6 45.5 L58.1 46.1 L56.6 46.7 L56 48.2 L55.4 46.7 L53.9 46.1 L55.4 45.5 Z" fill="#7EE3F0" fill-opacity="0.9" />
     </g>
 
     <!-- 等待用户操作时的提示点 -->
@@ -121,6 +143,30 @@ withDefaults(defineProps<Props>(), {
   transform-origin: 51px 13px;
 }
 
+/* 可爱化:头顶小星随呼吸轻晃,身旁星星交替闪烁 */
+.prismling-star {
+  transform-origin: 32px 6px;
+  animation: prismling-star-sway 2.6s ease-in-out infinite;
+}
+
+.prismling-sparkles {
+  animation: prismling-twinkle 2.2s ease-in-out infinite;
+}
+
+.is-running .prismling-sparkles {
+  animation-duration: 1.2s;
+}
+
+@keyframes prismling-star-sway {
+  0%, 100% { transform: rotate(-8deg) translateY(0); }
+  50% { transform: rotate(8deg) translateY(-0.8px); }
+}
+
+@keyframes prismling-twinkle {
+  0%, 100% { opacity: 0.35; transform: scale(0.86); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
 @keyframes prismling-breathe {
   0%, 100% { transform: translateY(0) scale(1); }
   50% { transform: translateY(-1.5px) scale(1.015); }
@@ -155,7 +201,9 @@ withDefaults(defineProps<Props>(), {
   .prismling-beams,
   .prismling-eyes,
   .prismling-face,
-  .prismling-attention {
+  .prismling-attention,
+  .prismling-star,
+  .prismling-sparkles {
     animation: none !important;
   }
 }

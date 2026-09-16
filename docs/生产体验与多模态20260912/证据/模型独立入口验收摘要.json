@@ -1,0 +1,39 @@
+{
+  "日期": "2026-09-12",
+  "隔离基线": "bc207b273441e2f01f988122d28e2f2acb17f4c5",
+  "模型及相关回归": {
+    "通过": 686,
+    "失败": 0,
+    "秒": 26.94
+  },
+  "权限独立模型生命周期组合": {
+    "通过": 60,
+    "失败": 0,
+    "秒": 12.91
+  },
+  "新增独立入口专项": 20,
+  "路由": {
+    "方法路径": 325,
+    "源文件": 42,
+    "匿名可验": 311,
+    "无权可验": 243,
+    "工坊纳入": 15
+  },
+  "已生产写入": false,
+  "需要生产验收": true,
+  "文件指纹": {
+    "backend/app/services/agent_model_service.py": "8e2320653b9391861284465107a58b25e4118cd8c99ed2bd310e6e3c320e21a3",
+    "backend/app/services/deepseek_responses_runtime.py": "488d7e9cbe8c4e03c3a88e9bb50bd948af39a569f6547f2decb5dc1825744aff",
+    "backend/app/ai/discussion_orchestrator.py": "6b15413b2124fb4bff4cde8ed628c2f9097212a2d5e7096c68212c8f85735c8e",
+    "backend/app/agents/operations_agent.py": "26c9735418d4c23f8a52dc6e29572bff7193ba2675b7d55de5d11958e5e4e05b",
+    "backend/app/agents/admin_copilot_agent.py": "81b1ebc4b1068199497bf85c71d27db0cf9c822942c77d27950ddd3b01d00290",
+    "backend/app/services/sandbox_service.py": "ebc3dbc3dae7eb17890df91247eaf72e9ed26886eea72fcabfaf19939125fa4d",
+    "backend/app/services/evolution_service.py": "5c8d1f6422525b22e8610b3c85fc204095f601c779e77bc8b6ce371ddcf8f568",
+    "backend/app/services/personalization_service.py": "0fc088b55fb2505163d24f32cab87587c42c06b02c96c05ec2bfff0c3a99449f",
+    "backend/app/services/eval_gate.py": "f0c32bb86b462b9d322015b31f22de075b279f56f24023134f6a718ac03ae5e5",
+    "backend/app/services/published_agent_tools.py": "3a069676741bbcfa27c742cf13b778c0f1450d817a405019e09d909bf8022bf7",
+    "backend/app/services/pentest_service.py": "5f480292e0e4fd15c4611c36818992dedd411c3d11f9dc3355ff87b1de375d1c",
+    "backend/scripts/verify_permission_acceptance_https.py": "7fdf72a02e6f612c5a38ff4aba3dee1d6326fb7c7b6f8724d40a3aae0052b5b4",
+    "backend/tests/unit/services/test_model_independent_paths.py": "1b5bae15230503512630f76caf0551d3fd5a636698f411d23d5bd9c0432456c1"
+  }
+}

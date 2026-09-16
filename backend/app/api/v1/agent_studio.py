@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.custom_agent import (
@@ -28,7 +29,14 @@ from app.schemas.agent_studio import (
 from app.schemas.common import Resp
 from app.services import agent_studio_service
 
-router = APIRouter()
+
+def require_studio_role(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> User:
+    """工坊所有操作先校验审查员身份，再执行具体权限及资源归属校验。"""
+    agent_studio_service._assert_reviewer(db, user)
+    return user
+
+
+router = APIRouter(dependencies=[Depends(require_studio_role)])
 
 
 @router.get("/agents", response_model=Resp[list[AssetOut]])
@@ -96,18 +104,23 @@ def get_agent_version(
         .order_by(CustomAgentSkillBinding.position.asc())
         .all()
     )
-    return Resp(data={
-        **VersionOut.model_validate(version).model_dump(),
-        "prompt": version.prompt,
-        "review_focus": version.review_focus,
-        "model_config": agent_studio_service._load(version.model_config_json, {}),
-        "bindings": [{
-            "id": item.id,
-            "skill_version_id": item.skill_version_id,
-            "position": item.position,
-            "config": agent_studio_service._load(item.config_json, {}),
-        } for item in bindings],
-    })
+    return Resp(
+        data={
+            **VersionOut.model_validate(version).model_dump(),
+            "prompt": version.prompt,
+            "review_focus": version.review_focus,
+            "model_config": agent_studio_service._load(version.model_config_json, {}),
+            "bindings": [
+                {
+                    "id": item.id,
+                    "skill_version_id": item.skill_version_id,
+                    "position": item.position,
+                    "config": agent_studio_service._load(item.config_json, {}),
+                }
+                for item in bindings
+            ],
+        }
+    )
 
 
 @router.post("/agents/{agent_id}/versions", response_model=Resp[VersionOut])
@@ -256,12 +269,14 @@ def get_skill_version(
     version = db.get(CustomSkillVersion, version_id)
     asset = db.get(CustomSkill, version.skill_id) if version else None
     agent_studio_service._assert_owner(db, asset.owner_id if asset else 0, user)
-    return Resp(data={
-        **VersionOut.model_validate(version).model_dump(),
-        "skill_type": version.skill_type,
-        "definition": agent_studio_service._load(version.definition_json, {}),
-        "requested_capabilities": agent_studio_service._load(version.requested_capabilities_json, []),
-    })
+    return Resp(
+        data={
+            **VersionOut.model_validate(version).model_dump(),
+            "skill_type": version.skill_type,
+            "definition": agent_studio_service._load(version.definition_json, {}),
+            "requested_capabilities": agent_studio_service._load(version.requested_capabilities_json, []),
+        }
+    )
 
 
 @router.post("/skills/{skill_id}/versions", response_model=Resp[VersionOut])

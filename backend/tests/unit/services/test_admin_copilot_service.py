@@ -100,6 +100,8 @@ def test_manager_structured_failure_retries_with_distinct_compact_prompt(
     monkeypatch,
     failure_kind,
 ):
+    from app.utils.api_resolver import ApiConfig
+
     agent = AdminCopilotAgent()
     prompts = []
 
@@ -120,7 +122,7 @@ def test_manager_structured_failure_retries_with_distinct_compact_prompt(
     monkeypatch.setattr(agent, "_log_call", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         "app.agents.admin_copilot_agent.resolve_api_config",
-        lambda *_args, **_kwargs: None,
+        lambda *_args, **_kwargs: ApiConfig(api_key="test", base_url="https://example.invalid", model="test"),
     )
 
     result = agent.plan(

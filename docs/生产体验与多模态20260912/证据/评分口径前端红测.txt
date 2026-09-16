@@ -1,0 +1,103 @@
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+ ❯ src/views/dashboard/Dashboard.test.ts (61 tests | 2 failed) 297ms
+   ✓ 成员仪表盘真实读取状态 > 未知维度不得从图表和图例消失，分项合计应等于真实总数 65ms
+   ✓ 成员仪表盘真实读取状态 > 全部问题未归类时显示真实数量而不是全零光谱 7ms
+   ✓ 成员仪表盘真实读取状态 > 首载未取得摘要时不显示零项任务或零分 5ms
+   ✓ 成员仪表盘真实读取状态 > 摘要失败显示可重试错误而不假报空业务 8ms
+   ✓ 成员仪表盘真实读取状态 > 真实全零保留零值，没有已完成审查时不判为风险或零分 5ms
+   ✓ 成员仪表盘真实读取状态 > 已有成功审查的真实零分不被当成未知 4ms
+   ✓ 成员仪表盘真实读取状态 > 畸形摘要不得变成可导出的统计事实 6ms
+   ✓ 成员仪表盘真实读取状态 > 部分接口迟迟未返回时成功分区仍立即展示 4ms
+   ✓ 成员仪表盘真实读取状态 > 维度接口成功且为空不再永远显示汇总中或八个假零 4ms
+   ✓ 成员仪表盘真实读取状态 > 单图失败与空态分开且仅重试失败图 6ms
+   ✓ 成员仪表盘真实读取状态 > 切换日期时旧区间成功响应不得覆盖新图 6ms
+   ✓ 成员仪表盘真实读取状态 > 旧区间失败不得覆盖新请求成功状态 5ms
+   ✓ 成员仪表盘真实读取状态 > 读取失败或仍在加载时禁止导出不完整报告 4ms
+   ✓ 成员仪表盘真实读取状态 > 不展示写死的宣传、假直播标签和非周区间的周报文案 4ms
+   ✓ 成员仪表盘真实读取状态 > 点击导出下载有文件名的HTML报告并反馈，不依赖弹出窗口 14ms
+   ✓ 成员仪表盘真实读取状态 > 触发下载失败时给出反馈并清理临时链接与URL 4ms
+   ✓ 成员仪表盘真实读取状态 > 下载内容保留真实统计范围与数值，项目标题按文本转义 12ms
+   ✓ 成员仪表盘真实读取状态 > 后端真实四类零计数不画出虚假的等分饼图且允许导出真实零 4ms
+   ✓ 成员仪表盘真实读取状态 > 窗口全零但累计有数据时提示口径并可一键切换累计 5ms
+   ✓ 成员仪表盘真实读取状态 > risk非法载荷null不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > risk非法载荷[null]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > risk非法载荷[{"severity":"严重","count":-1}]不能作为成功数据或导出来源 4ms
+   ✓ 成员仪表盘真实读取状态 > risk非法载荷[{"severity":null,"count":1}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > risk非法载荷[{"severity":"严重","count":null}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":"3"}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":null}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":42,"count":2}]不能作为成功数据或导出来源 8ms
+   ✓ 成员仪表盘真实读取状态 > dimension非法载荷[{"issue_type":"安全漏洞","count":null}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":101,"create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > score非法载荷[{"task_id":null,"score":50,"create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":"50","create_time":"2026-09-05T12:00:00"}]不能作为成功数据或导出来源 4ms
+   ✓ 成员仪表盘真实读取状态 > score非法载荷[{"task_id":1,"score":50,"create_time":"2026-02-30T12:00:00"}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"invalid","count":1}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-02-30","count":1}]不能作为成功数据或导出来源 2ms
+   ✓ 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-09-05","count":-1}]不能作为成功数据或导出来源 2ms
+   ✓ 成员仪表盘真实读取状态 > frequency非法载荷[{"date":"2026-09-05","count":"2"}]不能作为成功数据或导出来源 3ms
+   ✓ 成员仪表盘真实读取状态 > 摘要非法任务成员null被入口拒绝而非渲染崩溃 3ms
+   ✓ 成员仪表盘真实读取状态 > 摘要非法任务成员{"id":"2"}被入口拒绝而非渲染崩溃 2ms
+   ✓ 成员仪表盘真实读取状态 > 摘要非法任务成员{"task_name":2}被入口拒绝而非渲染崩溃 1ms
+   ✓ 成员仪表盘真实读取状态 > 摘要非法任务成员{"project_name":null}被入口拒绝而非渲染崩溃 4ms
+   ✓ 成员仪表盘真实读取状态 > 摘要非法任务成员{"score":null}被入口拒绝而非渲染崩溃 2ms
+   ✓ 成员仪表盘真实读取状态 > 摘要非法任务成员{"score":101}被入口拒绝而非渲染崩溃 1ms
+   ✓ 成员仪表盘真实读取状态 > 摘要非法任务成员{"status":"pending"}被入口拒绝而非渲染崩溃 1ms
+   ✓ 成员仪表盘真实读取状态 > 摘要非法任务成员{"create_time":"2026-02-30T12:00:00"}被入口拒绝而非渲染崩溃 1ms
+   ✓ 成员仪表盘真实读取状态 > 无导出权限时按钮不可见且直接调用也不能打开报告 4ms
+   ✓ 成员仪表盘真实读取状态 > 只有PDF导出权限时不能下载HTML格式 3ms
+   ✓ 成员仪表盘真实读取状态 > 加载中时按钮和直接导出调用均拒绝 2ms
+   ✓ 成员仪表盘真实读取状态 > 摘要重叠刷新不被旧请求覆盖 2ms
+   ✓ 成员仪表盘真实读取状态 > 刷新失败隐藏旧图，成功摘要保留，单图重试恢复 5ms
+   ✓ 成员仪表盘真实读取状态 > 卸载后成功和失败都不写状态或留下任务刷新监听 1ms
+   ✓ 后台进度读取与恢复 > 首屏实际请求后台进度并显示真实完成文件比例 3ms
+   ✓ 后台进度读取与恢复 > 进度读取失败有独立重试且不伪装没有后台任务 3ms
+   ✓ 后台进度读取与恢复 > 卸载后停止轮询，迟到响应不得重新启动轮询 2ms
+   ✓ 后台进度读取与恢复 > 进行中刷新失败保留已确认进度并标为未更新 7ms
+   ✓ 后台进度读取与恢复 > 纯空态仍定期重新发现其它页面启动的任务，避免永远隐藏 3ms
+   ✓ 后台进度读取与恢复 > 非法进度载荷作为错误反馈而不崩溃或展示负进度 3ms
+   ✓ 工作台补充失败边界 > 同步抛错后仍允许重试，不能被已结束的请求引用锁死 3ms
+   ✓ 工作台补充失败边界 > 累计趋势实际请求累计，并保留跨年日期信息 4ms
+   ✓ 工作台补充失败边界 > 严重度计数不依赖画布悬浮提示而可以直接阅读 2ms
+   × 代码评分样本口径 > 只有沙箱成功记录时不把测试100分显示成代码评分 6ms
+     → expected '0.0/100' to be '—/100' // Object.is equality
+   × 代码评分样本口径 > 缺失样本数或空分数不冒充有效代码评分 2ms
+     → Cannot read properties of undefined (reading 'text')
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 代码评分样本口径 > 只有沙箱成功记录时不把测试100分显示成代码评分
+AssertionError: expected '0.0/100' to be '—/100' // Object.is equality
+
+Expected: "—/100"
+Received: "0.0/100"
+
+ ❯ src/views/dashboard/Dashboard.test.ts:589:52
+    587|     const wrapper = mountPage()
+    588|     await flushPromises()
+    589|     expect(wrapper.findAll('.stat-num')[3].text()).toBe('—/100')
+       |                                                    ^
+    590|     expect(wrapper.find('.stat-gauge').exists()).toBe(false)
+    591|     expect(wrapper.text()).toContain('测试评分')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/views/dashboard/Dashboard.test.ts > 代码评分样本口径 > 缺失样本数或空分数不冒充有效代码评分
+TypeError: Cannot read properties of undefined (reading 'text')
+ ❯ src/views/dashboard/Dashboard.test.ts:601:42
+    599|     const wrapper = mountPage()
+    600|     await flushPromises()
+    601|     expect(wrapper.findAll('.stat-num')[3].text()).toBe('—/100')
+       |                                          ^
+    602|     expect(wrapper.text()).toContain('历史评分')
+    603|     expect(wrapper.text()).toContain('未提供')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 59 passed (61)
+   Start at  22:37:10
+   Duration  1.50s (transform 388ms, setup 15ms, collect 709ms, tests 297ms, environment 225ms, prepare 43ms)

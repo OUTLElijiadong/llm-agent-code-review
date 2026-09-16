@@ -5,6 +5,8 @@ export interface ProjectOut {
   language?: string
   status: string
   file_count: number
+  active_file_count?: number
+  archive_file_count?: number
   source_mode?: 'files' | 'audit_archive'
   source_malware_status?: 'clean' | 'infected' | 'degraded' | 'error' | null
   can_update: boolean
@@ -43,6 +45,8 @@ export interface ProjectDetailOut {
   language?: string
   status: string
   file_count: number
+  active_file_count?: number
+  archive_file_count?: number
   source_mode: 'files' | 'audit_archive'
   source_archive?: ProjectSourceArchiveOut | null
   can_update: boolean
@@ -51,7 +55,7 @@ export interface ProjectDetailOut {
   last_agent_run_at?: string | null
   create_time: string
   update_time: string
-  recent_tasks: { id: number; score: number; total_issues: number; status: string; create_time: string }[]
+  recent_tasks: { id: number; review_type?: string; score: number; total_issues: number; status: string; create_time: string }[]
   source_revisions: { id: number; revision_no: number; source_sha256: string; repaired_files: string[]; repair_notes?: string; create_time?: string | null }[]
 }
 

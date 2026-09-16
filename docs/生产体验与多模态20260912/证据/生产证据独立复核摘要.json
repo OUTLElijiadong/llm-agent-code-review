@@ -1,0 +1,64 @@
+{
+  "复核范围": "只读重算采集文件、核查采集SQL与本地Git对象；未独立再次连接生产数据库",
+  "状态": "通过",
+  "账本查询摘要匹配": true,
+  "账本统计总数": {
+    "agent_response_run": 789,
+    "agent_tool_execution": 2643,
+    "agent_team": 63,
+    "agent_team_task": 197,
+    "agent_team_member": 189,
+    "agent_mesh_message": 850,
+    "ops_execution": 98139
+  },
+  "历史对象逐字段比较": {
+    "historical_task": {
+      "rows": 2,
+      "equals_20260908_after_release": true
+    },
+    "historical_team_tasks": {
+      "rows": 6,
+      "equals_20260908_after_release": true
+    },
+    "historical_event": {
+      "rows": 23,
+      "equals_20260908_after_release": true
+    },
+    "orphan_tool": {
+      "rows": 7,
+      "equals_20260908_after_release": true
+    },
+    "unresolved_tool": {
+      "rows": 3,
+      "equals_20260908_after_release": true
+    }
+  },
+  "缺失关联": {
+    "tool_run": 7,
+    "tool_user": 0,
+    "run_user": 0,
+    "team_user": 0,
+    "task_team": 0,
+    "task_member": 0,
+    "member_team": 0,
+    "event_team": 0,
+    "event_task": 0,
+    "event_member": 0,
+    "mesh_event_message": 0,
+    "run_mesh_message": 0
+  },
+  "项目161字段数": 8,
+  "项目161旧基线摘要匹配": true,
+  "项目161本轮发布后证据": "尚未采集，本文件只证明发布前重核",
+  "源码领先运行提交数": 1,
+  "源码领先涉及文件": [
+    "deploy/deploy.sh",
+    "deploy/lib/common.sh",
+    "deploy/tests/test_scripts.sh"
+  ],
+  "输入文件摘要": {
+    "生产基线.json": "c7611b1194263fa4c6d52312e46cf7753de08607e1a50d4ba10be01a215634e1",
+    "历史账本生产只读复核.json": "d067f4f5434190383201c4a761b67b4bd517c609ff891bf6352de6917fac3777",
+    "项目161发布前字段证据.json": "dfcb6dba85589c14cf9e951556a11a97bf14eb7f9261d9743438d2a9c01893cb"
+  }
+}

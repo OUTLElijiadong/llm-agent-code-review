@@ -65,75 +65,69 @@
         <el-button v-if="!loadError" link :disabled="refreshing" @click="loadData()">刷新任务状态</el-button>
       </div>
 
-      <el-table
-        ref="tableRef"
-        :data="tasks"
-        v-loading="loading"
-        style="width: 100%"
-        size="default"
-        @row-click="onRowClick"
-        @selection-change="onSelectionChange"
-        highlight-current-row
-      >
-        <template #empty>
-          <EmptyState
-            :description="loadError ? '任务列表读取失败，请重试' : (hasFilter ? '当前筛选条件下没有审查任务,试试放宽条件' : '还没有审查任务')"
-            :action-text="loadError || hasFilter || !canStartReview ? '' : '启动第一个审查'"
-            :action-to="loadError || hasFilter || !canStartReview ? '' : '/reviews/start'"
-          />
-        </template>
-        <el-table-column v-if="canCancelReview" type="selection" width="44" />
-        <el-table-column prop="task_name" label="任务名称" min-width="160" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.task_name || `审查 #${row.id}` }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="project_name" label="所属项目" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="review_type" label="审查类型" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" type="info">{{ reviewTypeLabel(row.review_type) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="score" label="评分" width="120" sortable :sort-method="compareScores">
-          <template #default="{ row }">
+      <div class="task-cards" v-loading="loading" role="list" data-testid="task-cards">
+        <EmptyState
+          v-if="!tasks.length"
+          :description="loadError ? '任务列表读取失败，请重试' : (hasFilter ? '当前筛选条件下没有审查任务,试试放宽条件' : '还没有审查任务')"
+          :action-text="loadError || hasFilter || !canStartReview ? '' : '启动第一个审查'"
+          :action-to="loadError || hasFilter || !canStartReview ? '' : '/reviews/start'"
+        />
+        <article
+          v-for="row in tasks"
+          :key="row.id"
+          class="task-card"
+          :data-status="row.status"
+          role="listitem"
+          @click="onRowClick(row)"
+        >
+          <label v-if="canCancelReview" class="tc-check" @click.stop>
+            <input
+              type="checkbox"
+              :checked="selectedRows.some((t) => t.id === row.id)"
+              :aria-label="`选择 ${row.task_name || '任务'}`"
+              @change="toggleSelect(row)"
+            >
+          </label>
+          <span class="tc-band" :data-status="row.status" aria-hidden="true"></span>
+          <div class="tc-main">
+            <div class="tc-line1">
+              <button class="tc-name" type="button" @click.stop="onRowClick(row)">{{ row.task_name || `审查 #${row.id}` }}</button>
+              <el-tag size="small" type="info" effect="plain">{{ reviewTypeLabel(row.review_type) }}</el-tag>
+              <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+            </div>
+            <div class="tc-line2 font-mono">
+              <span class="tc-project">{{ row.project_name }}</span>
+              <span>问题 {{ row.review_type === 'sandbox_test' ? (row.report_issue_summary?.total ?? '—') : row.total_issues }}</span>
+              <span>{{ formatDuration(row.duration_ms) }}</span>
+              <span>{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
+            </div>
+            <div v-if="row.status === 'running' && row.total_files" class="tc-progress" :title="`${row.processed_files}/${row.total_files} 文件`">
+              <span class="tc-progress-fill" :style="{ width: `${Math.min(100, Math.round(((row.processed_files || 0) / row.total_files) * 100))}%` }"></span>
+            </div>
+          </div>
+          <div class="tc-score">
+            <svg v-if="row.status === 'success'" viewBox="0 0 36 36" class="tc-ring" aria-hidden="true">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray-100, #eef0f4)" stroke-width="3.5" />
+              <circle
+                cx="18" cy="18" r="15.9" fill="none" stroke-width="3.5" stroke-linecap="round"
+                :stroke="row.score >= 80 ? '#40a35f' : row.score >= 60 ? '#d9a857' : '#dc4961'"
+                :stroke-dasharray="`${Math.max(0, Math.min(100, row.score))} 100`"
+                stroke-dashoffset="25"
+              />
+            </svg>
             <span v-if="row.status === 'success'" :class="scoreClass(row.score)">{{ row.score }}</span>
-            <span v-else>未形成评分</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="total_issues" label="问题 / 报告条目" width="140" sortable>
-          <template #default="{ row }">
-            <span v-if="row.review_type === 'sandbox_test'">{{ row.report_issue_summary?.total ?? '—' }} 条报告条目</span>
-            <span v-else>{{ row.total_issues }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="duration_ms" label="耗时" width="100">
-          <template #default="{ row }">
-            {{ formatDuration(row.duration_ms) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="create_time" label="创建时间" width="170" sortable>
-          <template #default="{ row }">
-            {{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}
-          </template>
-        </el-table-column>
-        <el-table-column v-if="canCancelReview" label="操作" width="160" fixed="right">
-          <template #default="{ row }">
+            <span v-else class="no-score">未形成评分</span>
+          </div>
+          <div class="tc-actions" @click.stop>
             <el-button
-              v-if="row.status === 'running'"
-              link
-              type="warning"
-              size="small"
-              @click.stop="handleCancel(row)"
+              v-if="canCancelReview && row.status === 'running'"
+              link type="warning" size="small"
+              @click="handleCancel(row)"
             >停止</el-button>
-            <el-button link type="danger" size="small" @click.stop="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+            <el-button v-if="canCancelReview" link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          </div>
+        </article>
+      </div>
 
       <div v-if="canCancelReview && selectedRows.length" class="batch-bar">
         <span class="batch-info">已选 {{ selectedRows.length }} 项</span>
@@ -187,7 +181,6 @@ import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const userStore = useUserStore()
-const tableRef = ref()
 
 const loading = ref(false)
 const refreshing = ref(false)
@@ -244,16 +237,11 @@ function scoreClass(score: number) {
   return 'score-low'
 }
 
-function compareScores(first: TaskOut, second: TaskOut): number {
-  const firstScore = first.status === 'success' ? first.score : -1
-  const secondScore = second.status === 'success' ? second.score : -1
-  return firstScore - secondScore
-}
-
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`
+  const seconds = Math.round(ms / 1000)
+  return `${Math.floor(seconds / 60)}m${seconds % 60}s`
 }
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -378,13 +366,15 @@ const batchDeleting = ref(false)
 
 const selectedRunning = computed(() => selectedRows.value.filter((t) => t.status === 'running'))
 
-function onSelectionChange(rows: TaskOut[]) {
+function toggleSelect(row: TaskOut) {
   if (!canCancelReview.value) return
-  selectedRows.value = rows
+  const index = selectedRows.value.findIndex((t) => t.id === row.id)
+  if (index >= 0) selectedRows.value.splice(index, 1)
+  else selectedRows.value.push(row)
 }
 
 function clearSelection() {
-  tableRef.value?.clearSelection()
+  selectedRows.value = []
 }
 
 async function handleBatchStop() {
@@ -453,6 +443,56 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
+
+/* ── 任务卡片列表(替代表格:突出任务本身,次要信息降级为次行) ── */
+.task-cards { display: grid; gap: 10px; min-height: 120px; }
+.task-card {
+  position: relative; display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  gap: 14px; align-items: center;
+  padding: 13px 16px 13px 12px; border-radius: 12px;
+  background: #fff; border: 1px solid var(--gray-100, #eef0f4);
+  cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.task-card:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
+  border-color: var(--brand-300, #a8c4fa);
+}
+.tc-check { display: grid; place-items: center; cursor: pointer; }
+.tc-check input { width: 15px; height: 15px; accent-color: var(--brand-500, #4078f4); cursor: pointer; }
+.tc-band { width: 4px; height: 38px; border-radius: 999px; }
+.tc-band[data-status='running'] { background: var(--brand-500, #4078f4); }
+.tc-band[data-status='pending'] { background: var(--gray-300, #cfd4dc); }
+.tc-band[data-status='success'] { background: #40a35f; }
+.tc-band[data-status='failed'] { background: var(--sev-severe, #dc4961); }
+.tc-band[data-status='cancelled'] { background: var(--gray-200, #e3e6eb); }
+.tc-main { display: grid; gap: 5px; min-width: 0; }
+.tc-name:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 3px; }
+.tc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tc-name { background: transparent; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; font-family: inherit; font-size: 13.5px; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
+.tc-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-progress { position: relative; height: 5px; border-radius: 999px; background: var(--gray-100, #eef0f4); overflow: hidden; max-width: 360px; }
+.tc-progress-fill {
+  position: absolute; inset: 0 auto 0 0; border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand-400, #6f9df7), var(--brand-600, #2f5ce0));
+  transition: width .5s ease;
+}
+.tc-score { display: grid; place-items: center; gap: 2px; min-width: 56px; }
+.tc-ring { width: 38px; height: 38px; transform: rotate(0deg); }
+.tc-score span { font-size: 12.5px; font-weight: 700; }
+.no-score { font-size: 11px; color: var(--gray-400); font-weight: 400; }
+.tc-actions { display: flex; gap: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .task-card, .tc-progress-fill { transition: none; }
+}
+@media (max-width: 760px) {
+  .task-card { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .tc-band, .tc-actions { display: none; }
+  .tc-name { max-width: 46vw; }
+}
 .review-task-list-page {
   .page-header {
     display: flex;

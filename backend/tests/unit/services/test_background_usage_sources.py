@@ -15,7 +15,14 @@ from app.services.ai_usage_context import current_attribution, model_attribution
 
 
 def _origin(db):
-    root = AgentResponseRun(user_id=7, run_id="background-origin", surface="user", session_key="unit", status="completed", checkpoint_json="{}")
+    root = AgentResponseRun(
+        user_id=7,
+        run_id="background-origin",
+        surface="user",
+        session_key="unit",
+        status="completed",
+        checkpoint_json="{}",
+    )
     db.add(root)
     db.commit()
     return {"root_agent_run_id": root.id, "agent_run_id": root.id}
@@ -27,8 +34,19 @@ def test_published_report_inherits_persisted_origin_and_rerun_replaces_scope(db,
     from app.services.sandbox_service import _publish_sandbox_report
 
     origin = _origin(db)
-    row = SimpleNamespace(user_id=7, owner_id=7, project_id=1, public_id="unit-publish", target_type="web", started_at=None,
-                          completed_at=None, rules_version="unit", window_start=None, window_end=None, **origin)
+    row = SimpleNamespace(
+        user_id=7,
+        owner_id=7,
+        project_id=1,
+        public_id="unit-publish",
+        target_type="web",
+        started_at=None,
+        completed_at=None,
+        rules_version="unit",
+        window_start=None,
+        window_end=None,
+        **origin,
+    )
 
     def publish():
         if source == "pentest":
@@ -50,19 +68,42 @@ def test_discussion_task_uses_captured_origin_after_thread_context_is_gone(db, m
     from app.ai import discussion_orchestrator as discussion
 
     origin = _origin(db)
-    db.add(CodeFile(id=5, project_id=4, file_name="unit.py", file_path="unit.py", language="python", content="x=1", version_no=1, is_binary=0, status="active"))
+    db.add(
+        CodeFile(
+            id=5,
+            project_id=4,
+            file_name="unit.py",
+            file_path="unit.py",
+            language="python",
+            content="x=1",
+            version_no=1,
+            is_binary=0,
+            status="active",
+        )
+    )
     db.add(CodeVersion(file_id=5, version_no=1, content="x=1", create_time=datetime.now()))
     db.commit()
     monkeypatch.setattr(discussion, "SessionLocal", lambda: db)
     assert current_attribution(7) == {}
-    task_id = discussion._create_review_task(user_id=7, project_id=4, file_id=5, file_name="unit.py", code="x=1", language="python",
-                                            review_type="full", model_name="unit", profiles=(), usage_origin=origin)
+    task_id = discussion._create_review_task(
+        user_id=7,
+        project_id=4,
+        file_id=5,
+        file_name="unit.py",
+        code="x=1",
+        language="python",
+        review_type="full",
+        model_name="unit",
+        profiles=(),
+        usage_origin=origin,
+    )
     assert model_attribution(db.get(ReviewTask, task_id)) == origin
 
 
 def test_discussion_model_failure_keeps_usage_after_report_rollback(db, monkeypatch):
-    from app.ai import discussion_orchestrator as discussion
     from sqlalchemy.orm import sessionmaker
+
+    from app.ai import discussion_orchestrator as discussion
 
     origin = _origin(db)
     task = ReviewTask(user_id=7, project_id=1, task_name="unit", review_type="discuss", status="running", **origin)
@@ -73,7 +114,12 @@ def test_discussion_model_failure_keeps_usage_after_report_rollback(db, monkeypa
 
     def fail_call(**_kwargs):
         assert current_attribution(7) == origin
-        record_usage_attempt(model_name="unit", agent_label="general", usage={"prompt_tokens": 0, "completion_tokens": 8, "total_tokens": 8}, status="failed")
+        record_usage_attempt(
+            model_name="unit",
+            agent_label="general",
+            usage={"prompt_tokens": 0, "completion_tokens": 8, "total_tokens": 8},
+            status="failed",
+        )
         raise ValueError("invalid JSON after real token use")
 
     with pytest.raises(ValueError, match="invalid JSON"):
@@ -87,13 +133,23 @@ def test_discussion_model_failure_keeps_usage_after_report_rollback(db, monkeypa
 
 def test_current_execution_reviewing_old_task_uses_new_root(db):
     old_origin = _origin(db)
-    target = ReviewTask(user_id=7, project_id=1, task_name="historical-target", review_type="full", status="success", **old_origin)
-    new_root = AgentResponseRun(user_id=7, run_id="new-inspection", surface="user", session_key="new", status="completed", checkpoint_json="{}")
+    target = ReviewTask(
+        user_id=7, project_id=1, task_name="historical-target", review_type="full", status="success", **old_origin
+    )
+    new_root = AgentResponseRun(
+        user_id=7, run_id="new-inspection", surface="user", session_key="new", status="completed", checkpoint_json="{}"
+    )
     db.add_all([target, new_root])
     db.commit()
     new_origin = {"root_agent_run_id": new_root.id, "agent_run_id": new_root.id}
     with usage_context(7, new_origin, db=db):
-        record_usage_attempt(model_name="unit", agent_label="security_sentinel", task_id=target.id, usage={"total_tokens": 9}, status="success")
+        record_usage_attempt(
+            model_name="unit",
+            agent_label="security_sentinel",
+            task_id=target.id,
+            usage={"total_tokens": 9},
+            status="success",
+        )
     log = db.query(AiCallLog).one()
     assert log.task_id == target.id
     assert model_attribution(log) == new_origin
@@ -101,7 +157,9 @@ def test_current_execution_reviewing_old_task_uses_new_root(db):
 
 
 def test_explicit_system_database_call_records_usage_without_inventing_owner(db):
-    log_id = record_usage_attempt(db=db, user_id=None, model_name="unit", agent_label="eval_gate", usage={"total_tokens": 7}, status="success")
+    log_id = record_usage_attempt(
+        db=db, user_id=None, model_name="unit", agent_label="eval_gate", usage={"total_tokens": 7}, status="success"
+    )
     assert log_id is not None
     log = db.get(AiCallLog, log_id)
     assert log.user_id is None
@@ -110,11 +168,12 @@ def test_explicit_system_database_call_records_usage_without_inventing_owner(db)
 
 
 async def test_asgi_reentry_preserves_scope_through_auth_and_sync_model_endpoint(monkeypatch):
+    from unittest.mock import MagicMock
+
     import httpx
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
-    from unittest.mock import MagicMock
 
     from app.agents.base import AgentResult
     from app.agents.security_sentinel_agent import SecuritySentinelAgent
@@ -133,8 +192,15 @@ async def test_asgi_reentry_preserves_scope_through_auth_and_sync_model_endpoint
     session.add(actor)
     session.commit()
     origin = _origin(session)
-    tool = AgentToolExecution(request_id="asgi-tool", run_id="background-origin", call_id="asgi-call", user_id=7,
-                              tool_name="security_scan_file", status="executing", arguments_json="{}")
+    tool = AgentToolExecution(
+        request_id="asgi-tool",
+        run_id="background-origin",
+        call_id="asgi-call",
+        user_id=7,
+        tool_name="security_scan_file",
+        status="executing",
+        arguments_json="{}",
+    )
     session.add(tool)
     session.commit()
     origin["tool_execution_id"] = tool.id
@@ -151,13 +217,23 @@ async def test_asgi_reentry_preserves_scope_through_auth_and_sync_model_endpoint
 
     monkeypatch.setattr(sentinel, "scan_file", scan_file)
     monkeypatch.setattr(api, "get_request_orchestrator", lambda *_a, **_k: SimpleNamespace(security_sentinel=sentinel))
-    response = httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": '{"findings":[]}'}}],
-                                         "usage": {"prompt_tokens": 4, "completion_tokens": 3, "total_tokens": 7}})
+    response = httpx.Response(
+        200,
+        json={
+            "choices": [{"finish_reason": "stop", "message": {"content": '{"findings":[]}'}}],
+            "usage": {"prompt_tokens": 4, "completion_tokens": 3, "total_tokens": 7},
+        },
+    )
     client = MagicMock()
     client.__enter__.return_value = client
     client.post.return_value = response
     monkeypatch.setattr("app.agents.base.httpx.Client", lambda **_kwargs: client)
-    monkeypatch.setattr("app.agents.base.pin_public_http_url", lambda _url: SimpleNamespace(request_url="https://unit.invalid/chat", host_header="unit.invalid", request_extensions={}))
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda _url: SimpleNamespace(
+            request_url="https://unit.invalid/chat", host_header="unit.invalid", request_extensions={}
+        ),
+    )
 
     def local_db():
         yield session
@@ -185,9 +261,23 @@ def test_sandbox_worker_recovers_persisted_origin_and_resets_context(db, monkeyp
     from app.services import sandbox_service as sandbox
 
     origin = _origin(db)
-    row = SandboxEnvironment(public_id="unit-sandbox", project_id=1, owner_id=7, agent_code="test_verifier", purpose="test", language="python",
-                             test_mode="whitebox", status="recovering", runtime="remote_http", image_ref="unit", source_sha256="a" * 64,
-                             resource_policy_json="{}", agent_config_json='{"remote_only":true}', expires_at=datetime.now() + timedelta(hours=1), **origin)
+    row = SandboxEnvironment(
+        public_id="unit-sandbox",
+        project_id=1,
+        owner_id=7,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        status="recovering",
+        runtime="remote_http",
+        image_ref="unit",
+        source_sha256="a" * 64,
+        resource_policy_json="{}",
+        agent_config_json='{"remote_only":true}',
+        expires_at=datetime.now() + timedelta(hours=1),
+        **origin,
+    )
     db.add(row)
     db.commit()
     row_id = row.id

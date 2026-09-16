@@ -27,49 +27,53 @@
         <el-button type="primary" @click="loadData">查询</el-button>
       </div>
 
-      <el-table :data="users" v-loading="loading" style="width: 100%">
-        <el-table-column prop="username" label="用户名" width="140" show-overflow-tooltip />
-        <el-table-column prop="nickname" label="昵称" width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.nickname || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.email || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="role" label="角色" width="100">
-          <template #default="{ row }">
-            <el-tag :type="roleType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.status ? 'success' : 'danger'" size="small">
-              {{ row.status ? '启用' : '禁用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="last_login" label="最后登录" width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ formatDateTime(row.last_login) }}</template>
-        </el-table-column>
-        <el-table-column prop="last_login_ip" label="最后登录 IP" width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.last_login_ip || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="create_time" label="注册时间" width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ formatDateTime(row.create_time) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
-          <template #default="{ row }">
+      <!-- 用户卡片列表:替代表格,头像+名称/徽章为主行,邮箱/登录/注册等元信息降级为次行 -->
+      <div class="user-cards" v-loading="loading" role="list" data-testid="user-cards">
+        <EmptyState v-if="!users.length" description="暂无用户" />
+        <article
+          v-for="row in users"
+          :key="row.id"
+          class="user-card"
+          :class="{ 'is-disabled': !row.status }"
+          :data-status="row.status ? 'active' : 'disabled'"
+          role="listitem"
+        >
+          <span class="uc-band" :data-status="row.status ? 'active' : 'disabled'" aria-hidden="true"></span>
+          <span
+            class="uc-avatar"
+            :data-status="row.status ? 'active' : 'disabled'"
+            :aria-label="`用户 ${row.username} 头像`"
+            :title="row.nickname ? `${row.nickname}(@${row.username})` : row.username"
+          >{{ avatarInitial(row) }}</span>
+          <div class="uc-main">
+            <div class="uc-line1">
+              <b class="uc-name" :title="row.nickname || row.username">{{ row.nickname || row.username }}</b>
+              <span v-if="row.nickname" class="uc-username font-mono">@{{ row.username }}</span>
+              <el-tag :type="roleType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
+              <el-tag :type="row.status ? 'success' : 'danger'" size="small">
+                {{ row.status ? '启用' : '禁用' }}
+              </el-tag>
+            </div>
+            <div class="uc-line2 font-mono">
+              <span class="uc-email" :title="row.email || '-'">{{ row.email || '-' }}</span>
+              <span>最后登录 {{ formatDateTime(row.last_login) }}</span>
+              <span :title="row.last_login_ip || '-'">IP {{ row.last_login_ip || '-' }}</span>
+              <span>注册 {{ formatDateTime(row.create_time) }}</span>
+            </div>
+          </div>
+          <div class="uc-actions">
             <span v-if="row.username === 'admin'" class="protected-admin">唯一超级管理员</span>
             <template v-else>
-            <el-button link type="primary" size="small" @click="onSetRole(row)">设置角色</el-button>
-            <el-button link :type="row.status ? 'warning' : 'success'" size="small" @click="onToggleStatus(row)">
-              {{ row.status ? '禁用' : '启用' }}
-            </el-button>
-            <el-button link type="danger" size="small" @click="onResetPassword(row)">重置密码</el-button>
-            <el-button link type="danger" size="small" @click="onDelete(row)">删除</el-button>
+              <el-button link type="primary" size="small" @click="onSetRole(row)">设置角色</el-button>
+              <el-button link :type="row.status ? 'warning' : 'success'" size="small" @click="onToggleStatus(row)">
+                {{ row.status ? '禁用' : '启用' }}
+              </el-button>
+              <el-button link type="danger" size="small" @click="onResetPassword(row)">重置密码</el-button>
+              <el-button link type="danger" size="small" @click="onDelete(row)">删除</el-button>
             </template>
-          </template>
-        </el-table-column>
-      </el-table>
+          </div>
+        </article>
+      </div>
 
       <div class="pagination-wrapper">
         <el-pagination
@@ -154,6 +158,7 @@
 import { ref, onMounted } from 'vue'
 import { CopyDocument } from '@element-plus/icons-vue'
 
+import EmptyState from '@/components/common/EmptyState.vue'
 import { getUsers, setUserRole, toggleUserStatus, resetPassword, deleteUser } from '@/api/user'
 import type { UserListItem } from '@/types/user'
 import { formatDateTime } from '@/utils/format'
@@ -191,6 +196,12 @@ function roleLabel(role: string) {
 function roleType(role: string) {
   const map: Record<string, string> = { super_admin: 'danger', admin: 'warning', reviewer: 'warning', user: 'info' }
   return map[role] ?? 'info'
+}
+
+/** 头像首字母占位:优先昵称首字,回退用户名首字(不引入新组件)。 */
+function avatarInitial(row: UserListItem): string {
+  const source = (row.nickname || '').trim() || row.username
+  return source ? source.charAt(0).toUpperCase() : '?'
 }
 
 async function loadData() {
@@ -316,6 +327,55 @@ onMounted(() => {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 16px;
+}
+
+/* ── 用户卡片列表(替代表格:头像+名称/徽章为主行,元信息降级为次行) ── */
+.user-cards { display: grid; gap: 10px; min-height: 120px; }
+.user-card {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 14px; align-items: center;
+  padding: 12px 16px 12px 12px; border-radius: 12px;
+  background: #fff; border: 1px solid var(--gray-100, #eef0f4);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.user-card:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
+  border-color: var(--brand-300, #a8c4fa);
+}
+.user-card.is-disabled .uc-name { color: var(--gray-500, #6e7689); }
+.uc-band { width: 4px; height: 40px; border-radius: 999px; }
+.uc-band[data-status='active'] { background: #40a35f; }
+.uc-band[data-status='disabled'] { background: var(--sev-severe, #dc4961); }
+.uc-avatar {
+  width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 16px; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, var(--brand-400, #6f9df7), var(--brand-600, #2f5ce0));
+  user-select: none;
+}
+.uc-avatar[data-status='disabled'] {
+  background: var(--gray-300, #cfd4dc);
+  color: var(--gray-500, #6e7689);
+}
+.uc-main { display: grid; gap: 5px; min-width: 0; }
+.uc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.uc-name { font-size: 13.5px; font-weight: 600; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uc-username { font-size: 11.5px; color: var(--gray-500, #6e7689); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500, #6e7689); }
+.uc-email { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uc-actions { display: flex; gap: 4px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .user-card { transition: none; }
+  .user-card:hover { transform: none; box-shadow: none; }
+}
+@media (max-width: 760px) {
+  .user-card { grid-template-columns: auto minmax(0, 1fr); }
+  .uc-band { display: none; }
+  .uc-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .uc-line2 { gap: 8px; }
 }
 
 .pagination-wrapper {

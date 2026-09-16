@@ -203,6 +203,30 @@ class Orchestrator(BaseAgent):
         cfg = resolve_api_config(db, user.id)
         self.set_api_config(cfg)
 
+        # 请求级实例才覆盖模型；全部子 Agent 使用相同分配，用户自有配置仍优先。
+        from app.services.agent_model_service import resolve_agent_model
+        from app.services.system_config_service import resolve_model_assignment
+
+        self.chat_agent._model = resolve_agent_model(db, surface="user", config=cfg)
+        self._model = resolve_agent_model(db, surface="admin", config=cfg)
+        subagent_model = cfg.model if cfg.source == "user" else resolve_model_assignment(db, "subagent", cfg.model)
+        for agent in vars(self).values():
+            if isinstance(agent, BaseAgent) and agent is not self.chat_agent:
+                selected_model = (
+                    subagent_model if cfg.source == "user"
+                    else resolve_model_assignment(db, f"agent:{agent.name}", subagent_model)
+                )
+                agent._model = selected_model
+                agent._assigned_model = selected_model
+                agent._base_url = cfg.base_url.rstrip("/")
+                agent._api_key = cfg.api_key
+                if getattr(cfg, "timeout_seconds", None) is not None:
+                    agent._timeout = cfg.timeout_seconds
+                if getattr(cfg, "max_retries", None) is not None:
+                    agent._max_retries = cfg.max_retries
+                if getattr(cfg, "temperature", None) is not None:
+                    agent._temperature = cfg.temperature
+
         logger.info("[Orchestrator] DB 已注入到所有操作类 Agent")
 
     def _disabled_result(self, agent_code: str) -> Optional[AgentResult]:

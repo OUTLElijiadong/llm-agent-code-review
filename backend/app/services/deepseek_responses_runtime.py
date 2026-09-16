@@ -53,7 +53,7 @@ DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000
 DEFAULT_MAX_OUTPUT_TOKENS = 32_768
 DEFAULT_COMPACTION_THRESHOLD_TOKENS = 850_000
 DEFAULT_KEEP_RECENT_TOKENS = 200_000
-COMPACTION_STRATEGY_VERSION = "agent-transcript-v1"
+COMPACTION_STRATEGY_VERSION = "agent-transcript-v2-images"
 COMPLETION_GUARD_RETRY_LIMIT = 2
 _COMPLETION_GUARD_CORRECTION_PREFIX = "[runtime_completion_guard]"
 
@@ -396,6 +396,7 @@ class DeepSeekResponsesRuntime:
         keep_recent_tokens: int = DEFAULT_KEEP_RECENT_TOKENS,
         completion_guard: Optional[CompletionGuard] = None,
         on_round: Optional[Callable[[Mapping[str, Any]], None]] = None,
+        image_assets: Optional[Mapping[str, str]] = None,
     ) -> None:
         if max_rounds < 1:
             raise ValueError("max_rounds 必须大于 0")
@@ -418,6 +419,9 @@ class DeepSeekResponsesRuntime:
         self._keep_recent_tokens = keep_recent_tokens
         self._completion_guard = completion_guard
         self._on_round = on_round
+        # 多模态:sha256 -> data URL。检查点只存 prism-asset:// 占位符,
+        # 发往上游的 payload 在此还原;恢复运行缺项时降级为文字说明。
+        self._image_assets: Dict[str, str] = dict(image_assets) if image_assets else {}
         self._locks: Dict[str, asyncio.Lock] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
         self._cancel_reasons: Dict[str, str] = {}
@@ -758,6 +762,17 @@ class DeepSeekResponsesRuntime:
             # failed/incomplete 响应中的工具调用不具备执行语义，审计原文继续
             # 留在 checkpoint，但不能以缺失 output 的协议形态重发给上游。
             projected_input = _without_unpaired_function_calls(projected_input)
+            from app.services.multimodal_service import restore_image_placeholders, transcript_has_images
+
+            has_images = transcript_has_images(projected_input)
+            if has_images:
+                try:
+                    projected_input = restore_image_placeholders(projected_input, self._image_assets, strict=True)
+                except Exception as exc:
+                    checkpoint.status = FAILED
+                    checkpoint.error = str(exc)
+                    await self._store.save(checkpoint)
+                    return self._result(checkpoint, events=events)
 
             previous_compactions = int(checkpoint.context_metadata.get("compaction_count") or 0)
             if context_metadata["compacted"]:
@@ -817,6 +832,7 @@ class DeepSeekResponsesRuntime:
                 # flash/自定义降级模型并重试一次;工具调用或其他异常分支不触发回退。
                 if (
                     self._fallback_model
+                    and not has_images
                     and checkpoint.model != self._fallback_model
                     and _is_model_unavailable_error(exc)
                 ):
@@ -1243,7 +1259,11 @@ def compact_transcript(
     if not items:
         raise ContextBudgetError("空上下文的预估异常超出预算")
 
-    selected = {0}
+    from app.services.multimodal_service import transcript_has_images
+
+    # 图片无法用文本摘要替代；当轮图文必须贯穿工具循环保留。
+    image_indices = {index for index, item in enumerate(items) if transcript_has_images([item])}
+    selected = {0} | image_indices
     recent_cost = 0
     for index in range(len(items) - 1, 0, -1):
         related = _paired_item_indices(items, index)
@@ -1255,12 +1275,12 @@ def compact_transcript(
             selected.update(additions)
             recent_cost += addition_cost
 
-    if len(items) > 1 and selected == {0}:
+    if len(items) > 1 and selected <= ({0} | image_indices):
         latest = _paired_item_indices(items, len(items) - 1)
         if sum(estimate_tokens(items[index]) for index in latest) <= transcript_budget:
             selected.update(latest)
 
-    protected = {0, max(selected)}
+    protected = {0, max(selected)} | image_indices
     protected.update(_paired_item_indices(items, max(selected)))
 
     while True:
@@ -1275,7 +1295,7 @@ def compact_transcript(
         removable = sorted(selected - protected)
         if not removable:
             raise ContextBudgetError(
-                f"首条目标与最近完整调用预估 {metadata['projected_tokens']} tokens，"
+                f"首条目标、图片输入与最近完整调用预估 {metadata['projected_tokens']} tokens，"
                 f"超过可用输入预算 {transcript_budget} tokens"
             )
         selected.difference_update(_paired_item_indices(items, removable[0]))

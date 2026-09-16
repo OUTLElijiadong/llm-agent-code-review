@@ -64,7 +64,7 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
             retry_after=attempt.retry_after,
         )
     try:
-        token, user = auth_service.login(db, payload.username, payload.password, ip=ip)
+        token, user, first_login = auth_service.login(db, payload.username, payload.password, ip=ip)
     except (AuthError, ForbiddenError) as exc:
         login_failure_limiter.finish_attempt(ip, attempt.reservation_id, success=False)
         audit_service.log(
@@ -119,6 +119,7 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
         data=LoginOut(
             access_token=token,
             expires_in=settings.jwt_expire_seconds,
+            first_login=first_login,
             user=UserOut.model_validate(user),
         )
     )

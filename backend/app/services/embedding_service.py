@@ -230,6 +230,8 @@ def _reembed_model(
     last_id = 0
     while True:
         query = db.query(model).filter(model.id > last_id)
+        # 个人偏好通过本地上下文注入，禁止批量重嵌入将兴趣发送外部。
+        query = query.filter((model.embed_model.is_(None)) | (model.embed_model != "local:profile-context"))
         if expected_tag:
             # 增量模式: 只重建标签与当前配置不符的行(瞬态失败重跑快速收敛)
             query = query.filter(model.embed_model != expected_tag)

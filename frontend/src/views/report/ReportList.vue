@@ -41,51 +41,50 @@
         />
       </div>
 
-      <el-table
-        :data="reports"
-        v-loading="loading"
-        style="width: 100%"
-        @row-click="onRowClick"
-        highlight-current-row
-      >
-        <template #empty>
-          <EmptyState
-            :description="hasFilter ? '该项目还没有审查报告' : '暂无审查报告'"
-            :action-text="hasFilter || !canStartReview ? '' : '去启动审查'"
-            :action-to="hasFilter || !canStartReview ? '' : '/reviews/start'"
-          />
-        </template>
-        <el-table-column prop="task_name" label="任务名称" min-width="160">
-          <template #default="{ row }">
-            {{ row.task_name || `审查 #${row.task_id}` }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="project_name" label="所属项目" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="score" label="评分" width="80" sortable>
-          <template #default="{ row }">
+      <div class="report-cards" v-loading="loading" role="list" data-testid="report-cards">
+        <EmptyState
+          v-if="!reports.length"
+          :description="hasFilter ? '该项目还没有审查报告' : '暂无审查报告'"
+          :action-text="hasFilter || !canStartReview ? '' : '去启动审查'"
+          :action-to="hasFilter || !canStartReview ? '' : '/reviews/start'"
+        />
+        <article
+          v-for="row in reports"
+          :key="row.task_id"
+          class="report-card"
+          :data-status="row.status"
+          role="listitem"
+          @click="onRowClick(row)"
+        >
+          <span class="rc-band" :data-status="row.status" aria-hidden="true"></span>
+          <div class="rc-main">
+            <div class="rc-line1">
+              <b class="rc-name" :title="row.task_name || `审查 #${row.task_id}`">{{ row.task_name || `审查 #${row.task_id}` }}</b>
+              <el-tag v-if="row.source?.type" size="small" type="info" effect="plain">{{ reviewTypeLabel(row.source.type) }}</el-tag>
+              <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
+                {{ row.status === 'success' ? '通过' : '未通过' }}
+              </el-tag>
+            </div>
+            <div class="rc-line2 font-mono">
+              <span class="rc-project" :title="row.project_name">{{ row.project_name }}</span>
+              <span v-if="row.source?.type === 'sandbox_test'">{{ row.source.report_issue_summary?.total ?? '—' }} 条报告条目</span>
+              <span v-else>问题 {{ row.total_issues }}</span>
+              <span>{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
+            </div>
+          </div>
+          <div class="rc-score" :title="`综合评分 ${row.score}`">
+            <svg viewBox="0 0 36 36" class="rc-ring" aria-hidden="true">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray-100, #eef0f4)" stroke-width="3.5" />
+              <circle
+                cx="18" cy="18" r="15.9" fill="none" stroke-width="3.5" stroke-linecap="round"
+                :stroke="row.score >= 80 ? '#40a35f' : row.score >= 60 ? '#d9a857' : '#dc4961'"
+                :stroke-dasharray="`${Math.max(0, Math.min(100, row.score))} 100`"
+                stroke-dashoffset="25"
+              />
+            </svg>
             <span :class="scoreClass(row.score)">{{ row.score }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="结论" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
-              {{ row.status === 'success' ? '通过' : '未通过' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="total_issues" label="问题 / 报告条目" width="140" sortable>
-          <template #default="{ row }">
-            <span v-if="row.source?.type === 'sandbox_test'">{{ row.source.report_issue_summary?.total ?? '—' }} 条报告条目</span>
-            <span v-else>{{ row.total_issues }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="create_time" label="创建时间" width="170" sortable>
-          <template #default="{ row }">
-            {{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right" align="center">
-          <template #default="{ row }">
+          </div>
+          <div class="rc-actions" @click.stop>
             <el-tooltip content="查看详情" placement="top">
               <el-button link type="primary" size="small" :icon="ViewIcon" aria-label="查看详情" @click.stop="goDetail(row.task_id)" />
             </el-tooltip>
@@ -98,26 +97,26 @@
                 type="primary"
                 size="small"
                 :loading="exportingTaskId === row.task_id"
-                aria-label="更多操作"
+                aria-label="导出报告"
                 @click.stop
               >
-                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item v-if="canExport('json')" :command="'export:json'">导出 JSON</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('html') && !isDomainReport(row)" :command="'export:html'">导出 HTML</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('pdf') && !isDomainReport(row)" :command="'export:pdf'">导出 PDF</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('word') && !isDomainReport(row)" :command="'export:word'">导出 Word</el-dropdown-item>
-                  <el-dropdown-item v-if="canDeleteReport" :command="'delete'" divided>
+                  <el-dropdown-item v-if="canExport('json')" command="export:json">导出 JSON</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('html') && !isDomainReport(row)" command="export:html">导出 HTML</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('pdf') && !isDomainReport(row)" command="export:pdf">导出 PDF</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('word') && !isDomainReport(row)" command="export:word">导出 Word</el-dropdown-item>
+                  <el-dropdown-item v-if="canDeleteReport" command="delete" divided>
                     <span class="danger-item">删除报告</span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-          </template>
-        </el-table-column>
-      </el-table>
+          </div>
+        </article>
+      </div>
 
       <div class="pagination-wrapper">
         <el-pagination
@@ -144,6 +143,7 @@ import { getProjects } from '@/api/project'
 import type { ReportListItem, ReportFormat } from '@/types/report'
 import EmptyState from '@/components/common/EmptyState.vue'
 import type { ProjectOut } from '@/types/project'
+import { reviewTypeLabel } from '@/constants/reviewType'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { confirmDanger } from '@/composables/useDangerConfirm'
 import { useUserStore } from '@/stores/user'
@@ -309,7 +309,7 @@ async function handleDelete(row: ReportListItem) {
 }
 
 /**
- * 操作列「更多」下拉命令分发:export:* 导出,delete 删除。
+ * 卡片「导出」下拉命令分发:export:* 导出,delete 删除。
  */
 function handleRowCommand(row: ReportListItem, cmd: string): void {
   if (cmd === 'delete') {
@@ -328,6 +328,51 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+
+/* ── 报告卡片列表(替代表格:评分色环+任务名+类型徽章为主,项目/问题数/时间降级为次行) ── */
+.report-cards { display: grid; gap: 10px; min-height: 120px; }
+.report-card {
+  position: relative; display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 14px; align-items: center;
+  padding: 13px 16px 13px 12px; border-radius: 12px;
+  background: #fff; border: 1px solid var(--gray-100, #eef0f4);
+  cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.report-card:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
+  border-color: var(--brand-300, #a8c4fa);
+}
+.rc-band { width: 4px; height: 38px; border-radius: 999px; }
+.rc-band[data-status='success'] { background: #40a35f; }
+.rc-band[data-status='failed'] { background: var(--sev-severe, #dc4961); }
+.rc-main { display: grid; gap: 5px; min-width: 0; }
+.rc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rc-name { font-size: 13.5px; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
+.rc-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-score { display: grid; place-items: center; gap: 2px; min-width: 56px; }
+.rc-ring { width: 38px; height: 38px; }
+.rc-score span { font-size: 12.5px; font-weight: 700; }
+.rc-actions { display: flex; gap: 4px; align-items: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .report-card { transition: none; }
+  .report-card:hover { transform: none; }
+}
+@media (max-width: 760px) {
+  .report-card { grid-template-columns: minmax(0, 1fr) auto; padding: 12px; }
+  .rc-band { display: none; }
+  .rc-score { min-width: 48px; }
+  .rc-actions {
+    grid-column: 1 / -1; flex-wrap: wrap;
+    padding-top: 8px; border-top: 1px dashed var(--gray-100, #eef0f4);
+  }
+  .rc-name { max-width: 100%; }
+  .rc-project { max-width: 60vw; }
+}
+
 .report-list-page {
   .page-header {
     display: flex;

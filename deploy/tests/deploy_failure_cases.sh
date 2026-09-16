@@ -42,6 +42,7 @@ SCRIPT
 SCRIPT
     cat > "$workspace/repo/deploy/sync-frontend-assets.sh" <<'SCRIPT'
 #!/usr/bin/env bash
+printf 'sync-assets | release=%s\n' "$APP_RELEASE" >> "$FAKE_DOCKER_LOG"
 [[ "$FAIL_SCENARIO" != assets ]] || exit 43
 SCRIPT
     write_release_fake_docker "$workspace/bin/docker-base"
@@ -118,6 +119,19 @@ SCRIPT
     assert_not_contains "$workspace/docker.log" 'downgrade'
     assert_not_contains "$workspace/docker.log" 'restore'
     assert_contains "$workspace/releases/current.env" "RELEASE_SHA=$old_sha"
+    if [[ "$scenario" == assets ]]; then
+      # 同步失败必须在新frontend启动前失败，避免与entrypoint同时写同一assets卷。
+      assert_not_contains "$workspace/docker.log" "compose up -d --no-deps --no-build --pull never frontend | release=$new_sha"
+    fi
+    if [[ "$scenario" == frontend_health ]]; then
+      local sync_line switch_line
+      sync_line="$(grep -n "sync-assets | release=$new_sha" "$workspace/docker.log" | cut -d: -f1)"
+      switch_line="$(grep -n "compose up -d --no-deps --no-build --pull never frontend | release=$new_sha" "$workspace/docker.log" | cut -d: -f1)"
+      [[ -n "$sync_line" && -n "$switch_line" && "$sync_line" -lt "$switch_line" ]] || {
+        printf '新前端必须在assets同步成功后启动\n' >&2
+        exit 1
+      }
+    fi
     case "$scenario" in
       backup|verify|backend_build|migration)
         expected_rollback=not_switched

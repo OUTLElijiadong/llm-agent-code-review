@@ -115,21 +115,21 @@ describe('ProjectList create permission', () => {
 })
 
 describe('ProjectList 视图切换', () => {
-  it('通过 aria-pressed 暴露当前视图并在点击后同步更新', async () => {
+  it('通过 aria-pressed 暴露当前视图并在点击后同步更新(默认卡片)', async () => {
     const wrapper = mountProjectList()
     await flushPromises()
 
+    // 2026-09 改版:默认卡片视图(突出内容本身),表格按需切换
     const [tableButton, cardButton] = wrapper.findAll('.view-btn')
+    expect(cardButton.attributes('aria-pressed')).toBe('true')
+    expect(tableButton.attributes('aria-pressed')).toBe('false')
+    expect(wrapper.find('.card-grid').isVisible()).toBe(true)
+
+    await tableButton.trigger('click')
+
     expect(tableButton.attributes('aria-pressed')).toBe('true')
     expect(cardButton.attributes('aria-pressed')).toBe('false')
-    expect(wrapper.find('tbody td[colspan]').attributes('colspan')).toBe('9')
-
-    await cardButton.trigger('click')
-
-    expect(tableButton.attributes('aria-pressed')).toBe('false')
-    expect(cardButton.attributes('aria-pressed')).toBe('true')
-    expect(wrapper.find('.card-grid').isVisible()).toBe(true)
-    expect(wrapper.find('.table-card').isVisible()).toBe(false)
+    expect(wrapper.find('.table-card').isVisible()).toBe(true)
     wrapper.unmount()
   })
 })
@@ -402,4 +402,14 @@ describe('ProjectList 远程导入异步任务', () => {
     expect(routerState.push).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+})
+
+
+it('入库文件与整包归档文件区分口径，不把全部归档成员当可编辑代码文件', async () => {
+  projectApi.getProjects.mockResolvedValue({items:[{id:1,project_name:'归档项目',status:'active',file_count:4276,active_file_count:0,archive_file_count:4276,source_mode:'audit_archive',can_update:false,can_delete:false}],total:1})
+  const wrapper = mountProjectList()
+  await flushPromises()
+  expect(wrapper.text()).toContain('4276 个归档文件')
+  expect(wrapper.text()).not.toContain('4276 files')
+  wrapper.unmount()
 })

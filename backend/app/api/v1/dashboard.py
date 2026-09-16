@@ -8,7 +8,16 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.common import Resp
-from app.schemas.dashboard import FrequencyItem, IssueTypeItem, RiskItem, ScoreTrendItem, SummaryOut
+from app.schemas.dashboard import (
+    FrequencyItem,
+    IssueTypeItem,
+    RiskItem,
+    RunningAgentItem,
+    RunningOut,
+    RunningReviewItem,
+    ScoreTrendItem,
+    SummaryOut,
+)
 from app.services import dashboard_service
 
 router = APIRouter()
@@ -23,17 +32,17 @@ def summary(scope: str = Query("mine"), db: Session = Depends(get_db),
 
 
 @router.get("/risk-distribution", response_model=Resp[list[RiskItem]])
-def risk_distribution(days: int = Query(30), db: Session = Depends(get_db),
+def risk_distribution(days: int = Query(30, ge=0, le=3650), db: Session = Depends(get_db),
                       user: User = Depends(get_current_user)):
-    """风险等级分布"""
+    """风险等级分布;days=0 表示累计全部"""
     data = dashboard_service.get_risk_distribution(db, user, days)
     return Resp(data=[RiskItem(**d) for d in data])
 
 
 @router.get("/issue-type-statistics", response_model=Resp[list[IssueTypeItem]])
-def issue_type_statistics(days: int = Query(30), db: Session = Depends(get_db),
+def issue_type_statistics(days: int = Query(30, ge=0, le=3650), db: Session = Depends(get_db),
                           user: User = Depends(get_current_user)):
-    """问题类型分布"""
+    """问题类型分布;days=0 表示累计全部"""
     data = dashboard_service.get_issue_type_statistics(db, user, days)
     return Resp(data=[IssueTypeItem(**d) for d in data])
 
@@ -46,8 +55,18 @@ def score_trend(limit: int = Query(10), db: Session = Depends(get_db),
     return Resp(data=[ScoreTrendItem(**d) for d in data])
 
 
+@router.get("/running", response_model=Resp[RunningOut])
+def running(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """后台进行中:排队/运行中的审查(带文件进度)与本人进行中的 Agent 运行"""
+    data = dashboard_service.get_running(db, user)
+    return Resp(data=RunningOut(
+        reviews=[RunningReviewItem(**item) for item in data["reviews"]],
+        agents=[RunningAgentItem(**item) for item in data["agents"]],
+    ))
+
+
 @router.get("/review-frequency", response_model=Resp[list[FrequencyItem]])
-def review_frequency(days: int = Query(30), db: Session = Depends(get_db),
+def review_frequency(days: int = Query(30, ge=0, le=3650), db: Session = Depends(get_db),
                      user: User = Depends(get_current_user)):
     """审查频次趋势"""
     data = dashboard_service.get_review_frequency(db, user, days)

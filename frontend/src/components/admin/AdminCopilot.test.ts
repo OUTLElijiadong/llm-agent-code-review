@@ -7,6 +7,7 @@ const streams = vi.hoisted(() => ({
     body: Record<string, unknown>
     onEvent: (event: unknown) => void
     resolve: () => void
+    reject: (error: unknown) => void
     aborted: boolean
   }>,
 }))
@@ -94,7 +95,7 @@ beforeEach(() => {
     items: [], has_more: false, next_after_id: 0, page_size: 200, team_status: 'running',
   })
   sessionApi.get.mockReset()
-  sessionApi.cancel.mockReset().mockResolvedValue(undefined)
+  sessionApi.cancel.mockReset().mockResolvedValue({ run_id: 'run-admin-active', status: 'cancelled', output_text: '', error: '' })
   sessionApi.get.mockResolvedValue({
     surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null,
   })
@@ -106,8 +107,10 @@ beforeEach(() => {
   ) => {
     const controller = new AbortController()
     let resolve = (): void => undefined
-    const done = new Promise<void>((doneResolve) => { resolve = doneResolve })
-    const record = { body, onEvent: options.onEvent, resolve, aborted: false }
+    let reject = (_error: unknown): void => undefined
+    const done = new Promise<void>((doneResolve, doneReject) => { resolve = doneResolve; reject = doneReject })
+    done.catch(() => undefined)
+    const record = { body, onEvent: options.onEvent, resolve, reject, aborted: false }
     streams.records.push(record)
     return {
       abort: () => {
@@ -125,6 +128,53 @@ afterEach(() => {
 })
 
 describe('AdminCopilot Responses stream', () => {
+  it.each([true, false])('取消晚到completed时按真实助手payload判重（已有最终回复=%s）', async (hasAssistantReply) => {
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    await wrapper.find('textarea').setValue('唯一最终答案')
+    void wrapper.find('.send-button').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-admin-dedupe', model: 'deepseek-v4-pro' } })
+    if (hasAssistantReply) emit(0, { type: 'response.output_text.delta', delta: '唯一最终答案' })
+    await flushPromises()
+    sessionApi.cancel.mockResolvedValueOnce({ run_id: 'run-admin-dedupe', status: 'completed', output_text: '唯一最终答案', error: '' })
+    await wrapper.find('.stop-button').trigger('click')
+    await flushPromises()
+    ;(document.querySelector('.cancel-confirm-stop') as HTMLButtonElement).click()
+    await flushPromises()
+    const matches = wrapper.findAll('.message-row.is-assistant').filter((row) => row.text().includes('唯一最终答案'))
+    expect(matches).toHaveLength(1)
+    expect(wrapper.text()).toContain('任务已完成，无需停止')
+    expect(wrapper.text()).not.toContain('已停止任务')
+    wrapper.unmount()
+  })
+
+  it.each(['completed', 'failed', 'cancelled'])('停止返回%s时按服务端实态反馈', async (status) => {
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    await wrapper.find('textarea').setValue('检查运行状态')
+    void wrapper.find('.send-button').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-admin-late', model: 'deepseek-v4-pro' } })
+    await flushPromises()
+    sessionApi.cancel.mockResolvedValueOnce({ run_id: 'run-admin-late', status, output_text: '最终答案', error: '执行失败原因' })
+    await wrapper.find('.stop-button').trigger('click')
+    await flushPromises()
+    const confirm = document.querySelector('.cancel-confirm-stop') as HTMLButtonElement
+    confirm.click()
+    await flushPromises()
+    expect(wrapper.text()).toContain(status === 'completed' ? '任务已完成，无需停止' : status === 'failed' ? '任务已失败' : '已停止任务')
+    if (status !== 'cancelled') {
+      expect(wrapper.text()).not.toContain('已停止任务')
+      expect(wrapper.text()).not.toContain('已停止本次回答')
+    }
+    expect(wrapper.find('.stop-button').exists()).toBe(false)
+    expect(sessionApi.cancel).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
   it('停止请求失败时保持服务端运行并给出同步提示', async () => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
@@ -1051,4 +1101,167 @@ it.each(['completed', 'failed', 'cancelled'])('管理审计阶段属于真实助
     expect(wrapper.find('.xl-audit-now').exists()).toBe(false)
     expect(wrapper.text()).toContain('分析师')
   } finally { wrapper.unmount() }
+})
+
+
+it('管理端可选择图片单独发送，移除附件后恢复禁用', async () => {
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  const input = wrapper.find('input[aria-label="选择图片附件"]')
+  Object.defineProperty(input.element, 'files', {value:[new File(['image'],'sample.png',{type:'image/png'})], configurable:true})
+  await input.trigger('change')
+  await vi.waitFor(() => expect(wrapper.find('.chat-image-chip').exists()).toBe(true))
+  expect(wrapper.find('.send-button').attributes('disabled')).toBeUndefined()
+  await wrapper.find('.chip-remove').trigger('click')
+  expect(wrapper.find('.send-button').attributes('disabled')).toBeDefined()
+  wrapper.unmount()
+})
+
+
+it('首发图片在创建运行前失败可核对服务端后重试，保留原图', async () => {
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  const input = wrapper.find('input[aria-label="选择图片附件"]')
+  Object.defineProperty(input.element, 'files', {value:[new File(['image'],'sample.png',{type:'image/png'})], configurable:true})
+  await input.trigger('change')
+  await vi.waitFor(() => expect(wrapper.find('.chat-image-chip').exists()).toBe(true))
+  void wrapper.find('.send-button').trigger('click')
+  await flushPromises()
+  const firstBody = streams.records[0].body
+  streams.records[0].reject(new Error('网络断开'))
+  await flushPromises()
+  expect(wrapper.find('.copilot-error-btn.is-retry').attributes('disabled')).toBeUndefined()
+  void wrapper.find('.copilot-error-btn.is-retry').trigger('click')
+  await flushPromises()
+  expect(streams.records).toHaveLength(2)
+  expect(streams.records[1].body).toEqual(firstBody)
+  wrapper.unmount()
+})
+
+
+async function failFirstAdminMessage(wrapper: VueWrapper): Promise<Record<string, unknown>> {
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  await wrapper.find('textarea').setValue('测试断网后的提交确认')
+  void wrapper.find('.send-button').trigger('click')
+  await flushPromises()
+  const payload = streams.records[0].body
+  streams.records[0].reject(new Error('网络断开'))
+  await flushPromises()
+  return payload
+}
+
+it('首发断网但服务端已创建运行时恢复快照，不重复发起 start', async () => {
+  const wrapper = mountCopilot()
+  try {
+    const payload = await failFirstAdminMessage(wrapper)
+    sessionApi.get.mockResolvedValue({ surface: 'admin', session_id: payload.session_id,
+      run: { run_id: 'server-accepted', status: 'running', model: 'model', rounds: 1, error: '', updated_at: new Date().toISOString() },
+      messages: [{ role: 'user', content: '测试断网后的提交确认' }], events: [], pending: null })
+    void wrapper.find('.copilot-error-btn.is-retry').trigger('click')
+    await flushPromises()
+    expect(sessionApi.get).toHaveBeenLastCalledWith('admin', payload.session_id)
+    expect(streams.records).toHaveLength(1)
+    expect(messages.info).toHaveBeenCalledWith(expect.stringContaining('已恢复'))
+  } finally { wrapper.unmount() }
+})
+
+it('提交确认接口失败时保留可重试原请求，不冒险重复 start', async () => {
+  const wrapper = mountCopilot()
+  try {
+    await failFirstAdminMessage(wrapper)
+    sessionApi.get.mockRejectedValueOnce(new Error('无法核对'))
+    void wrapper.find('.copilot-error-btn.is-retry').trigger('click')
+    await flushPromises()
+    expect(streams.records).toHaveLength(1)
+    expect(wrapper.text()).toContain('未能确认上次提交状态')
+    expect(wrapper.findAll('.copilot-error-btn.is-retry').some(button => button.attributes('disabled') === undefined)).toBe(true)
+  } finally { wrapper.unmount() }
+})
+
+it('核对请求返回前切换会话，不将旧图片或旧请求发往新会话', async () => {
+  const wrapper = mountCopilot()
+  try {
+    const payload = await failFirstAdminMessage(wrapper)
+    let resolveCheck!: (value: unknown) => void
+    sessionApi.get.mockReturnValueOnce(new Promise(resolve => { resolveCheck = resolve }))
+    void wrapper.find('.copilot-error-btn.is-retry').trigger('click')
+    await flushPromises()
+    expect(sessionApi.get).toHaveBeenLastCalledWith('admin', payload.session_id)
+    expect(wrapper.text()).toContain('正在核对上次提交状态')
+    const vm = wrapper.vm as unknown as { handleSessionSelect: (id: string) => Promise<void> }
+    await vm.handleSessionSelect('different-session')
+    await flushSessionRestore()
+    resolveCheck({ surface: 'admin', session_id: payload.session_id, run: null, messages: [], pending: null })
+    await flushPromises()
+    expect(streams.records).toHaveLength(1)
+    expect(wrapper.find('.copilot-error-btn.is-retry').exists()).toBe(false)
+  } finally { wrapper.unmount() }
+})
+
+
+it('核对仅返回旧的已完成运行时重发原提交，不把旧run当成本次已接收', async () => {
+  sessionApi.get.mockResolvedValue({ surface: 'admin', session_id: 'admin-test',
+    run: { run_id: 'previous-completed', status: 'completed', model: 'model', rounds: 1, error: '', updated_at: new Date().toISOString() },
+    messages: [], events: [], pending: null })
+  const wrapper = mountCopilot()
+  try {
+    const payload = await failFirstAdminMessage(wrapper)
+    void wrapper.find('.copilot-error-btn.is-retry').trigger('click')
+    await flushPromises()
+    expect(streams.records).toHaveLength(2)
+    expect(streams.records[1].body).toEqual(payload)
+  } finally { wrapper.unmount() }
+})
+
+it('重复点击提交核对只发一个GET，卸载后的核对结果不再创建运行', async () => {
+  const wrapper = mountCopilot()
+  await failFirstAdminMessage(wrapper)
+  let resolveCheck!: (value: unknown) => void
+  sessionApi.get.mockReturnValueOnce(new Promise(resolve => { resolveCheck = resolve }))
+  const before = sessionApi.get.mock.calls.length
+  const retry = wrapper.find('.copilot-error-btn.is-retry')
+  void retry.trigger('click')
+  void retry.trigger('click')
+  await flushPromises()
+  expect(sessionApi.get).toHaveBeenCalledTimes(before + 1)
+  wrapper.unmount()
+  resolveCheck({ surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null })
+  await flushPromises()
+  expect(streams.records).toHaveLength(1)
+})
+
+it.each(['描述合成蓝圆', ''])('管理员恢复图片历史可显示附件，且不伪造消息时间（正文=%s）', async (content) => {
+  sessionApi.get.mockResolvedValue({
+    surface: 'admin', session_id: 'admin-test',
+    run: {
+      run_id: 'run-admin-history-image', status: 'completed', model: 'vision',
+      rounds: 1, error: '', updated_at: '2026-09-12T16:33:00',
+    },
+    messages: [
+      { role: 'user', content, image_assets: [{ id: 12, mime: 'image/png', sha256: 'a'.repeat(64) }] },
+      { role: 'assistant', content: '图中是蓝色圆形' },
+    ],
+    pending: null,
+  })
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+
+  const image = wrapper.findComponent({ name: 'AuthenticatedChatImage' })
+  expect(image.exists()).toBe(true)
+  expect(image.props('assetId')).toBe(12)
+  expect(wrapper.findAll('.message-row time')).toHaveLength(0)
+  expect(wrapper.text()).not.toContain('[图片]')
+
+  await wrapper.find('textarea').setValue('只回复验收完成')
+  void wrapper.find('.send-button').trigger('click')
+  await flushPromises()
+  const history = streams.records[0].body.messages as Array<Record<string, unknown>>
+  expect(history.at(-1)?.content).toBe('只回复验收完成')
+  expect(history.every(message => message.images === undefined && message.image_assets === undefined)).toBe(true)
+  expect(JSON.stringify(history)).not.toContain('blob:')
+  wrapper.unmount()
 })

@@ -1,0 +1,49 @@
+{
+  "生产代码基线": "bc207b273441e2f01f988122d28e2f2acb17f4c5",
+  "执行目录": "/Users/li/Documents/代码程序/Prism-production-ux-20260912",
+  "记录时间": "2026-09-12T14:11:02.112163+00:00",
+  "文件摘要": {
+    "frontend/src/views/dashboard/Dashboard.vue": "b36b38341625303d9b88ec0612be0c9bacf9741da30e035ac9c4e05cbd656d5f",
+    "frontend/src/components/chart/BaseChart.vue": "bbce463881a2a7b4e29bbe3ca733fbf4b59b7751e3d7e9c7b2a51daf514cd692",
+    "frontend/src/views/review/ReviewTaskList.vue": "1e826ba146d4fb3a508bc7f6aab2d5989b694144c8d4aa3c5f678731fbc94efd",
+    "frontend/src/types/review.ts": "dfc3df897983c0d599452c470afba43bae75af33134b6738c76bf9951d63d913",
+    "backend/app/schemas/review.py": "4e7a99e2372d073402f542768716b75a6e768adc456a7121ec350a9e344e02b9",
+    "backend/app/services/dashboard_service.py": "1d8a8fd859c8e364a16dd71146a1698f4987afacae0cab033f527d1430b002b4",
+    "backend/app/api/v1/dashboard.py": "6f71fe262592ea20c0ca96fb21b862666e2e09f1c7f12075b8b456c2488de6be",
+    "backend/tests/unit/services/test_dashboard_live_progress.py": "2ac68ac2909cd2d0507b6ed84d392bf1671fbbebd5835d50c3e12ec0085a2706",
+    "frontend/src/views/dashboard/Dashboard.test.ts": "56789ef7b75a476478177a8760f220e4b051fe6c886b5e603ab9d644b7de2a85",
+    "frontend/src/components/chart/BaseChart.test.ts": "28bf79efa2aa0951325663d33365f482346460bdfe49bd9422f59fadc5d08077",
+    "frontend/src/views/review/ReviewTaskList.polling.test.ts": "5baec2452b3c403821b32591314dba689a4bff681d5619c6d30c3b4589bcbc6d",
+    "backend/app/services/project_service.py": "626517277070e17f5fce097e240e26ed25bbf8c33b5c065d5da74c3144d27918",
+    "backend/app/schemas/project.py": "4402c0acb753949e4e52771c68ec48a37c0adeab1295d546be01934de48d626d",
+    "backend/app/schemas/dashboard.py": "9765b9470097dd70da4deab05d135f03c05d3fc8e1762d8b3d3109f2c5f71f31",
+    "frontend/src/types/project.ts": "400d569a7feaa88a0d785f9e0ae2d20f2362348f4e4d9b437652a56d035df5c3",
+    "frontend/src/types/dashboard.ts": "5195b972e156c63d80a2b2885d411e1e0746c7815fdfb60f4712a81aa3ec6be7",
+    "frontend/src/views/project/ProjectList.vue": "ac9817208d61f20a6144a10d628c582c7f66b50c72aadcebb2784800890411ec",
+    "frontend/src/views/project/ProjectList.test.ts": "8f7d2ec358dc05c0e07991ccfd07ac3d7e5c86c6f5c5008fed43af167b003a42"
+  },
+  "日志摘要": {
+    "工作台生产基线类型检查.log": "b8faabf876f7722553c6d092243a48a4443e7d55704e758b9e2177fbeb0034a8",
+    "工作台生产基线既有测试.log": "d26351b661286f81b08bf9abc8d4ec3b3557781028240a9adf5b73c7fd374535",
+    "工作台首次红测含工具故障.log": "23a164aec224bc5b61b028b985372feb6512bb8298b18230a845d127ce5af9dc",
+    "图表生产副本真实红测.log": "620f6c7b7a481db0caa0c94e6e1d76c9ac1a010b4c2490e5103ea47f11be2ab4",
+    "工作台后端基线红测.log": "3bf7f03c17c71e546bf05764d8f74f478298fe35cf0d8f889835b1d94f83d822",
+    "工作台前端最终定向测试.log": "80f3500850059043430e259f9b888710af199f397acf8ec7ca03c1c5134680ff",
+    "工作台后端定向测试.log": "cb4a8799c7c32a18d95461c859344cdb986fcfb473e8dfce4f23cf060fa6d6b0",
+    "工作台定向代码检查.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "工作台及项目计数后端验收.log": "0bb630ef89c9922873c79d79b5b7574c8ca99ce51ddf25d55d4eff1ec860ef4c",
+    "工作台及项目计数前端验收.log": "6d431327fea73405bebd819038250f781468686e0f2b4066d3fd346d12a5380d",
+    "工作台及项目计数代码检查.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "项目计数分来源红测.log": "a539a900ba16e9e53aca52eda760181d552a0114bbdd75d700b5a608bb565ef1",
+    "旧权限矩阵兼容验收.log": "3d885876fefcf0120dadbea3cf215c7e4ae90e39e35087ac6b58e0edd342bc6d"
+  },
+  "边界": "本组没有访问生产数据库或操作浏览器。类型检查与定向单元测试不等同真实页面验收；生产截图与发布门禁由主任务留证。",
+  "最终定向结果": {
+    "前端": 90,
+    "后端": 86,
+    "旧权限矩阵": 1009,
+    "旧权限矩阵FastAPI": "0.128.8",
+    "旧权限矩阵路由": 325,
+    "说明": "分别计数，不将重复覆盖相加为唯一验收点"
+  }
+}

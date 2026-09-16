@@ -71,7 +71,7 @@ def register(db: Session, payload: RegisterIn) -> User:
         raise
 
 
-def login(db: Session, username: str, password: str, ip: str = "") -> tuple[str, User]:
+def login(db: Session, username: str, password: str, ip: str = "") -> tuple[str, User, bool]:
     """用户登录: 单设备会话(CAS 递增 token_version),更新最后登录时间与来源IP,签发JWT
 
     Args:
@@ -81,7 +81,7 @@ def login(db: Session, username: str, password: str, ip: str = "") -> tuple[str,
         ip: 登录来源 IP(用于审计与用户管理展示)
 
     Returns:
-        tuple[str, User]: (JWT令牌, 用户ORM对象)
+        tuple[str, User, bool]: (JWT令牌, 用户ORM对象, 是否注册后首次登录)
 
     Raises:
         AuthError: 用户名或密码错误
@@ -102,6 +102,8 @@ def login(db: Session, username: str, password: str, ip: str = "") -> tuple[str,
             stored_password = str(user.password)
             role = str(user.role)
             login_at = datetime.now(timezone.utc)
+            # 注册后首次登录(last_login 尚未写过)→ 前端据此触发小菱新手引导
+            first_login = user.last_login is None
 
             # SQLite 的 FOR UPDATE 不生效，而且先 SELECT 后升级写锁会引入
             # SQLITE_BUSY 死锁窗口。先结束只读事务，再由单条 UPDATE 做 CAS。
@@ -132,7 +134,7 @@ def login(db: Session, username: str, password: str, ip: str = "") -> tuple[str,
             token = create_access_token(user_id, role, next_version)
             updated_user = db.query(User).populate_existing().filter(User.id == user_id).one()
             db.commit()
-            return token, updated_user
+            return token, updated_user, first_login
         raise ConflictError("并发登录请求过多，请重试", code=40902)
     except Exception:
         db.rollback()

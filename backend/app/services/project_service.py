@@ -136,6 +136,8 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             "agent_run_count": run_stats[0] if run_stats else 0,
             "last_agent_run_at": run_stats[1] if run_stats else None,
             "file_count": file_counts.get(row.id, 0) or (source_archive.file_count if source_archive else 0),
+            "active_file_count": file_counts.get(row.id, 0),
+            "archive_file_count": source_archive.file_count if source_archive else 0,
             "source_mode": "audit_archive" if source_archive else "files",
             "source_malware_status": source_archive.malware_status if source_archive else None,
             "can_update": can_write,
@@ -230,6 +232,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         ProjectSourceArchive.project_id == project_id,
         ProjectSourceArchive.storage_status == "active",
     ).first()
+    active_file_count = file_count
     if file_count == 0 and source_archive is not None:
         file_count = source_archive.file_count
     recent_tasks = db.query(ReviewTask).filter(
@@ -244,6 +247,8 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         "language": project.language,
         "status": project.status,
         "file_count": file_count,
+        "active_file_count": active_file_count,
+        "archive_file_count": source_archive.file_count if source_archive else 0,
         "source_mode": "audit_archive" if source_archive else "files",
         "source_archive": (
             {
@@ -269,7 +274,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         "create_time": project.create_time,
         "update_time": project.update_time,
         "recent_tasks": [
-            {"id": t.id, "score": t.score, "total_issues": t.total_issues,
+            {"id": t.id, "review_type": t.review_type, "score": t.score, "total_issues": t.total_issues,
              "status": t.status, "create_time": t.create_time}
             for t in recent_tasks
         ],
@@ -343,3 +348,9 @@ def delete_project(db: Session, user: User, project_id: int) -> None:
         raise ConflictError("项目存在进行中的审查任务，请先取消任务后再删除")
     project.status = "deleted"
     db.commit()
+    try:
+        from app.services.dashboard_service import invalidate_dashboard_stats
+
+        invalidate_dashboard_stats()
+    except Exception:  # noqa: BLE001 - 缓存失效失败不影响删除主流程
+        pass

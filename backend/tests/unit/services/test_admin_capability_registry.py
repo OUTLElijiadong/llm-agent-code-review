@@ -111,6 +111,10 @@ FRONTEND_API_CAPABILITY = {
     "llmConfig:updateLlmConfig": "llm.config.update",
     "llmConfig:testLlmConfig": "llm.config.test",
     "llmConfig:fetchLlmModels": "llm.config.models",
+    "llmConfig:getModelRegistry": "llm.config.registry.get",
+    "llmConfig:syncModelRegistry": "llm.config.registry.sync",
+    "llmConfig:saveModelRegistry": "llm.config.registry.save",
+    "llmConfig:saveModelAssignments": "llm.config.assignments.save",
     "mcpGovernance:listMcpServers": "mcp.servers.list",
     "mcpGovernance:seedRecommendedMcpServers": "mcp.servers.seed_recommended",
     "mcpGovernance:createMcpServer": "mcp.servers.create",
@@ -180,8 +184,8 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
-    # 125 = 124 项 + 嵌入配置重建(embedding.config.reembed)
-    assert len(ADMIN_CAPABILITIES) == 125
+    # 129 = 125 项 + 模型注册表/角色分配四项(llm.config.registry.* / assignments)
+    assert len(ADMIN_CAPABILITIES) == 129
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
@@ -211,6 +215,10 @@ def test_discovery_returns_exact_page_contracts() -> None:
         "llm.config.update",
         "llm.config.test",
         "llm.config.models",
+        "llm.config.registry.get",
+        "llm.config.registry.sync",
+        "llm.config.registry.save",
+        "llm.config.assignments.save",
     }
     update = next(row for row in rows if row["capability"] == "llm.config.update")
     assert "api_key" in update["parameters"]["properties"]

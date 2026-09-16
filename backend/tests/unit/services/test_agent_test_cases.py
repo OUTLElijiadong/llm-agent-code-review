@@ -76,6 +76,7 @@ def test_generate_deployment_patch_uses_agent_plan(db, monkeypatch) -> None:
         test_mode="blackbox", language="python",
     )
     captured: dict = {}
+    monkeypatch.setattr("app.services.sandbox_service.configure_subagent", lambda _db, agent, user_id: agent)
 
     class FakeDeploymentAgent:
         _api_key = "test-key"

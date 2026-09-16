@@ -17,6 +17,7 @@ class User(Base, IdMixin, TimestampMixin):
     password = Column(String(255), nullable=False)
     email = Column(String(100))
     nickname = Column(String(50))
+    avatar = Column(String(64), comment="头像标识: 空=默认 / builtin:key / upload")
     role = Column(String(20), nullable=False, default="user")
     status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=禁用,-1=已删除(软删)")
     last_login = Column(DateTime)

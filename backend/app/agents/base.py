@@ -152,6 +152,8 @@ class BaseAgent:
         base_url = normalize_ai_base_url(api_config.base_url if api_config else self._base_url)
         api_key = api_config.api_key if api_config else self._api_key
         model = api_config.model if api_config else self._model
+        if api_config and api_config.source != "user" and getattr(self, "_assigned_model", ""):
+            model = self._assigned_model
         timeout = (
             api_config.timeout_seconds
             if api_config and api_config.timeout_seconds is not None

@@ -62,38 +62,57 @@
     </el-card>
 
     <el-card shadow="hover">
-      <el-table
-        v-loading="loading"
-        :data="rows"
-        stripe
-        empty-text="暂无问题"
-        @selection-change="onSelectionChange"
-      >
-        <el-table-column v-if="canBatchIssues" type="selection" width="50" />
-        <el-table-column prop="project_name" label="项目" width="160" show-overflow-tooltip />
-        <el-table-column prop="file_name" label="文件" width="180" show-overflow-tooltip />
-        <el-table-column prop="line_number" label="行号" width="80" align="center" />
-        <el-table-column prop="severity" label="严重度" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag :type="severityTag(row.severity)" size="small">{{ severityLabel(row.severity) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="issue_type" label="类型" width="120" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" type="info" effect="plain">{{ typeLabel(row.issue_type) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="title" label="问题" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="status" label="状态" width="110" align="center">
-          <template #default="{ row }">
-            <el-tag :type="statusTag(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="220" align="center" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="onJump(row)">查看任务</el-button>
+      <div class="issue-cards" v-loading="loading" role="list" data-testid="issue-cards">
+        <EmptyState v-if="!rows.length" description="暂无问题" />
+        <article
+          v-for="row in rows"
+          :key="row.id"
+          class="issue-card"
+          :class="{ 'is-expanded': expandedIds.has(row.id) }"
+          role="listitem"
+        >
+          <label v-if="canBatchIssues" class="ic-check" @click.stop>
+            <input
+              type="checkbox"
+              :checked="selected.some((i) => i.id === row.id)"
+              :aria-label="`选择 ${row.title || '问题'}`"
+              @change="toggleSelect(row)"
+            >
+          </label>
+          <span class="ic-band" :data-severity="String(severityClass(row.severity))" aria-hidden="true"></span>
+          <div class="ic-main">
+            <div class="ic-line1">
+              <el-tag :type="severityTag(row.severity)" size="small">{{ severityLabel(row.severity) }}</el-tag>
+              <b class="ic-title" :title="row.title || ''">{{ row.title || `问题 #${row.id}` }}</b>
+              <el-tag :type="statusTag(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+              <el-tag size="small" type="info" effect="plain">{{ typeLabel(row.issue_type) }}</el-tag>
+              <button
+                type="button"
+                class="ic-toggle"
+                :aria-expanded="expandedIds.has(row.id)"
+                @click="toggleExpand(row.id)"
+              >
+                <el-icon :class="{ 'is-open': expandedIds.has(row.id) }"><ArrowDown /></el-icon>
+                {{ expandedIds.has(row.id) ? '收起' : '详情' }}
+              </button>
+            </div>
+            <div class="ic-line2 font-mono">
+              <span class="ic-file" :title="`${row.file_name || '未知文件'}${row.line_number ? ':' + row.line_number : ''}`">
+                {{ row.file_name || '未知文件' }}{{ row.line_number ? `:${row.line_number}` : '' }}
+              </span>
+              <span class="ic-project" :title="row.project_name">{{ row.project_name }}</span>
+              <span :title="`所属任务 #${row.task_id}`">{{ row.task_name || `任务 #${row.task_id}` }}</span>
+              <span :title="row.create_time">{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
+            </div>
+            <div v-if="expandedIds.has(row.id)" class="ic-desc">
+              <span class="ic-desc-label">问题描述</span>
+              <p class="ic-desc-text">{{ row.description || '（无描述）' }}</p>
+            </div>
+          </div>
+          <div class="ic-actions">
+            <el-button link type="primary" size="small" @click="onJump(row)">查看任务</el-button>
             <el-dropdown v-if="canHandleIssues" trigger="click" @command="(s: string) => onSetStatus(row, s)">
-              <el-button link type="primary">改状态<el-icon><ArrowDown /></el-icon></el-button>
+              <el-button link type="primary" size="small">改状态<el-icon><ArrowDown /></el-icon></el-button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="fixed">标记已修复</el-dropdown-item>
@@ -103,9 +122,9 @@
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-          </template>
-        </el-table-column>
-      </el-table>
+          </div>
+        </article>
+      </div>
 
       <div class="pagination-wrapper">
         <el-pagination
@@ -125,9 +144,11 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import EmptyState from '@/components/common/EmptyState.vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { list as listIssues, updateStatus, batchUpdateStatus } from '@/api/issue'
 import { getProjects } from '@/api/project'
+import { formatDateTime } from '@/utils/format'
 import type { IssueListItemOut } from '@/types/review'
 import type { ProjectOut } from '@/types/project'
 import { severityClass, severityDisplayLabel } from '@/constants/severity'
@@ -210,6 +231,8 @@ async function loadIssues(): Promise<void> {
     })
     rows.value = data.items
     total.value = data.total
+    // 数据刷新后勾选可能指向已不存在的问题,按新列表收敛(与原表格 selection 随数据重置一致)
+    selected.value = selected.value.filter((s) => rows.value.some((r) => r.id === s.id))
   } finally {
     loading.value = false
   }
@@ -229,9 +252,19 @@ function reloadDebounced(): void {
   }, 400)
 }
 
-function onSelectionChange(rows: IssueListItemOut[]): void {
+/** 展开区(描述全文)状态:按问题 id 记录,默认全部收起 */
+const expandedIds = ref<Set<number>>(new Set())
+
+function toggleExpand(id: number): void {
+  if (expandedIds.value.has(id)) expandedIds.value.delete(id)
+  else expandedIds.value.add(id)
+}
+
+function toggleSelect(row: IssueListItemOut): void {
   if (!canBatchIssues.value) return
-  selected.value = rows
+  const index = selected.value.findIndex((i) => i.id === row.id)
+  if (index >= 0) selected.value.splice(index, 1)
+  else selected.value.push(row)
 }
 
 async function onSetStatus(row: IssueListItemOut, status: string): Promise<void> {
@@ -328,5 +361,186 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+/* ── 问题卡片列表(替代表格:标题为主行,文件/任务/时间为次行,描述全文进展开区) ── */
+.issue-cards {
+  display: grid;
+  gap: 10px;
+  min-height: 120px;
+}
+
+.issue-card {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 13px 16px 13px 12px;
+  border-radius: 12px;
+  background: var(--el-bg-color, #fff);
+  border: 1px solid var(--gray-100, #eef0f4);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+
+.issue-card:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
+  border-color: var(--brand-300, #a8c4fa);
+}
+
+.ic-check {
+  display: grid;
+  place-items: center;
+  padding-top: 3px;
+  cursor: pointer;
+}
+
+.ic-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--brand-500, #4078f4);
+  cursor: pointer;
+}
+
+/* 严重度色带:危急红/高黄/中蓝/低灰,随展开区一起拉伸 */
+.ic-band {
+  width: 4px;
+  align-self: stretch;
+  margin: 2px 0;
+  border-radius: 999px;
+}
+
+.ic-band[data-severity='severe'] { background: var(--sev-severe, #dc4961); }
+.ic-band[data-severity='high'] { background: #e6a23c; }
+.ic-band[data-severity='medium'] { background: var(--brand-500, #4078f4); }
+.ic-band[data-severity='low'] { background: var(--gray-300, #cfd4dc); }
+
+.ic-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ic-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ic-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ic-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 0 6px;
+  height: 22px;
+  font-size: 12px;
+  color: var(--gray-500);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ic-toggle:hover {
+  color: var(--brand-600, #2f5ce0);
+  background: var(--gray-100, #eef0f4);
+}
+
+.ic-toggle .el-icon { transition: transform .18s ease; }
+.ic-toggle .el-icon.is-open { transform: rotate(180deg); }
+
+.ic-line2 {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--gray-500);
+}
+
+.ic-file,
+.ic-project {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ic-desc {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--gray-50, #f7f8fa);
+  border: 1px dashed var(--gray-200, #e3e6eb);
+}
+
+.ic-desc-label {
+  font-size: 11px;
+  color: var(--gray-400);
+}
+
+.ic-desc-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--gray-700, #4e5969);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ic-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .issue-card,
+  .ic-toggle .el-icon {
+    transition: none;
+  }
+
+  .issue-card:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .issue-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .ic-band {
+    display: none;
+  }
+
+  .ic-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding-top: 8px;
+    border-top: 1px solid var(--gray-100, #eef0f4);
+  }
+
+  .ic-title {
+    max-width: 52vw;
+  }
+
+  .ic-file,
+  .ic-project {
+    max-width: 60vw;
+  }
 }
 </style>

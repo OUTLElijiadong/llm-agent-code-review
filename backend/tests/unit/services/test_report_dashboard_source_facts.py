@@ -219,7 +219,9 @@ def test_all_sources_agree_in_list_detail_and_dashboard(db, source_owner, source
     assert sum(item["total_issues"] for item in listed) == sum(item["stats"]["total_issues"] for item in details) == 12
     assert summary["total_issues"] == 12
     assert summary["review_count"] == 4
-    assert summary["avg_score"] == 90.5
+    # 讨论和领域测试保留各自评分，不混入明确代码审查类型的均分。
+    assert summary["code_review_count"] == 1
+    assert summary["avg_score"] == 89
     assert {item["score"] for item in summary["recent_tasks"]} == {84, 89, 100}
     assert {item["task_id"]: item["score"] for item in dashboard_service.get_score_trend(db, source_owner)} == {
         task.id: task.score for task in tasks

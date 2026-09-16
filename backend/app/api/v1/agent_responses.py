@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import ForbiddenError
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.agent_mesh import AgentMeshMessage
@@ -37,6 +37,69 @@ from app.utils.api_resolver import resolve_api_config
 
 router = APIRouter()
 _BACKGROUND_RESPONSE_TASKS: set[asyncio.Task[Any]] = set()
+
+
+@router.get("/runs/{run_id}/assets")
+def list_run_assets(run_id: str, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """列出一次运行留档的多模态资产(输入/输出图片元数据;仅本人)。"""
+    from app.models.agent_multimodal import AgentMultimodalAsset
+
+    rows = (
+        db.query(AgentMultimodalAsset)
+        .filter(
+            AgentMultimodalAsset.run_id == run_id,
+            AgentMultimodalAsset.user_id == int(user.id),
+        )
+        .order_by(AgentMultimodalAsset.id)
+        .all()
+    )
+    return Resp(data=[{
+        "id": int(row.id),
+        "run_id": row.run_id,
+        "role": row.role,
+        "mime": row.mime,
+        "sha256": row.sha256,
+        "create_time": row.create_time.isoformat() if row.create_time else None,
+    } for row in rows])
+
+
+@router.get("/assets/{asset_id}/image")
+def get_asset_image(asset_id: int, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """查看留档的多模态图片(内联,仅本人)。"""
+    from fastapi.responses import Response as FastResponse
+
+    from app.models.agent_multimodal import AgentMultimodalAsset
+
+    row = (
+        db.query(AgentMultimodalAsset)
+        .filter(
+            AgentMultimodalAsset.id == asset_id,
+            AgentMultimodalAsset.user_id == int(user.id),
+        )
+        .first()
+    )
+    if row is None:
+        raise NotFoundError("多模态资产不存在", code=40400)
+    return FastResponse(
+        content=row.data,
+        media_type=row.mime,
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+def _schedule_profile_refresh(user_id: int) -> None:
+    """偏好聚合使用独立会话与线程，不能延迟或回滚已经完成的用户任务。"""
+    from app.services.profile_service import refresh_background
+
+    task = asyncio.create_task(asyncio.to_thread(refresh_background, user_id))
+    _BACKGROUND_RESPONSE_TASKS.add(task)
+    task.add_done_callback(_release_background_response_task)
 
 
 def _release_background_response_task(task: asyncio.Task[Any]) -> None:
@@ -81,6 +144,8 @@ def _is_admin_actor(db: Session, user: User) -> bool:
 class AgentResponseMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=100_000)
+    # 多模态:data URL 图片(PNG/JPEG/WebP/GIF,单张≤1.5MB,≤4张);服务端再校验
+    images: List[str] = Field(default_factory=list, max_length=4)
 
 
 class AgentResponsesRequest(BaseModel):
@@ -121,7 +186,13 @@ class AgentResponsesRequest(BaseModel):
     @model_validator(mode="after")
     def validate_action_fields(self) -> "AgentResponsesRequest":
         if self.action == "start":
-            has_user_message = any(item.role == "user" and item.content.strip() for item in self.messages)
+            for index, item in enumerate(self.messages):
+                if item.images and (item.role != "user" or index != len(self.messages) - 1):
+                    raise ValueError("图片只能附在最后一条用户消息中，请重新选择本次图片")
+            has_user_message = any(
+                item.role == "user" and (item.content.strip() or item.images)
+                for item in self.messages
+            )
             if not has_user_message and not self.mesh_message_id:
                 raise ValueError("启动 Agent 时必须提供用户消息或 Agent Mesh 消息")
             if has_user_message and self.mesh_message_id:
@@ -212,9 +283,9 @@ def get_agent_response_session(
                 "error": _public_text(checkpoint.get("error")),
                 "output_text": _public_text(checkpoint.get("output_text"), limit=4000),
                 "cancel_reason": _public_text(checkpoint.get("cancel_reason")),
-                "updated_at": row.update_time.isoformat() if row.update_time else "",
+                "updated_at": _public_utc_time(row.update_time),
             },
-            "messages": _public_transcript_messages(checkpoint.get("transcript")),
+            "messages": _public_session_messages(db, row, checkpoint),
             "events": replay_events,
             "last_sequence_number": len(replay_events),
             "pending": _public_pending_event(row.run_id, row.status, checkpoint.get("pending")),
@@ -343,12 +414,88 @@ def _recover_stale_active_run(
     db.commit()
 
 
-def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
+def _public_utc_time(value: Optional[datetime]) -> str:
+    if value is None:
+        return ""
+    aware = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    return aware.astimezone(timezone.utc).isoformat()
+
+
+def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """恢复同账号、同会话的图片元数据；旧轮次只在历史前缀精确一致时关联。"""
+    from app.models.agent_multimodal import AgentMultimodalAsset
+
+    runs = (
+        db.query(AgentResponseRun)
+        .join(AgentMultimodalAsset, AgentMultimodalAsset.run_id == AgentResponseRun.run_id)
+        .filter(
+            AgentResponseRun.user_id == row.user_id,
+            AgentResponseRun.surface == row.surface,
+            AgentResponseRun.session_key == row.session_key,
+            AgentResponseRun.id <= row.id,
+            AgentMultimodalAsset.user_id == row.user_id,
+            AgentMultimodalAsset.surface == row.surface,
+            AgentMultimodalAsset.role == "input",
+        ).distinct().order_by(AgentResponseRun.id.desc()).limit(100).all()
+    )
+    assets_by_run: dict[str, dict[str, dict[str, Any]]] = {}
+    if runs:
+        assets = db.query(
+            AgentMultimodalAsset.id, AgentMultimodalAsset.run_id,
+            AgentMultimodalAsset.sha256, AgentMultimodalAsset.mime,
+        ).filter(
+            AgentMultimodalAsset.run_id.in_([run.run_id for run in runs]),
+            AgentMultimodalAsset.user_id == row.user_id,
+            AgentMultimodalAsset.surface == row.surface,
+            AgentMultimodalAsset.role == "input",
+        ).all()
+        for asset in assets:
+            assets_by_run.setdefault(asset.run_id, {})[asset.sha256] = {
+                "id": int(asset.id), "mime": asset.mime, "sha256": asset.sha256,
+            }
+    messages = _public_transcript_messages(
+        checkpoint.get("transcript"), image_assets=assets_by_run.get(row.run_id, {}),
+    )
+    # 达到公开历史截断窗口时无法证明位置未平移，只恢复本轮显式资产引用。
+    if len(messages) >= 100:
+        return messages
+    for previous in runs:
+        if previous.id == row.id:
+            continue
+        try:
+            old_checkpoint = json.loads(previous.checkpoint_json)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(old_checkpoint, dict):
+            continue
+        old_messages = _public_transcript_messages(
+            old_checkpoint.get("transcript"), image_assets=assets_by_run.get(previous.run_id, {}),
+        )
+        if len(old_messages) >= 100 or len(old_messages) > len(messages):
+            continue
+        # 先验证完整旧历史是当前历史前缀，再整体回填；后续分支不同时不能先挂上首问图片。
+        if not all(
+            current["role"] == old["role"] and current["content"] in {
+                old["content"], old["content"] + "\n" + "\n".join(["[图片]"] * len(old.get("image_assets", []))),
+            }
+            for current, old in zip(messages, old_messages)
+        ):
+            continue
+        for current, old in zip(messages, old_messages):
+            if old.get("image_assets") and not current.get("image_assets"):
+                current["image_assets"] = old["image_assets"]
+                current["content"] = old["content"]
+    return messages
+
+
+def _public_transcript_messages(
+    value: Any, *, image_assets: Optional[Mapping[str, dict[str, Any]]] = None,
+) -> list[dict[str, Any]]:
     """只恢复用户可见文本，排除 reasoning、函数参数和工具结果。"""
 
     if not isinstance(value, list):
         return []
-    messages: list[dict[str, str]] = []
+    messages: list[dict[str, Any]] = []
     for item in value:
         if not isinstance(item, Mapping):
             continue
@@ -359,6 +506,7 @@ def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
         if item_type and item_type != "message":
             continue
         content = item.get("content")
+        visible_assets = []
         if isinstance(content, str):
             text = content.strip()
         elif isinstance(content, list):
@@ -368,6 +516,17 @@ def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
                     continue
                 part_type = str(part.get("type") or "")
                 visible_types = {"input_text", "text"} if role == "user" else {"output_text", "refusal"}
+                if part_type == "input_image":
+                    url = str(part.get("image_url") or "")
+                    asset = (
+                        (image_assets or {}).get(url.removeprefix("prism-asset://"))
+                        if url.startswith("prism-asset://") else None
+                    )
+                    if role == "user" and asset:
+                        visible_assets.append(asset)
+                    else:
+                        parts.append("[图片]")
+                    continue
                 if part_type not in visible_types:
                     continue
                 part_value = part.get("refusal") if part_type == "refusal" else part.get("text")
@@ -379,8 +538,11 @@ def _public_transcript_messages(value: Any) -> list[dict[str, str]]:
             text = ""
         if text and role == "assistant":
             text = redact_agent_output_text(text)
-        if text:
-            messages.append({"role": role, "content": text})
+        if text or visible_assets:
+            message: dict[str, Any] = {"role": role, "content": text}
+            if visible_assets:
+                message["image_assets"] = visible_assets
+            messages.append(message)
     return messages[-100:]
 
 
@@ -834,11 +996,32 @@ async def stream_agent_response(
         except (AttributeError, TypeError):
             # 轻量测试/非真实 Session 场景不阻断首个 response.created。
             api_config = None
+        from app.services.agent_model_service import resolve_agent_model
+
         response_model = (
-            api_config.model
-            if api_config is not None and api_config.source in {"user", "global"}
-            else settings.deepseek_orchestrator_model
+            resolve_agent_model(db, surface=payload.surface, config=api_config)
+            if api_config is not None else settings.deepseek_orchestrator_model
         )
+        if payload.action != "start":
+            owned_run = db.query(AgentResponseRun).filter(
+                AgentResponseRun.run_id == payload.run_id,
+                AgentResponseRun.user_id == user.id,
+                AgentResponseRun.surface == payload.surface,
+                AgentResponseRun.session_key == payload.session_id,
+            ).first()
+            if owned_run:
+                try:
+                    response_model = json.loads(owned_run.checkpoint_json).get("model") or response_model
+                except (TypeError, ValueError):
+                    pass
+        # 多模态:含图消息本运行切到视觉模型,元数据同步(与服务层同口径)
+        if payload.action == "start" and any(item.images for item in payload.messages):
+            from app.services.multimodal_service import resolve_vision_model
+
+            try:
+                response_model = resolve_vision_model(db)
+            except Exception:  # noqa: BLE001 - 元数据降级为默认模型名
+                pass
 
         async def sink(event: Mapping[str, Any]) -> None:
             nonlocal discard_events
@@ -887,7 +1070,7 @@ async def stream_agent_response(
                 mesh_message_id = ""
                 source_attribution = {}
                 if payload.action == "start":
-                    messages = [item.model_dump() for item in payload.messages if item.content.strip()]
+                    messages = [item.model_dump() for item in payload.messages if item.content.strip() or item.images]
                     if payload.mesh_message_id:
                         mesh_message_id = payload.mesh_message_id
                         _, system_input = agent_mesh_service.prepare_message_run(
@@ -998,6 +1181,12 @@ async def stream_agent_response(
                                 summary=result.output_text,
                                 error=result.error,
                             )
+                    if result.status == "completed" and payload.surface == "user":
+                        try:
+                            if not _is_admin_actor(run_db, run_user):
+                                _schedule_profile_refresh(int(run_user.id))
+                        except Exception:  # noqa: BLE001 - 偏好学习失败不影响已完成任务
+                            logger.warning("小菱偏好更新暂未排入后台，保留本轮结果")
                     return result
                 except Exception as exc:
                     if payload.action in {"start", "resume", "approve"}:

@@ -1,0 +1,12 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run
+
+
+ RUN  v4.1.11 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+
+ Test Files  101 passed (101)
+      Tests  1149 passed (1149)
+   Start at  23:14:12
+   Duration  12.08s (transform 8.29s, setup 1.23s, import 33.19s, tests 28.44s, environment 31.22s)

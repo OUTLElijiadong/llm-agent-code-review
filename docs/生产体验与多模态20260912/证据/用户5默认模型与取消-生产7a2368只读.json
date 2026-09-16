@@ -1,0 +1,22 @@
+{
+  "app_release": "7a2368f20453606ed09691ee0002d07df4629ec3",
+  "user_id": 5,
+  "api_config_source": "system",
+  "api_config_model": "deepseek-v4-flash",
+  "resolved_default_chat_model": "deepseek-v4-pro",
+  "assignments": {
+    "chat_vision": "deepseek-flash"
+  },
+  "runs": [
+    {
+      "id": 816,
+      "run_id": "run_bbe7b48f0e1845cf968c535577238606",
+      "status": "completed",
+      "checkpoint_status": "completed",
+      "model": "deepseek-v4-pro",
+      "output_chars": 1091,
+      "has_cancel_reason": false,
+      "has_error": false
+    }
+  ]
+}

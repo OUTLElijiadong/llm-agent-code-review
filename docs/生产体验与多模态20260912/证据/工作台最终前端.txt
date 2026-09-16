@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/li/Documents/代码程序/Prism-production-ux-20260912/frontend
+
+ ✓ src/views/dashboard/Dashboard.test.ts (61 tests) 388ms
+
+ Test Files  1 passed (1)
+      Tests  61 passed (61)
+   Start at  22:39:23
+   Duration  1.56s (transform 364ms, setup 12ms, collect 736ms, tests 388ms, environment 209ms, prepare 44ms)

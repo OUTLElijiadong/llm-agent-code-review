@@ -1,0 +1,1104 @@
+{
+  "route_methods": 325,
+  "potential_cells": 650,
+  "ready_cells": 554,
+  "blocked_cells": 96,
+  "blocked_unique_routes": 82,
+  "blocked_by_account": {
+    "anonymous": 14,
+    "no_permission": 82
+  },
+  "categories": {
+    "公开端点_拒绝矩阵不适用": 12,
+    "登录及资源能力_403不适用但功能未测": 60,
+    "服务内权限门禁_未测403": 3,
+    "预览Cookie_匿名未测": 3,
+    "预览Cookie_RBAC不适用": 3,
+    "SSE手动JWT_匿名未测": 1,
+    "SSE本人订阅_403不适用": 1,
+    "本人服务_需分别测自己与他人": 5,
+    "独立上游凭据_匿名未测": 4,
+    "独立上游凭据_RBAC不适用": 4
+  },
+  "source_sha256": {
+    "app/api/__init__.py": "f9fb00749c19c1d5889d37e4dbd309b20a29b462e0c22420cc0886fbfe2fb35d",
+    "app/api/responses.py": "a86ac4fe52124e4f9f3a294fb508e5d1875b30eebbfa12f9b0b36cce20aa2a8c",
+    "app/api/v1/admin_agent_releases.py": "c25bb31b3d81d0886f0ffbbf8086d4795bfe4635c5e3ce6e7344ed421fb3d1e0",
+    "app/api/v1/admin_copilot.py": "173e8e382bfa9b61293664cd16efe5b35dc18a726e3eed2ea46c8b967d85b8ac",
+    "app/api/v1/admin_overview.py": "441936558a2d6dc34f6399ba6dcbde7d7601a36f925fc681f2aa2e374d0c3ab9",
+    "app/api/v1/agent_catalog.py": "a4251ca6aa0caf862d9c4f958f2567e8367c0b659c7028d8f4775e0eab5b79e9",
+    "app/api/v1/agent_governance.py": "90e6c67903841c6bb261d8d0dd8d4f7b7499883700de3c84681cbca2d4014caf",
+    "app/api/v1/agent_mesh.py": "eb1febea0ea2b825d93a547072a48b4b71e926c199d50b84efc1b47fc2666293",
+    "app/api/v1/agent_responses.py": "10ca2cb02644955bf1edbb21cbbdfbb1f9209055392c80b29ab430dd0077b8ae",
+    "app/api/v1/agent_studio.py": "8ba24a9b1e4502c5e827c75cb325da2d5b26073f1e6e55728cf0fce9bab18e06",
+    "app/api/v1/agent_teams.py": "82fedd6972ccbd8e43ddb0d431319324ca1b9c400b363f8a56182bddd2eb2374",
+    "app/api/v1/agents.py": "19562d2447e92dc9155c52c148dff4a3403060304c217c000b42baf4da1fe264",
+    "app/api/v1/ai_chat.py": "6fd7038a38ea008a43eddd1c1e2c1d3caffbcbb540e1d70f8cd0bba7548a804e",
+    "app/api/v1/ai_logs.py": "521c9ba4745e7189427fc9a4d8f5cb5b0a924a4461f2302abfa052ba83222e93",
+    "app/api/v1/ai_prompt.py": "6589f2ff95b6c88b149bb8be4cbace0d3797cf6f32e2c208fb5210dcc5d9121d",
+    "app/api/v1/api_config.py": "c2ef7e9f3fadadac505bb15b6349c2545cfb71920e869292c4466676daf99d54",
+    "app/api/v1/audit.py": "4c7b416fd9e2376277a7b02b1d21cee4539d478244652c144c1c4624762b3a25",
+    "app/api/v1/auth.py": "3aef578a053a553513ee9c00c5d6164669b858c9649b197868eb5c35b8ff8715",
+    "app/api/v1/avatars.py": "f59bf9dfb7e42d723aa052df2acee2a2c61ecc5ad7ed9403f737e876128fb159",
+    "app/api/v1/beta_invites.py": "283bc45c71aa3491e9af9c852fb4e3693f93bef28f44ffe3b195a0e34bf976a5",
+    "app/api/v1/code_files.py": "c5da67b84478650c4741a0cfbca131483df4f902f3f0c6cbc2bd5d3c891978c1",
+    "app/api/v1/dashboard.py": "6f71fe262592ea20c0ca96fb21b862666e2e09f1c7f12075b8b456c2488de6be",
+    "app/api/v1/discussion.py": "724ddf5fffa420b9a61b5eba8ad1b71c0abb9df470e7b6a3db7f7559db7bdc73",
+    "app/api/v1/evolution.py": "a5921f8683b164e6c7b2385c96495f78f2e13053e24a418361e77a7a2bfa0280",
+    "app/api/v1/feedback.py": "76f2ba0e436b9dcdbcae25f828004f2ebbfdf4be864d89ac2f05c8c816b4a588",
+    "app/api/v1/forum.py": "fa4b9b4b36c68599dcf799a2d221b41884a1bde28e0e447792e3a230c8b02a29",
+    "app/api/v1/issues.py": "27e651b3fd4c17216d4811dea9661072f7bba4074994a70be13a8c2101fee8f2",
+    "app/api/v1/knowledge.py": "b3c6153d6beec9e5ec88e15d8219f4baeb5ef81a7c545d2b7096ad37a4457087",
+    "app/api/v1/llm_config.py": "fcf61d30261b05a7d2637fe94385132f723c45fc5eda68174bd431ab9409f7e7",
+    "app/api/v1/maintenance.py": "17157b0b3f9400a54d6da6e5c6880d11d6a62d9fcea171605715b3cf0501435a",
+    "app/api/v1/mcp_governance.py": "9458a73792e8b10ca22faea121c4193c1ca35cf2dae5812ab68908078198dbf5",
+    "app/api/v1/pentest.py": "9eff640f5eb6c61a5cf949990a0f41f58d563c083c5bffbfb35ae6d74d0efb39",
+    "app/api/v1/project_members.py": "0d5ec973eb523d2bc9a1732b77ec82e49aa7fe32a81bfbb0efeb1f5b885f49d6",
+    "app/api/v1/projects.py": "00cc0215fe54e86c035fdfdfe6ff941717713ad0f2442adf5f38de49c3fa1411",
+    "app/api/v1/rbac.py": "d0f34037d29d7713172fed807705083f79ba4e815914482b015394ca9779ae3c",
+    "app/api/v1/reports.py": "31c4e760f05875ee2e31fc8c0e29b564819e1679e60127dcbe47c5abb9757fce",
+    "app/api/v1/review.py": "9cc960c35393f39d480e3af1259a7d481322e4b0aa54d00d9a9f04ca385cdf7a",
+    "app/api/v1/rules.py": "a0165bc0bcd466de9bf13d5e26df74227d5b0af5106b42b32e7c1b58cde38b72",
+    "app/api/v1/sandboxes.py": "da54a4e68eea39cbd7decea8afba0a85bd22c528a58f93fde35e2f6135d5805e",
+    "app/api/v1/security.py": "9499bfe3a4b5011bd89ea18afe63047c5c2cdd5fef96f46233762857e404b552",
+    "app/api/v1/user_profile.py": "f1978dcfcd6615f0198aca16c2ef03005d75b7107e5466becdd9e4e323df925d",
+    "app/api/v1/users.py": "bf7d443e8d1f25755e0d298ffcac74ed52806318dca44dc8dac8e35e10d05211",
+    "app/api/v1/ws_discussion.py": "283f0c3a9e0574e2293cd9839926813056d21c64f12a32809418facbb011b3ff",
+    "app/core/database.py": "f187d56041c6b5920539838a27ce47aa0f5c36f52129ddb44cd5e77d0ffb9927",
+    "app/core/dependencies.py": "b75be1117e45d543d52fcae4bcadee16d1b93d214369beb7fd6e0a1c124f1709",
+    "app/core/observability.py": "f5efc84337e50b5c26467e575ea4127088f601588ea33b7bf5770bef00eb483f",
+    "app/core/rbac_dependency.py": "084dc337ec8981138229228794dccc722c73e8dddc6526d5d9009b9a84090ab8",
+    "app/core/security.py": "42bd514564cd3a3abd33e4a079e8cd61a565d885d876412b53378aa12db4c7e8",
+    "app/core/super_admin.py": "28191099c19fb13292bbb4790c9d1239b8f59652ac240614e0a3316e2bd2f4bb",
+    "app/main.py": "252547e259cbb80fe3fded9afd5add118f17b08c29b67490e382bc7cc5579197",
+    "app/services/agent_studio_service.py": "204a92ee28602b997aaa4dd2c2e67660315bc8e2a205dbfa031ae899913d78cb",
+    "app/services/rbac_service.py": "671d62b77db2c19d5fa5c9b2692d60a1340b5d1b542ef935df13c5fcdd9b2b59",
+    "requirements.lock": "d5466a365c95206160590f31cf65fc6ec45eba9556d55652177633d1ed938ea8",
+    "scripts/verify_permission_acceptance_https.py": "7fdf72a02e6f612c5a38ff4aba3dee1d6326fb7c7b6f8724d40a3aae0052b5b4"
+  },
+  "plan_inventory": {
+    "route_methods": 325,
+    "endpoint_sources": 42,
+    "routes_sha256": "dd7e8daebe7acafeb3cc50c857ec0074c3db9ecde0c2aef68fdd958ca1792057"
+  },
+  "excluded_routes": [
+    {
+      "kind": "framework_docs",
+      "path": "/openapi.json",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "endpoint": "fastapi.applications.FastAPI.setup.<locals>.openapi",
+      "status": "excluded",
+      "reason": "FastAPI内建文档端点，不纳入业务权限矩阵"
+    },
+    {
+      "kind": "framework_docs",
+      "path": "/docs",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "endpoint": "fastapi.applications.FastAPI.setup.<locals>.swagger_ui_html",
+      "status": "excluded",
+      "reason": "FastAPI内建文档端点，不纳入业务权限矩阵"
+    },
+    {
+      "kind": "framework_docs",
+      "path": "/docs/oauth2-redirect",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "endpoint": "fastapi.applications.FastAPI.setup.<locals>.swagger_ui_redirect",
+      "status": "excluded",
+      "reason": "FastAPI内建文档端点，不纳入业务权限矩阵"
+    },
+    {
+      "kind": "framework_docs",
+      "path": "/redoc",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "endpoint": "fastapi.applications.FastAPI.setup.<locals>.redoc_html",
+      "status": "excluded",
+      "reason": "FastAPI内建文档端点，不纳入业务权限矩阵"
+    },
+    {
+      "kind": "websocket",
+      "path": "/api/ws/discuss/{session_id}",
+      "endpoint": "app.api.v1.ws_discussion.ws_discuss",
+      "source": "app/api/v1/ws_discussion.py",
+      "status": "not_tested",
+      "reason": "HTTP权限矩阵不建立WebSocket连接，需独立验收"
+    }
+  ],
+  "studio_outside_blocked": {
+    "routes": 15,
+    "contract": "基本user及项目reviewer不是系统reviewer；角色门禁应优先拒绝，即使自定义资产权限放行也403"
+  },
+  "rows": [
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/api/auth/captcha",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/api/v1/auth.py",
+      "line": 27,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/auth/captcha",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/api/v1/auth.py",
+      "line": 27,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "POST",
+      "path": "/api/auth/register",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/api/v1/auth.py",
+      "line": 36,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/auth/register",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/api/v1/auth.py",
+      "line": 36,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/api/v1/auth.py",
+      "line": 56,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/api/v1/auth.py",
+      "line": 56,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/auth.py",
+      "line": 128,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/auth/change-password",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/auth.py",
+      "line": 134,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/auth.py",
+      "line": 152,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/reports/{task_id}/export/word",
+      "category": "服务内权限门禁_未测403",
+      "contract": "格式导出权限或管理员门禁在函数内；使用合法参数，必须实际403，422/404不是通过",
+      "source": "app/api/v1/reports.py",
+      "line": 522,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/reports/{task_id}/export/pdf",
+      "category": "服务内权限门禁_未测403",
+      "contract": "格式导出权限或管理员门禁在函数内；使用合法参数，必须实际403，422/404不是通过",
+      "source": "app/api/v1/reports.py",
+      "line": 540,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/dashboard/summary",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/dashboard.py",
+      "line": 26,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/dashboard/risk-distribution",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/dashboard.py",
+      "line": 34,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/dashboard/issue-type-statistics",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/dashboard.py",
+      "line": 42,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/dashboard/score-trend",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/dashboard.py",
+      "line": 50,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/dashboard/running",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/dashboard.py",
+      "line": 58,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/dashboard/review-frequency",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/dashboard.py",
+      "line": 68,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/ai/chat",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/ai_chat.py",
+      "line": 126,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/ai/detect-language",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/ai_chat.py",
+      "line": 175,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/ai/analyze-folder",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/ai_chat.py",
+      "line": 191,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/ai/agents",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/ai_chat.py",
+      "line": 207,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/ai-prompt/tools",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/ai_prompt.py",
+      "line": 31,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/ai-prompt/issue",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/ai_prompt.py",
+      "line": 39,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/ai-prompt/task",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/ai_prompt.py",
+      "line": 58,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/ai-prompt/project",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/ai_prompt.py",
+      "line": 78,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/sandboxes/capabilities/search",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 75,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/sandboxes",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 86,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/sandboxes",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 95,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/sandboxes/{public_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 106,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/stop",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 115,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/extend",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 124,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/sandboxes/{public_id}/artifacts/{artifact_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 134,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/preview-session",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 159,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "category": "预览Cookie_匿名未测",
+      "contract": "无预览cookie应401；Prism Authorization不能代替绑定sbx/exp/token_version的cookie。正向可能代理并commit",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "category": "预览Cookie_RBAC不适用",
+      "contract": "无预览cookie应401；Prism Authorization不能代替绑定sbx/exp/token_version的cookie。正向可能代理并commit",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "HEAD",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "category": "预览Cookie_匿名未测",
+      "contract": "无预览cookie应401；Prism Authorization不能代替绑定sbx/exp/token_version的cookie。正向可能代理并commit",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "HEAD",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "category": "预览Cookie_RBAC不适用",
+      "contract": "无预览cookie应401；Prism Authorization不能代替绑定sbx/exp/token_version的cookie。正向可能代理并commit",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "category": "预览Cookie_匿名未测",
+      "contract": "无预览cookie应401；Prism Authorization不能代替绑定sbx/exp/token_version的cookie。正向可能代理并commit",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/sandboxes/{public_id}/preview/{preview_path:path}",
+      "category": "预览Cookie_RBAC不适用",
+      "contract": "无预览cookie应401；Prism Authorization不能代替绑定sbx/exp/token_version的cookie。正向可能代理并commit",
+      "source": "app/api/v1/sandboxes.py",
+      "line": 179,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/api/agents/events",
+      "category": "SSE手动JWT_匿名未测",
+      "contract": "匿名401；已登录零权限可200订阅本人及系统事件；应流式限时读取，不用完整读body的Runner",
+      "source": "app/api/v1/agents.py",
+      "line": 174,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/agents/events",
+      "category": "SSE本人订阅_403不适用",
+      "contract": "匿名401；已登录零权限可200订阅本人及系统事件；应流式限时读取，不用完整读body的Runner",
+      "source": "app/api/v1/agents.py",
+      "line": 174,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/api-config",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/api_config.py",
+      "line": 22,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "PUT",
+      "path": "/api/api-config",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/api_config.py",
+      "line": 36,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "DELETE",
+      "path": "/api/api-config",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/api_config.py",
+      "line": 50,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/api-config/test",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/api_config.py",
+      "line": 63,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/maintenance",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/maintenance.py",
+      "line": 17,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/maintenance",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/maintenance.py",
+      "line": 25,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/maintenance/{ticket_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/maintenance.py",
+      "line": 46,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/maintenance/{ticket_id}/close",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/maintenance.py",
+      "line": 61,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/feedback",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/feedback.py",
+      "line": 17,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/feedback",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/feedback.py",
+      "line": 25,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/feedback/{feedback_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/feedback.py",
+      "line": 47,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/forum/posts",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/forum.py",
+      "line": 25,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/forum/posts",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/forum.py",
+      "line": 39,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/forum/posts/{post_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/forum.py",
+      "line": 47,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "PUT",
+      "path": "/api/forum/posts/{post_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/forum.py",
+      "line": 54,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "DELETE",
+      "path": "/api/forum/posts/{post_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/forum.py",
+      "line": 62,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "PUT",
+      "path": "/api/forum/posts/{post_id}/pin",
+      "category": "服务内权限门禁_未测403",
+      "contract": "格式导出权限或管理员门禁在函数内；使用合法参数，必须实际403，422/404不是通过",
+      "source": "app/api/v1/forum.py",
+      "line": 70,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/forum/posts/{post_id}/replies",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/forum.py",
+      "line": 78,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "DELETE",
+      "path": "/api/forum/replies/{reply_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/forum.py",
+      "line": 86,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/forum/assist",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/forum.py",
+      "line": 94,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/me/profile",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/user_profile.py",
+      "line": 18,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "PUT",
+      "path": "/api/me/profile",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/user_profile.py",
+      "line": 24,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/me/profile/preference-prompted",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/user_profile.py",
+      "line": 31,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/me/profile/relearn",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/user_profile.py",
+      "line": 40,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "PUT",
+      "path": "/api/me/avatar",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/avatars.py",
+      "line": 49,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/me/avatar/image",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/avatars.py",
+      "line": 65,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "DELETE",
+      "path": "/api/me/avatar",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/avatars.py",
+      "line": 88,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/users/{user_id}/avatar/image",
+      "category": "本人服务_需分别测自己与他人",
+      "contract": "本人可读不应普遍403；他人ID必须403且先于资源查询，缺头像的本人404只能说明资源缺失",
+      "source": "app/api/v1/avatars.py",
+      "line": 97,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/knowledge/docs",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/knowledge.py",
+      "line": 32,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/knowledge/docs",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/knowledge.py",
+      "line": 45,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "DELETE",
+      "path": "/api/knowledge/docs/{doc_id}",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/knowledge.py",
+      "line": 54,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/knowledge/search",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/knowledge.py",
+      "line": 62,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/knowledge/sync",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/knowledge.py",
+      "line": 70,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/knowledge/stats",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/knowledge.py",
+      "line": 77,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/agent-responses/runs/{run_id}/assets",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/agent_responses.py",
+      "line": 42,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/agent-responses/assets/{asset_id}/image",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/agent_responses.py",
+      "line": 67,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/{user_id}/roles",
+      "category": "本人服务_需分别测自己与他人",
+      "contract": "本人可读不应普遍403；他人ID必须403且先于资源查询，缺头像的本人404只能说明资源缺失",
+      "source": "app/api/v1/rbac.py",
+      "line": 178,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/{user_id}/permissions",
+      "category": "本人服务_需分别测自己与他人",
+      "contract": "本人可读不应普遍403；他人ID必须403且先于资源查询，缺头像的本人404只能说明资源缺失",
+      "source": "app/api/v1/rbac.py",
+      "line": 202,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/{user_id}/menus",
+      "category": "本人服务_需分别测自己与他人",
+      "contract": "本人可读不应普遍403；他人ID必须403且先于资源查询，缺头像的本人404只能说明资源缺失",
+      "source": "app/api/v1/rbac.py",
+      "line": 230,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/{user_id}/data-scope",
+      "category": "本人服务_需分别测自己与他人",
+      "contract": "本人可读不应普遍403；他人ID必须403且先于资源查询，缺头像的本人404只能说明资源缺失",
+      "source": "app/api/v1/rbac.py",
+      "line": 255,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "POST",
+      "path": "/v1/responses",
+      "category": "独立上游凭据_匿名未测",
+      "contract": "无Authorization应401；禁止把Prism JWT转发上游。Bearer隔离正向需独立上游凭据及专用响应夹具",
+      "source": "app/api/responses.py",
+      "line": 78,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/v1/responses",
+      "category": "独立上游凭据_RBAC不适用",
+      "contract": "无Authorization应401；禁止把Prism JWT转发上游。Bearer隔离正向需独立上游凭据及专用响应夹具",
+      "source": "app/api/responses.py",
+      "line": 78,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/v1/responses/{response_id}",
+      "category": "独立上游凭据_匿名未测",
+      "contract": "无Authorization应401；禁止把Prism JWT转发上游。Bearer隔离正向需独立上游凭据及专用响应夹具",
+      "source": "app/api/responses.py",
+      "line": 128,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/v1/responses/{response_id}",
+      "category": "独立上游凭据_RBAC不适用",
+      "contract": "无Authorization应401；禁止把Prism JWT转发上游。Bearer隔离正向需独立上游凭据及专用响应夹具",
+      "source": "app/api/responses.py",
+      "line": 128,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "DELETE",
+      "path": "/v1/responses/{response_id}",
+      "category": "独立上游凭据_匿名未测",
+      "contract": "无Authorization应401；禁止把Prism JWT转发上游。Bearer隔离正向需独立上游凭据及专用响应夹具",
+      "source": "app/api/responses.py",
+      "line": 142,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "DELETE",
+      "path": "/v1/responses/{response_id}",
+      "category": "独立上游凭据_RBAC不适用",
+      "contract": "无Authorization应401；禁止把Prism JWT转发上游。Bearer隔离正向需独立上游凭据及专用响应夹具",
+      "source": "app/api/responses.py",
+      "line": 142,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/v1/responses/{response_id}/input_items",
+      "category": "独立上游凭据_匿名未测",
+      "contract": "无Authorization应401；禁止把Prism JWT转发上游。Bearer隔离正向需独立上游凭据及专用响应夹具",
+      "source": "app/api/responses.py",
+      "line": 156,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/v1/responses/{response_id}/input_items",
+      "category": "独立上游凭据_RBAC不适用",
+      "contract": "无Authorization应401；禁止把Prism JWT转发上游。Bearer隔离正向需独立上游凭据及专用响应夹具",
+      "source": "app/api/responses.py",
+      "line": 156,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/discuss/start",
+      "category": "登录及资源能力_403不适用但功能未测",
+      "contract": "不要求全局RBAC权限；按本人/作者/项目成员/能力过滤实际验收。未拥有资源不等于403；副作用及模型调用另审批执行",
+      "source": "app/api/v1/discussion.py",
+      "line": 34,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/healthz",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/main.py",
+      "line": 253,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/healthz",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/main.py",
+      "line": 253,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/readyz",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/main.py",
+      "line": 267,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/readyz",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/main.py",
+      "line": 267,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "anonymous",
+      "method": "GET",
+      "path": "/metrics",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/main.py",
+      "line": 295,
+      "production_status": "not_executed_in_this_analysis"
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/metrics",
+      "category": "公开端点_拒绝矩阵不适用",
+      "contract": "无条件401/403不适用；公开功能本身另验，注册/登录/验证码有状态副作用",
+      "source": "app/main.py",
+      "line": 295,
+      "production_status": "not_executed_in_this_analysis"
+    }
+  ]
+}

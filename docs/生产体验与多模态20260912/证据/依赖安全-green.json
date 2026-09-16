@@ -1,0 +1,7 @@
+{
+  "dompurify_version": "3.4.15",
+  "detached_image_handler_removed": true,
+  "nanoid_version": "3.3.19",
+  "nanoid_zero_size_returns": true,
+  "nanoid_timeout": false
+}

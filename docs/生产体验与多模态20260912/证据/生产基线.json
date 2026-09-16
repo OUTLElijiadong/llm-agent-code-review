@@ -1,0 +1,10 @@
+{
+  "observed_at": "2026-09-12T14:05:05.134910+00:00",
+  "source_revision": "bc207b273441e2f01f988122d28e2f2acb17f4c5",
+  "source_version": "3.9.0",
+  "tracked_dirty": false,
+  "running_release": "c0e4e2ab270273808171da5518e77c9742d64eb2",
+  "healthz": "ok",
+  "readyz": "ready",
+  "note": "生产源码仅部署脚本领先运行镜像一提交；新任务未发布。无任何密码或凭据改动。"
+}

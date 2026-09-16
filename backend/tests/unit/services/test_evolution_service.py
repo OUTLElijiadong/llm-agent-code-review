@@ -89,6 +89,27 @@ def test_approve_requires_eval_gate(db, admin_user):
         evolution_service.approve_proposal(db, admin_user, p.id)
 
 
+@pytest.mark.parametrize(
+    "score",
+    [None, "", "{broken", "[]", "null", "{}", '{"passed":false}', '{"passed":"true"}', '{"passed":1}'],
+)
+def test_passed_status_without_valid_evidence_cannot_change_rules(db, admin_user, mk_rule, score):
+    rule = mk_rule(db, rule_code="fixture_evidence", enabled=1)
+    p = EvolutionProposal(
+        proposal_type="disable_rule", target_rule_id=rule.id, title="历史缺证据",
+        payload=json.dumps({"rule_id": rule.id}), status="eval_passed", eval_score=score,
+    )
+    db.add(p)
+    db.commit()
+    with pytest.raises(ValidationError, match="评估证据缺失，请重新评估"):
+        evolution_service.approve_proposal(db, admin_user, p.id)
+    db.refresh(p)
+    db.refresh(rule)
+    assert p.status == "eval_passed" and p.eval_score == score
+    assert p.applied_rule_id is None and p.reviewed_by is None
+    assert rule.enabled == 1
+
+
 def test_disable_then_rollback_restores_enabled(db, admin_user, mk_rule):
     """禁用提案:审批后规则禁用,回滚后恢复启用"""
     rule = mk_rule(db, rule_code="custom_noise", is_builtin=0, enabled=1)
@@ -98,6 +119,9 @@ def test_disable_then_rollback_restores_enabled(db, admin_user, mk_rule):
     )
     db.add(p)
     db.commit()
+
+    _seed_case(db)
+    evolution_service.evaluate_proposal(db, p.id, reviewer=_pass_reviewer)
 
     evolution_service.approve_proposal(db, admin_user, p.id)
     assert db.get(ReviewRule, rule.id).enabled == 0

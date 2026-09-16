@@ -7,6 +7,7 @@ _MODEL_MODULES = (
     "agent_capability",
     "agent_governance",
     "agent_mesh",
+    "agent_multimodal",
     "agent_response_run",
     "agent_skill_record",
     "agent_team",
@@ -41,6 +42,7 @@ _MODEL_MODULES = (
     "review_task_file",
     "system_config",
     "user",
+    "user_avatar",
     "user_feedback",
     "user_profile",
 )

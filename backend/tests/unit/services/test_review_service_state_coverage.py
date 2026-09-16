@@ -264,6 +264,8 @@ def _patch_start_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(review_service, "get_model_label", lambda *args, **kwargs: "fake-model")
     monkeypatch.setattr(review_service.threading, "Thread", CapturingThread)
     monkeypatch.setattr("app.utils.api_resolver.resolve_api_config", lambda *args, **kwargs: {"provider": "fake"})
+    # 本组测试只隔离审查状态机，模型配置契约由模型分配服务回归覆盖。
+    monkeypatch.setattr("app.services.agent_model_service.resolve_subagent_config", lambda db, cfg, **kwargs: cfg)
 
 
 def _runtime_task() -> SimpleNamespace:
@@ -389,6 +391,8 @@ def test_run_review_task_executes_with_degraded_optional_context(monkeypatch: py
     monkeypatch.setattr("app.services.experience_service.retrieve", _raise_experience)
     monkeypatch.setattr("app.services.personalization_service.build_review_context", _raise_persona)
     monkeypatch.setattr("app.utils.api_resolver.resolve_api_config", lambda *args, **kwargs: {"provider": "fake"})
+    # 本组测试只隔离审查状态机，模型配置契约由模型分配服务回归覆盖。
+    monkeypatch.setattr("app.services.agent_model_service.resolve_subagent_config", lambda db, cfg, **kwargs: cfg)
 
     review_service._run_review_task(task.id, user.id)
 

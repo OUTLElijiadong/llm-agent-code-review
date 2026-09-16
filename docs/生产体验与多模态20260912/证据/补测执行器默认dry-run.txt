@@ -1,0 +1,2 @@
+{"routes": 325, "anonymous_ready": 311, "no_permission_ready": 243}
+{"status": "plan_verified", "requests_sent": 0, "credentials_read": false, "planned_requests": 37, "preflight_requests": 6, "contract_requests": 31}

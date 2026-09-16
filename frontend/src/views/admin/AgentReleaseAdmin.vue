@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, Close, EditPen, Refresh, RefreshLeft, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+import EmptyState from '@/components/common/EmptyState.vue'
 import {
   approveAgentRelease,
   disableCustomAgent,
@@ -38,6 +39,61 @@ const beforeAuthoring = computed<AgentReleaseAuthoring | null>(() => {
 const afterAuthoring = computed<AgentReleaseAuthoring | null>(() => (
   selected.value?.authoring ?? selected.value?.diff.after ?? null
 ))
+
+// ── 中文标签映射(卡片化后替代原始枚举展示,颜色语义沿用原 tag) ──
+const approvalStatusLabels: Record<string, string> = {
+  pending: '待审批',
+  approved: '已通过',
+  rejected: '已驳回',
+}
+const approvalStatusTypes: Record<string, 'warning' | 'success' | 'info'> = {
+  pending: 'warning',
+  approved: 'success',
+  rejected: 'info',
+}
+const riskLevelLabels: Record<string, string> = {
+  high: '高风险',
+  medium: '中风险',
+  low: '低风险',
+}
+const assetStatusLabels: Record<string, string> = {
+  draft: '草稿',
+  testing: '测试中',
+  pending_approval: '待审批',
+  published: '已发布',
+  disabled: '已停用',
+  rolled_back: '已回滚',
+  rejected: '已驳回',
+}
+
+function approvalStatusLabel(status: string): string {
+  return approvalStatusLabels[status] ?? status
+}
+
+function approvalStatusType(status: string): 'warning' | 'success' | 'info' {
+  return approvalStatusTypes[status] ?? 'info'
+}
+
+function riskLabel(level: string): string {
+  return riskLevelLabels[level] ?? (level || '未评级')
+}
+
+function assetStatusLabel(status: string): string {
+  return assetStatusLabels[status] ?? status
+}
+
+// ── 提交说明展开/收起(长文本不截断丢失,默认单行省略+title 悬停) ──
+const expandedIds = ref<number[]>([])
+
+function isExpanded(id: number): boolean {
+  return expandedIds.value.includes(id)
+}
+
+function toggleExpand(id: number): void {
+  const index = expandedIds.value.indexOf(id)
+  if (index >= 0) expandedIds.value.splice(index, 1)
+  else expandedIds.value.push(id)
+}
 
 function isCancelled(error: unknown): boolean {
   return error === 'cancel' || error === 'close'
@@ -201,30 +257,78 @@ onMounted(load)
     <el-segmented v-model="activeTab" :options="[{ label: '发布审批', value: 'approvals' }, { label: '发布与回滚', value: 'releases' }]" />
 
     <section v-if="activeTab === 'approvals'" class="data-section">
-      <el-table v-loading="loading" :data="approvals" stripe empty-text="暂无发布审批">
-        <el-table-column prop="id" label="审批" width="90"><template #default="{ row }">#{{ row.id }}</template></el-table-column>
-        <el-table-column label="Agent" min-width="190">
-          <template #default="{ row }"><b>{{ row.agent?.name || '-' }}</b><div class="subtle"><code>{{ row.agent?.code }}</code></div></template>
-        </el-table-column>
-        <el-table-column label="版本" width="100"><template #default="{ row }">v{{ row.version?.version_number || '-' }}</template></el-table-column>
-        <el-table-column label="Skill" width="90"><template #default="{ row }">{{ row.dependencies.length }}</template></el-table-column>
-        <el-table-column label="新增调用" width="110"><template #default="{ row }">+{{ row.estimated_calls_per_chunk }}/分片</template></el-table-column>
-        <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag type="warning" effect="plain">{{ row.risk.level }}</el-tag></template></el-table-column>
-        <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag :type="row.status === 'pending' ? 'warning' : row.status === 'approved' ? 'success' : 'info'" effect="plain">{{ row.status }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="110" fixed="right"><template #default="{ row }"><el-button text type="primary" @click="openDetail(row)">查看</el-button></template></el-table-column>
-      </el-table>
+      <div v-loading="loading" class="approval-cards" role="list" data-testid="approval-cards">
+        <EmptyState v-if="!approvals.length" description="暂无发布审批" />
+        <article
+          v-for="row in approvals"
+          :key="row.id"
+          class="approval-card"
+          :data-status="row.status"
+          role="listitem"
+          @click="openDetail(row)"
+        >
+          <span class="rc-band" :data-status="row.status" aria-hidden="true"></span>
+          <div class="rc-main">
+            <div class="rc-line1">
+              <span class="rc-id font-mono">#{{ row.id }}</span>
+              <b class="rc-name" :title="row.agent?.name || ''">{{ row.agent?.name || '-' }}</b>
+              <el-tag size="small" type="info" effect="plain">v{{ row.version?.version_number || '-' }}</el-tag>
+              <el-tag size="small" type="warning" effect="plain">{{ riskLabel(row.risk.level) }}</el-tag>
+              <el-tag size="small" :type="approvalStatusType(row.status)" effect="plain">{{ approvalStatusLabel(row.status) }}</el-tag>
+            </div>
+            <div class="rc-line2 font-mono">
+              <span class="rc-code">{{ row.agent?.code || '—' }}</span>
+            </div>
+            <div class="rc-note" @click.stop>
+              <span class="rc-note-label">提交说明</span>
+              <span class="rc-note-text" :class="{ 'is-expanded': isExpanded(row.id) }" :title="row.title">{{ row.title || '（未填写提交说明）' }}</span>
+              <el-button v-if="(row.title || '').length > 42" link size="small" class="rc-note-toggle" @click="toggleExpand(row.id)">{{ isExpanded(row.id) ? '收起' : '展开' }}</el-button>
+            </div>
+          </div>
+          <div class="rc-metrics" :title="`精确依赖 ${row.dependencies.length} 项，新增调用约 ${row.estimated_calls_per_chunk} 次/代码分片，能力申请见审批抽屉`">
+            <div class="rc-metric" data-testid="approval-metric-skills">
+              <b>{{ row.dependencies.length }}</b>
+              <small>Skill 依赖</small>
+            </div>
+            <div class="rc-metric" data-testid="approval-metric-calls">
+              <b>+{{ row.estimated_calls_per_chunk }}</b>
+              <small>新增调用/分片</small>
+            </div>
+          </div>
+          <div class="rc-actions" @click.stop>
+            <template v-if="row.status === 'pending'">
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                :loading="actionKey === `decision-${row.id}`"
+                :disabled="actionBusy && actionKey !== `decision-${row.id}`"
+                @click="decide(row, false)"
+              >驳回</el-button>
+              <el-button
+                size="small"
+                type="primary"
+                :loading="actionKey === `decision-${row.id}`"
+                :disabled="actionBusy && actionKey !== `decision-${row.id}`"
+                @click="decide(row, true)"
+              >批准</el-button>
+            </template>
+            <el-button text type="primary" size="small" @click="openDetail(row)">查看</el-button>
+          </div>
+        </article>
+      </div>
     </section>
 
     <section v-else class="release-list" v-loading="loading">
       <article v-for="item in agents" :key="item.agent.id" class="release-row">
         <div class="release-agent">
           <b>{{ item.agent.name }}</b><code>{{ item.agent.code }}</code>
-          <el-tag size="small" effect="plain">{{ item.agent.status }}</el-tag>
+          <el-tag size="small" effect="plain">{{ assetStatusLabel(item.agent.status) }}</el-tag>
         </div>
         <div class="release-versions">
           <button v-for="release in item.releases" :key="release.id" type="button" class="release-chip" :disabled="actionBusy" @click="rollback(item, release.id)">
             <span>#{{ release.id }} · vID {{ release.agent_version_id }}</span>
-            <small>{{ release.status }}</small>
+            <small>{{ assetStatusLabel(release.status) }}</small>
           </button>
         </div>
         <el-button v-if="item.agent.is_enabled" type="danger" plain :icon="SwitchButton" :loading="actionKey === `disable-${item.agent.id}`" :disabled="actionBusy && actionKey !== `disable-${item.agent.id}`" @click="disableAgent(item)">停用</el-button>
@@ -292,7 +396,45 @@ onMounted(load)
 .page-header h2 { margin: 0; font-size: 24px; }
 .page-header p { margin: 6px 0 0; color: var(--gray-500); }
 .data-section { border-top: 1px solid var(--gray-200); background: #fff; }
-.subtle { color: var(--gray-500); font-size: 12px; margin-top: 3px; }
+
+/* ── 审批卡片列表(替代表格:Agent+版本+风险为主行,指标右置,提交说明次行可展开) ── */
+.approval-cards { display: grid; gap: 10px; min-height: 96px; }
+.approval-card {
+  position: relative; display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 16px; align-items: center;
+  padding: 13px 16px 13px 12px; border-radius: 12px;
+  background: #fff; border: 1px solid var(--gray-100, #eef0f4);
+  cursor: pointer; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.approval-card:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
+  border-color: var(--brand-300, #a8c4fa);
+}
+.rc-band { width: 4px; height: 40px; border-radius: 999px; }
+.rc-band[data-status='pending'] { background: #d9a857; }
+.rc-band[data-status='approved'] { background: #40a35f; }
+.rc-band[data-status='rejected'] { background: var(--gray-300, #cfd4dc); }
+.rc-main { display: grid; gap: 5px; min-width: 0; }
+.rc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rc-id { font-size: 12px; color: var(--gray-500); }
+.rc-name { font-size: 13.5px; font-weight: 600; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
+.rc-code { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-note { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rc-note-label { flex: none; font-size: 11px; color: var(--gray-400); }
+.rc-note-text { min-width: 0; max-width: 560px; font-size: 12px; color: var(--gray-500); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-note-text.is-expanded { white-space: normal; overflow: visible; }
+.rc-metrics { display: flex; gap: 20px; }
+.rc-metric { display: grid; justify-items: center; gap: 2px; min-width: 62px; text-align: center; }
+.rc-metric b { font-size: 15px; font-weight: 700; }
+.rc-metric small { font-size: 11px; color: var(--gray-500); }
+.rc-actions { display: flex; gap: 4px; align-items: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .approval-card { transition: none; }
+}
 .release-list { display: grid; border-top: 1px solid var(--gray-200); }
 .release-row { min-height: 86px; display: grid; grid-template-columns: 210px 1fr auto; align-items: center; gap: 18px; padding: 14px 0; border-bottom: 1px solid var(--gray-200); }
 .release-agent { display: grid; gap: 3px; justify-items: start; }
@@ -317,6 +459,11 @@ onMounted(load)
 .model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 760px) {
   .page-header { flex-direction: column; }
+  .approval-card { grid-template-columns: auto minmax(0, 1fr); gap: 10px 12px; }
+  .rc-metrics { grid-column: 2; justify-content: flex-start; }
+  .rc-actions { grid-column: 1 / -1; justify-content: flex-end; flex-wrap: wrap; }
+  .rc-name { max-width: 46vw; }
+  .rc-note-text { max-width: 60vw; }
   .release-row { grid-template-columns: 1fr; }
   .model-grid { grid-template-columns: 1fr; }
   .diff-comparison { grid-template-columns: 1fr; }

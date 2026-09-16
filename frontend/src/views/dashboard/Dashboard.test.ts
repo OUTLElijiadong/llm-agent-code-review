@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getIssueTypeStatistics: vi.fn(),
   getScoreTrend: vi.fn(),
   getReviewFrequency: vi.fn(),
+  getRunning: vi.fn(),
   push: vi.fn(),
   message: { warning: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }))
@@ -32,6 +33,7 @@ function summary(overrides: Partial<SummaryOut> = {}): SummaryOut {
     project_count: 3,
     file_count: 12,
     review_count: 4,
+    code_review_count: 4,
     total_issues: 9,
     severe_issues: 2,
     avg_score: 81,
@@ -92,6 +94,7 @@ beforeEach(() => {
   mocks.getIssueTypeStatistics.mockResolvedValue([])
   mocks.getScoreTrend.mockResolvedValue([])
   mocks.getReviewFrequency.mockResolvedValue([])
+  mocks.getRunning.mockResolvedValue({ reviews: [], agents: [] })
 })
 
 afterEach(() => { wrappers.splice(0).forEach((wrapper) => wrapper.unmount()) })
@@ -149,17 +152,17 @@ describe('成员仪表盘真实读取状态', () => {
 
   it('真实全零保留零值，没有已完成审查时不判为风险或零分', async () => {
     mocks.getSummary.mockResolvedValue(summary({
-      project_count: 0, file_count: 0, review_count: 0, total_issues: 0, severe_issues: 0, avg_score: 0,
+      project_count: 0, file_count: 0, review_count: 0, code_review_count: 0, total_issues: 0, severe_issues: 0, avg_score: 0,
     }))
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.findAll('.stat-num').map((item) => item.text())).toEqual(['0次', '0个', '0个', '—/100', '0个', '0份'])
     expect(wrapper.find('.stat-gauge').exists()).toBe(false)
-    expect(wrapper.text()).toContain('暂无已完成审查')
+    expect(wrapper.text()).toContain('暂无代码评分样本')
   })
 
   it('已有成功审查的真实零分不被当成未知', async () => {
-    mocks.getSummary.mockResolvedValue(summary({ review_count: 1, avg_score: 0 }))
+    mocks.getSummary.mockResolvedValue(summary({ review_count: 1, code_review_count: 1, avg_score: 0 }))
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.findAll('.stat-num')[3].text()).toBe('0.0/100')
@@ -336,6 +339,26 @@ describe('成员仪表盘真实读取状态', () => {
     expect(wrapper.get('[data-testid="export-dashboard"]').attributes('disabled')).toBeUndefined()
   })
 
+  it('窗口全零但累计有数据时提示口径并可一键切换累计', async () => {
+    mocks.getRiskDistribution.mockResolvedValue(['严重', '高', '中', '低'].map((severity) => ({ severity, count: 0 })))
+    const wrapper = mountPage()
+    await flushPromises()
+    const risk = section(wrapper, 'risk')
+    expect(risk.text()).toContain('近 30 天暂无严重度数据')
+    expect(risk.get('[data-testid="risk-cumulative-hint"]').text()).toContain('9')
+    expect(mocks.getRiskDistribution).toHaveBeenCalledWith(30)
+
+    mocks.getRiskDistribution.mockResolvedValue([
+      { severity: '严重', count: 5 }, { severity: '高', count: 3 },
+      { severity: '中', count: 2 }, { severity: '低', count: 1 },
+    ])
+    await risk.get('[data-testid="risk-cumulative-hint"] button').trigger('click')
+    await flushPromises()
+    expect(mocks.getRiskDistribution).toHaveBeenLastCalledWith(0)
+    expect(section(wrapper, 'risk').find('.chart-output').exists()).toBe(true)
+    expect(section(wrapper, 'risk').text()).toContain('累计的问题分布')
+  })
+
   it.each([
     ['risk', null], ['risk', [null]], ['risk', [{ severity: '严重', count: -1 }]],
     ['risk', [{ severity: null, count: 1 }]], ['risk', [{ severity: '严重', count: Infinity }]],
@@ -453,5 +476,131 @@ describe('成员仪表盘真实读取状态', () => {
     expect(controller.summaryState).toBe('loading')
     expect(controller.chartStates.risk).toBe('loading')
     expect(removeListener).toHaveBeenCalledWith('prism:agent-task-complete', expect.any(Function))
+  })
+})
+
+
+describe('后台进度读取与恢复', () => {
+  const activeReview = { id: 8, task_name: '正在审查', project_id: 2, project_name: '可见项目', review_type: 'standard', status: 'running', processed_files: 2, total_files: 5 }
+
+  it('首屏实际请求后台进度并显示真实完成文件比例', async () => {
+    mocks.getRunning.mockResolvedValue({ reviews: [activeReview], agents: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(mocks.getRunning).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="running-panel"]').text()).toContain('40%')
+  })
+
+  it('进度读取失败有独立重试且不伪装没有后台任务', async () => {
+    mocks.getRunning.mockRejectedValueOnce(new Error('unavailable'))
+    const wrapper = mountPage()
+    await flushPromises()
+    const panel = wrapper.get('[data-testid="running-panel"]')
+    expect(panel.text()).toContain('后台进度读取失败')
+    await panel.get('button').trigger('click')
+    await flushPromises()
+    expect(mocks.getRunning).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="running-panel"]').exists()).toBe(false)
+  })
+
+  it('卸载后停止轮询，迟到响应不得重新启动轮询', async () => {
+    vi.useFakeTimers()
+    const response = deferred<{ reviews: typeof activeReview[]; agents: [] }>()
+    mocks.getRunning.mockReturnValueOnce(response.promise)
+    const wrapper = mountPage()
+    await flushPromises()
+    wrapper.unmount()
+    response.resolve({ reviews: [activeReview], agents: [] })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(mocks.getRunning).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('进行中刷新失败保留已确认进度并标为未更新', async () => {
+    vi.useFakeTimers()
+    mocks.getRunning.mockResolvedValueOnce({ reviews: [activeReview], agents: [] }).mockRejectedValue(new Error('offline'))
+    const wrapper = mountPage()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    const panel = wrapper.get('[data-testid="running-panel"]')
+    expect(panel.text()).toContain('40%')
+    expect(panel.text()).toContain('后台进度读取失败')
+    expect(panel.text()).toContain('上次读取结果')
+    vi.useRealTimers()
+  })
+
+  it('纯空态仍定期重新发现其它页面启动的任务，避免永远隐藏', async () => {
+    vi.useFakeTimers()
+    mocks.getRunning.mockResolvedValueOnce({ reviews: [], agents: [] }).mockResolvedValue({ reviews: [activeReview], agents: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(30000)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="running-panel"]').text()).toContain('40%')
+    vi.useRealTimers()
+  })
+
+  it('非法进度载荷作为错误反馈而不崩溃或展示负进度', async () => {
+    mocks.getRunning.mockResolvedValue({ reviews: [{ ...activeReview, processed_files: -2 }], agents: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="running-panel"]').text()).toContain('后台进度读取失败')
+  })
+})
+
+
+describe('工作台补充失败边界', () => {
+  it('同步抛错后仍允许重试，不能被已结束的请求引用锁死', async () => {
+    mocks.getRunning.mockImplementationOnce(() => { throw new Error('sync failure') })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="running-panel"] button').trigger('click')
+    await flushPromises()
+    expect(mocks.getRunning).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="running-panel"]').exists()).toBe(false)
+  })
+  it('累计趋势实际请求累计，并保留跨年日期信息', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    mocks.getReviewFrequency.mockResolvedValue([{ date: '2025-09-01', count: 1 }, { date: '2026-09-01', count: 2 }])
+    await changeRange(wrapper, 0)
+    await flushPromises()
+    expect(mocks.getReviewFrequency).toHaveBeenLastCalledWith(0)
+    const option = JSON.parse(section(wrapper, 'frequency').get('.chart-output').text())
+    expect(option.xAxis.data).toEqual(['2025/9/1', '2026/9/1'])
+  })
+  it('严重度计数不依赖画布悬浮提示而可以直接阅读', async () => {
+    mocks.getRiskDistribution.mockResolvedValue([{ severity: '严重', count: 3 }, { severity: '未分级', count: 4 }])
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(section(wrapper, 'risk').get('.severity-values').text()).toContain('危急3')
+    expect(section(wrapper, 'risk').get('.severity-values').text()).toContain('未分级4')
+  })
+})
+
+describe('代码评分样本口径', () => {
+  it('只有沙箱成功记录时不把测试100分显示成代码评分', async () => {
+    mocks.getSummary.mockResolvedValue({ ...summary(), review_count: 1, code_review_count: 0, avg_score: 0,
+      recent_tasks: [{ id: 1, task_name: '沙箱执行', project_id: 1, project_name: '项目', status: 'success',
+        review_type: 'sandbox_test', score: 100, create_time: null }] })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.findAll('.stat-num')[3].text()).toBe('—/100')
+    expect(wrapper.find('.stat-gauge').exists()).toBe(false)
+    expect(wrapper.text()).toContain('测试评分')
+    expect(wrapper.text()).toContain('暂无代码评分样本')
+  })
+
+  it('缺失样本数或空分数不冒充有效代码评分', async () => {
+    const legacy = { ...summary(), code_review_count: undefined, recent_tasks: [{ id: 1, task_name: '旧任务', project_id: 1, project_name: '项目',
+      status: 'success', score: null, create_time: null }] }
+    mocks.getSummary.mockResolvedValue(legacy)
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.findAll('.stat-num')[3].text()).toBe('—/100')
+    expect(wrapper.text()).toContain('历史评分')
+    expect(wrapper.text()).toContain('未提供')
   })
 })

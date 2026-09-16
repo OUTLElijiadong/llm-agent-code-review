@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/Prism-production-ux-20260912/backend
+configfile: pyproject.toml
+plugins: anyio-4.12.1, cov-5.0.0, asyncio-0.26.0
+asyncio: mode=auto, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 9 items
+
+tests/test_security_catalog_current.py .........                         [100%]
+
+============================== 9 passed in 0.40s ===============================

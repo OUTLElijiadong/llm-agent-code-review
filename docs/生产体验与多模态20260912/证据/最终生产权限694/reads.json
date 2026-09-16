@@ -1,0 +1,1568 @@
+{
+  "status": "passed",
+  "base_url": "https://lijiadong.cn",
+  "marker": "20260908",
+  "phase": "existing_read_isolation",
+  "started_at": "2026-09-12T16:20:47.622843+00:00",
+  "requests": [
+    {
+      "account": "owner_a",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-1f4035c725a941a6a18124b35e3c09f7",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 497,
+      "response_sha256": "63ec055d28c74ae83403448a7c25b8165179376bed36f5286f48919da963f410",
+      "response_request_id": "35cf76f795cddcd83c830d80be60782d",
+      "elapsed_ms": 321
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/rbac/users/107/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-fde483743b774fdbbcd8e37154d6b9e4",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "eeed3248b23e16a61ed3a57b05694fb30bbb8299b81cc01f6a793e96a7248d1d",
+      "response_request_id": "1b31cc1b1686fa91ec42884149e2eab6",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/rbac/users/107/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-c381352b668e41e9bcc22f53af8ca07e",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "031b4c2f0d1c67b51676f18e3737ce3e",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "member_a",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-f997dd50f931419baa05d47e29983f0c",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 499,
+      "response_sha256": "d44d119ed62deb0a7bf18a09029353e89b86995db7c7a569d84d01851ea67ac1",
+      "response_request_id": "70cafc46626459dda9c57ed0a57866c6",
+      "elapsed_ms": 315
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/rbac/users/108/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-ca25ffadb12644a9bf10f2b3c5d934b3",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "eeed3248b23e16a61ed3a57b05694fb30bbb8299b81cc01f6a793e96a7248d1d",
+      "response_request_id": "eac51e89fce4a5d1a58fed93c8d0345c",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/rbac/users/108/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-e2db9f8b258b4ee3b2097b4c72eaa8ef",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "5ac6fe9ef453f79018edc2beeca675b0",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "owner_b",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-0b688e6a0451413a908fc0bd0b63771f",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 497,
+      "response_sha256": "b90c7ede3b57dbfd521f6da877c047bbd25b89b6650eb13bc1b305a602523dc0",
+      "response_request_id": "9300f92791e3ffc7a36d0ba72b349cb5",
+      "elapsed_ms": 318
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/rbac/users/109/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-a0a1a349831748d49a3225300e3aea9a",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 353,
+      "response_sha256": "eeed3248b23e16a61ed3a57b05694fb30bbb8299b81cc01f6a793e96a7248d1d",
+      "response_request_id": "a7b9c797c7aa682cbef58c39b94f1a78",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/rbac/users/109/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-148ea4747e734ffda253b3fc3dee6c9f",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 349,
+      "response_sha256": "8e3c55aca6862782662d93b9ff472caaf1daf4bb3d69bf3fd40cd2fdc070f1dc",
+      "response_request_id": "5395e2e913e86b166a4f7d062c454bac",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "expected": 200,
+      "purpose": "专用账号真实登录",
+      "request_id": "qa-119e4580d0ad41cf8e87f7b4726d9ee1",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 509,
+      "response_sha256": "bed5a95faa5bd338679b2abf40b9403ce46c120adf035ce59e17bb0ffd91709c",
+      "response_request_id": "af0625f56c909448e207357db9c0cfee",
+      "elapsed_ms": 320
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/110/roles",
+      "expected": 200,
+      "purpose": "自身真实角色",
+      "request_id": "qa-e21771a28de640eca7c9f1dd5ca18f42",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 35,
+      "response_sha256": "f139e4295f71dc13b09f52f38526a00e06b1f5ddcc7cbe39c3ff4f314ddb9a24",
+      "response_request_id": "2fe0f3dd402bbacd36dea23e5fd0770d",
+      "elapsed_ms": 24
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/rbac/users/110/permissions",
+      "expected": 200,
+      "purpose": "自身真实权限",
+      "request_id": "qa-c926f84209d14603b2206e9f0da1a9c1",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 35,
+      "response_sha256": "f139e4295f71dc13b09f52f38526a00e06b1f5ddcc7cbe39c3ff4f314ddb9a24",
+      "response_request_id": "d0ce93c00ddcad0594a9f07f864db344",
+      "elapsed_ms": 24
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects",
+      "expected": 200,
+      "purpose": "项目列表精确隔离",
+      "request_id": "qa-3fbb07d4ccb046cbae0b5e1a2411ec2a",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 520,
+      "response_sha256": "1fc502c4265314424f3e13895d805b2ccccc53668869b9fe7cf398e8be87affe",
+      "response_request_id": "a03e9d72eae92b6c8bfafdceb8b5158e",
+      "elapsed_ms": 121
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/164",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-01100cb384674698b6e455f97f7d4439",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 479,
+      "response_sha256": "8423fb264d58d726ae68e8326772769207d387fa8783a98b8490c920b2ca8bb0",
+      "response_request_id": "ae78f063e8ea2774a4d58c53961bcb75",
+      "elapsed_ms": 65
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/164/members",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-26e68ae6640b4839b729b6572aaf7344",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 419,
+      "response_sha256": "f6a0759a1bdba657b8b94b243e0f558531e9e17cd2232cf843ae6337a8b18bcb",
+      "response_request_id": "e3d458f9758ad8d19a11ce9c9525df38",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files?project_id=164",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-6112d679af21420dac8f1672c15a1393",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 397,
+      "response_sha256": "2ae42012786c8ee21995ee79d55806a24d65035eafcbcccaafd83ad19e0655c2",
+      "response_request_id": "035ab1dffac544139cbb8c6a9f20eab1",
+      "elapsed_ms": 37
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1894",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-785a3df20f3d4d1794eeda4fa54d3948",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 411,
+      "response_sha256": "7b82958c24ac96d6474d8d685b0d5e8322d22860c5c1088d3ab6cbe969aacadd",
+      "response_request_id": "35bd55c65c953bcdbbd7b1f1fbec2410",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1894/meta",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-ea9d59bc436f427ab179086740ca4c86",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 440,
+      "response_sha256": "08bb5a05a499118c1e10dbe02d617be90f9979d63041d098771f049aaf180851",
+      "response_request_id": "adcd4cfdf71c3a00333d4a70328f9228",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1894/versions",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-b72a82ab24a34896be27e0e6e6b8d3ce",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 295,
+      "response_sha256": "a7deff20e1308b69c05ac6d4551f1eb389a8b17e4ef8b6078feab62c7d1e26a7",
+      "response_request_id": "0985b52fdec95e10cd47dc3da69d9360",
+      "elapsed_ms": 45
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/review/tasks?project_id=164",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-1c06be3fdeb544dd851740950b7fb18d",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "23fdcdcfc51af74f0cfcd271b3e4a705",
+      "elapsed_ms": 34
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/issues?project_id=164",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-ecfd2190b17447f2973dd2df117c3030",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "ca7e027fed78399941b62817ceb6baf9",
+      "elapsed_ms": 63
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/reports?project_id=164",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-38b63451661f43ae98aa76559cc7ee59",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "692d50626dc667540dba3f52fbc772bd",
+      "elapsed_ms": 207
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/projects",
+      "expected": 200,
+      "purpose": "项目列表精确隔离",
+      "request_id": "qa-0e8c5da9a6354dacb67cdec9c91add9b",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 522,
+      "response_sha256": "e38d980ab4b84b2aae083e2b87344ad0c37033c3330198e7846d3564acfc60e6",
+      "response_request_id": "d5d72ecd4a3e1f1c0e6136f7149ea788",
+      "elapsed_ms": 35
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/projects/164",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-ee8f30cd6b494497b5aa34297f1e0664",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 481,
+      "response_sha256": "793a0a20589a590fedb7fbaad9fcb83df16e49f69c180fb4e955714570ba0210",
+      "response_request_id": "022e2ab7a729c1877988ba18d13deee6",
+      "elapsed_ms": 50
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/projects/164/members",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-a81378015c3e41949d67594e53202605",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 419,
+      "response_sha256": "f6a0759a1bdba657b8b94b243e0f558531e9e17cd2232cf843ae6337a8b18bcb",
+      "response_request_id": "ce7c342ca5bddf65d2ac2e69b8229310",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files?project_id=164",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-4b0f659341534737a774270588c893fd",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 397,
+      "response_sha256": "2ae42012786c8ee21995ee79d55806a24d65035eafcbcccaafd83ad19e0655c2",
+      "response_request_id": "0b2189565e4cd9780022cfec6d1b1752",
+      "elapsed_ms": 30
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files/1894",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-a4eb8db42e464286a1c20ccfc39e3453",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 411,
+      "response_sha256": "7b82958c24ac96d6474d8d685b0d5e8322d22860c5c1088d3ab6cbe969aacadd",
+      "response_request_id": "b67bfacb722c40b4266a1effa904d972",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files/1894/meta",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-88473422f26541b2a4880b64d3207bf8",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 440,
+      "response_sha256": "08bb5a05a499118c1e10dbe02d617be90f9979d63041d098771f049aaf180851",
+      "response_request_id": "6f27f419094e73bd1905d1b270a0fd15",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files/1894/versions",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-0074656153ef4315a0eda99ff51413df",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 295,
+      "response_sha256": "a7deff20e1308b69c05ac6d4551f1eb389a8b17e4ef8b6078feab62c7d1e26a7",
+      "response_request_id": "264864478ea01304b007d3262afbfbdd",
+      "elapsed_ms": 34
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/review/tasks?project_id=164",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-6cc0a46408d04ca8b297947a10fe7009",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "b78f5a9987cd783e4058213469f7fbf8",
+      "elapsed_ms": 31
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/issues?project_id=164",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-68d616c1e5984e04b2f84aa9908b0ab5",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "9daa21f62b7a90f05ce14cfedcfb3242",
+      "elapsed_ms": 36
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/reports?project_id=164",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-92983777d9d549e38a7901329f179e0b",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "e7341a3d7dae16c88e53b07c64dbfb42",
+      "elapsed_ms": 30
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects",
+      "expected": 200,
+      "purpose": "项目列表精确隔离",
+      "request_id": "qa-8c28303e1bfe47c1885cf72eb0b9f6f1",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 523,
+      "response_sha256": "efe8f82c52649096cb295a2a8b7eee9afbcab524b359365d0bcf104c5d080e06",
+      "response_request_id": "9541cbdea8e5d1c0b1f32c86d5b6fbaf",
+      "elapsed_ms": 33
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects/165",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-f2dc59e75e4747e39cb155c6c00d22c6",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 482,
+      "response_sha256": "96d28220f351e756ed0e104988630853ae285344044875ca69c6c96fc5f75c09",
+      "response_request_id": "931fbbfb812d09a88da1b6969bc17845",
+      "elapsed_ms": 33
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects/165/members",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-c56399f3815240fc81c2864e0f370cd4",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 224,
+      "response_sha256": "73e7c14627bb983d622f152541502e7ddf23e17726e953dabb173063e59c1eef",
+      "response_request_id": "e1096e5243ccd839e946fb642d59a5ab",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files?project_id=165",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-7b1c810631f44dabbc40939918adb28d",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 400,
+      "response_sha256": "aa7d05ebff695ac144b432d9d6028803427a8429a6a4926a0a594f86a51bd050",
+      "response_request_id": "1ae6f1f6e0bfd4b974195e9e140b9c93",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1895",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-af817cebbbdf4c169f25d18edcf84b7c",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 441,
+      "response_sha256": "cb83a04a86513ad3515742f2e3874244605e839c19fbb4002d65ea3ac1b3b87e",
+      "response_request_id": "89bdce92783f4ad4808167fe1325704b",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1895/meta",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-a683175dc5674e71b22861f31ade2457",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 443,
+      "response_sha256": "f01bf20aca346dded35fcf18e955bb67fbb38378def6f778ea721a0213d00baa",
+      "response_request_id": "cf271a55110c16e3495aa7a45c4bf324",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1895/versions",
+      "expected": 200,
+      "purpose": "既有资源正向读取",
+      "request_id": "qa-af83f430ee574b4c9503dc7d4459f468",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 188,
+      "response_sha256": "b84bca227ebb68cad4544e0217da4900ab6a8f6d6fa466549d3d3be9202c43f1",
+      "response_request_id": "47ef6b270cf4bedf0a1f9a9cfe0f8532",
+      "elapsed_ms": 34
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/review/tasks?project_id=165",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-44ffd7a59dbc414ab71a573e82fc5b72",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "56ed7c37954eff72b2daee9bd88d567d",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/issues?project_id=165",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-7fbb7971e6f442caa651ea56c7ebe4fc",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "2acc4b1a627bd3bcb54a46c945853149",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/reports?project_id=165",
+      "expected": 200,
+      "purpose": "QA空业务列表",
+      "request_id": "qa-5a3974c5eec44ce6ab81cc23df52663a",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 89,
+      "response_sha256": "76a059ce9ed20361296089f1808d0129631890ad050fb97a4fded9855b156ff4",
+      "response_request_id": "02e364dfa37ac68127ddec3750693c57",
+      "elapsed_ms": 33
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/165",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-9d7ba33e4f6549248a09ef81b8c984d3",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "38f180f9dee2fb10f38c75e26630bdfce66aafb8fb16a3c25a18f9c5d709c718",
+      "response_request_id": "b59a89ffac2e75306e25a5cb79f31200",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/165/members",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-ef249ace618e4f22bde643f50fe9c38a",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "05fc839cb1753fd51c07b76ba4525df764ef52ee0c4d7aa642ef08e58a654611",
+      "response_request_id": "4704ffb7b066dbc0e5a4daacb4e229b6",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files?project_id=165",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-a7b03c9428e8487294aa518017c0244d",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "bbdee919bfa34b0352a53073b876fcc249545ce5d385e8b4205c806249c73bfd",
+      "response_request_id": "7d92adf85710e7824dd32583e54710d6",
+      "elapsed_ms": 40
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1895",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-de5d031693f54d66a6eebb9abd1d1eb8",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "0dee9a38550e361f71130fb8567d5043deab704a6092df8a9f7428b2c9399940",
+      "response_request_id": "13f740b323e9ebafc6a18808eb07e8a0",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1895/meta",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-f14fc5894e26445bbdd535c059ac01e3",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "2b58a07a268a6ebd489dee2614c85ee08f6ebf5834e2c0c63166cbd7e37c03ed",
+      "response_request_id": "0774ee1ccd1999a651a91c43bf832163",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1895/versions",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-7e019e240e73455abfc4dfae9e2b1edc",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "8d9fbc97fbae3ee7614d1c2b28b9e7d44bd2b048872e68043e6881e27a7bf2a7",
+      "response_request_id": "125bef6c2d05de4747000ab5fdf3628d",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/projects/165",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-d0be40bae9fc4918b6c1fd464365deac",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "38eb60e154a522a2b31338674b1cafa07e5237cf328583b28dce34bc30a7b6ce",
+      "response_request_id": "1d01c53b3d03541724ee2e93f7e9c7c1",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/projects/165/members",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-1c208791dacc4f7982b7cc0fb226d54d",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "871b0c959c5d5f07223c7e2aec3b6b07c98e4e392efde1f7ac710a336ab9bf2c",
+      "response_request_id": "a644275ab823570f81d2318861c33db9",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files?project_id=165",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-4ce341fee44d4b63b5b7002cee323403",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "7a07cb991b5c4c348ddc82964933ece495e48655dbab07a6c62ae5acc39d9dca",
+      "response_request_id": "e029cc9e9e40af3fb54b0759cee7fb7b",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files/1895",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-f3878b1d821748df9b0524aad6b6048c",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "2067b15e9b29c13bc9cf900a77e71918f35aec75290c91d4d1fc2a35bfe11cc2",
+      "response_request_id": "15ec47fc0cf373b235945983a92e5f5f",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files/1895/meta",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-50340409047c405ab11c55ca787a3518",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "c18297b142cf8ea9497412370ae2e520b645d00fa9d432f201fb6420422c9133",
+      "response_request_id": "835032055eceb66c7216cc79de69ffa0",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "member_a",
+      "method": "GET",
+      "path": "/api/code-files/1895/versions",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-b06a642e16854f289441dfddc24fcd7b",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "fefba3cf54a40e3e418545f4cd880423383157a3e51f627767a226af723e0155",
+      "response_request_id": "e4666d9ceebf5ee40b65aa2b4b133212",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects/164",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-e558689069944151901ff564131b6ec8",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "b20eb67b48f4e5e7a315fc071a7c4d129d0bba76f972b9f92ad8b362405adec9",
+      "response_request_id": "ed008d3db744c3b6c4c54c9533077ad4",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects/164/members",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-e6ec23c4488d4572abf9d7460abc2eba",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "e1f315abc0235b2a2676c07484287dc128da9eb32c728e9995809b2ed5e81f3d",
+      "response_request_id": "3d823f265c77bd643bca8bfa1dec2e50",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files?project_id=164",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-fae62438a100482084717ebcdba5dbb9",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "03e6385925eb9ef6ba7dfd9c7c86fdaa762f340e37ab9c7c3736e48eebd4a770",
+      "response_request_id": "1b237ef5bed091936ad5da77ee76e538",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1894",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-c68ea0deb529403fa517a431ecdac1a4",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "96a4eb7cb404d43f50ba041923ec6b58efd926ea8a516598387c3baf50d2f4aa",
+      "response_request_id": "84250b11f3bb45dc1812b3d7be605c54",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1894/meta",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-f9fc1a9ec8f54584954c13ac7e2130ba",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "7a8d5253095e45f763e4a8181e44e5a5c555ef06e06bf666d5c4eb812403ace0",
+      "response_request_id": "74c476c908d98bbb0946b901900b8ddb",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1894/versions",
+      "expected": 404,
+      "purpose": "跨项目真实资源不可枚举",
+      "request_id": "qa-ae6f24ed390e4f85824317701446ea55",
+      "status": "passed",
+      "actual": 404,
+      "response_bytes": 155,
+      "response_sha256": "efc8899220f4ec3be4a17eaff7353ac2d986750484ce1bfd101a9a820ab1feac",
+      "response_request_id": "fb5b3d154f809cf145734a120793dac2",
+      "elapsed_ms": 28
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/code-files/1894",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-ee50fbea2e3b4b64aef1320d3268be47",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 173,
+      "response_sha256": "fe531aa310fc601cff1184b0311d1aaa48bde598c8fa64daf489c367bfb30aab",
+      "response_request_id": "2a6bc8df21c6f5feac1f9ca10e0b770a",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/code-files/1894/meta",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-693e5e414caf45c083f7f4e8f03ce999",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 173,
+      "response_sha256": "76c7f91e09d3d18ebc0f9a4a7e74a89cae4d95766f6255fb23b04fefdf504c43",
+      "response_request_id": "1883de47ad2371eaa8b3cfb69737f4ef",
+      "elapsed_ms": 27
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/code-files/1894/versions",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-cb69c6b924ea42afab2b97dc0814e4f6",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 173,
+      "response_sha256": "a9e4a5194036180dc2a6a4e6e43854e892bdd71c174ea99a36c4624c88e76175",
+      "response_request_id": "0307ac9ef6abcd210bd08fa830d6ad35",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/code-files/1895",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-7d13264db7ca49c4bd8cbed95936c1d2",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 173,
+      "response_sha256": "41c609870e8df27eda84475d0a9d03e5ecbe555c1bcdb6ffeb7ea26309f20ac0",
+      "response_request_id": "938e4aa90c88e8a946860e3ff949f2b2",
+      "elapsed_ms": 24
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/code-files/1895/meta",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-a33fe930136a4acea34d4b333655a48b",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 173,
+      "response_sha256": "e510c00d47dba11773aba0eec44bef6038dc0fbe2e02b1f4dea6202774a8daf4",
+      "response_request_id": "f944a5cb3355e3564eb3dda38c9907e3",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/code-files/1895/versions",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-3e0cc4facc754e7f938ce9c01b1404a9",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 173,
+      "response_sha256": "81a6c8680ad3859efcd3dd89c032d71222fdbefad3c4e2129ae8dcedc5d6d888",
+      "response_request_id": "c7fcf0ad34cbd515adb4686fff47c939",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/code-files?project_id=164",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-7f4192d654524190a4786d5a005c1395",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 173,
+      "response_sha256": "73e654a9bd2856a1f6b5040a8b3d5506df847556ba6be044d125599fe3a183a4",
+      "response_request_id": "4bc482295ae2099156a285ca4255d7f6",
+      "elapsed_ms": 24
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/code-files?project_id=165",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-fd88ec0df8c64bc9b2307f15a201c90d",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 173,
+      "response_sha256": "74089ece3f45a869bf78dae9ab96ac7646e64e0c26408b87be6d4139c6d0f889",
+      "response_request_id": "6ef3987a66aec4cb4db307d4cfad9bdd",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/issues?project_id=164",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-ec39b429181346b486c76755154022ef",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 174,
+      "response_sha256": "788afdf9a0bf0ad0bb8fb8d459fc2455e66f2a8d278924a41134cedcac2ae7e4",
+      "response_request_id": "dc36b596b917b80fba8cd704a63412ab",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/issues?project_id=165",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-57cf12c5089540549c8b73b8e2b1e2e1",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 174,
+      "response_sha256": "7262fdeff2b93ceb259651c0b94c0631cba641653241e30474544fa12c880b74",
+      "response_request_id": "358a4868b1b655d2c91cee9934f4002d",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/projects",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-4d1d263354204165aa9e02473f587f97",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 176,
+      "response_sha256": "286b184a1c59307b0a05342759ab4e2ddfbcd7c79484e766289c9b4ff189b309",
+      "response_request_id": "73d6952fa0e28c10c5d23e92a43c004b",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/projects/164",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-9befd9ebd67944448dab0545e1aefb0e",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 176,
+      "response_sha256": "cd70bef19cdb0338415a200f82fa26d59e46a55b563bee5a0d9302c00b7d014f",
+      "response_request_id": "2db911cd798e1afb0dd68d9045514132",
+      "elapsed_ms": 26
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/projects/164/members",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-4f7095dea6fd4064959b0372538dd7e9",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 176,
+      "response_sha256": "36bb3e0a1b8a259f2fcd90a76a6b96567ce4f49a30f89a14be2ccadbe04b998a",
+      "response_request_id": "57b32c0c51740d0201b8a7486c93263b",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/projects/165",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-94c19e90c43c49559f23e2c45f4853c1",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 176,
+      "response_sha256": "6397357494f793b06ef96ec1f3c012f2c8685d49bad068a7933048a91c6f05d6",
+      "response_request_id": "34c2aca2dd5bdfc61c58037399a98f2f",
+      "elapsed_ms": 24
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/projects/165/members",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-97ccbfd5c03f44769b4121724b2bdf5d",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 176,
+      "response_sha256": "53ef7c2bc227e4a252a4423e2a721f18a7b203b80d17db4630147af1997bb334",
+      "response_request_id": "19d78bdeb2b5be5bb7e7b91701f1e3fb",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/reports?project_id=164",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-37fc1b89cc864dd99e3015e370be3b57",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 175,
+      "response_sha256": "b09eda3d9cdd69210b88bbb810d9dc08f339942c4155b085590f0d06ebf9244a",
+      "response_request_id": "d85c5f22d75748c57d597a262acb516a",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/reports?project_id=165",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-ac0d52c80a1943b2951f51a64920c42c",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 175,
+      "response_sha256": "834f00c796ea4e76d35ace20ea1a9accc6dcaa0af5b081f633d9e691852df44c",
+      "response_request_id": "728843ee8234f023c9c515915f4688f6",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/review/tasks?project_id=164",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-e0f73cd09a324640bb24d4d87a540da5",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 175,
+      "response_sha256": "f73ef96252716feab63a8b7734c72be6119d5a80fe91a8a3a8a510dd62dedfdc",
+      "response_request_id": "9434252e0ab33de55cbc130a47e84417",
+      "elapsed_ms": 24
+    },
+    {
+      "account": "no_permission",
+      "method": "GET",
+      "path": "/api/review/tasks?project_id=165",
+      "expected": 403,
+      "purpose": "无权限真实列表及详情拒绝",
+      "request_id": "qa-d6a7ba535a75437890f6eecd0e9ae9c3",
+      "status": "passed",
+      "actual": 403,
+      "response_bytes": 175,
+      "response_sha256": "458ba7eeb28b5025de1e2923fa813bae61941c25e0339e9855de426dbc49d43a",
+      "response_request_id": "f0a367cb5af92ecedb767f1a44b6a184",
+      "elapsed_ms": 25
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/164",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-e560949c87954b6abd1642b82a4faaa8",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 479,
+      "response_sha256": "8423fb264d58d726ae68e8326772769207d387fa8783a98b8490c920b2ca8bb0",
+      "response_request_id": "1fefc228acc124f097c684b03d6b4c0b",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/projects/164/members",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-a4f15da8d5d34ac1849331e295c28bf4",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 419,
+      "response_sha256": "f6a0759a1bdba657b8b94b243e0f558531e9e17cd2232cf843ae6337a8b18bcb",
+      "response_request_id": "0d9f6311a1f6544b727bb6ab1caf0cff",
+      "elapsed_ms": 29
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files?project_id=164",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-d6733f99b0484cb292f0a86095564899",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 397,
+      "response_sha256": "2ae42012786c8ee21995ee79d55806a24d65035eafcbcccaafd83ad19e0655c2",
+      "response_request_id": "f8d7d4becf81974a429be8b6bf50bb1d",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1894",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-f55acb790d2e4a38befd19cc11c5d9e0",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 411,
+      "response_sha256": "7b82958c24ac96d6474d8d685b0d5e8322d22860c5c1088d3ab6cbe969aacadd",
+      "response_request_id": "0ec1ea7146003a0a9685dfd4cd32ba0b",
+      "elapsed_ms": 31
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1894/meta",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-eb7547a44c0f4b87a6f76fed45a2650f",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 440,
+      "response_sha256": "08bb5a05a499118c1e10dbe02d617be90f9979d63041d098771f049aaf180851",
+      "response_request_id": "9cf578c671676b416e666a59e17a0d61",
+      "elapsed_ms": 33
+    },
+    {
+      "account": "owner_a",
+      "method": "GET",
+      "path": "/api/code-files/1894/versions",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-8f769fe64a65494ca345390e51e69c70",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 295,
+      "response_sha256": "a7deff20e1308b69c05ac6d4551f1eb389a8b17e4ef8b6078feab62c7d1e26a7",
+      "response_request_id": "a60afd5ad797c3e95a9f2781ca423608",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects/165",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-d70b7476fcb74a708532a4225de08a44",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 482,
+      "response_sha256": "96d28220f351e756ed0e104988630853ae285344044875ca69c6c96fc5f75c09",
+      "response_request_id": "d4dba211a92b790664995190dade4198",
+      "elapsed_ms": 39
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/projects/165/members",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-6ca4e575a27f4eacb48ec46d6509001b",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 224,
+      "response_sha256": "73e7c14627bb983d622f152541502e7ddf23e17726e953dabb173063e59c1eef",
+      "response_request_id": "5f8560c2060a893640854f25e4e40d0f",
+      "elapsed_ms": 31
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files?project_id=165",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-9815f3013e73499a80ed3c3df26cc9bc",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 400,
+      "response_sha256": "aa7d05ebff695ac144b432d9d6028803427a8429a6a4926a0a594f86a51bd050",
+      "response_request_id": "07a5e4ed2260b331c2091494ee0522ed",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1895",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-f233a012ca8b4dc4a712ae9dd262990d",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 441,
+      "response_sha256": "cb83a04a86513ad3515742f2e3874244605e839c19fbb4002d65ea3ac1b3b87e",
+      "response_request_id": "40328802209c894203ae248b9969851b",
+      "elapsed_ms": 32
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1895/meta",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-1017792ca167458e85ec64a49288c1e4",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 443,
+      "response_sha256": "f01bf20aca346dded35fcf18e955bb67fbb38378def6f778ea721a0213d00baa",
+      "response_request_id": "6cee20aae4f4d5137a8d83579051706b",
+      "elapsed_ms": 31
+    },
+    {
+      "account": "owner_b",
+      "method": "GET",
+      "path": "/api/code-files/1895/versions",
+      "expected": 200,
+      "purpose": "只读验收后既有资源保持",
+      "request_id": "qa-a2e7806a74704028b8549a6fb1a58451",
+      "status": "passed",
+      "actual": 200,
+      "response_bytes": 188,
+      "response_sha256": "b84bca227ebb68cad4544e0217da4900ab6a8f6d6fa466549d3d3be9202c43f1",
+      "response_request_id": "72917e9265b86656cefaf969eec3374f",
+      "elapsed_ms": 30
+    }
+  ],
+  "assertions": [
+    {
+      "check": "owner_a身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_a仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "owner_a权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "member_a身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "member_a仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "member_a权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "owner_b身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_b仅专用角色",
+      "passed": true
+    },
+    {
+      "check": "owner_b权限严格等于20个专用权限",
+      "passed": true
+    },
+    {
+      "check": "no_permission身份精确核对",
+      "passed": true
+    },
+    {
+      "check": "无权限账号无任何角色和权限",
+      "passed": true
+    },
+    {
+      "check": "owner_a仅看见本方一个项目",
+      "passed": true
+    },
+    {
+      "check": "owner_a项目身份及活跃文件口径",
+      "passed": true
+    },
+    {
+      "check": "owner_a读态能力标记正确（不代表实测写请求）",
+      "passed": true
+    },
+    {
+      "check": "owner_a成员关系精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_a文件列表仅包含本项目文件",
+      "passed": true
+    },
+    {
+      "check": "owner_a文件内容可读且版本正确",
+      "passed": true
+    },
+    {
+      "check": "owner_a元数据与详情一致",
+      "passed": true
+    },
+    {
+      "check": "owner_a既有版本列表准确",
+      "passed": true
+    },
+    {
+      "check": "owner_a/api/review/tasks无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "owner_a/api/issues无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "owner_a/api/reports无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "member_a仅看见本方一个项目",
+      "passed": true
+    },
+    {
+      "check": "member_a项目身份及活跃文件口径",
+      "passed": true
+    },
+    {
+      "check": "member_a读态能力标记正确（不代表实测写请求）",
+      "passed": true
+    },
+    {
+      "check": "member_a成员关系精确核对",
+      "passed": true
+    },
+    {
+      "check": "member_a文件列表仅包含本项目文件",
+      "passed": true
+    },
+    {
+      "check": "member_a文件内容可读且版本正确",
+      "passed": true
+    },
+    {
+      "check": "member_a元数据与详情一致",
+      "passed": true
+    },
+    {
+      "check": "member_a既有版本列表准确",
+      "passed": true
+    },
+    {
+      "check": "普通成员与 owner 文件/成员/版本回显一致",
+      "passed": true
+    },
+    {
+      "check": "member_a/api/review/tasks无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "member_a/api/issues无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "member_a/api/reports无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "owner_b仅看见本方一个项目",
+      "passed": true
+    },
+    {
+      "check": "owner_b项目身份及活跃文件口径",
+      "passed": true
+    },
+    {
+      "check": "owner_b读态能力标记正确（不代表实测写请求）",
+      "passed": true
+    },
+    {
+      "check": "owner_b成员关系精确核对",
+      "passed": true
+    },
+    {
+      "check": "owner_b文件列表仅包含本项目文件",
+      "passed": true
+    },
+    {
+      "check": "owner_b文件内容可读且版本正确",
+      "passed": true
+    },
+    {
+      "check": "owner_b元数据与详情一致",
+      "passed": true
+    },
+    {
+      "check": "owner_b既有版本列表准确",
+      "passed": true
+    },
+    {
+      "check": "owner_b/api/review/tasks无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "owner_b/api/issues无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "owner_b/api/reports无伪造任务/问题/报告",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/projects/164",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/projects/164/members",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/code-files?project_id=164",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/code-files/1894",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/code-files/1894/meta",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/code-files/1894/versions",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/projects/165",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/projects/165/members",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/code-files?project_id=165",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/code-files/1895",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/code-files/1895/meta",
+      "passed": true
+    },
+    {
+      "check": "既有资源前后摘要一致:/api/code-files/1895/versions",
+      "passed": true
+    }
+  ],
+  "resources": {
+    "a": {
+      "project_id": 164,
+      "file_id": 1894,
+      "version_no": 2,
+      "response_sha256": {
+        "/api/projects/164": "fb8ae55c32c5a3e4c976e7b6a79927ba3d7463578d6f93e6b8356341bad47f21",
+        "/api/projects/164/members": "a3409482a8cb66825a3f7367ae412cef689faad4ae2dd6f82fd1301a6df98402",
+        "/api/code-files?project_id=164": "fd7474e2f04d2c4ce0c2bf6e9a15d6b66ffe66f30ec022114de13d8e8c7da97e",
+        "/api/code-files/1894": "241f832e94f2ebf872914d7f15aa841add5678ea0a0b0269e90a6ed9760490e3",
+        "/api/code-files/1894/meta": "091330e895638ae09451ce80ed1aa9ea8e9aaa14399e163aef71bd9910f1bb6f",
+        "/api/code-files/1894/versions": "22f825572c6b08ee1e483ae946f22fed36f9b12aca6837093d0f2536878f083b"
+      }
+    },
+    "b": {
+      "project_id": 165,
+      "file_id": 1895,
+      "version_no": 1,
+      "response_sha256": {
+        "/api/projects/165": "65c35b63ddf3a1792bd20475776bbafe4854906b5b3052793c0dca1e7497c1ab",
+        "/api/projects/165/members": "99c980efa57c240919c9e0a45920895c4bcbf0a13247ebf6f126e4d7b0e2fad4",
+        "/api/code-files?project_id=165": "de9edd127828966d9c45a0dded4cc81141f29e5f1396bb362e3e6b0b3579983a",
+        "/api/code-files/1895": "c6bc770ceab925d9081c3b4c0132b5f4924e32d3bbbb85197f232839d666a7b6",
+        "/api/code-files/1895/meta": "3ff9765f12afc4dbc7ae0163927a35de83d746742b551fd30288674e971dcf21",
+        "/api/code-files/1895/versions": "1be107b0196383b782dffd0b378856c0b263324c84793437b783f46934dfb177"
+      }
+    }
+  },
+  "blocked": [],
+  "plan_sha256": "149f54841b7c9842eea79c6c166539c5ca9996a63849f847191bfe7d7422d68f",
+  "not_tested": [
+    "member 对真实项目编辑/代码保存的写入 403：无效 body 在业务角色门禁前返回 422，不能冒充授权验收",
+    "owner 正向创建/编辑/重命名/删除及版本写入",
+    "成员撤权、恢复与旧 JWT 撤销专项断言",
+    "服务重启后的数据/权限持久化",
+    "组织实体级隔离（当前仅复验现有项目所有者/成员访问边界）",
+    "全路由权限矩阵、WebSocket、浏览器按钮与响应式布局"
+  ],
+  "source_sha256": {
+    "scripts/verify_permission_acceptance_https.py": "7fdf72a02e6f612c5a38ff4aba3dee1d6326fb7c7b6f8724d40a3aae0052b5b4",
+    "app/api/v1/projects.py": "00cc0215fe54e86c035fdfdfe6ff941717713ad0f2442adf5f38de49c3fa1411",
+    "app/api/v1/project_members.py": "0d5ec973eb523d2bc9a1732b77ec82e49aa7fe32a81bfbb0efeb1f5b885f49d6",
+    "app/api/v1/code_files.py": "c5da67b84478650c4741a0cfbca131483df4f902f3f0c6cbc2bd5d3c891978c1",
+    "app/services/project_service.py": "e1ffeff1544e0a0fa920689f33b37c20ebe9ce98fbb269fb031f7d229b5a6bb5",
+    "app/services/project_member_service.py": "e5d4923b8ac250451b7464d05bad4b6988c6f29dd34871122bff439dc64a6d8a",
+    "app/services/code_file_service.py": "c36f0b5a428802c99b7f5f05064fbbe7a04a3d8c61a774ef9e145462ec88a48c",
+    "app/services/project_source_revision_service.py": "188e63e102bf1b648bc1a95b0318d68987d8ced356903901b4a2148e5d6e0869",
+    "app/schemas/project.py": "7a69e3dcfda62d779b7e5e6dde1ffb0aa4746dc21dc984c00a88114beb18729d",
+    "app/schemas/code_file.py": "6a46d4800935d4816a3c4ac839a307262535a94b1a81bd0dd5e9a299e879ad54"
+  },
+  "authentication_writes": "4次登录会更新认证状态、令牌版本、审计及限流；无业务资源写请求",
+  "finished_at": "2026-09-12T16:21:06.108589+00:00",
+  "summary": {
+    "passed": 91
+  }
+}

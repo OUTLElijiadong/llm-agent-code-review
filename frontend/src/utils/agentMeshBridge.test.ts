@@ -187,3 +187,70 @@ describe('Agent Mesh session bridge', () => {
     expect(inboxIds).not.toContain('session-archived')
   })
 })
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+const options = () => ({ surface: 'user' as const, getSessionId: () => 'session-stop', getTitle: () => '停止复测',
+  isBusy: () => false, onMessage: vi.fn().mockResolvedValue(true) })
+
+describe('Mesh退出与重启的异步边界', () => {
+  beforeEach(() => {
+    api.heartbeat.mockReset().mockResolvedValue({})
+    api.inbox.mockReset().mockResolvedValue([])
+  })
+
+  it('心跳等待时停止，不再发后续会话心跳或收件箱请求', async () => {
+    const pending = deferred<object>()
+    api.heartbeat.mockReturnValueOnce(pending.promise)
+    const bridge = createAgentMeshBridge({ ...options(), getSessions: () => [{ id: 'one', title: '一' }, { id: 'two', title: '二' }] })
+    const sync = bridge.syncNow()
+    bridge.stop()
+    pending.resolve({})
+    await sync
+    await bridge.syncNow()
+    expect(api.heartbeat).toHaveBeenCalledTimes(1)
+    expect(api.inbox).not.toHaveBeenCalled()
+  })
+
+  it.each(['delivered', 'gone'])('收件箱%s返回前停止，不处理消息，也不触发会话失效回调', async (result) => {
+    const pending = deferred<Array<{ message_id: string; status: string }>>()
+    api.inbox.mockReturnValueOnce(pending.promise)
+    const opts = options()
+    const onSessionGone = vi.fn()
+    const bridge = createAgentMeshBridge({ ...opts, onSessionGone })
+    const sync = bridge.syncNow()
+    await Promise.resolve()
+    bridge.stop()
+    if (result === 'gone') pending.reject({ code: 40321 })
+    else pending.resolve([{ message_id: 'old', status: 'delivered' }])
+    await sync
+    expect(opts.onMessage).not.toHaveBeenCalled()
+    expect(onSessionGone).not.toHaveBeenCalled()
+  })
+
+  it('停止后立即重新启动，旧响应不能解锁新同步或发旧请求', async () => {
+    const oldHeartbeat = deferred<object>()
+    const newHeartbeat = deferred<object>()
+    api.heartbeat.mockReturnValueOnce(oldHeartbeat.promise).mockReturnValueOnce(newHeartbeat.promise)
+    const bridge = createAgentMeshBridge(options())
+    const oldSync = bridge.syncNow()
+    bridge.stop()
+    bridge.start()
+    try {
+      expect(api.heartbeat).toHaveBeenCalledTimes(2)
+      oldHeartbeat.resolve({})
+      await oldSync
+      await bridge.syncNow()
+      expect(api.heartbeat).toHaveBeenCalledTimes(2)
+      expect(api.inbox).not.toHaveBeenCalled()
+      newHeartbeat.resolve({})
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(api.inbox).toHaveBeenCalledOnce()
+    } finally { bridge.stop() }
+  })
+})

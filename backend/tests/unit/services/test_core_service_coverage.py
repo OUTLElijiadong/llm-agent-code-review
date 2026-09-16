@@ -287,11 +287,12 @@ def test_login_covers_invalid_disabled_and_success_paths(db, monkeypatch):
     with pytest.raises(ForbiddenError):
         auth_service.login(db, "disabled", "disabled-pwd")
 
-    token, logged_in = auth_service.login(db, "active", "active-pwd")
+    token, logged_in, first_login = auth_service.login(db, "active", "active-pwd")
     db.refresh(active)
     assert token == "jwt-token"
     assert logged_in.id == active.id
     assert active.last_login is not None
+    assert first_login is True  # 该测试账号此前从未登录过
     assert token_calls == [(active.id, "user", 4)]
     assert active.token_version == 4
 

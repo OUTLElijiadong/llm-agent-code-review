@@ -17,7 +17,7 @@ usage() {
   - revision 会解析为完整 SHA，并且必须等于当前干净工作区 HEAD；脚本不 pull/reset。
   - 当前仅支持 all，前后端必须使用同一提交发布。
   - 发布前自动备份并验证恢复，随后由目标 Backend 镜像执行 Alembic。
-  - 前端切换后自动同步 assets 卷并检查同源 HTTPS。
+  - 前端切换前自动同步 assets 卷，切换后检查同源 HTTPS。
   - 健康或冒烟失败时尝试切回 previous.env 记录的应用镜像，不自动降级数据库。
 USAGE
 }
@@ -264,13 +264,13 @@ fi
 if [[ "$target" == "all" || "$target" == "frontend" ]]; then
   deploy_stage="frontend_build"
   compose build frontend
+  # 先完整同步再启动新前端，避免两个容器的cp与entrypoint并发写同一assets卷。
+  # 同步失败仍进入原回滚事务；新index.html仅在新哈希文件就绪后上线。
+  deploy_stage="frontend_assets"
+  ./sync-frontend-assets.sh "$desired_frontend" || deploy_fatal "前端 assets 卷同步失败"
   deployment_mutated=1
   deploy_stage="frontend_switch"
   compose up -d --no-deps --no-build --pull never frontend
-  # assets 是命名卷挂载，必须把新镜像 dist 同步进卷，否则 index.html 引用的
-  # 新哈希文件 404 导致页面空白。
-  deploy_stage="frontend_assets"
-  ./sync-frontend-assets.sh "$desired_frontend" || deploy_fatal "前端 assets 卷同步失败"
   deploy_stage="frontend_health"
   wait_for_service_health frontend "${FRONTEND_HEALTH_TIMEOUT:-120}" || deploy_fatal "Frontend 未恢复健康"
 fi
@@ -283,6 +283,13 @@ write_release_state \
   "$current_state" "$target_sha" "$desired_backend" "$desired_frontend" \
   "$target" "$backup_file" "$alembic_revision" "$app_version"
 rm -f "$pending_state"
+# 自动校准默认 Compose 环境(.env)与本次发布一致,消除发布后 ops-check
+# 的漂移告警窗口;校准失败不回滚已验收发布,仅告警提示手工处理。
+if calibrate_default_env_file "$target_sha" "$desired_backend" "$desired_frontend" "$app_version"; then
+  log_info "默认 Compose 环境已随发布校准: $target_sha / $app_version"
+else
+  log_warn "默认 Compose 环境(.env)校准失败;手工校准前 ops-check 将持续报告发布环境漂移"
+fi
 # 提交发布账本后仅剩信息展示，不能因 compose ps 失败撤销已验收版本。
 failure_handled=1
 trap - ERR

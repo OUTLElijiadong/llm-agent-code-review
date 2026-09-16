@@ -10,6 +10,7 @@ import {
   fetchUserDataScope as apiFetchUserDataScope,
 } from '@/api/rbac'
 import { setToken, clearToken, getToken } from '@/utils/token'
+import { invalidateAvatarCache } from '@/constants/avatars'
 import { markAgentChatLoginFreshStart } from '@/utils/agentChatSessions'
 
 let authExpiredListenerRegistered = false
@@ -157,6 +158,11 @@ export const useUserStore = defineStore('user', () => {
     profile.value = res.user
     await loadRbacInfo()
     markAgentChatLoginFreshStart()
+    invalidateAvatarCache()
+    // 注册后首次登录 → 小菱新手引导(仅一次;老用户 first_login=false 不弹)
+    if (res.first_login && res.user?.id) {
+      try { sessionStorage.setItem(`prism-onboarding-shown:${res.user.id}`, 'pending') } catch { /* 忽略配额 */ }
+    }
   }
 
   /**
