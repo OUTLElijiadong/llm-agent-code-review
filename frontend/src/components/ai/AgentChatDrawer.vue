@@ -977,6 +977,13 @@ async function retryLastAction(): Promise<void> {
   if (kind === 'user-message') {
     const lastUserMessage = [...messages.value].reverse().find((message) => message.role === 'user')
     if (!lastUserMessage) return
+    // 刷新页面后，历史图片只保留服务端资产引用(imageAssets)，内存里已没有
+    // 原始 data URL。优先续跑原失败 run，让后端从受权资产表恢复图片；只有
+    // 运行尚未落库(例如请求在建 run 前就断网)时才重新 start。
+    if (canRetryRun.value && sessionRun.value?.run_id) {
+      await retryRun()
+      return
+    }
     await runResponse({
       action: 'start',
       surface: 'user',

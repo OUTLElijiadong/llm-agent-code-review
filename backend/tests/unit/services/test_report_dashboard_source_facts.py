@@ -230,6 +230,19 @@ def test_all_sources_agree_in_list_detail_and_dashboard(db, source_owner, source
     assert sum(item["count"] for item in dashboard_service.get_issue_type_statistics(db, source_owner)) == 10
 
 
+def test_score_trend_omits_successful_tasks_without_a_valid_score(db, source_owner, source_project):
+    """越界的历史评分不能让评分趋势接口返回 500 或伪造异常分数。"""
+    scored = _task(db, source_owner, source_project, "standard", count=0, score=87)
+    unscored = _task(db, source_owner, source_project, "sandbox_test", count=4, score=101)
+    _snapshot(db, unscored, public_id="sbx-unscored", report_md="## 问题清单\n- A\n")
+    db.commit()
+
+    trend = dashboard_service.get_score_trend(db, source_owner, limit=10)
+
+    assert [row["task_id"] for row in trend] == [scored.id]
+    assert trend[0]["score"] == 87
+
+
 @pytest.mark.parametrize("source", ["standard", "discuss", "sandbox_test", "pentest"])
 @pytest.mark.parametrize("score", [0, 100])
 def test_empty_source_keeps_explicit_score(db, source_owner, source_project, source, score):

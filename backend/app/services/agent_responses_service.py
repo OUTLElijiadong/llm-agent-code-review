@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import copy
 import hashlib
 import hmac
@@ -2451,7 +2453,12 @@ class AgentResponsesService:
         # 含图运行切换视觉模型,仅本次运行生效。
         vision_model = ""
         image_assets_map: Optional[Mapping[str, str]] = None
-        prepared_messages: Sequence[Mapping[str, Any]] = messages
+        # API schema 为兼容旧客户端会给每条消息补 images=[]；该字段不是
+        # Responses message 合法字段，必须在纯文本路径也剥离，避免上游 400。
+        prepared_messages: Sequence[Mapping[str, Any]] = [
+            {"role": message.get("role", "user"), "content": message.get("content") or ""}
+            for message in messages
+        ]
         image_urls: list[str] = []
         for message in messages:
             raw_images = message.get("images") if isinstance(message, Mapping) else None
@@ -2625,12 +2632,64 @@ class AgentResponsesService:
             }
             upstream_status = str(response.get("status") or "")
             error_value = response.get("error")
+            request_payload = response.get("_request_payload")
+
+            def _audit_value(value: Any) -> Any:
+                """保留请求结构与文本，图片以资产摘要替代 base64。"""
+                if isinstance(value, Mapping):
+                    result: dict[str, Any] = {}
+                    for key, item in value.items():
+                        if key == "image_url" and isinstance(item, str) and item.startswith("data:image/"):
+                            try:
+                                encoded = item.partition(",")[2]
+                                digest = hashlib.sha256(base64.b64decode(encoded)).hexdigest()
+                            except (ValueError, TypeError, binascii.Error):
+                                digest = ""
+                            result["image_asset_sha256"] = digest
+                            result["image_url"] = "[已写入多模态资产表]"
+                        else:
+                            result[str(key)] = _audit_value(item)
+                    return result
+                if isinstance(value, (list, tuple)):
+                    return [_audit_value(item) for item in value]
+                return value
+
+            audited_request = _audit_value(request_payload) if isinstance(request_payload, Mapping) else None
+            audited_response = {
+                str(key): _audit_value(value)
+                for key, value in response.items()
+                if key != "_request_payload"
+            }
+            multimodal = bool(
+                isinstance(audited_request, Mapping)
+                and "input_image" in json.dumps(audited_request, ensure_ascii=False)
+            )
+            prompt_audit = json.dumps(
+                {
+                    "protocol": "responses",
+                    "multimodal": multimodal,
+                    "request": audited_request,
+                },
+                ensure_ascii=False,
+                default=str,
+            ) if audited_request is not None else ""
+            response_audit = json.dumps(
+                {
+                    "protocol": "responses",
+                    "multimodal": multimodal,
+                    "response": audited_response,
+                },
+                ensure_ascii=False,
+                default=str,
+            )
             with usage_context(int(self._user.id), run_attribution(self._db, int(self._user.id), run_id), db=self._db):
                 record_usage_attempt(
                     user_id=int(self._user.id), agent_label=agent_label,
                     model_name=str(response.get("model") or fallback_model), usage=normalized_usage,
                     status="success" if upstream_status == COMPLETED else "failed",
                     error=str(error_value) if error_value else "",
+                    prompt=prompt_audit,
+                    response=response_audit,
                 )
 
         runtime = DeepSeekResponsesRuntime(

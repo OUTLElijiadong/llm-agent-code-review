@@ -812,7 +812,9 @@ class DeepSeekResponsesRuntime:
                     }
                     if self._on_round is not None:
                         try:
-                            self._on_round(failed_response)
+                            # 回调保留本轮实际发送的请求元数据；它不会写入检查点，
+                            # 仅供用量审计记录输入/输出关联。兼容原有单参数回调。
+                            self._on_round({**failed_response, "_request_payload": copy.deepcopy(payload)})
                         except Exception as log_error:
                             if isinstance(exc, asyncio.CancelledError):
                                 raise exc from log_error
@@ -820,7 +822,9 @@ class DeepSeekResponsesRuntime:
                     raise
                 if self._on_round is not None:
                     try:
-                        self._on_round(response)
+                        # 上游 response 不包含请求 input；将请求快照随回调传递，
+                        # 由服务层按审计策略脱敏后落 AiCallLog.prompt。
+                        self._on_round({**response, "_request_payload": copy.deepcopy(payload)})
                     except Exception as log_error:
                         raise RoundAccountingError("模型请求已执行，但该轮用量记账失败") from log_error
                 return response, turn_events

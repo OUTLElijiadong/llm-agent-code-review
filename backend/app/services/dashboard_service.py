@@ -333,6 +333,10 @@ def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:
         .filter(
             ReviewTask.status == "success",
             ReviewTask.project_id.in_(visible_ids),
+            # 领域任务/历史任务可能没有质量评分；过滤掉无效分数，避免
+            # ScoreTrendItem 校验 500，也不在图表中伪造 0 分。
+            ReviewTask.score.is_not(None),
+            ReviewTask.score.between(0, 100),
         )
         .order_by(ReviewTask.create_time.desc())
         .limit(limit)

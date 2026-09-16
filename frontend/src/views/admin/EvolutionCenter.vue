@@ -542,16 +542,40 @@ function pretty(v: unknown): string {
 }
 
 async function loadFeedback(): Promise<void> {
-  feedback.value = await getFeedback(windowDays.value)
+  try {
+    const value = await getFeedback(windowDays.value)
+    feedback.value = value && typeof value === 'object' ? value : null
+  } catch {
+    feedback.value = null
+    ElMessage.warning('反馈指标暂时无法加载，请稍后重试')
+  }
 }
 async function loadProposals(): Promise<void> {
-  proposals.value = await listProposals(statusFilter.value)
+  try {
+    const value = await listProposals(statusFilter.value)
+    proposals.value = Array.isArray(value) ? value : []
+  } catch {
+    proposals.value = []
+    ElMessage.error('提案列表加载失败，请刷新重试')
+  }
 }
 async function loadExperiences(): Promise<void> {
-  experiences.value = await listExperiences(100)
+  try {
+    const value = await listExperiences(100)
+    experiences.value = Array.isArray(value) ? value : []
+  } catch {
+    experiences.value = []
+    ElMessage.error('经验记忆加载失败，请刷新重试')
+  }
 }
 async function loadEvalCases(): Promise<void> {
-  evalCases.value = await listEvalCases()
+  try {
+    const value = await listEvalCases()
+    evalCases.value = Array.isArray(value) ? value : []
+  } catch {
+    evalCases.value = []
+    ElMessage.error('黄金集加载失败，请刷新重试')
+  }
 }
 
 async function reloadAll(): Promise<void> {
@@ -589,6 +613,8 @@ async function onRun(): Promise<void> {
       + (r.agent.skipped ? `（去重跳过 ${r.agent.skipped}）` : ''),
     )
     await reloadAll()
+  } catch {
+    ElMessage.error('运行进化失败，请检查服务状态后重试')
   } finally {
     running.value = false
   }
@@ -602,6 +628,8 @@ async function onEvaluate(row: EvolutionProposal): Promise<void> {
       p.status === 'eval_passed' ? '评估通过，可审批生效' : '未通过闸门（召回退化或无黄金集）',
     )
     await Promise.all([loadProposals(), loadFeedback()])
+  } catch {
+    ElMessage.error('评估提案失败，请稍后重试')
   } finally {
     busyId.value = null
   }
@@ -624,28 +652,40 @@ async function onApprove(row: EvolutionProposal): Promise<void> {
     await approveProposal(row.id)
     ElMessage.success('已生效，可在「审查规则」查看；如需撤回可在此回滚')
     await loadProposals()
+  } catch {
+    ElMessage.error('审批提案失败，请稍后重试')
   } finally {
     busyId.value = null
   }
 }
 
 async function onReject(row: EvolutionProposal): Promise<void> {
-  const { value } = await ElMessageBox.prompt('请填写驳回原因', '驳回提案', {
-    inputPlaceholder: '为何不采纳该提案',
-  })
-  await rejectProposal(row.id, value || '')
-  ElMessage.success('已驳回')
-  await loadProposals()
+  try {
+    const { value } = await ElMessageBox.prompt('请填写驳回原因', '驳回提案', {
+      inputPlaceholder: '为何不采纳该提案',
+    })
+    await rejectProposal(row.id, value || '')
+    ElMessage.success('已驳回')
+    await loadProposals()
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error('驳回提案失败，请稍后重试')
+  }
 }
 
 async function onRollback(row: EvolutionProposal): Promise<void> {
-  const { value } = await ElMessageBox.prompt('请填写回滚说明', '回滚已生效提案', {
-    inputPlaceholder: '为何撤回',
-    type: 'warning',
-  })
-  await rollbackProposal(row.id, value || '')
-  ElMessage.success('已回滚，规则恢复改动前状态')
-  await loadProposals()
+  try {
+    const { value } = await ElMessageBox.prompt('请填写回滚说明', '回滚已生效提案', {
+      inputPlaceholder: '为何撤回',
+      type: 'warning',
+    })
+    await rollbackProposal(row.id, value || '')
+    ElMessage.success('已回滚，规则恢复改动前状态')
+    await loadProposals()
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error('回滚提案失败，请稍后重试')
+  }
 }
 
 function openDetail(row: EvolutionProposal): void {

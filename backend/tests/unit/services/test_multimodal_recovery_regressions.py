@@ -262,6 +262,66 @@ async def test_service_image_question_resume_and_same_session_text_round(db, mon
     assert third.status == "completed"
     assert payloads[2]["model"] == "plain-model"
     assert "input_image" not in json.dumps(payloads[2])
+    assert "\"images\"" not in json.dumps(payloads[2])
+
+
+@pytest.mark.asyncio
+async def test_multimodal_round_audit_keeps_request_response_metadata_without_base64(db, monkeypatch):
+    """每轮调用日志应能证明视觉模型与输入输出，但不重复落图片 base64。"""
+    from app.models.ai_call_log import AiCallLog
+
+    from app.services import agent_responses_service as service_module
+
+    config = ApiConfig(
+        api_key="test", base_url="https://api.deepseek.com", model="default", source="system",
+    )
+    monkeypatch.setattr(service_module, "resolve_api_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_a, **_k: object())
+    monkeypatch.setattr(service_module, "NativeResponsesTransport", lambda *_a, **_k: object())
+    monkeypatch.setattr(service_module, "PrismToolExecutor", lambda *_a, **_k: SimpleNamespace())
+
+    captured = {}
+
+    class CapturingRuntime:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(service_module, "DeepSeekResponsesRuntime", CapturingRuntime)
+    service = service_module.AgentResponsesService(
+        db,
+        SimpleNamespace(id=7, role="user", username="sample"),
+        surface="user",
+        session_key="audit-image-session",
+    )
+    await service._runtime("audit-image-run", None, vision_model="deepseek-flash", image_assets={})
+
+    request = {
+        "model": "deepseek-flash",
+        "input": [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "请看图"},
+                {"type": "input_image", "image_url": PNG_URL, "detail": "auto"},
+            ],
+        }],
+    }
+    response = {
+        "status": "completed",
+        "model": "deepseek-flash",
+        "usage": {"input_tokens": 4, "output_tokens": 3, "total_tokens": 7},
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": "已识别"}]}],
+        "_request_payload": request,
+    }
+    captured["on_round"](response)
+
+    row = db.query(AiCallLog).order_by(AiCallLog.id.desc()).first()
+    assert row is not None
+    assert row.model_name == "deepseek-flash"
+    assert row.total_tokens == 7
+    assert '"multimodal": true' in row.prompt
+    assert "data:image" not in row.prompt
+    assert "[已写入多模态资产表]" in row.prompt
+    assert "已识别" in row.response
 
 
 @pytest.mark.asyncio
