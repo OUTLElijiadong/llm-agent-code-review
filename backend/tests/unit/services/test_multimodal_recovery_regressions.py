@@ -250,6 +250,8 @@ async def test_service_image_question_resume_and_same_session_text_round(db, mon
         [{"role": "user", "content": "请看这张图", "images": [PNG_URL]}], run_id="vision-question"
     )
     assert first.status == "waiting_input"
+    assert "包含已校验的图片附件" in payloads[0]["instructions"]
+    assert "不要因为工具列表没有单独的图像识别工具就声称未收到图片" in payloads[0]["instructions"]
     restored = ars.AgentResponsesService(db, user, surface="user", session_key="same-chat")
     second = await restored.resume(run_id="vision-question", action="answer", call_id="ask-image", answer="标题")
     assert second.status == "completed"
@@ -269,7 +271,6 @@ async def test_service_image_question_resume_and_same_session_text_round(db, mon
 async def test_multimodal_round_audit_keeps_request_response_metadata_without_base64(db, monkeypatch):
     """每轮调用日志应能证明视觉模型与输入输出，但不重复落图片 base64。"""
     from app.models.ai_call_log import AiCallLog
-
     from app.services import agent_responses_service as service_module
 
     config = ApiConfig(

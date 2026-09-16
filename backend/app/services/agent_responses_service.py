@@ -2489,6 +2489,16 @@ class AgentResponsesService:
         )
         tools = await executor.tool_schemas()
         instructions = _instructions(self._surface, self._user, self._is_super_admin)
+        if image_urls:
+            # 含图请求显式告知模型图片已经作为 input_image 附件传入。
+            # 小菱的通用提示会强调“工具列表没有图像识别工具”，模型可能据此
+            # 错误地声称没有收到图片；该提示只在本轮确有已校验图片时追加，
+            # 不会掩盖真正缺失或无效的附件。
+            instructions += (
+                "本轮用户消息包含已校验的图片附件，图片已通过 input_image 内容块提供给你；"
+                "请直接根据图片内容回答，不要因为工具列表没有单独的图像识别工具就声称未收到图片。"
+                "仅当输入内容确实没有 input_image 时，才说明缺少图片。"
+            )
         try:
             instructions += strategy_learning_service.build_strategy_context(
                 self._db,
