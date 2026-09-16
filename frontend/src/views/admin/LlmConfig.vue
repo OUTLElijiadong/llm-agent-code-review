@@ -201,7 +201,9 @@ async function test(): Promise<void> {
 }
 
 function canReuseStoredKey(): boolean {
-  if (cfg.value?.source !== 'global' || !cfg.value.is_set) return false
+  // 系统默认 DeepSeek 端点的凭据由服务端环境安全持有；管理员只切换
+  // 同一端点的模型时可以复用该凭据，避免要求把密钥再次粘贴到页面。
+  if (!cfg.value?.is_set || !['global', 'default'].includes(cfg.value.source)) return false
   return endpointIdentity(form.base_url) === endpointIdentity(cfg.value.base_url)
 }
 

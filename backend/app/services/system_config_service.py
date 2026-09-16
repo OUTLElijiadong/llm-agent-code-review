@@ -363,6 +363,28 @@ def update_llm_config(
         )
     if model is not None:
         data["model"] = model.strip()
+    # 当管理员在系统默认 DeepSeek 端点上只切换模型时，安全复用环境中的
+    # 系统凭据。该分支不接收或回显密钥，只在全局覆盖被启用且旧密文无法
+    # 解密时重新加密，避免生产配置因历史密钥轮换而无法保存。
+    if api_key is None and active is True:
+        target_base_url = (data.get("base_url") or "").strip()
+        system_base_url = (settings.deepseek_base_url or "").strip()
+        if target_base_url and system_base_url:
+            try:
+                same_system_endpoint = normalize_ai_base_url(
+                    target_base_url, resolve_host=False, allow_private=False,
+                ) == normalize_ai_base_url(
+                    system_base_url, resolve_host=False, allow_private=False,
+                )
+            except ValidationError:
+                same_system_endpoint = False
+            if same_system_endpoint and settings.deepseek_api_key.strip():
+                from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
+
+                encrypted = data.get("api_key_enc")
+                decryption = decrypt_api_key_with_metadata(encrypted) if encrypted else None
+                if decryption is None:
+                    data["api_key_enc"] = encrypt_api_key(settings.deepseek_api_key.strip())
     if api_key is not None:
         if api_key.strip():
             from app.utils.api_resolver import encrypt_api_key

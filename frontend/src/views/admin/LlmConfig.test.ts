@@ -176,7 +176,16 @@ describe('LlmConfig recoverable interactions', () => {
     wrapper.unmount()
   })
 
-  it('系统默认 Key 只能测试默认端点，不能被当作全局覆盖 Key 保存', async () => {
+  it('系统默认端点切换模型时可由服务端安全复用 Key 保存', async () => {
+    llmApi.updateLlmConfig.mockResolvedValueOnce({
+      ...config,
+      provider: 'deepseek',
+      base_url: 'https://api.deepseek.com',
+      model: 'deepseek-flash',
+      active: true,
+      source: 'global',
+      fallback_reason: '',
+    })
     llmApi.getLlmConfig.mockResolvedValueOnce({
       ...config,
       provider: 'deepseek',
@@ -195,12 +204,18 @@ describe('LlmConfig recoverable interactions', () => {
     expect(vm.statusLabel).toContain('已配置')
     vm.form.active = true
     vm.form.api_key = ''
+    vm.form.model = 'deepseek-flash'
     await vm.save()
 
-    expect(messages.warning).toHaveBeenCalledWith(
+    expect(messages.warning).not.toHaveBeenCalledWith(
       '启用新的全局端点前，请填写该端点的 API Key',
     )
-    expect(llmApi.updateLlmConfig).not.toHaveBeenCalled()
+    expect(llmApi.updateLlmConfig).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'deepseek',
+      base_url: 'https://api.deepseek.com',
+      model: 'deepseek-flash',
+      active: true,
+    }))
     wrapper.unmount()
   })
 })

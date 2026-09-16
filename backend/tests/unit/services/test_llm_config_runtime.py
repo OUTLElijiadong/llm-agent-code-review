@@ -126,6 +126,63 @@ def test_update_can_recover_from_legacy_non_object_json(db, monkeypatch):
     assert saved["model"] == "recovered-model"
 
 
+def test_update_reencrypts_system_key_when_switching_model_on_default_endpoint(
+    db,
+    monkeypatch,
+):
+    """同一系统端点切换模型时，管理员无需再次提交环境密钥。"""
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-system-secret")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.deepseek.example")
+    monkeypatch.setattr(settings, "deepseek_model", "deepseek-v4-flash")
+    monkeypatch.setattr(
+        "app.utils.api_resolver._resolve_host", lambda _host: {"93.184.216.34"},
+    )
+    db.add(SystemConfig(
+        config_key=system_config_service.LLM_KEY,
+        config_value=json.dumps({
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.example",
+            "model": "deepseek-v4-flash",
+            "api_key_enc": "unreadable-ciphertext",
+            "active": False,
+        }),
+    ))
+    db.commit()
+
+    saved = system_config_service.update_llm_config(
+        db,
+        provider="deepseek",
+        base_url="https://api.deepseek.example",
+        model="deepseek-flash",
+        active=True,
+    )
+
+    assert saved["source"] == "global"
+    assert saved["model"] == "deepseek-flash"
+    assert saved["active"] is True
+    assert saved["is_set"] is True
+
+
+def test_update_does_not_reuse_system_key_for_other_endpoint(db, monkeypatch):
+    """切换到其他端点仍必须由管理员显式提供密钥。"""
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-system-secret")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.deepseek.example")
+    monkeypatch.setattr(
+        "app.utils.api_resolver._resolve_host", lambda _host: {"93.184.216.34"},
+    )
+
+    saved = system_config_service.update_llm_config(
+        db,
+        provider="custom",
+        base_url="https://other.example.com/v1",
+        model="custom-model",
+        active=True,
+    )
+
+    assert saved["source"] == "default"
+    assert saved["fallback_reason"] in {"incomplete_config", "credential_unavailable"}
+
+
 def test_draft_never_reuses_stored_key_for_a_different_endpoint(db, monkeypatch):
     monkeypatch.setattr(
         system_config_service,
