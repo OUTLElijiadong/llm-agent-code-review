@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   createAgentChatSession,
+  migrateUnscopedAgentChatSessions,
+  resolveAgentChatStorageKey,
   findPristineAgentChatSession,
   isPlaceholderAgentChatTitle,
   isPristineAgentChatSession,
@@ -237,5 +239,40 @@ describe('Agent Team 快照锚点', () => {
       title: '白盒核验团队',
       status: 'running',
     })
+  })
+})
+
+
+describe('会话索引账号隔离', () => {
+  it('resolveAgentChatStorageKey 带 user_id,匿名回退裸 surface', () => {
+    expect(resolveAgentChatStorageKey('user', 123)).toBe('user:123')
+    expect(resolveAgentChatStorageKey('admin', 1)).toBe('admin:1')
+    expect(resolveAgentChatStorageKey('user', '')).toBe('user')
+    expect(resolveAgentChatStorageKey('user', undefined)).toBe('user')
+    expect(resolveAgentChatStorageKey('user', null)).toBe('user')
+  })
+
+  it('旧的无 user_id 索引与最后活跃会话一次性迁入账号作用域', () => {
+    const metas: AgentChatSessionMeta[] = [{ id: 'user-legacy', title: '旧对话', createdAt: 1 }]
+    seedSessions(metas)
+    saveActiveAgentChatSession('user', 'user-legacy')
+
+    migrateUnscopedAgentChatSessions('user', 'user:123')
+
+    expect(loadAgentChatSessions('user:123', 'no-legacy-key', 'user').map(m => m.id)).toContain('user-legacy')
+    expect(loadActiveAgentChatSession('user:123')).toBe('user-legacy')
+    // 旧键已清理,不会再串到下一个账号
+    expect(window.localStorage.getItem('prism-agent-sessions:user')).toBeNull()
+    expect(loadActiveAgentChatSession('user')).toBe('')
+  })
+
+  it('目标作用域已有索引时保留新数据并清理旧键', () => {
+    seedSessions([{ id: 'user-old', title: '旧', createdAt: 1 }])
+    window.localStorage.setItem('prism-agent-sessions:user:123', JSON.stringify([{ id: 'user-new', title: '新', createdAt: 2 }]))
+
+    migrateUnscopedAgentChatSessions('user', 'user:123')
+
+    expect(loadAgentChatSessions('user:123', 'no-legacy-key', 'user').map(m => m.id)).toEqual(['user-new'])
+    expect(window.localStorage.getItem('prism-agent-sessions:user')).toBeNull()
   })
 })

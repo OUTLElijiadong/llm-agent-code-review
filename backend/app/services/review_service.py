@@ -25,7 +25,7 @@ from app.agents.events import AgentEvent, AgentEventType
 from app.agents.registry import AgentRegistry
 from app.ai.code_chunker import chunk_code_with_context
 from app.ai.cvss import normalize_cvss
-from app.ai.deepseek_agent import DeepSeekAgent
+from app.ai.deepseek_agent import DeepSeekAgent, DeepSeekOutputTruncatedError
 from app.ai.finding_aggregator import aggregate_agent_findings_safely
 from app.ai.multi_agent import (
     ReviewAgentProfile,
@@ -1449,13 +1449,33 @@ def _call_single_agent(
         )
     # v2.2: agent_label 使用真实 Agent name,便于 AiCallLog 归因到具体 Agent
     agent_label = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
-    return agent.call_raw(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        agent_label=agent_label,
-        temperature=profile.temperature,
-        max_tokens=profile.max_tokens,
-    )
+    try:
+        return agent.call_raw(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            agent_label=agent_label,
+            temperature=profile.temperature,
+            max_tokens=profile.max_tokens,
+        )
+    except DeepSeekOutputTruncatedError:
+        # 输出预算兜底:推理型模型的 reasoning 与正文共享 completion 预算,
+        # 画像预算仍可能不足;截断时按翻倍预算重试一次,再失败才按覆盖不完整上报。
+        from app.ai.deepseek_agent import _clamp_max_tokens
+
+        ceiling = _clamp_max_tokens(settings.deepseek_max_output_tokens)
+        retry_budget = min(max(profile.max_tokens * 2, 8192), ceiling)
+        if retry_budget <= profile.max_tokens:
+            raise
+        logger.warning(
+            f"[review] {profile.code} 输出被截断,按 {profile.max_tokens}→{retry_budget} 提高输出预算重试一次"
+        )
+        return agent.call_raw(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            agent_label=agent_label,
+            temperature=profile.temperature,
+            max_tokens=retry_budget,
+        )
 
 
 def _absolute_line(line_number: Optional[int], chunk_start_line: int) -> int:

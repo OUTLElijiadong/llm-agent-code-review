@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import AgentActivityBorder from '@/components/ai/AgentActivityBorder.vue'
@@ -20,6 +20,37 @@ const canUseAgent = computed(() => (
   Boolean(userStore.token && userStore.profile)
   && userStore.hasPermission('agent:chat')
 ))
+
+const AGENT_VISIBLE_PREFIX = 'prism-agent-drawer-visible:'
+
+function agentVisibleStorageKey(): string {
+  const id = userStore.profile?.id
+  return id ? `${AGENT_VISIBLE_PREFIX}${id}` : ''
+}
+
+// 浮窗打开状态按账号持久化:此前只存内存,退出登录后组件卸载,
+// 重新登录时状态归零,用户感觉"悬浮窗不见了"。
+watch(agentVisible, (val) => {
+  const key = agentVisibleStorageKey()
+  if (!key) return
+  try {
+    if (val) window.sessionStorage.setItem(key, '1')
+    else window.sessionStorage.removeItem(key)
+  } catch {
+    // sessionStorage 不可用时退化为当前页面生命周期内记忆
+  }
+})
+
+watch(canUseAgent, (val) => {
+  if (!val || userStore.isAdmin()) return
+  const key = agentVisibleStorageKey()
+  if (!key) return
+  try {
+    if (window.sessionStorage.getItem(key) === '1') agentVisible.value = true
+  } catch {
+    // 读取失败保持默认关闭
+  }
+})
 
 /** 全站唯一小菱入口；管理员始终唤起管理会话，普通成员唤起用户会话。 */
 function openAgentChat(prefill = ''): void {

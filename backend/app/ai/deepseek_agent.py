@@ -149,10 +149,16 @@ def _get_http_client(pool_key: tuple[str, str]) -> tuple[httpx.Client, bool]:
 
 
 def _clamp_max_tokens(max_tokens: Optional[int]) -> int:
-    """输出上限钳制: 默认 4096, 最高 8192(DeepSeek chat 系安全上限)。"""
+    """输出上限钳制: 默认 4096, 上限取 settings.deepseek_max_output_tokens。
+
+    DeepSeek V4 系(flash/pro)为推理型模型, reasoning_content 与正文共享 completion
+    预算且 API 实测接受 65536; 仍使用旧 chat 系(上限 8192)的部署须把
+    DEEPSEEK_MAX_OUTPUT_TOKENS 调回 8192, 否则上游会返回 400。
+    """
+    ceiling = max(8192, int(settings.deepseek_max_output_tokens))
     if max_tokens is None:
         return 4096
-    return max(128, min(8192, int(max_tokens)))
+    return max(128, min(ceiling, int(max_tokens)))
 
 
 class DeepSeekAgent:
@@ -280,7 +286,7 @@ class DeepSeekAgent:
         if temperature is not None:
             payload["temperature"] = max(0.0, min(2.0, float(temperature)))
         if max_tokens is not None:
-            payload["max_tokens"] = max(128, min(8192, int(max_tokens)))
+            payload["max_tokens"] = _clamp_max_tokens(max_tokens)
 
         usage_log_ids: list[int] = []
         http_attempts = 0

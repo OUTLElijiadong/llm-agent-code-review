@@ -63,6 +63,47 @@ const ACTIVE_PREFIX = 'prism-agent-active-session:'
 const LOGIN_FRESH_PREFIX = 'prism-agent-login-fresh:'
 const CHAT_SURFACES = ['user', 'admin'] as const
 
+/**
+ * 会话索引按账号隔离:历史上 storageKey 只有 surface(user/admin),
+ * 同一浏览器多账号会互相看到对方的会话索引、草稿和最后活跃会话。
+ * 新 key 形如 `user:123` / `admin:1`;未登录态回退为裸 surface。
+ */
+export function resolveAgentChatStorageKey(
+  surface: 'user' | 'admin',
+  userId: number | string | undefined | null,
+): string {
+  const id = userId === undefined || userId === null || userId === '' ? '' : String(userId)
+  return id ? `${surface}:${id}` : surface
+}
+
+/**
+ * 一次性把未带 user_id 的旧索引/最后活跃会话迁移到当前账号作用域,
+ * 避免老用户升级后丢失本地会话标题和排序;服务端仍是会话事实源。
+ */
+export function migrateUnscopedAgentChatSessions(
+  surface: 'user' | 'admin',
+  scopedKey: string,
+): void {
+  if (scopedKey === surface) return
+  try {
+    const scopedIndex = window.localStorage.getItem(INDEX_PREFIX + scopedKey)
+    const legacyIndex = window.localStorage.getItem(INDEX_PREFIX + surface)
+    if (!scopedIndex && legacyIndex) {
+      window.localStorage.setItem(INDEX_PREFIX + scopedKey, legacyIndex)
+    }
+    const legacyActive = window.localStorage.getItem(ACTIVE_PREFIX + surface)
+    if (legacyActive) {
+      if (!window.localStorage.getItem(ACTIVE_PREFIX + scopedKey)) {
+        window.localStorage.setItem(ACTIVE_PREFIX + scopedKey, legacyActive)
+      }
+      window.localStorage.removeItem(ACTIVE_PREFIX + surface)
+    }
+    if (legacyIndex) window.localStorage.removeItem(INDEX_PREFIX + surface)
+  } catch {
+    // 存储不可用时跳过迁移,会话列表由服务端发现兜底。
+  }
+}
+
 /** 成功凭据登录后,两个小菱入口各自需要在首次挂载时创建一个新对话。 */
 export function markAgentChatLoginFreshStart(): void {
   try {

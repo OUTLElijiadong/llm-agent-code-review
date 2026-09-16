@@ -252,7 +252,9 @@ class DeclarativeReviewAgentFactory:
             system_prompt=version.prompt,
             review_focus=version.review_focus,
             temperature=float(config.get("temperature", 0.2)),
-            max_tokens=int(config.get("max_tokens", 4096)),
+            # 推理型模型的推理过程与正文共享输出预算,4096 默认值曾导致
+            # 整文件 Issue JSON 被截断(finish_reason=length),与内置画像对齐 16384。
+            max_tokens=int(config.get("max_tokens", 16_384)),
             skill_context=skill_context,
         )
 

@@ -67,6 +67,8 @@ import {
   autoTitleAgentChatSession,
   loadAgentChatDraft,
   loadAgentChatSnapshot,
+  migrateUnscopedAgentChatSessions,
+  resolveAgentChatStorageKey,
   saveActiveAgentChatSession,
   saveAgentChatDraft,
   saveAgentChatSnapshot,
@@ -177,6 +179,8 @@ const chatBody = ref<HTMLElement>()
 const chatInputRef = ref<HTMLTextAreaElement>()
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('user')
 const LEGACY_SESSION_KEY = 'prism-user-agent-session'
+/** 会话索引按账号隔离,同机多账号互不看到对方会话(服务端仍是事实源)。 */
+const chatStorageKey = computed(() => resolveAgentChatStorageKey('user', userStore.profile?.id))
 const sessionId = ref('')
 let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
@@ -2066,11 +2070,16 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
 
 function close(): void {
   // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
-  saveActiveAgentChatSession('user', sessionId.value)
+  saveActiveAgentChatSession(chatStorageKey.value, sessionId.value)
   persistSnapshot()
   activityStore.clear()
   emit('update:visible', false)
 }
+
+watch(() => userStore.profile?.id, (id, prev) => {
+  // 账号就绪或切换时,把未带 user_id 的旧会话索引/最后活跃会话迁入当前账号作用域
+  if (id && id !== prev) migrateUnscopedAgentChatSessions('user', chatStorageKey.value)
+}, { immediate: true })
 
 watch(() => props.visible, async (val) => {
   if (!val) return
@@ -2205,7 +2214,7 @@ onMounted(() => {
                 <AgentSessionSwitcher
                   ref="switcherRef"
                   class="chat-session-switch"
-                  storage-key="user"
+                  :storage-key="chatStorageKey"
                   :legacy-key="LEGACY_SESSION_KEY"
                   id-prefix="user"
                   :welcome-text="WELCOME_TEXT"

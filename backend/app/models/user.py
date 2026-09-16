@@ -14,7 +14,8 @@ class User(Base, IdMixin, TimestampMixin):
     )
 
     username = Column(String(50), unique=True, nullable=False)
-    password = Column(String(255), nullable=False)
+    # bcrypt 哈希固定 60 字符($2b$12$ + 53),按实际需要收窄,替代 SQLAlchemy 默认 255
+    password = Column(String(60), nullable=False)
     email = Column(String(100))
     nickname = Column(String(50))
     avatar = Column(String(64), comment="头像标识: 空=默认 / builtin:key / upload")

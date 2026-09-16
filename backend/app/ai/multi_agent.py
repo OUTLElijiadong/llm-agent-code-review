@@ -32,7 +32,9 @@ class ReviewAgentProfile:
     release_id: int = 0
     version_id: int = 0
     temperature: float = 0.0
-    max_tokens: int = 4096
+    # 推理型模型(deepseek-v4-flash/pro)的 reasoning_content 与正文共享 completion
+    # 预算;4096 曾被推理消耗殆尽导致整文件 Issue JSON 截断(finish_reason=length)。
+    max_tokens: int = 16_384
 
 
 GENERAL_AGENT = ReviewAgentProfile(

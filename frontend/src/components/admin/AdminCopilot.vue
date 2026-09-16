@@ -6,6 +6,7 @@ import {
   CircleCloseFilled,
   Close,
   DocumentCopy,
+  Picture,
   Promotion,
   VideoPause,
   WarningFilled,
@@ -88,6 +89,8 @@ import {
   autoTitleAgentChatSession,
   loadAgentChatDraft,
   loadAgentChatSnapshot,
+  migrateUnscopedAgentChatSessions,
+  resolveAgentChatStorageKey,
   saveAgentChatDraft,
   saveAgentChatSnapshot,
   type AgentChatSessionMeta,
@@ -284,6 +287,11 @@ const activityStore = useAgentActivityStore()
 
 const sessionId = ref('')
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+/** 会话索引按账号隔离,同机多账号互不看到对方会话(服务端仍是事实源)。 */
+const chatStorageKey = computed(() => resolveAgentChatStorageKey('admin', userStore.profile?.id))
+watch(() => userStore.profile?.id, (id, prev) => {
+  if (id && id !== prev) migrateUnscopedAgentChatSessions('admin', chatStorageKey.value)
+}, { immediate: true })
 const meshSessions = ref<AgentChatSessionMeta[]>([])
 const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
@@ -1745,7 +1753,7 @@ onMounted(() => {
             <AgentSessionSwitcher
               ref="switcherRef"
               class="copilot-session-switch"
-              storage-key="admin"
+              :storage-key="chatStorageKey"
               :legacy-key="LEGACY_SESSION_KEY"
               id-prefix="admin"
               :welcome-text="WELCOME_TEXT"
@@ -2033,7 +2041,6 @@ onMounted(() => {
           <span class="tray-hint">发送时自动切换视觉模型</span>
         </div>
         <input ref="imageInput" type="file" class="image-upload-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple aria-label="选择图片附件" @change="onImageInput" />
-        <button type="button" class="image-upload-button" :disabled="loading || readingImages || sessionRestoring || sessionBusy" @click="imageInput?.click()">添加图片</button>
         <div class="composer">
           <textarea
             ref="chatInputRef"
@@ -2046,6 +2053,16 @@ onMounted(() => {
             :disabled="loading || uploading || sessionRestoring || sessionBusy"
             @keydown="handleSubmitKey"
           ></textarea>
+          <button
+            type="button"
+            class="image-upload-button"
+            :disabled="loading || readingImages || sessionRestoring || sessionBusy"
+            aria-label="添加图片"
+            title="添加图片,发送时自动切换视觉模型"
+            @click="imageInput?.click()"
+          >
+            <el-icon><Picture /></el-icon>
+          </button>
           <button
             v-if="sessionBusy"
             type="button"
@@ -2690,10 +2707,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   white-space: nowrap;
 }
 .copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px); border-radius: 0 0 18px 18px; }
-.composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
 /* ── 多模态图片附件 ── */
 .image-upload-input { display: none; }
-.image-upload-button { margin: 6px 0; padding: 6px 12px; border: 1px solid var(--agent-border); border-radius: 8px; color: var(--agent-primary); background: white; cursor: pointer; }
+.image-upload-button { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--agent-border); border-radius: 50%; color: var(--agent-primary); background: rgba(255, 255, 255, 0.85); cursor: pointer; transition: all 0.15s ease; }
+.image-upload-button:hover:not(:disabled) { border-color: var(--agent-primary); background: #fff; box-shadow: 0 3px 10px rgba(91, 88, 232, 0.18); transform: translateY(-1px); }
+.image-upload-button:active:not(:disabled) { transform: translateY(0) scale(0.96); }
 .image-upload-button:disabled { opacity: 0.5; cursor: not-allowed; }
 .chat-image-feedback { font-size: 12px; margin: 6px 0; overflow-wrap: anywhere; }
 .chat-image-feedback.is-error { color: var(--color-danger, #c43d36); }
