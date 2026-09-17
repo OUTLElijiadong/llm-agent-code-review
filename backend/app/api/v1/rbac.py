@@ -32,9 +32,9 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.rbac_dependency import require_admin
-from app.models.rbac import DataScope, Menu, Role, RolePermission, UserRole
+from app.models.rbac import Menu, Role
 from app.models.user import User
 from app.schemas.common import Resp
 from app.schemas.rbac import (
@@ -405,24 +405,9 @@ def delete_role(
         NotFoundError: 角色不存在
         BadRequestError: 角色为系统内置角色,不可删除
     """
-    role = db.get(Role, role_id)
-    if not role:
+    if db.get(Role, role_id) is None:
         raise NotFoundError("角色不存在", code=40400)
-    if role.is_builtin == 1:
-        raise BadRequestError("系统内置角色不可删除", code=40000)
-
-    # 清理关联记录:角色-权限、用户-角色、数据范围
-    db.query(RolePermission).filter(RolePermission.role_id == role_id).delete()
-    db.query(UserRole).filter(UserRole.role_id == role_id).delete()
-    db.query(DataScope).filter(DataScope.role_id == role_id).delete()
-    db.delete(role)
-    db.commit()
-    audit_service.log(
-        db, current, "rbac.role_delete",
-        target_type="role", target_id=str(role_id),
-        detail=f"删除角色 {role.code}({role.name})及其权限/用户/数据域关联",
-    )
-    return Resp(data=None)
+    raise ForbiddenError("角色模型已固定，历史角色仅供审计且不允许删除", code=40324)
 
 
 @router.get("/roles/{role_id}/permissions", response_model=Resp[List[PermissionOut]])

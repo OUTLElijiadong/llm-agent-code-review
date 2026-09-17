@@ -2,7 +2,7 @@
   <div class="role-manage-page">
     <div class="page-header">
       <h2>角色管理</h2>
-      <el-button type="primary" @click="onCreate">新建角色</el-button>
+      <el-tag type="info" effect="plain">固定角色模型：普通用户 / 评审员 / 管理员 / 唯一超级管理员</el-tag>
     </div>
 
     <el-card shadow="hover">
@@ -134,7 +134,6 @@ import { ref, reactive, onMounted } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
   listRoles,
-  createRole,
   updateRole,
   deleteRole,
   listPermissions,
@@ -263,26 +262,6 @@ function buildPermTree(list: Permission[]): PermTreeNode[] {
 }
 
 /**
- * 重置表单数据
- * @returns void
- */
-function resetForm(): void {
-  formData.code = ''
-  formData.name = ''
-  formData.description = ''
-  editingRole.value = null
-}
-
-/**
- * 打开新建角色对话框
- * @returns void
- */
-function onCreate(): void {
-  resetForm()
-  formDialogVisible.value = true
-}
-
-/**
  * 打开编辑角色对话框
  * @param row - 角色行数据
  * @returns void
@@ -300,25 +279,16 @@ function onEdit(row: Role): void {
  * @returns void
  */
 async function onConfirmForm(): Promise<void> {
-  if (!formRef.value) return
+  if (!formRef.value || !editingRole.value) return
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
   submitting.value = true
   try {
-    if (editingRole.value) {
-      await updateRole(editingRole.value.id, {
-        name: formData.name,
-        description: formData.description,
-      })
-      ElMessage.success('角色更新成功')
-    } else {
-      await createRole({
-        code: formData.code,
-        name: formData.name,
-        description: formData.description,
-      })
-      ElMessage.success('角色创建成功')
-    }
+    await updateRole(editingRole.value.id, {
+      name: formData.name,
+      description: formData.description,
+    })
+    ElMessage.success('角色更新成功')
     formDialogVisible.value = false
     loadRoles()
   } finally {

@@ -1363,7 +1363,7 @@ class PrismToolExecutor:
         return ToolExecutionResult.success(data)
 
     def _create_pentest_engagement(self, call: ToolCall) -> ToolExecutionResult:
-        """小菱安排渗透测试: 只创建草稿, 授权确认必须由用户在前端完成。"""
+        """小菱安排渗透测试: 只创建草稿, 授权申请与独立审批必须在前端完成。"""
 
         from app.services import pentest_service
 
@@ -1408,8 +1408,8 @@ class PrismToolExecutor:
                 "authorize_url": "/pentests",
                 "rules_version": pentest_service.PENTEST_RULES_VERSION,
                 "message": (
-                    "委托草稿已创建。请在『渗透测试』页面完成授权规则签署与时间窗设定后启动;"
-                    "未完成授权前不会执行任何主动测试动作。"
+                    "委托草稿已创建。请在『渗透测试』页面确认规则、设定时间窗并提交授权申请;"
+                    "须由其他评审员或管理员独立批准，批准前不会执行任何主动测试动作。"
                 ),
             }
         )

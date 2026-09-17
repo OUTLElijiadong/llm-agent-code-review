@@ -1753,6 +1753,7 @@ onMounted(() => {
             <AgentSessionSwitcher
               ref="switcherRef"
               class="copilot-session-switch"
+              surface="admin"
               :storage-key="chatStorageKey"
               :legacy-key="LEGACY_SESSION_KEY"
               id-prefix="admin"

@@ -53,10 +53,27 @@ _ADMIN_ROLE_CODES: Set[str] = {"admin", "super_admin"}
 # 享受权限绕过的旧版 User.role 字段值集合
 _ADMIN_LEGACY_ROLES: Set[str] = {"admin", "super_admin"}
 
+# 系统只允许为普通账号分配一个基础角色；超级管理员由唯一账号约束维护。
+ASSIGNABLE_ROLE_CODES: Set[str] = {"user", "reviewer", "admin"}
+
 
 # ============================================================================
 # 内部辅助函数
 # ============================================================================
+
+
+def _require_configurable_role(db: Session, role_id: int) -> Role:
+    """只允许管理三个可分配的固定角色。
+
+    历史 auditor/自定义角色可保留供审计，但不得通过旧 API 重新启用、
+    获得权限或扩大数据范围。
+    """
+    role = db.get(Role, role_id)
+    if role is None:
+        raise NotFoundError("角色不存在", code=40400)
+    if role.code not in ASSIGNABLE_ROLE_CODES:
+        raise ForbiddenError("仅允许管理普通用户、评审员和管理员三个固定角色", code=40324)
+    return role
 
 
 def is_admin_user(db: Session, user_id: int) -> bool:
@@ -124,13 +141,17 @@ def assign_roles_to_user(
     target = db.query(User).populate_existing().filter(User.id == user_id).with_for_update().one_or_none()
     if target is None:
         raise NotFoundError("用户不存在", code=40400)
-    roles = db.query(Role).filter(Role.id.in_(set(role_ids))).all() if role_ids else []
+    if len(set(role_ids)) != 1:
+        raise BadRequestError("每个用户必须且只能分配一个基础角色", code=40000)
+    roles = db.query(Role).filter(Role.id.in_(set(role_ids)), Role.status == "active").all()
     if len({role.id for role in roles}) != len(set(role_ids)):
         raise BadRequestError("包含不存在的角色", code=40000)
     if target.username == SUPER_ADMIN_USERNAME:
         raise ForbiddenError("超级管理员角色固定，不允许修改", code=40322)
     if any(role.code == SUPER_ADMIN_ROLE for role in roles):
         raise ForbiddenError("超级管理员只能是 admin", code=40322)
+    if any(role.code not in ASSIGNABLE_ROLE_CODES for role in roles):
+        raise BadRequestError("仅允许分配普通用户、评审员或管理员", code=40000)
     if actor is not None and not is_admin_user(db, actor.id):
         raise ForbiddenError("需要管理员权限", code=40300)
 
@@ -268,7 +289,12 @@ def list_roles(db: Session) -> List[Role]:
     Returns:
         List[Role]: 全部角色列表,按 sort 升序
     """
-    return db.query(Role).order_by(Role.sort).all()
+    return (
+        db.query(Role)
+        .filter(Role.status == "active", Role.code.in_((*ASSIGNABLE_ROLE_CODES, SUPER_ADMIN_ROLE)))
+        .order_by(Role.sort)
+        .all()
+    )
 
 
 def list_permissions(db: Session) -> List[Permission]:
@@ -284,49 +310,18 @@ def list_permissions(db: Session) -> List[Permission]:
 
 
 def create_role(db: Session, role_in: RoleCreateIn, *, actor: User | None = None) -> Role:
-    """创建角色
+    """拒绝创建角色。
 
-    创建角色记录,若 role_in.permission_codes 非空,同时分配对应权限。
+    角色模型自 v3.9.5 起固定，不再允许通过接口扩展角色集合。
 
     Args:
         db: 数据库会话
         role_in: 角色创建请求体(含 name/code/description/status/sort/permission_codes)
 
-    Returns:
-        Role: 新建的角色 ORM 对象
-
     Raises:
-        BadRequestError: 角色编码已存在
+        ForbiddenError: 角色模型已固定
     """
-    existing = db.query(Role).filter(Role.code == role_in.code).first()
-    if existing:
-        raise BadRequestError("角色编码已存在", code=40000)
-    if role_in.code == SUPER_ADMIN_ROLE:
-        raise ForbiddenError("超级管理员角色为系统唯一内置角色", code=40322)
-    if any(code.startswith(SERVER_OPS_PERMISSION_PREFIX) for code in role_in.permission_codes):
-        raise ForbiddenError("服务器权限仅属于超级管理员", code=40323)
-
-    role = Role(
-        name=role_in.name,
-        code=role_in.code,
-        description=role_in.description,
-        status=role_in.status,
-        sort=role_in.sort,
-        is_builtin=0,
-    )
-    db.add(role)
-    db.flush()  # 获取 role.id
-
-    # 分配权限(若提供)
-    if role_in.permission_codes:
-        perm_codes = set(role_in.permission_codes)
-        perms = db.query(Permission).filter(Permission.code.in_(perm_codes)).all()
-        for perm in perms:
-            db.add(RolePermission(role_id=role.id, permission_id=perm.id))
-
-    db.commit()
-    db.refresh(role)
-    return role
+    raise ForbiddenError("角色模型已固定为普通用户、评审员、管理员和唯一超级管理员", code=40324)
 
 
 def update_role(db: Session, role_id: int, role_in: RoleUpdateIn, *, actor: User | None = None) -> Role:
@@ -346,11 +341,9 @@ def update_role(db: Session, role_id: int, role_in: RoleUpdateIn, *, actor: User
     Raises:
         NotFoundError: 角色不存在
     """
-    role = db.get(Role, role_id)
-    if not role:
-        raise NotFoundError("角色不存在", code=40400)
-    if role.code == SUPER_ADMIN_ROLE:
-        raise ForbiddenError("超级管理员角色固定，不允许修改", code=40322)
+    role = _require_configurable_role(db, role_id)
+    if role_in.status is not None and role_in.status != "active":
+        raise ForbiddenError("三个固定基础角色不允许停用", code=40324)
     if role_in.permission_codes is not None and any(
         code.startswith(SERVER_OPS_PERMISSION_PREFIX) for code in role_in.permission_codes
     ):
@@ -397,11 +390,7 @@ def assign_permissions_to_role(
         role_id: 角色ID
         permission_ids: 权限ID列表(将完全替换角色现有权限)
     """
-    role = db.get(Role, role_id)
-    if role is None:
-        raise NotFoundError("角色不存在", code=40400)
-    if role.code == SUPER_ADMIN_ROLE:
-        raise ForbiddenError("超级管理员权限固定，不允许修改", code=40322)
+    _require_configurable_role(db, role_id)
     permissions = db.query(Permission).filter(Permission.id.in_(set(permission_ids))).all() if permission_ids else []
     if len({permission.id for permission in permissions}) != len(set(permission_ids)):
         raise BadRequestError("包含不存在的权限", code=40000)
@@ -455,11 +444,7 @@ def update_data_scope(
     Raises:
         NotFoundError: 角色不存在
     """
-    role = db.get(Role, role_id)
-    if not role:
-        raise NotFoundError("角色不存在", code=40400)
-    if role.code == SUPER_ADMIN_ROLE:
-        raise ForbiddenError("超级管理员数据范围固定，不允许修改", code=40322)
+    _require_configurable_role(db, role_id)
 
     scope = db.query(DataScope).filter(DataScope.role_id == role_id).first()
     if scope:

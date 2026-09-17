@@ -133,18 +133,12 @@ def set_role(
             raise ForbiddenError("不能降级最后一个可用管理员账号", code=40320)
     user.role = role
     user.token_version = (user.token_version or 0) + 1
-    # 同步新版 RBAC 关联，避免 legacy role 与 user_role 两套事实源分裂。
-    # 只替换基础角色(user/reviewer/admin)关联,保留审计员与自定义附加角色,
-    # 避免管理 Agent/旧接口调用把统一用户管理页配置的附加角色清空。
+    # 同步新版 RBAC 关联。角色模型固定为单一基础角色，降级必须撤销全部旧关联。
     from app.models.rbac import Role, UserRole
 
     target_role = db.query(Role).filter(Role.code == role, Role.status == "active").first()
     if target_role:
-        base_role_ids = db.query(Role.id).filter(Role.code.in_(["user", "reviewer", "admin"]))
-        db.query(UserRole).filter(
-            UserRole.user_id == user_id,
-            UserRole.role_id.in_(base_role_ids),
-        ).delete(synchronize_session=False)
+        db.query(UserRole).filter(UserRole.user_id == user_id).delete(synchronize_session=False)
         link_exists = db.query(UserRole.id).filter(
             UserRole.user_id == user_id,
             UserRole.role_id == target_role.id,

@@ -66,6 +66,7 @@ describe('AgentSessionSwitcher 登录周期选择权', () => {
 
       const first = mount(AgentSessionSwitcher, {
         props: {
+          surface,
           storageKey: surface,
           legacyKey: `legacy-${surface}`,
           idPrefix: surface,
@@ -82,6 +83,7 @@ describe('AgentSessionSwitcher 登录周期选择权', () => {
 
       const reopened = mount(AgentSessionSwitcher, {
         props: {
+          surface,
           storageKey: surface,
           legacyKey: `legacy-${surface}`,
           idPrefix: surface,
@@ -279,7 +281,7 @@ describe('AgentSessionSwitcher Agent Mesh discovery', () => {
       by_kind: { session: 2 },
     })
     const wrapper = await mount(AgentSessionSwitcher, {
-      props: { storageKey: 'admin', legacyKey: 'legacy-admin', idPrefix: 'admin', discoverRemote: true },
+      props: { surface: 'admin', storageKey: 'admin:1', legacyKey: 'legacy-admin', idPrefix: 'admin', discoverRemote: true },
     })
     await flushPromises()
     await wrapper.find('.session-current').trigger('click')

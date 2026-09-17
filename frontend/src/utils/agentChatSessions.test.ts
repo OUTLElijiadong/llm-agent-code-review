@@ -252,15 +252,15 @@ describe('会话索引账号隔离', () => {
     expect(resolveAgentChatStorageKey('user', null)).toBe('user')
   })
 
-  it('旧的无 user_id 索引与最后活跃会话一次性迁入账号作用域', () => {
+  it('旧的无 user_id 索引不会迁入其他账号作用域', () => {
     const metas: AgentChatSessionMeta[] = [{ id: 'user-legacy', title: '旧对话', createdAt: 1 }]
     seedSessions(metas)
     saveActiveAgentChatSession('user', 'user-legacy')
 
     migrateUnscopedAgentChatSessions('user', 'user:123')
 
-    expect(loadAgentChatSessions('user:123', 'no-legacy-key', 'user').map(m => m.id)).toContain('user-legacy')
-    expect(loadActiveAgentChatSession('user:123')).toBe('user-legacy')
+    expect(loadAgentChatSessions('user:123', 'no-legacy-key', 'user').map(m => m.id)).not.toContain('user-legacy')
+    expect(loadActiveAgentChatSession('user:123')).toBe('')
     // 旧键已清理,不会再串到下一个账号
     expect(window.localStorage.getItem('prism-agent-sessions:user')).toBeNull()
     expect(loadActiveAgentChatSession('user')).toBe('')

@@ -74,7 +74,6 @@ FRONTEND_API_CAPABILITY = {
     "user:toggleUserStatus": "users.toggle_status",
     "user:deleteUser": "users.delete",
     "rbac:listRoles": "rbac.roles.list",
-    "rbac:createRole": "rbac.roles.create",
     "rbac:updateRole": "rbac.roles.update",
     "rbac:deleteRole": "rbac.roles.delete",
     "rbac:listPermissions": "rbac.permissions.list",
@@ -82,7 +81,6 @@ FRONTEND_API_CAPABILITY = {
     "rbac:assignRolePermissions": "rbac.roles.permissions.assign",
     "rbac:fetchRoleDataScope": "rbac.roles.data_scope.get",
     "rbac:updateRoleDataScope": "rbac.roles.data_scope.update",
-    "rbac:fetchUserRoles": "rbac.users.roles.get",
     "rbac:assignUserRoles": "rbac.users.roles.assign",
     "project:getProjects": "rbac.roles.projects.list",
     "aiLog:getAiLogs": "ai_logs.list",
@@ -182,8 +180,8 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
-    # 129 = 125 项 + 模型注册表/角色分配四项(llm.config.registry.* / assignments)
-    assert len(ADMIN_CAPABILITIES) == 129
+    # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
+    assert len(ADMIN_CAPABILITIES) == 127
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)

@@ -437,25 +437,22 @@ class TestRoleCrud:
     """角色创建/更新/删除测试"""
 
     def test_admin_create_role(self, db, seed, client_factory):
-        """admin 创建角色应成功并返回角色信息"""
+        """固定角色模型下 admin 也不得创建新角色。"""
         client = client_factory(seed["admin"])
-        data = _ok(
-            client.post(
-                "/api/rbac/roles",
-                json={
-                    "name": "测试角色",
-                    "code": "test_role",
-                    "description": "测试",
-                    "permission_codes": ["project:view"],
-                },
-            )
+        response = client.post(
+            "/api/rbac/roles",
+            json={
+                "name": "测试角色",
+                "code": "test_role",
+                "description": "测试",
+                "permission_codes": ["project:view"],
+            },
         )
-        assert data["code"] == "test_role"
-        assert data["is_builtin"] == 0
-        assert "project:view" in data["permission_codes"]
+        assert response.status_code == 403
+        assert response.json()["code"] == 40324
 
     def test_admin_create_role_duplicate_code(self, db, seed, client_factory):
-        """admin 创建角色编码重复应返回业务错误"""
+        """固定角色模型优先拒绝创建，不泄露编码是否存在。"""
         client = client_factory(seed["admin"])
         response = client.post(
             "/api/rbac/roles",
@@ -464,7 +461,8 @@ class TestRoleCrud:
                 "code": "reviewer",
             },
         )
-        assert response.status_code == 400
+        assert response.status_code == 403
+        assert response.json()["code"] == 40324
 
     def test_admin_update_role(self, db, seed, client_factory):
         """admin 更新角色字段应成功"""
@@ -488,18 +486,18 @@ class TestRoleCrud:
         assert response.status_code == 404
 
     def test_admin_delete_custom_role(self, db, seed, client_factory):
-        """admin 删除自定义角色应成功"""
+        """固定角色模型不允许删除评审员。"""
         client = client_factory(seed["admin"])
-        _ok(client.delete("/api/rbac/roles/10"))
-        # 再次查询角色列表,reviewer 应已删除
-        data = _ok(client.get("/api/rbac/roles"))
-        assert all(r["code"] != "reviewer" for r in data)
+        response = client.delete("/api/rbac/roles/10")
+        assert response.status_code == 403
+        assert response.json()["code"] == 40324
 
     def test_admin_delete_builtin_role_forbidden(self, db, seed, client_factory):
-        """admin 删除系统内置角色应返回 400(业务错误)"""
+        """admin 也不能删除固定管理员角色。"""
         client = client_factory(seed["admin"])
         response = client.delete("/api/rbac/roles/20")
-        assert response.status_code == 400
+        assert response.status_code == 403
+        assert response.json()["code"] == 40324
 
     def test_admin_delete_role_not_found(self, db, seed, client_factory):
         """admin 删除不存在角色应 404"""
@@ -676,8 +674,8 @@ class TestPermissionChange:
         data = _ok(client.get("/api/rbac/users/2/permissions"))
         assert "project:view" in data
 
-    def test_revoke_role_removes_permissions(self, db, seed, client_factory):
-        """撤销用户角色后权限应清空"""
+    def test_empty_role_assignment_is_rejected_and_keeps_permissions(self, db, seed, client_factory):
+        """用户必须始终保留一个基础角色，空覆盖不得撤销现有绑定。"""
         client = client_factory(seed["admin"])
         perm_view = seed["permissions"]["project:view"].id
         _ok(
@@ -689,10 +687,10 @@ class TestPermissionChange:
             )
         )
         _ok(client.post("/api/rbac/users/2/roles", json={"role_ids": [10]}))
-        # 撤销角色(空列表覆盖)
-        _ok(client.post("/api/rbac/users/2/roles", json={"role_ids": []}))
+        response = client.post("/api/rbac/users/2/roles", json={"role_ids": []})
+        assert response.status_code == 400
         data = _ok(client.get("/api/rbac/users/2/permissions"))
-        assert data == []
+        assert "project:view" in data
 
 
 # ============================================================================

@@ -71,7 +71,7 @@ def route_inventory():
                 "line": inspect.getsourcelines(endpoint)[1],
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
-    assert len(rows) == 325, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 326, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -81,14 +81,20 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 325
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 325
+    assert len(ROUTES) == 326
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 326
     assert len({row["source"] for row in ROUTES}) == 42
-    assert len(AUTHENTICATED_ROUTES) == 311
-    assert len(GUARDED_ROUTES) == 243
+    assert len(AUTHENTICATED_ROUTES) == 312
+    assert len(GUARDED_ROUTES) == 244
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
+    authorize = [
+        row for row in ROUTES
+        if row["method"] == "POST" and row["path"] == "/api/pentest/engagements/{public_id}/authorize"
+    ]
+    assert len(authorize) == 1
+    assert authorize[0]["guards"] == ["pentest:authorize"]
 
 
 def _route_id(row):

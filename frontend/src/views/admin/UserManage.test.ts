@@ -9,7 +9,6 @@ const userApi = vi.hoisted(() => ({
 }))
 const rbacApi = vi.hoisted(() => ({
   listRoles: vi.fn(),
-  fetchUserRoles: vi.fn(),
   assignUserRoles: vi.fn(),
 }))
 const messages = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }))
@@ -34,10 +33,8 @@ const USERS = [
 const ROLES = [
   { id: 1, code: 'user', name: '普通用户', is_builtin: true },
   { id: 2, code: 'reviewer', name: '评审员', is_builtin: true },
-  { id: 3, code: 'auditor', name: '审计员', is_builtin: true },
   { id: 4, code: 'admin', name: '管理员', is_builtin: true },
   { id: 5, code: 'super_admin', name: '超级管理员', is_builtin: true },
-  { id: 9, code: 'qa_temp', name: '临时验收角色', is_builtin: false },
 ]
 
 function mountUserManage(): VueWrapper {
@@ -72,27 +69,22 @@ beforeEach(() => {
   userApi.resetPassword.mockReset()
   userApi.deleteUser.mockReset()
   rbacApi.listRoles.mockReset().mockResolvedValue(ROLES)
-  rbacApi.fetchUserRoles.mockReset().mockResolvedValue([
-    { id: 1, code: 'user', name: '普通用户' },
-    { id: 9, code: 'qa_temp', name: '临时验收角色' },
-  ])
   rbacApi.assignUserRoles.mockReset().mockResolvedValue([])
 })
 
 describe('UserManage 统一角色编辑(合并原用户角色分配页)', () => {
-  it('卡片同时展示基础角色与 RBAC 附加角色标签', async () => {
+  it('卡片只展示唯一基础角色，不再查询或展示附加角色', async () => {
     const wrapper = mountUserManage()
     await flushPromises()
     await flushPromises()
 
-    expect(rbacApi.fetchUserRoles).toHaveBeenCalledWith(42)
     const text = wrapper.text()
     expect(text).toContain('普通用户')
-    expect(text).toContain('临时验收角色')
+    expect(text).not.toContain('临时验收角色')
     wrapper.unmount()
   })
 
-  it('编辑角色弹窗:基础角色单选 + 附加角色多选(审计员与自定义角色),保存一次写全量', async () => {
+  it('编辑角色弹窗只允许选择一个基础角色并覆盖保存', async () => {
     const wrapper = mountUserManage()
     await flushPromises()
     await flushPromises()
@@ -102,19 +94,13 @@ describe('UserManage 统一角色编辑(合并原用户角色分配页)', () => 
     await editBtn!.trigger('click')
     await flushPromises()
 
-    // 附加角色预选来自 RBAC(临时验收角色已勾选),超级管理员不出现在任何选项里
     const vm = wrapper.vm as unknown as {
       selectedRole: string
-      selectedExtraRoleIds: number[]
-      extraRoleOptions: Array<{ id: number; code: string }>
     }
     expect(vm.selectedRole).toBe('user')
-    expect(vm.selectedExtraRoleIds).toEqual([9])
-    expect(vm.extraRoleOptions.map((r) => r.code)).toEqual(['auditor', 'qa_temp'])
 
-    // 模拟用户改选:基础角色=审查员,附加保留 qa_temp 并加 auditor
+    // 模拟用户改选基础角色为评审员。
     vm.selectedRole = 'reviewer'
-    vm.selectedExtraRoleIds = [3, 9]
     const confirmBtn = wrapper.findAll('.el-dialog-stub button').find((b) => b.text().includes('确定'))
     expect(confirmBtn).toBeTruthy()
     await confirmBtn!.trigger('click')
@@ -122,7 +108,7 @@ describe('UserManage 统一角色编辑(合并原用户角色分配页)', () => 
 
     expect(rbacApi.assignUserRoles).toHaveBeenCalledWith(42, {
       user_id: 42,
-      role_ids: [2, 3, 9],
+      role_ids: [2],
     })
     wrapper.unmount()
   })

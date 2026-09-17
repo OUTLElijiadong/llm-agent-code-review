@@ -20,6 +20,8 @@ import { listAgentMeshAgents } from '@/api/agentMesh'
 import { isAgentResponseSessionOccupied } from '@/utils/agentResponseSession'
 
 interface Props {
+  /** 显式声明当前会话面，不从带账号的 storageKey 字符串推断。 */
+  surface?: 'user' | 'admin'
   /** localStorage 命名空间:user / admin 各自独立 */
   storageKey: string
   /** 旧版单会话 localStorage 键,用于迁移 */
@@ -32,7 +34,7 @@ interface Props {
   discoverRemote?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { surface: 'user' })
 const emit = defineEmits<{
   select: [sessionId: string]
   'sessions-changed': [metas: AgentChatSessionMeta[]]
@@ -189,7 +191,7 @@ onMounted(() => {
     sessions.value = [meta]
     pendingHeartbeatId = meta.id
   }
-  const surface = props.storageKey === 'admin' ? 'admin' : 'user'
+  const surface = props.surface
   if (consumeAgentChatLoginFreshStart(surface)) {
     const fresh = createAgentChatSession(props.storageKey, props.idPrefix)
     pendingHeartbeatId = fresh.id
@@ -239,7 +241,7 @@ function reload(): void {
 async function refreshFromAgentMesh(): Promise<void> {
   if (discoveryLoading.value) return
   discoveryLoading.value = true
-  const surface = props.storageKey === 'admin' ? 'admin' : 'user'
+  const surface = props.surface
   const previousActiveId = activeId.value
   try {
     const discovery = await listAgentMeshAgents()

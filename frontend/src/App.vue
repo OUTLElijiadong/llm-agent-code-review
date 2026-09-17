@@ -34,10 +34,10 @@ watch(agentVisible, (val) => {
   const key = agentVisibleStorageKey()
   if (!key) return
   try {
-    if (val) window.sessionStorage.setItem(key, '1')
-    else window.sessionStorage.removeItem(key)
+    if (val) window.localStorage.setItem(key, '1')
+    else window.localStorage.removeItem(key)
   } catch {
-    // sessionStorage 不可用时退化为当前页面生命周期内记忆
+    // localStorage 不可用时退化为当前页面生命周期内记忆
   }
 })
 
@@ -46,7 +46,7 @@ watch(canUseAgent, (val) => {
   const key = agentVisibleStorageKey()
   if (!key) return
   try {
-    if (window.sessionStorage.getItem(key) === '1') agentVisible.value = true
+    if (window.localStorage.getItem(key) === '1') agentVisible.value = true
   } catch {
     // 读取失败保持默认关闭
   }

@@ -77,8 +77,11 @@ export function resolveAgentChatStorageKey(
 }
 
 /**
- * 一次性把未带 user_id 的旧索引/最后活跃会话迁移到当前账号作用域,
- * 避免老用户升级后丢失本地会话标题和排序;服务端仍是会话事实源。
+ * 清理未带 user_id 的旧索引/最后活跃会话。
+ *
+ * 旧版本没有记录会话所属账号，因此在共享浏览器上把裸 key 复制给
+ * 当前登录账号会把上一个账号的标题、活动会话甚至快照暴露给新账号。
+ * 旧会话必须由服务端按当前用户重新发现；无法证明归属的本地索引不迁移。
  */
 export function migrateUnscopedAgentChatSessions(
   surface: 'user' | 'admin',
@@ -86,19 +89,12 @@ export function migrateUnscopedAgentChatSessions(
 ): void {
   if (scopedKey === surface) return
   try {
-    const scopedIndex = window.localStorage.getItem(INDEX_PREFIX + scopedKey)
     const legacyIndex = window.localStorage.getItem(INDEX_PREFIX + surface)
-    if (!scopedIndex && legacyIndex) {
-      window.localStorage.setItem(INDEX_PREFIX + scopedKey, legacyIndex)
-    }
     const legacyActive = window.localStorage.getItem(ACTIVE_PREFIX + surface)
-    if (legacyActive) {
-      if (!window.localStorage.getItem(ACTIVE_PREFIX + scopedKey)) {
-        window.localStorage.setItem(ACTIVE_PREFIX + scopedKey, legacyActive)
-      }
+    if (legacyIndex || legacyActive) {
+      window.localStorage.removeItem(INDEX_PREFIX + surface)
       window.localStorage.removeItem(ACTIVE_PREFIX + surface)
     }
-    if (legacyIndex) window.localStorage.removeItem(INDEX_PREFIX + surface)
   } catch {
     // 存储不可用时跳过迁移,会话列表由服务端发现兜底。
   }

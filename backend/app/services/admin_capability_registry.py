@@ -546,9 +546,6 @@ _cap(
     # RBAC 角色、权限与用户绑定
     _cap("rbac.roles.list", "/admin/rbac/roles", "查询 RBAC 角色", "GET", "/api/rbac/roles", permission="role:manage"),
     _cap(
-        "rbac.roles.create", "/admin/rbac/roles", "创建 RBAC 角色", "POST", "/api/rbac/roles", CRITICAL, "role:manage"
-    ),
-    _cap(
         "rbac.roles.update",
         "/admin/rbac/roles",
         "更新 RBAC 角色",
@@ -640,14 +637,6 @@ _cap(
         "/api/rbac/users/{user_id}/roles",
         CRITICAL,
         "role:manage",
-    ),
-    _cap(
-        "rbac.users.roles.get",
-        "/admin/users",
-        "查询用户 RBAC 角色",
-        "GET",
-        "/api/rbac/users/{user_id}/roles",
-        permission="user:view",
     ),
     _cap(
         "rbac.users.permissions.get",

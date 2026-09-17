@@ -2087,7 +2087,7 @@ watch(() => props.visible, async (val) => {
   restoreOrAnchor()
   switcherRef.value?.ensureFreshOnOpen()
   scrollToBottom()
-})
+}, { immediate: true })
 
 watch(() => props.prefill, (prefill) => {
   if (!prefill) return
@@ -2214,6 +2214,7 @@ onMounted(() => {
                 <AgentSessionSwitcher
                   ref="switcherRef"
                   class="chat-session-switch"
+                  surface="user"
                   :storage-key="chatStorageKey"
                   :legacy-key="LEGACY_SESSION_KEY"
                   id-prefix="user"
@@ -2768,6 +2769,8 @@ onMounted(() => {
 
 .chat-drawer {
   position: fixed;
+  right: 24px;
+  bottom: 24px;
   width: min(400px, calc(100vw - 32px));
   height: min(620px, calc(100dvh - 48px));
   background: #fff;

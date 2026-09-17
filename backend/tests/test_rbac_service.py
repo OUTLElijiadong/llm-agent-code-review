@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.exceptions import BadRequestError, NotFoundError, PermissionError
+from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError, PermissionError
 from app.core.permission_codes import ALL_PERMISSION_CODES, PermissionCode
 from app.core.rbac_dependency import (
     require_admin,
@@ -214,19 +214,18 @@ class TestAssignRolesToUser:
         assert user.token_version == 1
 
     def test_assign_multiple_roles(self, db):
-        """分配多个角色后用户应拥有全部角色"""
+        """一个账号不能分配多个基础/附加角色"""
         user = _make_user(db, 1, "u1")
         r1 = _make_role(db, 11, "reviewer", "评审员", sort=200)
         r2 = _make_role(db, 12, "auditor", "审计员", sort=300)
-        assign_roles_to_user(db, user.id, [r1.id, r2.id])
-        roles = get_user_roles(db, user.id)
-        assert {r.code for r in roles} == {"reviewer", "auditor"}
+        with pytest.raises(BadRequestError):
+            assign_roles_to_user(db, user.id, [r1.id, r2.id])
 
     def test_assign_overwrites_previous(self, db):
         """覆盖式分配: 旧角色应被清除"""
         user = _make_user(db, 1, "u1")
         r1 = _make_role(db, 11, "reviewer", "评审员")
-        r2 = _make_role(db, 12, "auditor", "审计员")
+        r2 = _make_role(db, 12, "user", "普通用户")
         # 先分配 r1
         assign_roles_to_user(db, user.id, [r1.id])
         assert len(get_user_roles(db, user.id)) == 1
@@ -234,19 +233,18 @@ class TestAssignRolesToUser:
         assign_roles_to_user(db, user.id, [r2.id])
         roles = get_user_roles(db, user.id)
         assert len(roles) == 1
-        assert roles[0].code == "auditor"
+        assert roles[0].code == "user"
 
     def test_assign_empty_clears_roles(self, db):
-        """空列表分配应清空用户全部角色"""
+        """空列表会制造无角色账号，必须拒绝"""
         user = _make_user(db, 1, "u1")
         r1 = _make_role(db, 11, "reviewer", "评审员")
         assign_roles_to_user(db, user.id, [r1.id])
         assert len(get_user_roles(db, user.id)) == 1
         # 清空
-        assign_roles_to_user(db, user.id, [])
-        assert get_user_roles(db, user.id) == []
-        db.refresh(user)
-        assert user.role == "user"
+        with pytest.raises(BadRequestError):
+            assign_roles_to_user(db, user.id, [])
+        assert [r.code for r in get_user_roles(db, user.id)] == ["reviewer"]
 
     def test_assign_and_remove_admin_keeps_legacy_role_consistent(self, db):
         """RBAC 管理员变更必须同步历史角色，避免降级后仍绕过权限。"""
@@ -476,12 +474,10 @@ class TestRoleManagement:
     """create_role / update_role / list_roles 测试"""
 
     def test_create_role_basic(self, db):
-        """创建角色应持久化并返回"""
+        """固定角色模型拒绝创建自定义角色"""
         role_in = RoleCreateIn(name="自定义角色", code="custom", description="测试")
-        role = create_role(db, role_in)
-        assert role.id is not None
-        assert role.code == "custom"
-        assert role.is_builtin == 0
+        with pytest.raises(ForbiddenError):
+            create_role(db, role_in)
 
     def test_create_role_with_permissions(self, db):
         """创建角色时同时分配权限码"""
@@ -491,20 +487,19 @@ class TestRoleManagement:
             name="自定义角色", code="custom",
             permission_codes=["review:start", "review:view"],
         )
-        role = create_role(db, role_in)
-        perms = get_role_permissions(db, role.id)
-        assert {p.code for p in perms} == {"review:start", "review:view"}
+        with pytest.raises(ForbiddenError):
+            create_role(db, role_in)
 
     def test_create_role_duplicate_code_raises(self, db):
         """角色编码重复应抛出 BadRequestError"""
         _make_role(db, 10, "custom", "自定义角色")
         role_in = RoleCreateIn(name="另一角色", code="custom")
-        with pytest.raises(BadRequestError):
+        with pytest.raises(ForbiddenError):
             create_role(db, role_in)
 
     def test_update_role_fields(self, db):
         """更新角色字段应持久化"""
-        role = _make_role(db, 10, "custom", "原名称", sort=100)
+        role = _make_role(db, 10, "reviewer", "原名称", sort=100)
         role_in = RoleUpdateIn(name="新名称", sort=200)
         updated = update_role(db, role.id, role_in)
         assert updated.name == "新名称"
@@ -512,7 +507,7 @@ class TestRoleManagement:
 
     def test_update_role_permissions_overwrite(self, db):
         """更新角色权限码应覆盖式替换"""
-        role = _make_role(db, 10, "custom", "自定义")
+        role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "review:start", "review")
         p2 = _make_permission(db, 102, "review:view", "review")
         _make_permission(db, 103, "review:cancel", "review")
@@ -527,7 +522,7 @@ class TestRoleManagement:
 
     def test_update_role_clear_permissions(self, db):
         """传空权限码列表应清空角色权限"""
-        role = _make_role(db, 10, "custom", "自定义")
+        role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "review:start", "review")
         _link_role_permission(db, role.id, p1.id)
         role_in = RoleUpdateIn(permission_codes=[])
@@ -539,13 +534,24 @@ class TestRoleManagement:
         with pytest.raises(NotFoundError):
             update_role(db, 999, RoleUpdateIn(name="x"))
 
+    def test_update_legacy_role_is_forbidden(self, db):
+        role = _make_role(db, 10, "auditor", "审计员", status="disabled")
+        with pytest.raises(ForbiddenError):
+            update_role(db, role.id, RoleUpdateIn(status="active"))
+
+    def test_fixed_role_cannot_be_disabled(self, db):
+        role = _make_role(db, 10, "reviewer", "评审员")
+        with pytest.raises(ForbiddenError):
+            update_role(db, role.id, RoleUpdateIn(status="disabled"))
+
     def test_list_roles_ordered_by_sort(self, db):
         """列出角色应按 sort 升序"""
-        _make_role(db, 10, "b", "B", sort=200)
-        _make_role(db, 11, "a", "A", sort=100)
-        _make_role(db, 12, "c", "C", sort=300)
+        _make_role(db, 10, "reviewer", "评审员", sort=200)
+        _make_role(db, 11, "user", "普通用户", sort=100)
+        _make_role(db, 12, "admin", "管理员", sort=300)
+        _make_role(db, 13, "auditor", "审计员", sort=150)
         roles = list_roles(db)
-        assert [r.code for r in roles] == ["a", "b", "c"]
+        assert [r.code for r in roles] == ["user", "reviewer", "admin"]
 
 
 # ============================================================================
@@ -558,7 +564,7 @@ class TestPermissionAssignment:
 
     def test_assign_permissions_overwrites(self, db):
         """assign_permissions_to_role 应覆盖式替换"""
-        role = _make_role(db, 10, "custom", "自定义")
+        role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "p1", "mod")
         p2 = _make_permission(db, 102, "p2", "mod")
         p3 = _make_permission(db, 103, "p3", "mod")
@@ -571,7 +577,7 @@ class TestPermissionAssignment:
 
     def test_assign_empty_clears_permissions(self, db):
         """空权限列表应清空角色权限"""
-        role = _make_role(db, 10, "custom", "自定义")
+        role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "p1", "mod")
         _link_role_permission(db, role.id, p1.id)
         assign_permissions_to_role(db, role.id, [])
@@ -650,7 +656,7 @@ class TestDataScopeManagement:
 
     def test_update_data_scope_creates_new(self, db):
         """update_data_scope 对无记录角色应新建"""
-        role = _make_role(db, 10, "custom", "自定义")
+        role = _make_role(db, 10, "reviewer", "评审员")
         scope_in = DataScopeIn(role_id=role.id, scope_type="all")
         scope = update_data_scope(db, role.id, scope_in)
         assert scope.scope_type == "all"
@@ -658,7 +664,7 @@ class TestDataScopeManagement:
 
     def test_update_data_scope_updates_existing(self, db):
         """update_data_scope 对已有记录应更新"""
-        role = _make_role(db, 10, "custom", "自定义")
+        role = _make_role(db, 10, "reviewer", "评审员")
         _make_data_scope(db, role.id, "project_own")
         scope_in = DataScopeIn(role_id=role.id, scope_type="all")
         scope = update_data_scope(db, role.id, scope_in)
@@ -835,8 +841,8 @@ class TestPermissionCodes:
     """权限点常量定义测试"""
 
     def test_all_permission_codes_count(self):
-        """ALL_PERMISSION_CODES 应包含 59 个权限点(56+渗透测试 3 项)"""
-        assert len(ALL_PERMISSION_CODES) == 59
+        """ALL_PERMISSION_CODES 应包含新增的独立渗透授权权限"""
+        assert len(ALL_PERMISSION_CODES) == 60
 
     def test_permission_code_values_unique(self):
         """所有权限编码应唯一"""
@@ -853,12 +859,11 @@ class TestPermissionCodes:
         assert PermissionCode.AUDIT_VIEW == "audit:view"
 
 
-class TestSetRolePreservesExtraRoles:
-    """user_service.set_role 只替换基础角色(user/reviewer/admin),
-    保留审计员与自定义附加角色 —— 统一用户管理页合并后的口径保护。"""
+class TestSetRoleRevokesExtraRoles:
+    """user_service.set_role 必须撤销附加角色，避免降级后残留权限。"""
 
-    def test_extra_roles_preserved_on_base_role_change(self, db):
-        from app.models.rbac import Role, UserRole
+    def test_extra_roles_revoked_on_base_role_change(self, db):
+        from app.models.rbac import UserRole
         from app.services import user_service
 
         u = _make_user(db, 8101, "merge_target_u")
@@ -878,14 +883,14 @@ class TestSetRolePreservesExtraRoles:
             for link in db.query(UserRole).filter(UserRole.user_id == u.id).all()
         }
         assert reviewer.id in role_ids  # 新基础角色已挂载
-        assert custom.id in role_ids  # 自定义附加角色被保留
+        assert custom.id not in role_ids  # 自定义附加角色被撤销
         assert base_user.id not in role_ids  # 旧基础角色被替换
         db.refresh(u)
         assert u.role == "reviewer"
 
     def test_set_role_without_matching_builtin_keeps_links(self, db):
         """目标基础角色的 RBAC 记录不存在时,不动任何现有角色关联。"""
-        from app.models.rbac import Role, UserRole
+        from app.models.rbac import UserRole
         from app.services import user_service
 
         u = _make_user(db, 8111, "no_builtin_u")

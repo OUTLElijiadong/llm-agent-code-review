@@ -26,7 +26,8 @@ from app.models.base import IdMixin, TimestampMixin
 class Role(Base, IdMixin, TimestampMixin):
     """角色表
 
-    定义系统角色,预置角色(user/reviewer/auditor/admin/super_admin)不可删除。
+    定义系统角色。可分配角色固定为 user/reviewer/admin，super_admin 为不可分配的最高管理员；
+    历史 auditor 角色由迁移合并进 reviewer 后停用。
 
     Attributes:
         name: 角色名称(如"评审员")

@@ -44,6 +44,12 @@ export function useFloatingChatPosition(storageKey: string) {
       position.value = null
       return
     }
+    // Teleport + 异步组件自动恢复时，面板可能刚挂载但尚未完成布局。
+    // 不能用 0×0 计算右下角坐标，否则真实尺寸出来后整个窗口会落到视口外。
+    if (panel.offsetWidth <= 0 || panel.offsetHeight <= 0) {
+      window.requestAnimationFrame(restoreOrAnchor)
+      return
+    }
     let saved: Point | null = null
     try {
       const parsed = JSON.parse(window.localStorage.getItem(storageName(storageKey)) || 'null') as Point | null

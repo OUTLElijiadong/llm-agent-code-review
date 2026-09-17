@@ -1,6 +1,6 @@
 import { defineComponent, nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useFloatingChatPosition } from './useFloatingChatPosition'
 
@@ -13,6 +13,8 @@ describe('useFloatingChatPosition', () => {
   beforeEach(() => {
     setViewport(1280, 720)
   })
+
+  afterEach(() => vi.restoreAllMocks())
 
   it('drops a saved desktop position on mobile and restores it when desktop returns', async () => {
     localStorage.setItem('prism-floating-chat-position:user', JSON.stringify({ left: 856, top: 76 }))
@@ -62,6 +64,38 @@ describe('useFloatingChatPosition', () => {
     expect(wrapper.attributes('style') ?? '').not.toContain('left:')
     expect(wrapper.attributes('style') ?? '').not.toContain('top:')
 
+    wrapper.unmount()
+  })
+
+  it('重登自动恢复时等待真实尺寸，不用 0×0 把浮窗放到视口外', async () => {
+    setViewport(1440, 1000)
+    let width = 0
+    let height = 0
+    let scheduled: FrameRequestCallback | undefined
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      scheduled = callback
+      return 1
+    })
+    const Component = defineComponent({
+      setup() {
+        return useFloatingChatPosition('user:2')
+      },
+      template: '<div ref="panelRef" :style="style" />',
+    })
+    const wrapper = mount(Component)
+    Object.defineProperty(wrapper.element, 'offsetWidth', { configurable: true, get: () => width })
+    Object.defineProperty(wrapper.element, 'offsetHeight', { configurable: true, get: () => height })
+
+    wrapper.vm.restoreOrAnchor()
+    expect(scheduled).toBeTypeOf('function')
+    expect(wrapper.attributes('style') ?? '').not.toContain('left:')
+
+    width = 400
+    height = 620
+    scheduled?.(0)
+    await nextTick()
+    expect(wrapper.attributes('style')).toContain('left: 1016px')
+    expect(wrapper.attributes('style')).toContain('top: 356px')
     wrapper.unmount()
   })
 
