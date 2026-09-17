@@ -1,0 +1,152 @@
+{
+  "checked_at": "2026-09-17T15:30:16.675581+00:00",
+  "base_url": "https://lijiadong.cn",
+  "steps": [
+    {
+      "actor": "applicant",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "reviewer",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "superadmin",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "reviewer",
+      "method": "GET",
+      "path": "/api/agent-studio/agents",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "applicant",
+      "method": "POST",
+      "path": "/api/pentest/engagements",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "applicant",
+      "method": "POST",
+      "path": "/api/pentest/engagements/pt-724ba703d6d64497/submit-authorization",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "applicant",
+      "method": "POST",
+      "path": "/api/pentest/engagements/pt-724ba703d6d64497/authorize",
+      "http": 403,
+      "code": 40303,
+      "message": "无操作权限: 需要 pentest:authorize"
+    },
+    {
+      "actor": "reviewer",
+      "method": "POST",
+      "path": "/api/pentest/engagements/pt-724ba703d6d64497/cancel",
+      "http": 403,
+      "code": 40332,
+      "message": "无权访问该渗透测试委托"
+    },
+    {
+      "actor": "reviewer",
+      "method": "DELETE",
+      "path": "/api/pentest/engagements/pt-724ba703d6d64497",
+      "http": 403,
+      "code": 40332,
+      "message": "无权访问该渗透测试委托"
+    },
+    {
+      "actor": "reviewer",
+      "method": "GET",
+      "path": "/api/pentest/engagements?scope=all&status=pending_authorization&limit=100&offset=0",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    }
+  ],
+  "public_id": "pt-724ba703d6d64497",
+  "pending_visible_to_reviewer": true,
+  "post_approval_steps": [
+    {
+      "actor": "applicant",
+      "method": "GET",
+      "path": "/api/pentest/engagements/pt-724ba703d6d64497",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "applicant",
+      "method": "POST",
+      "path": "/api/pentest/engagements/pt-724ba703d6d64497/cancel",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "applicant",
+      "method": "DELETE",
+      "path": "/api/pentest/engagements/pt-724ba703d6d64497",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "applicant",
+      "method": "POST",
+      "path": "/api/pentest/engagements/pt-79b0fdf402314e20/cancel",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "applicant",
+      "method": "DELETE",
+      "path": "/api/pentest/engagements/pt-79b0fdf402314e20",
+      "http": 200,
+      "code": 0,
+      "message": "ok"
+    },
+    {
+      "actor": "applicant",
+      "method": "GET",
+      "path": "/api/pentest/engagements/pt-724ba703d6d64497",
+      "http": 404,
+      "code": 40432,
+      "message": "渗透测试委托不存在: pt-724ba703d6d64497"
+    },
+    {
+      "actor": "applicant",
+      "method": "GET",
+      "path": "/api/pentest/engagements/pt-79b0fdf402314e20",
+      "http": 404,
+      "code": 40432,
+      "message": "渗透测试委托不存在: pt-79b0fdf402314e20"
+    }
+  ],
+  "browser_approval_verified": {
+    "status": "authorized",
+    "independent_authorizer_matches": true
+  },
+  "cleanup_verified": true,
+  "completed_at": "2026-09-17T15:40:05.239346+00:00"
+}
