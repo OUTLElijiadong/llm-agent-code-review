@@ -555,15 +555,6 @@ _cap(
         "role:manage",
     ),
     _cap(
-        "rbac.roles.delete",
-        "/admin/rbac/roles",
-        "删除非内置 RBAC 角色",
-        "DELETE",
-        "/api/rbac/roles/{role_id}",
-        CRITICAL,
-        "role:manage",
-    ),
-    _cap(
         "rbac.roles.permissions.get",
         "/admin/rbac/roles",
         "查询角色权限",

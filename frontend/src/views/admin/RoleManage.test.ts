@@ -3,9 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const rbacApi = vi.hoisted(() => ({
   listRoles: vi.fn(),
-  createRole: vi.fn(),
   updateRole: vi.fn(),
-  deleteRole: vi.fn(),
   listPermissions: vi.fn(),
   fetchRolePermissions: vi.fn(),
   assignRolePermissions: vi.fn(),
@@ -17,9 +15,6 @@ const messages = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: 
 
 vi.mock('@/api/rbac', () => rbacApi)
 vi.mock('@/api/project', () => projectApi)
-vi.mock('element-plus/es/components/message-box/index', () => ({
-  ElMessageBox: { confirm: vi.fn() },
-}))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
 import RoleManage from './RoleManage.vue'

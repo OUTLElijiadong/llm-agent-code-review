@@ -1,10 +1,10 @@
 /**
  * RBAC 权限管理 API 封装
  * 对接后端 T10 RBAC 模块,路径前缀 /api/rbac
- * 共封装 15 个接口,涵盖用户角色/权限/菜单/数据范围查询、角色 CRUD、权限分配等
+ * 角色集合固定，前端只提供角色查询、编辑、权限和数据范围分配。
  */
 
-import { get, post, put, del } from './http'
+import { get, post, put } from './http'
 import type {
   Role,
   Permission,
@@ -13,7 +13,6 @@ import type {
   UserRoleItem,
   RoleUserItem,
   UserRoleAssignIn,
-  RoleCreateIn,
   RoleUpdateIn,
   RolePermissionAssignIn,
   DataScopeUpdateIn,
@@ -72,7 +71,7 @@ export function fetchUserDataScope(userId: number): Promise<DataScope> {
 }
 
 /* ------------------------------------------------------------------ */
-/* 角色 CRUD 与权限/数据范围                                           */
+/* 固定角色查询、编辑与权限/数据范围                             */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -84,15 +83,6 @@ export function listRoles(): Promise<Role[]> {
 }
 
 /**
- * 创建角色
- * @param body - 角色创建入参
- * @returns 创建后的角色
- */
-export function createRole(body: RoleCreateIn): Promise<Role> {
-  return post<Role>(`${BASE}/roles`, body)
-}
-
-/**
  * 更新角色
  * @param roleId - 角色 ID
  * @param body - 角色更新入参
@@ -100,15 +90,6 @@ export function createRole(body: RoleCreateIn): Promise<Role> {
  */
 export function updateRole(roleId: number, body: RoleUpdateIn): Promise<Role> {
   return put<Role>(`${BASE}/roles/${roleId}`, body)
-}
-
-/**
- * 删除角色
- * @param roleId - 角色 ID
- * @returns void
- */
-export function deleteRole(roleId: number): Promise<void> {
-  return del<void>(`${BASE}/roles/${roleId}`)
 }
 
 /**

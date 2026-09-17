@@ -19,40 +19,30 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="320" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <span v-if="row.code === 'super_admin'" class="protected-role">固定最高权限</span>
             <template v-else>
             <el-button link type="primary" size="small" @click="onEdit(row)">编辑</el-button>
             <el-button link type="success" size="small" @click="onAssignPermissions(row)">分配权限</el-button>
             <el-button link type="warning" size="small" @click="onSetDataScope(row)">数据范围</el-button>
-            <el-button
-              link
-              type="danger"
-              size="small"
-              :disabled="row.is_builtin"
-              @click="onDelete(row)"
-            >
-              删除
-            </el-button>
             </template>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <!-- 新建/编辑角色对话框 -->
+    <!-- 固定角色编辑对话框 -->
     <el-dialog
       v-model="formDialogVisible"
-      :title="editingRole ? '编辑角色' : '新建角色'"
+      title="编辑角色"
       width="460px"
     >
       <el-form ref="formRef" :model="formData" :rules="formRules" label-width="90px">
         <el-form-item label="角色编码" prop="code">
           <el-input
             v-model="formData.code"
-            placeholder="如 reviewer / auditor"
-            :disabled="!!editingRole"
+            disabled
           />
         </el-form-item>
         <el-form-item label="角色名称" prop="name">
@@ -135,7 +125,6 @@ import type { FormInstance, FormRules } from 'element-plus'
 import {
   listRoles,
   updateRole,
-  deleteRole,
   listPermissions,
   fetchRolePermissions,
   assignRolePermissions,
@@ -145,7 +134,6 @@ import {
 import { getProjects } from '@/api/project'
 import type { Role, Permission, DataScopeType, DataScopeUpdateIn } from '@/types/rbac'
 import type { ProjectOut } from '@/types/project'
-import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 /** 权限树节点 */
@@ -275,7 +263,7 @@ function onEdit(row: Role): void {
 }
 
 /**
- * 提交新建/编辑角色表单
+ * 提交固定角色编辑表单
  * @returns void
  */
 async function onConfirmForm(): Promise<void> {
@@ -293,26 +281,6 @@ async function onConfirmForm(): Promise<void> {
     loadRoles()
   } finally {
     submitting.value = false
-  }
-}
-
-/**
- * 删除角色(内置角色禁用)
- * @param row - 角色行数据
- * @returns void
- */
-async function onDelete(row: Role): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除角色「${row.name}」吗?该操作不可恢复。`,
-      '确认删除',
-      { type: 'warning' },
-    )
-    await deleteRole(row.id)
-    ElMessage.success('角色已删除')
-    loadRoles()
-  } catch {
-    /* canceled */
   }
 }
 

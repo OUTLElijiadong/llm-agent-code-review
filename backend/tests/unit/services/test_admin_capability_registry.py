@@ -75,7 +75,6 @@ FRONTEND_API_CAPABILITY = {
     "user:deleteUser": "users.delete",
     "rbac:listRoles": "rbac.roles.list",
     "rbac:updateRole": "rbac.roles.update",
-    "rbac:deleteRole": "rbac.roles.delete",
     "rbac:listPermissions": "rbac.permissions.list",
     "rbac:fetchRolePermissions": "rbac.roles.permissions.get",
     "rbac:assignRolePermissions": "rbac.roles.permissions.assign",
@@ -181,7 +180,7 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
-    assert len(ADMIN_CAPABILITIES) == 127
+    assert len(ADMIN_CAPABILITIES) == 126
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
