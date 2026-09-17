@@ -50,6 +50,13 @@
               <b class="uc-name" :title="row.nickname || row.username">{{ row.nickname || row.username }}</b>
               <span v-if="row.nickname" class="uc-username font-mono">@{{ row.username }}</span>
               <el-tag :type="roleType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
+              <el-tag
+                v-for="name in row.extraRoleNames ?? []"
+                :key="name"
+                type="info"
+                size="small"
+                effect="plain"
+              >{{ name }}</el-tag>
               <el-tag :type="row.status ? 'success' : 'danger'" size="small">
                 {{ row.status ? '启用' : '禁用' }}
               </el-tag>
@@ -64,7 +71,7 @@
           <div class="uc-actions">
             <span v-if="row.username === 'admin'" class="protected-admin">唯一超级管理员</span>
             <template v-else>
-              <el-button link type="primary" size="small" @click="onSetRole(row)">设置角色</el-button>
+              <el-button link type="primary" size="small" @click="onSetRole(row)">编辑角色</el-button>
               <el-button link :type="row.status ? 'warning' : 'success'" size="small" @click="onToggleStatus(row)">
                 {{ row.status ? '禁用' : '启用' }}
               </el-button>
@@ -87,15 +94,28 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="roleDialogVisible" title="设置角色" width="460px" append-to-body>
-      <el-form label-width="80px">
+    <el-dialog v-model="roleDialogVisible" title="编辑角色" width="520px" append-to-body>
+      <el-form label-width="90px" v-loading="roleLoading">
         <el-form-item label="用户">{{ selectedUser?.username }}</el-form-item>
-        <el-form-item label="角色">
-          <el-select v-model="selectedRole" placeholder="选择角色" style="width: 100%">
-            <el-option label="普通用户(可管理自己的项目)" value="user" />
-            <el-option label="审查员(可审查,项目操作受权限约束)" value="reviewer" />
-            <el-option label="管理员(程序内管理权限)" value="admin" />
-          </el-select>
+        <el-form-item label="基础角色">
+          <el-radio-group v-model="selectedRole">
+            <el-radio value="user">普通用户(可管理自己的项目)</el-radio>
+            <el-radio value="reviewer">审查员(可审查,项目操作受权限约束)</el-radio>
+            <el-radio value="admin">管理员(程序内管理权限)</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="extraRoleOptions.length" label="附加角色">
+          <el-checkbox-group v-model="selectedExtraRoleIds">
+            <div class="extra-role-list">
+              <el-checkbox v-for="r in extraRoleOptions" :key="r.id" :value="r.id">
+                <span class="extra-role-label">
+                  <span class="extra-role-name">{{ r.name }}</span>
+                  <span class="extra-role-code font-mono">{{ r.code }}</span>
+                  <el-tag v-if="r.is_builtin" size="small" type="warning">内置</el-tag>
+                </span>
+              </el-checkbox>
+            </div>
+          </el-checkbox-group>
         </el-form-item>
         <!-- 项目影响说明:角色变更不影响已建项目归属,仅改变后续可见范围 -->
         <el-alert
@@ -155,19 +175,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { CopyDocument } from '@element-plus/icons-vue'
 
 import EmptyState from '@/components/common/EmptyState.vue'
-import { getUsers, setUserRole, toggleUserStatus, resetPassword, deleteUser } from '@/api/user'
+import { getUsers, toggleUserStatus, resetPassword, deleteUser } from '@/api/user'
+import { listRoles, fetchUserRoles, assignUserRoles } from '@/api/rbac'
+import type { Role } from '@/types/rbac'
 import type { UserListItem } from '@/types/user'
 import { formatDateTime } from '@/utils/format'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
+/** 表格行:在 UserListItem 基础上附挂 RBAC 附加角色名(展示用) */
+interface UserRow extends UserListItem {
+  extraRoleNames?: string[]
+}
+
 const loading = ref(false)
 const submitting = ref(false)
-const users = ref<UserListItem[]>([])
+const roleLoading = ref(false)
+const users = ref<UserRow[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
@@ -176,11 +204,20 @@ const filterRole = ref('')
 const filterStatus = ref<number | null>(null)
 
 const roleDialogVisible = ref(false)
-const selectedUser = ref<UserListItem | null>(null)
+const selectedUser = ref<UserRow | null>(null)
 const selectedRole = ref('user')
+const selectedExtraRoleIds = ref<number[]>([])
+const allRoles = ref<Role[]>([])
 const passwordDialogVisible = ref(false)
 const resetPasswordUsername = ref('')
 const temporaryPassword = ref('')
+
+/** 基础角色(RBAC 内置编码,与 user.role 旧列一一对应) */
+const BASE_ROLE_CODES = ['user', 'reviewer', 'admin'] as const
+/** 附加角色选项:内置审计员 + 全部自定义角色;超级管理员任何入口都不可分配 */
+const extraRoleOptions = computed(() => allRoles.value.filter(
+  (r) => !(['user', 'reviewer', 'admin', 'super_admin'] as const).includes(r.code as never),
+))
 
 const roleLabels: Record<string, string> = {
   super_admin: '超级管理员',
@@ -218,23 +255,60 @@ async function loadData() {
     const data = await getUsers(params)
     users.value = data.items
     total.value = data.total
+    loadExtraRoleNames(users.value)
   } finally {
     loading.value = false
   }
 }
 
-function onSetRole(row: UserListItem) {
+/** 异步补齐每行的 RBAC 附加角色标签(基础角色已由 user.role 展示,跳过同名内置)。 */
+async function loadExtraRoleNames(rows: UserRow[]): Promise<void> {
+  for (const row of rows) {
+    try {
+      const roles = await fetchUserRoles(row.id)
+      const target = users.value.find((u) => u.id === row.id)
+      if (target) {
+        target.extraRoleNames = roles
+          .filter((r) => !(BASE_ROLE_CODES as readonly string[]).includes(r.code) && r.code !== 'super_admin')
+          .map((r) => r.name)
+      }
+    } catch {
+      /* 单个用户角色加载失败不影响整体 */
+    }
+  }
+}
+
+async function onSetRole(row: UserRow) {
   selectedUser.value = row
-  selectedRole.value = row.role
+  selectedRole.value = BASE_ROLE_CODES.includes(row.role as never) ? row.role : 'user'
+  selectedExtraRoleIds.value = []
   roleDialogVisible.value = true
+  roleLoading.value = true
+  try {
+    // 以 RBAC 关联为权威源预选:基础角色取旧列,附加角色取非基础内置/自定义角色
+    const roles = await fetchUserRoles(row.id)
+    selectedExtraRoleIds.value = roles
+      .filter((r) => !(BASE_ROLE_CODES as readonly string[]).includes(r.code) && r.code !== 'super_admin')
+      .map((r) => r.id)
+  } finally {
+    roleLoading.value = false
+  }
 }
 
 async function onConfirmRole() {
   if (!selectedUser.value) return
   submitting.value = true
   try {
-    await setUserRole(selectedUser.value.id, selectedRole.value)
-    ElMessage.success('角色设置成功')
+    // 统一走 RBAC 覆盖式分配:基础角色+附加角色一次写入,
+    // 后端由角色集合推导 user.role 旧列,两套显示口径不再分裂。
+    const baseRole = allRoles.value.find((r) => r.code === selectedRole.value)
+    if (!baseRole) throw new Error('基础角色不存在')
+    await assignUserRoles(selectedUser.value.id, {
+      user_id: selectedUser.value.id,
+      role_ids: [baseRole.id, ...selectedExtraRoleIds.value],
+    })
+    selectedUser.value.role = selectedRole.value
+    ElMessage.success('角色已保存')
     roleDialogVisible.value = false
     loadData()
   } finally {
@@ -301,7 +375,12 @@ async function onDelete(row: UserListItem) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    allRoles.value = await listRoles()
+  } catch {
+    /* 角色列表失败时仅隐藏附加角色区,基础功能可用 */
+  }
   loadData()
 })
 </script>
@@ -387,6 +466,27 @@ onMounted(() => {
 .protected-admin {
   color: var(--el-text-color-secondary);
   font-size: 13px;
+}
+
+.extra-role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.extra-role-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extra-role-name {
+  font-weight: 500;
+}
+
+.extra-role-code {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .password-owner {

@@ -11,6 +11,7 @@ import type {
 } from '@/types/security'
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { OWASP_TOP10, SECURITY_CATALOG_METADATA, type OwaspDoc } from './owasp-knowledge'
+import { CN_VULN_PORTALS, CN_SECURITY_STANDARDS, OWASP_TO_CNNVD_TYPE } from './cnnvd-knowledge'
 import { useUserStore } from '@/stores/user'
 import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 
@@ -309,6 +310,57 @@ onBeforeUnmount(() => { disposed = true })
             </span>
           </div>
         </article>
+      </div>
+    </section>
+
+    <!-- ========== 中国漏洞库与国家标准对照 ========== -->
+    <section class="block">
+      <header class="block-head">
+        <h3 class="block-title">中国漏洞库与国家标准对照</h3>
+        <p class="block-sub">
+          平台审查规则以 CWE 编号为枢纽,叠加 OWASP 标签后按 CNNVD《漏洞分类指南》的 CWE 对照关系派生 CNNVD 26 类中文类型;
+          危害等级口径对齐 GB/T 30279-2020(超危/高危/中危/低危)。类型对照为平台整理,非 CNNVD 官方发布。
+        </p>
+      </header>
+      <div class="cn-portal-grid">
+        <a
+          v-for="portal in CN_VULN_PORTALS"
+          :key="portal.name"
+          class="cn-portal-card"
+          :href="portal.url"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <div class="cn-portal-head">
+            <b>{{ portal.name }}</b>
+            <span class="cn-portal-full">{{ portal.fullName }}</span>
+          </div>
+          <div class="cn-portal-operator">{{ portal.operator }}</div>
+          <p class="cn-portal-note">{{ portal.note }}</p>
+        </a>
+      </div>
+      <div class="cn-standard-list">
+        <span
+          v-for="std in CN_SECURITY_STANDARDS"
+          :key="std.code"
+          class="cn-standard-chip"
+          :title="std.note"
+        >
+          <b class="font-mono">{{ std.code }}</b> {{ std.name }}
+        </span>
+      </div>
+      <div class="cn-mapping-table-wrap">
+        <table class="cn-mapping-table">
+          <thead>
+            <tr><th>OWASP Top 10 · 2025</th><th>CNNVD 漏洞类型(平台整理)</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="owasp in OWASP_TOP10" :key="owasp.code">
+              <td><span class="font-mono">{{ owasp.code }}</span> {{ owasp.name_zh }}</td>
+              <td>{{ OWASP_TO_CNNVD_TYPE[owasp.code] || '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -1005,5 +1057,95 @@ onBeforeUnmount(() => { disposed = true })
 .detail-section.coverage h4,
 .detail-section.coverage p {
   color: var(--gray-900);
+}
+
+/* ── 中国漏洞库与国家标准对照 ── */
+.cn-portal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.cn-portal-card {
+  display: block;
+  padding: 14px 16px;
+  border: 1px solid var(--gray-100, #eef0f4);
+  border-radius: 12px;
+  background: #fff;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cn-portal-card:hover {
+  border-color: var(--brand-300, #a8c4fa);
+  box-shadow: 0 8px 20px rgba(23, 34, 62, 0.07);
+}
+
+.cn-portal-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cn-portal-head b {
+  font-size: 15px;
+}
+
+.cn-portal-full {
+  font-size: 12px;
+  color: var(--gray-500, #6e7689);
+}
+
+.cn-portal-operator {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--brand-600, #2f5ce0);
+}
+
+.cn-portal-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--gray-500, #6e7689);
+}
+
+.cn-standard-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.cn-standard-chip {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--gray-100, #eef0f4);
+  background: rgba(91, 88, 232, 0.05);
+  font-size: 12px;
+}
+
+.cn-mapping-table-wrap {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.cn-mapping-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.cn-mapping-table th,
+.cn-mapping-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--gray-100, #eef0f4);
+}
+
+.cn-mapping-table th {
+  color: var(--gray-500, #6e7689);
+  font-weight: 500;
+  background: rgba(247, 248, 250, 0.8);
 }
 </style>

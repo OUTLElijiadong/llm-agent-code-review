@@ -851,3 +851,54 @@ class TestPermissionCodes:
         assert PermissionCode.AGENT_ASSET_CREATE == "agent_asset:create"
         assert PermissionCode.CUSTOM_AGENT_INVOKE == "custom_agent:invoke"
         assert PermissionCode.AUDIT_VIEW == "audit:view"
+
+
+class TestSetRolePreservesExtraRoles:
+    """user_service.set_role 只替换基础角色(user/reviewer/admin),
+    保留审计员与自定义附加角色 —— 统一用户管理页合并后的口径保护。"""
+
+    def test_extra_roles_preserved_on_base_role_change(self, db):
+        from app.models.rbac import Role, UserRole
+        from app.services import user_service
+
+        u = _make_user(db, 8101, "merge_target_u")
+        base_user = _make_role(db, 8101, "user", "普通用户", is_builtin=1)
+        reviewer = _make_role(db, 8102, "reviewer", "审查员", is_builtin=1)
+        custom = _make_role(db, 8103, "custom_x", "自定义附加角色", is_builtin=0)
+        db.add_all([
+            UserRole(user_id=u.id, role_id=base_user.id),
+            UserRole(user_id=u.id, role_id=custom.id),
+        ])
+        db.commit()
+
+        user_service.set_role(db, u.id, "reviewer", admin_id=1)
+
+        role_ids = {
+            link.role_id
+            for link in db.query(UserRole).filter(UserRole.user_id == u.id).all()
+        }
+        assert reviewer.id in role_ids  # 新基础角色已挂载
+        assert custom.id in role_ids  # 自定义附加角色被保留
+        assert base_user.id not in role_ids  # 旧基础角色被替换
+        db.refresh(u)
+        assert u.role == "reviewer"
+
+    def test_set_role_without_matching_builtin_keeps_links(self, db):
+        """目标基础角色的 RBAC 记录不存在时,不动任何现有角色关联。"""
+        from app.models.rbac import Role, UserRole
+        from app.services import user_service
+
+        u = _make_user(db, 8111, "no_builtin_u")
+        custom = _make_role(db, 8111, "custom_only", "仅自定义", is_builtin=0)
+        db.add(UserRole(user_id=u.id, role_id=custom.id))
+        db.commit()
+
+        user_service.set_role(db, u.id, "reviewer", admin_id=1)  # 无 reviewer 角色记录
+
+        role_ids = {
+            link.role_id
+            for link in db.query(UserRole).filter(UserRole.user_id == u.id).all()
+        }
+        assert role_ids == {custom.id}
+        db.refresh(u)
+        assert u.role == "reviewer"

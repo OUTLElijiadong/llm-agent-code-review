@@ -59,7 +59,6 @@ ADMIN_PAGE_LABELS: dict[str, tuple[str, str]] = {
     "/admin/users": ("用户管理", "用户查询、启停与重置密码"),
     "/admin/rbac/roles": ("角色管理", "RBAC 角色与权限分配"),
     "/admin/rbac/permissions": ("权限点列表", "权限点与菜单树"),
-    "/admin/rbac/users": ("用户角色分配", "用户 RBAC 角色绑定"),
     "/admin/ai-logs": ("Agent 调用日志", "AI 调用记录检索"),
     "/admin/report-templates": ("报告模板管理", "报告模板维护"),
     "/admin/audit": ("系统操作审计", "操作审计日志"),

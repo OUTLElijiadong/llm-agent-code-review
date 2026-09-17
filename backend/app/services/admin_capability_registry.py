@@ -66,7 +66,6 @@ ADMIN_PAGE_ROUTES: tuple[str, ...] = (
     "/admin/users",
     "/admin/rbac/roles",
     "/admin/rbac/permissions",
-    "/admin/rbac/users",
     "/admin/ai-logs",
     "/admin/audit",
     "/admin/evolution",
@@ -635,7 +634,7 @@ _cap(
     ),
     _cap(
         "rbac.users.roles.assign",
-        "/admin/rbac/users",
+        "/admin/users",
         "覆盖分配用户 RBAC 角色",
         "POST",
         "/api/rbac/users/{user_id}/roles",
@@ -644,7 +643,7 @@ _cap(
     ),
     _cap(
         "rbac.users.roles.get",
-        "/admin/rbac/users",
+        "/admin/users",
         "查询用户 RBAC 角色",
         "GET",
         "/api/rbac/users/{user_id}/roles",
@@ -652,7 +651,7 @@ _cap(
     ),
     _cap(
         "rbac.users.permissions.get",
-        "/admin/rbac/users",
+        "/admin/users",
         "查询用户有效权限",
         "GET",
         "/api/rbac/users/{user_id}/permissions",
@@ -660,7 +659,7 @@ _cap(
     ),
     _cap(
         "rbac.users.menus.get",
-        "/admin/rbac/users",
+        "/admin/users",
         "查询用户可见菜单",
         "GET",
         "/api/rbac/users/{user_id}/menus",
@@ -668,7 +667,7 @@ _cap(
     ),
     _cap(
         "rbac.users.data_scope.get",
-        "/admin/rbac/users",
+        "/admin/users",
         "查询用户有效数据范围",
         "GET",
         "/api/rbac/users/{user_id}/data-scope",

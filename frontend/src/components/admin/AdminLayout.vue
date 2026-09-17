@@ -56,7 +56,6 @@ const menuItems: AdminMenuItem[] = [
   { path: '/admin/users', title: '用户管理', icon: User },
   { path: '/admin/rbac/roles', title: '角色管理', icon: Lock },
   { path: '/admin/rbac/permissions', title: '权限点列表', icon: Key },
-  { path: '/admin/rbac/users', title: '用户角色分配', icon: User },
   { path: '/admin/ai-logs', title: 'Agent 调用日志', icon: MagicStick },
   { path: '/admin/report-templates', title: '报告模板', icon: Document },
   { path: '/admin/audit', title: '系统操作审计', icon: Bell },

@@ -69,7 +69,7 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
         "/admin/tools", "/admin/knowledge", "/admin/jobs",
         "/admin/observability", "/admin/rewards", "/admin/rollback",
         "/admin/users", "/admin/rbac/roles", "/admin/rbac/permissions",
-        "/admin/rbac/users", "/admin/ai-logs", "/admin/report-templates",
+        "/admin/ai-logs", "/admin/report-templates",
         "/admin/audit", "/admin/evolution", "/admin/skills",
         "/admin/embedding", "/admin/mcp-workers", "/admin/llm",
     }

@@ -319,12 +319,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '权限点列表', role: 'admin', roles: ['admin'], permissions: ['role:manage'] },
       },
       {
-        path: 'rbac/users',
-        name: 'UserRoleAssign',
-        component: () => import('@/views/admin/UserRoleAssign.vue'),
-        meta: { title: '用户角色分配', role: 'admin', roles: ['admin'], permissions: ['user:view'] },
-      },
-      {
         path: 'ai-logs',
         name: 'AiLogList',
         component: () => import('@/views/admin/AiLogList.vue'),
