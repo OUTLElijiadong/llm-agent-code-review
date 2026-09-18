@@ -44,10 +44,10 @@ v3.9.6 已以不可变提交发布到生产并完成备份恢复、迁移、健�
 
 ## 生产验收
 
-- 发布提交：`02d7b9709e69f5c342e18fd5ea474ba8528a68d9`，版本 `3.9.6`，前后端镜像同 SHA。
-- 数据库备份与恢复校验：通过；备份 `code_review_20260918T045710Z_02d7b9709e69.sql.gz`，独立恢复验证 97 张表，Alembic=`053_role_pentest_authorization`。
+- 发布一致性：版本 `3.9.6`；生产 Git HEAD、前后端镜像 release、`/healthz` 与 `/readyz` 返回的 release 必须完全一致。精确 SHA 由发布完成后生成的 `deploy/.release/current_state` 和知识库闭环记录保存，避免在同一 Git 提交内写入无法成立的自引用 SHA。
+- 数据库备份与恢复校验：通过；每次正式发布先生成带发布 SHA 的压缩备份并完成独立恢复校验（97 张表），Alembic=`053_role_pentest_authorization`。最终备份文件名及校验结果由发布状态文件和知识库闭环记录保存。
 - `healthz` / `readyz`：同源 HTTPS 冒烟通过；backend/frontend/mysql/redis/clamav healthy，embedding 运行。
-- QA 临时账号治理：`qa_claude_0825`（id=98）与 `xiaoling_accept_20260812_0547`（id=94）均事务软停用，token_version 分别 46→47、8→9；项目/任务/角色关联分别保留 2/7/1、1/6/1。
+- QA 临时账号治理：`qa_claude_0825`（id=98）与 `xiaoling_accept_20260812_0547`（id=94）均事务软停用，token_version 分别 46→47、8→9；软停用时项目/任务/角色关联分别为 2/7/1、1/6/1，随后 id=98 新增真实验收任务 #178，因此最终重算为 2/8/1、1/6/1。
 - 生产角色核验：活动 QA/测试前缀账号=0；活动 `super_admin`=1；评审员拥有 `agent_asset:create/update_own/test/submit` 与 `pentest:authorize`。
 - 公网页面：Safari 刷新后登录页显示构建版本 `v3.9.6`；管理员页因系统密码库需要 macOS 解锁未二次登录，不能宣称后台截图验收通过。截图已存知识库附件。
 - 真实 DeepSeek 项目级运行：任务 #178，`full`，5/5 文件完成，33 条发现；30 次 success、8 次首轮 failed（截断后重试成功），覆盖账本所有文件 `complete`，总 Token 278,036。

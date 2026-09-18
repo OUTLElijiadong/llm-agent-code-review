@@ -22,7 +22,7 @@ v3.9.6 已完成生产发布。分散的安全态势、审查规则和规则来�
 
 ## 生产结论
 
-- 版本：`3.9.6`；提交：`02d7b9709e69f5c342e18fd5ea474ba8528a68d9`。
+- 版本：`3.9.6`；最终发布要求生产 Git HEAD、前后端镜像 release、`/healthz` 与 `/readyz` 返回的 release 完全一致，精确 SHA 以部署生成的状态文件及知识库闭环记录为准。
 - 发布脚本 exit 0；独立恢复验证 97 张表；Alembic head=`053_role_pentest_authorization`；同源 HTTPS `health/ready` 冒烟通过。
 - 角色：活动集合为 `user/reviewer/admin/super_admin`，`auditor` disabled，活动最高管理员 1；评审员保留 Agent 自定义与渗透授权。
 - 数据治理：两条已确认验收账号软停用并使 token 失效，关联项目/任务/角色均保留。
