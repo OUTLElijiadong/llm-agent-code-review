@@ -390,7 +390,7 @@ def get_running(db: Session, user: User) -> dict:
     轻量查询(索引列),供前端 5s 轮询;为空时前端隐藏整个面板(渐进披露)。
     """
     from app.models.agent_response_run import AgentResponseRun
-    from app.services.rbac_service import check_permission
+    from app.services.rbac_service import check_permission, is_admin_user
 
     visible_ids = _visible_project_ids(db, user) if check_permission(db, user.id, "review:view") else []
     review_rows = (
@@ -436,6 +436,9 @@ def get_running(db: Session, user: User) -> dict:
         for task, project_name in review_rows
     ]
 
+    # 管理面与成员面使用不同的助手身份。工作台只展示当前登录账号
+    # 在当前身份面上的运行记录，避免历史 admin 运行记录混入成员侧小菱列表。
+    current_surface = "admin" if is_admin_user(db, int(user.id)) else "user"
     agent_rows = (
         (
             db.query(AgentResponseRun)
@@ -450,6 +453,7 @@ def get_running(db: Session, user: User) -> dict:
             )
             .filter(
                 AgentResponseRun.user_id == user.id,
+                AgentResponseRun.surface == current_surface,
                 AgentResponseRun.status.in_(
                     (
                         "running",

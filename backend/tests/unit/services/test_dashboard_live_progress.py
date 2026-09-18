@@ -68,6 +68,17 @@ def test_running_owner_scope_and_deleted_projects(db, monkeypatch):
                 checkpoint_json="{}",
             )
         )
+    # 同一账号历史上可能残留管理面运行记录；成员工作台不能把它显示成贾维斯会话。
+    db.add(
+        AgentResponseRun(
+            user_id=owner.id,
+            run_id="own-admin-run",
+            surface="admin",
+            session_key="admin-session",
+            status="running",
+            checkpoint_json="{}",
+        )
+    )
     db.flush()
     monkeypatch.setattr("app.services.rbac_service.check_permission", lambda *args: True)
     result = dashboard_service.get_running(db, owner)
