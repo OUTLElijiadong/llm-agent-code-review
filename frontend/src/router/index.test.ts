@@ -23,7 +23,7 @@ describe('authenticated route visibility permissions', () => {
     ReviewTaskDetail: 'review:view',
     ReviewStart: 'review:start',
     IssueHub: 'issue:view',
-    RuleConfigLegacy: 'rule:view',
+    RuleConfig: 'rule:view',
     ReportList: 'report:view',
     ReportDetail: 'report:view',
     AgentCenter: 'agent:view',
@@ -39,17 +39,16 @@ describe('authenticated route visibility permissions', () => {
     }
   })
 
-  it('旧审查规则路由兼容跳转到统一页面的规则标签', () => {
-    const route = router.getRoutes().find((item) => item.name === 'RuleConfigLegacy')
-    expect(route?.redirect).toBeTypeOf('function')
-    const redirect = (route?.redirect as (to: { query: Record<string, string> }) => unknown)({ query: { q: 'sql' } })
-    expect(redirect).toEqual({ path: '/security', query: { q: 'sql', tab: 'rules' } })
+  it('旧审查规则入口兼容跳转到安全与审查规则中心', () => {
+    const route = router.getRoutes().find((item) => item.name === 'RuleConfig')
+    expect(route?.path).toBe('/rules')
+    expect(route?.redirect).toEqual({ path: '/security', query: { section: 'rules' } })
   })
 
-  it('旧管理员报告模板路由跳转到唯一正式页面', () => {
-    const legacy = router.getRoutes().find((item) => item.name === 'AdminReportTemplateLegacy')
+  it('后台报告模板入口兼容跳转到平台配置中心的报告模板标签', () => {
+    const legacy = router.getRoutes().find((item) => item.name === 'AdminReportTemplateManage')
     const canonical = router.getRoutes().find((item) => item.name === 'ReportTemplateManage')
-    expect(legacy?.redirect).toBe('/report/templates')
+    expect(legacy?.redirect).toEqual({ path: '/admin/platform', query: { section: 'report-templates' } })
     expect(canonical?.path).toBe('/report/templates')
   })
 })

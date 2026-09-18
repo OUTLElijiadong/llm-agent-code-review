@@ -1079,7 +1079,7 @@ async def stream_agent_response(
                         ),
                         "",
                     )
-                    if first_user_text:
+                    if first_user_text and owns_run_db:
                         # 标题由服务端按账号/入口写入，避免只改浏览器本地标题后
                         # 重新登录或跨设备时所有历史仍显示“新对话”。
                         agent_mesh_service.update_title_from_user_message(

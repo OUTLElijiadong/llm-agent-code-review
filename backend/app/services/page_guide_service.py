@@ -43,28 +43,10 @@ USER_PAGE_LABELS: dict[str, tuple[str, str]] = {
 }
 
 ADMIN_PAGE_LABELS: dict[str, tuple[str, str]] = {
-    "/admin/overview": ("总览大屏", "系统状态、安全态势与 Agent 活跃"),
-    "/admin/agents": ("Agent 管理", "Agent 治理档案与配置"),
-    "/admin/approvals": ("审批中心", "处理待审批事项"),
-    "/admin/agent-releases": ("Agent 发布审批", "审批自定义 Agent 发布"),
-    "/admin/beta-codes": ("内测码管理", "生成与撤销内测码"),
-    "/admin/policies": ("策略中心", "治理策略与决策记录"),
-    "/admin/tools": ("工具权限", "Agent 工具调用与权限"),
-    "/admin/knowledge": ("知识与记忆", "Agent 记忆与知识治理"),
-    "/admin/jobs": ("任务调度", "Agent 调度任务管理"),
-    "/admin/observability": ("监控告警", "Agent 可观测与告警"),
-    "/admin/rewards": ("奖惩趋势", "Agent 奖惩事件"),
-    "/admin/rollback": ("回滚中心", "治理制品版本回滚"),
-    "/admin/users": ("用户管理", "用户查询、启停与重置密码"),
-    "/admin/rbac/roles": ("角色管理", "RBAC 角色与权限分配"),
-    "/admin/rbac/permissions": ("权限点列表", "权限点与菜单树"),
-    "/admin/ai-logs": ("Agent 调用日志", "AI 调用记录检索"),
-    "/admin/audit": ("系统操作审计", "操作审计日志"),
-    "/admin/evolution": ("Agent 自进化", "反馈信号与进化提案"),
-    "/admin/skills": ("Skill 管理", "Skill 清单与调用记录"),
-    "/admin/embedding": ("RAG 嵌入配置", "嵌入模型配置"),
-    "/admin/mcp-workers": ("MCP 与沙箱节点", "MCP Server 与沙箱 Worker"),
-    "/admin/llm": ("大模型配置", "全局 LLM 配置"),
+    "/admin/governance": ("治理中心", "Agent、审批、发布、知识与能力治理"),
+    "/admin/operations": ("运营中心", "系统总览、策略、任务、监控、审计与运行记录"),
+    "/admin/access": ("访问控制中心", "用户、角色与权限管理"),
+    "/admin/platform": ("平台配置中心", "模型、嵌入、内测码、MCP 与运行节点配置"),
     "/report/templates": ("报告模板管理", "维护报告模板"),
 }
 

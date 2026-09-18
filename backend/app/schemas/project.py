@@ -10,6 +10,12 @@ from app.utils.input_validation import normalize_plain_text
 from app.utils.sanitize import sanitize_text
 
 
+def _normalize_project_name(value: str) -> str:
+    raw_text = normalize_plain_text(value, field_name="项目名称", allow_newlines=False)
+    sanitized = sanitize_text(raw_text)
+    return normalize_plain_text(sanitized, field_name="项目名称", allow_newlines=False)
+
+
 class ProjectIn(BaseModel):
     """创建项目请求体"""
     project_name: str = Field(min_length=1, max_length=100)
@@ -19,7 +25,7 @@ class ProjectIn(BaseModel):
     @field_validator("project_name")
     @classmethod
     def validate_project_name(cls, value: str) -> str:
-        return normalize_plain_text(sanitize_text(value), field_name="项目名称", allow_newlines=False)
+        return _normalize_project_name(value)
 
     @field_validator("description", "language")
     @classmethod
@@ -39,11 +45,7 @@ class ProjectUpdateIn(BaseModel):
     def validate_update_name(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
-        return normalize_plain_text(
-            sanitize_text(value),
-            field_name="项目名称",
-            allow_newlines=False,
-        )
+        return _normalize_project_name(value)
 
     @field_validator("description", "language")
     @classmethod
@@ -63,7 +65,7 @@ class RemoteProjectImportIn(BaseModel):
     @field_validator("project_name")
     @classmethod
     def validate_project_name(cls, value: str) -> str:
-        return normalize_plain_text(sanitize_text(value), field_name="项目名称", allow_newlines=False)
+        return _normalize_project_name(value)
 
 
 class RemoteProjectImportCancelIn(BaseModel):

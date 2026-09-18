@@ -228,7 +228,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
 
     expect(wrapper.find('.posture-badge').text()).toBe('安全态势：检测到攻击迹象')
     await wrapper.find('.signals li').trigger('click')
-    expect(mocks.routerPush).toHaveBeenCalledWith({ path: '/admin/audit', query: { keyword: '登录' } })
+    expect(mocks.routerPush).toHaveBeenCalledWith({ path: '/admin/operations', query: { section: 'audit', keyword: '登录' } })
   })
 
   it('Agent 失败不是空态，也不是零个运行中', async () => {

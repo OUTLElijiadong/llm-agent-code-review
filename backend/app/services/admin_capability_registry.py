@@ -47,32 +47,48 @@ def _cap(
     risk: str = READ,
     permission: Optional[str] = None,
 ) -> AdminCapabilitySpec:
-    return AdminCapabilitySpec(code, page, description, method, path, risk, permission)
+    canonical_page = _ADMIN_PAGE_CANONICAL.get(page)
+    if canonical_page is None:
+        raise ValueError(f"管理能力使用未登记的页面路由: {page}")
+    return AdminCapabilitySpec(code, canonical_page, description, method, path, risk, permission)
+
+
+_ADMIN_PAGE_CANONICAL = {
+    "/admin/overview": "/admin/operations",
+    "/admin/agents": "/admin/governance",
+    "/admin/approvals": "/admin/governance",
+    "/admin/agent-releases": "/admin/governance",
+    "/admin/beta-codes": "/admin/platform",
+    "/admin/policies": "/admin/operations",
+    "/admin/tools": "/admin/operations",
+    "/admin/knowledge": "/admin/governance",
+    "/admin/jobs": "/admin/operations",
+    "/admin/observability": "/admin/operations",
+    "/admin/rewards": "/admin/operations",
+    "/admin/rollback": "/admin/operations",
+    "/admin/users": "/admin/access",
+    "/admin/rbac/roles": "/admin/access",
+    "/admin/rbac/permissions": "/admin/access",
+    "/admin/ai-logs": "/admin/operations",
+    "/admin/audit": "/admin/operations",
+    "/admin/evolution": "/admin/governance",
+    "/admin/skills": "/admin/governance",
+    "/admin/embedding": "/admin/platform",
+    "/admin/llm": "/admin/platform",
+    "/admin/mcp-workers": "/admin/platform",
+    "/admin/governance": "/admin/governance",
+    "/admin/operations": "/admin/operations",
+    "/admin/access": "/admin/access",
+    "/admin/platform": "/admin/platform",
+    "/report/templates": "/report/templates",
+}
 
 
 ADMIN_PAGE_ROUTES: tuple[str, ...] = (
-    "/admin/overview",
-    "/admin/agents",
-    "/admin/approvals",
-    "/admin/agent-releases",
-    "/admin/beta-codes",
-    "/admin/policies",
-    "/admin/tools",
-    "/admin/knowledge",
-    "/admin/jobs",
-    "/admin/observability",
-    "/admin/rewards",
-    "/admin/rollback",
-    "/admin/users",
-    "/admin/rbac/roles",
-    "/admin/rbac/permissions",
-    "/admin/ai-logs",
-    "/admin/audit",
-    "/admin/evolution",
-    "/admin/skills",
-    "/admin/embedding",
-    "/admin/llm",
-    "/admin/mcp-workers",
+    "/admin/governance",
+    "/admin/operations",
+    "/admin/access",
+    "/admin/platform",
     "/report/templates",
 )
 

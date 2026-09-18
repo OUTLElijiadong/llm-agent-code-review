@@ -5,12 +5,12 @@ import { ADMIN_PAGE_TIPS, USER_PAGE_TIPS, findPageGuideTip } from './pageGuideTi
 describe('页面主动引导目录', () => {
   it('精确路由优先匹配', () => {
     expect(findPageGuideTip('user', '/projects')?.title).toBe('项目管理')
-    expect(findPageGuideTip('admin', '/admin/approvals')?.title).toBe('审批中心')
+    expect(findPageGuideTip('admin', '/admin/governance')?.title).toBe('Agent 治理中心')
   })
 
   it('动态详情页按最长前缀匹配', () => {
     expect(findPageGuideTip('user', '/reviews/123')?.route).toBe('/reviews')
-    expect(findPageGuideTip('admin', '/admin/observability/detail')?.route).toBe('/admin/observability')
+    expect(findPageGuideTip('admin', '/admin/operations/detail')?.route).toBe('/admin/operations')
   })
 
   it('无匹配路由不返回建议', () => {

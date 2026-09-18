@@ -1277,7 +1277,7 @@ describe('AdminCopilot 图片入口布局', () => {
     const uploadBtn = composer.find('.image-upload-button')
     expect(uploadBtn.exists()).toBe(true)
     expect(uploadBtn.attributes('aria-label')).toBe('添加图片')
-    // 图片按钮必须位于输入区内部,不再孤零零浮在输入框上方
+    expect(uploadBtn.text()).toContain('添加图片')
     expect(uploadBtn.element.parentElement).toBe(composer.element)
     expect(composer.find('.send-button').exists() || composer.find('.stop-button').exists()).toBe(true)
     wrapper.unmount()

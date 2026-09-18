@@ -30,7 +30,7 @@ it('normalizes known roles and falls back to the user home', function testRoleNo
   expect(normalizeRole('ADMIN')).toBe('user')
   expect(normalizeRole(null)).toBe('user')
   expect(normalizeRole(undefined)).toBe('user')
-  expect(getRoleHomePath('admin')).toBe('/admin/overview')
+  expect(getRoleHomePath('admin')).toBe('/admin/operations?section=overview')
   expect(getRoleHomePath('reviewer')).toBe('/dashboard')
   expect(getRoleHomePath('unknown')).toBe('/dashboard')
 })
@@ -80,14 +80,14 @@ it('rejects unsafe or role-incompatible direct routes', function testRoleRouteGu
 
 /** 验证登录后重定向只保留当前角色可访问的内部地址。 */
 it('resolves post-login redirects to a safe role home', function testPostLoginRedirect(): void {
-  expect(resolvePostLoginPath('admin')).toBe('/admin/overview')
-  expect(resolvePostLoginPath('admin', '/')).toBe('/admin/overview')
-  expect(resolvePostLoginPath('admin', '/dashboard')).toBe('/admin/overview')
+  expect(resolvePostLoginPath('admin')).toBe('/admin/operations?section=overview')
+  expect(resolvePostLoginPath('admin', '/')).toBe('/admin/operations?section=overview')
+  expect(resolvePostLoginPath('admin', '/dashboard')).toBe('/admin/operations?section=overview')
   expect(resolvePostLoginPath('user', '/login?redirect=/projects')).toBe('/dashboard')
   expect(resolvePostLoginPath('user', '/register')).toBe('/dashboard')
   expect(resolvePostLoginPath('user', '/admin/users')).toBe('/dashboard')
   // 服务器版:管理员登录后非 /admin 重定向一律落总览大屏
-  expect(resolvePostLoginPath('admin', '/projects')).toBe('/admin/overview')
+  expect(resolvePostLoginPath('admin', '/projects')).toBe('/admin/operations?section=overview')
   expect(resolvePostLoginPath('reviewer', '/projects/7')).toBe('/projects/7')
 })
 

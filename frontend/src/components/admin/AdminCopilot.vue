@@ -6,6 +6,7 @@ import {
   CircleCloseFilled,
   Close,
   DocumentCopy,
+  Picture,
   Promotion,
   VideoPause,
   WarningFilled,
@@ -2037,7 +2038,6 @@ onMounted(() => {
           <span class="tray-hint">发送时自动切换视觉模型</span>
         </div>
         <input ref="imageInput" type="file" class="image-upload-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple aria-label="选择图片附件" @change="onImageInput" />
-        <button type="button" class="image-upload-button" :disabled="loading || readingImages || sessionRestoring || sessionBusy" @click="imageInput?.click()">添加图片</button>
         <div class="composer">
           <textarea
             ref="chatInputRef"
@@ -2050,6 +2050,17 @@ onMounted(() => {
             :disabled="loading || uploading || sessionRestoring || sessionBusy"
             @keydown="handleSubmitKey"
           ></textarea>
+          <button
+            type="button"
+            class="image-upload-button"
+            aria-label="添加图片"
+            title="添加图片"
+            :disabled="loading || readingImages || sessionRestoring || sessionBusy"
+            @click="imageInput?.click()"
+          >
+            <el-icon><Picture /></el-icon>
+            <span>添加图片</span>
+          </button>
           <button
             v-if="sessionBusy"
             type="button"
@@ -2694,10 +2705,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   white-space: nowrap;
 }
 .copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px); border-radius: 0 0 18px 18px; }
-.composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr) auto 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
 /* ── 多模态图片附件 ── */
 .image-upload-input { display: none; }
-.image-upload-button { margin: 6px 0; padding: 6px 12px; border: 1px solid var(--agent-border); border-radius: 8px; color: var(--agent-primary); background: white; cursor: pointer; }
+.image-upload-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 76px; height: 38px; padding: 0 10px; border: 1px solid var(--agent-border); border-radius: 8px; color: var(--agent-primary); background: white; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .image-upload-button:disabled { opacity: 0.5; cursor: not-allowed; }
 .chat-image-feedback { font-size: 12px; margin: 6px 0; overflow-wrap: anywhere; }
 .chat-image-feedback.is-error { color: var(--color-danger, #c43d36); }

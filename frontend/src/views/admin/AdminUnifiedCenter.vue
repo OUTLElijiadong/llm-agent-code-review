@@ -33,8 +33,6 @@ const router = useRouter()
 const userStore = useUserStore()
 
 type Domain = 'agents' | 'operations' | 'access' | 'platform'
-type Section = string
-
 const domain = computed<Domain>(() => {
   const value = String(route.meta.unifiedDomain || route.path.split('/').filter(Boolean).pop() || 'agents')
   return ['agents', 'operations', 'access', 'platform'].includes(value) ? value as Domain : 'agents'

@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from app.schemas.agent_governance import AgentToolPermissionUpsertIn, PolicyRuleUpsertIn
 from app.schemas.auth import LoginIn
 from app.schemas.feedback import FeedbackIn
-from app.schemas.project import ProjectIn
+from app.schemas.project import ProjectIn, ProjectUpdateIn, RemoteProjectImportIn
 from app.schemas.report_template import ReportTemplateIn
 from app.schemas.rule import RuleIn
 
@@ -45,16 +45,32 @@ def test_login_username_trims_legacy_safe_identifier() -> None:
     assert LoginIn(username="  lijiadong  ", password="secret").username == "lijiadong"
 
 
-@pytest.mark.parametrize("value", ["   ", "project\x00name"])
-def test_project_name_rejects_empty_and_controls(value: str) -> None:
+@pytest.mark.parametrize(
+    "schema, payload",
+    [
+        (ProjectIn, {"project_name": "project\x00name"}),
+        (ProjectUpdateIn, {"project_name": "project\x00name"}),
+        (RemoteProjectImportIn, {"project_name": "project\x00name", "url": "https://example.com/repo.git"}),
+    ],
+)
+def test_project_name_rejects_control_characters_before_html_sanitizing(schema, payload) -> None:
     with pytest.raises(ValidationError):
-        ProjectIn(project_name=value)
+        schema(**payload)
+
+
+def test_project_name_rejects_empty_value() -> None:
+    with pytest.raises(ValidationError):
+        ProjectIn(project_name="   ")
 
 
 def test_project_name_strips_markup_before_storage() -> None:
-    sanitized = ProjectIn(project_name="<script></script>").project_name
-    assert "<script>" not in sanitized
-    assert sanitized in {"script", "&lt;script&gt;&lt;/script&gt;"}
+    sanitized = ProjectIn(project_name="<script>project</script>").project_name
+    assert sanitized == "project"
+
+
+def test_project_name_rejects_markup_only_value_after_sanitization() -> None:
+    with pytest.raises(ValidationError):
+        ProjectIn(project_name="<script></script>")
 
 
 def test_rule_code_is_a_stable_machine_identifier() -> None:

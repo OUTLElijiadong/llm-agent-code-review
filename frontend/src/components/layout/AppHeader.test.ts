@@ -18,7 +18,7 @@ vi.mock('vue-router', () => ({
     replace: harness.replace,
     resolve: ({ path }: { path: string }) => ({
       matched: [{}],
-      meta: path === '/agent-studio' ? { roles: ['reviewer'], permissions: ['agent_asset:create'] } : {},
+      meta: path === '/agents' ? { permissions: ['agent:view', 'agent_asset:create'] } : {},
     }),
   }),
 }))
@@ -63,22 +63,22 @@ describe('AppHeader navigation visibility', () => {
     harness.replace.mockReset()
   })
 
-  it('uses the same permission gate for search results', () => {
+  it('uses the same permission gate for the merged Agent workspace search result', () => {
     harness.role = 'reviewer'
     harness.permission = false
-    expect(mountHeader().text()).not.toContain('Agent 工坊')
+    expect(mountHeader().text()).not.toContain('Agent 工作台')
 
     harness.permission = true
-    expect(mountHeader().text()).toContain('Agent 工坊')
+    expect(mountHeader().text()).toContain('Agent 工作台')
   })
 
-  it('普通用户搜索不到 Agent 工坊(仅审查者及以上可见)', () => {
+  it('普通用户和审查员使用同一个 Agent 工作台入口', () => {
     harness.role = 'user'
     harness.permission = true
-    expect(mountHeader().text()).not.toContain('Agent 工坊')
+    expect(mountHeader().text()).toContain('Agent 工作台')
 
     harness.role = 'reviewer'
-    expect(mountHeader().text()).toContain('Agent 工坊')
+    expect(mountHeader().text()).toContain('Agent 工作台')
   })
 
   it('renders accessible top navigation with active underline state', () => {

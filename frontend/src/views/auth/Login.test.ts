@@ -19,7 +19,7 @@ let wrapper: VueWrapper
 async function renderLogin() {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: ['/login', '/register', '/dashboard', '/admin/overview'].map((path) => ({
+    routes: ['/login', '/register', '/dashboard', '/admin/operations'].map((path) => ({
       path,
       component: { template: '<div />' },
     })),
@@ -81,7 +81,7 @@ describe('登录真实反馈', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(user.login).toHaveBeenCalledExactlyOnceWith({ username: 'reviewer', password: 'test-password' })
-    expect(router.currentRoute.value.path).toBe(role === 'user' ? '/dashboard' : '/admin/overview')
+    expect(router.currentRoute.value.path).toBe(role === 'user' ? '/dashboard' : '/admin/operations')
     expect(wrapper.get('[role="status"]').text()).toContain('登录成功')
   })
 

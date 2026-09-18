@@ -141,11 +141,13 @@ FRONTEND_API_CAPABILITY = {
 def _frontend_admin_routes() -> set[str]:
     source = (REPO_ROOT / "frontend/src/router/index.ts").read_text(encoding="utf-8")
     admin_block = source.split("path: '/admin'", 1)[1].split("path: '/403'", 1)[0]
-    children = set(re.findall(r"\bpath:\s*'([^']*)'", admin_block))
-    # /admin/report-templates is a compatibility-only redirect; the functional
-    # page is the shared canonical /report/templates route.
-    children.discard("report-templates")
-    return {f"/admin/{path}" for path in children if path} | {"/report/templates"}
+    children = set(
+        re.findall(
+            r"(?m)^        path:\s*'([^']+)',\n        name:\s*'Admin(?:Governance|Operations|Access|Platform)Center'",
+            admin_block,
+        )
+    )
+    return {f"/admin/{path}" for path in children} | {"/report/templates"}
 
 
 def _admin_menu_routes() -> set[str]:
@@ -172,7 +174,7 @@ def _admin_view_api_imports() -> set[str]:
 def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
     expected = set(ADMIN_PAGE_ROUTES)
     assert _frontend_admin_routes() == expected
-    assert _admin_menu_routes() == expected
+    assert _admin_menu_routes() == expected - {"/report/templates"}
 
     mapped_pages = {spec.page for spec in ADMIN_CAPABILITIES}
     assert mapped_pages == expected
@@ -207,7 +209,7 @@ def test_external_knowledge_source_mutations_require_server_operations_permissio
 
 
 def test_discovery_returns_exact_page_contracts() -> None:
-    rows = describe_capabilities(app.openapi(), page="/admin/llm")
+    rows = describe_capabilities(app.openapi(), page="/admin/platform", query="llm.config")
     assert {row["capability"] for row in rows} == {
         "llm.config.get",
         "llm.config.update",
@@ -221,6 +223,15 @@ def test_discovery_returns_exact_page_contracts() -> None:
     update = next(row for row in rows if row["capability"] == "llm.config.update")
     assert "api_key" in update["parameters"]["properties"]
     assert update["risk"] == "critical"
+
+
+def test_admin_legacy_routes_redirect_to_a_canonical_center() -> None:
+    source = (REPO_ROOT / "frontend/src/router/index.ts").read_text(encoding="utf-8")
+    admin_block = source.split("path: '/admin'", 1)[1].split("path: '/403'", 1)[0]
+    redirect_targets = set(re.findall(r"redirect:\s*\{\s*path:\s*'(/admin/[^']+)'", admin_block))
+
+    assert redirect_targets
+    assert redirect_targets <= _admin_menu_routes()
 
 
 def test_prepare_request_separates_path_query_and_body() -> None:

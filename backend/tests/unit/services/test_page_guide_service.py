@@ -64,14 +64,7 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
         "/profile/personalization", "/profile/password", "/profile/api-config",
     }
     frontend_static_admin_routes = {
-        "/admin/overview", "/admin/agents", "/admin/approvals",
-        "/admin/agent-releases", "/admin/beta-codes", "/admin/policies",
-        "/admin/tools", "/admin/knowledge", "/admin/jobs",
-        "/admin/observability", "/admin/rewards", "/admin/rollback",
-        "/admin/users", "/admin/rbac/roles", "/admin/rbac/permissions",
-        "/admin/ai-logs",
-        "/admin/audit", "/admin/evolution", "/admin/skills",
-        "/admin/embedding", "/admin/mcp-workers", "/admin/llm",
+        "/admin/governance", "/admin/operations", "/admin/access", "/admin/platform",
         "/report/templates",
     }
     user_block = user_guide_block()

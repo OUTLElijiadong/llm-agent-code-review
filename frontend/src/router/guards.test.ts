@@ -70,7 +70,7 @@ describe('router guards', () => {
     auth.user.token = 'token'
     auth.user.profile = { id: 1, role: 'admin' }
     expect(await before(route('/login', { public: true }), route('/'))).toEqual({
-      path: '/admin/overview',
+      path: '/admin/operations?section=overview',
       replace: true,
     })
   })

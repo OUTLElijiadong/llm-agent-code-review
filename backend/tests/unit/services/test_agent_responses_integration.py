@@ -1221,7 +1221,7 @@ async def test_cached_execution_is_not_reused_for_different_arguments(db, monkey
             user_id=7,
             tool_name="admin_describe_capabilities",
             status="success",
-            arguments_json=json.dumps({"page": "/admin/overview"}),
+            arguments_json=json.dumps({"page": "/admin/operations"}),
             result_json=json.dumps({"status": "success", "output": {"count": 1}}),
         )
     )
@@ -1231,8 +1231,8 @@ async def test_cached_execution_is_not_reused_for_different_arguments(db, monkey
         ToolCall(
             call_id,
             "admin_describe_capabilities",
-            {"page": "/admin/users"},
-            '{"page":"/admin/users"}',
+            {"page": "/admin/access"},
+            '{"page":"/admin/access"}',
         )
     )
 
@@ -1297,8 +1297,8 @@ async def test_admin_capability_tools_are_admin_only_and_discover_exact_contract
         ToolCall(
             "call_describe",
             "admin_describe_capabilities",
-            {"page": "/admin/beta-codes"},
-            '{"page":"/admin/beta-codes"}',
+            {"page": "/admin/platform", "query": "beta_codes"},
+            '{"page":"/admin/platform","query":"beta_codes"}',
         )
     )
     assert result.status == "success"

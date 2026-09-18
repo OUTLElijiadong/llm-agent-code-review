@@ -13,8 +13,8 @@ vi.mock('vue-router', () => ({
     push: harness.push,
     resolve: ({ path }: { path: string }) => ({
       matched: [{}],
-      meta: path === '/agent-studio'
-        ? { roles: ['reviewer', 'admin'], permissions: ['test:permission'] }
+      meta: path === '/agents'
+        ? { permissions: ['agent:view', 'agent_asset:create'] }
         : path === '/projects'
           ? { permissions: ['test:permission'] }
           : {},
@@ -55,17 +55,19 @@ describe('AppSidebar ordinary member navigation', () => {
     })
   }
 
-  it('审查员可以看到 Agent 工坊入口', () => {
+  it('审查员从统一 Agent 工作台进入 Agent 管理与个人草稿', () => {
     harness.role = 'reviewer'
     const wrapper = mountSidebar()
 
-    expect(wrapper.text()).toContain('Agent 工坊')
+    expect(wrapper.find('[data-route="/agents"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Agent 工作台')
   })
 
-  it('普通用户即使有权限也看不到 Agent 工坊(仅审查者及以上)', () => {
+  it('普通用户使用同一 Agent 工作台,不再显示重复的 Agent 工坊入口', () => {
     const wrapper = mountSidebar()
 
-    expect(wrapper.text()).not.toContain('Agent 工坊')
+    expect(wrapper.find('[data-route="/agents"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Agent 工作台')
     expect(wrapper.find('[data-route="/agent-studio"]').exists()).toBe(false)
   })
 
@@ -74,7 +76,7 @@ describe('AppSidebar ordinary member navigation', () => {
     harness.permission = false
     const wrapper = mountSidebar()
 
-    expect(wrapper.text()).not.toContain('Agent 工坊')
+    expect(wrapper.text()).not.toContain('Agent 工作台')
     expect(wrapper.find('[data-route="/agent-studio"]').exists()).toBe(false)
   })
 
