@@ -6,7 +6,6 @@ import {
   CircleCloseFilled,
   Close,
   DocumentCopy,
-  Picture,
   Promotion,
   VideoPause,
   WarningFilled,
@@ -89,10 +88,9 @@ import {
   autoTitleAgentChatSession,
   loadAgentChatDraft,
   loadAgentChatSnapshot,
-  migrateUnscopedAgentChatSessions,
-  resolveAgentChatStorageKey,
   saveAgentChatDraft,
   saveAgentChatSnapshot,
+  agentChatStorageKey,
   type AgentChatSessionMeta,
 } from '@/utils/agentChatSessions'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -165,6 +163,7 @@ const ASSISTANT_NAME = '贾维斯 · 全局运维'
 const MASCOT_NAME = '贾维斯'
 const WELCOME_TEXT = `你好,我是${MASCOT_NAME},Prism 的全局运维助手!我和成员侧的小菱是两位不同的助手:我负责系统态势巡查、风险处置、审批运维与批量治理,代码审查和安全审计等成员业务请找小菱。点击「+」可开新对话,多个任务并行处理。`
 const LEGACY_SESSION_KEY = 'prism-admin-copilot-session'
+const legacySessionKey = computed(() => `${LEGACY_SESSION_KEY}:${userStore.profile?.id ?? 'anonymous'}`)
 const PANEL_POSITION_KEY = 'prism-floating-chat-position:admin'
 const COMPACT_DESKTOP_MIN_WIDTH = 1100
 const COMPACT_DESKTOP_MAX_WIDTH = 1366
@@ -282,16 +281,12 @@ async function handleAskMember({ teamId, name, address }: { teamId: number; name
 }
 const router = useRouter()
 const userStore = useUserStore()
+const chatStorageKey = computed(() => agentChatStorageKey('admin', userStore.profile?.id))
 /** 管理端同样点亮全局彩框/虚拟鼠标:贾维斯替管理员操作页面时的实况反馈。 */
 const activityStore = useAgentActivityStore()
 
 const sessionId = ref('')
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
-/** 会话索引按账号隔离,同机多账号互不看到对方会话(服务端仍是事实源)。 */
-const chatStorageKey = computed(() => resolveAgentChatStorageKey('admin', userStore.profile?.id))
-watch(() => userStore.profile?.id, (id, prev) => {
-  if (id && id !== prev) migrateUnscopedAgentChatSessions('admin', chatStorageKey.value)
-}, { immediate: true })
 const meshSessions = ref<AgentChatSessionMeta[]>([])
 const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
@@ -1462,7 +1457,7 @@ async function sendMessage(): Promise<void> {
   pendingImages.value = []
   inputText.value = ''
   // 新对话自动命名:首条用户消息提炼为会话标题
-  if (autoTitleAgentChatSession('admin', sessionId.value, content)) {
+  if (autoTitleAgentChatSession(chatStorageKey.value, sessionId.value, content)) {
     switcherRef.value?.reload?.()
   }
   await scrollToBottom()
@@ -1753,9 +1748,9 @@ onMounted(() => {
             <AgentSessionSwitcher
               ref="switcherRef"
               class="copilot-session-switch"
-              surface="admin"
               :storage-key="chatStorageKey"
-              :legacy-key="LEGACY_SESSION_KEY"
+              :account-key="userStore.profile?.id"
+              :legacy-key="legacySessionKey"
               id-prefix="admin"
               :welcome-text="WELCOME_TEXT"
               :discover-remote="true"
@@ -2042,6 +2037,7 @@ onMounted(() => {
           <span class="tray-hint">发送时自动切换视觉模型</span>
         </div>
         <input ref="imageInput" type="file" class="image-upload-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple aria-label="选择图片附件" @change="onImageInput" />
+        <button type="button" class="image-upload-button" :disabled="loading || readingImages || sessionRestoring || sessionBusy" @click="imageInput?.click()">添加图片</button>
         <div class="composer">
           <textarea
             ref="chatInputRef"
@@ -2054,16 +2050,6 @@ onMounted(() => {
             :disabled="loading || uploading || sessionRestoring || sessionBusy"
             @keydown="handleSubmitKey"
           ></textarea>
-          <button
-            type="button"
-            class="image-upload-button"
-            :disabled="loading || readingImages || sessionRestoring || sessionBusy"
-            aria-label="添加图片"
-            title="添加图片,发送时自动切换视觉模型"
-            @click="imageInput?.click()"
-          >
-            <el-icon><Picture /></el-icon>
-          </button>
           <button
             v-if="sessionBusy"
             type="button"
@@ -2708,12 +2694,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   white-space: nowrap;
 }
 .copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px); border-radius: 0 0 18px 18px; }
-.composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
 /* ── 多模态图片附件 ── */
 .image-upload-input { display: none; }
-.image-upload-button { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--agent-border); border-radius: 50%; color: var(--agent-primary); background: rgba(255, 255, 255, 0.85); cursor: pointer; transition: all 0.15s ease; }
-.image-upload-button:hover:not(:disabled) { border-color: var(--agent-primary); background: #fff; box-shadow: 0 3px 10px rgba(91, 88, 232, 0.18); transform: translateY(-1px); }
-.image-upload-button:active:not(:disabled) { transform: translateY(0) scale(0.96); }
+.image-upload-button { margin: 6px 0; padding: 6px 12px; border: 1px solid var(--agent-border); border-radius: 8px; color: var(--agent-primary); background: white; cursor: pointer; }
 .image-upload-button:disabled { opacity: 0.5; cursor: not-allowed; }
 .chat-image-feedback { font-size: 12px; margin: 6px 0; overflow-wrap: anywhere; }
 .chat-image-feedback.is-error { color: var(--color-danger, #c43d36); }

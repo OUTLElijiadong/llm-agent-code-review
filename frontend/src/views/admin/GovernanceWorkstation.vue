@@ -670,11 +670,11 @@ onMounted(loadData)
         <div class="metric"><span>Agent 总数</span><strong>{{ overview?.agents_total ?? 0 }}</strong></div>
         <div class="metric"><span>启用 Agent</span><strong>{{ overview?.agents_enabled ?? 0 }}</strong></div>
         <!-- 统计卡即入口:待审批/开放告警点击直达,数值>0 标警示色 -->
-        <button type="button" class="metric is-link" title="去审批中心" @click="goMetric('/admin/approvals')">
+        <button type="button" class="metric is-link" title="去审批中心" @click="goMetric('/admin/governance?section=approvals')">
           <span>待审批</span><strong :class="{ 'is-warn': (overview?.approvals_pending ?? 0) > 0 }">{{ overview?.approvals_pending ?? 0 }}</strong>
         </button>
         <div class="metric"><span>工具调用</span><strong>{{ overview?.tool_calls_today ?? 0 }}</strong></div>
-        <button type="button" class="metric is-link" title="去可观测中心" @click="goMetric('/admin/observability')">
+        <button type="button" class="metric is-link" title="去可观测中心" @click="goMetric('/admin/operations?section=observability')">
           <span>开放告警</span><strong :class="{ 'is-warn': (overview?.alerts_open ?? 0) > 0 }">{{ overview?.alerts_open ?? 0 }}</strong>
         </button>
         <div class="metric"><span>知识文档</span><strong>{{ overview?.knowledge_docs_total ?? 0 }}</strong></div>

@@ -191,9 +191,9 @@ function reload(): void {
 function traceRoute(row: AuditLogOut): string {
   const id = row.target_id
   if (row.target_type === 'project' && id) return `/projects/${id}`
-  if (row.target_type === 'user') return '/admin/users'
-  if (row.target_type === 'rule') return '/security?tab=rules'
-  if (row.target_type === 'proposal' || row.target_type === 'evolution') return '/admin/evolution'
+  if (row.target_type === 'user') return '/admin/access?section=users'
+  if (row.target_type === 'rule') return '/security?section=rules'
+  if (row.target_type === 'proposal' || row.target_type === 'evolution') return '/admin/governance?section=evolution'
   return ''
 }
 

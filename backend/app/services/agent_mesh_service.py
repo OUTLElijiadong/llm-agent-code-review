@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
@@ -33,6 +34,10 @@ _ACTIVE_RESPONSE_RUN_STATUSES = (
     "waiting_input",
 )
 _JARVIS_COST_GUARD_SUMMARY = "后台成本保护已关闭 JARVIS 自动模型派发;历史消息已收敛,未执行模型调用。"
+# 每个账号、每个小菱入口最多保留 10 条活动会话。
+# 超出部分只归档会话索引，不删除 Responses/消息账本，便于审计和恢复。
+CONVERSATION_RETENTION_LIMIT = 10
+_PLACEHOLDER_CONVERSATION_TITLES = frozenset({"新对话", "默认对话", "用户端小菱对话", "贾维斯运维对话"})
 
 
 class AgentMeshError(ValueError):
@@ -200,6 +205,83 @@ def _conversation(db: Session, user_id: int, surface: str, session_key: str) -> 
     )
 
 
+def _enforce_conversation_retention(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+    limit: int | None = None,
+    keep_session_key: str = "",
+) -> int:
+    """按账号和入口归档超出上限的最旧会话。
+
+    归档而非物理删除，保证聊天/Responses 审计账本仍完整；归档会话不再进入
+    发现列表，也不能被心跳复活。排序优先最后一条消息，其次心跳时间。
+    """
+    retention_limit = max(1, int(limit if limit is not None else settings.agent_mesh_max_active_conversations))
+    rows = (
+        db.query(AgentMeshConversation)
+        .filter(
+            AgentMeshConversation.user_id == int(user_id),
+            AgentMeshConversation.surface == surface,
+            AgentMeshConversation.status == "active",
+        )
+        .all()
+    )
+    if len(rows) <= retention_limit:
+        return 0
+    rows.sort(
+        key=lambda row: (
+            _aware(row.last_message_at or row.last_seen_at) or datetime.min.replace(tzinfo=timezone.utc),
+            int(row.id or 0),
+        ),
+        reverse=True,
+    )
+    occupied_keys = {
+        str(item.session_key)
+        for item in db.query(AgentResponseRun.session_key)
+        .filter(
+            AgentResponseRun.user_id == int(user_id),
+            AgentResponseRun.surface == surface,
+            AgentResponseRun.status.in_(_OCCUPIED_RUN_STATUSES),
+        )
+        .all()
+    }
+    archived = 0
+    retained = 0
+    for row in rows:
+        if row.session_key == keep_session_key or retained < retention_limit or row.session_key in occupied_keys:
+            retained += 1
+            continue
+        row.status = "archived"
+        row.active_run_id = None
+        row.active_run_status = None
+        archived += 1
+    return archived
+
+
+def update_title_from_user_message(
+    db: Session,
+    user: User,
+    *,
+    surface: str,
+    session_key: str,
+    message: str,
+) -> bool:
+    """把首条用户消息摘要写入服务端会话，避免历史列表全部显示“新对话”。"""
+    _assert_surface(db, user, surface)
+    row = _conversation(db, int(user.id), surface, session_key)
+    if row is None or str(row.title or "").strip() not in _PLACEHOLDER_CONVERSATION_TITLES:
+        return False
+    normalized = re.sub(r"\s+", " ", str(message or "")).strip()
+    if not normalized:
+        return False
+    # 与前端切换器保持一致：中文/英文都控制在可扫描的短标题内。
+    row.title = normalized[:32] + ("…" if len(normalized) > 32 else "")
+    row.last_message_at = _now()
+    return True
+
+
 def heartbeat(
     db: Session,
     user: User,
@@ -237,11 +319,23 @@ def heartbeat(
             last_seen_at=now,
         )
         db.add(row)
-    row.title = title.strip() or row.title or "新对话"
+    requested_title = title.strip()
+    if requested_title and requested_title not in _PLACEHOLDER_CONVERSATION_TITLES:
+        row.title = requested_title
+    elif not str(row.title or "").strip():
+        row.title = "新对话"
     row.active_run_id = active_run_id or None
     row.active_run_status = active_run_status or None
     row.last_seen_at = now
     try:
+        # 让并发首心跳下的新行进入 retention 查询，最旧会话会被归档而非删除。
+        db.flush()
+        _enforce_conversation_retention(
+            db,
+            user_id=int(user.id),
+            surface=surface,
+            keep_session_key=session_key,
+        )
         db.commit()
     except IntegrityError:
         # 同一账户并发首心跳可能同时新建同一会话;让已提交的一方获胜并返回其状态。
@@ -495,12 +589,21 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
                 }
         items.append(item)
     items.extend(_custom_agents(db, user))
+    if surface in {"user", "admin"}:
+        _enforce_conversation_retention(db, user_id=int(user.id), surface=surface)
+        db.commit()
+    else:
+        _enforce_conversation_retention(db, user_id=int(user.id), surface="user")
+        _enforce_conversation_retention(db, user_id=int(user.id), surface="admin")
+        db.commit()
+    conversation_query = db.query(AgentMeshConversation).filter(
+        AgentMeshConversation.user_id == int(user.id),
+        AgentMeshConversation.status == "active",
+    )
+    if surface in {"user", "admin"}:
+        conversation_query = conversation_query.filter(AgentMeshConversation.surface == surface)
     conversations = (
-        db.query(AgentMeshConversation)
-        .filter(
-            AgentMeshConversation.user_id == int(user.id),
-            AgentMeshConversation.status == "active",
-        )
+        conversation_query
         .order_by(AgentMeshConversation.last_seen_at.desc(), AgentMeshConversation.id.desc())
         .all()
     )

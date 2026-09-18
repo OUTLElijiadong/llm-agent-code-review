@@ -125,6 +125,8 @@ class Settings(BaseSettings):
     agent_mesh_supervision_max_rounds: int = Field(default=3, ge=1, le=5)
     # 空 Mesh 会话归档阈值:活跃但无消息、无 Responses 运行且超过此时长的会话将被归档。
     agent_mesh_empty_session_archive_hours: int = Field(default=24, ge=1, le=720)
+    # 每个账号、每个入口最多保留的活跃会话数；归档只隐藏会话目录，不删除消息和审计记录。
+    agent_mesh_max_active_conversations: int = Field(default=10, ge=1, le=100)
     # 管理小菱 JARVIS 巡逻:发现异常后采集只读证据。
     agent_jarvis_patrol_enabled: bool = True
     # 成本保护:默认不把定时巡逻简报自动交给模型处理;管理员明确发起时仍可核验。

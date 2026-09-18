@@ -13,6 +13,8 @@ import {
   saveActiveAgentChatSession,
   saveAgentChatSessions,
   setAgentChatSessionPinned,
+  agentChatStorageKey,
+  migrateUnscopedAgentChatSessions,
   type AgentChatSessionMeta,
   type DiscoveredAgentChatSession,
 } from '@/utils/agentChatSessions'
@@ -20,10 +22,9 @@ import { listAgentMeshAgents } from '@/api/agentMesh'
 import { isAgentResponseSessionOccupied } from '@/utils/agentResponseSession'
 
 interface Props {
-  /** 显式声明当前会话面，不从带账号的 storageKey 字符串推断。 */
-  surface?: 'user' | 'admin'
   /** localStorage 命名空间:user / admin 各自独立 */
   storageKey: string
+  surface?: 'user' | 'admin'
   /** 旧版单会话 localStorage 键,用于迁移 */
   legacyKey: string
   /** 新会话 id 前缀 */
@@ -32,9 +33,12 @@ interface Props {
   welcomeText?: string
   /** 启用 Agent Mesh 服务端会话发现；user/admin 宿主显式传入。 */
   discoverRemote?: boolean
+  /** 当前登录账号 ID；本地会话目录必须按账号隔离。 */
+  accountKey?: string | number | null
 }
 
-const props = withDefaults(defineProps<Props>(), { surface: 'user' })
+const props = defineProps<Props>()
+const storageNamespace = computed(() => agentChatStorageKey(props.storageKey, props.accountKey))
 const emit = defineEmits<{
   select: [sessionId: string]
   'sessions-changed': [metas: AgentChatSessionMeta[]]
@@ -88,15 +92,15 @@ function select(sessionId: string): void {
     return
   }
   activeId.value = sessionId
-  saveActiveAgentChatSession(props.storageKey, sessionId)
+  saveActiveAgentChatSession(storageNamespace.value, sessionId)
   menuFor.value = ''
   emit('select', sessionId)
 }
 
 function createSession(): void {
-  const meta = createAgentChatSession(props.storageKey, props.idPrefix)
+  const meta = createAgentChatSession(storageNamespace.value, props.idPrefix)
   pendingHeartbeatId = meta.id
-  sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+  sessions.value = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
   notify()
   select(meta.id)
 }
@@ -105,10 +109,10 @@ function dropSession(sessionId: string): void {
   if (inferBusy(sessions.value.find((item) => item.id === sessionId) ?? { id: sessionId, title: '', createdAt: 0 })) return
   if (pendingHeartbeatId === sessionId) pendingHeartbeatId = ''
   const wasActive = sessionId === activeId.value
-  removeAgentChatSession(props.storageKey, sessionId)
-  sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+  removeAgentChatSession(storageNamespace.value, sessionId)
+  sessions.value = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
   if (!sessions.value.length) {
-    const meta = createAgentChatSession(props.storageKey, props.idPrefix)
+    const meta = createAgentChatSession(storageNamespace.value, props.idPrefix)
     sessions.value = [meta]
   }
   notify()
@@ -118,8 +122,8 @@ function dropSession(sessionId: string): void {
 function togglePin(sessionId: string): void {
   const target = sessions.value.find((item) => item.id === sessionId)
   if (!target) return
-  setAgentChatSessionPinned(props.storageKey, sessionId, target.pinned !== true)
-  sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+  setAgentChatSessionPinned(storageNamespace.value, sessionId, target.pinned !== true)
+  sessions.value = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
   notify()
 }
 
@@ -185,22 +189,23 @@ function inferBusy(meta: AgentChatSessionMeta): boolean {
 }
 
 onMounted(() => {
-  sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+  migrateUnscopedAgentChatSessions(props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user'), storageNamespace.value)
+  sessions.value = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
   if (!sessions.value.length) {
-    const meta = createAgentChatSession(props.storageKey, props.idPrefix)
+    const meta = createAgentChatSession(storageNamespace.value, props.idPrefix)
     sessions.value = [meta]
     pendingHeartbeatId = meta.id
   }
-  const surface = props.surface
+  const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
   if (consumeAgentChatLoginFreshStart(surface)) {
-    const fresh = createAgentChatSession(props.storageKey, props.idPrefix)
+    const fresh = createAgentChatSession(storageNamespace.value, props.idPrefix)
     pendingHeartbeatId = fresh.id
-    sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+    sessions.value = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
     activeId.value = fresh.id
-    saveActiveAgentChatSession(props.storageKey, fresh.id)
+    saveActiveAgentChatSession(storageNamespace.value, fresh.id)
   } else {
     activeId.value = sessions.value[0].id
-    const persistedActiveId = loadActiveAgentChatSession(props.storageKey)
+    const persistedActiveId = loadActiveAgentChatSession(storageNamespace.value)
     if (persistedActiveId && sessions.value.some((item) => item.id === persistedActiveId)) {
       activeId.value = persistedActiveId
     }
@@ -223,14 +228,14 @@ onBeforeUnmount(() => {
 
 function renameActive(title: string): void {
   if (!activeId.value) return
-  renameAgentChatSession(props.storageKey, activeId.value, title)
-  sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+  renameAgentChatSession(storageNamespace.value, activeId.value, title)
+  sessions.value = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
   notify()
 }
 
 /** 重新从本地存储加载会话列表(自动命名等外部改动后刷新标题)。 */
 function reload(): void {
-  sessions.value = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+  sessions.value = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
   notify()
 }
 
@@ -241,10 +246,10 @@ function reload(): void {
 async function refreshFromAgentMesh(): Promise<void> {
   if (discoveryLoading.value) return
   discoveryLoading.value = true
-  const surface = props.surface
+  const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
   const previousActiveId = activeId.value
   try {
-    const discovery = await listAgentMeshAgents()
+    const discovery = await listAgentMeshAgents(surface)
     const discovered: DiscoveredAgentChatSession[] = discovery.items
       .filter((item) => item.kind === 'session' && item.surface === surface && item.session_id)
       .map((item) => ({
@@ -256,7 +261,7 @@ async function refreshFromAgentMesh(): Promise<void> {
         activeRunId: item.active_run_id,
         activeRunStatus: item.active_run_status,
       }))
-    const localBeforeMerge = loadAgentChatSessions(props.storageKey, props.legacyKey, props.idPrefix)
+    const localBeforeMerge = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
     // 服务端发现前,当前会话也必须保留,否则首次心跳尚未落库时会被误删并切走,
     // 正在运行/等待审批的会话尤其不能因为一次空发现而丢失上下文。
     const preserveIds = new Set<string>()
@@ -271,11 +276,11 @@ async function refreshFromAgentMesh(): Promise<void> {
     if (pendingHeartbeatId && discovered.some((item) => item.id === pendingHeartbeatId)) pendingHeartbeatId = ''
     if (!merged.length) {
       // 服务端还未收到当前窗口的首次 heartbeat，建立一个干净的当前端会话。
-      const current = createAgentChatSession(props.storageKey, props.idPrefix)
+      const current = createAgentChatSession(storageNamespace.value, props.idPrefix)
       pendingHeartbeatId = current.id
       merged = [current]
     }
-    saveAgentChatSessions(props.storageKey, merged)
+    saveAgentChatSessions(storageNamespace.value, merged)
     sessions.value = merged
     const nextRunState = new Map<string, string>()
     for (const item of discovered) {

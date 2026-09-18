@@ -67,11 +67,10 @@ import {
   autoTitleAgentChatSession,
   loadAgentChatDraft,
   loadAgentChatSnapshot,
-  migrateUnscopedAgentChatSessions,
-  resolveAgentChatStorageKey,
   saveActiveAgentChatSession,
   saveAgentChatDraft,
   saveAgentChatSnapshot,
+  agentChatStorageKey,
   type AgentChatSessionMeta,
   type AgentChatSnapshotMessage,
   type AgentChatSnapshotTeam,
@@ -179,8 +178,7 @@ const chatBody = ref<HTMLElement>()
 const chatInputRef = ref<HTMLTextAreaElement>()
 const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('user')
 const LEGACY_SESSION_KEY = 'prism-user-agent-session'
-/** 会话索引按账号隔离,同机多账号互不看到对方会话(服务端仍是事实源)。 */
-const chatStorageKey = computed(() => resolveAgentChatStorageKey('user', userStore.profile?.id))
+const legacySessionKey = computed(() => `${LEGACY_SESSION_KEY}:${userStore.profile?.id ?? 'anonymous'}`)
 const sessionId = ref('')
 let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
@@ -209,6 +207,7 @@ const canRetryRun = computed(() => {
   return Boolean(status && ['failed', 'incomplete', 'max_rounds_exceeded'].includes(status) && !loading.value)
 })
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
+const chatStorageKey = computed(() => agentChatStorageKey('user', userStore.profile?.id))
 const meshSessions = ref<AgentChatSessionMeta[]>([])
 const backgroundBusySessions = new Set<string>()
 const lastActiveToolName = ref('')
@@ -1718,7 +1717,7 @@ async function sendMessage(): Promise<void> {
   inputText.value = ''
   lastFailedRun.value = { kind: 'user-message' }
   // 新对话自动命名:首条用户消息提炼为会话标题
-  if (autoTitleAgentChatSession('user', sessionId.value, text)) {
+  if (autoTitleAgentChatSession(chatStorageKey.value, sessionId.value, text)) {
     switcherRef.value?.reload?.()
   }
 
@@ -2076,18 +2075,13 @@ function close(): void {
   emit('update:visible', false)
 }
 
-watch(() => userStore.profile?.id, (id, prev) => {
-  // 账号就绪或切换时,把未带 user_id 的旧会话索引/最后活跃会话迁入当前账号作用域
-  if (id && id !== prev) migrateUnscopedAgentChatSessions('user', chatStorageKey.value)
-}, { immediate: true })
-
 watch(() => props.visible, async (val) => {
   if (!val) return
   await nextTick()
   restoreOrAnchor()
   switcherRef.value?.ensureFreshOnOpen()
   scrollToBottom()
-}, { immediate: true })
+})
 
 watch(() => props.prefill, (prefill) => {
   if (!prefill) return
@@ -2214,9 +2208,9 @@ onMounted(() => {
                 <AgentSessionSwitcher
                   ref="switcherRef"
                   class="chat-session-switch"
-                  surface="user"
                   :storage-key="chatStorageKey"
-                  :legacy-key="LEGACY_SESSION_KEY"
+                  :account-key="userStore.profile?.id"
+                  :legacy-key="legacySessionKey"
                   id-prefix="user"
                   :welcome-text="WELCOME_TEXT"
                   :discover-remote="true"
@@ -2769,8 +2763,6 @@ onMounted(() => {
 
 .chat-drawer {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
   width: min(400px, calc(100vw - 32px));
   height: min(620px, calc(100dvh - 48px));
   background: #fff;

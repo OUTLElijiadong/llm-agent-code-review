@@ -59,8 +59,8 @@ export function heartbeatAgentMesh(input: {
   return post<AgentMeshAddress>('/agent-mesh/conversations/heartbeat', input)
 }
 
-export function listAgentMeshAgents(): Promise<AgentMeshDiscovery> {
-  return get<AgentMeshDiscovery>('/agent-mesh/agents')
+export function listAgentMeshAgents(surface?: AgentMeshSurface): Promise<AgentMeshDiscovery> {
+  return get<AgentMeshDiscovery>('/agent-mesh/agents', surface ? { surface } : undefined)
 }
 
 /**

@@ -3,7 +3,7 @@ export type UserRole = 'admin' | 'reviewer' | 'user'
 const FALLBACK_ROLE: UserRole = 'user'
 
 const ROLE_HOME_PATHS: Record<UserRole, string> = {
-  admin: '/admin/overview',
+  admin: '/admin/operations?section=overview',
   reviewer: '/dashboard',
   user: '/dashboard',
 }
@@ -87,7 +87,7 @@ export function canRoleOpenPath(role: string | null | undefined, path: string): 
  * @param redirect - 登录前记录的重定向路径
  * @returns 登录成功后应进入的路径
  *
- * 管理员固定回到总览大屏:管理后台页面间跳转产生的 redirect 参数
+ * 管理员固定回到运行与审计中心总览:管理后台页面间跳转产生的 redirect 参数
  * (如超时回登录页)不应把重新登录后的落脚点带离总览;
  * 普通用户按 redirect 回原页面。
  */

@@ -1071,6 +1071,25 @@ async def stream_agent_response(
                 source_attribution = {}
                 if payload.action == "start":
                     messages = [item.model_dump() for item in payload.messages if item.content.strip() or item.images]
+                    first_user_text = next(
+                        (
+                            str(item.get("content") or "").strip()
+                            for item in messages
+                            if item.get("role") == "user" and str(item.get("content") or "").strip()
+                        ),
+                        "",
+                    )
+                    if first_user_text:
+                        # 标题由服务端按账号/入口写入，避免只改浏览器本地标题后
+                        # 重新登录或跨设备时所有历史仍显示“新对话”。
+                        agent_mesh_service.update_title_from_user_message(
+                            run_db,
+                            run_user,
+                            surface=payload.surface,
+                            session_key=payload.session_id,
+                            message=first_user_text,
+                        )
+                        run_db.commit()
                     if payload.mesh_message_id:
                         mesh_message_id = payload.mesh_message_id
                         _, system_input = agent_mesh_service.prepare_message_run(

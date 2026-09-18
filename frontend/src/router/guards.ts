@@ -24,6 +24,8 @@ declare module 'vue-router' {
     permissions?: string[]
     /** 是否仅允许唯一超级管理员 admin,此限制不可被普通管理员绕过 */
     superAdmin?: boolean
+    /** 后台合并中心所属业务域,用于在一个容器内切换子功能 */
+    unifiedDomain?: 'agents' | 'operations' | 'access' | 'platform'
   }
 }
 

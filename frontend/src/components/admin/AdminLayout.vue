@@ -2,25 +2,12 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Bell,
   Cpu,
   DataAnalysis,
-  Document,
-  Files,
   Histogram,
-  Key,
-  Lock,
-  MagicStick,
-  Operation,
-  Refresh,
   Setting,
   SwitchButton,
-  Timer,
-  Tools,
-  TrendCharts,
   User,
-  View,
-  Connection,
 } from '@element-plus/icons-vue'
 
 import { useUserStore } from '@/stores/user'
@@ -32,7 +19,6 @@ interface AdminMenuItem {
   path: string
   title: string
   icon: typeof Histogram
-  superAdmin?: boolean
 }
 
 const route = useRoute()
@@ -41,35 +27,15 @@ const userStore = useUserStore()
 const contentRef = ref<HTMLElement | null>(null)
 
 const menuItems: AdminMenuItem[] = [
-  { path: '/admin/overview', title: '总览大屏', icon: Histogram },
-  { path: '/admin/agents', title: 'Agent 管理', icon: Cpu },
-  { path: '/admin/approvals', title: '审批中心', icon: Lock },
-  { path: '/admin/agent-releases', title: 'Agent 发布审批', icon: Cpu },
-  { path: '/admin/beta-codes', title: '内测码管理', icon: Key },
-  { path: '/admin/policies', title: '策略中心', icon: Operation },
-  { path: '/admin/tools', title: '工具权限', icon: Tools },
-  { path: '/admin/knowledge', title: '知识与记忆', icon: Files },
-  { path: '/admin/jobs', title: '任务调度', icon: Timer },
-  { path: '/admin/observability', title: '监控告警', icon: DataAnalysis },
-  { path: '/admin/rewards', title: '奖惩趋势', icon: TrendCharts },
-  { path: '/admin/rollback', title: '回滚中心', icon: Refresh },
-  { path: '/admin/users', title: '用户管理', icon: User },
-  { path: '/admin/rbac/roles', title: '角色管理', icon: Lock },
-  { path: '/admin/rbac/permissions', title: '权限点列表', icon: Key },
-  { path: '/admin/ai-logs', title: 'Agent 调用日志', icon: MagicStick },
-  { path: '/report/templates', title: '报告模板', icon: Document },
-  { path: '/admin/audit', title: '系统操作审计', icon: Bell },
-  { path: '/admin/evolution', title: 'Agent 自进化', icon: MagicStick },
-  { path: '/admin/skills', title: 'Skill 管理', icon: View },
-  { path: '/admin/mcp-workers', title: 'MCP 与沙箱节点', icon: Connection, superAdmin: true },
-  { path: '/admin/llm', title: '大模型配置', icon: Setting, superAdmin: true },
-  { path: '/admin/embedding', title: 'RAG 嵌入配置', icon: Key, superAdmin: true },
+  { path: '/admin/governance', title: 'Agent 治理', icon: Cpu },
+  { path: '/admin/operations', title: '运行与审计', icon: DataAnalysis },
+  { path: '/admin/access', title: '用户与权限', icon: User },
+  { path: '/admin/platform', title: '平台配置', icon: Setting },
 ]
 
 const visibleMenuItems = computed(() => (
   menuItems.filter((item) => (
-    (!item.superAdmin || userStore.isSuperAdmin())
-    && isNavigationPathAllowed(router, item.path, userStore)
+    isNavigationPathAllowed(router, item.path, userStore)
   ))
 ))
 
@@ -77,7 +43,7 @@ const activePath = computed(() => {
   const found = visibleMenuItems.value.find(
     (item) => route.path === item.path || route.path.startsWith(item.path + '/'),
   )
-  return found?.path || '/admin/overview'
+  return found?.path || '/admin/operations'
 })
 
 /**

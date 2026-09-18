@@ -21,15 +21,10 @@ const LOCAL_NAVIGATION_PREFIX_RE = /^(?:小菱)?(?:请帮我|请|帮我|麻烦|�
 
 /** 常用简称只作为已有静态路由标题的别名,不新增可访问路径。 */
 const LOCAL_NAVIGATION_ALIASES: Record<string, string[]> = {
-  '/admin/overview': ['总览', '管理总览'],
-  '/admin/approvals': ['审批'],
-  '/admin/observability': ['监控', '告警'],
-  '/admin/users': ['用户'],
-  '/admin/audit': ['审计', '系统审计'],
-  '/admin/jobs': ['调度'],
-  '/admin/rollback': ['回滚'],
-  '/admin/ai-logs': ['调用日志'],
-  '/admin/mcp-workers': ['节点'],
+  '/admin/governance': ['Agent治理', 'Agent管理'],
+  '/admin/operations': ['运行', '监控', '告警', '审计', '总览'],
+  '/admin/access': ['用户', '权限', '角色'],
+  '/admin/platform': ['平台配置', '模型配置', '节点'],
   '/projects': ['项目'],
   '/code': ['代码'],
   '/reviews': ['审查任务', '审查'],

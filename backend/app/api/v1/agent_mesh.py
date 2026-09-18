@@ -101,10 +101,11 @@ def archive_session(
     dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
 )
 def list_agents(
+    surface: Literal["user", "admin"] | None = Query(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Resp[dict]:
-    return Resp(data=agent_mesh_service.list_agents(db, user))
+    return Resp(data=agent_mesh_service.list_agents(db, user, surface=surface or ""))
 
 
 @router.post(

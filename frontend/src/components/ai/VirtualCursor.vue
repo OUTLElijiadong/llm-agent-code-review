@@ -106,15 +106,10 @@ function isExactCurrentRoute(route: string): boolean {
 
 /** 路由 → 侧边栏中文标签(与 router/菜单文案对齐)。 */
 const ROUTE_LABELS: Array<[string, string]> = [
-  ['/admin/overview', '总览'],
-  ['/admin/users', '用户'],
-  ['/admin/approvals', '审批'],
-  ['/admin/observability', '监控'],
-  ['/admin/audit', '审计'],
-  ['/admin/jobs', '任务调度'],
-  ['/admin/rollback', '回滚'],
-  ['/admin/ai-logs', '调用日志'],
-  ['/admin/mcp-workers', '节点'],
+  ['/admin/governance', 'Agent治理'],
+  ['/admin/operations', '运行与审计'],
+  ['/admin/access', '用户与权限'],
+  ['/admin/platform', '平台配置'],
   ['/projects', '项目'],
   ['/code', '代码'],
   ['/reviews', '审查'],

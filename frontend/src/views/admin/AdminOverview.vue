@@ -188,14 +188,14 @@ const router = useRouter()
 function goSignalDetail(signal: { title?: string; detail?: string; severity?: string }): void {
   const text = `${signal.title ?? ''}${signal.detail ?? ''}`
   if (/登录|爆破|暴力/.test(text)) {
-    void router.push({ path: '/admin/audit', query: { keyword: '登录' } })
+    void router.push({ path: '/admin/operations', query: { section: 'audit', keyword: '登录' } })
     return
   }
   if (/文件|恶意|样本/.test(text)) {
-    void router.push('/admin/observability')
+    void router.push({ path: '/admin/operations', query: { section: 'observability' } })
     return
   }
-  void router.push('/admin/observability')
+  void router.push({ path: '/admin/operations', query: { section: 'observability' } })
 }
 
 const system = ref<SystemStatus | null>(null)

@@ -63,11 +63,15 @@ const ACTIVE_PREFIX = 'prism-agent-active-session:'
 const LOGIN_FRESH_PREFIX = 'prism-agent-login-fresh:'
 const CHAT_SURFACES = ['user', 'admin'] as const
 
-/**
- * 会话索引按账号隔离:历史上 storageKey 只有 surface(user/admin),
- * 同一浏览器多账号会互相看到对方的会话索引、草稿和最后活跃会话。
- * 新 key 形如 `user:123` / `admin:1`;未登录态回退为裸 surface。
- */
+/** 将浏览器本地会话目录绑定到登录主体；未提供主体时保留测试/兼容调用的旧命名空间。 */
+export function agentChatStorageKey(surface: string, accountId?: string | number | null): string {
+  const normalized = accountId === undefined || accountId === null || String(accountId).trim() === ''
+    ? ''
+    : String(accountId).trim()
+  return normalized ? `${surface}:account:${normalized}` : surface
+}
+
+/** 与历史测试/调用方兼容的账号命名空间解析。 */
 export function resolveAgentChatStorageKey(
   surface: 'user' | 'admin',
   userId: number | string | undefined | null,
@@ -76,27 +80,17 @@ export function resolveAgentChatStorageKey(
   return id ? `${surface}:${id}` : surface
 }
 
-/**
- * 清理未带 user_id 的旧索引/最后活跃会话。
- *
- * 旧版本没有记录会话所属账号，因此在共享浏览器上把裸 key 复制给
- * 当前登录账号会把上一个账号的标题、活动会话甚至快照暴露给新账号。
- * 旧会话必须由服务端按当前用户重新发现；无法证明归属的本地索引不迁移。
- */
+/** 删除无法证明归属的旧裸索引，避免共享浏览器跨账号显示。 */
 export function migrateUnscopedAgentChatSessions(
   surface: 'user' | 'admin',
   scopedKey: string,
 ): void {
   if (scopedKey === surface) return
   try {
-    const legacyIndex = window.localStorage.getItem(INDEX_PREFIX + surface)
-    const legacyActive = window.localStorage.getItem(ACTIVE_PREFIX + surface)
-    if (legacyIndex || legacyActive) {
-      window.localStorage.removeItem(INDEX_PREFIX + surface)
-      window.localStorage.removeItem(ACTIVE_PREFIX + surface)
-    }
+    window.localStorage.removeItem(INDEX_PREFIX + surface)
+    window.localStorage.removeItem(ACTIVE_PREFIX + surface)
   } catch {
-    // 存储不可用时跳过迁移,会话列表由服务端发现兜底。
+    // 存储不可用时由服务端目录兜底。
   }
 }
 
@@ -116,7 +110,10 @@ export function consumeAgentChatLoginFreshStart(surface: 'user' | 'admin'): bool
   try {
     const key = LOGIN_FRESH_PREFIX + surface
     const pending = window.sessionStorage.getItem(key) === '1'
-    if (pending) window.sessionStorage.removeItem(key)
+    if (pending) {
+      window.sessionStorage.removeItem(key)
+      // 登录主体可能已经切换；先丢弃旧账号本地目录，等待服务端返回当前账号会话。
+    }
     return pending
   } catch {
     return false
@@ -142,7 +139,7 @@ function readIndex(storageKey: string): AgentChatSessionMeta[] {
 
 function writeIndex(storageKey: string, metas: AgentChatSessionMeta[]): void {
   try {
-    window.localStorage.setItem(INDEX_PREFIX + storageKey, JSON.stringify(metas.slice(0, 30)))
+    window.localStorage.setItem(INDEX_PREFIX + storageKey, JSON.stringify(metas.slice(0, 10)))
   } catch {
     // 存储写满时静默失败,会话功能降级为单会话。
   }
@@ -166,7 +163,11 @@ export function loadAgentChatSessions(
   idPrefix: string,
 ): AgentChatSessionMeta[] {
   const existing = readIndex(storageKey)
-  if (existing.length) return existing
+  if (existing.length) {
+    // 旧版本可能已写入超过 10 条；首次读取即收敛到同服务端的保留上限。
+    if (existing.length > 10) writeIndex(storageKey, existing.slice(0, 10))
+    return existing.slice(0, 10)
+  }
   const migrated = migrateLegacy(storageKey, legacyKey, idPrefix)
   return migrated
 }
@@ -272,7 +273,7 @@ export function mergeAgentChatSessions(
     included.add(cached.id)
   }
 
-  return result.slice(0, 30)
+  return result.slice(0, 10)
 }
 
 export function createAgentChatSession(
