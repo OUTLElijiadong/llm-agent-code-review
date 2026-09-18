@@ -109,6 +109,7 @@ export interface SecurityScanProjectIn {
 }
 
 export interface SecurityScanAllProjectsIn {
+  scan_mode?: 'full' | 'static_full' | 'triage'
   top_n_per_project?: number
   trace_dataflow?: boolean
 }
@@ -128,6 +129,53 @@ export interface SecurityChecklistOut {
   secret_patterns: SecurityChecklistItem[]
   static_rules: SecurityChecklistItem[]
   catalog_metadata?: Record<string, unknown>
+}
+
+export interface SecurityRuleCatalogItemOut {
+  id: string
+  code: string
+  name: string
+  category: string
+  language: string
+  severity: string
+  origin: string
+  executor: string
+  executable: boolean
+  enabled: boolean
+  builtin: boolean
+  cwe: string
+  owasp: string
+  description: string
+  source_url: string
+}
+
+export interface SecurityRuleEngineOut {
+  code: string
+  name: string
+  kind: string
+  executable: boolean
+  status: string
+  version: string
+  suites: string[]
+  languages: string[]
+  source_url: string
+  documentation_url: string
+  status_message: string
+}
+
+export interface SecurityRuleSourceOut {
+  code: string
+  name: string
+  role: string
+  url: string
+}
+
+export interface SecurityRuleCatalogOut {
+  items: SecurityRuleCatalogItemOut[]
+  counts: Record<string, number>
+  engines: SecurityRuleEngineOut[]
+  sources: SecurityRuleSourceOut[]
+  mapping_note: string
 }
 
 // ---- v2.1.1 Dashboard 态势汇总 ----

@@ -27,7 +27,7 @@ class RoleCreateIn(BaseModel):
     description: Optional[str] = Field(default=None, max_length=255, description="角色描述")
     status: str = Field(default="active", pattern="^(active|disabled)$", description="状态")
     sort: int = Field(default=100, ge=0, description="排序值")
-    permission_codes: list[str] = Field(default_factory=list, description="权限编码列表")
+    permission_codes: list[str] = Field(default_factory=list, max_length=500, description="权限编码列表")
 
 
 class RoleUpdateIn(BaseModel):
@@ -47,7 +47,7 @@ class RoleUpdateIn(BaseModel):
     description: Optional[str] = Field(default=None, max_length=255, description="角色描述")
     status: Optional[str] = Field(default=None, pattern="^(active|disabled)$", description="状态")
     sort: Optional[int] = Field(default=None, ge=0, description="排序值")
-    permission_codes: Optional[list[str]] = Field(default=None, description="权限编码列表")
+    permission_codes: Optional[list[str]] = Field(default=None, max_length=500, description="权限编码列表")
 
 
 class RoleOut(BaseModel):
@@ -207,6 +207,7 @@ class DataScopeIn(BaseModel):
     )
     project_ids: Optional[list[int]] = Field(
         default=None,
+        max_length=1000,
         description="自定义项目ID列表(custom类型时使用)",
     )
 
@@ -221,6 +222,7 @@ class DataScopeUpdateIn(BaseModel):
     )
     project_ids: Optional[list[int]] = Field(
         default=None,
+        max_length=1000,
         description="自定义项目ID列表(custom类型时使用)",
     )
 
@@ -252,7 +254,7 @@ class UserRoleAssignIn(BaseModel):
         role_ids: 角色ID列表
     """
 
-    role_ids: list[int] = Field(default_factory=list, description="角色ID列表")
+    role_ids: list[int] = Field(default_factory=list, max_length=4, description="角色ID列表")
 
 
 # 解析 MenuOut 中的自引用前向引用(children: list["MenuOut"])

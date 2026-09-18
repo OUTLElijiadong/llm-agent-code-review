@@ -7,7 +7,6 @@ import {
   Document,
   DocumentChecked,
   Warning,
-  List,
   DataBoard,
   Cpu,
   EditPen,
@@ -75,8 +74,7 @@ const menuItems: MenuItem[] = [
   { path: '/agents',    title: 'Agent 中心', icon: Cpu,              roles: ['admin', 'user', 'reviewer'] },
   { path: '/sandboxes', title: '代码沙箱',   icon: Monitor,          roles: ['admin', 'user', 'reviewer'] },
   { path: '/agent-studio', title: 'Agent 工坊', icon: EditPen,       roles: ['admin', 'reviewer'] },
-  { path: '/security',  title: '安全中心',   icon: Aim,              roles: ['admin', 'user', 'reviewer'] },
-  { path: '/rules',     title: '审查规则',   icon: List,             roles: ['user', 'reviewer'] },
+  { path: '/security',  title: '安全与审查规则', icon: Aim,           roles: ['admin', 'user', 'reviewer'] },
   { path: '/forum',     title: '开发者论坛', icon: ChatLineSquare,   roles: ['admin', 'user', 'reviewer'] },
   { path: '/knowledge', title: '个人知识库', icon: Collection,       roles: ['user', 'reviewer'] },
   { path: '/support/maintenance', title: '申请维修', icon: Tools,    roles: ['admin', 'user', 'reviewer'] },
@@ -85,6 +83,7 @@ const menuItems: MenuItem[] = [
 ]
 
 const adminItems: MenuItem[] = [
+  { path: '/security',             title: '安全与审查规则', icon: Aim,         admin: true },
   { path: '/admin/users',          title: '用户管理',        icon: User,          admin: true },
   { path: '/admin/rbac/roles',     title: '角色管理',        icon: Key,           admin: true },
   { path: '/admin/rbac/permissions', title: '权限点列表',    icon: Stamp,         admin: true },
@@ -131,7 +130,7 @@ if (typeof window !== 'undefined') {
 
 const userGroupDefinitions = [
   { key: 'workspace', title: '工作区', paths: ['/dashboard', '/projects', '/code'] },
-  { key: 'review', title: '智能审查', paths: ['/reviews', '/issues', '/reports', '/rules'] },
+  { key: 'review', title: '智能审查', paths: ['/reviews', '/issues', '/reports'] },
   { key: 'agents', title: 'Agent 与安全', paths: ['/agents', '/sandboxes', '/agent-studio', '/security'] },
   { key: 'community', title: '社区与支持', paths: ['/forum', '/support/maintenance', '/support/feedback'] },
   { key: 'personal', title: '个人空间', paths: ['/knowledge', '/profile/personalization', '/profile'] },

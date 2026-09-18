@@ -57,7 +57,7 @@ const menuItems: AdminMenuItem[] = [
   { path: '/admin/rbac/roles', title: '角色管理', icon: Lock },
   { path: '/admin/rbac/permissions', title: '权限点列表', icon: Key },
   { path: '/admin/ai-logs', title: 'Agent 调用日志', icon: MagicStick },
-  { path: '/admin/report-templates', title: '报告模板', icon: Document },
+  { path: '/report/templates', title: '报告模板', icon: Document },
   { path: '/admin/audit', title: '系统操作审计', icon: Bell },
   { path: '/admin/evolution', title: 'Agent 自进化', icon: MagicStick },
   { path: '/admin/skills', title: 'Skill 管理', icon: View },

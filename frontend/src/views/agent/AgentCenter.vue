@@ -436,7 +436,7 @@ function invokeViaChat(agent: AgentRuntimeOut): void {
 }
 
 function goRules(): void {
-  router.push('/rules')
+  router.push('/security?tab=rules')
 }
 
 async function loadAll(includeMappings = true): Promise<boolean> {

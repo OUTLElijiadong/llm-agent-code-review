@@ -130,6 +130,7 @@ class BaseAgent:
     def call(self, user_message: str, ctx: Optional[AgentContext] = None,
              json_mode: bool = False,
              api_config: Optional["ApiConfig"] = None,
+             max_tokens: Optional[int] = None,
              recover_truncation: bool = False,
              retry_reserver: Optional[Callable[[], bool]] = None,
              deadline_monotonic: Optional[float] = None,
@@ -179,11 +180,13 @@ class BaseAgent:
         projected_message, input_truncated = self._project_input(user_message)
         messages.append({"role": "user", "content": projected_message})
 
+        output_budget = int(max_tokens or self._max_tokens)
+        output_budget = max(1, min(output_budget, settings.deepseek_max_output_tokens))
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": self._max_tokens,
+            "max_tokens": output_budget,
         }
         if input_truncated:
             self._emit(AgentEventType.PROGRESS, ctx,
@@ -441,6 +444,7 @@ class BaseAgent:
 
     def call_json(self, user_message: str, ctx: Optional[AgentContext] = None,
                   api_config: Optional["ApiConfig"] = None,
+                  max_tokens: Optional[int] = None,
                   recover_truncation: bool = False,
                   retry_reserver: Optional[Callable[[], bool]] = None,
                   deadline_monotonic: Optional[float] = None,
@@ -451,6 +455,7 @@ class BaseAgent:
             ctx,
             json_mode=True,
             api_config=api_config,
+            max_tokens=max_tokens,
             recover_truncation=recover_truncation,
             retry_reserver=retry_reserver,
             deadline_monotonic=deadline_monotonic,

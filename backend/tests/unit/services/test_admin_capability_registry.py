@@ -142,12 +142,15 @@ def _frontend_admin_routes() -> set[str]:
     source = (REPO_ROOT / "frontend/src/router/index.ts").read_text(encoding="utf-8")
     admin_block = source.split("path: '/admin'", 1)[1].split("path: '/403'", 1)[0]
     children = set(re.findall(r"\bpath:\s*'([^']*)'", admin_block))
-    return {f"/admin/{path}" for path in children if path}
+    # /admin/report-templates is a compatibility-only redirect; the functional
+    # page is the shared canonical /report/templates route.
+    children.discard("report-templates")
+    return {f"/admin/{path}" for path in children if path} | {"/report/templates"}
 
 
 def _admin_menu_routes() -> set[str]:
     source = (REPO_ROOT / "frontend/src/components/admin/AdminLayout.vue").read_text(encoding="utf-8")
-    return set(re.findall(r"\{\s*path:\s*'(/admin/[^']+)'", source))
+    return set(re.findall(r"\{\s*path:\s*'(/[^']+)'", source))
 
 
 def _admin_view_api_imports() -> set[str]:

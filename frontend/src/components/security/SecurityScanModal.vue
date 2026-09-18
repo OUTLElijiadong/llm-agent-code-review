@@ -70,7 +70,7 @@ const dialogTitle = computed(() => {
     file: '文件安全扫描',
     task: '任务安全复审',
     project: '项目威胁建模',
-    'all-projects': '全量项目安全扫描',
+    'all-projects': '全部项目安全扫描',
   }
   return map[props.source]
 })
@@ -101,7 +101,6 @@ const scanActionLabel = computed(() => {
 const scopeDescription = computed(() => {
   if (props.source === 'task') return '仅整理已有安全问题的 OWASP/CWE 标签，不调用模型，也不重新扫描源码。'
   if (props.source === 'file') return '按所选深度进行敏感信息、静态规则和语义检查；实际覆盖以返回结果为准。'
-  if (props.source === 'all-projects') return '扫描当前账号可见的活跃项目；实际范围与覆盖以返回结果为准。'
   if (scanMode.value === 'triage') return '仅检查风险优先子集，不代表完整项目覆盖。'
   if (scanMode.value === 'static_full') return '全包静态检查与有界语义分析，不代表完整语义覆盖。'
   return '请求全包静态与语义审计；实际完成范围及覆盖以返回结果为准。'
@@ -180,6 +179,7 @@ async function runScan(): Promise<void> {
       })
     } else {
       response = await scanAllProjects({
+        scan_mode: scanMode.value,
         top_n_per_project: topN.value,
         trace_dataflow: traceDataflow.value,
       })

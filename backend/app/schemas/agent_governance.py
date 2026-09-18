@@ -1,7 +1,7 @@
 """Agent 治理平台 Pydantic Schema。"""
 import json
 from datetime import datetime
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -102,7 +102,7 @@ class AgentProfileOut(BaseModel):
 class AgentProfileUpdateIn(BaseModel):
     """Agent 治理画像更新输入。"""
 
-    status: Optional[str] = None
+    status: Optional[Literal["idle", "working", "disabled", "error"]] = None
     budget_tokens_daily: Optional[int] = Field(default=None, ge=0)
     priority: Optional[int] = Field(default=None, ge=0, le=100)
     auto_approval_threshold: Optional[float] = Field(default=None, ge=0, le=1)
@@ -181,8 +181,8 @@ class PolicyRuleUpsertIn(BaseModel):
     subject: str = Field(default="*", max_length=120)
     action: str = Field(default="*", max_length=120)
     resource: str = Field(default="*", max_length=120)
-    effect: str = Field(default="allow")
-    risk_level: str = Field(default="low")
+    effect: Literal["allow", "deny", "escalate"] = "allow"
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
     condition_json: Optional[Union[dict, list]] = None
     priority: int = Field(default=100, ge=0, le=10000)
     enabled: int = Field(default=1, ge=0, le=1)
@@ -191,9 +191,9 @@ class PolicyRuleUpsertIn(BaseModel):
 class PolicyEvaluateIn(BaseModel):
     """策略试算输入。"""
 
-    subject: str = Field(default="agent:unknown")
-    action: str
-    resource: str = "*"
+    subject: str = Field(default="agent:unknown", max_length=120)
+    action: str = Field(min_length=1, max_length=120)
+    resource: str = Field(default="*", max_length=160)
     context: dict = Field(default_factory=dict)
 
 
@@ -361,8 +361,8 @@ class AgentMemoryCreateIn(BaseModel):
     """Agent 记忆创建输入。"""
 
     title: str = Field(..., min_length=1, max_length=200)
-    content: str = Field(..., min_length=1)
-    memory_type: str = Field(default="long_term", max_length=30)
+    content: str = Field(..., min_length=1, max_length=262_144)
+    memory_type: Literal["short_term", "long_term", "reflection"] = "long_term"
     weight: float = Field(default=1.0, ge=0, le=10)
     source_ref: str = Field(default="", max_length=160)
 
@@ -455,10 +455,10 @@ class AgentKnowledgeDocCreateIn(BaseModel):
 
     agent_code: str = Field(..., min_length=1, max_length=80)
     title: str = Field(..., min_length=1, max_length=240)
-    content: str = Field(..., min_length=1)
-    source_type: str = Field(default="manual", max_length=30)
+    content: str = Field(..., min_length=1, max_length=2_000_000)
+    source_type: Literal["manual", "project", "docs", "url", "github", "official"] = "manual"
     source_ref: str = Field(default="", max_length=160)
-    risk_level: str = Field(default="low")
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
     confidence: float = Field(default=1.0, ge=0, le=1)
 
 
@@ -604,8 +604,8 @@ class AgentToolPermissionUpsertIn(BaseModel):
 
     agent_code: str = Field(..., min_length=1, max_length=80)
     tool_code: str = Field(..., min_length=1, max_length=120)
-    permission: str = Field(default="allow")
-    risk_level: str = Field(default="low")
+    permission: Literal["allow", "deny", "escalate"] = "allow"
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
     enabled: int = Field(default=1, ge=0, le=1)
     note: str = Field(default="", max_length=300)
 
@@ -622,7 +622,7 @@ class AgentRewardCreateIn(BaseModel):
     """Agent 奖惩事件创建输入。"""
 
     agent_code: str = Field(..., min_length=1, max_length=80)
-    event_type: str = Field(default="reward")
+    event_type: Literal["reward", "penalty"] = "reward"
     score: float = Field(..., ge=-100, le=100)
     reason: str = Field(..., min_length=1, max_length=500)
     impact: Optional[dict] = None
@@ -634,9 +634,9 @@ class AgentArtifactVersionCreateIn(BaseModel):
     agent_code: str = Field(..., min_length=1, max_length=80)
     artifact_type: str = Field(..., min_length=1, max_length=50)
     version: str = Field(..., min_length=1, max_length=50)
-    content: str = Field(..., min_length=1)
-    snapshot: str = ""
-    status: str = Field(default="draft")
+    content: str = Field(..., min_length=1, max_length=1_000_000)
+    snapshot: str = Field(default="", max_length=1_000_000)
+    status: Literal["draft", "gray", "stable", "rolled_back"] = "draft"
 
 
 class AgentAlertResolveIn(BaseModel):

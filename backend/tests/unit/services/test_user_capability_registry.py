@@ -60,7 +60,7 @@ def _executor(db, user: User, run_id: str = "run_user_capability") -> PrismToolE
 def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
     openapi = app.openapi()
 
-    assert len(USER_CAPABILITIES) == 113
+    assert len(USER_CAPABILITIES) == 114
     assert len(CAPABILITY_BY_CODE) == len(USER_CAPABILITIES)
     for spec in USER_CAPABILITIES:
         assert not spec.path.startswith(("/api/admin", "/api/auth", "/api/rbac", "/api/users"))
@@ -79,9 +79,13 @@ def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
         if spec.method == "GET":
             assert spec.risk == READ
 
-    security_codes = {spec.code for spec in USER_CAPABILITIES if spec.page == "/security"}
+    security_codes = {
+        spec.code for spec in USER_CAPABILITIES
+        if spec.page == "/security" and spec.code.startswith("security.")
+    }
     assert security_codes == {
         "security.checklist",
+        "security.rule_catalog",
         "security.dashboard",
         "security.findings",
         "security.scan_file",

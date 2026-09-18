@@ -406,7 +406,32 @@ def _apply_tool_permission(
         )
         .first()
     )
-    if not permission or permission.permission == policy_engine.ALLOW:
+    if not permission:
+        return decision
+
+    if permission.permission not in {
+        policy_engine.ALLOW,
+        policy_engine.DENY,
+        policy_engine.ESCALATE,
+    } or permission.risk_level not in {
+        policy_engine.LOW,
+        policy_engine.MEDIUM,
+        policy_engine.HIGH,
+        policy_engine.CRITICAL,
+    }:
+        return _restrict_decision(
+            db,
+            decision=decision,
+            subject=subject,
+            action=action,
+            resource=resource,
+            context=context,
+            target=policy_engine.DENY,
+            risk_level=policy_engine.CRITICAL,
+            reason=f"工具权限 {permission.tool_code} 含无效决策值，已阻断",
+        )
+
+    if permission.permission == policy_engine.ALLOW:
         return decision
 
     decision = _restrict_decision(
@@ -460,7 +485,15 @@ def _restrict_decision(
         policy_engine.ESCALATE: 1,
         policy_engine.DENY: 2,
     }
-    if priority.get(target, 2) <= priority.get(decision.decision, 2):
+    if target not in priority:
+        target = policy_engine.DENY
+        risk_level = policy_engine.CRITICAL
+    if decision.decision not in priority:
+        decision.decision = policy_engine.DENY
+        decision.risk_level = policy_engine.CRITICAL
+        decision.risk_score = _permission_risk_score(policy_engine.CRITICAL)
+        decision.reason = "上游策略返回未知决策值，已阻断"
+    if priority[target] <= priority[decision.decision]:
         return decision
     decision.decision = target
     decision.risk_level = risk_level

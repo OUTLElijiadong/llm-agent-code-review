@@ -69,7 +69,7 @@ describe('同步安全扫描真实交互', () => {
     ['file', 'scanFile', { file_id: 7, scan_depth: 'standard' }],
     ['task', 'scanTask', { task_id: 7 }],
     ['project', 'scanProject', { project_id: 7, scan_mode: 'static_full', top_n: 50, trace_dataflow: true }],
-    ['all-projects', 'scanAllProjects', { top_n_per_project: 50, trace_dataflow: true }],
+    ['all-projects', 'scanAllProjects', { scan_mode: 'static_full', top_n_per_project: 50, trace_dataflow: true }],
   ] as const)('首次可见且自动启动时，%s 只使用原有请求契约', async (source, method, payload) => {
     await renderModal({ source, autoStart: true, refId: source === 'all-projects' ? null : 7 })
     expect(api[method]).toHaveBeenCalledExactlyOnceWith(payload)

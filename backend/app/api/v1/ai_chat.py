@@ -2,7 +2,7 @@
 Agent 助手聊天 + 语言检测 + 项目分析 API 路由
 全部通过 Orchestrator 主调度 Agent 委派给专业子 Agent 执行
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -19,15 +19,16 @@ router = APIRouter()
 
 
 class ChatMessage(BaseModel):
-    role: str = Field(default="user", description="角色: user/assistant")
-    content: str = Field(..., description="消息内容")
+    role: Literal["user", "assistant"] = "user"
+    content: str = Field(..., min_length=1, max_length=100_000, description="消息内容")
 
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage] = Field(..., description="历史消息列表")
+    messages: List[ChatMessage] = Field(..., min_length=1, max_length=100, description="历史消息列表")
     stream: bool = Field(default=False, description="是否流式输出")
     trace_id: Optional[str] = Field(
         default=None,
+        max_length=80,
         description="v2.0: 客户端可携带 trace_id 关联 SSE 事件流",
     )
 
@@ -95,8 +96,8 @@ class ChatResponse(BaseModel):
 
 
 class LanguageDetectRequest(BaseModel):
-    project_name: str = Field(..., description="项目名称")
-    description: str = Field(default="", description="项目描述")
+    project_name: str = Field(..., min_length=1, max_length=100, description="项目名称")
+    description: str = Field(default="", max_length=2000, description="项目描述")
 
 
 class LanguageDetectResponse(BaseModel):
@@ -107,8 +108,8 @@ class LanguageDetectResponse(BaseModel):
 
 
 class FolderAnalyzeRequest(BaseModel):
-    folder_name: str = Field(default="", description="文件夹名称")
-    file_names: List[str] = Field(default_factory=list, description="文件名列表")
+    folder_name: str = Field(default="", max_length=500, description="文件夹名称")
+    file_names: List[str] = Field(default_factory=list, max_length=2000, description="文件名列表")
 
 
 class FolderAnalyzeResponse(BaseModel):

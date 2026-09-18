@@ -1,5 +1,5 @@
 """安全审计模块 Pydantic Schema (v2.1)"""
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -7,16 +7,16 @@ from pydantic import BaseModel, Field
 
 
 class SecurityScanFileIn(BaseModel):
-    file_id: int = Field(..., description="代码文件 ID")
-    scan_depth: str = Field("standard", description="quick / standard / deep")
+    file_id: int = Field(..., gt=0, description="代码文件 ID")
+    scan_depth: Literal["quick", "standard", "deep"] = "standard"
 
 
 class SecurityScanTaskIn(BaseModel):
-    task_id: int = Field(..., description="审查任务 ID")
+    task_id: int = Field(..., gt=0, description="审查任务 ID")
 
 
 class SecurityScanProjectIn(BaseModel):
-    project_id: int = Field(..., description="项目 ID")
+    project_id: int = Field(..., gt=0, description="项目 ID")
     scan_mode: str = Field(
         "static_full",
         pattern="^(full|static_full|triage)$",
@@ -27,6 +27,10 @@ class SecurityScanProjectIn(BaseModel):
 
 
 class SecurityScanAllProjectsIn(BaseModel):
+    scan_mode: Literal["full", "static_full", "triage"] = Field(
+        "triage",
+        description="full=逐项目全量语义, static_full=整包静态+有界语义, triage=风险优先抽样",
+    )
     top_n_per_project: int = Field(50, ge=1, le=200, description="每个项目最多扫描的文件数")
     trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
 
@@ -34,7 +38,7 @@ class SecurityScanAllProjectsIn(BaseModel):
 class FullChainAuditIn(BaseModel):
     """全链路源码审计输入 (v3.3)"""
 
-    project_id: int = Field(..., description="项目 ID")
+    project_id: int = Field(..., gt=0, description="项目 ID")
     top_n: int = Field(100, ge=1, le=200, description="语义审计候选文件数")
     trace_dataflow: bool = Field(True, description="是否启用跨文件数据流追踪")
     enable_sandbox: bool = Field(
@@ -176,6 +180,57 @@ class SecurityChecklistOut(BaseModel):
     secret_patterns: List[SecurityChecklistItem] = Field(default_factory=list)
     static_rules: List[SecurityChecklistItem] = Field(default_factory=list)
     catalog_metadata: dict = Field(default_factory=dict)
+
+
+class SecurityRuleCatalogItemOut(BaseModel):
+    """统一规则目录中的一条规则投影。"""
+
+    id: str
+    code: str
+    name: str
+    category: str
+    language: str = "*"
+    severity: str = "中"
+    origin: str
+    executor: str
+    executable: bool
+    enabled: bool
+    builtin: bool
+    cwe: str = ""
+    owasp: str = ""
+    description: str = ""
+    source_url: str = ""
+
+
+class SecurityRuleEngineOut(BaseModel):
+    code: str
+    name: str
+    kind: str
+    executable: bool
+    status: str
+    version: str = ""
+    suites: List[str] = Field(default_factory=list)
+    languages: List[str] = Field(default_factory=list)
+    source_url: str = ""
+    documentation_url: str = ""
+    status_message: str = ""
+
+
+class SecurityRuleSourceOut(BaseModel):
+    code: str
+    name: str
+    role: str
+    url: str
+
+
+class SecurityRuleCatalogOut(BaseModel):
+    """统一规则事实目录；不改变各规则源的写入职责。"""
+
+    items: List[SecurityRuleCatalogItemOut] = Field(default_factory=list)
+    counts: dict[str, int] = Field(default_factory=dict)
+    engines: List[SecurityRuleEngineOut] = Field(default_factory=list)
+    sources: List[SecurityRuleSourceOut] = Field(default_factory=list)
+    mapping_note: str = ""
 
 
 # ---- Dashboard 安全态势 (v2.1.1) ----

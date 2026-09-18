@@ -1,7 +1,5 @@
 """审查画像输出截断兜底:_call_single_agent 提高预算重试一次的回归测试。"""
 
-from unittest.mock import Mock
-
 import pytest
 
 from app.ai.deepseek_agent import DeepSeekOutputTruncatedError, _clamp_max_tokens

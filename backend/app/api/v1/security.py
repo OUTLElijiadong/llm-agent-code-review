@@ -18,13 +18,15 @@ from app.schemas.security import (
     FullChainAuditIn,
     SecurityChecklistOut,
     SecurityDashboardSummaryOut,
+    SecurityRuleCatalogOut,
     SecurityScanAllProjectsIn,
     SecurityScanFileIn,
     SecurityScanOut,
     SecurityScanProjectIn,
     SecurityScanTaskIn,
 )
-from app.services import security_service
+from app.services import security_rule_catalog_service, security_service
+from app.services.rbac_service import check_permission
 
 router = APIRouter()
 
@@ -43,6 +45,24 @@ def get_checklist(_: User = Depends(get_current_user)):
     orch = get_orchestrator()
     data = orch.security_sentinel.get_checklist()
     return Resp(data=SecurityChecklistOut(**data))
+
+
+@router.get(
+    "/rule-catalog",
+    response_model=Resp[SecurityRuleCatalogOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_VIEW))],
+)
+def get_rule_catalog(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """统一返回提示规则、平台静态规则、敏感规则和外部执行器状态。"""
+    include_review_rules = check_permission(db, user.id, PermissionCode.RULE_VIEW)
+    return Resp(data=SecurityRuleCatalogOut(**security_rule_catalog_service.build_catalog(
+        db,
+        user,
+        include_review_rules=include_review_rules,
+    )))
 
 
 @router.post(
@@ -152,11 +172,12 @@ def scan_all_projects(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """全量项目安全扫描:扫描当前用户可见的全部活跃项目"""
+    """按显式模式扫描当前用户可见的全部活跃项目。"""
     orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_all_projects(
         top_n_per_project=payload.top_n_per_project,
         trace_dataflow=payload.trace_dataflow,
+        scan_mode=payload.scan_mode,
         ctx=_ctx(user),
     )
     if not result.success:

@@ -11,7 +11,7 @@ from app.schemas.agent_governance import parse_json_value
 
 class ReviewStartIn(BaseModel):
     """启动审查请求体"""
-    project_id: int
+    project_id: int = Field(gt=0)
     file_ids: list[int] = Field(min_length=1, max_length=500)
     review_type: Optional[str] = Field(default="standard", pattern="^(quick|standard|security|performance|full)$")
     task_name: Optional[str] = Field(default=None, max_length=100)
@@ -228,5 +228,5 @@ class IssueReviewDecisionIn(BaseModel):
 
 class IssueBatchStatusIn(BaseModel):
     """批量更新问题状态请求体"""
-    ids: list[int]
+    ids: list[int] = Field(min_length=1, max_length=500)
     status: str = Field(pattern="^(unfixed|fixed|ignored|pending_review)$")

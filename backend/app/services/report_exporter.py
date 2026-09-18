@@ -31,7 +31,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from jinja2 import Environment, select_autoescape
+from jinja2 import select_autoescape
+from jinja2.sandbox import SandboxedEnvironment
 
 from app.ai.scoring import SCORING_VERSION, compute_score_breakdown, score_risk_level
 from app.constants.compliance import build_compliance_summary
@@ -80,7 +81,7 @@ _TASK_FIELDS: tuple = (
 _TEMPLATES_DIR: Path = Path(__file__).resolve().parent.parent / "templates"
 
 # Jinja2 渲染环境(开启 HTML 自动转义,避免 XSS)
-_JINJA_ENV: Environment = Environment(
+_JINJA_ENV: SandboxedEnvironment = SandboxedEnvironment(
     autoescape=select_autoescape(default=True, default_for_string=True),
     auto_reload=False,
     trim_blocks=True,

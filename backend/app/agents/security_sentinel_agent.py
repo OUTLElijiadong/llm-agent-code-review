@@ -218,6 +218,7 @@ class SecuritySentinelAgent(BaseAgent):
         experience_section: str = "",
         context_section: str = "",
         api_config=None,
+        max_tokens: Optional[int] = None,
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
         """供 review_service 主流程调用的安全审查入口(双引擎之引擎2:LLM 安全深度审查)
@@ -245,7 +246,12 @@ class SecuritySentinelAgent(BaseAgent):
         )
 
         # 2. 通过 BaseAgent.call_json 调用 LLM(自动 emit 事件、重试)
-        result = self.call_json(user_msg, ctx=ctx, api_config=api_config)
+        result = self.call_json(
+            user_msg,
+            ctx=ctx,
+            api_config=api_config,
+            max_tokens=max_tokens,
+        )
         if not result.success:
             return result
 
@@ -450,6 +456,7 @@ class SecuritySentinelAgent(BaseAgent):
         )
 
         findings: List[dict] = []
+        llm_audit = _AuditChunkResult()
         # 1) 正则秘钥扫描(无 token 成本)
         secret_findings = self._regex_findings(file)
         findings.extend(secret_findings)
@@ -460,8 +467,8 @@ class SecuritySentinelAgent(BaseAgent):
 
         # 3) LLM 审查(quick 跳过大文件)
         if not (scan_depth == "quick" and len(file.content or "") > 12000):
-            llm_findings = self._llm_findings_for_file(file, ctx=ctx, scan_depth=scan_depth)
-            findings.extend(llm_findings)
+            llm_audit = self._llm_audit_collect(file, ctx=ctx, scan_depth=scan_depth)
+            findings.extend(llm_audit.findings)
 
         raw_finding_count = len(findings)
         findings = self._dedup_findings(findings)
@@ -485,7 +492,39 @@ class SecuritySentinelAgent(BaseAgent):
             ),
             "findings_truncated": False,
             "finding_severity_counts": self._severity_counts(effective_findings),
+            "scan_complete": llm_audit.success,
+            "failure_kind": llm_audit.failure_kind,
+            "coverage_error": llm_audit.error,
         })
+
+        if not llm_audit.success:
+            error = llm_audit.error or "单文件语义扫描覆盖不完整"
+            self._emit(
+                AgentEventType.FAILED,
+                ctx,
+                message=error,
+                payload={
+                    "scope": "file",
+                    "file_id": file_id,
+                    "failure_kind": llm_audit.failure_kind or "partial_coverage",
+                },
+            )
+            return AgentResult(
+                success=False,
+                error=error,
+                failure_kind=llm_audit.failure_kind or "partial_coverage",
+                data={
+                    "findings": findings,
+                    "threat_model": None,
+                    "compliance": compliance,
+                    "risk_score": risk_score,
+                    "summary": f"扫描未完成：{error}",
+                    "file_count": 1,
+                    "duration_ms": duration_ms,
+                },
+                model=self._model,
+                duration_ms=duration_ms,
+            )
 
         self._emit(
             AgentEventType.COMPLETE, ctx,
@@ -1441,8 +1480,9 @@ class SecuritySentinelAgent(BaseAgent):
 
     def scan_all_projects(self, top_n_per_project: int = 50,
                           trace_dataflow: bool = True,
+                          scan_mode: str = "triage",
                           ctx: Optional[AgentContext] = None) -> AgentResult:
-        """全量项目安全扫描:聚合当前用户可见的全部活跃项目
+        """遍历全部可见项目，并按显式模式聚合安全扫描结果。
 
         Args:
             top_n_per_project: 每个项目最多扫描的文件数量。
@@ -1452,6 +1492,8 @@ class SecuritySentinelAgent(BaseAgent):
         Returns:
             AgentResult: 复用 SecurityScanOut 结构的聚合结果。
         """
+        if scan_mode not in {"full", "static_full", "triage"}:
+            return AgentResult(success=False, error=f"不支持的 scan_mode: {scan_mode}")
         if (err := self._ensure_db()) is not None:
             return err
 
@@ -1546,7 +1588,7 @@ class SecuritySentinelAgent(BaseAgent):
                 top_n=top_n,
                 trace_dataflow=trace_dataflow,
                 ctx=ctx,
-                scan_mode="triage",
+                scan_mode=scan_mode,
             )
             if not result.success:
                 if len(project_errors) < 500:
@@ -1681,6 +1723,7 @@ class SecuritySentinelAgent(BaseAgent):
             "scanned_project_count": scanned_projects,
             "skipped_project_count": skipped_projects,
             "project_errors": project_errors,
+            "scan_mode": scan_mode,
         })
         scan_success = not project_errors
         summary = (

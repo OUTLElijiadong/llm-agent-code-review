@@ -4,6 +4,7 @@
 import { get, post } from './http'
 import type {
   SecurityChecklistOut,
+  SecurityRuleCatalogOut,
   SecurityDashboardSummaryOut,
   SecurityScanAllProjectsIn,
   SecurityScanFileIn,
@@ -15,6 +16,11 @@ import type {
 /** OWASP Top10 + 内置敏感信息正则规则清单 */
 export function getSecurityChecklist(): Promise<SecurityChecklistOut> {
   return get<SecurityChecklistOut>('/security/checklist')
+}
+
+/** 统一规则事实目录与执行器状态 */
+export function getSecurityRuleCatalog(): Promise<SecurityRuleCatalogOut> {
+  return get<SecurityRuleCatalogOut>('/security/rule-catalog')
 }
 
 /** 单文件安全扫描 */

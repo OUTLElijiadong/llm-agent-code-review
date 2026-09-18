@@ -35,6 +35,7 @@ from app.services import (
     project_source_revision_service,
     project_source_service,
 )
+from app.utils.upload_reader import read_limited
 
 router = APIRouter()
 
@@ -271,7 +272,11 @@ def upload_audit_source_archive(
         db,
         user,
         project_id,
-        raw=file.file.read(),
+        raw=read_limited(
+            file.file,
+            max_bytes=settings.max_upload_size,
+            filename=file.filename or "",
+        ),
         filename=file.filename or "",
     )
     return Resp(data=data)

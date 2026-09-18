@@ -60,7 +60,7 @@ const searchItems = computed<SearchItem[]>(() => {
     { title: '代码中心', description: '按项目浏览、编辑和管理代码文件', path: '/code', roles: ['user'] },
     { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start', roles: ['user', 'reviewer'] },
     { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'], topNav: true },
-    { title: '审查规则', description: '配置代码规范、性能、安全等审查维度', path: '/rules', roles: ['user', 'reviewer'] },
+    { title: '安全与审查规则', description: '查看安全态势、权威规则基座并管理审查规则', path: '/security', roles: ['user', 'reviewer', 'admin'] },
     { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['user', 'reviewer'], topNav: true },
     { title: 'Agent 工坊', description: '创建和测试个人 Agent 草稿', path: '/agent-studio', roles: ['reviewer'] },
     { title: '开发者论坛', description: '提问、分享经验和交流审查实践', path: '/forum', roles: ['admin', 'user', 'reviewer'] },

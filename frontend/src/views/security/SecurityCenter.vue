@@ -15,6 +15,10 @@ import { CN_VULN_PORTALS, CN_SECURITY_STANDARDS, OWASP_TO_CNNVD_TYPE } from './c
 import { useUserStore } from '@/stores/user'
 import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 
+withDefaults(defineProps<{ embedded?: boolean }>(), {
+  embedded: false,
+})
+
 const router = useRouter()
 const userStore = useUserStore()
 
@@ -137,7 +141,7 @@ onBeforeUnmount(() => { disposed = true })
       <div>
         <h2 class="page-title font-display">
           <el-icon><Lock /></el-icon>
-          安全中心
+          {{ embedded ? '安全态势与标准' : '安全中心' }}
         </h2>
         <p class="page-sub">
           OWASP Top 10 知识库 ·

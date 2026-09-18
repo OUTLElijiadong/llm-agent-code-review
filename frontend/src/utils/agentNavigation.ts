@@ -35,7 +35,7 @@ const LOCAL_NAVIGATION_ALIASES: Record<string, string[]> = {
   '/reviews': ['审查任务', '审查'],
   '/issues': ['问题'],
   '/reports': ['报告'],
-  '/security': ['安全'],
+  '/security': ['安全', '安全中心', '审查规则', '规则目录'],
   '/sandboxes': ['沙箱'],
   '/agents': ['Agent'],
   '/knowledge': ['知识'],

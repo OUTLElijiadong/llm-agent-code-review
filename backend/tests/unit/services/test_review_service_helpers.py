@@ -1,6 +1,42 @@
 from app.ai.multi_agent import get_agent_profiles
 from app.ai.static_analyzer import Finding
-from app.services.review_service import _absolute_line, _build_summary, _finding_fingerprint
+from app.models.review_rule import ReviewRule
+from app.services.review_service import (
+    _absolute_line,
+    _build_summary,
+    _finding_fingerprint,
+    _freeze_rules,
+    _rules_from_snapshot,
+)
+
+
+def test_rule_snapshot_freezes_content_and_detects_later_mutation():
+    rule = ReviewRule(
+        id=7,
+        rule_code="sql",
+        rule_name="SQL",
+        rule_type="security",
+        rule_content="使用参数化查询",
+        language="python",
+        severity="高",
+        enabled=1,
+        is_builtin=0,
+    )
+    snapshot = _freeze_rules([rule])
+    rule.rule_content = "排队后被修改的内容"
+
+    restored = _rules_from_snapshot(snapshot)
+
+    assert restored[0].rule_content == "使用参数化查询"
+    assert restored[0].severity == "高"
+    assert len(snapshot[0]["sha256"]) == 64
+
+
+def test_empty_rule_snapshot_is_valid_and_distinct_from_legacy_snapshot():
+    """新任务可合法冻结为空规则集，不能在执行时回查后来启用的规则。"""
+    assert _rules_from_snapshot([]) == []
+    assert _rules_from_snapshot(None) is None
+    assert _rules_from_snapshot([{"code": "legacy-only"}]) is None
 
 
 def test_absolute_line_keeps_file_level_issue_zero():

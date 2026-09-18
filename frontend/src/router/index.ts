@@ -74,15 +74,18 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'rules',
-        name: 'RuleConfig',
-        component: () => import('@/views/rule/RuleConfig.vue'),
-        meta: { title: '审查规则', permissions: ['rule:view'] },
+        name: 'RuleConfigLegacy',
+        redirect: (route) => ({
+          path: '/security',
+          query: { ...route.query, tab: 'rules' },
+        }),
+        meta: { title: '安全与审查规则', permissions: ['rule:view'] },
       },
       {
         path: 'security',
         name: 'SecurityCenter',
-        component: () => import('@/views/security/SecurityCenter.vue'),
-        meta: { title: '安全中心', permissions: ['security:view'] },
+        component: () => import('@/views/security/SecurityRuleCenter.vue'),
+        meta: { title: '安全与审查规则', permissions: ['security:view', 'rule:view'] },
       },
       {
         path: 'reports',
@@ -326,8 +329,8 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'report-templates',
-        name: 'AdminReportTemplateManage',
-        component: () => import('@/views/report/ReportTemplateManage.vue'),
+        name: 'AdminReportTemplateLegacy',
+        redirect: '/report/templates',
         meta: { title: '报告模板管理', role: 'admin', permissions: ['report:template_manage'] },
       },
       {

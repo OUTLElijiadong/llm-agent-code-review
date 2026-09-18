@@ -14,7 +14,7 @@ class ProfileUpdateIn(BaseModel):
     hobbies: Optional[str] = Field(default=None, max_length=2000)
     goals: Optional[str] = Field(default=None, max_length=2000)
     tech_stack: Optional[str] = Field(default=None, max_length=2000)
-    focus_areas: Optional[List[str]] = None
+    focus_areas: Optional[List[str]] = Field(default=None, max_length=50)
     preferred_language: Optional[str] = Field(default=None, max_length=50)
     experience_level: Optional[str] = Field(default=None, pattern="^(|beginner|intermediate|advanced)$")
     auto_learn: Optional[bool] = None

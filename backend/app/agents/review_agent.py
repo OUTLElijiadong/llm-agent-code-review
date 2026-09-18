@@ -95,6 +95,7 @@ class CodeReviewerAgent(BaseAgent):
         agent_section: str = "",
         context_section: str = "",
         api_config=None,
+        max_tokens: Optional[int] = None,
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
         """执行单次代码审查(双引擎之引擎2:LLM 深度审查)
@@ -138,7 +139,13 @@ class CodeReviewerAgent(BaseAgent):
         original_system = self._system_prompt
         self._system_prompt = compose_system_prompt(self.name, system_prompt)
         try:
-            result = self.call(user_prompt, ctx=ctx, json_mode=True, api_config=api_config)
+            result = self.call(
+                user_prompt,
+                ctx=ctx,
+                json_mode=True,
+                api_config=api_config,
+                max_tokens=max_tokens,
+            )
         finally:
             self._system_prompt = original_system
 

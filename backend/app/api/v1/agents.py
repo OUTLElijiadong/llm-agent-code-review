@@ -22,7 +22,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.agents import AgentContext
@@ -274,8 +274,8 @@ async def stream_agent_events(
 
 
 class ClarifyAnswers(BaseModel):
-    clarify_id: str
-    answers: dict
+    clarify_id: str = Field(min_length=1, max_length=128)
+    answers: dict = Field(default_factory=dict)
 
 
 @router.post("/clarify", response_model=Resp[dict],

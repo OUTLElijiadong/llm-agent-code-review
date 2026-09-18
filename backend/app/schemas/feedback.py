@@ -11,13 +11,13 @@ class FeedbackIn(BaseModel):
     """提交反馈"""
     feedback_type: str = Field(default="suggestion",
                                pattern="^(suggestion|complaint|praise|bug|other)$")
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=20_000)
     contact: Optional[str] = Field(default=None, max_length=100)
 
 
 class FeedbackReplyIn(BaseModel):
     """管理员回复反馈"""
-    admin_reply: Optional[str] = None
+    admin_reply: Optional[str] = Field(default=None, max_length=20_000)
     status: Optional[str] = Field(default=None, pattern="^(new|read|replied|closed)$")
 
 

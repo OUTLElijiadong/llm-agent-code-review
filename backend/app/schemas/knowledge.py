@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class DocAddIn(BaseModel):
     """手动添加一篇知识文档"""
     title: str = Field(min_length=1, max_length=200)
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=2_000_000)
 
 
 class DocOut(BaseModel):
@@ -34,7 +34,7 @@ class DocOut(BaseModel):
 
 class SearchIn(BaseModel):
     """知识库检索(联调/演示用)"""
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=4000)
     top_k: int = Field(default=5, ge=1, le=20)
 
 

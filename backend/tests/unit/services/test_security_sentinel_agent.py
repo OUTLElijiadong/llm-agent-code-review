@@ -204,8 +204,8 @@ def test_scan_file_authz_rejects_non_owner():
 # ---------- 单文件正则路径 ----------
 
 
-def test_scan_file_regex_secret_detected_without_llm(monkeypatch):
-    """正则路径独立工作: 即使 LLM 失败也能返回 finding"""
+def test_scan_file_regex_secret_is_retained_when_llm_coverage_fails(monkeypatch):
+    """LLM 失败时保留确定性 finding，但不得把不完整扫描标记为成功。"""
     agent = SecuritySentinelAgent()
 
     db = MagicMock()
@@ -221,13 +221,15 @@ def test_scan_file_regex_secret_detected_without_llm(monkeypatch):
     )
 
     result = agent.scan_file(file_id=1, scan_depth="standard")
-    assert result.success is True
+    assert result.success is False
+    assert result.failure_kind == "partial_coverage"
+    assert result.data["compliance"]["scan_complete"] is False
     findings = result.data["findings"]
     assert any(f["source"] == "regex" for f in findings)
     secret = next(f for f in findings if f["source"] == "regex")
     assert secret["severity"] == "严重"
     assert secret["cwe"] == "CWE-798"
-    # evidence 必须脱敏
+    # 即使整体覆盖失败，已验证的正则证据仍保留且必须脱敏。
     assert "sk-proj-AbCdEf1234567890XyZqWeRtYu" not in secret["evidence"]
 
 

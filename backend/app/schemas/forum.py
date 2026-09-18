@@ -10,14 +10,14 @@ from pydantic import BaseModel, Field
 class PostIn(BaseModel):
     """发帖"""
     title: str = Field(min_length=1, max_length=200)
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=100_000)
     category: str = Field(default="qa", pattern="^(qa|tech|share|announce|other)$")
 
 
 class PostUpdateIn(BaseModel):
     """编辑帖子"""
     title: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    content: Optional[str] = Field(default=None, min_length=1)
+    content: Optional[str] = Field(default=None, min_length=1, max_length=100_000)
     category: Optional[str] = Field(default=None, pattern="^(qa|tech|share|announce|other)$")
 
 
@@ -26,13 +26,13 @@ class PinIn(BaseModel):
 
 
 class ReplyIn(BaseModel):
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=50_000)
 
 
 class AssistIn(BaseModel):
     """论坛发帖助手(RAG)"""
     title: str = Field(default="", max_length=200)
-    draft: str = Field(min_length=1)
+    draft: str = Field(min_length=1, max_length=100_000)
 
 
 class PostListItemOut(BaseModel):

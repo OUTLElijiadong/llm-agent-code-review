@@ -67,7 +67,6 @@ USER_PAGE_ROUTES: tuple[str, ...] = (
     "/issues",
     "/reports",
     "/report/templates",
-    "/rules",
     "/security",
     "/agents",
     "/agent-studio",
@@ -278,11 +277,15 @@ USER_CAPABILITIES: tuple[UserCapabilitySpec, ...] = (
         "report:template_manage",
     ),
     # 规则和安全审计
-    _cap("rules.list", "/rules", "查询审查规则", "GET", "/api/rules"),
-    _cap("rules.create", "/rules", "创建审查规则", "POST", "/api/rules", WRITE),
-    _cap("rules.update", "/rules", "更新审查规则", "PUT", "/api/rules/{rule_id}", WRITE),
-    _cap("rules.toggle", "/rules", "启用或停用审查规则", "POST", "/api/rules/{rule_id}/toggle", WRITE),
-    _cap("rules.delete", "/rules", "删除审查规则", "DELETE", "/api/rules/{rule_id}", CRITICAL),
+    _cap("rules.list", "/security", "查询审查规则", "GET", "/api/rules"),
+    _cap("rules.create", "/security", "创建审查规则", "POST", "/api/rules", WRITE),
+    _cap("rules.update", "/security", "更新审查规则", "PUT", "/api/rules/{rule_id}", WRITE),
+    _cap("rules.toggle", "/security", "启用或停用审查规则", "POST", "/api/rules/{rule_id}/toggle", WRITE),
+    _cap("rules.delete", "/security", "删除审查规则", "DELETE", "/api/rules/{rule_id}", CRITICAL),
+    _cap(
+        "security.rule_catalog", "/security", "查询统一规则事实目录", "GET",
+        "/api/security/rule-catalog", permission="security:view",
+    ),
     _cap(
         "security.checklist", "/security", "查询安全审查清单", "GET",
         "/api/security/checklist", permission="security:view",

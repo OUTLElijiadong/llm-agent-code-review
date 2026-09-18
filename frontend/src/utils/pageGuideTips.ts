@@ -19,7 +19,7 @@ export const USER_PAGE_TIPS: PageGuideTip[] = [
   { route: '/reviews', title: '审查记录', hint: '查看任务进度、失败原因与重试入口。', prompt: '我在审查记录页，请帮我梳理当前任务并指出需要我处理的失败项。' },
   { route: '/issues', title: '问题追踪', hint: '按严重度闭环问题,优先处理 high/critical。', prompt: '我在问题追踪页，请按严重度帮我排一个处理顺序并给出首个问题的处置建议。' },
   { route: '/reports', title: '审查报告', hint: '报告可直接导出、分享或转成修复计划。', prompt: '我在审查报告页，请帮我解读最新报告并给出下一步行动。' },
-  { route: '/security', title: '安全中心', hint: '查看安全审计清单与扫描任务,高风险项目优先。', prompt: '我在安全中心，请分析当前安全态势并建议优先处理哪些高风险项目。' },
+  { route: '/security', title: '安全与审查规则', hint: '统一查看安全态势、规则基座与可编辑审查规则。', prompt: '我在安全与审查规则页面，请分析当前安全态势、规则覆盖和优先处理项。' },
   { route: '/sandboxes', title: '代码沙箱', hint: '可创建隔离测试环境并做白盒/黑盒验证。', prompt: '我在代码沙箱页，请帮我判断是否需要在沙箱复测并指导我操作。' },
   { route: '/agents', title: 'Agent 中心', hint: '查看 Agent 画像、团队协作与运行态势。', prompt: '我在 Agent 中心，请介绍当前可用的审查 Agent 并推荐合适的协作方式。' },
   { route: '/knowledge', title: '个人知识库', hint: '沉淀审查经验后,后续问答会自动复用。', prompt: '我在个人知识库，请帮我把最近的审查经验整理成一条知识笔记。' },

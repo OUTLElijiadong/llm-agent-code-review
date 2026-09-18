@@ -73,7 +73,7 @@ ADMIN_PAGE_ROUTES: tuple[str, ...] = (
     "/admin/embedding",
     "/admin/llm",
     "/admin/mcp-workers",
-    "/admin/report-templates",
+    "/report/templates",
 )
 
 
@@ -973,7 +973,7 @@ _cap(
     # 管理侧栏中的报告模板页
     _cap(
         "report_templates.list",
-        "/admin/report-templates",
+        "/report/templates",
         "查询报告模板",
         "GET",
         "/api/reports/templates",
@@ -981,7 +981,7 @@ _cap(
     ),
     _cap(
         "report_templates.create",
-        "/admin/report-templates",
+        "/report/templates",
         "创建报告模板",
         "POST",
         "/api/reports/templates",
@@ -990,7 +990,7 @@ _cap(
     ),
     _cap(
         "report_templates.update",
-        "/admin/report-templates",
+        "/report/templates",
         "更新报告模板",
         "PUT",
         "/api/reports/templates/{template_id}",
@@ -999,7 +999,7 @@ _cap(
     ),
     _cap(
         "report_templates.delete",
-        "/admin/report-templates",
+        "/report/templates",
         "删除报告模板",
         "DELETE",
         "/api/reports/templates/{template_id}",

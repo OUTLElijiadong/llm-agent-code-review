@@ -37,6 +37,7 @@ from app.utils.file_validator import (
     validate_mime,
 )
 from app.utils.malware_scanner import get_scanner
+from app.utils.upload_reader import read_limited
 
 
 def list_files(db: Session, user: User, project_id: int = None, language: str = "",
@@ -94,7 +95,7 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
     - 文本文件按原逻辑处理
 
     T06 增强:
-    - 上传不设固定字节数上限，仍执行 MIME、恶意软件和归档安全校验
+    - 按配置的单文件容量上限分块读取，再执行 MIME、恶意软件和归档安全校验
     - 任一校验失败抛出 ValueError 并附带清晰错误信息
 
     Args:
@@ -119,8 +120,12 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
     try:
         _check_project_access(db, user, project_id)
 
-        raw = upload_file.file.read()
         filename = upload_file.filename or ""
+        raw = read_limited(
+            upload_file.file,
+            max_bytes=settings.max_upload_size,
+            filename=filename,
+        )
 
         # 压缩包会在解包后逐成员扫描，避免 ClamAV INSTREAM 对外层大包的传输上限。
         _validate_upload_security(db, project_id, filename, raw)

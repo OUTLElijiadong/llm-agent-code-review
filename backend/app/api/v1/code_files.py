@@ -3,10 +3,13 @@
 """
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.exceptions import ValidationError
@@ -24,6 +27,7 @@ from app.schemas.code_file import (
 from app.schemas.code_version import VersionDetailOut, VersionOut
 from app.schemas.common import PageOut, Resp
 from app.services import code_file_service
+from app.utils.multipart_limits import parse_limited_multipart
 
 router = APIRouter()
 
@@ -75,27 +79,13 @@ def upload_code(
     })
 
 
-@router.post("/upload-folder", response_model=Resp[dict],
-             dependencies=[Depends(require_permission(PermissionCode.FILE_UPLOAD))])
-def upload_folder(
-    project_id: int = Form(...),
-    files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """批量上传代码文件(支持文件夹上传)
-
-    接收多个文件,逐个保存到指定项目中。每个文件自动检测语言。
-
-    Args:
-        project_id: 目标项目ID
-        files: 上传的文件列表
-        db: 数据库会话
-        user: 当前登录用户
-
-    Returns:
-        Resp[dict]: 包含成功/失败计数和文件列表
-    """
+def _upload_folder_items(
+    db: Session,
+    user: User,
+    project_id: int,
+    files: list[StarletteUploadFile],
+) -> dict:
+    """在线程池内沿用既有逐文件上传事务与结果合同。"""
     results = []
     success_count = 0
     fail_count = 0
@@ -117,19 +107,62 @@ def upload_folder(
                 "version_no": ver,
             })
             success_count += 1
-        except Exception as e:
+        except Exception as exc:
             fail_count += 1
             errors.append({
                 "file_name": upload_file.filename,
-                "error": str(e),
+                "error": str(exc),
             })
 
-    return Resp(data={
+    return {
         "success_count": success_count,
         "fail_count": fail_count,
         "files": results,
         "errors": errors,
-    })
+    }
+
+
+@router.post("/upload-folder", response_model=Resp[dict],
+             dependencies=[Depends(require_permission(PermissionCode.FILE_UPLOAD))])
+async def upload_folder(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """批量上传代码文件(支持文件夹上传)
+
+    接收多个文件,逐个保存到指定项目中。每个文件自动检测语言。
+
+    Args:
+        project_id: 目标项目ID
+        files: 上传的文件列表
+        db: 数据库会话
+        user: 当前登录用户
+
+    Returns:
+        Resp[dict]: 包含成功/失败计数和文件列表
+    """
+    form = await parse_limited_multipart(
+        request.headers,
+        request.stream(),
+        max_file_bytes=settings.max_upload_size,
+        max_files=1000,
+    )
+    try:
+        raw_project_id = form.get("project_id")
+        try:
+            project_id = int(str(raw_project_id))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("project_id 必须是整数") from exc
+        if project_id <= 0:
+            raise ValidationError("project_id 必须大于 0")
+        files = [item for item in form.getlist("files") if isinstance(item, StarletteUploadFile)]
+        if not files:
+            raise ValidationError("至少上传一个文件")
+        result = await run_in_threadpool(_upload_folder_items, db, user, project_id, files)
+        return Resp(data=result)
+    finally:
+        await form.close()
 
 
 @router.post("", response_model=Resp[dict],

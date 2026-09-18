@@ -22,6 +22,7 @@ from app.core.observability import (
     render_metrics,
 )
 from app.core.rate_limit import limiter
+from app.core.request_size_limit import MULTIPART_OVERHEAD_BYTES, UploadRequestSizeLimitMiddleware
 
 
 def _ensure_schema() -> None:
@@ -214,6 +215,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    UploadRequestSizeLimitMiddleware,
+    max_source_bytes=settings.max_upload_size + MULTIPART_OVERHEAD_BYTES,
+    max_folder_bytes=512 * 1024 * 1024,
+    max_avatar_bytes=1024 * 1024,
 )
 app.add_middleware(RequestContextMiddleware)
 

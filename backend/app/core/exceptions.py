@@ -90,6 +90,14 @@ class ValidationError(AppError):
     next_action = "请检查输入后重新提交"
 
 
+class PayloadTooLargeError(AppError):
+    """请求主体超过服务端明确公布的容量上限。"""
+
+    code = 41300
+    http_status = 413
+    next_action = "请减小文件或拆分后重新上传"
+
+
 class BadRequestError(ValidationError):
     """坏请求异常:客户端请求参数或语义错误(HTTP 400)
 

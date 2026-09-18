@@ -159,6 +159,53 @@ def test_legacy_recovery_preserves_previous_evidence_when_input_cannot_resume(is
         assert evidence_count == 1, actual
 
 
+def test_recovery_keeps_completed_file_evidence_and_retries_only_incomplete_files(
+    isolated_rows, monkeypatch,
+):
+    rows = isolated_rows
+    second_file = CodeFile(
+        project_id=rows.project.id,
+        file_name="second.py",
+        file_path="second.py",
+        content="value = 2\n",
+        language="python",
+        status="active",
+        size_bytes=10,
+        line_count=1,
+        version_no=1,
+        is_binary=0,
+    )
+    rows.database.add(second_file)
+    rows.database.flush()
+    rows.database.add(CodeVersion(
+        file_id=second_file.id,
+        version_no=1,
+        content=second_file.content,
+        create_time=datetime.now(timezone.utc),
+    ))
+    rows.task.total_files = 2
+    rows.task.coverage = {
+        "stage": "analyzing",
+        "files": {str(rows.code_file.id): {"file_name": "source.py", "status": "complete"}},
+    }
+    evidence_id = add_existing_evidence(rows)
+    freeze_task_inputs(rows.database, rows.task.id, [rows.code_file, second_file])
+    rows.database.commit()
+    dispatch = Mock()
+    monkeypatch.setattr(review_service, "_run_review_task", dispatch)
+
+    review_service._resume_interrupted_task(rows.task.id, rows.user.id, "initial-lease")
+
+    with rows.sessions() as observer:
+        persisted = observer.get(ReviewTask, rows.task.id)
+        evidence = observer.get(ReviewIssue, evidence_id)
+        assert evidence is not None
+        assert persisted.processed_files == 1
+        assert persisted.coverage["completed_files"] == 1
+        assert persisted.coverage["files"][str(rows.code_file.id)]["status"] == "complete"
+    dispatch.assert_called_once()
+
+
 @pytest.mark.parametrize("mode", ["standard", "full"])
 def test_partial_invalid_model_output_is_not_complete_success(isolated_rows, monkeypatch, mode):
     rows = isolated_rows
@@ -363,6 +410,72 @@ def test_new_file_progress_does_not_inherit_completed_chunks(isolated_rows, monk
     assert observed[1]["calling_file"] == "second.py"
     assert observed[1]["coverage"]["current_file"] == "second.py"
     assert observed[1]["coverage"].get("completed_chunks", 0) == 0, observed[1]
+
+
+def test_failed_chunk_does_not_prevent_later_chunks_from_running(isolated_rows, monkeypatch):
+    rows = isolated_rows
+    chunks = [
+        SimpleNamespace(text="value = 1", start_line=0),
+        SimpleNamespace(text="value = 2", start_line=1),
+    ]
+    invoked = []
+    monkeypatch.setattr(review_service, "chunk_code_with_context", lambda *args, **kwargs: chunks)
+
+    def review_chunk(*args, **kwargs):
+        chunk_index = args[7]
+        invoked.append(chunk_index)
+        if chunk_index == 0:
+            raise review_service.ReviewCoverageError(["finish_reason=length"])
+        return []
+
+    monkeypatch.setattr(review_service, "_review_chunk_sequential", review_chunk)
+    review_service._execute_review(
+        rows.database, Mock(), None, rows.task, rows.user, [rows.code_file], [],
+        get_agent_profiles("standard"), "", execution_token="initial-lease",
+    )
+
+    rows.database.refresh(rows.task)
+    ledger = rows.task.coverage["files"][str(rows.code_file.id)]
+    assert invoked == [0, 1]
+    assert rows.task.status == "failed"
+    assert ledger["completed_chunk_indexes"] == [1]
+    assert ledger["failed_chunks"][0]["index"] == 0
+
+
+def test_failed_file_does_not_prevent_later_files_from_running(isolated_rows, monkeypatch):
+    rows = isolated_rows
+    second_file = CodeFile(
+        id=999,
+        project_id=rows.project.id,
+        file_name="second.py",
+        file_path="second.py",
+        content="value = 2\n",
+        language="python",
+        status="active",
+        size_bytes=10,
+        line_count=1,
+        version_no=1,
+        is_binary=0,
+    )
+    rows.task.total_files = 2
+    invoked = []
+
+    def review_file(*args, **kwargs):
+        code_file = args[4]
+        invoked.append(code_file.file_name)
+        if code_file.id == rows.code_file.id:
+            raise review_service.ReviewCoverageError(["finish_reason=length"])
+        return []
+
+    monkeypatch.setattr(review_service, "_review_one_file", review_file)
+    review_service._execute_review(
+        rows.database, Mock(), None, rows.task, rows.user, [rows.code_file, second_file], [],
+        get_agent_profiles("standard"), "", execution_token="initial-lease",
+    )
+
+    assert invoked == ["source.py", "second.py"]
+    assert rows.task.status == "failed"
+    assert rows.task.processed_files == 1
 
 
 def test_one_collaborative_failure_keeps_other_agents_valid_evidence(isolated_rows, monkeypatch):

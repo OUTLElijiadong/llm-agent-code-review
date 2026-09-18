@@ -1,7 +1,7 @@
 <template>
   <div class="rule-config-page">
     <div class="page-header">
-      <h2>审查规则配置</h2>
+      <h2>{{ embedded ? '可编辑审查规则' : '审查规则配置' }}</h2>
       <el-button v-if="canCreate" type="primary" size="default" @click="onCreate">
         <el-icon><Plus /></el-icon>新增规则
       </el-button>
@@ -158,6 +158,10 @@ import type { RuleOut } from '@/types/rule'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { useUserStore } from '@/stores/user'
+
+withDefaults(defineProps<{ embedded?: boolean }>(), {
+  embedded: false,
+})
 
 const userStore = useUserStore()
 const loading = ref(false)

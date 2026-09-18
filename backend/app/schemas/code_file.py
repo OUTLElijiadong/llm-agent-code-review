@@ -9,16 +9,16 @@ from pydantic import BaseModel, Field
 
 class CodeFileIn(BaseModel):
     """在线新增代码文件请求体"""
-    project_id: int
+    project_id: int = Field(gt=0)
     file_name: str = Field(min_length=1, max_length=255)
     file_path: Optional[str] = Field(default=None, max_length=500)
     language: Optional[str] = Field(default=None, max_length=50)
-    content: str = Field(min_length=0)
+    content: str = Field(min_length=0, max_length=5_000_000)
 
 
 class CodeFileUpdateIn(BaseModel):
     """更新代码内容请求体"""
-    content: str
+    content: str = Field(max_length=5_000_000)
     change_desc: Optional[str] = Field(default=None, max_length=255)
 
 

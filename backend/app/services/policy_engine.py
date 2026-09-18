@@ -195,16 +195,30 @@ def evaluate(
             break
 
         if matched:
-            decision = PolicyDecision(
-                subject=subject,
-                action=action,
-                resource=resource,
-                decision=matched.effect,
-                risk_level=matched.risk_level,
-                risk_score=_risk_score(matched.risk_level),
-                reason=f"命中策略: {matched.name}",
-                matched_rule_id=matched.id,
-            )
+            if matched.effect not in {ALLOW, DENY, ESCALATE} or matched.risk_level not in {
+                LOW, MEDIUM, HIGH, CRITICAL,
+            }:
+                decision = PolicyDecision(
+                    subject=subject,
+                    action=action,
+                    resource=resource,
+                    decision=DENY,
+                    risk_level=CRITICAL,
+                    risk_score=_risk_score(CRITICAL),
+                    reason=f"策略 {matched.name} 含无效决策值，已阻断",
+                    matched_rule_id=matched.id,
+                )
+            else:
+                decision = PolicyDecision(
+                    subject=subject,
+                    action=action,
+                    resource=resource,
+                    decision=matched.effect,
+                    risk_level=matched.risk_level,
+                    risk_score=_risk_score(matched.risk_level),
+                    reason=f"命中策略: {matched.name}",
+                    matched_rule_id=matched.id,
+                )
         else:
             decision = infer_default_decision(action, resource, context)
             decision.subject = subject

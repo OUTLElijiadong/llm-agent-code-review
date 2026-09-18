@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 import pytest
+from jinja2.exceptions import SecurityError
 
 from app.schemas.review import IssueOut
 from app.services.report_exporter import (
@@ -368,6 +369,18 @@ def test_export_to_html_supports_legacy_template_context():
     rendered = export_to_html(task, issues, "旧模板", 66, template)
 
     assert rendered == "示例审查任务|4|3|1|1|1|3"
+
+
+def test_export_to_html_blocks_unsafe_template_attribute_access():
+    """数据库模板只能访问报告上下文，不能遍历 Python 运行时对象。"""
+    with pytest.raises(SecurityError):
+        export_to_html(
+            _make_task(task_name="sandbox"),
+            [],
+            "summary",
+            100,
+            "{{ task_info.__class__.__mro__ }}",
+        )
 
 
 def test_export_to_html_compliance_renders_with_key_content():

@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.agents.discussion_bus import DiscussionBus
 from app.agents.events import AgentEventType, DiscussionTurn
-from app.agents.security_sentinel_agent import SecuritySentinelAgent
+from app.agents.security_sentinel_agent import SecuritySentinelAgent, _AuditChunkResult
 from app.ai import discussion_orchestrator as discussion
 from app.ai.exceptions import AiServiceError
 from app.ai.multi_agent import GENERAL_AGENT, SECURITY_AGENT
@@ -429,8 +429,8 @@ def test_security_file_rejects_empty_text_before_any_scanner(monkeypatch, scan_d
     )
     agent.inject(database)
     scanners = []
-    for name in ("_regex_findings", "_static_findings", "_llm_findings_for_file"):
-        scanner = Mock(return_value=[])
+    for name in ("_regex_findings", "_static_findings", "_llm_audit_collect"):
+        scanner = Mock(return_value=_AuditChunkResult() if name == "_llm_audit_collect" else [])
         monkeypatch.setattr(agent, name, scanner)
         scanners.append(scanner)
     events = Mock()
@@ -482,8 +482,9 @@ def test_security_file_valid_zero_findings_still_succeeds(monkeypatch, scan_dept
         content="value = 1\n", is_binary=0, status="active",
     )
     agent.inject(database)
-    for name in ("_regex_findings", "_static_findings", "_llm_findings_for_file"):
-        monkeypatch.setattr(agent, name, Mock(return_value=[]))
+    monkeypatch.setattr(agent, "_regex_findings", Mock(return_value=[]))
+    monkeypatch.setattr(agent, "_static_findings", Mock(return_value=[]))
+    monkeypatch.setattr(agent, "_llm_audit_collect", Mock(return_value=_AuditChunkResult()))
     result = agent.scan_file(11, scan_depth=scan_depth)
     assert result.success is True
     assert result.data["file_count"] == 1

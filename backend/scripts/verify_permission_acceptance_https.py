@@ -176,6 +176,7 @@ def build_plan():
         "app/core/security.py",
         "app/core/super_admin.py",
         "app/core/observability.py",
+        "app/core/request_size_limit.py",
         "app/services/rbac_service.py",
         # require_studio_role 委托此服务做只读角色校验，必须同样绑定源码。
         "app/services/agent_studio_service.py",
@@ -193,6 +194,7 @@ def build_plan():
     expected_middleware = {
         "starlette.middleware.cors.CORSMiddleware",
         "app.core.observability.RequestContextMiddleware",
+        "app.core.request_size_limit.UploadRequestSizeLimitMiddleware",
     }
     for route in iter_api_route_contexts(app.routes, exclusions=exclusions):
         calls = list(ordered(route.dependant))[:-1]
@@ -240,7 +242,8 @@ def build_plan():
         "source_sha256": {name: sha((ROOT / name).read_bytes()) for name in sorted(sources)},
         "proof": "FastAPI按依赖树先求子依赖再调用依赖；仅已复核只读身份/RBAC依赖可通过计划。"
         "缺token或无权限在端点调用前抛出；未知依赖和公开路由不发送负向请求。"
-        "中间件只有CORS及日志/进程内指标；不声称HTTP日志本身零写入。",
+        "中间件只有CORS、上传前置容量拒绝及日志/进程内指标；容量中间件只会提前拒绝，"
+        "不放宽身份或权限；不声称HTTP日志本身零写入。",
     }
 
 

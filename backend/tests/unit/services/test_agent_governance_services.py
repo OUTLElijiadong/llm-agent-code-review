@@ -80,6 +80,32 @@ def test_policy_engine_matches_explicit_deny_rule(db):
     assert decision.risk_level == "critical"
 
 
+def test_policy_engine_rejects_unknown_persisted_effect(db):
+    """旧库脏值不得穿过输入校验后被当成放行。"""
+    db.add(PolicyRule(
+        rule_code="dirty_policy",
+        name="脏策略",
+        subject="agent:*",
+        action="knowledge.read",
+        resource="*",
+        effect="permit",
+        risk_level="low",
+        priority=1,
+        enabled=1,
+    ))
+    db.commit()
+
+    decision = policy_engine.evaluate(
+        db,
+        subject="agent:manager",
+        action="knowledge.read",
+        resource="workspace",
+    )
+
+    assert decision.decision == "deny"
+    assert decision.risk_level == "critical"
+
+
 def test_approval_service_auto_approves_low_risk(db, admin_user):
     """验证低风险 allow 决策自动审批。"""
     item = approval_service.create_or_auto_decide(
@@ -371,6 +397,68 @@ def test_tool_gateway_applies_tool_permission_deny(db):
     assert result.success is False
     assert result.status == "denied"
     assert result.risk_level == "critical"
+
+
+def test_tool_gateway_rejects_unknown_persisted_permission(db):
+    """旧工具权限脏值必须 fail closed，且不得调用实际 handler。"""
+    db.add(AgentToolPermission(
+        agent_code="manager",
+        tool_code="reader",
+        permission="permit",
+        risk_level="low",
+        enabled=1,
+    ))
+    db.commit()
+    called = False
+
+    def handler():
+        nonlocal called
+        called = True
+        return {"ok": True}
+
+    result = tool_gateway.execute(
+        db,
+        agent_code="manager",
+        tool_code="reader",
+        action="knowledge.read",
+        resource="workspace",
+        handler=handler,
+    )
+
+    assert result.status == "denied"
+    assert result.risk_level == "critical"
+    assert called is False
+
+
+def test_tool_gateway_rejects_allow_permission_with_unknown_risk(db):
+    """allow 也必须先校验风险脏值，不能通过提前返回绕过 fail-closed。"""
+    db.add(AgentToolPermission(
+        agent_code="manager",
+        tool_code="reader",
+        permission="allow",
+        risk_level="future-risk",
+        enabled=1,
+    ))
+    db.commit()
+    called = False
+
+    def handler():
+        nonlocal called
+        called = True
+        return {"ok": True}
+
+    result = tool_gateway.execute(
+        db,
+        agent_code="manager",
+        tool_code="reader",
+        action="knowledge.read",
+        resource="workspace",
+        handler=handler,
+    )
+
+    assert result.status == "denied"
+    assert result.risk_level == "critical"
+    assert called is False
 
 
 def test_tool_gateway_boundary_defaults_to_deny_for_out_of_scope_tool(db):

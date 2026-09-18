@@ -2,7 +2,7 @@
 审查规则模块Pydantic Schema
 """
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -11,19 +11,25 @@ class RuleIn(BaseModel):
     """新增自定义规则请求体"""
     rule_code: str = Field(min_length=1, max_length=50)
     rule_name: str = Field(min_length=1, max_length=100)
-    rule_type: str = Field(min_length=1, max_length=50)
-    rule_content: str = Field(min_length=1)
+    rule_type: Literal[
+        "security", "correctness", "performance", "robustness",
+        "maintainability", "style", "documentation",
+    ]
+    rule_content: str = Field(min_length=1, max_length=100_000)
     language: str = Field(default="*", max_length=30)
-    severity: str = Field(default="中", max_length=10)
+    severity: Literal["严重", "高", "中", "低"] = "中"
 
 
 class RuleUpdateIn(BaseModel):
     """更新规则请求体"""
     rule_name: Optional[str] = Field(default=None, max_length=100)
-    rule_type: Optional[str] = Field(default=None, max_length=50)
-    rule_content: Optional[str] = None
+    rule_type: Optional[Literal[
+        "security", "correctness", "performance", "robustness",
+        "maintainability", "style", "documentation",
+    ]] = None
+    rule_content: Optional[str] = Field(default=None, max_length=100_000)
     language: Optional[str] = Field(default=None, max_length=30)
-    severity: Optional[str] = Field(default=None, max_length=10)
+    severity: Optional[Literal["严重", "高", "中", "低"]] = None
 
 
 class RuleToggleIn(BaseModel):

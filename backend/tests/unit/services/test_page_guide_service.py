@@ -55,9 +55,9 @@ def test_instructions_include_guide_protocol_and_recall() -> None:
 
 def test_guide_routes_exist_in_frontend_route_table() -> None:
     """引导协议给出的路由必须与前端 router 同源(手工对账表,防漂移)。"""
-    # 与 frontend/src/router/index.ts 静态路径对账;含动态段与重定向的不在清单内
+    # 与 frontend/src/router/index.ts 的主导航路径对账；兼容重定向 /rules 不再重复注入提示词。
     frontend_static_user_routes = {
-        "/dashboard", "/projects", "/reviews", "/reviews/start", "/rules",
+        "/dashboard", "/projects", "/reviews", "/reviews/start",
         "/security", "/reports", "/report/templates", "/code", "/issues",
         "/agents", "/sandboxes", "/agent-studio", "/forum", "/forum/new",
         "/knowledge", "/support/maintenance", "/support/feedback", "/profile",
@@ -69,9 +69,10 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
         "/admin/tools", "/admin/knowledge", "/admin/jobs",
         "/admin/observability", "/admin/rewards", "/admin/rollback",
         "/admin/users", "/admin/rbac/roles", "/admin/rbac/permissions",
-        "/admin/ai-logs", "/admin/report-templates",
+        "/admin/ai-logs",
         "/admin/audit", "/admin/evolution", "/admin/skills",
         "/admin/embedding", "/admin/mcp-workers", "/admin/llm",
+        "/report/templates",
     }
     user_block = user_guide_block()
     for route in frontend_static_user_routes:

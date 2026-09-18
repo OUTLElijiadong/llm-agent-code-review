@@ -27,8 +27,7 @@ USER_PAGE_LABELS: dict[str, tuple[str, str]] = {
     "/issues": ("问题追踪", "跨任务检索并闭环问题"),
     "/reports": ("审查报告", "查看与导出审查报告"),
     "/report/templates": ("报告模板管理", "维护报告模板"),
-    "/rules": ("审查规则", "管理自定义审查规则"),
-    "/security": ("安全中心", "安全审计清单、发现与扫描"),
+    "/security": ("安全与审查规则", "查看安全态势、权威规则目录并管理审查规则"),
     "/agents": ("Agent 中心", "查看 Agent 画像与运行态势"),
     "/agent-studio": ("Agent 工坊", "创建自定义 Agent 与 Skill"),
     "/sandboxes": ("代码沙箱", "创建测试沙箱与持续部署环境"),
@@ -60,13 +59,13 @@ ADMIN_PAGE_LABELS: dict[str, tuple[str, str]] = {
     "/admin/rbac/roles": ("角色管理", "RBAC 角色与权限分配"),
     "/admin/rbac/permissions": ("权限点列表", "权限点与菜单树"),
     "/admin/ai-logs": ("Agent 调用日志", "AI 调用记录检索"),
-    "/admin/report-templates": ("报告模板管理", "报告模板维护"),
     "/admin/audit": ("系统操作审计", "操作审计日志"),
     "/admin/evolution": ("Agent 自进化", "反馈信号与进化提案"),
     "/admin/skills": ("Skill 管理", "Skill 清单与调用记录"),
     "/admin/embedding": ("RAG 嵌入配置", "嵌入模型配置"),
     "/admin/mcp-workers": ("MCP 与沙箱节点", "MCP Server 与沙箱 Worker"),
     "/admin/llm": ("大模型配置", "全局 LLM 配置"),
+    "/report/templates": ("报告模板管理", "维护报告模板"),
 }
 
 _GUIDE_PROTOCOL = """\

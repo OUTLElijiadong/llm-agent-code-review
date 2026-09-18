@@ -32,8 +32,8 @@ class RegisterIn(BaseModel):
 
 class LoginIn(BaseModel):
     """用户登录请求体"""
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=1, max_length=32)
 
 
 class UserOut(BaseModel):

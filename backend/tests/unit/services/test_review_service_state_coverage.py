@@ -553,7 +553,7 @@ def test_execute_review_records_failure_reason(monkeypatch: pytest.MonkeyPatch) 
     )
 
     assert task.status == "failed"
-    assert task.error_message == "review exploded"
+    assert task.error_message == "扫描覆盖不完整: bad.py: review exploded"
     assert task.duration_ms == 199
     assert AgentEventType.FAILED in events
 
