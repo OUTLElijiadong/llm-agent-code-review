@@ -67,3 +67,15 @@ def test_api_and_websocket_proxy_contracts_remain_present() -> None:
     api = _block(source, "location /api/ {")
     assert "proxy_pass http://backend:8000/api/;" in api
     assert "proxy_buffering off;" in api
+
+
+def test_request_too_large_uses_json_error_contract() -> None:
+    source = TEMPLATE.read_text(encoding="utf-8")
+
+    assert "client_max_body_size 4m;" in source
+    assert "error_page 413 = @json_request_too_large;" in source
+    block = _block(source, "location @json_request_too_large")
+    assert "default_type application/json;" in block
+    assert '"code":41300' in block
+    assert '"request_id":"$request_id"' in block
+    assert '"retryable":false' in block
