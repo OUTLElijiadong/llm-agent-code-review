@@ -1,4 +1,4 @@
-"""在 multipart 解析前限制源码上传请求体大小。"""
+"""在解析前限制上传与普通 JSON 请求体大小。"""
 from __future__ import annotations
 
 import re
@@ -15,6 +15,7 @@ _SOURCE_UPLOAD_PATH: Final = "/api/code-files/upload"
 _FOLDER_UPLOAD_PATH: Final = "/api/code-files/upload-folder"
 _AVATAR_UPLOAD_PATH: Final = "/api/me/avatar/image"
 _AUDIT_ARCHIVE_PATH: Final = re.compile(r"^/api/projects/[1-9][0-9]*/audit-source-archive$")
+JSON_REQUEST_METHODS: Final = frozenset({"POST", "PUT", "PATCH"})
 
 
 def is_limited_upload_path(path: str) -> bool:
@@ -34,13 +35,15 @@ class UploadRequestSizeLimitMiddleware:
         max_source_bytes: int,
         max_folder_bytes: int,
         max_avatar_bytes: int,
+        max_json_bytes: int = 4 * 1024 * 1024,
     ) -> None:
-        if min(max_source_bytes, max_folder_bytes, max_avatar_bytes) <= 0:
-            raise ValueError("上传请求上限必须大于 0")
+        if min(max_source_bytes, max_folder_bytes, max_avatar_bytes, max_json_bytes) <= 0:
+            raise ValueError("请求体上限必须大于 0")
         self.app = app
         self.max_source_bytes = max_source_bytes
         self.max_folder_bytes = max_folder_bytes
         self.max_avatar_bytes = max_avatar_bytes
+        self.max_json_bytes = max_json_bytes
 
     def _limit_for_path(self, path: str) -> int:
         if path == _FOLDER_UPLOAD_PATH:
@@ -50,16 +53,21 @@ class UploadRequestSizeLimitMiddleware:
         return self.max_source_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if (
-            scope["type"] != "http"
-            or scope.get("method") != "POST"
-            or not is_limited_upload_path(str(scope.get("path", "")))
-        ):
+        path = str(scope.get("path", ""))
+        method = str(scope.get("method", ""))
+        headers = Headers(scope=scope)
+        content_type = headers.get("content-type", "").lower()
+        upload_path = scope["type"] == "http" and method == "POST" and is_limited_upload_path(path)
+        json_path = (
+            scope["type"] == "http"
+            and method in JSON_REQUEST_METHODS
+            and content_type.startswith("application/json")
+        )
+        if not upload_path and not json_path:
             await self.app(scope, receive, send)
             return
 
-        max_bytes = self._limit_for_path(str(scope.get("path", "")))
-        headers = Headers(scope=scope)
+        max_bytes = self._limit_for_path(path) if upload_path else self.max_json_bytes
         content_length = headers.get("content-length")
         if content_length:
             try:
@@ -101,10 +109,10 @@ class UploadRequestSizeLimitMiddleware:
             status_code=413,
             content={
                 "code": 41300,
-                "message": "上传请求超过容量上限，请减小文件或拆分后重新上传",
+                "message": "请求体超过容量上限，请减小内容后重新提交",
                 "request_id": request_id,
                 "retryable": False,
-                "next_action": "请减小文件或拆分后重新上传",
+                "next_action": "请减小内容后重新提交",
             },
         )
         await response(scope, receive, send)

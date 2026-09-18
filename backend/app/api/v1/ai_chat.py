@@ -5,7 +5,7 @@ Agent 助手聊天 + 语言检测 + 项目分析 API 路由
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.agents import AgentContext
@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.common import Resp
+from app.utils.input_validation import normalize_plain_text
 
 router = APIRouter()
 
@@ -21,6 +22,11 @@ router = APIRouter()
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"] = "user"
     content: str = Field(..., min_length=1, max_length=100_000, description="消息内容")
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        return normalize_plain_text(value, field_name="聊天内容")
 
 
 class ChatRequest(BaseModel):

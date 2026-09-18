@@ -12,8 +12,9 @@
 
 ## 发布后仍需外部条件
 
-- [ ] GitHub 上确认新 CodeQL 工作流至少一次真实成功运行；本地配置通过不等于 GitHub 告警已产生。
+- [x] GitHub 上确认新 CodeQL 工作流真实成功运行：运行 `35320485649`，Python 与 JavaScript/TypeScript 均成功；Code Scanning API 已记录两个分析结果。
 - [x] 已执行真实 DeepSeek `full` 全项目任务 #178：5/5 文件、33 条发现、覆盖账本完整，8 次首轮截断经提升预算重试恢复，总 Token 278,036。
 - [ ] 为平台上传项目设计受控 CodeQL CLI 沙箱、SARIF 导入和 Finding 合并；当前仅有 Prism 仓库 CI。
 - [ ] 为 Codex Security Deep Scan 提供 managed read-only filesystem permission profile 后重跑；当前宿主环境阻断。
-- [ ] 把普通文本字段的动态 SQLi/XSS/Unicode 攻击字典纳入持续生产前测试；当前已覆盖高风险接收点和 Schema 合同，不宣称每个输入框都做过浏览器动态攻击。
+- [x] 已补普通 JSON/API 4MiB 网关上限、账号/项目/规则/反馈/聊天字段的控制字符与语义校验；相关定向回归 49/49 通过。
+- [ ] 把普通文本字段的浏览器动态 SQLi/XSS/Unicode 攻击字典纳入持续生产前测试；当前已覆盖高风险接收点和 Schema 合同，不宣称每个输入框都做过浏览器动态攻击。

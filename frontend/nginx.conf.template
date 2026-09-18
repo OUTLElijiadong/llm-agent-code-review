@@ -30,8 +30,8 @@ server {
 
     root /usr/share/nginx/html;
     index index.html;
-    # 网关兜底总上限；源码上传入口另设 21MB，请求在 multipart 落盘前被拒绝。
-    client_max_body_size 512m;
+    # JSON/API 兜底上限 4MB；源码上传入口在下方按路径放宽到 21MB/512MB。
+    client_max_body_size 4m;
 
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options SAMEORIGIN always;

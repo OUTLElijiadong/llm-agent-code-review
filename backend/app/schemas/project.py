@@ -4,7 +4,10 @@
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.utils.input_validation import normalize_plain_text
+from app.utils.sanitize import sanitize_text
 
 
 class ProjectIn(BaseModel):
@@ -13,6 +16,16 @@ class ProjectIn(BaseModel):
     description: Optional[str] = Field(default=None, max_length=500)
     language: Optional[str] = Field(default=None, max_length=50)
 
+    @field_validator("project_name")
+    @classmethod
+    def validate_project_name(cls, value: str) -> str:
+        return normalize_plain_text(sanitize_text(value), field_name="项目名称", allow_newlines=False)
+
+    @field_validator("description", "language")
+    @classmethod
+    def validate_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_plain_text(value, field_name="项目字段", allow_empty=True) if value is not None else None
+
 
 class ProjectUpdateIn(BaseModel):
     """更新项目请求体"""
@@ -20,6 +33,22 @@ class ProjectUpdateIn(BaseModel):
     description: Optional[str] = Field(default=None, max_length=500)
     language: Optional[str] = Field(default=None, max_length=50)
     status: Optional[str] = Field(default=None, pattern="^(active|archived)$")
+
+    @field_validator("project_name")
+    @classmethod
+    def validate_update_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return normalize_plain_text(
+            sanitize_text(value),
+            field_name="项目名称",
+            allow_newlines=False,
+        )
+
+    @field_validator("description", "language")
+    @classmethod
+    def validate_update_text(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_plain_text(value, field_name="项目字段", allow_empty=True) if value is not None else None
 
 
 class RemoteProjectImportIn(BaseModel):
@@ -30,6 +59,11 @@ class RemoteProjectImportIn(BaseModel):
     description: Optional[str] = Field(default=None, max_length=500)
     language: Optional[str] = Field(default=None, max_length=50)
     audit_mode: bool = False
+
+    @field_validator("project_name")
+    @classmethod
+    def validate_project_name(cls, value: str) -> str:
+        return normalize_plain_text(sanitize_text(value), field_name="项目名称", allow_newlines=False)
 
 
 class RemoteProjectImportCancelIn(BaseModel):

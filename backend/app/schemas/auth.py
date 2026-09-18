@@ -6,6 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.utils.input_validation import normalize_username
+
 
 class RegisterIn(BaseModel):
     """用户注册请求体"""
@@ -17,6 +19,11 @@ class RegisterIn(BaseModel):
     captcha_id: Optional[str] = Field(default=None, max_length=64)
     captcha_answer: Optional[str] = Field(default=None, max_length=16)
     beta_code: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        return normalize_username(value, strict=True)
 
     @field_validator("email", mode="before")
     @classmethod
@@ -34,6 +41,11 @@ class LoginIn(BaseModel):
     """用户登录请求体"""
     username: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=32)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def validate_login_username(cls, value: str) -> str:
+        return normalize_username(value)
 
 
 class UserOut(BaseModel):

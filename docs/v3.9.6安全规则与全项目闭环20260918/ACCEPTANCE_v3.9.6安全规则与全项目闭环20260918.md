@@ -14,7 +14,7 @@ v3.9.6 已以不可变提交发布到生产并完成备份恢复、迁移、健�
 | CodeQL 边界 | 仓库 CI 使用官方高级工作流与 `security-extended`；产品目录不宣称上传项目已执行 CodeQL | 通过 |
 | DeepSeek 截断 | 画像输出预算传入真实调用；失败分片与失败文件继续后续项；生产任务 #178 完成 5/5 文件、33 条发现；8 次首轮截断均被重试恢复 | 通过真实生产运行 |
 | 规则快照 | 新任务冻结完整内容和 SHA-256；合法空快照不回查实时规则；旧不完整任务兼容回查 | 通过 |
-| 输入边界 | Schema 长度、治理枚举 fail-closed、模板沙箱、上传前置容量、目录逐文件流式上限 | 通过 |
+| 输入边界 | Schema 长度、治理枚举 fail-closed、模板沙箱、上传前置容量、普通 JSON/API 4MiB 网关上限、目录逐文件流式上限 | 通过；新增边界回归 49/49 |
 | 角色范围 | 可分配角色仅用户、评审员、管理员；最高管理员唯一；评审员保留 Agent 自定义与渗透授权 | 生产核验：活动角色 user/reviewer/admin/super_admin，auditor disabled；唯一 super_admin=1 |
 
 ## 输入安全矩阵
@@ -55,3 +55,13 @@ v3.9.6 已以不可变提交发布到生产并完成备份恢复、迁移、健�
 ## 工具边界
 
 Codex Security Deep Scan 因宿主缺少 managed filesystem permission profile 未能启动。不能把普通测试或独立代码复核写成该插件已完成；本轮使用全量测试、CodeQL 仓库 CI 配置和独立只读审查补充，但该工具环境问题继续列入 TODO。
+
+## 权威来源与 CodeQL 执行边界
+
+- [GitHub CodeQL CLI](https://docs.github.com/en/code-security/concepts/code-scanning/codeql/codeql-cli)：说明 CLI 的数据库创建、分析、SARIF 生成和可上传路径；本项目已验证仓库 CI 的真实运行结果。
+- [GitHub CodeQL 条款](https://github.com/github/codeql-cli-binaries/blob/main/LICENSE.md)：普通条款允许的自动化分析范围与 GitHub Code Security 付费许可边界不同；平台托管用户上传源码不能在未取得适用许可前直接开启。
+- [CodeQL 推荐硬件](https://docs.github.com/en/code-security/reference/code-scanning/codeql/hardware-resources-for-codeql)：小型代码库起步建议至少 8GB RAM、2 核和 14GB SSD；当前业务沙箱不满足该隔离资源基线。
+- [OWASP Secure Code Review Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Secure_Code_Review_Cheat_Sheet.html)：作为人工审查与规则映射参考。
+- [CNVD](https://www.cnvd.org.cn/) / [CNNVD](https://www.cnnvd.org.cn/)：作为中国漏洞情报与分类来源，不冒充源码执行引擎。
+
+因此当前交付结论是：仓库 CodeQL CI 已完成且可核验；平台上传项目 CodeQL CLI/SARIF/Finding 接入仍保持关闭，待书面许可、专用隔离 worker、资源配额和多租户数据清理验收后再实现。

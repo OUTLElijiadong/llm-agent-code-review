@@ -221,6 +221,7 @@ app.add_middleware(
     max_source_bytes=settings.max_upload_size + MULTIPART_OVERHEAD_BYTES,
     max_folder_bytes=512 * 1024 * 1024,
     max_avatar_bytes=1024 * 1024,
+    max_json_bytes=4 * 1024 * 1024,
 )
 app.add_middleware(RequestContextMiddleware)
 

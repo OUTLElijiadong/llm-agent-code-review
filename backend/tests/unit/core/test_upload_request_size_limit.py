@@ -6,7 +6,13 @@ from starlette.responses import JSONResponse
 from app.core.request_size_limit import UploadRequestSizeLimitMiddleware
 
 
-async def _invoke(*, path: str, body: bytes, content_length: str | None = None):
+async def _invoke(
+    *,
+    path: str,
+    body: bytes,
+    content_length: str | None = None,
+    content_type: str | None = None,
+):
     called = False
 
     async def downstream(scope, receive, send):
@@ -23,6 +29,8 @@ async def _invoke(*, path: str, body: bytes, content_length: str | None = None):
     headers = []
     if content_length is not None:
         headers.append((b"content-length", content_length.encode("ascii")))
+    if content_type is not None:
+        headers.append((b"content-type", content_type.encode("ascii")))
     scope = {
         "type": "http",
         "asgi": {"version": "3.0"},
@@ -51,6 +59,7 @@ async def _invoke(*, path: str, body: bytes, content_length: str | None = None):
         max_source_bytes=4,
         max_folder_bytes=8,
         max_avatar_bytes=2,
+        max_json_bytes=4,
     )
     await middleware(scope, receive, send)
     return called, sent
@@ -109,3 +118,28 @@ async def test_folder_and_avatar_use_independent_request_limits():
     assert folder_sent[0]["status"] == 200
     assert avatar_called is False
     assert avatar_sent[0]["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_json_limit_rejects_declared_oversize_before_downstream():
+    called, sent = await _invoke(
+        path="/api/auth/login",
+        body=b"12345",
+        content_length="5",
+        content_type="application/json",
+    )
+
+    assert called is False
+    assert sent[0]["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_json_limit_counts_chunked_body_without_content_length():
+    called, sent = await _invoke(
+        path="/api/auth/login",
+        body=b"12345",
+        content_type="application/json; charset=utf-8",
+    )
+
+    assert called is True
+    assert sent[0]["status"] == 413
