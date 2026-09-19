@@ -404,6 +404,67 @@ def test_account_wide_retention_archives_oldest_across_surfaces(db, user) -> Non
     assert db.query(AgentMeshConversation).filter_by(user_id=user.id).count() == 11
 
 
+def test_heartbeat_keeps_only_latest_empty_placeholder_per_surface(db, user) -> None:
+    """重复新建空会话只替换占位索引，不删除任何会话账本。"""
+    for index in range(3):
+        agent_mesh_service.heartbeat(
+            db,
+            user,
+            surface="user",
+            session_key=f"empty-{index}",
+            title="新对话",
+        )
+
+    rows = (
+        db.query(AgentMeshConversation)
+        .filter_by(user_id=user.id, surface="user")
+        .order_by(AgentMeshConversation.id.asc())
+        .all()
+    )
+    assert [(row.session_key, row.status) for row in rows] == [
+        ("empty-0", "archived"),
+        ("empty-1", "archived"),
+        ("empty-2", "active"),
+    ]
+
+
+def test_heartbeat_does_not_archive_placeholder_with_real_run(db, user) -> None:
+    agent_mesh_service.heartbeat(
+        db,
+        user,
+        surface="user",
+        session_key="conversation-with-run",
+        title="新对话",
+    )
+    db.add(AgentResponseRun(
+        run_id="run-with-user-content",
+        user_id=user.id,
+        surface="user",
+        session_key="conversation-with-run",
+        status="completed",
+        checkpoint_json=json.dumps({"transcript": [{"role": "user", "content": "核对历史"}]}),
+        version=1,
+    ))
+    db.commit()
+
+    agent_mesh_service.heartbeat(
+        db,
+        user,
+        surface="user",
+        session_key="new-empty",
+        title="新对话",
+    )
+
+    assert db.query(AgentMeshConversation).filter_by(
+        user_id=user.id,
+        session_key="conversation-with-run",
+    ).one().status == "active"
+    assert db.query(AgentMeshConversation).filter_by(
+        user_id=user.id,
+        session_key="new-empty",
+    ).one().status == "active"
+
+
 def test_eleventh_conversation_is_rejected_when_ten_are_occupied(db, user) -> None:
     for index in range(10):
         key = f"session-occupied-{index:02d}"

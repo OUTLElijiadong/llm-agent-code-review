@@ -207,6 +207,112 @@ def _lock_conversation_owner(db: Session, user_id: int) -> None:
     db.query(User.id).filter(User.id == int(user_id)).with_for_update().first()
 
 
+def _conversation_keys_with_activity(
+    db: Session,
+    *,
+    user_id: int,
+    rows: list[AgentMeshConversation],
+) -> set[tuple[str, str]]:
+    """批量识别真正有消息或 Responses 账本的会话。
+
+    不以 heartbeat 或占位标题冒充聊天内容，也避免为每个会话分别
+    查询导致 N+1。
+    """
+    refs = {(str(row.surface), str(row.session_key)) for row in rows}
+    if not refs:
+        return set()
+    active = {
+        (str(surface), str(session_key))
+        for surface, session_key in db.query(
+            AgentResponseRun.surface,
+            AgentResponseRun.session_key,
+        )
+        .filter(
+            AgentResponseRun.user_id == int(user_id),
+            tuple_(AgentResponseRun.surface, AgentResponseRun.session_key).in_(sorted(refs)),
+        )
+        .all()
+    }
+    address_to_key = {
+        _session_address(surface, session_key): (surface, session_key)
+        for surface, session_key in refs
+    }
+    addresses = sorted(address_to_key)
+    message_rows = (
+        db.query(AgentMeshMessage.sent_from, AgentMeshMessage.send_to)
+        .filter(
+            AgentMeshMessage.user_id == int(user_id),
+            or_(
+                AgentMeshMessage.sent_from.in_(addresses),
+                AgentMeshMessage.send_to.in_(addresses),
+            ),
+        )
+        .all()
+    )
+    for sent_from, send_to in message_rows:
+        for address in (str(sent_from or ""), str(send_to or "")):
+            key = address_to_key.get(address)
+            if key is not None:
+                active.add(key)
+    return active
+
+
+def _archive_duplicate_empty_conversations(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+    keep_session_key: str,
+) -> int:
+    """同一账号、同一入口只保留一条真空白活动会话。
+
+    新标签或重复点击「+」不应把历史列表堆成多个「新对话」。
+    已有 Responses 运行、Mesh 消息或非占位标题的会话都不属于空白会话。
+    """
+    rows = (
+        db.query(AgentMeshConversation)
+        .filter(
+            AgentMeshConversation.user_id == int(user_id),
+            AgentMeshConversation.surface == surface,
+            AgentMeshConversation.status == "active",
+            AgentMeshConversation.title.in_(sorted(_PLACEHOLDER_CONVERSATION_TITLES)),
+        )
+        .with_for_update()
+        .all()
+    )
+    if len(rows) <= 1:
+        return 0
+    activity_keys = _conversation_keys_with_activity(db, user_id=int(user_id), rows=rows)
+    empty_rows = [
+        row for row in rows
+        if (str(row.surface), str(row.session_key)) not in activity_keys
+    ]
+    if len(empty_rows) <= 1:
+        return 0
+    keep_row = next(
+        (row for row in empty_rows if str(row.session_key) == keep_session_key),
+        None,
+    )
+    if keep_row is None:
+        keep_row = max(
+            empty_rows,
+            key=lambda row: (
+                _aware(row.last_message_at or row.last_seen_at)
+                or datetime.min.replace(tzinfo=timezone.utc),
+                int(row.id or 0),
+            ),
+        )
+    archived = 0
+    for row in empty_rows:
+        if row is keep_row:
+            continue
+        row.status = "archived"
+        row.active_run_id = None
+        row.active_run_status = None
+        archived += 1
+    return archived
+
+
 def _enforce_conversation_retention(
     db: Session,
     *,
@@ -351,6 +457,12 @@ def heartbeat(
     try:
         # 让并发首心跳下的新行进入 retention 查询，最旧会话会被归档而非删除。
         db.flush()
+        _archive_duplicate_empty_conversations(
+            db,
+            user_id=int(user.id),
+            surface=surface,
+            keep_session_key=session_key,
+        )
         _enforce_conversation_retention(
             db,
             user_id=int(user.id),
