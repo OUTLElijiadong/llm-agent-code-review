@@ -24,7 +24,8 @@ tags:
 
 ## 发布收尾
 
-- [ ] 将 `v3.9.10` 变更固化为精确 Git SHA，按 `deploy/deploy.sh all --revision <SHA>` 执行备份、恢复验证、迁移、前后端同 SHA 切换和 HTTPS 冒烟。
+- [x] `v3.9.10 / 8d0efdcffb2a...` 已执行备份、恢复验证、迁移、前后端同 SHA 切换和 HTTPS 冒烟。
+- [ ] 发布 `v3.9.11` 巡检补丁，确保 Alembic 一次性容器与 `ops-check` 并行时不再把多个容器 ID 拼接成假故障。
 - [ ] 发布后回填 APP_VERSION/APP_RELEASE、Alembic current/head、health/ready、容器健康和业务页面截图；未完成前不标记生产已修复。
 
 ## 独立依赖

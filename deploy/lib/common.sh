@@ -445,7 +445,9 @@ assert_compose_release_environment() (
 assert_running_release_environment() {
   local service container_id expected_id actual_id environment runtime_release runtime_version
   for service in backend frontend; do
-    container_id="$(compose ps -a -q "$service")"
+    # 只选择常驻服务容器。`compose run` 产生的一次性容器可能仍处于
+    # ps --all 结果中，不能让并行的迁移/巡检把多个 ID 传给 docker inspect。
+    container_id="$(service_container_id "$service")"
     [[ -n "$container_id" ]] || fatal "无法识别发布容器: $service"
     expected_id="$BOUND_BACKEND_IMAGE_ID"
     [[ "$service" != frontend ]] || expected_id="$BOUND_FRONTEND_IMAGE_ID"
