@@ -71,7 +71,7 @@ def route_inventory():
                 "line": inspect.getsourcelines(endpoint)[1],
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
-    assert len(rows) == 327, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 332, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -81,11 +81,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 327
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 327
+    assert len(ROUTES) == 332
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 332
     assert len({row["source"] for row in ROUTES}) == 42
-    assert len(AUTHENTICATED_ROUTES) == 313
-    assert len(GUARDED_ROUTES) == 245
+    assert len(AUTHENTICATED_ROUTES) == 318
+    assert len(GUARDED_ROUTES) == 249
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -101,6 +101,18 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
     ]
     assert len(catalog) == 1
     assert catalog[0]["guards"] == ["security:view"]
+    expected_new_routes = {
+        ("GET", "/api/agent-mesh/conversations"): ["agent:chat"],
+        ("POST", "/api/agent-mesh/conversations/restore"): ["agent:chat"],
+        ("POST", "/api/agent-mesh/inbox/pull"): ["agent:chat"],
+        ("POST", "/api/feedback/{feedback_id}/read"): ["require_admin"],
+        ("POST", "/api/forum/posts/{post_id}/views"): [],
+    }
+    for route_key, expected_guards in expected_new_routes.items():
+        matches = [row for row in ROUTES if (row["method"], row["path"]) == route_key]
+        assert len(matches) == 1
+        assert matches[0]["authenticated"] is True
+        assert matches[0]["guards"] == expected_guards
 
 
 def _route_id(row):
@@ -115,7 +127,8 @@ def matrix_env():
     users = {}
     for index, name in enumerate(("owner_a", "member_a", "owner_b", "no_permission", "disabled", "manager"), start=101):
         users[name] = User(id=index, username=f"matrix_{name}", password="isolated-fixture",
-                           role="admin" if name == "manager" else "user",
+                           role=("admin" if name == "manager" else
+                                 "reviewer" if name in {"owner_a", "member_a", "owner_b"} else "user"),
                            status=0 if name == "disabled" else 1, nickname=name)
     db.add_all(users.values())
     codes = {
@@ -124,7 +137,7 @@ def matrix_env():
         "review:view", "review:cancel", "issue:view", "issue:handle", "issue:batch",
         "report:view", "report:export:json", "report:export:html", "agent:chat", "security:view",
     }
-    role = Role(name="隔离验收成员", code="matrix_member", status="active", is_builtin=0)
+    role = Role(name="评审员", code="reviewer", status="active", is_builtin=1)
     db.add(role)
     db.flush()
     for code in sorted(codes):

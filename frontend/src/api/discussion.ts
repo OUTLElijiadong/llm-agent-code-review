@@ -1,4 +1,4 @@
-import { get } from './http'
+import { post } from './http'
 
 export interface StartDiscussionParams {
   project_id: number
@@ -17,5 +17,5 @@ export interface StartDiscussionResult {
 }
 
 export function startDiscussion(params: StartDiscussionParams) {
-  return get<StartDiscussionResult>('/discuss/start', params)
+  return post<StartDiscussionResult>('/discuss/start', undefined, params)
 }

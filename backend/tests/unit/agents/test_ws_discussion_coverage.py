@@ -312,6 +312,7 @@ async def test_ws_rejects_unknown_and_unauthorized_sessions_without_consuming_pe
     assert unknown.closed == [(4004, "session 不存在")]
 
     module.register_pending("owned", user_id=2, code="secret")
+    monkeypatch.setattr(module, "_can_access_session", lambda _user, _owner: False)
     unauthorized = FakeWebSocket(query=b"token=ok")
     await module.ws_discuss(unauthorized, "owned")
     assert unauthorized.closed == [(4003, "无权访问讨论会话")]
@@ -474,6 +475,7 @@ async def test_ws_existing_session_allows_admin_and_sends_server_heartbeat(
     bus = FakeDiscussionBus(session=session)
     _install_bus(monkeypatch, bus)
     monkeypatch.setattr(module, "_load_ws_user", lambda token: _user(1, role="admin"))
+    monkeypatch.setattr(module, "_can_access_session", lambda _user, _owner: True)
     heartbeat_calls = 0
 
     async def controlled_sleep(delay: float) -> None:

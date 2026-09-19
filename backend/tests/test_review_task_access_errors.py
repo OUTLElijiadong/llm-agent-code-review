@@ -27,7 +27,7 @@ def review_http():
     users = {name: User(id=index, username=f'review_access_{name}', password='isolated', role='user', status=1)
              for index, name in enumerate(('owner', 'member', 'outsider', 'no_permission', 'disabled'), 1)}
     users['disabled'].status = 0
-    role = Role(id=1, name='审查读取', code='review_read_test', status='active', is_builtin=0)
+    role = Role(id=1, name='普通用户', code='user', status='active', is_builtin=1)
     db.add_all([*users.values(), role])
     for index, code in enumerate(('review:view', 'issue:view'), 1):
         db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))

@@ -14,7 +14,7 @@ from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
 from app.core.error_handlers import register_handlers
 from app.models.beta_invite_code import BetaInviteCode  # noqa: F401
-from app.models.rbac import Role
+from app.models.rbac import Role, UserRole
 from app.models.user import User
 
 
@@ -33,8 +33,17 @@ def beta_client(monkeypatch):
     session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     db = session_factory()
     admin_user = User(username="admin", password="x", role="super_admin", status=1)
-    role = Role(name="普通成员", code="user", status="active", sort=100, is_builtin=1)
-    db.add_all([admin_user, role])
+    user_role = Role(name="普通成员", code="user", status="active", sort=100, is_builtin=1)
+    super_admin_role = Role(
+        name="超级管理员",
+        code="super_admin",
+        status="active",
+        sort=0,
+        is_builtin=1,
+    )
+    db.add_all([admin_user, user_role, super_admin_role])
+    db.flush()
+    db.add(UserRole(user_id=admin_user.id, role_id=super_admin_role.id))
     db.commit()
 
     app = FastAPI()

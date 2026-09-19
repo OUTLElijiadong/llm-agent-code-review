@@ -7,9 +7,16 @@ from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.models.review_rule import ReviewRule
 from app.models.user import User
 from app.schemas.rule import RuleIn, RuleUpdateIn
+from app.services import rbac_service
 
 
-def _ensure_can_mutate(user: User, rule: ReviewRule, *, allow_builtin_for_admin: bool = True) -> None:
+def _ensure_can_mutate(
+    db: Session,
+    user: User,
+    rule: ReviewRule,
+    *,
+    allow_builtin_for_admin: bool = True,
+) -> None:
     """规则写操作统一鉴权
 
     - 管理员: 可操作全部规则(内置规则的启停由管理员统一治理)。
@@ -25,7 +32,7 @@ def _ensure_can_mutate(user: User, rule: ReviewRule, *, allow_builtin_for_admin:
         ConflictError: 内置规则不可改/删。
     """
     is_global = rule.is_builtin or rule.user_id is None
-    if user.role in {"admin", "super_admin"}:
+    if rbac_service.is_admin_user(db, int(user.id)):
         if is_global and not allow_builtin_for_admin:
             raise ConflictError("不可修改内置规则", code=40901)
         return
@@ -92,7 +99,7 @@ def toggle_rule(db: Session, user: User, rule_id: int, enabled: int) -> None:
     if not rule:
         raise NotFoundError("规则不存在", code=40400)
     # 启停允许管理员操作内置规则(全局治理),普通用户仅限自有规则
-    _ensure_can_mutate(user, rule, allow_builtin_for_admin=True)
+    _ensure_can_mutate(db, user, rule, allow_builtin_for_admin=True)
     rule.enabled = enabled
     db.commit()
 
@@ -127,7 +134,7 @@ def update_rule(db: Session, user: User, rule_id: int, payload: RuleUpdateIn) ->
     if not rule:
         raise NotFoundError("规则不存在", code=40400)
     # 内置规则任何人都不可改;自定义规则仅创建者或管理员可改
-    _ensure_can_mutate(user, rule, allow_builtin_for_admin=False)
+    _ensure_can_mutate(db, user, rule, allow_builtin_for_admin=False)
     if payload.rule_name is not None:
         rule.rule_name = payload.rule_name
     if payload.rule_type is not None:
@@ -147,6 +154,6 @@ def delete_rule(db: Session, user: User, rule_id: int) -> None:
     if not rule:
         raise NotFoundError("规则不存在", code=40400)
     # 自定义规则仅创建者或管理员可删
-    _ensure_can_mutate(user, rule, allow_builtin_for_admin=False)
+    _ensure_can_mutate(db, user, rule, allow_builtin_for_admin=False)
     db.delete(rule)
     db.commit()

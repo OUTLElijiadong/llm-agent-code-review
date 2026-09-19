@@ -1,8 +1,11 @@
 """精确根任务外键、执行尝试与未知用量回归。"""
 
+from datetime import datetime, timezone
+
 import httpx
 
 from app.ai.deepseek_agent import DeepSeekAgent
+from app.models.agent_mesh import AgentMeshConversation
 from app.models.ai_call_log import AiCallLog
 
 
@@ -217,6 +220,15 @@ async def test_nested_run_persists_root_across_checkpoint_reconstruction(db):
     from app.services.deepseek_responses_runtime import RunCheckpoint
 
     root = _run(db)
+    db.add(AgentMeshConversation(
+        user_id=7,
+        surface="user",
+        session_key="child-session",
+        title="子运行",
+        status="active",
+        last_seen_at=datetime.now(timezone.utc),
+    ))
+    db.commit()
     with usage_context(7, {"root_agent_run_id": root.id, "agent_run_id": root.id}):
         store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="child-session")
         assert await store.create(RunCheckpoint(run_id="persist-child", model="unit", transcript=[], tools=[]))

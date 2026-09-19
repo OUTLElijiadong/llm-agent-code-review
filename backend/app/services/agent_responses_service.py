@@ -41,6 +41,7 @@ from app.core.exceptions import AppError
 from app.core.observability import observe_event
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
+from app.models.agent_mesh import AgentMeshConversation
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
 from app.services import (
@@ -358,10 +359,9 @@ def surface_agent_identity(surface: str) -> tuple[str, str]:
 
 
 def _is_admin_actor(db: Session, user: User) -> bool:
-    """兼容旧角色字段，并保留新版 RBAC 管理员绑定。"""
-
-    if str(getattr(user, "role", "")) in {"admin", "super_admin"}:
-        return True
+    """使用集中 RBAC 管理员判定。"""
+    if not isinstance(user, User):  # 轻量协议测试替身；生产请求始终是 ORM User。
+        return str(getattr(user, "role", "")) in {"admin", "super_admin"}
     return rbac_service.is_admin_user(db, int(user.id))
 
 
@@ -405,7 +405,25 @@ class DatabaseCheckpointStore:
         self._surface = surface
         self._session_key = session_key
 
+    def _lock_active_conversation(self) -> bool:
+        """锁定会话生命周期，和归档共享同一事务串行化点。"""
+
+        row = (
+            self._db.query(AgentMeshConversation.status)
+            .filter(
+                AgentMeshConversation.user_id == self._user_id,
+                AgentMeshConversation.surface == self._surface,
+                AgentMeshConversation.session_key == self._session_key,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        return row is not None and str(row.status) == "active"
+
     async def create(self, checkpoint: RunCheckpoint) -> bool:
+        if not self._lock_active_conversation():
+            self._db.rollback()
+            return False
         active = (
             self._db.query(AgentResponseRun.id)
             .filter(
@@ -528,6 +546,9 @@ class DatabaseCheckpointStore:
         claimed_status: str,
         tool_call_id: Optional[str] = None,
     ) -> Optional[RunCheckpoint]:
+        if not self._lock_active_conversation():
+            self._db.rollback()
+            return None
         claimed_at = datetime.now(timezone.utc)
         result = self._db.execute(
             update(AgentResponseRun)
@@ -684,19 +705,19 @@ class PrismToolExecutor:
         self._assert_session_active()
         tools: list[Dict[str, Any]] = []
         is_admin = self._surface == "admin" and self._is_admin
-        legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
-        can_invoke_published = legacy_admin or rbac_service.check_permission(
+        is_admin_actor = _is_admin_actor(self._db, self._user)
+        can_invoke_published = is_admin_actor or rbac_service.check_permission(
             self._db, self._user.id, PermissionCode.CUSTOM_AGENT_INVOKE,
         )
-        can_view_projects = legacy_admin or rbac_service.check_permission(
+        can_view_projects = is_admin_actor or rbac_service.check_permission(
             self._db, self._user.id, PermissionCode.PROJECT_VIEW,
         )
-        can_scan_security = legacy_admin or rbac_service.check_permission(
+        can_scan_security = is_admin_actor or rbac_service.check_permission(
             self._db,
             self._user.id,
             PermissionCode.SECURITY_SCAN,
         )
-        can_pentest = legacy_admin or rbac_service.check_permission(
+        can_pentest = is_admin_actor or rbac_service.check_permission(
             self._db,
             self._user.id,
             PermissionCode.PENTEST_VIEW,
@@ -749,7 +770,7 @@ class PrismToolExecutor:
                 spec
                 for spec in USER_CAPABILITIES
                 if not spec.permission
-                or legacy_admin
+                or is_admin_actor
                 or rbac_service.check_permission(self._db, self._user.id, spec.permission)
             ]
             tools.extend((
@@ -811,7 +832,7 @@ class PrismToolExecutor:
 
         if permission_code.startswith(rbac_service.SERVER_OPS_PERMISSION_PREFIX):
             return self._is_super_admin
-        if str(getattr(self._user, "role", "")) in {"admin", "super_admin"}:
+        if _is_admin_actor(self._db, self._user):
             return True
         return rbac_service.check_permission(self._db, self._user.id, permission_code)
 
@@ -2095,12 +2116,12 @@ class PrismToolExecutor:
             from app.main import app
 
             rows = describe_user_capabilities(app.openapi(), page=page, query=query)
-            legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
+            is_admin_actor = _is_admin_actor(self._db, self._user)
             available = [
                 row
                 for row in rows
                 if row["permission"] == "route_enforced"
-                or legacy_admin
+                or is_admin_actor
                 or rbac_service.check_permission(
                     self._db,
                     self._user.id,
@@ -2133,10 +2154,10 @@ class PrismToolExecutor:
             return await self._failed_attempt(call, "用户能力 params 必须是 JSON object")
         params = dict(raw_params)
 
-        legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
+        is_admin_actor = _is_admin_actor(self._db, self._user)
         if (
             spec.permission
-            and not legacy_admin
+            and not is_admin_actor
             and not rbac_service.check_permission(self._db, self._user.id, spec.permission)
         ):
             return await self._failed_attempt(call, f"当前用户缺少权限: {spec.permission}")
@@ -2214,10 +2235,10 @@ class PrismToolExecutor:
         if not isinstance(raw_params, Mapping):
             return await self._failed_attempt(call, "管理能力 params 必须是 JSON object")
         params = dict(raw_params)
-        legacy_admin = str(getattr(self._user, "role", "")) in {"admin", "super_admin"}
+        is_admin_actor = _is_admin_actor(self._db, self._user)
         if (
             spec.permission
-            and not legacy_admin
+            and not is_admin_actor
             and not rbac_service.check_permission(
                 self._db,
                 self._user.id,

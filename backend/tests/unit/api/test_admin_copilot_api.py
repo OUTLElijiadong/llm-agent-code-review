@@ -33,3 +33,26 @@ def test_legacy_template_chat_is_gone(db, admin_user):
 
     assert response.status_code == 410
     assert response.json()["detail"] == "旧管理副驾驶协议已停用，请使用 /api/agent-responses/stream"
+
+
+def test_legacy_history_is_gone_and_does_not_create_session(db, admin_user):
+    from app.models.admin_chat import AdminChatSession
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        before = db.query(AdminChatSession).count()
+        response = TestClient(app).get(
+            "/api/admin/copilot/history",
+            params={"session_id": "legacy-session-001"},
+        )
+        after = db.query(AdminChatSession).count()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_admin, None)
+
+    assert response.status_code == 410
+    assert after == before

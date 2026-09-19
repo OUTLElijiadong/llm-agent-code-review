@@ -49,6 +49,26 @@ export interface AgentMeshDiscovery {
   by_kind: Record<string, number>
 }
 
+export type AgentMeshConversationStatus = 'active' | 'archived'
+
+/** 当前登录账号的服务端会话摘要。 */
+export interface AgentMeshConversation {
+  session_id: string
+  surface: AgentMeshSurface
+  title: string
+  status: AgentMeshConversationStatus
+  last_seen_at: string
+  active_run_id?: string
+  active_run_status?: string
+}
+
+export interface AgentMeshConversationPage {
+  items: AgentMeshConversation[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export function heartbeatAgentMesh(input: {
   surface: AgentMeshSurface
   session_id: string
@@ -64,6 +84,31 @@ export function listAgentMeshAgents(surface?: AgentMeshSurface): Promise<AgentMe
 }
 
 /**
+ * 从服务端读取当前账号的会话目录。账号范围由后端从登录态确定，
+ * 前端不传 user_id，防止跨账号查询。
+ */
+export function listAgentMeshConversations(input: {
+  surface: AgentMeshSurface
+  status: AgentMeshConversationStatus
+  query?: string
+  limit?: number
+  offset?: number
+}): Promise<AgentMeshConversationPage> {
+  return get<AgentMeshConversationPage>('/agent-mesh/conversations', input)
+}
+
+/** 恢复当前账号已归档的会话。 */
+export function restoreAgentMeshConversation(
+  surface: AgentMeshSurface,
+  sessionId: string,
+): Promise<AgentMeshConversation> {
+  return post<AgentMeshConversation>('/agent-mesh/conversations/restore', {
+    surface,
+    session_id: sessionId,
+  })
+}
+
+/**
  * 目标会话已归档/未注册(或表面归属不符)时的后端业务码。
  * 轮询收件箱命中它是正常生命周期(空会话 24h 被服务端定时归档、他端删除等),
  * 不该弹全局红字;由桥接层静默并触发会话收敛。
@@ -75,7 +120,7 @@ export function pullAgentMeshInbox(
   sessionId: string,
   limit = 20,
 ): Promise<AgentMeshMessage[]> {
-  return get<AgentMeshMessage[]>('/agent-mesh/inbox', {
+  return post<AgentMeshMessage[]>('/agent-mesh/inbox/pull', undefined, {
     surface,
     session_id: sessionId,
     limit,

@@ -273,7 +273,7 @@ def test_archive_conversation_rejects_occupied_run(db):
         )
 
 
-def test_heartbeat_does_not_revive_archived_session(db):
+def test_heartbeat_rejects_archived_session_until_explicit_restore(db):
     from app.models.user import User
 
     row = _conversation(db, session_key="session-archived")
@@ -282,15 +282,33 @@ def test_heartbeat_does_not_revive_archived_session(db):
         db, user, surface="user", session_key="session-archived"
     )
 
+    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="已归档"):
+        agent_mesh_service.heartbeat(
+            db,
+            user,
+            surface="user",
+            session_key="session-archived",
+            title="不该复活",
+        )
+
+    db.refresh(row)
+    assert row.status == "archived"
+    assert row.title != "不该复活"
+
+    agent_mesh_service.restore_conversation(
+        db,
+        user,
+        surface="user",
+        session_key="session-archived",
+    )
     result = agent_mesh_service.heartbeat(
         db,
         user,
         surface="user",
         session_key="session-archived",
-        title="不该复活",
+        title="已显式恢复",
     )
-
     db.refresh(row)
-    assert row.status == "archived"
-    assert row.title != "不该复活"
-    assert result["status"] in {"online", "offline"}
+    assert row.status == "active"
+    assert row.title == "已显式恢复"
+    assert result["lifecycle_status"] == "active"

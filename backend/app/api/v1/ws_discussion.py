@@ -31,6 +31,7 @@ from urllib.parse import parse_qs
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
+from sqlalchemy.orm import Session
 
 from app.agents.discussion_bus import DiscussionBus
 from app.core.database import SessionLocal
@@ -130,7 +131,7 @@ def _token_from_query(websocket: WebSocket) -> str | None:
     return tokens[0] if tokens else None
 
 
-def _can_access_session(user: User, owner_user_id: int) -> bool:
+def _can_access_session(user: User, owner_user_id: int, db: Session | None = None) -> bool:
     """判断当前用户是否可订阅指定讨论会话。
 
     Args:
@@ -142,7 +143,19 @@ def _can_access_session(user: User, owner_user_id: int) -> bool:
     """
     if owner_user_id <= 0:
         return False
-    return user.role in {"admin", "super_admin"} or user.id == owner_user_id
+    if user.id == owner_user_id:
+        return True
+    from app.services.rbac_service import is_admin_user
+
+    if db is not None:
+        return is_admin_user(db, int(user.id))
+    try:
+        with SessionLocal() as auth_db:
+            return is_admin_user(auth_db, int(user.id))
+    except Exception as exc:
+        # WebSocket 不得在 RBAC 存储不可用时回退信任 JWT 内的旧角色。
+        logger.warning("[WS] RBAC 会话授权校验失败 user={} error={}", user.id, exc)
+        return False
 
 
 def _load_ws_user(token: str) -> User | None:

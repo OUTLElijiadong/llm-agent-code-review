@@ -21,6 +21,7 @@ from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
+from app.services import rbac_service
 from app.services.report_exporter import build_report_score_facts
 
 
@@ -56,7 +57,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
         (ReviewTask.status == "success")
         | ((ReviewTask.status == "failed") & (ReviewTask.review_type == "sandbox_test"))
     )
-    if user.role not in {"admin", "super_admin"}:
+    if not rbac_service.is_admin_user(db, int(user.id)):
         q = q.filter(ReviewTask.user_id == user.id)
     if project_id:
         q = q.filter(ReviewTask.project_id == project_id)
@@ -101,7 +102,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
     task = db.get(ReviewTask, task_id)
     if not is_report_available(task):
         raise NotFoundError("报告不存在", code=40400)
-    if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
         raise NotFoundError("报告不存在", code=40400)
 
     project = db.get(Project, task.project_id)
@@ -537,7 +538,7 @@ def delete_report(db: Session, user: User, task_id: int) -> None:
     task = db.get(ReviewTask, task_id)
     if not task:
         raise NotFoundError("报告不存在", code=40400)
-    if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
         raise ForbiddenError("无权限删除此报告", code=40300)
     task.status = "deleted"
     # 渗透报告删除联动: 清空委托的 report_task_id, 防止详情页"查看报告"跳 404

@@ -14,6 +14,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.core.pagination import Pagination
 from app.models.maintenance_ticket import MaintenanceTicket
 from app.models.user import User
+from app.services.rbac_service import is_admin_user
 
 _CATEGORIES = ("bug", "account", "feature", "performance", "other")
 _PRIORITIES = ("low", "medium", "high")
@@ -41,7 +42,7 @@ def list_tickets(db: Session, user: User, status: str = "", mine: bool = True,
                  page: int = 1, page_size: int = 20) -> dict:
     """列表。管理员 mine=False 时看全部;否则只看本人。"""
     q = db.query(MaintenanceTicket)
-    if user.role not in {"admin", "super_admin"} or mine:
+    if not is_admin_user(db, user.id) or mine:
         q = q.filter(MaintenanceTicket.user_id == user.id)
     if status:
         q = q.filter(MaintenanceTicket.status == status)
@@ -56,14 +57,14 @@ def get_ticket(db: Session, user: User, ticket_id: int) -> dict:
     ticket = db.get(MaintenanceTicket, ticket_id)
     if not ticket:
         raise NotFoundError("工单不存在", code=40400)
-    if ticket.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if ticket.user_id != user.id and not is_admin_user(db, user.id):
         raise ForbiddenError("无权查看该工单", code=40300)
     return _to_dict(ticket)
 
 
 def handle_ticket(db: Session, admin: User, ticket_id: int, payload: dict) -> dict:
     """管理员受理/回复/改状态"""
-    if admin.role not in {"admin", "super_admin"}:
+    if not is_admin_user(db, admin.id):
         raise ForbiddenError("需要管理员权限", code=40300)
     ticket = db.get(MaintenanceTicket, ticket_id)
     if not ticket:
@@ -89,7 +90,7 @@ def close_own_ticket(db: Session, user: User, ticket_id: int) -> dict:
     ticket = db.get(MaintenanceTicket, ticket_id)
     if not ticket:
         raise NotFoundError("工单不存在", code=40400)
-    if ticket.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if ticket.user_id != user.id and not is_admin_user(db, user.id):
         raise ForbiddenError("无权操作该工单", code=40300)
     ticket.status = "closed"
     db.commit()
@@ -98,7 +99,7 @@ def close_own_ticket(db: Session, user: User, ticket_id: int) -> dict:
 
 
 def stats_for_admin(db: Session, admin: User) -> dict:
-    if admin.role not in {"admin", "super_admin"}:
+    if not is_admin_user(db, admin.id):
         raise ForbiddenError("需要管理员权限", code=40300)
     out = {s: 0 for s in _USER_STATUS}
     for status, in db.query(MaintenanceTicket.status).all():

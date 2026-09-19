@@ -39,17 +39,15 @@ EXPECTED_PERMISSIONS = {
     "file:upload",
     "file:edit",
     "file:delete",
-    "file:download",
     "review:view",
-    "review:cancel",
     "issue:view",
-    "issue:handle",
-    "issue:batch",
     "report:view",
-    "report:export:json",
-    "report:export:html",
-    "security:view",
-    "agent:view",
+}
+FORBIDDEN_ELEVATED_PERMISSIONS = {
+    "agent_asset:approve", "agent_asset:publish", "agent_asset:disable", "agent_asset:rollback",
+    "pentest:authorize", "pentest:manage", "role:manage", "menu:manage",
+    "user:create", "user:update", "user:delete",
+    "server_ops:view", "server_ops:execute", "server_ops:critical",
 }
 READ_DEPENDENCIES = {
     "app.core.database.get_db",
@@ -89,12 +87,13 @@ def write_private(path, value, *, exclusive=False):
         os.fsync(stream.fileno())
 
 
-# 已独立复核的2026-09-12基线（含画像、头像、模型注册表）；合法删除路由时须复核并显式更新此门禁。
-MIN_ROUTE_METHODS = 325
+# 已独立复核的2026-09-19基线（含显式会话恢复、收件、浏览及已读动作）；
+# 合法删除路由时须复核并显式更新此门禁。
+MIN_ROUTE_METHODS = 332
 MIN_ENDPOINT_SOURCES = 42
 REQUIRED_ROUTES = {
     ("POST", "/api/auth/login"), ("POST", "/v1/responses"),
-    ("GET", "/api/discuss/start"), ("GET", "/api/review/tasks/{task_id}"),
+    ("POST", "/api/discuss/start"), ("GET", "/api/review/tasks/{task_id}"),
     ("GET", "/healthz"), ("GET", "/readyz"), ("GET", "/metrics"),
 }
 
@@ -399,8 +398,13 @@ class Runner:
         if account == "no_permission":
             self.check(roles == [] and permissions == [], "无权限账号无任何角色和权限")
         else:
-            self.check({role["code"] for role in roles} == {self.manifest["role_code"]}, f"{account}仅专用角色")
-            self.check(set(permissions) == EXPECTED_PERMISSIONS, f"{account}权限严格等于20个专用权限")
+            actual_permissions = set(permissions)
+            self.check({role["code"] for role in roles} == {"user"}, f"{account}仅内置普通用户角色")
+            self.check(EXPECTED_PERMISSIONS <= actual_permissions, f"{account}具备验收路径所需权限")
+            self.check(
+                not (FORBIDDEN_ELEVATED_PERMISSIONS & actual_permissions),
+                f"{account}不含管理员或评审员专属能力",
+            )
 
     def negative_matrix(self):
         for account, expected, field in (("anonymous", 401, "anonymous"), ("no_permission", 403, "no_permission")):
@@ -641,7 +645,12 @@ def main():
         parser.error("执行要求credentials、base-url、output")
     manifest = private_json(args.credentials)
     marker = manifest.get("marker", "")
-    if not marker.isalnum() or len(marker) > 16 or manifest.get("role_code") != f"qa_permission_{marker}":
+    if (
+        not marker.isalnum()
+        or len(marker) > 16
+        or manifest.get("role_code") != "user"
+        or manifest.get("role_origin") != "existing_builtin"
+    ):
         raise ValueError("凭据标记非法")
     if set(manifest.get("accounts", {})) != set(ACCOUNTS):
         raise ValueError("专用账号集合不匹配")

@@ -18,7 +18,7 @@ from app.models.project_source_archive import ProjectSourceArchive
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
-from app.services import project_source_revision_service
+from app.services import project_source_revision_service, rbac_service
 from app.services.project_member_service import (
     HIDDEN_PROJECT_STATUSES,
     ensure_owner_member,
@@ -118,12 +118,13 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             .all()
         )
 
+    is_admin = rbac_service.is_admin_user(db, int(user.id))
     items = []
     for row in rows:
         last_task = last_tasks.get(row.id)
         source_archive = source_archives.get(row.id)
         can_write = (
-            user.role in {"admin", "super_admin"}
+            is_admin
             or row.user_id == user.id
             or member_roles.get(row.id) == "owner"
         )

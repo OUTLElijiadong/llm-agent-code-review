@@ -44,7 +44,7 @@ from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
-from app.services import project_source_service
+from app.services import project_source_service, rbac_service
 from app.services.project_member_service import get_visible_project_ids, require_project_access
 from app.services.review_input_service import validate_review_input
 from app.utils.encoding_utils import MAX_AUDIT_TEXT_LINES_PER_FILE
@@ -1504,7 +1504,7 @@ class SecuritySentinelAgent(BaseAgent):
         top_n = max(1, min(200, top_n))
 
         q = self._db.query(Project).filter(Project.status == "active")
-        if self._user and self._user.role not in {"admin", "super_admin"}:
+        if self._user and not rbac_service.is_admin_user(self._db, int(self._user.id)):
             visible_project_ids, _scope = get_visible_project_ids(self._db, self._user)
             q = q.filter(Project.id.in_(visible_project_ids))
         projects = q.order_by(Project.id.asc()).all()

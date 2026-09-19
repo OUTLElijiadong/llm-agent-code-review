@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
+from app.models.rbac import Role, UserRole
 from app.models.user import User
 from app.schemas.agent_mesh import AgentMeshMessageIn
 from app.services import agent_mesh_dispatcher, agent_mesh_service
@@ -23,6 +24,8 @@ def _factory(tmp_path):
     AgentMeshMessage.__table__.create(engine)
     AgentMeshMessageEvent.__table__.create(engine)
     User.__table__.create(engine)
+    Role.__table__.create(engine)
+    UserRole.__table__.create(engine)
     return engine, sessionmaker(bind=engine, expire_on_commit=False)
 
 

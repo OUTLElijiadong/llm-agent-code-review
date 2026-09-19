@@ -245,12 +245,21 @@ def test_personal_language_distribution_intersects_visible_projects(db, role):
     assert derived["forum_posts"] == 1
 
 
-def _grant_report_permissions(db, user, *, domain_view=False, export_json=True):
-    user.role = "user"
-    role = Role(name=f"导出角色-{user.id}", code=f"export-role-{user.id}", status="active")
-    db.add(role)
-    db.flush()
-    db.add(UserRole(user_id=user.id, role_id=role.id))
+def _grant_report_permissions(db, user, *, role_code, domain_view=False, export_json=True):
+    assert role_code in {"user", "reviewer"}
+    user.role = role_code
+    role = db.query(Role).filter_by(code=role_code).one_or_none()
+    if role is None:
+        role = Role(
+            name="评审员" if role_code == "reviewer" else "普通用户",
+            code=role_code,
+            status="active",
+            is_builtin=1,
+        )
+        db.add(role)
+        db.flush()
+    if db.query(UserRole).filter_by(user_id=user.id, role_id=role.id).count() == 0:
+        db.add(UserRole(user_id=user.id, role_id=role.id))
     codes = [PermissionCode.REPORT_VIEW]
     if export_json:
         codes.append(PermissionCode.REPORT_EXPORT_JSON)
@@ -262,7 +271,8 @@ def _grant_report_permissions(db, user, *, domain_view=False, export_json=True):
             permission = Permission(code=code, name=code, module="report")
             db.add(permission)
             db.flush()
-        db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+        if db.query(RolePermission).filter_by(role_id=role.id, permission_id=permission.id).count() == 0:
+            db.add(RolePermission(role_id=role.id, permission_id=permission.id))
     db.commit()
 
 
@@ -270,7 +280,7 @@ def _grant_report_permissions(db, user, *, domain_view=False, export_json=True):
 def test_pentest_json_requires_existing_source_view_permission(export_context, domain_view):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, "pentest")
-    _grant_report_permissions(db, owner, domain_view=domain_view)
+    _grant_report_permissions(db, owner, role_code="reviewer", domain_view=domain_view)
 
     response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
     assert response.status_code == (200 if domain_view else 403)
@@ -280,9 +290,9 @@ def test_pentest_json_requires_existing_source_view_permission(export_context, d
 def test_domain_export_preserves_format_permission_and_report_owner_scope(export_context, source):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, source)
-    _grant_report_permissions(db, owner, domain_view=True, export_json=False)
+    _grant_report_permissions(db, owner, role_code="reviewer", domain_view=True, export_json=False)
     assert client.get(f"/api/reports/tasks/{task.id}/export?format=json").status_code == 403
-    _grant_report_permissions(db, other, domain_view=True)
+    _grant_report_permissions(db, other, role_code="user", domain_view=True)
     current["user"] = other
     response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
     assert response.status_code == 404

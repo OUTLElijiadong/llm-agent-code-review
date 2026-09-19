@@ -54,8 +54,8 @@ def test_runner_rejects_unsafe_base_url_before_output_or_network(tmp_path, url):
 def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
     plan = runner_module.build_plan()
     runner_module.validate_plan(plan, PATH.parents[1])
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 313
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 245
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 318
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 249
     plan["source_sha256"]["app/core/dependencies.py"] = "0" * 64
     with pytest.raises(ValueError, match="不匹配"):
         runner_module.validate_plan(plan, PATH.parents[1])
@@ -83,8 +83,13 @@ def test_runner_actual_login_permissions_crud_and_negative_matrix_without_networ
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
     marker = "localrunner"
-    manifest = {"marker": marker, "role_code": f"qa_permission_{marker}", "accounts": {}}
-    role = Role(name="真实登录验收", code=manifest["role_code"], status="active")
+    manifest = {
+        "marker": marker,
+        "role_code": "user",
+        "role_origin": "existing_builtin",
+        "accounts": {},
+    }
+    role = Role(name="普通用户", code="user", status="active", is_builtin=1)
     db.add(role)
     db.flush()
     for code in runner_module.EXPECTED_PERMISSIONS:

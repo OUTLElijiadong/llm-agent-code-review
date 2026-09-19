@@ -189,14 +189,11 @@ def _ensure_session(db: Session, team_user: User, *, surface: str, session_key: 
 
 
 def _is_admin(db: Session, user: User) -> bool:
-    if str(getattr(user, "role", "")) in {"admin", "super_admin"}:
-        return True
-    try:
-        from app.services.rbac_service import is_admin_user
+    from app.services.rbac_service import is_admin_user
 
-        return bool(is_admin_user(db, int(user.id)))
-    except Exception:  # pragma: no cover - 测试中的轻量 User 不一定有 RBAC 表
-        return False
+    if not isinstance(user, User):  # 轻量协议测试替身；生产请求始终是 ORM User。
+        return str(getattr(user, "role", "")) in {"admin", "super_admin"}
+    return bool(is_admin_user(db, int(user.id)))
 
 
 def _assert_surface(db: Session, user: User, surface: str) -> None:
@@ -264,7 +261,7 @@ def _validate_target(db: Session, user: User, address: str) -> tuple[str, Option
         )
         if version is None or release is None:
             raise AgentTeamValidationError(f"已发布 Agent {code} 缺少有效版本快照")
-        if str(getattr(user, "role", "")) not in {"admin", "super_admin"}:
+        if not _is_admin(db, user):
             from app.core.permission_codes import PermissionCode
             from app.services.rbac_service import check_permission
 

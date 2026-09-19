@@ -51,6 +51,13 @@ def get_feedback(feedback_id: int, db: Session = Depends(get_db),
     return Resp(data=FeedbackOut(**user_feedback_service.get_feedback(db, user, feedback_id)))
 
 
+@router.post("/{feedback_id}/read", response_model=Resp[FeedbackOut])
+def mark_feedback_read(feedback_id: int, db: Session = Depends(get_db),
+                       admin: User = Depends(require_admin)):
+    """显式标记反馈已读，避免 GET 详情产生写副作用。"""
+    return Resp(data=FeedbackOut(**user_feedback_service.mark_feedback_read(db, admin, feedback_id)))
+
+
 @router.put("/{feedback_id}/reply", response_model=Resp[FeedbackOut])
 def reply_feedback(feedback_id: int, payload: FeedbackReplyIn,
                    db: Session = Depends(get_db), admin: User = Depends(require_admin)):

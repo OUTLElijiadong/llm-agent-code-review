@@ -49,7 +49,7 @@ from app.schemas.agent import (
     SkillMetaOut,
 )
 from app.schemas.common import Resp
-from app.services import agent_service, skill_service
+from app.services import agent_service, rbac_service, skill_service
 
 router = APIRouter()
 _SSE_SESSION_CHECK_INTERVAL = 2.0
@@ -76,7 +76,7 @@ def get_usage(
     user: User = Depends(get_current_user),
 ):
     """每个代理的调用统计 (普通用户仅自己,管理员看全部)"""
-    user_id = None if user.role in {"admin", "super_admin"} else user.id
+    user_id = None if rbac_service.is_admin_user(db, user.id) else user.id
     rows = agent_service.get_usage(db, user_id)
     return Resp(data=[AgentUsageOut(**r) for r in rows])
 
@@ -88,7 +88,7 @@ def get_overview(
     user: User = Depends(get_current_user),
 ):
     """Agent 中心首屏一次性返回:画像 + 映射 + 统计"""
-    user_id = None if user.role in {"admin", "super_admin"} else user.id
+    user_id = None if rbac_service.is_admin_user(db, user.id) else user.id
     data = agent_service.get_overview(db, user_id)
     return Resp(data=AgentOverviewOut(**data))
 
@@ -106,7 +106,7 @@ def list_runtime_agents(
 
     数据源是 AgentRegistry.instance(),确保 UI 显示数量与后端实际运行 Agent 一致。
     """
-    user_id = None if user.role in {"admin", "super_admin"} else user.id
+    user_id = None if rbac_service.is_admin_user(db, user.id) else user.id
     rows = agent_service.get_runtime_agents(db, user_id)
     return Resp(data=[AgentRuntimeOut(**r) for r in rows])
 
@@ -118,7 +118,7 @@ def get_runtime_summary(
     db: Session = Depends(get_db),
 ):
     """返回内置注册中心与已发布自定义 Agent 的合并汇总(普通成员按可见范围过滤)。"""
-    user_id = None if user.role in {"admin", "super_admin"} else user.id
+    user_id = None if rbac_service.is_admin_user(db, user.id) else user.id
     return Resp(data=AgentRuntimeSummaryOut(**agent_service.get_runtime_summary(db, user_id)))
 
 
@@ -130,7 +130,7 @@ def get_situation(
     user: User = Depends(get_current_user),
 ):
     """v2.0: 态势感知面板数据(在岗/今日调用/N 分钟波形/热点)"""
-    user_id = None if user.role in {"admin", "super_admin"} else user.id
+    user_id = None if rbac_service.is_admin_user(db, user.id) else user.id
     data = agent_service.get_situation(db, user_id, minutes)
     return Resp(data=AgentSituationOut(**data))
 
@@ -190,7 +190,7 @@ async def stream_agent_events(
     """
     raw_token = _resolve_sse_token(authorization, token)
     current_user = _resolve_sse_user(authorization, token, db)
-    is_admin = current_user.role in {"admin", "super_admin"}
+    is_admin = rbac_service.is_admin_user(db, current_user.id)
     current_user_id = current_user.id
 
     def _should_deliver(ev) -> bool:
@@ -291,7 +291,7 @@ def submit_clarification(
     if pending is None:
         return Resp(code=41001, message="追问已过期或不存在,请重新提问", data={})
     owner_user_id = pending.get("user_id")
-    if owner_user_id is not None and owner_user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if owner_user_id is not None and owner_user_id != user.id and not rbac_service.is_admin_user(db, user.id):
         raise ForbiddenError("无权回填此追问", code=40300)
     reserved = store.reserve(payload.clarify_id, expected_data=pending)
     if reserved is None:

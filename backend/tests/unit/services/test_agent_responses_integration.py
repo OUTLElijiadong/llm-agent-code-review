@@ -25,6 +25,7 @@ from app.models.agent_governance import (
     PolicyDecisionLog,
     PolicyRule,
 )
+from app.models.agent_mesh import AgentMeshConversation
 from app.models.agent_multimodal import AgentMultimodalAsset
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.services import agent_responses_service as service_module
@@ -106,6 +107,7 @@ def db():
     from app.models.system_config import SystemConfig
 
     SystemConfig.__table__.create(engine)
+    AgentMeshConversation.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
     AgentMultimodalAsset.__table__.create(engine)
     AgentToolExecution.__table__.create(engine)
@@ -120,6 +122,28 @@ def db():
         yield session
     finally:
         session.close()
+
+
+def _activate_conversation(db, *, user_id: int, surface: str, session_key: str) -> AgentMeshConversation:
+    row = db.query(AgentMeshConversation).filter_by(
+        user_id=user_id,
+        surface=surface,
+        session_key=session_key,
+    ).one_or_none()
+    if row is None:
+        row = AgentMeshConversation(
+            user_id=user_id,
+            surface=surface,
+            session_key=session_key,
+            title="测试会话",
+            status="active",
+            last_seen_at=datetime.now(timezone.utc),
+        )
+        db.add(row)
+    else:
+        row.status = "active"
+    db.commit()
+    return row
 
 
 @pytest.mark.asyncio
@@ -143,6 +167,7 @@ async def test_database_checkpoint_store_is_owner_and_session_isolated(db) -> No
 
 @pytest.mark.asyncio
 async def test_database_checkpoint_store_cancelled_is_terminal_against_write_back(db) -> None:
+    _activate_conversation(db, user_id=7, surface="user", session_key="session-cancel-race")
     drive_store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-cancel-race")
     cancel_store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-cancel-race")
     checkpoint = RunCheckpoint(
@@ -181,11 +206,13 @@ async def test_cancelled_is_terminal_across_independent_sessions(tmp_path) -> No
     from app.models.system_config import SystemConfig
 
     SystemConfig.__table__.create(engine)
+    AgentMeshConversation.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     driver_db = factory()
     cancel_db = factory()
     try:
+        _activate_conversation(driver_db, user_id=7, surface="user", session_key="session-x")
         driver_store = DatabaseCheckpointStore(driver_db, user_id=7, surface="user", session_key="session-x")
         cancel_store = DatabaseCheckpointStore(cancel_db, user_id=7, surface="user", session_key="session-x")
         checkpoint = RunCheckpoint(
@@ -221,6 +248,7 @@ async def test_cancelled_is_terminal_across_independent_sessions(tmp_path) -> No
 
 @pytest.mark.asyncio
 async def test_database_checkpoint_store_blocks_new_run_while_session_is_pending(db) -> None:
+    _activate_conversation(db, user_id=7, surface="admin", session_key="session-single-active")
     store = DatabaseCheckpointStore(db, user_id=7, surface="admin", session_key="session-single-active")
     first = RunCheckpoint(
         run_id="run_first_pending",
@@ -266,6 +294,7 @@ async def test_database_checkpoint_store_preserves_payload_larger_than_mysql_tex
 
 @pytest.mark.asyncio
 async def test_database_checkpoint_store_claim_is_compare_and_swap(db) -> None:
+    _activate_conversation(db, user_id=7, surface="admin", session_key="session-claim")
     first_store = DatabaseCheckpointStore(db, user_id=7, surface="admin", session_key="session-claim")
     second_store = DatabaseCheckpointStore(db, user_id=7, surface="admin", session_key="session-claim")
     checkpoint = RunCheckpoint(
@@ -297,6 +326,71 @@ async def test_database_checkpoint_store_claim_is_compare_and_swap(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_database_checkpoint_store_rejects_create_after_conversation_archived(db) -> None:
+    conversation = _activate_conversation(
+        db,
+        user_id=7,
+        surface="user",
+        session_key="session-archive-before-create",
+    )
+    conversation.status = "archived"
+    db.commit()
+
+    created = await DatabaseCheckpointStore(
+        db,
+        user_id=7,
+        surface="user",
+        session_key="session-archive-before-create",
+    ).create(
+        RunCheckpoint(
+            run_id="run_archive_before_create",
+            model="deepseek-v4-flash",
+            transcript=[{"role": "user", "content": "旧标签页继续运行"}],
+            tools=[],
+        )
+    )
+
+    assert created is False
+    assert db.query(AgentResponseRun).filter_by(run_id="run_archive_before_create").count() == 0
+
+
+@pytest.mark.asyncio
+async def test_database_checkpoint_store_rejects_resume_after_conversation_archived(db) -> None:
+    conversation = _activate_conversation(
+        db,
+        user_id=7,
+        surface="user",
+        session_key="session-archive-before-resume",
+    )
+    store = DatabaseCheckpointStore(
+        db,
+        user_id=7,
+        surface="user",
+        session_key="session-archive-before-resume",
+    )
+    checkpoint = RunCheckpoint(
+        run_id="run_archive_before_resume",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "失败后重试"}],
+        tools=[],
+        status=FAILED,
+    )
+    assert await store.create(checkpoint) is True
+    conversation = db.query(AgentMeshConversation).filter_by(id=conversation.id).one()
+    conversation.status = "archived"
+    db.commit()
+
+    claimed = await store.claim(
+        checkpoint.run_id,
+        expected_status=FAILED,
+        claimed_status="running",
+    )
+
+    assert claimed is None
+    assert db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one().status == FAILED
+
+
+@pytest.mark.asyncio
 async def test_database_checkpoint_store_claim_is_atomic_across_sessions(tmp_path) -> None:
     engine = create_engine(
         f"sqlite:///{tmp_path / 'response-retry-claim.db'}",
@@ -305,10 +399,12 @@ async def test_database_checkpoint_store_claim_is_atomic_across_sessions(tmp_pat
     from app.models.system_config import SystemConfig
 
     SystemConfig.__table__.create(engine)
+    AgentMeshConversation.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     seed = session_factory()
     try:
+        _activate_conversation(seed, user_id=7, surface="admin", session_key="session-retry-claim")
         await DatabaseCheckpointStore(
             seed,
             user_id=7,
@@ -429,6 +525,12 @@ async def test_retry_reuses_persisted_tool_result_when_checkpoint_output_was_los
         error="Worker 在工具账本落库后、检查点输出落库前中断",
     )
     store = DatabaseCheckpointStore(
+        db,
+        user_id=7,
+        surface="admin",
+        session_key="session-persisted-tool-recovery",
+    )
+    _activate_conversation(
         db,
         user_id=7,
         surface="admin",
@@ -908,6 +1010,8 @@ def test_session_recovery_restores_stale_approval_transition(db) -> None:
     )
     db.commit()
 
+    assert api_module.sweep_stale_active_runs(db, max_age_seconds=1) == 1
+
     response = api_module.get_agent_response_session(
         surface="admin",
         session_id="session-stale-approval",
@@ -993,6 +1097,8 @@ def test_session_recovery_fails_stale_running_work_instead_of_hanging(db) -> Non
     )
     db.commit()
 
+    assert api_module.sweep_stale_active_runs(db, max_age_seconds=1) == 1
+
     response = api_module.get_agent_response_session(
         surface="user",
         session_id="session-stale-running",
@@ -1003,6 +1109,34 @@ def test_session_recovery_fails_stale_running_work_instead_of_hanging(db) -> Non
     assert response.data["run"]["status"] == "failed"
     assert "安全终止" in response.data["run"]["error"]
     assert response.data["pending"] is None
+
+
+def test_session_get_does_not_mutate_stale_run(db) -> None:
+    """GET 仅返回账本快照；僵尸恢复由显式后台 sweep 承担。"""
+    row = AgentResponseRun(
+        run_id="run_stale_readonly",
+        user_id=7,
+        surface="user",
+        session_key="session-stale-readonly",
+        status="running",
+        checkpoint_json=json.dumps({"status": "running", "transcript": []}),
+        update_time=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+    db.add(row)
+    db.commit()
+    version = int(row.version or 0)
+
+    response = api_module.get_agent_response_session(
+        surface="user",
+        session_id="session-stale-readonly",
+        db=db,
+        user=SimpleNamespace(id=7, role="user"),
+    )
+
+    db.refresh(row)
+    assert response.data["run"]["status"] == "running"
+    assert row.status == "running"
+    assert int(row.version or 0) == version
 
 
 class EmptyMcp:
@@ -2219,6 +2353,28 @@ async def _collect_stream(response: Any) -> str:
     async for chunk in response.body_iterator:
         chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
     return "".join(chunks)
+
+
+@pytest.mark.asyncio
+async def test_api_stream_rejects_archived_session_before_start(monkeypatch) -> None:
+    """归档会话不能通过旧标签页绕过显式恢复与活动会话上限。"""
+
+    def reject_archived(*_args, **_kwargs):
+        raise api_module.agent_mesh_service.AgentMeshStateError("会话已归档")
+
+    monkeypatch.setattr(api_module.agent_mesh_service, "heartbeat", reject_archived)
+    request = api_module.AgentResponsesRequest(
+        surface="user",
+        session_id="session-archived",
+        messages=[{"role": "user", "content": "继续执行"}],
+    )
+
+    with pytest.raises(api_module.ConflictError, match="会话已归档"):
+        await api_module.stream_agent_response(
+            request,
+            db=SimpleNamespace(get_bind=lambda: None),
+            user=SimpleNamespace(id=7, role="user"),
+        )
 
 
 @pytest.mark.asyncio

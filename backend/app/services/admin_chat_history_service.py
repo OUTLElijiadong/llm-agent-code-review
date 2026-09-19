@@ -101,7 +101,18 @@ def list_history(
     after_id: int = 0,
     limit: int = 200,
 ) -> dict[str, Any]:
-    session = get_or_create_session(db, admin, session_key)
+    # 历史读取必须是纯读；不存在的会话不应因 GET 被创建。
+    session = (
+        db.query(AdminChatSession)
+        .filter(AdminChatSession.user_id == admin.id, AdminChatSession.session_key == session_key)
+        .first()
+    )
+    if session is None:
+        return {
+            "session_id": session_key,
+            "messages": [],
+            "last_message_id": after_id,
+        }
     query = db.query(AdminChatMessage).filter(AdminChatMessage.session_id == session.id)
     if after_id > 0:
         query = query.filter(AdminChatMessage.id > after_id)

@@ -1,8 +1,11 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const meshApi = vi.hoisted(() => ({ list: vi.fn() }))
-vi.mock('@/api/agentMesh', () => ({ listAgentMeshAgents: meshApi.list }))
+const meshApi = vi.hoisted(() => ({ list: vi.fn(), restore: vi.fn() }))
+vi.mock('@/api/agentMesh', () => ({
+  listAgentMeshConversations: meshApi.list,
+  restoreAgentMeshConversation: meshApi.restore,
+}))
 
 import AgentSessionSwitcher from './AgentSessionSwitcher.vue'
 import {
@@ -45,6 +48,7 @@ beforeEach(() => {
   window.localStorage.clear()
   window.sessionStorage.clear()
   meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
+  meshApi.restore.mockReset().mockResolvedValue({})
 })
 
 function lastSelect(wrapper: VueWrapper): string | undefined {
@@ -241,7 +245,7 @@ describe('AgentSessionSwitcher.ensureFreshOnOpen', () => {
 })
 
 describe('AgentSessionSwitcher Agent Mesh discovery', () => {
-  it('只合并当前 surface 的服务端会话并保留本地标题', async () => {
+  it('只合并当前 surface 的服务端会话并优先显示服务端摘要', async () => {
     seedIndex([
       { id: 'user-local', title: '本地命名', createdAt: 10 },
       { id: 'user-stale', title: '不应继续显示', createdAt: 9 },
@@ -263,11 +267,13 @@ describe('AgentSessionSwitcher Agent Mesh discovery', () => {
     await wrapper.find('.session-current').trigger('click')
 
     expect(wrapper.findAll('.session-item')).toHaveLength(2)
-    expect(wrapper.text()).toContain('本地命名')
+    expect(wrapper.text()).toContain('服务端名称')
+    expect(wrapper.text()).not.toContain('本地命名')
     expect(wrapper.text()).toContain('另一会话')
     expect(wrapper.text()).not.toContain('不应继续显示')
     expect(wrapper.text()).not.toContain('管理会话')
-    expect(meshApi.list).toHaveBeenCalledOnce()
+    // 挂载先同步一次，用户展开目录时再次刷新，保证跨设备历史不是旧快照。
+    expect(meshApi.list).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 
@@ -288,6 +294,53 @@ describe('AgentSessionSwitcher Agent Mesh discovery', () => {
 
     expect(wrapper.text()).toContain('管理会话')
     expect(wrapper.text()).not.toContain('用户会话')
+    wrapper.unmount()
+  })
+
+  it('已归档目录来自服务端，恢复后切回活动会话并选中', async () => {
+    seedIndex([{ id: 'user-active', title: '当前对话', createdAt: 10 }])
+    meshApi.list.mockImplementation((input: { status: 'active' | 'archived'; query?: string }) => {
+      if (input.status === 'archived') {
+        return Promise.resolve({
+          items: [{
+            session_id: 'user-archived', surface: 'user', title: '支付模块历史审查', status: 'archived',
+            last_seen_at: '2026-08-12T00:00:00Z',
+          }],
+          total: 1, limit: 50, offset: 0,
+        })
+      }
+      const restored = meshApi.restore.mock.calls.length > 0
+      return Promise.resolve({
+        items: [
+          { session_id: 'user-active', surface: 'user', title: '当前对话', status: 'active', last_seen_at: '2026-08-13T00:00:00Z' },
+          ...(restored ? [{ session_id: 'user-archived', surface: 'user', title: '支付模块历史审查', status: 'active', last_seen_at: '2026-08-12T00:00:00Z' }] : []),
+        ],
+        total: restored ? 2 : 1, limit: 20, offset: 0,
+      })
+    })
+    meshApi.restore.mockResolvedValue({
+      session_id: 'user-archived', surface: 'user', title: '支付模块历史审查', status: 'active', last_seen_at: '2026-08-12T00:00:00Z',
+    })
+
+    const wrapper = mount(AgentSessionSwitcher, {
+      props: { surface: 'user', storageKey: 'user', accountKey: 7, legacyKey: 'legacy', idPrefix: 'user', discoverRemote: true },
+    })
+    await flushPromises()
+    await wrapper.find('.session-current').trigger('click')
+    await wrapper.findAll('.session-status-tab')[1].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('支付模块历史审查')
+    expect(meshApi.list).toHaveBeenCalledWith(expect.objectContaining({
+      surface: 'user', status: 'archived', limit: 50, offset: 0,
+    }))
+
+    await wrapper.find('.session-restore').trigger('click')
+    await flushPromises()
+
+    expect(meshApi.restore).toHaveBeenCalledWith('user', 'user-archived')
+    expect(lastSelect(wrapper)).toBe('user-archived')
+    expect(loadAgentChatSessions('user:account:7', 'legacy', 'user').map((item) => item.id)).toContain('user-archived')
     wrapper.unmount()
   })
 })

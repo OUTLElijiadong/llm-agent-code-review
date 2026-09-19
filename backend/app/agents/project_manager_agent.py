@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.models.project import Project
 from app.schemas.project import ProjectIn
-from app.services import project_service
+from app.services import project_service, rbac_service
 
 
 @dataclass
@@ -87,7 +87,10 @@ class ProjectManagerAgent(BaseAgent):
             self._ops.db, user=self._user, keyword=keyword,
             language=language, status=status, page=page, page_size=page_size,
         )
-        is_admin = bool(self._user and self._user.role in {"admin", "super_admin"})
+        is_admin = bool(
+            self._user
+            and rbac_service.is_admin_user(self._ops.db, int(self._user.id))
+        )
         items = []
         for i in result["items"]:
             if is_admin:
@@ -137,7 +140,7 @@ class ProjectManagerAgent(BaseAgent):
         """
         if self._ops is None or self._user is None:
             return "DB 或用户上下文未注入"
-        if self._user.role not in {"admin", "super_admin"}:
+        if not rbac_service.is_admin_user(self._ops.db, int(self._user.id)):
             return None
         project = self._ops.db.get(Project, project_id)
         if project is None or project.status == "deleted":

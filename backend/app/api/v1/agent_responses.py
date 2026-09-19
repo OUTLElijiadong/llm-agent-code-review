@@ -11,19 +11,19 @@ from typing import Any, AsyncIterator, List, Literal, Mapping, Optional
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.agent_mesh import AgentMeshMessage
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
-from app.schemas.common import Resp
+from app.schemas.common import Resp, StrictInputModel
 from app.services import agent_mesh_service, rbac_service
 from app.services.agent_responses_service import (
     AgentResponsesService,
@@ -34,6 +34,7 @@ from app.services.agent_responses_service import (
 )
 from app.services.ai_usage_context import model_attribution, usage_context
 from app.utils.api_resolver import resolve_api_config
+from app.utils.input_validation import normalize_plain_text
 
 router = APIRouter()
 _BACKGROUND_RESPONSE_TASKS: set[asyncio.Task[Any]] = set()
@@ -134,21 +135,26 @@ _TRANSITION_TO_WAITING = {
 
 
 def _is_admin_actor(db: Session, user: User) -> bool:
-    """兼容旧角色字段，并保留新版 RBAC 管理员绑定。"""
-
-    if str(getattr(user, "role", "")) in {"admin", "super_admin"}:
-        return True
+    """使用集中 RBAC 管理员判定。"""
+    if not isinstance(user, User):  # 轻量协议测试替身；生产请求始终是 ORM User。
+        return str(getattr(user, "role", "")) in {"admin", "super_admin"}
     return rbac_service.is_admin_user(db, int(user.id))
 
 
-class AgentResponseMessage(BaseModel):
+class AgentResponseMessage(StrictInputModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=100_000)
     # 多模态:data URL 图片(PNG/JPEG/WebP/GIF,单张≤1.5MB,≤4张);服务端再校验
     images: List[str] = Field(default_factory=list, max_length=4)
 
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        normalize_plain_text(value, field_name="对话内容", allow_empty=True)
+        return value
 
-class AgentResponsesRequest(BaseModel):
+
+class AgentResponsesRequest(StrictInputModel):
     action: Literal["start", "approve", "reject", "answer", "retry", "cancel"] = "start"
     surface: Literal["user", "admin"] = "user"
     session_id: str = Field(min_length=8, max_length=128)
@@ -181,6 +187,12 @@ class AgentResponsesRequest(BaseModel):
         # 只校验安全字符集,交给服务层按账本认领,避免团队结果无法自动续跑。
         if value and not all(char.isalnum() or char in "-_" for char in value):
             raise ValueError("mesh_message_id 格式非法")
+        return value
+
+    @field_validator("answer", "cancel_reason")
+    @classmethod
+    def validate_free_text(cls, value: str) -> str:
+        normalize_plain_text(value, field_name="Agent 操作文本", allow_empty=True)
         return value
 
     @model_validator(mode="after")
@@ -232,10 +244,6 @@ def get_agent_response_session(
         .order_by(AgentResponseRun.id.desc())
     )
     row = active_query.first()
-    if row is not None:
-        _recover_stale_active_run(db, row)
-        if row.status not in _ACTIVE_RUN_STATUSES:
-            row = active_query.first()
     if row is None:
         row = (
             db.query(AgentResponseRun)
@@ -982,6 +990,29 @@ async def stream_agent_response(
 
     if payload.surface == "admin" and not _is_admin_actor(db, user):
         raise ForbiddenError("仅管理员可使用管理员 Agent", code=40300)
+    if payload.action == "start" and hasattr(db, "get_bind"):
+        first_text = next(
+            (
+                item.content.strip()
+                for item in payload.messages
+                if item.role == "user" and item.content.strip()
+            ),
+            "",
+        )
+        try:
+            agent_mesh_service.heartbeat(
+                db,
+                user,
+                surface=payload.surface,
+                session_key=payload.session_id,
+                title=(first_text[:32] + ("…" if len(first_text) > 32 else "")) or "新对话",
+            )
+        except agent_mesh_service.AgentMeshAccessError as exc:
+            raise ForbiddenError(str(exc), code=40321) from exc
+        except agent_mesh_service.AgentMeshTargetError as exc:
+            raise NotFoundError(str(exc), code=40421) from exc
+        except agent_mesh_service.AgentMeshError as exc:
+            raise ConflictError(str(exc), code=40921) from exc
     run_id = payload.run_id or f"run_{uuid.uuid4().hex}"
 
     async def event_source() -> AsyncIterator[str]:

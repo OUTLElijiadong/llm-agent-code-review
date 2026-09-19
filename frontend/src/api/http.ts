@@ -197,8 +197,8 @@ export async function get<T>(url: string, params?: object, silentCodes?: number[
 }
 
 
-export async function post<T>(url: string, body?: object, params?: object): Promise<T> {
-  const r = await http.post<Resp<T>>(url, body, { params: cleanParams(params) })
+export async function post<T>(url: string, body?: object, params?: object, silentCodes?: number[]): Promise<T> {
+  const r = await http.post<Resp<T>>(url, body, { params: cleanParams(params), silentCodes })
   return r.data.data as T
 }
 

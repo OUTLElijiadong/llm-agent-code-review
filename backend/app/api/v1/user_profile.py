@@ -17,7 +17,7 @@ router = APIRouter()
 
 @router.get("/profile", response_model=Resp[ProfileOut])
 def get_profile(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """获取本人画像(不存在则初始化空画像)"""
+    """获取本人画像；不存在时返回未持久化的空画像。"""
     return Resp(data=ProfileOut(**profile_service.read_profile(db, user.id)))
 
 

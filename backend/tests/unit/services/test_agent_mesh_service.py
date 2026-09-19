@@ -375,6 +375,137 @@ def test_list_agents_uses_authoritative_run_status_over_heartbeat() -> None:
         engine.dispose()
 
 
+def test_account_wide_retention_archives_oldest_across_surfaces(db, user) -> None:
+    """user/admin 合计只保留 10 条活动会话，超限归档而不删除。"""
+    created: list[AgentMeshConversation] = []
+    for index in range(10):
+        surface = "user" if index < 6 else "admin"
+        key = f"session-retention-{index:02d}"
+        agent_mesh_service.heartbeat(db, user, surface=surface, session_key=key, title=key)
+        row = db.query(AgentMeshConversation).filter_by(
+            user_id=user.id, surface=surface, session_key=key,
+        ).one()
+        row.last_seen_at = datetime.now(timezone.utc) - timedelta(minutes=20 - index)
+        created.append(row)
+    db.commit()
+
+    agent_mesh_service.heartbeat(
+        db,
+        user,
+        surface="user",
+        session_key="session-retention-10",
+        title="第十一条",
+    )
+
+    active = db.query(AgentMeshConversation).filter_by(user_id=user.id, status="active").all()
+    archived = db.query(AgentMeshConversation).filter_by(user_id=user.id, status="archived").all()
+    assert len(active) == 10
+    assert [row.session_key for row in archived] == ["session-retention-00"]
+    assert db.query(AgentMeshConversation).filter_by(user_id=user.id).count() == 11
+
+
+def test_eleventh_conversation_is_rejected_when_ten_are_occupied(db, user) -> None:
+    for index in range(10):
+        key = f"session-occupied-{index:02d}"
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+        db.add(AgentResponseRun(
+            run_id=f"run-occupied-{index:02d}",
+            user_id=user.id,
+            surface="user",
+            session_key=key,
+            status="running",
+            checkpoint_json="{}",
+            version=1,
+        ))
+    db.commit()
+
+    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="10 条"):
+        agent_mesh_service.heartbeat(
+            db,
+            user,
+            surface="admin",
+            session_key="session-occupied-10",
+            title="不应创建",
+        )
+
+    assert db.query(AgentMeshConversation).filter_by(user_id=user.id, status="active").count() == 10
+    assert db.query(AgentMeshConversation).filter_by(
+        user_id=user.id, session_key="session-occupied-10",
+    ).count() == 0
+
+
+def test_archived_history_is_owner_scoped_searchable_and_restorable(db, user) -> None:
+    mine = AgentMeshConversation(
+        user_id=user.id,
+        surface="user",
+        session_key="session-archived-mine",
+        title="注入测试复盘",
+        status="archived",
+        last_seen_at=datetime.now(timezone.utc),
+    )
+    other = AgentMeshConversation(
+        user_id=99,
+        surface="user",
+        session_key="session-archived-other",
+        title="注入测试复盘",
+        status="archived",
+        last_seen_at=datetime.now(timezone.utc),
+    )
+    db.add_all([mine, other])
+    db.commit()
+
+    page = agent_mesh_service.list_conversations(
+        db,
+        user,
+        surface="user",
+        status="archived",
+        query="注入测试",
+    )
+    assert page["total"] == 1
+    assert page["items"][0]["session_id"] == "session-archived-mine"
+    assert page["items"][0]["status"] == "archived"
+    assert page["items"][0]["title"] == "注入测试复盘"
+
+    restored = agent_mesh_service.restore_conversation(
+        db,
+        user,
+        surface="user",
+        session_key="session-archived-mine",
+    )
+    assert restored["lifecycle_status"] == "active"
+    db.refresh(mine)
+    db.refresh(other)
+    assert mine.status == "active"
+    assert other.status == "archived"
+
+
+def test_peek_inbox_is_read_only(db, user) -> None:
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="user",
+        session_key="session-a1",
+        message=_message(idempotency_key="peek-readonly-001"),
+    )
+    before = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+    assert before.status == "queued" and int(before.attempt_count or 0) == 0
+
+    inbox = agent_mesh_service.peek_inbox(
+        db,
+        user,
+        surface="user",
+        session_key="session-b1",
+        limit=10,
+    )
+
+    db.refresh(before)
+    assert inbox[0]["status"] == "queued"
+    assert before.status == "queued"
+    assert int(before.attempt_count or 0) == 0
+
+
 def test_sweep_blocked_jarvis_messages_closes_history_and_active_run(db, user, monkeypatch) -> None:
     """成本保护应收敛历史 JARVIS,但不影响普通协作消息。"""
     for key in ("session-a1", "session-b1"):

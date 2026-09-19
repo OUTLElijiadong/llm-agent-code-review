@@ -26,6 +26,7 @@ from app.services.user_capability_registry import (
     CRITICAL,
     READ,
     USER_CAPABILITIES,
+    USER_PAGE_ROUTES,
     describe_capabilities,
     discovery_tool_schema,
     execution_tool_schema,
@@ -116,6 +117,19 @@ def test_registry_excludes_binary_stream_multipart_admin_and_secret_routes() -> 
     assert not any(spec.path == "/api/api-config" and spec.method == "PUT" for spec in USER_CAPABILITIES)
     assert "/api/api-config/test" not in paths
     assert not any(spec.path.startswith("/api/admin") for spec in USER_CAPABILITIES)
+
+
+def test_support_capabilities_share_one_page_entry() -> None:
+    support_specs = [
+        spec
+        for spec in USER_CAPABILITIES
+        if spec.code.startswith(("maintenance.", "feedback."))
+    ]
+    assert support_specs
+    assert {spec.page for spec in support_specs} == {"/support"}
+    assert "/support" in USER_PAGE_ROUTES
+    assert "/support/maintenance" not in USER_PAGE_ROUTES
+    assert "/support/feedback" not in USER_PAGE_ROUTES
 
 
 def test_explicit_permissions_match_rbac_catalog_except_migrated_report_template_permission() -> None:

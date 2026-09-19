@@ -14,6 +14,7 @@ from app.models.custom_agent import (  # noqa: F401
     ReviewTaskAgentRelease,
 )
 from app.models.user import User
+from app.schemas.agent_studio import CatalogAgentOut
 from app.services import agent_studio_service, approval_service
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 
@@ -89,6 +90,20 @@ def test_create_test_submit_and_atomic_publish(db, admin_user):
     assert boundary["allowed_tools"] == []
     assert agent_studio_service.publish_for_approval(db, db.get(ApprovalItem, approval.id)).id == release.id
     assert agent_studio_service.list_catalog(db)[0]["code"] == agent.code
+
+
+def test_published_catalog_response_is_global_but_does_not_expose_owner_id(db, admin_user):
+    reviewer = _user(db, "reviewer_catalog_visibility", "reviewer")
+    agent, version, _, _ = _create_package(db, reviewer, "visibility")
+    approval = _test_and_submit(db, reviewer, version)
+    approval_service.decide_item(db, admin_user, approval.id, approve=True)
+
+    rows = agent_studio_service.list_catalog(db)
+    row = next(item for item in rows if item["code"] == agent.code)
+    response = CatalogAgentOut(**row)
+    serialized = response.model_dump()
+    assert serialized["code"] == agent.code
+    assert "owner_id" not in serialized
 
 
 def test_published_shared_skill_keeps_published_state(db, admin_user):

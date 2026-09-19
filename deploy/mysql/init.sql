@@ -9,10 +9,10 @@ USE code_review;
 CREATE TABLE IF NOT EXISTS user (
     id           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     username     VARCHAR(50)  NOT NULL                COMMENT '用户名',
-    password     VARCHAR(255) NOT NULL                COMMENT 'bcrypt加密',
+    password     VARCHAR(60)  NOT NULL                COMMENT 'bcrypt哈希(固定60字符)',
     email        VARCHAR(100) DEFAULT NULL            COMMENT '邮箱',
     nickname     VARCHAR(50)  DEFAULT NULL            COMMENT '昵称',
-    role         VARCHAR(20)  NOT NULL DEFAULT 'user' COMMENT 'admin/user/reviewer',
+    role         VARCHAR(20)  NOT NULL DEFAULT 'user' COMMENT 'user/reviewer/admin/super_admin',
     status       TINYINT      NOT NULL DEFAULT 1      COMMENT '1=启用,0=禁用',
     last_login   DATETIME     DEFAULT NULL            COMMENT '最后登录时间',
     token_version INT         NOT NULL DEFAULT 0      COMMENT '令牌版本:改密/禁用/重置时递增使旧JWT失效',

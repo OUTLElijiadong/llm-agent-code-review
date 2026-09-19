@@ -1,6 +1,6 @@
 """讨论模式审查 REST API (v2.3 M7)
 
-GET  /discuss/start  — 启动讨论模式审查(preflight)
+POST /discuss/start  — 启动讨论模式审查(preflight)
      → 返回 session_id → 前端连接 WebSocket → 讨论开始
 """
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _gen_session_id() -> str:
     return f"disc_{uuid.uuid4().hex[:10]}"
 
 
-@router.get("/discuss/start", response_model=Resp[dict])
+@router.post("/discuss/start", response_model=Resp[dict])
 def start_discussion(
     project_id: int = Query(...),
     file_id: int = Query(...),

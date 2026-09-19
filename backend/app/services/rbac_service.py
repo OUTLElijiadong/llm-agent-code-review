@@ -5,16 +5,17 @@ RBAC 业务服务层
 所有函数均为纯函数式(接收 db Session),便于在路由与命令行中复用。
 
 设计要点:
-1. admin 角色绕过:拥有 admin/super_admin 角色编码的用户对所有权限检查返回 True
-2. 数据范围优先级:all > project_member > custom > project_own,多角色取最高
-3. 角色分配为覆盖式:assign_roles_to_user 先清除旧关联再插入新关联
-4. 兼容旧版 User.role 字段:admin/super_admin 文本角色同样享受绕过
+1. 每个账号只有一个固定有效角色，旧字段与 RBAC 绑定冲突时失败关闭
+2. admin/super_admin 仅在身份一致时按各自边界执行权限绕过
+3. 数据范围绑定唯一有效角色，缺失或冲突时回落到仅本人
+4. 角色分配为覆盖式，并同步旧版 ``User.role`` 兼容字段
 """
 
 from __future__ import annotations
 
 from typing import List, Optional, Set
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
@@ -50,11 +51,9 @@ _DEFAULT_SCOPE_TYPE = "project_own"
 # 享受权限绕过的角色编码集合
 _ADMIN_ROLE_CODES: Set[str] = {"admin", "super_admin"}
 
-# 享受权限绕过的旧版 User.role 字段值集合
-_ADMIN_LEGACY_ROLES: Set[str] = {"admin", "super_admin"}
-
 # 系统只允许为普通账号分配一个基础角色；超级管理员由唯一账号约束维护。
 ASSIGNABLE_ROLE_CODES: Set[str] = {"user", "reviewer", "admin"}
+_EFFECTIVE_ROLE_CODES: Set[str] = {*ASSIGNABLE_ROLE_CODES, "super_admin"}
 
 
 # ============================================================================
@@ -76,43 +75,75 @@ def _require_configurable_role(db: Session, role_id: int) -> Role:
     return role
 
 
-def is_admin_user(db: Session, user_id: int) -> bool:
-    """判断用户是否为管理员(享受权限绕过)
+def resolve_effective_role_code(db: Session, user_id: int) -> str:
+    """解析账号唯一有效角色；旧字段与 RBAC 冲突时失败关闭。
 
-    同时检查两套体系:
-    1. 新版 RBAC:用户在 user_role 表中关联了 code 为 admin/super_admin 的角色
-    2. 旧版字段:User.role 字段值为 admin/super_admin(向后兼容)
+    迁移期仍允许“仅有旧字段、尚无任何 RBAC 绑定”的四个固定角色。一旦账号
+    存在有效 RBAC 绑定，就必须恰好只有一个角色且与 ``User.role`` 一致。
 
     Args:
         db: 数据库会话
         user_id: 用户ID
 
     Returns:
-        bool: 是管理员返回 True,否则 False
+        str: 唯一有效角色编码；账号禁用、未知角色或数据漂移时返回空字符串。
     """
-    # 旧版字段检查(快速路径,无需 JOIN)
+    # 权限判定不得在缺失真实数据会话时回退信任请求对象中的旧 role。
+    # 测试替身、已关闭会话或被污染的会话均必须稳定失败关闭。
+    if not callable(getattr(db, "get", None)) or not callable(getattr(db, "query", None)):
+        return ""
     user = db.get(User, user_id)
-    if user and user.role in _ADMIN_LEGACY_ROLES:
-        return True
-
-    # 新版 RBAC 检查
-    admin_role_count = (
-        db.query(UserRole.id)
+    # 某些服务会使用代理 Session；若 ORM 身份映射被污染或返回了
+    # 其他实体，必须失败关闭，而不是继续解析其同名属性。
+    if not isinstance(user, User):
+        return ""
+    try:
+        is_active = int(user.status or 0) == 1
+    except (TypeError, ValueError):
+        return ""
+    if not is_active:
+        return ""
+    rows = (
+        db.query(Role.code, Role.status)
+        .select_from(UserRole)
         .join(Role, Role.id == UserRole.role_id)
-        .filter(
-            UserRole.user_id == user_id,
-            Role.code.in_(_ADMIN_ROLE_CODES),
-            Role.status == "active",
-        )
-        .count()
+        .filter(UserRole.user_id == user_id)
+        .all()
     )
-    return admin_role_count > 0
+    active_role_codes = {str(code) for code, status in rows if str(status) == "active"}
+    legacy_role = str(user.role or "")
+    if not rows:
+        return legacy_role if legacy_role in _EFFECTIVE_ROLE_CODES else ""
+    if active_role_codes == {legacy_role} and legacy_role in _EFFECTIVE_ROLE_CODES:
+        return legacy_role
+    logger.warning(
+        "RBAC 角色身份漂移或失效，已拒绝授权 user_id={} legacy_role={} rbac_roles={}",
+        user_id,
+        legacy_role,
+        sorted((str(code), str(status)) for code, status in rows),
+    )
+    return ""
+
+
+def has_effective_role(db: Session, user_id: int, *role_codes: str) -> bool:
+    """集中角色判定入口，禁止业务服务自行读取 ``User.role`` 授权。"""
+
+    return resolve_effective_role_code(db, user_id) in set(role_codes)
+
+
+def is_admin_user(db: Session, user_id: int) -> bool:
+    """集中判断用户是否为管理员；两套持久化表示冲突时拒绝授权。"""
+
+    return has_effective_role(db, user_id, *_ADMIN_ROLE_CODES)
 
 
 def is_super_admin_user(db: Session, user_id: int) -> bool:
     """判断用户是否为唯一且数据一致的 ``admin`` 超级管理员。"""
 
-    return is_unique_super_admin(db, db.get(User, user_id))
+    return has_effective_role(db, user_id, "super_admin") and is_unique_super_admin(
+        db,
+        db.get(User, user_id),
+    )
 
 
 # ============================================================================
@@ -130,8 +161,7 @@ def assign_roles_to_user(
 ) -> None:
     """给用户分配角色(覆盖式)
 
-    先删除用户的所有旧角色关联,再插入新角色关联。
-    若 role_ids 为空,等价于撤销用户全部角色。
+    先删除用户的所有旧角色关联,再插入唯一固定角色关联。
 
     Args:
         db: 数据库会话
@@ -173,9 +203,10 @@ def assign_roles_to_user(
 
 
 def get_user_roles(db: Session, user_id: int) -> List[Role]:
-    """获取用户的角色列表
+    """获取用户的唯一有效角色列表。
 
-    仅返回 status='active' 的角色,禁用角色不包含在内。
+    持久化表冲突或账号失效时返回空列表，避免上层将多角色并集
+    重新解释成有效身份。
 
     Args:
         db: 数据库会话
@@ -184,19 +215,26 @@ def get_user_roles(db: Session, user_id: int) -> List[Role]:
     Returns:
         List[Role]: 用户的有效角色 ORM 对象列表
     """
+    effective_role = resolve_effective_role_code(db, user_id)
+    if not effective_role:
+        return []
     return (
         db.query(Role)
         .join(UserRole, UserRole.role_id == Role.id)
-        .filter(UserRole.user_id == user_id, Role.status == "active")
+        .filter(
+            UserRole.user_id == user_id,
+            Role.status == "active",
+            Role.code == effective_role,
+        )
         .order_by(Role.sort)
         .all()
     )
 
 
 def get_user_permissions(db: Session, user_id: int) -> Set[str]:
-    """获取用户的全部权限 code 集合(去重)
+    """获取用户唯一有效角色的权限 code 集合。
 
-    聚合用户所有有效角色的权限点,返回并集去重后的权限编码集合。
+    角色表与旧字段冲突时返回空集，禁止继续聚合冲突角色的权限。
     管理员用户不在此处绕过(绕过逻辑在 check_permission 中处理),
     本函数如实反映用户在 RBAC 表中分配的权限。
 
@@ -207,12 +245,19 @@ def get_user_permissions(db: Session, user_id: int) -> Set[str]:
     Returns:
         Set[str]: 权限编码字符串集合(如 {"project:create", "review:view"})
     """
+    effective_role = resolve_effective_role_code(db, user_id)
+    if not effective_role:
+        return set()
     rows = (
         db.query(Permission.code)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
         .join(UserRole, UserRole.role_id == RolePermission.role_id)
         .join(Role, Role.id == UserRole.role_id)
-        .filter(UserRole.user_id == user_id, Role.status == "active")
+        .filter(
+            UserRole.user_id == user_id,
+            Role.status == "active",
+            Role.code == effective_role,
+        )
         .all()
     )
     return {r[0] for r in rows}
@@ -232,8 +277,11 @@ def get_user_menus(db: Session, user_id: int) -> List[Menu]:
     Returns:
         List[Menu]: 可见菜单 ORM 对象列表,按 sort 升序
     """
+    effective_role = resolve_effective_role_code(db, user_id)
+    if not effective_role:
+        return []
     menus = db.query(Menu).filter(Menu.visible == 1).order_by(Menu.sort).all()
-    if is_admin_user(db, user_id):
+    if effective_role in _ADMIN_ROLE_CODES:
         return menus
 
     perm_codes = get_user_permissions(db, user_id)
@@ -241,7 +289,7 @@ def get_user_menus(db: Session, user_id: int) -> List[Menu]:
 
 
 def get_user_data_scope(db: Session, user_id: int) -> DataScope:
-    """获取用户数据范围(取最高优先级)
+    """获取用户唯一有效角色的数据范围。
 
     用户可能有多个角色,每个角色对应一条 DataScope 记录。
     按 _DATA_SCOPE_PRIORITY 优先级取最高的 scope_type:
@@ -257,11 +305,18 @@ def get_user_data_scope(db: Session, user_id: int) -> DataScope:
     Returns:
         DataScope: 用户最高优先级的数据范围对象(无 id 表示虚拟默认范围)
     """
+    effective_role = resolve_effective_role_code(db, user_id)
+    if not effective_role:
+        return DataScope(scope_type=_DEFAULT_SCOPE_TYPE, project_ids=None)
     scopes = (
         db.query(DataScope)
         .join(Role, Role.id == DataScope.role_id)
         .join(UserRole, UserRole.role_id == Role.id)
-        .filter(UserRole.user_id == user_id, Role.status == "active")
+        .filter(
+            UserRole.user_id == user_id,
+            Role.status == "active",
+            Role.code == effective_role,
+        )
         .all()
     )
     if not scopes:
@@ -487,7 +542,7 @@ def get_users_by_role(db: Session, role_code: str) -> List[User]:
         db.query(User)
         .join(UserRole, UserRole.user_id == User.id)
         .join(Role, Role.id == UserRole.role_id)
-        .filter(Role.code == role_code)
+        .filter(Role.code == role_code, Role.status == "active", User.role == role_code, User.status == 1)
         .order_by(User.id)
         .all()
     )
@@ -552,11 +607,9 @@ def check_data_scope(db: Session, user_id: int, target_user_id: int) -> bool:
     if scope_type == "project_own":
         # 仅自己的数据:目标用户必须是自己
         return target_user_id == user_id
-    if scope_type == "project_member":
-        # 参与项目数据:后续实现项目成员关系检查,目前允许访问
-        return True
-    if scope_type == "custom":
-        # 自定义项目列表:后续实现项目列表检查,目前允许访问
-        return True
+    if scope_type in {"project_member", "custom"}:
+        # 该依赖项只有目标用户 ID，无法证明项目成员或自定义项目关系。
+        # 在增加项目级契约前只允许访问本人，禁止临时全放行。
+        return target_user_id == user_id
     # 未知范围类型,默认拒绝
     return False

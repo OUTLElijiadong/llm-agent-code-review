@@ -140,7 +140,7 @@ def test_batch_delete_rolls_back_every_target_when_one_step_fails(db, admin_user
     assert db.query(ToolCallLog).filter(ToolCallLog.copilot_request_id == "batch-rollback-request").count() == 0
 
 
-def test_batch_delete_protects_current_and_last_available_admin(db, admin_user) -> None:
+def test_batch_delete_protects_current_and_rejects_role_identity_drift(db, admin_user) -> None:
     self_preview = admin_agent_tools.preview_delete_users(db, admin_user, [admin_user.id])
     assert self_preview.success is False
     assert "当前登录" in self_preview.error
@@ -156,7 +156,7 @@ def test_batch_delete_protects_current_and_last_available_admin(db, admin_user) 
 
     last_admin_preview = admin_agent_tools.preview_delete_users(db, rbac_admin, [only_legacy_admin.id])
     assert last_admin_preview.success is False
-    assert "最后一个" in last_admin_preview.error
+    assert "仅管理员" in last_admin_preview.error
 
 
 def _submitted_agent(db, owner: User, suffix: str):
@@ -443,7 +443,7 @@ def _grant_custom_agent_invoke(db, user: User) -> None:
         module="agent",
         type="api",
     )
-    role = Role(name="普通成员", code="member_custom_agent", status="active", sort=20)
+    role = Role(name="普通用户", code="user", status="active", sort=20, is_builtin=1)
     db.add_all([permission, role])
     db.flush()
     db.add_all([

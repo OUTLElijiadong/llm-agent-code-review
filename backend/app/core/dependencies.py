@@ -71,7 +71,7 @@ def require_admin(
     """
     from app.services.rbac_service import is_admin_user
 
-    if user.role not in {"admin", "super_admin"} and not is_admin_user(db, user.id):
+    if not is_admin_user(db, user.id):
         raise ForbiddenError("需要管理员权限", code=40300)
     return user
 

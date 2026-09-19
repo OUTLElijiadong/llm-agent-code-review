@@ -45,6 +45,7 @@ from app.services.rbac_service import (
     get_user_permissions,
     get_user_roles,
     get_users_by_role,
+    has_effective_role,
     is_admin_user,
     list_permissions,
     list_roles,
@@ -272,7 +273,7 @@ class TestGetUserPermissions:
 
     def test_single_role_permissions(self, db):
         """单角色用户应返回该角色的全部权限"""
-        user = _make_user(db, 1, "u1")
+        user = _make_user(db, 1, "u1", role="reviewer")
         role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "review:start", "review")
         p2 = _make_permission(db, 102, "review:view", "review")
@@ -283,9 +284,9 @@ class TestGetUserPermissions:
         perms = get_user_permissions(db, user.id)
         assert perms == {"review:start", "review:view"}
 
-    def test_multi_role_permissions_union(self, db):
-        """多角色用户权限应为并集"""
-        user = _make_user(db, 1, "u1")
+    def test_multi_role_permissions_fail_closed(self, db):
+        """多个有效角色冲突时不得聚合权限。"""
+        user = _make_user(db, 1, "u1", role="reviewer")
         r1 = _make_role(db, 10, "reviewer", "评审员")
         r2 = _make_role(db, 11, "auditor", "审计员")
         p1 = _make_permission(db, 101, "review:start", "review")
@@ -296,11 +297,11 @@ class TestGetUserPermissions:
         _link_user_role(db, user.id, r2.id)
 
         perms = get_user_permissions(db, user.id)
-        assert perms == {"review:start", "audit:view"}
+        assert perms == set()
 
-    def test_permissions_deduplicated(self, db):
-        """多角色共享同一权限时应去重"""
-        user = _make_user(db, 1, "u1")
+    def test_duplicate_permission_does_not_override_role_conflict(self, db):
+        """多角色冲突时，共享权限也不能绕过唯一角色约束。"""
+        user = _make_user(db, 1, "u1", role="reviewer")
         r1 = _make_role(db, 10, "reviewer", "评审员")
         r2 = _make_role(db, 11, "auditor", "审计员")
         p1 = _make_permission(db, 101, "review:view", "review")
@@ -311,7 +312,7 @@ class TestGetUserPermissions:
         _link_user_role(db, user.id, r2.id)
 
         perms = get_user_permissions(db, user.id)
-        assert perms == {"review:view"}
+        assert perms == set()
 
     def test_no_roles_returns_empty(self, db):
         """无角色用户应返回空权限集合"""
@@ -341,7 +342,7 @@ class TestCheckPermission:
 
     def test_has_permission(self, db):
         """用户拥有权限应返回 True"""
-        user = _make_user(db, 1, "u1")
+        user = _make_user(db, 1, "u1", role="reviewer")
         role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "review:start", "review")
         _link_role_permission(db, role.id, p1.id)
@@ -351,7 +352,7 @@ class TestCheckPermission:
 
     def test_missing_permission(self, db):
         """用户无权限应返回 False"""
-        user = _make_user(db, 1, "u1")
+        user = _make_user(db, 1, "u1", role="reviewer")
         role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "review:start", "review")
         _link_role_permission(db, role.id, p1.id)
@@ -359,8 +360,8 @@ class TestCheckPermission:
 
         assert check_permission(db, user.id, "review:approve") is False
 
-    def test_admin_bypass_via_legacy_role(self, db):
-        """admin 用户(旧版 User.role)应绕过权限检查"""
+    def test_admin_bypass_via_legacy_role_without_rbac_binding(self, db):
+        """升级前仅有旧字段且没有任何 RBAC 绑定时保留兼容入口。"""
         user = _make_user(db, 1, "admin", role="admin")
         # admin 用户无任何 RBAC 角色与权限分配
         assert check_permission(db, user.id, "any:permission") is True
@@ -379,20 +380,29 @@ class TestCheckPermission:
 
         assert check_permission(db, user.id, "server_ops:view") is True
 
-    def test_admin_bypass_via_rbac_role(self, db):
-        """admin 角色(新版 RBAC)应绕过权限检查"""
+    def test_rbac_admin_conflicting_with_legacy_role_is_denied(self, db):
+        """RBAC 管理员与旧字段冲突时必须 fail-closed。"""
         user = _make_user(db, 1, "u1", role="user")
         admin_role = _make_role(db, 10, "admin", "管理员")
+        permission = _make_permission(db, 101, "pentest:authorize", "pentest")
+        _link_role_permission(db, admin_role.id, permission.id)
         _link_user_role(db, user.id, admin_role.id)
-        # 无任何权限分配,但 admin 角色应绕过
+        assert check_permission(db, user.id, "pentest:authorize") is False
+
+    def test_consistent_admin_bypass(self, db):
+        """旧字段与 RBAC 绑定一致时授予管理员能力。"""
+        user = _make_user(db, 2, "consistent-admin", role="admin")
+        admin_role = _make_role(db, 12, "admin", "管理员")
+        _link_user_role(db, user.id, admin_role.id)
+
         assert check_permission(db, user.id, "any:permission") is True
 
-    def test_super_admin_bypass(self, db):
-        """super_admin 角色应绕过权限检查"""
+    def test_conflicting_super_admin_binding_is_denied(self, db):
+        """普通账号的 RBAC 超级管理员绑定不能覆盖旧字段。"""
         user = _make_user(db, 1, "u1", role="user")
         sa_role = _make_role(db, 10, "super_admin", "超级管理员")
         _link_user_role(db, user.id, sa_role.id)
-        assert check_permission(db, user.id, "any:permission") is True
+        assert check_permission(db, user.id, "any:permission") is False
 
 
 # ============================================================================
@@ -405,9 +415,9 @@ class TestCheckDataScope:
 
     def test_scope_all_allows_any_user(self, db):
         """scope_type=all 应允许访问任意用户数据"""
-        user = _make_user(db, 1, "u1", role="user")
+        user = _make_user(db, 1, "u1", role="reviewer")
         target = _make_user(db, 2, "u2", role="user")
-        role = _make_role(db, 10, "auditor", "审计员")
+        role = _make_role(db, 10, "reviewer", "评审员")
         _link_user_role(db, user.id, role.id)
         _make_data_scope(db, role.id, "all")
 
@@ -426,25 +436,27 @@ class TestCheckDataScope:
         # 访问他人 → False
         assert check_data_scope(db, user.id, target.id) is False
 
-    def test_scope_project_member_allows_any(self, db):
-        """scope_type=project_member 后续实现,目前返回 True"""
-        user = _make_user(db, 1, "u1", role="user")
+    def test_scope_project_member_fails_closed_without_project_context(self, db):
+        """scope_type=project_member 缺少项目上下文时只允许本人。"""
+        user = _make_user(db, 1, "u1", role="reviewer")
         target = _make_user(db, 2, "u2", role="user")
         role = _make_role(db, 10, "reviewer", "评审员")
         _link_user_role(db, user.id, role.id)
         _make_data_scope(db, role.id, "project_member")
 
-        assert check_data_scope(db, user.id, target.id) is True
+        assert check_data_scope(db, user.id, user.id) is True
+        assert check_data_scope(db, user.id, target.id) is False
 
-    def test_scope_custom_allows_any(self, db):
-        """scope_type=custom 后续实现,目前返回 True"""
-        user = _make_user(db, 1, "u1", role="user")
+    def test_scope_custom_fails_closed_without_project_context(self, db):
+        """scope_type=custom 缺少项目上下文时只允许本人。"""
+        user = _make_user(db, 1, "u1", role="reviewer")
         target = _make_user(db, 2, "u2", role="user")
-        role = _make_role(db, 10, "custom_role", "自定义角色")
+        role = _make_role(db, 10, "reviewer", "评审员")
         _link_user_role(db, user.id, role.id)
         _make_data_scope(db, role.id, "custom", project_ids=[1, 2, 3])
 
-        assert check_data_scope(db, user.id, target.id) is True
+        assert check_data_scope(db, user.id, user.id) is True
+        assert check_data_scope(db, user.id, target.id) is False
 
     def test_admin_bypass_data_scope(self, db):
         """管理员应绕过数据范围检查"""
@@ -610,7 +622,7 @@ class TestGetUserMenus:
 
     def test_normal_user_sees_permitted_menus(self, db):
         """普通用户应仅看到无权限限制或有权限的菜单"""
-        user = _make_user(db, 1, "u1", role="user")
+        user = _make_user(db, 1, "u1", role="reviewer")
         role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "review:start", "review")
         _link_role_permission(db, role.id, p1.id)
@@ -676,18 +688,18 @@ class TestDataScopeManagement:
         with pytest.raises(NotFoundError):
             update_data_scope(db, 999, scope_in)
 
-    def test_get_user_data_scope_highest_priority(self, db):
-        """多角色数据范围应取最高优先级(all > project_member > custom > project_own)"""
+    def test_get_user_data_scope_ignores_disabled_historical_role(self, db):
+        """停用的历史角色不得扩大当前有效角色的数据范围。"""
         user = _make_user(db, 1, "u1", role="user")
         r1 = _make_role(db, 10, "user", "普通用户")
-        r2 = _make_role(db, 11, "auditor", "审计员")
+        r2 = _make_role(db, 11, "auditor", "审计员", status="disabled")
         _link_user_role(db, user.id, r1.id)
         _link_user_role(db, user.id, r2.id)
         _make_data_scope(db, r1.id, "project_own")   # 优先级 1
         _make_data_scope(db, r2.id, "all")            # 优先级 4
 
         scope = get_user_data_scope(db, user.id)
-        assert scope.scope_type == "all"
+        assert scope.scope_type == "project_own"
 
     def test_get_user_data_scope_default_when_empty(self, db):
         """无数据范围记录时应返回默认 project_own"""
@@ -709,8 +721,8 @@ class TestGetUsersByRole:
     def test_get_users_by_role_code(self, db):
         """按角色编码应返回所有拥有该角色的用户"""
         role = _make_role(db, 10, "reviewer", "评审员")
-        u1 = _make_user(db, 1, "u1")
-        u2 = _make_user(db, 2, "u2")
+        u1 = _make_user(db, 1, "u1", role="reviewer")
+        u2 = _make_user(db, 2, "u2", role="reviewer")
         _make_user(db, 3, "u3")  # 无角色
         _link_user_role(db, u1.id, role.id)
         _link_user_role(db, u2.id, role.id)
@@ -743,12 +755,38 @@ class TestIsAdminUser:
         user = _make_user(db, 1, "sa", role="super_admin")
         assert is_admin_user(db, user.id) is True
 
-    def test_rbac_admin_role(self, db):
-        """RBAC admin 角色应判定为管理员"""
+    def test_rbac_admin_role_conflicting_with_legacy_field_is_denied(self, db):
+        """RBAC admin 与旧字段不一致时拒绝授权。"""
         user = _make_user(db, 1, "u1", role="user")
         admin_role = _make_role(db, 10, "admin", "管理员")
         _link_user_role(db, user.id, admin_role.id)
-        assert is_admin_user(db, user.id) is True
+        assert is_admin_user(db, user.id) is False
+
+    def test_reviewer_role_conflict_is_denied_by_central_resolver(self, db):
+        """评审员也必须使用同一漂移规则，不能只读取旧 role 字段。"""
+        user = _make_user(db, 2, "reviewer-drift", role="reviewer")
+        member_role = _make_role(db, 11, "user", "普通用户")
+        _link_user_role(db, user.id, member_role.id)
+
+        assert has_effective_role(db, user.id, "reviewer") is False
+
+    def test_disabled_role_binding_does_not_fall_back_to_legacy_admin(self, db):
+        """已禁用的 RBAC 关联是失效身份，不能回退信任旧管理员字段。"""
+        user = _make_user(db, 1, "disabled-admin", role="admin")
+        disabled_admin = _make_role(db, 10, "admin", "管理员", status="disabled")
+        _link_user_role(db, user.id, disabled_admin.id)
+
+        assert is_admin_user(db, user.id) is False
+
+    def test_disabled_historical_role_does_not_invalidate_matching_active_role(self, db):
+        """053 迁移保留的停用历史关联不影响唯一有效角色。"""
+        user = _make_user(db, 1, "migrated-reviewer", role="reviewer")
+        reviewer = _make_role(db, 10, "reviewer", "评审员")
+        auditor = _make_role(db, 11, "auditor", "审计员", status="disabled")
+        _link_user_role(db, user.id, reviewer.id)
+        _link_user_role(db, user.id, auditor.id)
+
+        assert has_effective_role(db, user.id, "reviewer") is True
 
     def test_normal_user_not_admin(self, db):
         """普通用户应判定为非管理员"""
@@ -797,7 +835,7 @@ class TestRbacDependency:
 
     def test_require_permission_passes(self, db):
         """require_permission 闭包: 有权限应返回用户对象"""
-        user = _make_user(db, 1, "u1", role="user")
+        user = _make_user(db, 1, "u1", role="reviewer")
         role = _make_role(db, 10, "reviewer", "评审员")
         p1 = _make_permission(db, 101, "review:start", "review")
         _link_role_permission(db, role.id, p1.id)

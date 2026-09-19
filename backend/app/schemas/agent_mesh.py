@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.utils.input_validation import normalize_plain_text, validate_json_payload
 
 
 class _StrictModel(BaseModel):
@@ -23,10 +25,18 @@ class AgentMeshContextIn(_StrictModel):
     # 监督式调度闭环（T4）的可选监督元数据。
     # 仅作为信封透传字段；范围/依赖关系校验由 agent_mesh_service.send_message 负责，
     # 这里不引入新约束，避免破坏已有信封兼容性。
-    supervision_objective: Optional[str] = None
+    supervision_objective: Optional[str] = Field(default=None, max_length=4000)
     supervision_round: Optional[int] = None
     supervision_max_rounds: Optional[int] = None
-    supervision_correlation_id: Optional[str] = None
+    supervision_correlation_id: Optional[str] = Field(default=None, max_length=160)
+
+    @field_validator("supervision_objective", "supervision_correlation_id")
+    @classmethod
+    def validate_supervision_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalize_plain_text(value, field_name="Agent 监督上下文", allow_empty=True)
+        return value
 
 
 class AgentMeshDeliveryIn(_StrictModel):
@@ -65,6 +75,36 @@ class AgentMeshMessageIn(_StrictModel):
         if value and not all(char.isalnum() or char in "-_.:" for char in value):
             raise ValueError("标识只能包含字母、数字、- _ . :")
         return value
+
+    @field_validator("subject")
+    @classmethod
+    def validate_subject(cls, value: str) -> str:
+        return normalize_plain_text(value, field_name="Agent 消息主题", allow_newlines=False)
+
+    @model_validator(mode="after")
+    def validate_dynamic_payloads(self) -> "AgentMeshMessageIn":
+        validate_json_payload(
+            self.payload,
+            field_name="Agent 消息负载",
+            max_bytes=262_144,
+            max_depth=16,
+            max_items=2_000,
+        )
+        validate_json_payload(
+            self.artifacts,
+            field_name="Agent 制品列表",
+            max_bytes=131_072,
+            max_depth=12,
+            max_items=1_000,
+        )
+        validate_json_payload(
+            self.errors,
+            field_name="Agent 错误列表",
+            max_bytes=65_536,
+            max_depth=8,
+            max_items=500,
+        )
+        return self
 
 
 class AgentMeshHeartbeatIn(_StrictModel):

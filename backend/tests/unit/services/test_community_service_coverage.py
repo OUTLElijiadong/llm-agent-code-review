@@ -96,7 +96,9 @@ def test_forum_post_lifecycle_filters_authors_and_admin_pin(db):
     without_replies = forum_service.get_post(db, post.id, with_replies=False)
     assert without_replies["content"] == "原始正文"
     assert without_replies["replies"] == []
-    assert without_replies["view_count"] == 1
+    assert without_replies["view_count"] == 0
+    viewed = forum_service.record_post_view(db, post.id)
+    assert viewed["view_count"] == 1
 
     with pytest.raises(ForbiddenError):
         forum_service.update_post(db, outsider, post.id, {"title": "越权编辑"})
@@ -350,6 +352,8 @@ def test_feedback_create_list_and_admin_read_enforce_user_isolation(db):
         user_feedback_service.get_feedback(db, owner, 999999)
 
     opened = user_feedback_service.get_feedback(db, admin, feedback.id)
+    assert opened["status"] == "new"
+    opened = user_feedback_service.mark_feedback_read(db, admin, feedback.id)
     assert opened["status"] == "read"
     db.refresh(feedback)
     assert feedback.status == "read"

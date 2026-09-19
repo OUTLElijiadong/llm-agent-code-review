@@ -1,11 +1,13 @@
 """模型分配与图片恢复回归；隔离数据库和模拟上游。"""
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from app.api.v1 import llm_config
 from app.core.exceptions import ValidationError
+from app.models.agent_mesh import AgentMeshConversation
 from app.schemas.llm_config import LlmModelsIn, LlmModelsOut
 from app.services import agent_responses_service as ars
 from app.services import multimodal_service as ms
@@ -13,6 +15,18 @@ from app.services import system_config_service as scs
 from app.services.deepseek_responses_runtime import RunCheckpoint
 from app.utils.api_resolver import ApiConfig
 from tests.unit.services.test_multimodal_service import PNG_URL
+
+
+def _activate_conversation(db, *, user_id: int, surface: str, session_key: str) -> None:
+    db.add(AgentMeshConversation(
+        user_id=user_id,
+        surface=surface,
+        session_key=session_key,
+        title="多模态测试",
+        status="active",
+        last_seen_at=datetime.now(timezone.utc),
+    ))
+    db.commit()
 
 
 def test_flash_official_capability_and_no_name_guess(db):
@@ -68,6 +82,7 @@ async def test_runtime_consumes_chat_assignment_and_retains_resume_assets(db, mo
     monkeypatch.setattr(ars, "NativeResponsesTransport", lambda *_a, **_k: object())
     monkeypatch.setattr(ars, "get_request_orchestrator", lambda *_a, **_k: object())
     user = SimpleNamespace(id=7, role="user", username="test")
+    _activate_conversation(db, user_id=7, surface="user", session_key="session-images")
     service = ars.AgentResponsesService(db, user, surface="user", session_key="session-images")
     _, plain = await service._runtime("new-text-run", None)
     assert plain._model == "chat-custom"
@@ -132,6 +147,7 @@ async def test_vision_terminal_does_not_change_next_plain_model(db, monkeypatch,
     monkeypatch.setattr(ars, "resolve_api_config", lambda *_a: cfg)
     monkeypatch.setattr(ars, "get_request_orchestrator", lambda *_a, **_k: object())
     monkeypatch.setattr(ars, "NativeResponsesTransport", lambda *_a: object())
+    _activate_conversation(db, user_id=1, surface="user", session_key="same-session")
     service = ars.AgentResponsesService(
         db, SimpleNamespace(id=1, role="user", username="a"), surface="user", session_key="same-session"
     )
@@ -180,6 +196,7 @@ async def test_missing_asset_and_vision_unavailable_never_silently_drop_image():
 
 @pytest.mark.asyncio
 async def test_cancellation_does_not_require_models_or_images(db, monkeypatch):
+    _activate_conversation(db, user_id=1, surface="user", session_key="cancel-session")
     service = ars.AgentResponsesService(
         db, SimpleNamespace(id=1, role="user", username="a"), surface="user", session_key="cancel-session"
     )
@@ -245,6 +262,7 @@ async def test_service_image_question_resume_and_same_session_text_round(db, mon
     monkeypatch.setattr(ars, "PrismToolExecutor", Executor)
     monkeypatch.setattr(ars, "NativeResponsesTransport", Transport)
     user = SimpleNamespace(id=7, role="user", username="sample")
+    _activate_conversation(db, user_id=7, surface="user", session_key="same-chat")
     service = ars.AgentResponsesService(db, user, surface="user", session_key="same-chat")
     first = await service.start(
         [{"role": "user", "content": "请看这张图", "images": [PNG_URL]}], run_id="vision-question"

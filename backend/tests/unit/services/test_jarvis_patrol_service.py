@@ -10,6 +10,7 @@ from app.models.agent_capability import SandboxEnvironment
 from app.models.agent_governance import AgentAlert
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
 from app.models.agent_response_run import AgentResponseRun
+from app.models.rbac import Role, UserRole
 from app.models.user import User
 from app.services import jarvis_patrol_service as module
 
@@ -23,6 +24,8 @@ def _make_db(tmp_path, monkeypatch):
     AgentMeshMessageEvent.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
     User.__table__.create(engine)
+    Role.__table__.create(engine)
+    UserRole.__table__.create(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     monkeypatch.setattr(module, "SessionLocal", lambda: factory())
     return engine, factory
@@ -30,7 +33,11 @@ def _make_db(tmp_path, monkeypatch):
 
 def _seed(db, *, online=True):
     now = datetime.now(timezone.utc)
-    db.add(User(id=1, username="admin", role="admin", status=1, password="x", token_version=0))
+    user = User(id=1, username="admin", role="admin", status=1, password="x", token_version=0)
+    role = Role(name="管理员", code="admin", status="active", is_builtin=1)
+    db.add_all([user, role])
+    db.flush()
+    db.add(UserRole(user_id=user.id, role_id=role.id))
     db.add(AgentMeshConversation(
         user_id=1, surface="admin", session_key="admin-session-a1", title="管理对话",
         status="active", last_seen_at=now if online else now - timedelta(hours=2),

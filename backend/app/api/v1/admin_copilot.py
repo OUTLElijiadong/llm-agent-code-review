@@ -9,7 +9,6 @@ from app.core.database import get_db
 from app.core.dependencies import require_admin
 from app.models.user import User
 from app.schemas.common import Resp
-from app.services import admin_chat_history_service
 
 router = APIRouter()
 
@@ -78,9 +77,11 @@ def history(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """读取当前管理员自己的副驾驶历史，支持增量轮询。"""
+    """拒绝旧副驾驶历史协议，避免 GET 隐式创建空会话。"""
+    del after_id, limit, db, admin
     if not all(char.isalnum() or char in "-_" for char in session_id):
         raise HTTPException(status_code=422, detail="session_id 只能包含字母、数字、连字符和下划线")
-    return Resp(data=admin_chat_history_service.list_history(
-        db, admin, session_id, after_id=after_id, limit=limit,
-    ))
+    raise HTTPException(
+        status_code=410,
+        detail="旧管理副驾驶历史已停用，请使用 /api/agent-responses/session",
+    )

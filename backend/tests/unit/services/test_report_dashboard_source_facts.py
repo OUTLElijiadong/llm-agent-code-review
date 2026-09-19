@@ -531,7 +531,7 @@ def source_api_client():
     db.add_all([owner, other])
     db.flush()
     # 外部账号具有报告查看权限，确保后续 404 实际验证资源归属隔离。
-    report_reader = Role(name="来源接口报告读者", code="source_report_reader", status="active")
+    report_reader = Role(name="普通用户", code="user", status="active", is_builtin=1)
     report_view = Permission(code="report:view", name="报告查看", module="report", type="api")
     db.add_all([report_reader, report_view])
     db.flush()

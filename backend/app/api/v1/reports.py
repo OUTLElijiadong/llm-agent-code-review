@@ -46,7 +46,7 @@ from app.models.user import User
 from app.schemas.common import PageOut, Resp
 from app.schemas.report import DomainReportExportOut, ReportDetailOut, ReportListItem
 from app.schemas.report_template import ReportTemplateIn, ReportTemplateOut, ReportTemplateUpdate
-from app.services import audit_service, report_service, report_template_service
+from app.services import audit_service, rbac_service, report_service, report_template_service
 from app.services.rbac_service import check_permission
 from app.services.report_exporter import (
     export_to_html,
@@ -106,7 +106,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     if not report_service.is_report_available(task):
         raise NotFoundError(f"审查任务 #{task_id} 不存在或未完成", code=40400)
     # 权限校验:管理员或任务发起者可访问
-    if task.user_id != user.id and user.role not in {"admin", "super_admin"}:
+    if task.user_id != user.id and not rbac_service.is_admin_user(db, user.id):
         raise NotFoundError("报告不存在", code=40400)
 
     if task.review_type in {"sandbox_test", "pentest"}:

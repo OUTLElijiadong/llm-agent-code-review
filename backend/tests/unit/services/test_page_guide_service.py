@@ -60,7 +60,7 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
         "/dashboard", "/projects", "/reviews", "/reviews/start",
         "/security", "/reports", "/report/templates", "/code", "/issues",
         "/agents", "/sandboxes", "/agent-studio", "/forum", "/forum/new",
-        "/knowledge", "/support/maintenance", "/support/feedback", "/profile",
+        "/knowledge", "/support", "/profile",
         "/profile/personalization", "/profile/password", "/profile/api-config",
     }
     frontend_static_admin_routes = {
@@ -70,6 +70,8 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
     user_block = user_guide_block()
     for route in frontend_static_user_routes:
         assert route in user_block, f"用户引导缺少前端已有路由: {route}"
+    assert "/support/maintenance" not in user_block
+    assert "/support/feedback" not in user_block
     admin_block = admin_guide_block()
     for route in frontend_static_admin_routes:
         assert route in admin_block, f"管理引导缺少前端已有路由: {route}"

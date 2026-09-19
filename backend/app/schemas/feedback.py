@@ -6,10 +6,11 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.common import StrictInputModel
 from app.utils.input_validation import normalize_plain_text
 
 
-class FeedbackIn(BaseModel):
+class FeedbackIn(StrictInputModel):
     """提交反馈"""
     feedback_type: str = Field(default="suggestion",
                                pattern="^(suggestion|complaint|praise|bug|other)$")
@@ -34,7 +35,7 @@ class FeedbackIn(BaseModel):
         )
 
 
-class FeedbackReplyIn(BaseModel):
+class FeedbackReplyIn(StrictInputModel):
     """管理员回复反馈"""
     admin_reply: Optional[str] = Field(default=None, max_length=20_000)
     status: Optional[str] = Field(default=None, pattern="^(new|read|replied|closed)$")

@@ -89,7 +89,7 @@ def test_custom_invoke_permission_is_applied_to_all_three_counts(count_scope):
     env = count_scope
     db = env['db']
     seed_calls(env, env['codes'] + ['qa_custom_0'])
-    role = Role(code='qa_custom_invoke', name='验收角色', status='active')
+    role = Role(code='user', name='普通用户', status='active', is_builtin=1)
     permission = Permission(code='custom_agent:invoke', name='调用', module='agent', type='api')
     db.add_all([role, permission])
     db.flush()

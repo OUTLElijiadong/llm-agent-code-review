@@ -25,7 +25,7 @@ from app.models.custom_agent import (
 )
 from app.models.user import User
 from app.services import audit_service
-from app.services.rbac_service import is_admin_user
+from app.services.rbac_service import has_effective_role, is_admin_user
 
 SKILL_TYPES = {"llm_transform", "readonly_tool", "agent_delegate", "sequence_workflow"}
 READONLY_TOOLS = {
@@ -93,12 +93,9 @@ def _is_admin(db: Session, user: User) -> bool:
 
 
 def _assert_reviewer(db: Session, user: User) -> None:
-    from app.services.rbac_service import get_user_roles
-
-    if _is_admin(db, user) or user.role == "reviewer":
+    if _is_admin(db, user) or has_effective_role(db, user.id, "reviewer"):
         return
-    if not any(role.code == "reviewer" for role in get_user_roles(db, user.id)):
-        raise ForbiddenError("仅审查员或管理员可使用 Agent 工坊", code=40300)
+    raise ForbiddenError("仅审查员或管理员可使用 Agent 工坊", code=40300)
 
 
 def _assert_owner(db: Session, owner_id: int, user: User) -> None:

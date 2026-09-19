@@ -242,10 +242,16 @@ export function mergeAgentChatSessions(
 
   const toMeta = (item: DiscoveredAgentChatSession, cached?: AgentChatSessionMeta): AgentChatSessionMeta => {
     const parsedLastSeen = item.lastSeenAt ? Date.parse(item.lastSeenAt) : Number.NaN
+    const remoteTitle = item.title?.trim() ?? ''
+    const cachedTitle = cached?.title?.trim() ?? ''
+    // 服务端摘要是历史目录的跨设备事实源；仅当服务端仍是占位标题时，
+    // 保留本地已提炼的业务标题，避免一次心跳延迟把标题退回“新对话”。
+    const title = remoteTitle && !isPlaceholderAgentChatTitle(remoteTitle)
+      ? remoteTitle
+      : cachedTitle || remoteTitle || '未命名对话'
     return {
       id: item.id,
-      // 本地标题包含用户自动命名；没有缓存时才采用服务端标题。
-      title: cached?.title?.trim() || item.title?.trim() || '默认对话',
+      title,
       createdAt: cached?.createdAt ?? (Number.isFinite(parsedLastSeen) ? parsedLastSeen : Date.now()),
       pinned: cached?.pinned === true,
     }

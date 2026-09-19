@@ -38,6 +38,7 @@ from app.services import (
     project_import_service,
     project_service,
     project_source_service,
+    rbac_service,
 )
 from app.services.rbac_service import check_permission
 from app.utils.api_resolver import ApiConfig, resolve_api_config
@@ -292,7 +293,7 @@ class Orchestrator(BaseAgent):
         """通过当前请求用户更新项目元数据。"""
         if self._db is None or self._user is None:
             return AgentResult(success=False, error="DB 或用户上下文未注入")
-        if self._user.role in {"admin", "super_admin"}:
+        if rbac_service.is_admin_user(self._db, int(self._user.id)):
             from app.models.project import Project as _Project
             target = self._db.get(_Project, project_id)
             if target is None or target.status == "deleted":

@@ -238,6 +238,7 @@ def test_admin_agent_routes_request_unscoped_data(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(module.agent_service, "get_overview", overview_mock)
     monkeypatch.setattr(module.agent_service, "get_runtime_agents", runtime_mock)
     monkeypatch.setattr(module.agent_service, "get_situation", situation_mock)
+    monkeypatch.setattr(module.rbac_service, "is_admin_user", lambda _db, user_id: user_id == 1)
     db = object()
     admin = SimpleNamespace(id=1, role="admin")
 
@@ -326,6 +327,7 @@ async def test_admin_sse_delivers_all_events(monkeypatch: pytest.MonkeyPatch) ->
     """管理员 SSE 应接收任意 user_id 的事件。"""
     bus = FakeEventBus([_event("foreign", 88)])
     monkeypatch.setattr(module, "_resolve_sse_user", MagicMock(return_value=SimpleNamespace(id=1, role="admin")))
+    monkeypatch.setattr(module.rbac_service, "is_admin_user", lambda _db, user_id: user_id == 1)
     monkeypatch.setattr(module.AgentEventBus, "instance", MagicMock(return_value=bus))
 
     response = await module.stream_agent_events(replay=0, authorization=None, token="x", db=object())
@@ -458,6 +460,7 @@ def test_submit_clarification_allows_admin_and_returns_scalar_result(
         "get_request_orchestrator",
         MagicMock(return_value=SimpleNamespace(chat_agent=chat_agent)),
     )
+    monkeypatch.setattr(module.rbac_service, "is_admin_user", lambda _db, user_id: user_id == 1)
 
     response = module.submit_clarification(
         module.ClarifyAnswers(clarify_id="clarify-3", answers={}),

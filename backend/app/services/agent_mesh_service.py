@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 
-from sqlalchemy import inspect, or_, update
+from sqlalchemy import inspect, or_, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -34,7 +34,7 @@ _ACTIVE_RESPONSE_RUN_STATUSES = (
     "waiting_input",
 )
 _JARVIS_COST_GUARD_SUMMARY = "后台成本保护已关闭 JARVIS 自动模型派发;历史消息已收敛,未执行模型调用。"
-# 每个账号、每个小菱入口最多保留 10 条活动会话。
+# 每个账号在用户端和管理端合计最多保留 10 条活动会话。
 # 超出部分只归档会话索引，不删除 Responses/消息账本，便于审计和恢复。
 CONVERSATION_RETENTION_LIMIT = 10
 _PLACEHOLDER_CONVERSATION_TITLES = frozenset({"新对话", "默认对话", "用户端小菱对话", "贾维斯运维对话"})
@@ -162,10 +162,6 @@ def _load(value: Optional[str], fallback: Any) -> Any:
     return parsed
 
 
-def _is_admin(user: User) -> bool:
-    return str(getattr(user, "role", "")) in {"admin", "super_admin"}
-
-
 def _session_address(surface: str, session_key: str) -> str:
     return f"session:{surface}:{session_key}"
 
@@ -178,18 +174,12 @@ def _assert_surface(db: Session, user: User, surface: str) -> None:
 
 
 def _is_admin_surface(db: Session, user: User) -> bool:
-    """admin 会话准入与 /agent-responses/stream 口径一致:
-    旧版 role 字段之外,RBAC 绑定了 admin/super_admin 角色的账户同样放行,
-    避免 AdminCopilot 能聊天但 Mesh 心跳/收件箱/归档 403 的割裂。
-    """
-    if _is_admin(user):
-        return True
-    try:
-        from app.services import rbac_service
+    """admin 会话准入复用集中 RBAC 判定，查询错误直接拒绝。"""
+    if not isinstance(user, User):  # 轻量协议测试替身；生产请求始终是 ORM User。
+        return str(getattr(user, "role", "")) in {"admin", "super_admin"}
+    from app.services import rbac_service
 
-        return rbac_service.is_admin_user(db, int(user.id))
-    except Exception:  # noqa: BLE001 - RBAC 查询失败时退回 role 字段判定
-        return False
+    return rbac_service.is_admin_user(db, int(user.id))
 
 
 def _conversation(db: Session, user_id: int, surface: str, session_key: str) -> Optional[AgentMeshConversation]:
@@ -205,27 +195,41 @@ def _conversation(db: Session, user_id: int, surface: str, session_key: str) -> 
     )
 
 
+def _lock_conversation_owner(db: Session, user_id: int) -> None:
+    """用用户行串行化同一账号的会话容量变更。
+
+    MySQL 生产库会获取 ``FOR UPDATE`` 行锁；独立 SQLite 单测可能没有
+    user 表，此时跳过锁但仍保留同一事务内的容量检查。
+    """
+    bind = db.get_bind()
+    if bind is None or not inspect(bind).has_table(User.__tablename__):
+        return
+    db.query(User.id).filter(User.id == int(user_id)).with_for_update().first()
+
+
 def _enforce_conversation_retention(
     db: Session,
     *,
     user_id: int,
-    surface: str,
     limit: int | None = None,
+    keep_surface: str = "",
     keep_session_key: str = "",
 ) -> int:
-    """按账号和入口归档超出上限的最旧会话。
+    """按账号归档超出上限的最旧会话。
 
     归档而非物理删除，保证聊天/Responses 审计账本仍完整；归档会话不再进入
-    发现列表，也不能被心跳复活。排序优先最后一条消息，其次心跳时间。
+    发现列表，也不能被心跳复活。运行中/等待操作的会话不得归档；
+    如果 10 条都被占用，新建或恢复会话必须失败，不能突破硬上限。
     """
-    retention_limit = max(1, int(limit if limit is not None else settings.agent_mesh_max_active_conversations))
+    configured_limit = int(limit if limit is not None else settings.agent_mesh_max_active_conversations)
+    retention_limit = max(1, min(CONVERSATION_RETENTION_LIMIT, configured_limit))
     rows = (
         db.query(AgentMeshConversation)
         .filter(
             AgentMeshConversation.user_id == int(user_id),
-            AgentMeshConversation.surface == surface,
             AgentMeshConversation.status == "active",
         )
+        .with_for_update()
         .all()
     )
     if len(rows) <= retention_limit:
@@ -238,20 +242,36 @@ def _enforce_conversation_retention(
         reverse=True,
     )
     occupied_keys = {
-        str(item.session_key)
-        for item in db.query(AgentResponseRun.session_key)
+        (str(item.surface), str(item.session_key))
+        for item in db.query(AgentResponseRun.surface, AgentResponseRun.session_key)
         .filter(
             AgentResponseRun.user_id == int(user_id),
-            AgentResponseRun.surface == surface,
             AgentResponseRun.status.in_(_OCCUPIED_RUN_STATUSES),
         )
         .all()
     }
-    archived = 0
-    retained = 0
+    keep_key = (keep_surface, keep_session_key)
+    protected_keys = {
+        (str(row.surface), str(row.session_key))
+        for row in rows
+        if (str(row.surface), str(row.session_key)) == keep_key
+        or (str(row.surface), str(row.session_key)) in occupied_keys
+    }
+    if len(protected_keys) > retention_limit:
+        raise AgentMeshStateError(
+            f"当前账号已有 {retention_limit} 条运行中或等待操作的会话，暂时无法创建或恢复新会话"
+        )
+    retained_keys = set(protected_keys)
     for row in rows:
-        if row.session_key == keep_session_key or retained < retention_limit or row.session_key in occupied_keys:
-            retained += 1
+        key = (str(row.surface), str(row.session_key))
+        if len(retained_keys) >= retention_limit:
+            break
+        retained_keys.add(key)
+
+    archived = 0
+    for row in rows:
+        key = (str(row.surface), str(row.session_key))
+        if key in retained_keys:
             continue
         row.status = "archived"
         row.active_run_id = None
@@ -294,11 +314,12 @@ def heartbeat(
 ) -> dict[str, Any]:
     """注册或刷新当前账户的小菱会话。"""
     _assert_surface(db, user, surface)
+    _lock_conversation_owner(db, int(user.id))
     row = _conversation(db, int(user.id), surface, session_key)
     now = _now()
     if row is None:
-        # 已归档会话不因在途 heartbeat 复活:归档是跨设备可见的用户决定,
-        # 新会话始终使用新的 UUID,也不会触发唯一键冲突。
+        # 已归档会话不因旧标签页 heartbeat 复活，也不允许继续隐藏运行。
+        # 用户必须先走显式 restore，由恢复流程重新校验账号级 10 条上限。
         archived = (
             db.query(AgentMeshConversation)
             .filter(
@@ -309,7 +330,7 @@ def heartbeat(
             .first()
         )
         if archived is not None:
-            return _conversation_out(archived, now=now)
+            raise AgentMeshStateError("会话已归档，请先恢复后再继续")
         row = AgentMeshConversation(
             user_id=int(user.id),
             surface=surface,
@@ -333,10 +354,13 @@ def heartbeat(
         _enforce_conversation_retention(
             db,
             user_id=int(user.id),
-            surface=surface,
+            keep_surface=surface,
             keep_session_key=session_key,
         )
         db.commit()
+    except AgentMeshStateError:
+        db.rollback()
+        raise
     except IntegrityError:
         # 同一账户并发首心跳可能同时新建同一会话;让已提交的一方获胜并返回其状态。
         db.rollback()
@@ -383,6 +407,32 @@ def _authoritative_run_state(
     return str(row.run_id or ""), str(row.status or "")
 
 
+def _latest_run_states(
+    db: Session,
+    *,
+    user_id: int,
+    conversation_refs: list[tuple[str, str]],
+) -> dict[tuple[str, str], tuple[str, str]]:
+    """一次查询同账号多个会话的最新 Responses 运行，避免列表 N+1。"""
+    refs = {(str(surface), str(session_key)) for surface, session_key in conversation_refs}
+    if not refs:
+        return {}
+    rows = (
+        db.query(AgentResponseRun)
+        .filter(
+            AgentResponseRun.user_id == int(user_id),
+            tuple_(AgentResponseRun.surface, AgentResponseRun.session_key).in_(sorted(refs)),
+        )
+        .order_by(AgentResponseRun.id.desc())
+        .all()
+    )
+    states: dict[tuple[str, str], tuple[str, str]] = {}
+    for row in rows:
+        key = (str(row.surface), str(row.session_key))
+        states.setdefault(key, (str(row.run_id or ""), str(row.status or "")))
+    return states
+
+
 _OCCUPIED_RUN_STATUSES = {
     "running", "approving", "rejecting", "answering", "waiting_approval", "waiting_input",
 }
@@ -401,14 +451,6 @@ def archive_conversation(
     拒绝归档,避免用户在另一设备上误删正在执行的任务。
     """
     _assert_surface(db, user, surface)
-    _, run_status = _authoritative_run_state(
-        db,
-        user_id=int(user.id),
-        surface=surface,
-        session_key=session_key,
-    )
-    if run_status in _OCCUPIED_RUN_STATUSES:
-        raise AgentMeshStateError("会话正在运行或等待操作,暂不能归档")
     row = (
         db.query(AgentMeshConversation)
         .filter(
@@ -416,15 +458,135 @@ def archive_conversation(
             AgentMeshConversation.surface == surface,
             AgentMeshConversation.session_key == session_key,
         )
-        .first()
+        .with_for_update()
+        .one_or_none()
     )
     if row is None or row.status == "archived":
         return {"session_id": session_key, "status": "archived"}
+    _, run_status = _authoritative_run_state(
+        db,
+        user_id=int(user.id),
+        surface=surface,
+        session_key=session_key,
+    )
+    if run_status in _OCCUPIED_RUN_STATUSES:
+        db.rollback()
+        raise AgentMeshStateError("会话正在运行或等待操作,暂不能归档")
     row.status = "archived"
     row.active_run_id = None
     row.active_run_status = None
     db.commit()
     return {"session_id": session_key, "status": "archived"}
+
+
+def restore_conversation(
+    db: Session,
+    user: User,
+    *,
+    surface: str,
+    session_key: str,
+) -> dict[str, Any]:
+    """恢复当前账号的归档会话，且继续遵守账号级 10 条活动上限。"""
+    _assert_surface(db, user, surface)
+    _lock_conversation_owner(db, int(user.id))
+    row = (
+        db.query(AgentMeshConversation)
+        .filter(
+            AgentMeshConversation.user_id == int(user.id),
+            AgentMeshConversation.surface == surface,
+            AgentMeshConversation.session_key == session_key,
+        )
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        raise AgentMeshTargetError("会话不存在或不属于当前账号")
+    if row.status == "active":
+        return _conversation_out(row)
+    row.status = "active"
+    row.last_seen_at = _now()
+    try:
+        db.flush()
+        _enforce_conversation_retention(
+            db,
+            user_id=int(user.id),
+            keep_surface=surface,
+            keep_session_key=session_key,
+        )
+        db.commit()
+    except AgentMeshStateError:
+        db.rollback()
+        raise
+    db.refresh(row)
+    return _conversation_out(row)
+
+
+def list_conversations(
+    db: Session,
+    user: User,
+    *,
+    surface: str = "",
+    status: str = "active",
+    query: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """纯读列出当前账号的会话目录，支持活动/归档检索。"""
+    if surface:
+        _assert_surface(db, user, surface)
+    if status not in {"active", "archived"}:
+        raise AgentMeshStateError("status 必须是 active 或 archived")
+    bounded_limit = max(1, min(int(limit), 100))
+    bounded_offset = max(0, int(offset))
+    rows_query = db.query(AgentMeshConversation).filter(
+        AgentMeshConversation.user_id == int(user.id),
+        AgentMeshConversation.status == status,
+    )
+    if surface:
+        rows_query = rows_query.filter(AgentMeshConversation.surface == surface)
+    normalized_query = str(query or "").strip()
+    if normalized_query:
+        pattern = f"%{normalized_query}%"
+        rows_query = rows_query.filter(
+            or_(
+                AgentMeshConversation.title.ilike(pattern),
+                AgentMeshConversation.session_key.ilike(pattern),
+            )
+        )
+    total = rows_query.count()
+    rows = (
+        rows_query
+        .order_by(
+            AgentMeshConversation.last_message_at.desc(),
+            AgentMeshConversation.last_seen_at.desc(),
+            AgentMeshConversation.id.desc(),
+        )
+        .offset(bounded_offset)
+        .limit(bounded_limit)
+        .all()
+    )
+    latest_states = _latest_run_states(
+        db,
+        user_id=int(user.id),
+        conversation_refs=[(row.surface, row.session_key) for row in rows],
+    )
+    now = _now()
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        item = _conversation_out(row, now=now)
+        run_id, run_status = latest_states.get((row.surface, row.session_key), ("", ""))
+        item["presence_status"] = item["status"]
+        item["status"] = row.status
+        item["title"] = row.title
+        item["active_run_id"] = run_id
+        item["active_run_status"] = run_status
+        items.append(item)
+    return {
+        "items": items,
+        "total": total,
+        "limit": bounded_limit,
+        "offset": bounded_offset,
+    }
 
 
 def archive_empty_conversations(db: Session) -> dict[str, Any]:
@@ -481,6 +643,7 @@ def _conversation_out(row: AgentMeshConversation, *, now: Optional[datetime] = N
         "name": row.title,
         "kind": "session",
         "status": "online" if online else "offline",
+        "lifecycle_status": row.status,
         "capabilities": ["receive_message", "resume_context", "acknowledge"],
         "session_id": row.session_key,
         "surface": row.surface,
@@ -574,7 +737,7 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
                 str(getattr(user, "username", "")) == "admin"
                 and str(getattr(user, "role", "")) == "super_admin"
             )
-            if is_super_admin:
+            if is_super_admin and isinstance(user, User):
                 from app.services import rbac_service
 
                 is_super_admin = rbac_service.is_super_admin_user(db, int(user.id))
@@ -589,13 +752,6 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
                 }
         items.append(item)
     items.extend(_custom_agents(db, user))
-    if surface in {"user", "admin"}:
-        _enforce_conversation_retention(db, user_id=int(user.id), surface=surface)
-        db.commit()
-    else:
-        _enforce_conversation_retention(db, user_id=int(user.id), surface="user")
-        _enforce_conversation_retention(db, user_id=int(user.id), surface="admin")
-        db.commit()
     conversation_query = db.query(AgentMeshConversation).filter(
         AgentMeshConversation.user_id == int(user.id),
         AgentMeshConversation.status == "active",
@@ -608,15 +764,15 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
         .all()
     )
     now = _now()
+    latest_states = _latest_run_states(
+        db,
+        user_id=int(user.id),
+        conversation_refs=[(row.surface, row.session_key) for row in conversations],
+    )
     for row in conversations:
         item = _conversation_out(row, now=now)
         # 覆盖心跳快照,用数据库运行账本给出权威 busy 状态。
-        run_id, run_status = _authoritative_run_state(
-            db,
-            user_id=int(user.id),
-            surface=row.surface,
-            session_key=row.session_key,
-        )
+        run_id, run_status = latest_states.get((row.surface, row.session_key), ("", ""))
         item["active_run_id"] = run_id
         item["active_run_status"] = run_status
         items.append(item)
@@ -1260,6 +1416,35 @@ def pull_inbox(
         delivered.append(row)
     db.commit()
     return [_message_out(row) for row in delivered]
+
+
+def peek_inbox(
+    db: Session,
+    user: User,
+    *,
+    surface: str,
+    session_key: str,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """纯读查看当前会话收件箱，不改变送达状态、尝试次数或事件账本。"""
+    _assert_surface(db, user, surface)
+    if _conversation(db, int(user.id), surface, session_key) is None:
+        raise AgentMeshAccessError("目标会话尚未注册或不属于当前账号")
+    target = _session_address(surface, session_key)
+    now = _now()
+    rows = (
+        db.query(AgentMeshMessage)
+        .filter(
+            AgentMeshMessage.user_id == int(user.id),
+            AgentMeshMessage.send_to == target,
+            AgentMeshMessage.status.in_(("queued", "delivered")),
+            or_(AgentMeshMessage.expires_at.is_(None), AgentMeshMessage.expires_at > now),
+        )
+        .order_by(AgentMeshMessage.id.asc())
+        .limit(max(1, min(int(limit), 100)))
+        .all()
+    )
+    return [_message_out(row) for row in rows]
 
 
 def _owned_target_message(

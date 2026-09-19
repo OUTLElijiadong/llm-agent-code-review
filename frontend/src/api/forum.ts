@@ -39,8 +39,15 @@ export function getPosts(params?: Record<string, unknown>): Promise<Page<ForumPo
 }
 
 /** 帖子详情 + 回复 */
-export function getPost(id: number): Promise<ForumPostDetail> {
-  return get<ForumPostDetail>(`/forum/posts/${id}`)
+export async function getPost(id: number): Promise<ForumPostDetail> {
+  const detail = await get<ForumPostDetail>(`/forum/posts/${id}`)
+  try {
+    const viewed = await post<ForumPost>(`/forum/posts/${id}/views`)
+    return { ...detail, view_count: viewed.view_count }
+  } catch {
+    // 浏览计数是非关键遥测；写入失败不能阻断已经成功读取的帖子详情。
+    return detail
+  }
 }
 
 /** 发帖 */

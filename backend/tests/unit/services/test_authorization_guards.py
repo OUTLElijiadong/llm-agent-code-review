@@ -7,6 +7,7 @@ from app.api.v1.ws_discussion import _can_access_session
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.code_file import CodeFile
 from app.models.project import Project
+from app.models.rbac import Role, UserRole
 from app.models.review_issue import ReviewIssue
 from app.models.review_rule import ReviewRule
 from app.models.review_task import ReviewTask
@@ -28,6 +29,14 @@ def _user(db, username: str, role: str = "user") -> User:
     """
     row = User(username=username, password="x", role=role, status=1)
     db.add(row)
+    db.flush()
+    if role in {"admin", "reviewer", "super_admin"}:
+        role_row = db.query(Role).filter(Role.code == role).one_or_none()
+        if role_row is None:
+            role_row = Role(name=role, code=role, status="active", is_builtin=1)
+            db.add(role_row)
+            db.flush()
+        db.add(UserRole(user_id=row.id, role_id=role_row.id))
     db.commit()
     db.refresh(row)
     return row
@@ -225,7 +234,7 @@ def test_discussion_session_access_requires_owner_or_admin(db):
     admin = _user(db, "ws-admin", role="admin")
     session = DiscussionSession(session_id="disc_x", task_id=1, file_name="app.py", owner_user_id=owner.id)
 
-    assert _can_access_session(owner, session.owner_user_id) is True
-    assert _can_access_session(admin, session.owner_user_id) is True
-    assert _can_access_session(other, session.owner_user_id) is False
-    assert _can_access_session(owner, 0) is False
+    assert _can_access_session(owner, session.owner_user_id, db) is True
+    assert _can_access_session(admin, session.owner_user_id, db) is True
+    assert _can_access_session(other, session.owner_user_id, db) is False
+    assert _can_access_session(owner, 0, db) is False

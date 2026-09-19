@@ -164,7 +164,7 @@ describe('当前会话持久化', () => {
 })
 
 describe('mergeAgentChatSessions 服务端发现优先', () => {
-  it('只保留当前 surface 已发现的会话,并使用本地标题和顺序', () => {
+  it('只保留当前 surface 已发现的会话,并使用服务端摘要和本地顺序', () => {
     const merged = mergeAgentChatSessions(
       [
         { id: 'user-local', title: '本地标题', createdAt: 20 },
@@ -179,8 +179,18 @@ describe('mergeAgentChatSessions 服务端发现优先', () => {
     )
 
     expect(merged.map((item) => item.id)).toEqual(['user-local', 'user-remote'])
-    expect(merged[0].title).toBe('本地标题')
+    expect(merged[0].title).toBe('服务端标题')
     expect(merged[1].title).toBe('远程会话')
+  })
+
+  it('服务端仍是占位标题时保留本地已提炼的摘要', () => {
+    const merged = mergeAgentChatSessions(
+      [{ id: 'user-local', title: '审查支付模块', createdAt: 20 }],
+      [{ id: 'user-local', title: '新对话', surface: 'user', kind: 'session', lastSeenAt: '2026-08-12T00:00:00Z' }],
+      'user',
+    )
+
+    expect(merged[0].title).toBe('审查支付模块')
   })
 
   it('心跳未落库的 preserve 会话(新建/当前)始终排在最前不被误切', () => {

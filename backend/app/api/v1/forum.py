@@ -51,6 +51,14 @@ def get_post(post_id: int, db: Session = Depends(get_db),
     return Resp(data=PostDetailOut(**forum_service.get_post(db, post_id)))
 
 
+@router.post("/posts/{post_id}/views", response_model=Resp[PostListItemOut])
+def record_post_view(post_id: int, db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    """显式记录帖子浏览，避免 GET 详情写库。"""
+    del user
+    return Resp(data=PostListItemOut(**forum_service.record_post_view(db, post_id)))
+
+
 @router.put("/posts/{post_id}", response_model=Resp[PostDetailOut])
 def update_post(post_id: int, payload: PostUpdateIn, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):

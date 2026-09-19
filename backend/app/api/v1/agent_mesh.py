@@ -95,6 +95,59 @@ def archive_session(
         raise AssertionError("unreachable")
 
 
+@router.post(
+    "/conversations/restore",
+    response_model=Resp[dict],
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
+def restore_session(
+    payload: AgentMeshArchiveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Resp[dict]:
+    try:
+        return Resp(
+            data=agent_mesh_service.restore_conversation(
+                db,
+                user,
+                surface=payload.surface,
+                session_key=payload.session_id,
+            )
+        )
+    except agent_mesh_service.AgentMeshError as exc:
+        _raise_mesh_error(exc)
+        raise AssertionError("unreachable")
+
+
+@router.get(
+    "/conversations",
+    response_model=Resp[dict],
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
+def list_conversations(
+    surface: Literal["user", "admin"] | None = Query(default=None),
+    status: Literal["active", "archived"] = Query(default="active"),
+    query: str = Query(default="", max_length=100),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Resp[dict]:
+    try:
+        return Resp(data=agent_mesh_service.list_conversations(
+            db,
+            user,
+            surface=surface or "",
+            status=status,
+            query=query,
+            limit=limit,
+            offset=offset,
+        ))
+    except agent_mesh_service.AgentMeshError as exc:
+        _raise_mesh_error(exc)
+        raise AssertionError("unreachable")
+
+
 @router.get(
     "/agents",
     response_model=Resp[dict],
@@ -135,6 +188,33 @@ def send_message(
 
 @router.get(
     "/inbox",
+    response_model=Resp[list],
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
+def peek_inbox(
+    surface: Literal["user", "admin"] = Query(...),
+    session_id: str = Query(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Resp[list]:
+    try:
+        return Resp(
+            data=agent_mesh_service.peek_inbox(
+                db,
+                user,
+                surface=surface,
+                session_key=session_id,
+                limit=limit,
+            )
+        )
+    except agent_mesh_service.AgentMeshError as exc:
+        _raise_mesh_error(exc)
+        raise AssertionError("unreachable")
+
+
+@router.post(
+    "/inbox/pull",
     response_model=Resp[list],
     dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
 )

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import {
   createAgentChatSession,
@@ -16,9 +16,12 @@ import {
   agentChatStorageKey,
   migrateUnscopedAgentChatSessions,
   type AgentChatSessionMeta,
-  type DiscoveredAgentChatSession,
 } from '@/utils/agentChatSessions'
-import { listAgentMeshAgents } from '@/api/agentMesh'
+import {
+  listAgentMeshConversations,
+  restoreAgentMeshConversation,
+  type AgentMeshConversationStatus,
+} from '@/api/agentMesh'
 import { isAgentResponseSessionOccupied } from '@/utils/agentResponseSession'
 
 interface Props {
@@ -47,6 +50,7 @@ const emit = defineEmits<{
 }>()
 
 const sessions = ref<AgentChatSessionMeta[]>([])
+const archivedSessions = ref<AgentChatSessionMeta[]>([])
 const activeId = ref('')
 const menuFor = ref('')
 const searchQuery = ref('')
@@ -55,10 +59,15 @@ const archivingId = ref('')
 const busyIds = ref<Set<string>>(new Set())
 const panelRef = ref<HTMLElement | null>(null)
 const discoveryLoading = ref(false)
+const archivedLoading = ref(false)
+const restoringId = ref('')
+const historyStatus = ref<AgentMeshConversationStatus>('active')
 /** 服务端权威运行状态(仅 session 项);数据库为忙碌状态的唯一事实源。 */
 const remoteRunState = ref<Map<string, string>>(new Map())
 const discoveryLoadedOnce = ref(false)
 let discoveryTimer: number | undefined
+let archivedSearchTimer: number | undefined
+let archivedRequestSerial = 0
 let pendingHeartbeatId = ''
 
 const currentTitle = computed(() => (
@@ -67,12 +76,17 @@ const currentTitle = computed(() => (
 
 /** 搜索过滤 + 置顶优先;底层的 sessions 顺序仍由服务端合并结果决定。 */
 const displaySessions = computed<AgentChatSessionMeta[]>(() => {
+  if (historyStatus.value === 'archived') return archivedSessions.value
   const query = searchQuery.value.trim().toLowerCase()
   const base = query
     ? sessions.value.filter((item) => item.title.toLowerCase().includes(query))
     : [...sessions.value]
   return base.slice().sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)))
 })
+
+const historyLoading = computed(() => (
+  historyStatus.value === 'active' ? discoveryLoading.value : archivedLoading.value
+))
 
 /** 由父组件在恢复/轮询/流事件后同步各会话占用状态。 */
 function setBusy(sessionId: string, busy: boolean): void {
@@ -165,6 +179,16 @@ async function ensureFreshOnOpen(): Promise<void> {
 
 function toggleMenu(): void {
   menuFor.value = menuFor.value ? '' : 'open'
+  if (menuFor.value && props.discoverRemote) {
+    if (historyStatus.value === 'archived') void refreshArchivedSessions()
+    else void refreshFromAgentMesh()
+  }
+}
+
+function setHistoryStatus(status: AgentMeshConversationStatus): void {
+  historyStatus.value = status
+  confirmingDeleteId.value = ''
+  if (status === 'archived' && props.discoverRemote) void refreshArchivedSessions()
 }
 
 function closeMenu(): void {
@@ -223,7 +247,14 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (discoveryTimer !== undefined) window.clearInterval(discoveryTimer)
+  if (archivedSearchTimer !== undefined) window.clearTimeout(archivedSearchTimer)
   document.removeEventListener('click', handleOutsideClick)
+})
+
+watch(searchQuery, () => {
+  if (!props.discoverRemote || historyStatus.value !== 'archived' || !menuFor.value) return
+  if (archivedSearchTimer !== undefined) window.clearTimeout(archivedSearchTimer)
+  archivedSearchTimer = window.setTimeout(() => void refreshArchivedSessions(), 180)
 })
 
 function renameActive(title: string): void {
@@ -243,18 +274,18 @@ function reload(): void {
  * 以 Agent Mesh 服务端会话目录为事实源，合并当前 surface 的本地标题和最近顺序。
  * 未被服务端发现的本地条目不会继续出现在切换器中，避免账户或 user/admin 数据串线。
  */
-async function refreshFromAgentMesh(): Promise<void> {
+async function refreshFromAgentMesh(preferredSessionId = ''): Promise<void> {
   if (discoveryLoading.value) return
   discoveryLoading.value = true
   const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
   const previousActiveId = activeId.value
   try {
-    const discovery = await listAgentMeshAgents(surface)
-    const discovered: DiscoveredAgentChatSession[] = discovery.items
-      .filter((item) => item.kind === 'session' && item.surface === surface && item.session_id)
+    const page = await listAgentMeshConversations({ surface, status: 'active', limit: 20, offset: 0 })
+    const discovered = page.items
+      .filter((item) => item.surface === surface && item.status !== 'archived' && item.session_id)
       .map((item) => ({
         id: item.session_id,
-        title: item.name,
+        title: item.title || (item as typeof item & { name?: string }).name || '未命名对话',
         surface,
         kind: 'session' as const,
         lastSeenAt: item.last_seen_at,
@@ -293,6 +324,13 @@ async function refreshFromAgentMesh(): Promise<void> {
     }
     remoteRunState.value = nextRunState
     discoveryLoadedOnce.value = true
+    if (preferredSessionId && merged.some((item) => item.id === preferredSessionId)) {
+      activeId.value = preferredSessionId
+      saveActiveAgentChatSession(storageNamespace.value, preferredSessionId)
+      notify()
+      emit('select', preferredSessionId)
+      return
+    }
     if (!merged.some((item) => item.id === activeId.value)) {
       const busy = busyIds.value.has(activeId.value)
       if (busy) {
@@ -312,7 +350,51 @@ async function refreshFromAgentMesh(): Promise<void> {
   }
 }
 
-defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, removeSession, restoreSessionAfterArchiveFailure })
+/** 已归档目录始终直接来自当前登录账号的服务端，不写入本地索引。 */
+async function refreshArchivedSessions(): Promise<void> {
+  const requestSerial = ++archivedRequestSerial
+  archivedLoading.value = true
+  const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
+  try {
+    const page = await listAgentMeshConversations({
+      surface,
+      status: 'archived',
+      query: searchQuery.value.trim(),
+      limit: 50,
+      offset: 0,
+    })
+    if (requestSerial !== archivedRequestSerial) return
+    archivedSessions.value = page.items
+      .filter((item) => item.surface === surface && item.status === 'archived' && item.session_id)
+      .map((item) => ({
+        id: item.session_id,
+        title: item.title.trim() || '未命名对话',
+        createdAt: Number.isFinite(Date.parse(item.last_seen_at)) ? Date.parse(item.last_seen_at) : 0,
+      }))
+  } catch {
+    // 归档目录读取失败时保留上次结果，用户可重新打开后重试。
+  } finally {
+    if (requestSerial === archivedRequestSerial) archivedLoading.value = false
+  }
+}
+
+async function restoreArchivedSession(sessionId: string): Promise<void> {
+  if (restoringId.value) return
+  const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
+  restoringId.value = sessionId
+  try {
+    await restoreAgentMeshConversation(surface, sessionId)
+    archivedSessions.value = archivedSessions.value.filter((item) => item.id !== sessionId)
+    historyStatus.value = 'active'
+    searchQuery.value = ''
+    await refreshFromAgentMesh(sessionId)
+    menuFor.value = ''
+  } finally {
+    restoringId.value = ''
+  }
+}
+
+defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, refreshArchivedSessions, removeSession, restoreSessionAfterArchiveFailure })
 </script>
 
 <template>
@@ -343,6 +425,24 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
     <Transition name="session-pop">
       <div v-if="menuFor" class="session-menu" role="menu">
         <div class="session-menu-title">我的对话</div>
+        <div class="session-status-tabs" role="tablist" aria-label="会话状态">
+          <button
+            class="session-status-tab"
+            :class="{ 'is-active': historyStatus === 'active' }"
+            type="button"
+            role="tab"
+            :aria-selected="historyStatus === 'active'"
+            @click.stop="setHistoryStatus('active')"
+          >活动</button>
+          <button
+            class="session-status-tab"
+            :class="{ 'is-active': historyStatus === 'archived' }"
+            type="button"
+            role="tab"
+            :aria-selected="historyStatus === 'archived'"
+            @click.stop="setHistoryStatus('archived')"
+          >已归档</button>
+        </div>
         <input
           v-model="searchQuery"
           class="session-search"
@@ -350,13 +450,15 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
           placeholder="搜索对话"
           aria-label="搜索对话"
         />
-        <div v-if="!displaySessions.length" class="session-empty">没有匹配的对话</div>
+        <div v-if="historyLoading && !displaySessions.length" class="session-empty">正在读取会话…</div>
+        <div v-else-if="!displaySessions.length" class="session-empty">没有匹配的对话</div>
         <div
           v-for="item in displaySessions"
           :key="item.id"
           class="session-entry"
         >
           <button
+            v-if="historyStatus === 'active'"
             class="session-item"
             :class="{ 'is-active': item.id === activeId }"
             type="button"
@@ -384,8 +486,8 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
               class="session-delete"
               role="button"
               tabindex="-1"
-              :aria-label="`删除对话 ${item.title}`"
-              :title="`删除对话 ${item.title}`"
+              :aria-label="`归档对话 ${item.title}`"
+              :title="`归档对话 ${item.title}`"
               @click.stop="requestDelete(item.id)"
             >×</span>
             <span
@@ -401,15 +503,26 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
               aria-label="运行中，不可删除"
             >🔒</span>
           </button>
+          <div v-else class="session-item session-item-archived">
+            <span class="session-item-name">{{ item.title }}</span>
+            <button
+              class="session-restore"
+              type="button"
+              :disabled="Boolean(restoringId)"
+              :aria-label="`恢复对话 ${item.title}`"
+              :title="`恢复对话 ${item.title}`"
+              @click.stop="restoreArchivedSession(item.id)"
+            >{{ restoringId === item.id ? '恢复中…' : '恢复' }}</button>
+          </div>
           <div
-            v-if="confirmingDeleteId === item.id"
+            v-if="historyStatus === 'active' && confirmingDeleteId === item.id"
             class="session-confirm"
             role="alertdialog"
             aria-label="确认删除对话"
             @click.stop
           >
             <span class="session-confirm-text">确认归档该对话？归档后将从会话列表移除。</span>
-            <button class="session-confirm-yes" type="button" @click.stop="confirmDelete(item.id)">删除</button>
+            <button class="session-confirm-yes" type="button" @click.stop="confirmDelete(item.id)">归档</button>
             <button class="session-confirm-no" type="button" @click.stop="cancelDelete()">取消</button>
           </div>
         </div>
@@ -501,6 +614,33 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
   color: var(--color-text-placeholder, #a8abb2);
 }
 
+.session-status-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 0 0 6px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--gray-50, #f4f5f8);
+}
+
+.session-status-tab {
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary, #5b616b);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-status-tab.is-active {
+  background: #fff;
+  color: var(--brand-600, #4a47d1);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(15, 18, 34, 0.1);
+}
+
 .session-item {
   display: flex;
   align-items: center;
@@ -524,6 +664,27 @@ defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, 
   background: var(--brand-50, #eef0ff);
   color: var(--brand-600, #4a47d1);
   font-weight: 600;
+}
+
+.session-item-archived {
+  cursor: default;
+}
+
+.session-restore {
+  flex-shrink: 0;
+  min-width: 46px;
+  padding: 3px 7px;
+  border: 1px solid var(--brand-200, #c9c7ff);
+  border-radius: 6px;
+  background: var(--brand-50, #eef0ff);
+  color: var(--brand-600, #4a47d1);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.session-restore:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .session-item-name {

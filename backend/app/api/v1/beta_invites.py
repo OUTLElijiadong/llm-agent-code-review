@@ -9,7 +9,7 @@ from app.models.beta_invite_code import BetaInviteCode
 from app.models.user import User
 from app.schemas.beta_invite import BetaInviteGenerateIn, BetaInviteGenerateOut, BetaInviteOut
 from app.schemas.common import PageOut, Resp
-from app.services import audit_service, beta_invite_service
+from app.services import audit_service, beta_invite_service, rbac_service
 
 router = APIRouter()
 
@@ -106,7 +106,7 @@ def delete_beta_code(
 ):
     """物理删除一个内测码记录(任意状态;仅超级管理员)。"""
 
-    if admin.role != "super_admin":
+    if not rbac_service.is_super_admin_user(db, int(admin.id)):
         from app.core.exceptions import ForbiddenError
 
         raise ForbiddenError("仅超级管理员可删除内测码记录", code=40331)

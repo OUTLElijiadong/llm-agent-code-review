@@ -19,6 +19,7 @@ from app.models.agent_governance import AgentAlert, AgentMetricSnapshot
 from app.models.agent_mesh import AgentMeshMessage
 from app.models.custom_agent import CustomAgent
 from app.models.user import User
+from app.services import rbac_service
 from app.services.ai_usage_context import model_attribution, usage_context
 
 _scheduler = None
@@ -798,7 +799,7 @@ def _monitor_handler(db: Session, user: User, message: dict[str, Any]) -> dict[s
             result["summary"] = "metrics 必须是非空指标名字符串列表，不能传入服务器事实对象"
             result["errors"] = [{"code": "invalid_field_type", "field": "metrics", "expected": "list[string]"}]
         return result
-    if str(user.role) not in {"admin", "super_admin"}:
+    if not rbac_service.is_admin_user(db, int(user.id)):
         return _result(
             "blocked",
             "普通账户不能读取全平台治理指标",

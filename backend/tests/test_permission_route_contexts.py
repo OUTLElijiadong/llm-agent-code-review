@@ -19,13 +19,13 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 327
+    assert len(plan["routes"]) == 332
     assert len({row["endpoint"] for row in plan["routes"]}) == 42
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
         ("POST", "/api/auth/login"),
         ("POST", "/v1/responses"),
-        ("GET", "/api/discuss/start"),
+        ("POST", "/api/discuss/start"),
         ("GET", "/healthz"),
         ("GET", "/readyz"),
         ("GET", "/metrics"),
@@ -34,8 +34,8 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/me/profile"),
         ("POST", "/api/me/profile/preference-prompted"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 313
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 245
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 318
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 249
 
 
 @pytest.mark.parametrize(

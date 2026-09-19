@@ -15,6 +15,7 @@ from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
+from app.services.rbac_service import is_admin_user
 
 HIDDEN_PROJECT_STATUSES = ("deleted", "quarantined")
 
@@ -48,7 +49,7 @@ def get_visible_project_ids(db: Session, user: Optional[User]) -> tuple[list[int
             - scope='global': 管理员视角,返回全部项目
             - scope='self': 普通用户视角,返回 owner ∪ member 项目
     """
-    if user is None or user.role in {"admin", "super_admin"}:
+    if user is None or is_admin_user(db, user.id):
         rows = db.query(Project.id).filter(Project.status.notin_(HIDDEN_PROJECT_STATUSES)).all()
         return [r[0] for r in rows], "global"
 
@@ -100,7 +101,7 @@ def is_project_member(
     )
     if not project or project.status in HIDDEN_PROJECT_STATUSES:
         return False, ""
-    if user.role in {"admin", "super_admin"}:
+    if is_admin_user(db, user.id):
         return True, "admin"
     if project.user_id == user.id:
         return True, "owner"
