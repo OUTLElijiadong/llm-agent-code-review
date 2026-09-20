@@ -465,6 +465,56 @@ def test_heartbeat_does_not_archive_placeholder_with_real_run(db, user) -> None:
     ).one().status == "active"
 
 
+def test_heartbeat_does_not_archive_placeholder_with_mesh_message_only(db, user) -> None:
+    """只有 Mesh 消息、没有 Responses run 的占位会话也不是空白会话。"""
+    agent_mesh_service.heartbeat(
+        db,
+        user,
+        surface="user",
+        session_key="conversation-with-message",
+        title="新对话",
+    )
+    db.add(AgentMeshMessage(
+        message_id="msg-history-only",
+        idempotency_key="message-history-only",
+        trace_id="trace-history-only",
+        correlation_id="",
+        causation_id="",
+        user_id=user.id,
+        sent_from="session:user:conversation-with-message",
+        send_to="agent:code_reviewer",
+        message_type="status.update",
+        priority="normal",
+        subject="已有历史消息",
+        payload_json="{}",
+        context_json="{}",
+        artifacts_json="[]",
+        errors_json="[]",
+        status="completed",
+        requires_ack=False,
+        max_attempts=1,
+        attempt_count=1,
+    ))
+    db.commit()
+
+    agent_mesh_service.heartbeat(
+        db,
+        user,
+        surface="user",
+        session_key="new-empty-after-message",
+        title="新对话",
+    )
+
+    assert db.query(AgentMeshConversation).filter_by(
+        user_id=user.id,
+        session_key="conversation-with-message",
+    ).one().status == "active"
+    assert db.query(AgentMeshConversation).filter_by(
+        user_id=user.id,
+        session_key="new-empty-after-message",
+    ).one().status == "active"
+
+
 def test_eleventh_conversation_is_rejected_when_ten_are_occupied(db, user) -> None:
     for index in range(10):
         key = f"session-occupied-{index:02d}"
