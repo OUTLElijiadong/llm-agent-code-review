@@ -168,7 +168,9 @@ def _safe_commit(db: Session, task: Optional[ReviewTask] = None) -> None:
         db.commit()
 
 
-def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
+def start(
+    db: Session, user: User, payload: ReviewStartIn, *, input_exclusions: Optional[list[dict]] = None,
+) -> ReviewTask:
     """创建审查任务并提交后台异步执行 —— 立即返回 status=running 的任务。
 
     校验(项目归属/文件存在/数量上限)在请求线程内同步完成,非法请求立刻返回 4xx;
@@ -232,7 +234,9 @@ def start(db: Session, user: User, payload: ReviewStartIn) -> ReviewTask:
         rules_snapshot=_freeze_rules(rules),
         start_time=datetime.now(timezone.utc),
         execution_token=uuid.uuid4().hex,
-        coverage={"stage": "queued", "completed_files": 0, "total_files": len(files)},
+        coverage={"stage": "queued", "completed_files": 0, "total_files": len(files),
+                  **({"excluded_files": input_exclusions, "input_selection": "reviewable_text"}
+                     if input_exclusions else {})},
     )
     try:
         db.add(task)
@@ -406,6 +410,16 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
         )
         if task.status != "running" or str(getattr(task, "execution_token", "") or "") != active_token:
             logger.info("[review] 后台任务 #{} 的执行租约已失效，跳过旧 Worker", task_id)
+            return
+        if int(getattr(user, "status", 1) or 0) != 1:
+            _check_cancelled(db, task, active_token, lock=True)
+            task.status = "failed"
+            task.error_message = "账户已停用或删除，审查未执行"
+            task.end_time = datetime.now(timezone.utc)
+            task.coverage = {**(task.coverage or {}), "stage": "failed", "reason": "account_inactive"}
+            _update_duration(task)
+            _safe_commit(db, task)
+            _emit_review_event(AgentEventType.FAILED, task, user, task.error_message)
             return
 
         project = db.get(Project, task.project_id)
@@ -693,10 +707,13 @@ def _execute_review(
                     experience_section=experience_section,
                     execution_token=execution_token,
                 )
+            except (TaskCancelledError, TaskSupersededError):
+                raise
             except ReviewCoverageError as exc:
                 file_failures.append(f"{code_file.file_name}: {'; '.join(exc.failures)}")
                 continue
             except Exception as exc:  # noqa: BLE001 - 单文件失败不应阻断其余文件覆盖
+                _check_cancelled(db, task, execution_token, lock=True)
                 file_failures.append(f"{code_file.file_name}: {exc}")
                 coverage = task.coverage if isinstance(task.coverage, dict) else {}
                 ledger = dict(coverage.get("files") or {})
@@ -903,6 +920,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                 )
             llm_findings.extend(chunk_findings)
         except ReviewCoverageError as exc:
+            _check_cancelled(db, task, execution_token, lock=True)
             llm_findings.extend(exc.findings)
             failures.extend(exc.failures)
             file_entry["failed_chunks"] = [
@@ -945,11 +963,13 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
         db.add_all(issues_acc)
         db.commit()
     if failures:
+        _check_cancelled(db, task, execution_token, lock=True)
         file_entry["status"] = "failed"
         ledger[str(code_file.id)] = dict(file_entry)
         task.coverage = {**(task.coverage or {}), "files": dict(ledger)}
         _safe_commit(db, task)
         raise ReviewCoverageError(failures)
+    _check_cancelled(db, task, execution_token, lock=True)
     file_entry["status"] = "complete"
     ledger[str(code_file.id)] = dict(file_entry)
     task.coverage = {**(task.coverage or {}), "files": dict(ledger)}

@@ -1,0 +1,36 @@
+{
+  "passed": false,
+  "checks": {
+    "existing_runtime_members_only": true,
+    "three_team_nodes_completed": false,
+    "independent_team_tasks_overlap": true,
+    "actual_http_requests_overlap_across_nodes": false,
+    "one_full_review_success": false,
+    "file_coverage_complete": false,
+    "issue_counts_match_database": true,
+    "formal_report_readable": false,
+    "all_review_profiles_have_real_success_logs": false,
+    "all_http_attempts_accounted": false,
+    "all_calls_attributed_to_team_tasks": true,
+    "all_real_http_succeeded": false
+  },
+  "dispatch": {
+    "teams": 1,
+    "claimed": 2,
+    "completed": 0,
+    "failed": 2,
+    "recovered": 0,
+    "expired": 0,
+    "cleaned": 0
+  },
+  "elapsed_seconds": 1.05,
+  "http_attempts": 0,
+  "ai_call_logs": 0,
+  "expected_profiles": [
+    "code_reviewer",
+    "security_sentinel"
+  ],
+  "observed_profiles": [],
+  "run_directory": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/v4小菱并行审查20260920/证据/真实模型运行/20260920T120914Z",
+  "boundary": "合成单文件真实模型隔离集成，不代表生产数据全项目验收；汇总节点依据返回证据确定性核对。"
+}

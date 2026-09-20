@@ -580,6 +580,10 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
         "创建有依赖关系、可排队、可追踪的临时子 Agent 团队；成员只能引用 list_agents 返回的 executable Agent。"
         "团队必须至少有一个 verifier 或 summarizer 任务；所有无下游依赖的叶任务必须被 verifier/summarizer 覆盖。"
         "若遗漏汇总节点或叶任务覆盖关系，系统会自动补 agent:reporter 汇总节点；"
+        "项目正式审查使用 agent:review_orchestrator 的 input={operation:'run_review',project_id,review_type:'full'}；"
+        "项目安全审计使用 agent:security_sentinel 的 input={project_id,scan_mode:'full'}。"
+        "独立审查/审计节点不互相依赖，可同时执行，最终 reporter 依赖全部工作节点。"
+        "只编组既有 Agent，不创建新 Agent 定义；code_reviewer 只接受代码片段 code。"
         "needs_configuration/session_only/approval_required"
         "等不可执行成员不会被轮询伪装成可用，需改用 executable Agent。",
         CreateAgentTeamArguments,

@@ -1,0 +1,184 @@
+{
+  "owner_while_member_present": {
+    "/api/review/tasks/1": {
+      "status": 200,
+      "data": null
+    },
+    "/api/reports/1": {
+      "status": 404,
+      "data": null
+    },
+    "/api/reports/tasks/1/export?format=json": {
+      "status": 404,
+      "data": null
+    },
+    "/api/reports": {
+      "status": 200,
+      "data": {
+        "items": [],
+        "total": 0,
+        "page": 1,
+        "page_size": 20,
+        "pages": 0
+      }
+    }
+  },
+  "member_present": {
+    "/api/review/tasks/1": {
+      "status": 200,
+      "data": null
+    },
+    "/api/reports/1": {
+      "status": 200,
+      "data": null
+    },
+    "/api/reports/tasks/1/export?format=json": {
+      "status": 200,
+      "data": null
+    },
+    "/api/reports": {
+      "status": 200,
+      "data": {
+        "items": [
+          {
+            "task_id": 1,
+            "task_name": "member-task",
+            "project_name": "private-project",
+            "total_issues": 1,
+            "score": 92,
+            "status": "success",
+            "create_time": "2026-09-20T11:58:04.622181Z",
+            "source": {
+              "type": "standard",
+              "stats_basis": "review_issues"
+            }
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20,
+        "pages": 1
+      }
+    }
+  },
+  "member_removed": {
+    "/api/review/tasks/1": {
+      "status": 404,
+      "data": null
+    },
+    "/api/reports/1": {
+      "status": 200,
+      "data": null
+    },
+    "/api/reports/tasks/1/export?format=json": {
+      "status": 200,
+      "data": null
+    },
+    "/api/reports": {
+      "status": 200,
+      "data": {
+        "items": [
+          {
+            "task_id": 1,
+            "task_name": "member-task",
+            "project_name": "private-project",
+            "total_issues": 1,
+            "score": 92,
+            "status": "success",
+            "create_time": "2026-09-20T11:58:04.622181Z",
+            "source": {
+              "type": "standard",
+              "stats_basis": "review_issues"
+            }
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20,
+        "pages": 1
+      }
+    }
+  },
+  "project_quarantined_member": {
+    "/api/review/tasks/1": {
+      "status": 404,
+      "data": null
+    },
+    "/api/reports/1": {
+      "status": 200,
+      "data": null
+    },
+    "/api/reports/tasks/1/export?format=json": {
+      "status": 200,
+      "data": null
+    },
+    "/api/reports": {
+      "status": 200,
+      "data": {
+        "items": [
+          {
+            "task_id": 1,
+            "task_name": "member-task",
+            "project_name": "private-project",
+            "total_issues": 1,
+            "score": 92,
+            "status": "success",
+            "create_time": "2026-09-20T11:58:04.622181Z",
+            "source": {
+              "type": "standard",
+              "stats_basis": "review_issues"
+            }
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20,
+        "pages": 1
+      }
+    }
+  },
+  "report_snapshot": {
+    "task_files": [
+      {
+        "file_id": 1,
+        "project_id": 1,
+        "file_name": "source.py",
+        "file_path": "source.py",
+        "language": "python",
+        "line_count": 1,
+        "version_no": 1,
+        "content_sha256": "ffab1b3914d3eceec58e0688ec2fed2cba82da0a6f2b4e758d04b634e8d87ba2",
+        "snapshot_verified": true
+      }
+    ],
+    "report_files": [
+      {
+        "file_id": 1,
+        "file_name": "renamed.ts",
+        "language": "typescript",
+        "issue_count": 1,
+        "severe_count": 0,
+        "score": 92
+      }
+    ]
+  },
+  "superseded_worker": {
+    "execution_token": "new",
+    "coverage": {
+      "stage": "analyzing",
+      "current_file": "renamed.ts",
+      "total_files": 1,
+      "completed_files": 0,
+      "completed_chunks": 0,
+      "total_chunks": null,
+      "files": {
+        "1": {
+          "file_name": "renamed.ts",
+          "status": "failed",
+          "error": "old worker should not write"
+        }
+      }
+    },
+    "status": "running"
+  }
+}

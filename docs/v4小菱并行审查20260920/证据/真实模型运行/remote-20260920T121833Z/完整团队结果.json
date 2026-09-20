@@ -1,0 +1,1170 @@
+{
+  "review": {
+    "status": "completed",
+    "task_id": 1,
+    "project_id": 1,
+    "coverage": {
+      "stage": "complete",
+      "completed_files": 1,
+      "total_files": 1,
+      "current_file": null,
+      "completed_chunks": 1,
+      "total_chunks": 1,
+      "files": {
+        "1": {
+          "file_name": "synthetic_routes.py",
+          "status": "complete",
+          "total_chunks": 1,
+          "completed_chunks": 1,
+          "completed_chunk_indexes": [
+            0
+          ],
+          "failed_chunks": []
+        }
+      }
+    },
+    "findings": [
+      {
+        "issue_id": 1,
+        "project_id": 1,
+        "task_id": 1,
+        "file_id": 1,
+        "file_name": "synthetic_routes.py",
+        "line_number": 7,
+        "title": "函数缺少文档字符串与注释",
+        "severity": "中",
+        "issue_type": "注释完整性"
+      },
+      {
+        "issue_id": 2,
+        "project_id": 1,
+        "task_id": 1,
+        "file_id": 1,
+        "file_name": "synthetic_routes.py",
+        "line_number": 10,
+        "title": "内存数据库每请求重建导致查询必失败",
+        "severity": "中",
+        "issue_type": "潜在Bug"
+      },
+      {
+        "issue_id": 3,
+        "project_id": 1,
+        "task_id": 1,
+        "file_id": 1,
+        "file_name": "synthetic_routes.py",
+        "line_number": 11,
+        "title": "SQL 查询字符串拼接导致注入",
+        "severity": "严重",
+        "issue_type": "安全漏洞"
+      },
+      {
+        "issue_id": 4,
+        "project_id": 1,
+        "task_id": 1,
+        "file_id": 1,
+        "file_name": "synthetic_routes.py",
+        "line_number": 16,
+        "title": "shell=True 拼接执行导致命令注入",
+        "severity": "严重",
+        "issue_type": "安全漏洞"
+      },
+      {
+        "issue_id": 5,
+        "project_id": 1,
+        "task_id": 1,
+        "file_id": 1,
+        "file_name": "synthetic_routes.py",
+        "line_number": 20,
+        "title": "eval 执行用户输入导致任意代码执行",
+        "severity": "严重",
+        "issue_type": "安全漏洞"
+      }
+    ],
+    "finding_count_total": 5,
+    "findings_truncated": false,
+    "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。",
+    "evidence": [
+      {
+        "source": "review_task",
+        "data": {
+          "task_id": 1,
+          "project_id": 1,
+          "status": "success",
+          "review_type": "full",
+          "coverage": {
+            "stage": "complete",
+            "completed_files": 1,
+            "total_files": 1,
+            "current_file": null,
+            "completed_chunks": 1,
+            "total_chunks": 1,
+            "files": {
+              "1": {
+                "file_name": "synthetic_routes.py",
+                "status": "complete",
+                "total_chunks": 1,
+                "completed_chunks": 1,
+                "completed_chunk_indexes": [
+                  0
+                ],
+                "failed_chunks": []
+              }
+            }
+          },
+          "total_files": 1,
+          "processed_files": 1,
+          "total_issues": 5,
+          "task_url": "/reviews/1",
+          "report_url": "/reports/1"
+        }
+      }
+    ],
+    "artifacts": [
+      {
+        "type": "review_task",
+        "task_id": 1,
+        "project_id": 1,
+        "status": "success",
+        "review_type": "full",
+        "coverage": {
+          "stage": "complete",
+          "completed_files": 1,
+          "total_files": 1,
+          "current_file": null,
+          "completed_chunks": 1,
+          "total_chunks": 1,
+          "files": {
+            "1": {
+              "file_name": "synthetic_routes.py",
+              "status": "complete",
+              "total_chunks": 1,
+              "completed_chunks": 1,
+              "completed_chunk_indexes": [
+                0
+              ],
+              "failed_chunks": []
+            }
+          }
+        },
+        "total_files": 1,
+        "processed_files": 1,
+        "total_issues": 5,
+        "task_url": "/reviews/1",
+        "report_url": "/reports/1"
+      }
+    ],
+    "errors": [],
+    "retryable": false
+  },
+  "audit": {
+    "status": "completed",
+    "summary": "安全审查已完成",
+    "evidence": [
+      {
+        "source": "request_scoped_agent",
+        "data": {
+          "findings": [
+            {
+              "title": "SQL 注入：用户输入直接拼接进 SQL 查询",
+              "category": "Injection",
+              "owasp": "A05:2025-Injection",
+              "cwe": "CWE-89",
+              "severity": "严重",
+              "file_path": "synthetic_routes.py",
+              "file_id": 1,
+              "lines": "L11",
+              "line_number": 11,
+              "end_line": 11,
+              "column_start": null,
+              "column_end": null,
+              "source_anchor": "",
+              "evidence": "        return str(connection.execute(\"SELECT id FROM users WHERE name = '\" + user_name + \"'\").fetchall())",
+              "exploit_scenario": "攻击者请求 /search?name=' OR '1'='1 可绕过条件返回全部用户；使用 UNION SELECT 可读取任意表数据，导致数据库信息泄露。",
+              "fix_suggestion": "使用参数化查询：connection.execute(\"SELECT id FROM users WHERE name = ?\", (user_name,))，禁止字符串拼接 SQL。",
+              "references": [
+                "https://owasp.org/Top10/A05_2025-Injection/",
+                "https://cwe.mitre.org/data/definitions/89.html"
+              ],
+              "confidence": 1.0,
+              "source": "llm",
+              "source_details": [
+                {
+                  "source": "llm",
+                  "confidence": 0.98,
+                  "evidence": "        return str(connection.execute(\"SELECT id FROM users WHERE name = '\" + user_name + \"'\").fetchall())",
+                  "line_number": 11,
+                  "title": "SQL 注入：用户输入直接拼接进 SQL 查询"
+                }
+              ],
+              "confirmation_count": 1,
+              "sources": [
+                "llm"
+              ],
+              "static_rule_hits": 0,
+              "verification": "confirmed",
+              "verification_reason": "synthetic_routes.py:L11 使用字符串拼接构造 SQL：\"SELECT id FROM users WHERE name = '\" + user_name + \"'\"，user_name 直接来自请求参数（/search?name=），无参数化绑定、无 ORM、无类型约束。拼接点位于引号内部，注入 ' OR '1'='1 可改变 WHERE 语义，UNION SELECT 可跨表读取。属真实可利用的 SQL 注入（CWE-89 / OWASP A03）。"
+            },
+            {
+              "title": "命令注入：host 参数拼接进 shell 命令",
+              "category": "Injection",
+              "owasp": "A05:2025-Injection",
+              "cwe": "CWE-78",
+              "severity": "严重",
+              "file_path": "synthetic_routes.py",
+              "file_id": 1,
+              "lines": "L16",
+              "line_number": 16,
+              "end_line": 16,
+              "column_start": null,
+              "column_end": null,
+              "source_anchor": "",
+              "evidence": "    return subprocess.check_output(\"ping -c 1 \" + host, shell=True).decode()",
+              "exploit_scenario": "请求 /ping?host=127.0.0.1;id 会以 shell=True 执行拼接命令，攻击者可执行任意系统命令，完全控制服务器。",
+              "fix_suggestion": "避免 shell=True，使用参数列表：subprocess.check_output([\"ping\",\"-c\",\"1\",host])，并对 host 做白名单校验。",
+              "references": [
+                "https://owasp.org/Top10/A05_2025-Injection/",
+                "https://cwe.mitre.org/data/definitions/78.html"
+              ],
+              "confidence": 1.0,
+              "source": "llm",
+              "source_details": [
+                {
+                  "source": "llm",
+                  "confidence": 0.98,
+                  "evidence": "    return subprocess.check_output(\"ping -c 1 \" + host, shell=True).decode()",
+                  "line_number": 16,
+                  "title": "命令注入：host 参数拼接进 shell 命令"
+                }
+              ],
+              "confirmation_count": 1,
+              "sources": [
+                "llm"
+              ],
+              "static_rule_hits": 0,
+              "verification": "confirmed",
+              "verification_reason": "synthetic_routes.py:L16 将 host 直接拼入命令字符串并传 shell=True：subprocess.check_output(\"ping -c 1 \" + host, shell=True)。host 来自 /ping?host=，shell 元字符（;、|、&&）会被 /bin/sh 解释，host=127.0.0.1;id 即可执行任意命令。无白名单、无转义、无 shell=False，属真实可利用的命令注入（CWE-78 / OWASP A03）。"
+            },
+            {
+              "title": "Python 命令注入",
+              "category": "静态规则",
+              "owasp": "A05:2025-Injection",
+              "cwe": "CWE-78",
+              "severity": "严重",
+              "file_path": "synthetic_routes.py",
+              "file_id": 1,
+              "lines": "L16",
+              "line_number": 16,
+              "end_line": 16,
+              "column_start": 11,
+              "column_end": 67,
+              "source_anchor": "py:subprocess.check_output(\"ping -c 1 \" + host, shell=True)#1",
+              "evidence": "subprocess.check_output(\"ping -c 1 \" + host, shell=True)",
+              "exploit_scenario": "动态外部输入进入系统命令或 shell=True 子进程,可导致任意命令执行。",
+              "fix_suggestion": "禁止 shell=True 和 os.system/os.popen;使用 subprocess 参数列表并保持 shell=False,同时对白名单参数做格式校验。",
+              "references": [
+                "https://cwe.mitre.org/data/definitions/78.html",
+                "https://owasp.org/Top10/2025/A05_2025-Injection/"
+              ],
+              "confidence": 1.0,
+              "source": "static",
+              "source_details": [
+                {
+                  "source": "static",
+                  "confidence": 0.95,
+                  "evidence": "subprocess.check_output(\"ping -c 1 \" + host, shell=True)",
+                  "line_number": 16,
+                  "title": "Python 命令注入",
+                  "source_anchor": "py:subprocess.check_output(\"ping -c 1 \" + host, shell=True)#1"
+                }
+              ],
+              "confirmation_count": 1,
+              "sources": [
+                "static"
+              ],
+              "static_rule_hits": 0,
+              "verification": "confirmed",
+              "verification_reason": "与 [2] 为同一处代码（synthetic_routes.py:L16）的规则命中，证据一致：subprocess.check_output(\"ping -c 1 \" + host, shell=True)。动态外部输入 host 进入 shell=True 子进程，构成命令注入。该条为 [2] 的静态规则重复项，结论相同，确认为真实漏洞（CWE-78 / OWASP A03）。"
+            },
+            {
+              "title": "代码注入：eval 执行用户提交表达式",
+              "category": "Injection",
+              "owasp": "A05:2025-Injection",
+              "cwe": "CWE-95",
+              "severity": "严重",
+              "file_path": "synthetic_routes.py",
+              "file_id": 1,
+              "lines": "L20",
+              "line_number": 20,
+              "end_line": 20,
+              "column_start": null,
+              "column_end": null,
+              "source_anchor": "",
+              "evidence": "    return str(eval(request.form[\"expression\"]))",
+              "exploit_scenario": "POST /calculate 提交 expression=__import__('os').system('id') 可在服务器执行任意 Python 代码，导致远程代码执行。",
+              "fix_suggestion": "禁止对用户输入使用 eval；改用 ast.literal_eval 或受限表达式解析器，并做输入白名单校验。",
+              "references": [
+                "https://owasp.org/Top10/A05_2025-Injection/",
+                "https://cwe.mitre.org/data/definitions/95.html"
+              ],
+              "confidence": 1.0,
+              "source": "llm",
+              "source_details": [
+                {
+                  "source": "llm",
+                  "confidence": 0.98,
+                  "evidence": "    return str(eval(request.form[\"expression\"]))",
+                  "line_number": 20,
+                  "title": "代码注入：eval 执行用户提交表达式"
+                }
+              ],
+              "confirmation_count": 1,
+              "sources": [
+                "llm"
+              ],
+              "static_rule_hits": 0,
+              "verification": "confirmed",
+              "verification_reason": "synthetic_routes.py:L20 对 request.form[\"expression\"] 直接调用 eval()：return str(eval(request.form[\"expression\"]))。POST /calculate 的 expression 完全用户可控，eval 在服务端进程上下文执行任意 Python 表达式，__import__('os').system('id') 可达成 RCE。无沙箱、无 AST 白名单，属真实可利用的代码注入（CWE-95 / OWASP A03）。"
+            }
+          ],
+          "threat_model": {
+            "entry_points": [
+              {
+                "file": "synthetic_routes.py",
+                "function": "search",
+                "line": 7,
+                "risk": "GET /search",
+                "input_source": "HTTP API"
+              },
+              {
+                "file": "synthetic_routes.py",
+                "function": "ping",
+                "line": 13,
+                "risk": "GET /ping",
+                "input_source": "HTTP API"
+              },
+              {
+                "file": "synthetic_routes.py",
+                "function": "calculate",
+                "line": 18,
+                "risk": "POST /calculate",
+                "input_source": "HTTP API"
+              },
+              {
+                "file": "synthetic_routes.py",
+                "name": "search",
+                "line": 9,
+                "input_source": "query"
+              },
+              {
+                "file": "synthetic_routes.py",
+                "name": "ping",
+                "line": 15,
+                "input_source": "query"
+              },
+              {
+                "file": "synthetic_routes.py",
+                "name": "calculate",
+                "line": 20,
+                "input_source": "HTTP body"
+              }
+            ],
+            "data_flows": [
+              {
+                "from": "synthetic_routes.py:search",
+                "via": [
+                  "search",
+                  "connection.execute"
+                ],
+                "to": "synthetic_routes.py:11 connection.execute (SQL)",
+                "risk_type": "SQL 注入",
+                "severity": "高"
+              },
+              {
+                "from": "synthetic_routes.py:ping",
+                "via": [
+                  "ping",
+                  "subprocess.check_output"
+                ],
+                "to": "synthetic_routes.py:16 subprocess.check_output (exec)",
+                "risk_type": "RCE",
+                "severity": "高"
+              },
+              {
+                "from": "synthetic_routes.py:calculate",
+                "via": [
+                  "calculate",
+                  "eval"
+                ],
+                "to": "synthetic_routes.py:20 eval (exec)",
+                "risk_type": "RCE",
+                "severity": "严重"
+              }
+            ],
+            "api_endpoints": [
+              {
+                "method": "GET",
+                "path": "/search",
+                "file_path": "synthetic_routes.py",
+                "line_number": 7,
+                "handler": "search",
+                "auth_hint": "未发现明显认证线索",
+                "source": "python_route"
+              },
+              {
+                "method": "GET",
+                "path": "/ping",
+                "file_path": "synthetic_routes.py",
+                "line_number": 13,
+                "handler": "ping",
+                "auth_hint": "未发现明显认证线索",
+                "source": "python_route"
+              },
+              {
+                "method": "POST",
+                "path": "/calculate",
+                "file_path": "synthetic_routes.py",
+                "line_number": 18,
+                "handler": "calculate",
+                "auth_hint": "未发现明显认证线索",
+                "source": "python_route"
+              }
+            ],
+            "code_links": [
+              {
+                "from": "synthetic_routes.py:search",
+                "to": "synthetic_routes.py:11 connection.execute (SQL)",
+                "relation": "跨文件数据流",
+                "risk_type": "SQL 注入",
+                "severity": "高"
+              },
+              {
+                "from": "synthetic_routes.py:ping",
+                "to": "synthetic_routes.py:16 subprocess.check_output (exec)",
+                "relation": "跨文件数据流",
+                "risk_type": "RCE",
+                "severity": "高"
+              },
+              {
+                "from": "synthetic_routes.py:calculate",
+                "to": "synthetic_routes.py:20 eval (exec)",
+                "relation": "跨文件数据流",
+                "risk_type": "RCE",
+                "severity": "严重"
+              },
+              {
+                "from": "synthetic_routes.py:search",
+                "to": "synthetic_routes.py:connection.execute",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "SQL 注入",
+                "severity": "高"
+              },
+              {
+                "from": "synthetic_routes.py:search",
+                "to": "synthetic_routes.py:subprocess.check_output",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "命令执行/RCE",
+                "severity": "严重"
+              },
+              {
+                "from": "synthetic_routes.py:search",
+                "to": "synthetic_routes.py:eval",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "命令执行/RCE",
+                "severity": "严重"
+              },
+              {
+                "from": "synthetic_routes.py:ping",
+                "to": "synthetic_routes.py:connection.execute",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "SQL 注入",
+                "severity": "高"
+              },
+              {
+                "from": "synthetic_routes.py:ping",
+                "to": "synthetic_routes.py:subprocess.check_output",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "命令执行/RCE",
+                "severity": "严重"
+              },
+              {
+                "from": "synthetic_routes.py:ping",
+                "to": "synthetic_routes.py:eval",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "命令执行/RCE",
+                "severity": "严重"
+              },
+              {
+                "from": "synthetic_routes.py:calculate",
+                "to": "synthetic_routes.py:connection.execute",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "SQL 注入",
+                "severity": "高"
+              },
+              {
+                "from": "synthetic_routes.py:calculate",
+                "to": "synthetic_routes.py:subprocess.check_output",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "命令执行/RCE",
+                "severity": "严重"
+              },
+              {
+                "from": "synthetic_routes.py:calculate",
+                "to": "synthetic_routes.py:eval",
+                "relation": "接口到同文件危险接收点",
+                "risk_type": "命令执行/RCE",
+                "severity": "严重"
+              }
+            ],
+            "attack_surface_summary": "扫描接口 3 个,入口 6 处,危险接收点 3 处。"
+          },
+          "compliance": {
+            "owasp_coverage": [
+              "A05"
+            ],
+            "gb_t_22239": "等保 2.0 应用安全相关命中风险 1 类",
+            "verification": {
+              "confirmed": 4,
+              "refuted": 0,
+              "reviewed": 4
+            },
+            "scan_mode": "full",
+            "total_file_count": 1,
+            "scanned_file_count": 1,
+            "skipped_file_count": 0,
+            "coverage_ratio": 1.0,
+            "truncated": false,
+            "requested_top_n": 50,
+            "static_scanned_file_count": 1,
+            "static_complete": true,
+            "semantic_candidate_file_count": 1,
+            "semantic_candidate_source_chars": 576,
+            "semantic_selection_strategy": "all_source",
+            "semantic_planned_file_count": 1,
+            "semantic_planned_source_chars": 576,
+            "semantic_file_count": 1,
+            "archive_text_file_count": 1,
+            "archive_text_source_chars": 576,
+            "binary_or_empty_file_count": 0,
+            "archive_binary_or_empty_file_count": 0,
+            "candidate_binary_or_empty_file_count": 0,
+            "semantic_initial_batch_count": 1,
+            "semantic_batch_count": 1,
+            "semantic_request_count": 1,
+            "semantic_split_count": 0,
+            "semantic_successful_batch_count": 1,
+            "semantic_failed_batch_count": 0,
+            "semantic_output_truncated_leaf_count": 0,
+            "semantic_output_limited_leaf_count": 0,
+            "semantic_budget_exhausted_leaf_count": 0,
+            "semantic_invalid_contract_leaf_count": 0,
+            "semantic_invalid_item_count": 0,
+            "semantic_invalid_item_kinds": {},
+            "semantic_attempted_source_chars": 576,
+            "semantic_source_chars": 576,
+            "semantic_failed_source_chars": 0,
+            "semantic_accounted_source_chars": 576,
+            "total_text_source_chars": 576,
+            "semantic_char_coverage_ratio": 1.0,
+            "semantic_scheduled_coverage_ratio": 1.0,
+            "semantic_archive_coverage_ratio": 1.0,
+            "semantic_truncated_file_count": 0,
+            "semantic_unscheduled_file_count": 0,
+            "semantic_partially_scheduled_file_count": 0,
+            "semantic_fully_scheduled_file_count": 1,
+            "semantic_verified_file_count": 1,
+            "semantic_failed_file_count": 0,
+            "semantic_complete": true,
+            "semantic_candidate_complete": true,
+            "semantic_execution_complete": true,
+            "semantic_scope_execution_complete": true,
+            "archive_semantic_complete": true,
+            "semantic_accounting_complete": true,
+            "semantic_request_accounting_complete": true,
+            "audit_request_count": 2,
+            "semantic_request_headroom": 4,
+            "dataflow_request_count": 1,
+            "dataflow_scope": "all_semantic_source",
+            "audit_request_accounting_complete": true,
+            "semantic_request_budget": 6,
+            "semantic_timeout_seconds": 420,
+            "semantic_bounded_total_chars": null,
+            "semantic_bounded_per_file_chars": null,
+            "semantic_bounded_max_files": null,
+            "dataflow_requested": true,
+            "dataflow_attempted": true,
+            "dataflow_complete": true,
+            "raw_candidate_count": 4,
+            "raw_finding_severity_counts": {
+              "严重": 4,
+              "高": 0,
+              "中": 0,
+              "低": 0
+            },
+            "deduplicated_finding_count": 4,
+            "scored_finding_count": 4,
+            "refuted_finding_count": 0,
+            "finding_total_count": 4,
+            "retained_finding_count": 4,
+            "findings_truncated": false,
+            "finding_severity_counts": {
+              "严重": 4,
+              "高": 0,
+              "中": 0,
+              "低": 0
+            },
+            "entry_point_total_count": 6,
+            "retained_entry_point_count": 6,
+            "dangerous_sink_total_count": 3,
+            "retained_dangerous_sink_count": 3,
+            "api_endpoint_total_count": 3,
+            "retained_api_endpoint_count": 3,
+            "data_flow_total_count": 3,
+            "retained_data_flow_count": 3,
+            "code_link_total_count": 12,
+            "retained_code_link_count": 12,
+            "returned_entry_point_count": 6,
+            "returned_data_flow_count": 3,
+            "returned_api_endpoint_count": 3,
+            "returned_code_link_count": 12,
+            "response_graph_truncated": false,
+            "graph_items_truncated": false,
+            "result_json_bytes": 14267
+          },
+          "risk_score": 40,
+          "summary": "项目「v4合成漏洞隔离验收」白盒审计静态覆盖 1/1 个文件,发现 4 处严重 / 0 处高危 / 0 处中危 / 0 处低危。风险评分 40/100。",
+          "file_count": 1,
+          "duration_ms": 4377,
+          "source_archive_sha256": "266b823899dcc39f2792f64576e4c7cc5df576e2754cf9c32199f92fa9c4fadb",
+          "source_archive_bytes": 458,
+          "source_archive_filename": "v4合成漏洞隔离验收.zip"
+        }
+      }
+    ],
+    "artifacts": [],
+    "errors": [],
+    "next_action": null
+  },
+  "report": {
+    "status": "completed",
+    "summary": "已核对 2 个子任务的终态与证据，汇总保留问题 9 条；实测范围见各项证据。",
+    "evidence": [
+      {
+        "source": "agent_team_dependency",
+        "task_key": "audit",
+        "data": {
+          "status": "completed",
+          "result": {
+            "status": "completed",
+            "summary": "安全审查已完成",
+            "evidence": [
+              {
+                "source": "request_scoped_agent",
+                "data": {
+                  "findings": [
+                    "[TRUNCATED]",
+                    "[TRUNCATED]",
+                    "[TRUNCATED]",
+                    "[TRUNCATED]"
+                  ],
+                  "threat_model": {
+                    "entry_points": "[TRUNCATED]",
+                    "data_flows": "[TRUNCATED]",
+                    "api_endpoints": "[TRUNCATED]",
+                    "code_links": "[TRUNCATED]",
+                    "attack_surface_summary": "[TRUNCATED]"
+                  },
+                  "compliance": {
+                    "owasp_coverage": "[TRUNCATED]",
+                    "gb_t_22239": "[TRUNCATED]",
+                    "verification": "[TRUNCATED]",
+                    "scan_mode": "[TRUNCATED]",
+                    "total_file_count": "[TRUNCATED]",
+                    "scanned_file_count": "[TRUNCATED]",
+                    "skipped_file_count": "[TRUNCATED]",
+                    "coverage_ratio": "[TRUNCATED]",
+                    "truncated": "[TRUNCATED]",
+                    "requested_top_n": "[TRUNCATED]",
+                    "static_scanned_file_count": "[TRUNCATED]",
+                    "static_complete": "[TRUNCATED]",
+                    "semantic_candidate_file_count": "[TRUNCATED]",
+                    "semantic_candidate_source_chars": "[TRUNCATED]",
+                    "semantic_selection_strategy": "[TRUNCATED]",
+                    "semantic_planned_file_count": "[TRUNCATED]",
+                    "semantic_planned_source_chars": "[TRUNCATED]",
+                    "semantic_file_count": "[TRUNCATED]",
+                    "archive_text_file_count": "[TRUNCATED]",
+                    "archive_text_source_chars": "[TRUNCATED]",
+                    "binary_or_empty_file_count": "[TRUNCATED]",
+                    "archive_binary_or_empty_file_count": "[TRUNCATED]",
+                    "candidate_binary_or_empty_file_count": "[TRUNCATED]",
+                    "semantic_initial_batch_count": "[TRUNCATED]",
+                    "semantic_batch_count": "[TRUNCATED]",
+                    "semantic_request_count": "[TRUNCATED]",
+                    "semantic_split_count": "[TRUNCATED]",
+                    "semantic_successful_batch_count": "[TRUNCATED]",
+                    "semantic_failed_batch_count": "[TRUNCATED]",
+                    "semantic_output_truncated_leaf_count": "[TRUNCATED]",
+                    "semantic_output_limited_leaf_count": "[TRUNCATED]",
+                    "semantic_budget_exhausted_leaf_count": "[TRUNCATED]",
+                    "semantic_invalid_contract_leaf_count": "[TRUNCATED]",
+                    "semantic_invalid_item_count": "[TRUNCATED]",
+                    "semantic_invalid_item_kinds": "[TRUNCATED]",
+                    "semantic_attempted_source_chars": "[TRUNCATED]",
+                    "semantic_source_chars": "[TRUNCATED]",
+                    "semantic_failed_source_chars": "[TRUNCATED]",
+                    "semantic_accounted_source_chars": "[TRUNCATED]",
+                    "total_text_source_chars": "[TRUNCATED]",
+                    "semantic_char_coverage_ratio": "[TRUNCATED]",
+                    "semantic_scheduled_coverage_ratio": "[TRUNCATED]",
+                    "semantic_archive_coverage_ratio": "[TRUNCATED]",
+                    "semantic_truncated_file_count": "[TRUNCATED]",
+                    "semantic_unscheduled_file_count": "[TRUNCATED]",
+                    "semantic_partially_scheduled_file_count": "[TRUNCATED]",
+                    "semantic_fully_scheduled_file_count": "[TRUNCATED]",
+                    "semantic_verified_file_count": "[TRUNCATED]",
+                    "semantic_failed_file_count": "[TRUNCATED]",
+                    "semantic_complete": "[TRUNCATED]",
+                    "_truncated_fields": 45
+                  },
+                  "risk_score": 40,
+                  "summary": "项目「v4合成漏洞隔离验收」白盒审计静态覆盖 1/1 个文件,发现 4 处严重 / 0 处高危 / 0 处中危 / 0 处低危。风险评分 40/100。",
+                  "file_count": 1,
+                  "duration_ms": 4377,
+                  "source_archive_sha256": "266b823899dcc39f2792f64576e4c7cc5df576e2754cf9c32199f92fa9c4fadb",
+                  "source_archive_bytes": 458,
+                  "source_archive_filename": "v4合成漏洞隔离验收.zip"
+                }
+              }
+            ],
+            "artifacts": [],
+            "errors": [],
+            "next_action": null
+          },
+          "finding_summary": {
+            "items": [
+              {
+                "file_id": 1,
+                "file_path": "synthetic_routes.py",
+                "line_number": 11,
+                "title": "SQL 注入：用户输入直接拼接进 SQL 查询",
+                "severity": "严重"
+              },
+              {
+                "file_id": 1,
+                "file_path": "synthetic_routes.py",
+                "line_number": 16,
+                "title": "命令注入：host 参数拼接进 shell 命令",
+                "severity": "严重"
+              },
+              {
+                "file_id": 1,
+                "file_path": "synthetic_routes.py",
+                "line_number": 16,
+                "title": "Python 命令注入",
+                "severity": "严重"
+              },
+              {
+                "file_id": 1,
+                "file_path": "synthetic_routes.py",
+                "line_number": 20,
+                "title": "代码注入：eval 执行用户提交表达式",
+                "severity": "严重"
+              }
+            ],
+            "omitted_count": 0,
+            "source_truncated": false
+          },
+          "artifacts": [],
+          "errors": []
+        }
+      },
+      {
+        "source": "agent_team_dependency",
+        "task_key": "review",
+        "data": {
+          "status": "completed",
+          "result": {
+            "status": "completed",
+            "task_id": 1,
+            "project_id": 1,
+            "coverage": {
+              "stage": "complete",
+              "completed_files": 1,
+              "total_files": 1,
+              "current_file": null,
+              "completed_chunks": 1,
+              "total_chunks": 1,
+              "files": {
+                "1": {
+                  "file_name": "synthetic_routes.py",
+                  "status": "complete",
+                  "total_chunks": 1,
+                  "completed_chunks": 1,
+                  "completed_chunk_indexes": [
+                    "[TRUNCATED]"
+                  ],
+                  "failed_chunks": []
+                }
+              }
+            },
+            "findings": [
+              {
+                "issue_id": 1,
+                "project_id": 1,
+                "task_id": 1,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 7,
+                "title": "函数缺少文档字符串与注释",
+                "severity": "中",
+                "issue_type": "注释完整性"
+              },
+              {
+                "issue_id": 2,
+                "project_id": 1,
+                "task_id": 1,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 10,
+                "title": "内存数据库每请求重建导致查询必失败",
+                "severity": "中",
+                "issue_type": "潜在Bug"
+              },
+              {
+                "issue_id": 3,
+                "project_id": 1,
+                "task_id": 1,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 11,
+                "title": "SQL 查询字符串拼接导致注入",
+                "severity": "严重",
+                "issue_type": "安全漏洞"
+              },
+              {
+                "issue_id": 4,
+                "project_id": 1,
+                "task_id": 1,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 16,
+                "title": "shell=True 拼接执行导致命令注入",
+                "severity": "严重",
+                "issue_type": "安全漏洞"
+              },
+              {
+                "issue_id": 5,
+                "project_id": 1,
+                "task_id": 1,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 20,
+                "title": "eval 执行用户输入导致任意代码执行",
+                "severity": "严重",
+                "issue_type": "安全漏洞"
+              }
+            ],
+            "finding_count_total": 5,
+            "findings_truncated": false,
+            "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。",
+            "evidence": [
+              {
+                "source": "review_task",
+                "data": {
+                  "task_id": 1,
+                  "project_id": 1,
+                  "status": "success",
+                  "review_type": "full",
+                  "coverage": {
+                    "stage": "[TRUNCATED]",
+                    "completed_files": "[TRUNCATED]",
+                    "total_files": "[TRUNCATED]",
+                    "current_file": "[TRUNCATED]",
+                    "completed_chunks": "[TRUNCATED]",
+                    "total_chunks": "[TRUNCATED]",
+                    "files": "[TRUNCATED]"
+                  },
+                  "total_files": 1,
+                  "processed_files": 1,
+                  "total_issues": 5,
+                  "task_url": "/reviews/1",
+                  "report_url": "/reports/1"
+                }
+              }
+            ],
+            "artifacts": [
+              {
+                "type": "review_task",
+                "task_id": 1,
+                "project_id": 1,
+                "status": "success",
+                "review_type": "full",
+                "coverage": {
+                  "stage": "complete",
+                  "completed_files": 1,
+                  "total_files": 1,
+                  "current_file": null,
+                  "completed_chunks": 1,
+                  "total_chunks": 1,
+                  "files": {
+                    "1": "[TRUNCATED]"
+                  }
+                },
+                "total_files": 1,
+                "processed_files": 1,
+                "total_issues": 5,
+                "task_url": "/reviews/1",
+                "report_url": "/reports/1"
+              }
+            ],
+            "errors": [],
+            "retryable": false
+          },
+          "finding_summary": {
+            "items": [
+              {
+                "issue_id": 1,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 7,
+                "title": "函数缺少文档字符串与注释",
+                "severity": "中",
+                "issue_type": "注释完整性",
+                "project_id": 1,
+                "task_id": 1
+              },
+              {
+                "issue_id": 2,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 10,
+                "title": "内存数据库每请求重建导致查询必失败",
+                "severity": "中",
+                "issue_type": "潜在Bug",
+                "project_id": 1,
+                "task_id": 1
+              },
+              {
+                "issue_id": 3,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 11,
+                "title": "SQL 查询字符串拼接导致注入",
+                "severity": "严重",
+                "issue_type": "安全漏洞",
+                "project_id": 1,
+                "task_id": 1
+              },
+              {
+                "issue_id": 4,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 16,
+                "title": "shell=True 拼接执行导致命令注入",
+                "severity": "严重",
+                "issue_type": "安全漏洞",
+                "project_id": 1,
+                "task_id": 1
+              },
+              {
+                "issue_id": 5,
+                "file_id": 1,
+                "file_name": "synthetic_routes.py",
+                "line_number": 20,
+                "title": "eval 执行用户输入导致任意代码执行",
+                "severity": "严重",
+                "issue_type": "安全漏洞",
+                "project_id": 1,
+                "task_id": 1
+              }
+            ],
+            "omitted_count": 0,
+            "source_truncated": false
+          },
+          "artifacts": [
+            {
+              "type": "review_task",
+              "task_id": 1,
+              "project_id": 1,
+              "status": "success",
+              "review_type": "full",
+              "coverage": {
+                "stage": "complete",
+                "completed_files": 1,
+                "total_files": 1,
+                "current_file": null,
+                "completed_chunks": 1,
+                "total_chunks": 1,
+                "files": {
+                  "1": {
+                    "file_name": "[TRUNCATED]",
+                    "status": "[TRUNCATED]",
+                    "total_chunks": "[TRUNCATED]",
+                    "completed_chunks": "[TRUNCATED]",
+                    "completed_chunk_indexes": "[TRUNCATED]",
+                    "failed_chunks": "[TRUNCATED]"
+                  }
+                }
+              },
+              "total_files": 1,
+              "processed_files": 1,
+              "total_issues": 5,
+              "task_url": "/reviews/1",
+              "report_url": "/reports/1"
+            }
+          ],
+          "errors": []
+        }
+      }
+    ],
+    "artifacts": [
+      {
+        "type": "agent_team_summary",
+        "data": {
+          "verification": "dependency_evidence_reconciled",
+          "outcomes": [
+            {
+              "task_key": "audit",
+              "status": "completed",
+              "result_status": "completed",
+              "summary": "安全审查已完成"
+            },
+            {
+              "task_key": "review",
+              "status": "completed",
+              "result_status": "completed",
+              "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。"
+            }
+          ],
+          "incomplete_tasks": [],
+          "unique_finding_count": 9,
+          "bounded_finding_tasks": [],
+          "findings": [
+            {
+              "file_id": 1,
+              "file_path": "synthetic_routes.py",
+              "line_number": 11,
+              "title": "SQL 注入：用户输入直接拼接进 SQL 查询",
+              "severity": "严重",
+              "source_tasks": [
+                "audit"
+              ]
+            },
+            {
+              "file_id": 1,
+              "file_path": "synthetic_routes.py",
+              "line_number": 16,
+              "title": "命令注入：host 参数拼接进 shell 命令",
+              "severity": "严重",
+              "source_tasks": [
+                "audit"
+              ]
+            },
+            {
+              "file_id": 1,
+              "file_path": "synthetic_routes.py",
+              "line_number": 16,
+              "title": "Python 命令注入",
+              "severity": "严重",
+              "source_tasks": [
+                "audit"
+              ]
+            },
+            {
+              "file_id": 1,
+              "file_path": "synthetic_routes.py",
+              "line_number": 20,
+              "title": "代码注入：eval 执行用户提交表达式",
+              "severity": "严重",
+              "source_tasks": [
+                "audit"
+              ]
+            },
+            {
+              "issue_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 7,
+              "title": "函数缺少文档字符串与注释",
+              "severity": "中",
+              "issue_type": "注释完整性",
+              "project_id": 1,
+              "task_id": 1,
+              "source_tasks": [
+                "review"
+              ]
+            },
+            {
+              "issue_id": 2,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 10,
+              "title": "内存数据库每请求重建导致查询必失败",
+              "severity": "中",
+              "issue_type": "潜在Bug",
+              "project_id": 1,
+              "task_id": 1,
+              "source_tasks": [
+                "review"
+              ]
+            },
+            {
+              "issue_id": 3,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 11,
+              "title": "SQL 查询字符串拼接导致注入",
+              "severity": "严重",
+              "issue_type": "安全漏洞",
+              "project_id": 1,
+              "task_id": 1,
+              "source_tasks": [
+                "review"
+              ]
+            },
+            {
+              "issue_id": 4,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 16,
+              "title": "shell=True 拼接执行导致命令注入",
+              "severity": "严重",
+              "issue_type": "安全漏洞",
+              "project_id": 1,
+              "task_id": 1,
+              "source_tasks": [
+                "review"
+              ]
+            },
+            {
+              "issue_id": 5,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 20,
+              "title": "eval 执行用户输入导致任意代码执行",
+              "severity": "严重",
+              "issue_type": "安全漏洞",
+              "project_id": 1,
+              "task_id": 1,
+              "source_tasks": [
+                "review"
+              ]
+            }
+          ],
+          "references": [
+            {
+              "type": "review_task",
+              "task_id": 1,
+              "route": "/reviews/1",
+              "source_task": "review"
+            }
+          ],
+          "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。"
+        }
+      }
+    ],
+    "errors": [],
+    "next_action": null,
+    "retryable": false
+  }
+}

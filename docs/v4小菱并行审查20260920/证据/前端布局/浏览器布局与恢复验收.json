@@ -1,0 +1,656 @@
+{
+  "config": {
+    "configFile": "/tmp/prism-v4-browser-tools/playwright.config.ts",
+    "rootDir": "/tmp/prism-v4-browser-tools/e2e",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "quiet": false,
+    "projects": [
+      {
+        "outputDir": "/tmp/prism-v4-layout-final",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/tmp/prism-v4-browser-tools/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 120000
+      }
+    ],
+    "shard": null,
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.54.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "layout-alignment.spec.ts",
+      "file": "layout-alignment.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "侧栏收起、展开和刷新后按钮完整可点击，且不盖住品牌图标",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2857,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "steps": [
+                    {
+                      "title": "Expect \"poll toBe\"",
+                      "duration": 407
+                    }
+                  ],
+                  "startTime": "2026-09-20T12:09:31.084Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-2f1bdbb592b929257f8c",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 42,
+          "column": 5
+        },
+        {
+          "title": "代码中心顶部仅保留主布局间距，搜索框与标题说明区底边对齐",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 938,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:38.432Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "header-geometry",
+                      "contentType": "application/json",
+                      "body": "eyJ0b3BHYXAiOjI4LCJwYWRkaW5nIjoyOCwiYm90dG9tR2FwIjowfQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-de2c70799743cfc02b46",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 61,
+          "column": 5
+        },
+        {
+          "title": "代码中心失败原因与重试按钮同时可见，重试后恢复项目卡片",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1811,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:39.372Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-830ee2a60bb4964a2aa9",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 80,
+          "column": 5
+        },
+        {
+          "title": "移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2239,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:41.186Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-d3c8b31c4ee43cd819e1",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 95,
+          "column": 5
+        },
+        {
+          "title": "问题追踪请求失败有明确反馈，两类请求可独立点击重试",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1120,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:43.427Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-fc1da73216d935a3c3c9",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 111,
+          "column": 5
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：1440px，只读权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1637,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:44.551Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjMwNiwiYWN0aW9uWCI6MTI2NCwiZGV0YWlsWCI6MTI2NCwidGFza1giOjEzMjQsImFjdGlvblJpZ2h0IjoxMzc0LCJyaWdodCI6MTM5MSwic2Nyb2xsIjoxMDk2LCJjbGllbnQiOjEwOTZ9LHsiYmFuZFgiOjMwNiwiYWN0aW9uWCI6MTI2NCwiZGV0YWlsWCI6MTI2NCwidGFza1giOjEzMjQsImFjdGlvblJpZ2h0IjoxMzc0LCJyaWdodCI6MTM5MSwic2Nyb2xsIjoxMDk2LCJjbGllbnQiOjEwOTZ9LHsiYmFuZFgiOjMwNiwiYWN0aW9uWCI6MTI2NCwiZGV0YWlsWCI6MTI2NCwidGFza1giOjEzMjQsImFjdGlvblJpZ2h0IjoxMzc0LCJyaWdodCI6MTM5MSwic2Nyb2xsIjoxMDk2LCJjbGllbnQiOjEwOTZ9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-e6cb3edad7abc55f5e6d",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：1024px，只读权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2618,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:46.190Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjMwMiwiYWN0aW9uWCI6ODUyLCJkZXRhaWxYIjo4NTIsInRhc2tYIjo5MTIsImFjdGlvblJpZ2h0Ijo5NjIsInJpZ2h0Ijo5NzksInNjcm9sbCI6Njg4LCJjbGllbnQiOjY4OH0seyJiYW5kWCI6MzAyLCJhY3Rpb25YIjo4NTIsImRldGFpbFgiOjg1MiwidGFza1giOjkxMiwiYWN0aW9uUmlnaHQiOjk2MiwicmlnaHQiOjk3OSwic2Nyb2xsIjo2ODgsImNsaWVudCI6Njg4fSx7ImJhbmRYIjozMDIsImFjdGlvblgiOjg1MiwiZGV0YWlsWCI6ODUyLCJ0YXNrWCI6OTEyLCJhY3Rpb25SaWdodCI6OTYyLCJyaWdodCI6OTc5LCJzY3JvbGwiOjY4OCwiY2xpZW50Ijo2ODh9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-5fedcae51912bc7eb80a",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：768px，只读权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3021,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:48.812Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjQ2LCJhY3Rpb25YIjo2MDgsImRldGFpbFgiOjYwOCwidGFza1giOjY2OCwiYWN0aW9uUmlnaHQiOjcxOCwicmlnaHQiOjczNSwic2Nyb2xsIjo3MDAsImNsaWVudCI6NzAwfSx7ImJhbmRYIjo0NiwiYWN0aW9uWCI6NjA4LCJkZXRhaWxYIjo2MDgsInRhc2tYIjo2NjgsImFjdGlvblJpZ2h0Ijo3MTgsInJpZ2h0Ijo3MzUsInNjcm9sbCI6NzAwLCJjbGllbnQiOjcwMH0seyJiYW5kWCI6NDYsImFjdGlvblgiOjYwOCwiZGV0YWlsWCI6NjA4LCJ0YXNrWCI6NjY4LCJhY3Rpb25SaWdodCI6NzE4LCJyaWdodCI6NzM1LCJzY3JvbGwiOjcwMCwiY2xpZW50Ijo3MDB9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-a3ba6b55ec17dd948e36",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：390px，只读权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7196,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:51.842Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjQ0LCJhY3Rpb25YIjo1OCwiZGV0YWlsWCI6NTgsInRhc2tYIjoxMTgsImFjdGlvblJpZ2h0IjozNDIsInJpZ2h0IjozNTksInNjcm9sbCI6MzI2LCJjbGllbnQiOjMyNn0seyJiYW5kWCI6NDQsImFjdGlvblgiOjU4LCJkZXRhaWxYIjo1OCwidGFza1giOjExOCwiYWN0aW9uUmlnaHQiOjM0MiwicmlnaHQiOjM1OSwic2Nyb2xsIjozMjYsImNsaWVudCI6MzI2fSx7ImJhbmRYIjo0NCwiYWN0aW9uWCI6NTgsImRldGFpbFgiOjU4LCJ0YXNrWCI6MTE4LCJhY3Rpb25SaWdodCI6MzQyLCJyaWdodCI6MzU5LCJzY3JvbGwiOjMyNiwiY2xpZW50IjozMjZ9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-b1906a56c683008fc75a",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：320px，只读权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2177,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:09:59.043Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjQ0LCJhY3Rpb25YIjo1OCwiZGV0YWlsWCI6NTgsInRhc2tYIjoxMTgsImFjdGlvblJpZ2h0IjoyNzIsInJpZ2h0IjoyODksInNjcm9sbCI6MjU2LCJjbGllbnQiOjI1Nn0seyJiYW5kWCI6NDQsImFjdGlvblgiOjU4LCJkZXRhaWxYIjo1OCwidGFza1giOjExOCwiYWN0aW9uUmlnaHQiOjI3MiwicmlnaHQiOjI4OSwic2Nyb2xsIjoyNTYsImNsaWVudCI6MjU2fSx7ImJhbmRYIjo0NCwiYWN0aW9uWCI6NTgsImRldGFpbFgiOjU4LCJ0YXNrWCI6MTE4LCJhY3Rpb25SaWdodCI6MjcyLCJyaWdodCI6Mjg5LCJzY3JvbGwiOjI1NiwiY2xpZW50IjoyNTZ9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-150b66705860f048081e",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：1440px，可处理权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2639,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:10:01.230Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjMzNiwiYWN0aW9uWCI6MTIwMiwiZGV0YWlsWCI6MTIwMiwidGFza1giOjEyNjIsImFjdGlvblJpZ2h0IjoxMzc0LCJyaWdodCI6MTM5MSwic2Nyb2xsIjoxMDk2LCJjbGllbnQiOjEwOTZ9LHsiYmFuZFgiOjMzNiwiYWN0aW9uWCI6MTIwMiwiZGV0YWlsWCI6MTIwMiwidGFza1giOjEyNjIsImFjdGlvblJpZ2h0IjoxMzc0LCJyaWdodCI6MTM5MSwic2Nyb2xsIjoxMDk2LCJjbGllbnQiOjEwOTZ9LHsiYmFuZFgiOjMzNiwiYWN0aW9uWCI6MTIwMiwiZGV0YWlsWCI6MTIwMiwidGFza1giOjEyNjIsImFjdGlvblJpZ2h0IjoxMzc0LCJyaWdodCI6MTM5MSwic2Nyb2xsIjoxMDk2LCJjbGllbnQiOjEwOTZ9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-b59f999304371d9beda9",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：1024px，可处理权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2211,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:10:03.877Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjMzMiwiYWN0aW9uWCI6NzkwLCJkZXRhaWxYIjo3OTAsInRhc2tYIjo4NTAsImFjdGlvblJpZ2h0Ijo5NjIsInJpZ2h0Ijo5NzksInNjcm9sbCI6Njg4LCJjbGllbnQiOjY4OH0seyJiYW5kWCI6MzMyLCJhY3Rpb25YIjo3OTAsImRldGFpbFgiOjc5MCwidGFza1giOjg1MCwiYWN0aW9uUmlnaHQiOjk2MiwicmlnaHQiOjk3OSwic2Nyb2xsIjo2ODgsImNsaWVudCI6Njg4fSx7ImJhbmRYIjozMzIsImFjdGlvblgiOjc5MCwiZGV0YWlsWCI6NzkwLCJ0YXNrWCI6ODUwLCJhY3Rpb25SaWdodCI6OTYyLCJyaWdodCI6OTc5LCJzY3JvbGwiOjY4OCwiY2xpZW50Ijo2ODh9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-551f191b5d3f606f2955",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：768px，可处理权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2009,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:10:06.091Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjc2LCJhY3Rpb25YIjo1NDYsImRldGFpbFgiOjU0NiwidGFza1giOjYwNiwiYWN0aW9uUmlnaHQiOjcxOCwicmlnaHQiOjczNSwic2Nyb2xsIjo3MDAsImNsaWVudCI6NzAwfSx7ImJhbmRYIjo3NiwiYWN0aW9uWCI6NTQ2LCJkZXRhaWxYIjo1NDYsInRhc2tYIjo2MDYsImFjdGlvblJpZ2h0Ijo3MTgsInJpZ2h0Ijo3MzUsInNjcm9sbCI6NzAwLCJjbGllbnQiOjcwMH0seyJiYW5kWCI6NzYsImFjdGlvblgiOjU0NiwiZGV0YWlsWCI6NTQ2LCJ0YXNrWCI6NjA2LCJhY3Rpb25SaWdodCI6NzE4LCJyaWdodCI6NzM1LCJzY3JvbGwiOjcwMCwiY2xpZW50Ijo3MDB9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-a7f93e5519cd9a1198fd",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：390px，可处理权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2459,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:10:08.110Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjcwLCJhY3Rpb25YIjo4NCwiZGV0YWlsWCI6ODQsInRhc2tYIjoxNDQsImFjdGlvblJpZ2h0IjozNDIsInJpZ2h0IjozNTksInNjcm9sbCI6MzI2LCJjbGllbnQiOjMyNn0seyJiYW5kWCI6NzAsImFjdGlvblgiOjg0LCJkZXRhaWxYIjo4NCwidGFza1giOjE0NCwiYWN0aW9uUmlnaHQiOjM0MiwicmlnaHQiOjM1OSwic2Nyb2xsIjozMjYsImNsaWVudCI6MzI2fSx7ImJhbmRYIjo3MCwiYWN0aW9uWCI6ODQsImRldGFpbFgiOjg0LCJ0YXNrWCI6MTQ0LCJhY3Rpb25SaWdodCI6MzQyLCJyaWdodCI6MzU5LCJzY3JvbGwiOjMyNiwiY2xpZW50IjozMjZ9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-71d2672a774d6a0b403c",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        },
+        {
+          "title": "问题操作列保持对齐且窄屏无溢出：320px，可处理权限",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2557,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-20T12:10:10.571Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "card-geometry",
+                      "contentType": "application/json",
+                      "body": "W3siYmFuZFgiOjcwLCJhY3Rpb25YIjo4NCwiZGV0YWlsWCI6ODQsInRhc2tYIjoxNDQsImFjdGlvblJpZ2h0IjoyNzIsInJpZ2h0IjoyODksInNjcm9sbCI6MjU2LCJjbGllbnQiOjI1Nn0seyJiYW5kWCI6NzAsImFjdGlvblgiOjg0LCJkZXRhaWxYIjo4NCwidGFza1giOjE0NCwiYWN0aW9uUmlnaHQiOjI3MiwicmlnaHQiOjI4OSwic2Nyb2xsIjoyNTYsImNsaWVudCI6MjU2fSx7ImJhbmRYIjo3MCwiYWN0aW9uWCI6ODQsImRldGFpbFgiOjg0LCJ0YXNrWCI6MTQ0LCJhY3Rpb25SaWdodCI6MjcyLCJyaWdodCI6Mjg5LCJzY3JvbGwiOjI1NiwiY2xpZW50IjoyNTZ9XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d7feca25f5272fcc6768-34b1f98a9bd2d8ec6e28",
+          "file": "../../../private/tmp/prism-v4-browser-tools/e2e/layout-alignment.spec.ts",
+          "line": 136,
+          "column": 9
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-20T12:09:30.877Z",
+    "duration": 42610.316,
+    "expected": 15,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

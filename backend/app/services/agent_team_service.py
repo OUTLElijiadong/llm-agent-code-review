@@ -141,6 +141,8 @@ def _validate_safe_input(value: Any, *, key: str = "", depth: int = 0) -> None:
 def _dependency_context(db: Session, team: AgentTeam, task: AgentTeamTask) -> dict[str, Any]:
     """只把前置节点的脱敏结果摘要传入下一节点。"""
 
+    from app.services.agent_team_summary import dependency_finding_summary
+
     wanted = {str(item) for item in _unjson(task.dependency_keys_json, [])}
     if not wanted:
         return {}
@@ -150,6 +152,9 @@ def _dependency_context(db: Session, team: AgentTeam, task: AgentTeamTask) -> di
         key: {
             "status": by_key[key].status,
             "result": _public(_unjson(by_key[key].result_json, {})),
+            "finding_summary": dependency_finding_summary(
+                _unjson(by_key[key].result_json, {}), redact=_public,
+            ),
             "artifacts": _public(_unjson(by_key[key].artifacts_json, [])),
             "errors": _public(_unjson(by_key[key].errors_json, [])),
         }
@@ -357,7 +362,7 @@ _TEAM_TASK_CONTRACTS: dict[str, dict[str, Any]] = {
     "review_orchestrator": {
         "default_operation": "list",
         "readonly_operation": None,
-        "allowed_operations": frozenset({"list", "get", "issues"}),
+        "allowed_operations": frozenset({"list", "get", "issues", "run_review"}),
     },
     "test_verifier": {
         "default_operation": "run_project_tests",
@@ -415,6 +420,9 @@ def _normalize_task_inputs(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
         readonly_operation = contract.get("readonly_operation")
         allowed_operations = contract.get("allowed_operations") or frozenset()
         operation = data.get("operation")
+
+        if readonly and code == "review_orchestrator" and operation == "run_review":
+            raise AgentTeamValidationError("只读团队不能发起新的正式审查，请读取现有任务")
 
         if operation is None and default_operation is not None:
             data["operation"] = default_operation
@@ -556,6 +564,26 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
     if not address.startswith("agent:"):
         return
     code = address.split(":", 1)[1]
+    if code == "review_orchestrator" and raw.get("operation") == "run_review":
+        if project_id is None:
+            raise AgentTeamValidationError(f"任务 {task_input.task_key} 必须提供 project_id")
+        if revision_id is not None:
+            raise AgentTeamValidationError("正式代码审查只支持代码中心的版本快照，归档修订请使用隔离审计")
+        if raw.get("review_type", "full") not in {"full", "security"}:
+            raise AgentTeamValidationError("团队正式审查类型只能为 full 或 security")
+        file_ids = raw.get("file_ids")
+        if file_ids is not None and (
+            not isinstance(file_ids, list) or not 1 <= len(file_ids) <= 500
+            or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in file_ids)
+            or len(set(file_ids)) != len(file_ids)
+        ):
+            raise AgentTeamValidationError("file_ids 必须是 1 到 500 个不重复的正整数")
+        from app.core.permission_codes import PermissionCode
+        from app.services.rbac_service import check_permission
+
+        if not check_permission(db, int(user.id), PermissionCode.REVIEW_START):
+            raise AgentTeamAccessError("当前账户没有发起审查的权限")
+        return
     if code == "monitor":
         window = raw.get("window_minutes")
         metrics = raw.get("metrics")
@@ -813,6 +841,35 @@ def _require_live_task_lease(
     return team, task, member
 
 
+def require_active_task_lease(
+    db: Session, *, team_id: int, task_id: int, lease_token: str,
+    owner_user_id: Optional[int] = None, lock: bool = False,
+) -> tuple[AgentTeam, AgentTeamTask, AgentTeamMember]:
+    """执行前重新读取持久化租约；不让已取消、过期或被接管的声明调用业务。"""
+    team_query = db.query(AgentTeam).filter(AgentTeam.id == int(team_id)).populate_existing()
+    task_query = db.query(AgentTeamTask).filter(
+        AgentTeamTask.id == int(task_id), AgentTeamTask.team_id == int(team_id),
+    ).populate_existing()
+    if lock:
+        team_query = team_query.with_for_update()
+        task_query = task_query.with_for_update()
+    team = team_query.first()
+    task = task_query.first()
+    member = db.get(AgentTeamMember, task.member_id) if task else None
+    if team is None or task is None or member is None or member.team_id != team.id:
+        raise AgentTeamNotFoundError("团队任务不存在")
+    if owner_user_id is not None and int(team.user_id) != int(owner_user_id):
+        raise AgentTeamNotFoundError("团队任务不属于当前账户")
+    if team.status in _TERMINAL_TEAM or task.status != "running" or not lease_token or task.lease_token != lease_token:
+        raise AgentTeamLeaseError("团队任务租约已失效")
+    for expires_at in (team.deadline_at, task.lease_expires_at):
+        if expires_at is not None:
+            normalized = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
+            if normalized <= _now():
+                raise AgentTeamLeaseError("团队任务租约或截止时间已过期")
+    return team, task, member
+
+
 def handoff_dependency_runtime_resources(
     db: Session,
     *,
@@ -936,7 +993,9 @@ def handoff_dependency_runtime_resources(
 
 
 def _cleanup_team_runtime_resources(db: Session, team: AgentTeam, *, reason: str) -> int:
-    cleaned = 0
+    from app.services.agent_team_review import cancel_team_reviews
+
+    cleaned = cancel_team_reviews(db, team_id=int(team.id), reason=reason)
     tasks = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).all()
     for task in tasks:
         if not _active_task_runtime_resources(db, int(task.id)):
@@ -1984,8 +2043,13 @@ def claim_next_task(db: Session, team_id: int, *, lease_seconds: Optional[int] =
     if candidate is None:
         db.commit()
         return None
+    member = db.get(AgentTeamMember, candidate.member_id)
+    effective_lease_seconds = max(1, int(lease_seconds or settings.agent_team_task_lease_seconds))
+    if member is not None and member.address == "agent:security_sentinel":
+        # 全项目语义审计有独立的全局时限，租约需覆盖模型执行和结果提交。
+        effective_lease_seconds = max(effective_lease_seconds, int(settings.security_semantic_timeout_seconds) + 60)
     token = secrets.token_urlsafe(32)
-    expires = now + timedelta(seconds=max(1, int(lease_seconds or settings.agent_team_task_lease_seconds)))
+    expires = now + timedelta(seconds=effective_lease_seconds)
     result = db.execute(
         update(AgentTeamTask)
         .where(AgentTeamTask.id == candidate.id, AgentTeamTask.status == "queued")
@@ -2089,6 +2153,11 @@ def complete_task(
     if task.status != "running" or not lease_token or task.lease_token != lease_token:
         raise AgentTeamLeaseError("团队任务租约已失效")
     now = _now()
+    for expires_at in (team.deadline_at, task.lease_expires_at):
+        if expires_at is not None:
+            normalized = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
+            if normalized <= now:
+                raise AgentTeamLeaseError("团队任务租约或截止时间已过期，结果未写入")
     task.lease_token = None
     task.lease_expires_at = None
     member = db.get(AgentTeamMember, task.member_id)

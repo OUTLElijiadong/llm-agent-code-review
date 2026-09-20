@@ -100,7 +100,7 @@ class BaseAgent:
         except Exception as e:
             logger.warning(f"[{self.name}] emit 事件失败: {e}")
 
-    def _project_input(self, user_message: str) -> tuple[str, bool]:
+    def _project_input(self, user_message: str, *, system_prompt: Optional[str] = None) -> tuple[str, bool]:
         """按 1M 上下文窗口对输入做投影(超长时截断尾部并标记)。
 
         BaseAgent 直连 chat/completions,不经过 responses runtime 的压缩管线;
@@ -110,7 +110,7 @@ class BaseAgent:
         """
         window = int(getattr(settings, "deepseek_context_window_tokens", 1_000_000) or 1_000_000)
         budget_chars = max(8_000, (window - 8_192) * 2)
-        system_len = len(self._system_prompt or "")
+        system_len = len((self._system_prompt if system_prompt is None else system_prompt) or "")
         if system_len + len(user_message) <= budget_chars:
             return user_message, False
         keep = max(0, budget_chars - system_len - 200)
@@ -134,7 +134,8 @@ class BaseAgent:
              recover_truncation: bool = False,
              retry_reserver: Optional[Callable[[], bool]] = None,
              deadline_monotonic: Optional[float] = None,
-             thinking: Optional[bool] = None) -> AgentResult:
+             thinking: Optional[bool] = None,
+             system_prompt: Optional[str] = None) -> AgentResult:
         """调用 API (支持用户自定义配置)
 
         Args:
@@ -143,6 +144,7 @@ class BaseAgent:
             json_mode: 是否要求 JSON 输出
             api_config: 可选，用户自定义 API 配置；为 None 时使用系统默认
             thinking: 可选思考模式开关；None 时不写请求体，保留供应商默认
+            system_prompt: 本次请求独有的系统提示词，不修改注册 Agent 的共享状态
 
         Returns:
             AgentResult
@@ -176,8 +178,9 @@ class BaseAgent:
                    message=f"{self.name} 正在调用模型",
                    payload={"model": model, "json_mode": json_mode})
 
-        messages = [{"role": "system", "content": self._system_prompt}]
-        projected_message, input_truncated = self._project_input(user_message)
+        effective_system_prompt = self._system_prompt if system_prompt is None else system_prompt
+        messages = [{"role": "system", "content": effective_system_prompt}]
+        projected_message, input_truncated = self._project_input(user_message, system_prompt=effective_system_prompt)
         messages.append({"role": "user", "content": projected_message})
 
         output_budget = int(max_tokens or self._max_tokens)

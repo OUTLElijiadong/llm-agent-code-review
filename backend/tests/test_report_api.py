@@ -22,6 +22,7 @@ from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
 from app.core.permission_codes import PermissionCode
 from app.main import app
+from app.models.project import Project
 from app.models.report_template import ReportTemplate
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
@@ -104,6 +105,8 @@ def _seed_review_task(db_session, user_id: int = 1) -> int:
     Returns:
         int: 创建的审查任务 ID。
     """
+    if db_session.get(Project, 1) is None:
+        db_session.add(Project(id=1, user_id=user_id, project_name="报告导出测试", status="active"))
     task = ReviewTask(
         user_id=user_id,
         project_id=1,
@@ -662,6 +665,7 @@ def test_plain_owner_html_export_uses_format_specific_permission(
     client, db, task_id = plain_client
     task = db.get(ReviewTask, task_id)
     task.user_id = 2
+    db.get(Project, task.project_id).user_id = 2
     db.commit()
     checked = []
 

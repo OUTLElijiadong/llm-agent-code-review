@@ -1,0 +1,35 @@
+{
+  "时间": "2026-09-20T20:21:45.569412+08:00",
+  "复核方式": "只读核对既有生产输出；在内存SQLite补跑报告隔离、快照与Worker租约；合成条目独立核对摘要数量；未再次访问生产或调用模型",
+  "全量后端XML": {
+    "来源": "/tmp/prism-v4-backend-full.xml",
+    "总计": 4316,
+    "通过": 4311,
+    "失败": 0,
+    "错误": 0,
+    "跳过": 5,
+    "日志结尾": "4311 passed, 5 skipped, 4 warnings in 424.81s"
+  },
+  "摘要最新补充测试": {
+    "命令": "backend/.venv/bin/pytest backend/tests/unit/services/test_v4_team_review_contracts.py -q -o addopts= --junitxml=/tmp/prism-v4-summary-independent.xml",
+    "退出码": 0,
+    "通过": 9,
+    "失败": 0
+  },
+  "待验收": [
+    "服务器隔离真实模型的后续运行结果",
+    "生产4.0.0发布后的健康与业务浏览器复验",
+    "知识库最终validate/postflight"
+  ],
+  "输入SHA256": {
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/v4小菱并行审查20260920/证据/生产基线.json": "fc60b3c59e26376ba24a3be23cb0be5a66953a9151cf4ff09066052d1978cce7",
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/v4小菱并行审查20260920/证据/生产基线补充.json": "4e2b256a7cc30eb9c7719718da4583ee2b6449e24f4465259fccd42c0704f1a6",
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/v4小菱并行审查20260920/证据/prism_v4_independent_review.json": "b056ff95dc8262ef322f6e2c72b4ea5a21aab99ca71d4978897ec6b04104a9dd",
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/v4小菱并行审查20260920/证据/prism_v4_independent_review_after.json": "acd08ff96ab6f7193a45c9efe3264a4f0a4634414f24ca6defe274d514b7ad53",
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/docs/v4小菱并行审查20260920/证据/独立复核复跑.json": "cd8be24419d598028af55758a50a8fff6ddee3d8d78e926ca112f3aa6089c09d",
+    "/tmp/prism-v4-backend-full.xml": "6827f05a143bb3d55569fa5aaad753b97ab8abdc9760cea9132a6df997a92ffa",
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_summary.py": "a5a1071023eb088070222c45bf3c710f745b6cbd9351d3a8d430f313f9ef7fa0",
+    "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/app/services/agent_team_review.py": "337860c064bdda78ff3ed415f3bfb1b52b67d6640d5df0cbc6907b92e6cecfbe",
+    "/Users/li/Documents/Obsidian/myself/01_知识整理/个人画像/中文界面对齐与操作列偏好.md": "771717208bd5eb75b9beb9aa04b4c976867a45606885a552edbb8b9605dff92b"
+  }
+}

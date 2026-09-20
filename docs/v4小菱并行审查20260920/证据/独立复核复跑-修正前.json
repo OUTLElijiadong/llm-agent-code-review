@@ -1,0 +1,229 @@
+{
+  "source_script_sha256": "fd598996f541fdb7657d75d40a5ff0a176ee064c63afdcc4cd9b22500a9a4efa",
+  "isolation": "sqlite in-memory; restored membership before quarantine; no network/model calls",
+  "baseline_recheck": {
+    "owner_while_member_present": {
+      "/api/review/tasks/1": {
+        "status": 200,
+        "data": null
+      },
+      "/api/reports/1": {
+        "status": 404,
+        "data": null
+      },
+      "/api/reports/tasks/1/export?format=json": {
+        "status": 404,
+        "data": null
+      },
+      "/api/reports": {
+        "status": 200,
+        "data": {
+          "items": [],
+          "total": 0,
+          "page": 1,
+          "page_size": 20,
+          "pages": 0
+        }
+      }
+    },
+    "member_present": {
+      "/api/review/tasks/1": {
+        "status": 200,
+        "data": null
+      },
+      "/api/reports/1": {
+        "status": 200,
+        "data": null
+      },
+      "/api/reports/tasks/1/export?format=json": {
+        "status": 200,
+        "data": null
+      },
+      "/api/reports": {
+        "status": 200,
+        "data": {
+          "items": [
+            {
+              "task_id": 1,
+              "task_name": "member-task",
+              "project_name": "private-project",
+              "total_issues": 1,
+              "score": 92,
+              "status": "success",
+              "create_time": "2026-09-20T12:18:14.832120Z",
+              "source": {
+                "type": "standard",
+                "stats_basis": "review_issues"
+              }
+            }
+          ],
+          "total": 1,
+          "page": 1,
+          "page_size": 20,
+          "pages": 1
+        }
+      }
+    },
+    "member_removed": {
+      "/api/review/tasks/1": {
+        "status": 404,
+        "data": null
+      },
+      "/api/reports/1": {
+        "status": 404,
+        "data": null
+      },
+      "/api/reports/tasks/1/export?format=json": {
+        "status": 404,
+        "data": null
+      },
+      "/api/reports": {
+        "status": 200,
+        "data": {
+          "items": [],
+          "total": 0,
+          "page": 1,
+          "page_size": 20,
+          "pages": 0
+        }
+      }
+    },
+    "member_restored_before_quarantine": {
+      "/api/review/tasks/1": {
+        "status": 200,
+        "data": null
+      },
+      "/api/reports/1": {
+        "status": 200,
+        "data": null
+      },
+      "/api/reports/tasks/1/export?format=json": {
+        "status": 200,
+        "data": null
+      },
+      "/api/reports": {
+        "status": 200,
+        "data": {
+          "items": [
+            {
+              "task_id": 1,
+              "task_name": "member-task",
+              "project_name": "private-project",
+              "total_issues": 1,
+              "score": 92,
+              "status": "success",
+              "create_time": "2026-09-20T12:18:14.832120Z",
+              "source": {
+                "type": "standard",
+                "stats_basis": "review_issues"
+              }
+            }
+          ],
+          "total": 1,
+          "page": 1,
+          "page_size": 20,
+          "pages": 1
+        }
+      }
+    },
+    "project_quarantined_member": {
+      "/api/review/tasks/1": {
+        "status": 404,
+        "data": null
+      },
+      "/api/reports/1": {
+        "status": 404,
+        "data": null
+      },
+      "/api/reports/tasks/1/export?format=json": {
+        "status": 404,
+        "data": null
+      },
+      "/api/reports": {
+        "status": 200,
+        "data": {
+          "items": [],
+          "total": 0,
+          "page": 1,
+          "page_size": 20,
+          "pages": 0
+        }
+      }
+    },
+    "report_snapshot": {
+      "task_files": [
+        {
+          "file_id": 1,
+          "project_id": 1,
+          "file_name": "source.py",
+          "file_path": "source.py",
+          "language": "python",
+          "line_count": 1,
+          "version_no": 1,
+          "content_sha256": "ffab1b3914d3eceec58e0688ec2fed2cba82da0a6f2b4e758d04b634e8d87ba2",
+          "snapshot_verified": true
+        }
+      ],
+      "report_files": [
+        {
+          "file_id": 1,
+          "file_name": "source.py",
+          "language": "python",
+          "issue_count": 1,
+          "severe_count": 0,
+          "score": 92
+        }
+      ]
+    },
+    "superseded_worker": {
+      "execution_token": "new",
+      "coverage": {
+        "stage": "analyzing",
+        "new_worker_marker": true,
+        "files": {
+          "1": {
+            "status": "complete",
+            "completed_chunks": 99
+          }
+        }
+      },
+      "status": "running"
+    }
+  },
+  "bounded_summary": {
+    "formal_total": 101,
+    "formal_returned": 100,
+    "formal_truncated": true,
+    "audit_total": 250,
+    "audit_returned": 200,
+    "audit_omitted": 50,
+    "audit_source_truncated": false,
+    "summary_count": 300,
+    "bounded_tasks": [
+      "audit",
+      "formal"
+    ],
+    "human_summary": "已核对 2 个子任务的终态与证据，汇总保留问题 300 条；实测范围见各项证据。",
+    "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。",
+    "summary_omitted_counts": null
+  },
+  "filename_only_dedup": {
+    "input_file_names": [
+      "one.py",
+      "two.py"
+    ],
+    "result_count": 1,
+    "result": [
+      {
+        "file_name": "one.py",
+        "line_number": 1,
+        "title": "相同类型问题",
+        "severity": "高",
+        "project_id": 1,
+        "source_tasks": [
+          "audit"
+        ]
+      }
+    ]
+  }
+}

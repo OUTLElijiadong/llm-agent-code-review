@@ -407,7 +407,9 @@ def _wait_for_sandbox_terminal(
     )
 
 
-def _runtime_handler(db: Session, user: User, code: str, message: dict[str, Any]) -> dict[str, Any]:
+def _runtime_handler(
+    db: Session, user: User, code: str, message: dict[str, Any], *, trusted_team_execution: bool = False,
+) -> dict[str, Any]:
     data = _payload(message)
     context = message.get("context") if isinstance(message.get("context"), dict) else {}
     team_task_id = context.get("agent_team_task_id") or context.get("task_id")
@@ -701,6 +703,17 @@ def _runtime_handler(db: Session, user: User, code: str, message: dict[str, Any]
         return _as_mesh_result(result, action="代码文件查询")
     if code == "review_orchestrator":
         operation = str(data.get("operation") or "list")
+        if operation == "run_review":
+            if not trusted_team_execution or _readonly_team_task(data):
+                return _result("approval_required", "正式团队审查必须由小菱通过有效团队租约发起")
+            from app.services.agent_team_review import run_team_review
+
+            return run_team_review(
+                db, user, team_id=context.get("team_id"), task_id=context.get("agent_team_task_id"),
+                lease_token=str(context.get("lease_token") or ""),
+                project_id=data.get("project_id"), file_ids=data.get("file_ids"),
+                review_type=str(data.get("review_type") or "full"), task_name=str(data.get("task_name") or ""),
+            )
         if operation == "list":
             result = orch.review_orch.list_tasks(
                 project_id=data.get("project_id") or context.get("project_id"),
@@ -736,15 +749,9 @@ def _runtime_handler(db: Session, user: User, code: str, message: dict[str, Any]
     if code == "reporter":
         dependency_context = data.get("dependency_context")
         if isinstance(dependency_context, dict) and dependency_context:
-            return _result(
-                "completed",
-                "子 Agent 结果汇总已完成",
-                evidence=[
-                    {"source": "agent_team_dependency", "task_key": key, "data": value}
-                    for key, value in dependency_context.items()
-                ],
-                artifacts=[{"type": "agent_team_summary", "data": dependency_context}],
-            )
+            from app.services.agent_team_summary import summarize_dependencies
+
+            return summarize_dependencies(dependency_context)
         task_id = data.get("task_id") or context.get("task_id")
         result = (
             orch.reporter.get_report_detail(int(task_id), ctx=ctx)
@@ -777,9 +784,24 @@ def _runtime_handler(db: Session, user: User, code: str, message: dict[str, Any]
         elif task_id := (data.get("task_id") or context.get("task_id")):
             result = orch.security_sentinel.scan_task(int(task_id), ctx=ctx)
         elif project_id := (data.get("project_id") or context.get("project_id")):
-            result = orch.security_sentinel.scan_project(int(project_id), top_n=int(data.get("top_n") or 50), ctx=ctx)
+            result = orch.security_sentinel.scan_project(
+                int(project_id), top_n=int(data.get("top_n") or 50),
+                scan_mode=str(data.get("scan_mode") or "full"), ctx=ctx,
+            )
+            if isinstance(result.data, dict):
+                # scope 已由 scan_project 校验；为跨成员精确去重保留真实项目归属。
+                result.data = {**result.data, "project_id": int(project_id)}
         else:
             return _missing("file_id|task_id|project_id")
+        if not result.success and isinstance(result.data, dict) and result.data:
+            partial = _result(
+                "failed", result.error or "安全审查未完整完成，已保留部分结果",
+                evidence=[{"source": "request_scoped_agent", "data": result.data}],
+                errors=[{"code": result.failure_kind or "audit_incomplete", "message": result.error}],
+                next_action={"inspect_coverage": True, "retry_with_changed_strategy": True},
+            )
+            partial["retryable"] = False
+            return partial
         return _as_mesh_result(result, action="安全审查")
     return _result("needs_configuration", f"Agent {code} 尚未绑定消息 Handler")
 
@@ -950,7 +972,7 @@ def _handle(
         )
     if code == "monitor":
         return contract.name, _monitor_handler(db, user, message)
-    return contract.name, _runtime_handler(db, user, code, message)
+    return contract.name, _runtime_handler(db, user, code, message, trusted_team_execution=trusted_team_execution)
 
 
 def _candidate_rows(db: Session, limit: int) -> list[tuple[str, int, str]]:

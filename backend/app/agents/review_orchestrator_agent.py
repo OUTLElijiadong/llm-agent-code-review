@@ -48,7 +48,8 @@ class ReviewOrchestratorAgent(BaseAgent):
     def start_review(self, project_id: int, file_ids: List[int],
                      review_type: str = "quick", task_name: str = "",
                      user: Optional[User] = None,
-                     ctx: Optional[AgentContext] = None) -> AgentResult:
+                     ctx: Optional[AgentContext] = None, *,
+                     input_exclusions: Optional[list[dict]] = None) -> AgentResult:
         if not self._db:
             return AgentResult(success=False, error="DB 未注入")
         try:
@@ -56,7 +57,8 @@ class ReviewOrchestratorAgent(BaseAgent):
                 project_id=project_id, file_ids=file_ids,
                 review_type=review_type, task_name=task_name or None,
             )
-            task = review_service.start(self._db, user=user or self._user, payload=payload)
+            extra = {"input_exclusions": input_exclusions} if input_exclusions else {}
+            task = review_service.start(self._db, user=user or self._user, payload=payload, **extra)
             return AgentResult(success=True, data={
                 "task_id": task.id, "status": task.status,
                 "total_files": task.total_files or len(file_ids),
@@ -105,10 +107,10 @@ class ReviewOrchestratorAgent(BaseAgent):
             issue_type=issue_type, page=page, page_size=page_size,
         )
         items = [
-            {"id": i["id"], "file_name": i.get("file_name", ""),
-             "line_number": i["line_number"], "severity": i["severity"],
-             "issue_type": i["issue_type"], "title": i.get("title", ""),
-             "status": i["status"]}
+            {"id": i.id, "file_name": i.file_name or "",
+             "line_number": i.line_number, "severity": i.severity,
+             "issue_type": i.issue_type, "title": i.title or "",
+             "status": i.status}
             for i in result["items"]
         ]
         return AgentResult(success=True, data={

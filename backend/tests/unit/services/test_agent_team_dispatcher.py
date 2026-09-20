@@ -209,12 +209,14 @@ def test_reporter_prefers_team_dependency_context_over_internal_task_id(monkeypa
         "reporter",
         {
             "user_id": 7,
-            "payload": {"dependency_context": {"facts": {"status": "completed"}}},
+            "payload": {"dependency_context": {"facts": {
+                "status": "completed", "result": {"status": "completed", "summary": "已核对项目事实"},
+            }}},
             "context": {"task_id": 999},
         },
     )
     assert result["status"] == "completed"
-    assert result["summary"] == "子 Agent 结果汇总已完成"
+    assert "已核对" in result["summary"]
 
 
 def test_dispatch_once_consumes_persistent_queue_and_records_completion(monkeypatch, db):

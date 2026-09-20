@@ -844,6 +844,22 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
         # 也可作为 create_agent_team 成员,避免模型被 approval_required 误导。
         if code in _TEAM_GOVERNED_CODES and item["dispatch_state"] == "approval_required":
             item["team_dispatch_state"] = "team_governed"
+        if code == "review_orchestrator":
+            item["team_input_contract"] = {
+                "operation": ["list", "get", "issues", "run_review"],
+                "run_review": {"required": ["project_id"], "optional": ["file_ids", "review_type", "task_name"],
+                               "review_type": ["full", "security"],
+                               "execution": "trusted_team_lease_only"},
+            }
+        elif code == "security_sentinel":
+            item["team_input_contract"] = {
+                "required_one_of": ["project_id", "task_id", "file_id"],
+                "scan_mode": ["full", "static_full", "triage"],
+            }
+        elif code == "code_reviewer":
+            item["team_input_contract"] = {"required": ["code"], "scope": "code_snippet_only"}
+        elif code == "reporter":
+            item["team_input_contract"] = {"depends_on": "all_work_nodes", "role": "summarizer"}
         if code == "operations":
             is_super_admin = (
                 str(getattr(user, "username", "")) == "admin"

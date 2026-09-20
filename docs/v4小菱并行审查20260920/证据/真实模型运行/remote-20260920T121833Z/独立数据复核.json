@@ -1,0 +1,166 @@
+{
+  "read_only_sqlite": true,
+  "db_integrity": "ok",
+  "reviews": [
+    {
+      "id": 1,
+      "status": "success",
+      "total_files": 1,
+      "processed_files": 1,
+      "total_issues": 5,
+      "severe_issues": 3,
+      "high_issues": 0,
+      "medium_issues": 2,
+      "low_issues": 0,
+      "agent_team_id": 1,
+      "agent_team_task_id": 1
+    }
+  ],
+  "issue_counts_by_severity": [
+    {
+      "task_id": 1,
+      "severity": "严重",
+      "n": 3
+    },
+    {
+      "task_id": 1,
+      "severity": "中",
+      "n": 2
+    }
+  ],
+  "calls_by_node_agent": [
+    {
+      "agent_team_task_id": 1,
+      "agent_label": "code_reviewer",
+      "calls": 3,
+      "total_tokens": 17572
+    },
+    {
+      "agent_team_task_id": 1,
+      "agent_label": "security_sentinel",
+      "calls": 1,
+      "total_tokens": 4585
+    },
+    {
+      "agent_team_task_id": 2,
+      "agent_label": "security_sentinel",
+      "calls": 3,
+      "total_tokens": 9349
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "task_key": "review",
+      "status": "completed",
+      "started_at": "2026-09-20 12:18:36.619131",
+      "completed_at": "2026-09-20 12:18:54.891793"
+    },
+    {
+      "id": 2,
+      "task_key": "audit",
+      "status": "completed",
+      "started_at": "2026-09-20 12:18:36.651478",
+      "completed_at": "2026-09-20 12:18:43.512204"
+    },
+    {
+      "id": 3,
+      "task_key": "report",
+      "status": "completed",
+      "started_at": "2026-09-20 12:18:54.912458",
+      "completed_at": "2026-09-20 12:18:54.943069"
+    }
+  ],
+  "audit_finding_count": 4,
+  "audit_full_semantic_coverage": true,
+  "summary_unique_finding_count": 9,
+  "summary_returned_items": 9,
+  "actual_http_cross_node_overlap_pairs": [
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 3.29
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 3.29
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 3.289
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 3.289
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 0.898
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 0.898
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 0.898
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 0.898
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 2.404
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 2.404
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 2.404
+    },
+    {
+      "nodes": [
+        2,
+        1
+      ],
+      "overlap_seconds": 2.404
+    }
+  ],
+  "all_calls_attributed": true,
+  "issue_count_matches": true
+}

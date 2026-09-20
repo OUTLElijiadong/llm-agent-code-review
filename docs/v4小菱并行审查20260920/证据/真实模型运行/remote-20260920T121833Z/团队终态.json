@@ -1,0 +1,2091 @@
+{
+  "team_id": 1,
+  "user_id": 1,
+  "surface": "user",
+  "session_id": "v4_isolated_20260920T121833Z",
+  "title": "现有Agent真实并行验收",
+  "objective": "对合成样本并行执行正式全量代码审查和独立白盒审计，再核对真实结果",
+  "status": "completed",
+  "max_active_children": 2,
+  "max_attempts": 1,
+  "priority": 0,
+  "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+  "deadline_at": null,
+  "started_at": "2026-09-20T12:18:36.619131",
+  "completed_at": "2026-09-20T12:18:54.952294",
+  "summary": {
+    "completed_tasks": 3,
+    "verification_results": [
+      {
+        "task_key": "report",
+        "result": {
+          "status": "completed",
+          "summary": "已核对 2 个子任务的终态与证据，汇总保留问题 9 条；实测范围见各项证据。",
+          "evidence": [
+            "[TRUNCATED]",
+            "[TRUNCATED]"
+          ],
+          "artifacts": [
+            "[TRUNCATED]"
+          ],
+          "errors": [],
+          "next_action": null,
+          "retryable": false
+        }
+      }
+    ],
+    "final_result": {
+      "status": "completed",
+      "summary": "已核对 2 个子任务的终态与证据，汇总保留问题 9 条；实测范围见各项证据。",
+      "evidence": [
+        {
+          "source": "agent_team_dependency",
+          "task_key": "audit",
+          "data": {
+            "status": "[TRUNCATED]",
+            "result": "[TRUNCATED]",
+            "finding_summary": "[TRUNCATED]",
+            "artifacts": "[TRUNCATED]",
+            "errors": "[TRUNCATED]"
+          }
+        },
+        {
+          "source": "agent_team_dependency",
+          "task_key": "review",
+          "data": {
+            "status": "[TRUNCATED]",
+            "result": "[TRUNCATED]",
+            "finding_summary": "[TRUNCATED]",
+            "artifacts": "[TRUNCATED]",
+            "errors": "[TRUNCATED]"
+          }
+        }
+      ],
+      "artifacts": [
+        {
+          "type": "agent_team_summary",
+          "data": {
+            "verification": "[TRUNCATED]",
+            "outcomes": "[TRUNCATED]",
+            "incomplete_tasks": "[TRUNCATED]",
+            "unique_finding_count": "[TRUNCATED]",
+            "bounded_finding_tasks": "[TRUNCATED]",
+            "findings": "[TRUNCATED]",
+            "references": "[TRUNCATED]",
+            "scope": "[TRUNCATED]"
+          }
+        }
+      ],
+      "errors": [],
+      "next_action": null,
+      "retryable": false
+    }
+  },
+  "error": {},
+  "created_at": "2026-09-20T12:18:36.440511",
+  "updated_at": "2026-09-20T12:18:54.954287",
+  "archived_at": null,
+  "members": [
+    {
+      "member_id": 1,
+      "member_key": "review",
+      "display_name": "正式代码审查",
+      "address": "agent:review_orchestrator",
+      "kind": "runtime",
+      "role": "worker",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "review_orchestrator",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "completed",
+      "started_at": "2026-09-20T12:18:36.619131",
+      "completed_at": "2026-09-20T12:18:54.906388"
+    },
+    {
+      "member_id": 2,
+      "member_key": "audit",
+      "display_name": "白盒安全审计",
+      "address": "agent:security_sentinel",
+      "kind": "runtime",
+      "role": "worker",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "security_sentinel",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "completed",
+      "started_at": "2026-09-20T12:18:36.651478",
+      "completed_at": "2026-09-20T12:18:43.535033"
+    },
+    {
+      "member_id": 3,
+      "member_key": "report",
+      "display_name": "证据复核汇总",
+      "address": "agent:reporter",
+      "kind": "runtime",
+      "role": "summarizer",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "reporter",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "completed",
+      "started_at": "2026-09-20T12:18:54.912458",
+      "completed_at": "2026-09-20T12:18:54.953704"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": 1,
+      "task_key": "review",
+      "member_id": 1,
+      "member_key": "review",
+      "title": "正式全量代码审查",
+      "instructions": "运行现有审查画像，保存真实任务与发现，覆盖失败必须如实报告。",
+      "depends_on": [],
+      "input": {
+        "operation": "run_review",
+        "project_id": 1,
+        "review_type": "full"
+      },
+      "status": "completed",
+      "priority": 0,
+      "attempt_count": 1,
+      "max_attempts": 1,
+      "next_attempt_at": "2026-09-20T12:18:36.586130",
+      "lease_expires_at": null,
+      "result": {
+        "status": "completed",
+        "task_id": 1,
+        "project_id": 1,
+        "coverage": {
+          "stage": "complete",
+          "completed_files": 1,
+          "total_files": 1,
+          "current_file": null,
+          "completed_chunks": 1,
+          "total_chunks": 1,
+          "files": {
+            "1": {
+              "file_name": "synthetic_routes.py",
+              "status": "complete",
+              "total_chunks": 1,
+              "completed_chunks": 1,
+              "completed_chunk_indexes": [
+                "[TRUNCATED]"
+              ],
+              "failed_chunks": []
+            }
+          }
+        },
+        "findings": [
+          {
+            "issue_id": 1,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 7,
+            "title": "函数缺少文档字符串与注释",
+            "severity": "中",
+            "issue_type": "注释完整性"
+          },
+          {
+            "issue_id": 2,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 10,
+            "title": "内存数据库每请求重建导致查询必失败",
+            "severity": "中",
+            "issue_type": "潜在Bug"
+          },
+          {
+            "issue_id": 3,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 11,
+            "title": "SQL 查询字符串拼接导致注入",
+            "severity": "严重",
+            "issue_type": "安全漏洞"
+          },
+          {
+            "issue_id": 4,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 16,
+            "title": "shell=True 拼接执行导致命令注入",
+            "severity": "严重",
+            "issue_type": "安全漏洞"
+          },
+          {
+            "issue_id": 5,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 20,
+            "title": "eval 执行用户输入导致任意代码执行",
+            "severity": "严重",
+            "issue_type": "安全漏洞"
+          }
+        ],
+        "finding_count_total": 5,
+        "findings_truncated": false,
+        "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。",
+        "evidence": [
+          {
+            "source": "review_task",
+            "data": {
+              "task_id": 1,
+              "project_id": 1,
+              "status": "success",
+              "review_type": "full",
+              "coverage": {
+                "stage": "[TRUNCATED]",
+                "completed_files": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "current_file": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "files": "[TRUNCATED]"
+              },
+              "total_files": 1,
+              "processed_files": 1,
+              "total_issues": 5,
+              "task_url": "/reviews/1",
+              "report_url": "/reports/1"
+            }
+          }
+        ],
+        "artifacts": [
+          {
+            "type": "review_task",
+            "task_id": 1,
+            "project_id": 1,
+            "status": "success",
+            "review_type": "full",
+            "coverage": {
+              "stage": "complete",
+              "completed_files": 1,
+              "total_files": 1,
+              "current_file": null,
+              "completed_chunks": 1,
+              "total_chunks": 1,
+              "files": {
+                "1": "[TRUNCATED]"
+              }
+            },
+            "total_files": 1,
+            "processed_files": 1,
+            "total_issues": 5,
+            "task_url": "/reviews/1",
+            "report_url": "/reports/1"
+          }
+        ],
+        "errors": [],
+        "retryable": false
+      },
+      "artifacts": [
+        {
+          "type": "review_task",
+          "task_id": 1,
+          "project_id": 1,
+          "status": "success",
+          "review_type": "full",
+          "coverage": {
+            "stage": "complete",
+            "completed_files": 1,
+            "total_files": 1,
+            "current_file": null,
+            "completed_chunks": 1,
+            "total_chunks": 1,
+            "files": {
+              "1": {
+                "file_name": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "completed_chunk_indexes": "[TRUNCATED]",
+                "failed_chunks": "[TRUNCATED]"
+              }
+            }
+          },
+          "total_files": 1,
+          "processed_files": 1,
+          "total_issues": 5,
+          "task_url": "/reviews/1",
+          "report_url": "/reports/1"
+        }
+      ],
+      "errors": [],
+      "started_at": "2026-09-20T12:18:36.619131",
+      "completed_at": "2026-09-20T12:18:54.891793"
+    },
+    {
+      "task_id": 2,
+      "task_key": "audit",
+      "member_id": 2,
+      "member_key": "audit",
+      "title": "独立白盒安全审计",
+      "instructions": "完整审计所有合成代码，检查注入与命令执行，明确证据和覆盖。",
+      "depends_on": [],
+      "input": {
+        "project_id": 1,
+        "scan_mode": "full"
+      },
+      "status": "completed",
+      "priority": 0,
+      "attempt_count": 1,
+      "max_attempts": 1,
+      "next_attempt_at": "2026-09-20T12:18:36.586221",
+      "lease_expires_at": null,
+      "result": {
+        "status": "completed",
+        "summary": "安全审查已完成",
+        "evidence": [
+          {
+            "source": "request_scoped_agent",
+            "data": {
+              "findings": [
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "threat_model": {
+                "entry_points": "[TRUNCATED]",
+                "data_flows": "[TRUNCATED]",
+                "api_endpoints": "[TRUNCATED]",
+                "code_links": "[TRUNCATED]",
+                "attack_surface_summary": "[TRUNCATED]"
+              },
+              "compliance": {
+                "owasp_coverage": "[TRUNCATED]",
+                "gb_t_22239": "[TRUNCATED]",
+                "verification": "[TRUNCATED]",
+                "scan_mode": "[TRUNCATED]",
+                "total_file_count": "[TRUNCATED]",
+                "scanned_file_count": "[TRUNCATED]",
+                "skipped_file_count": "[TRUNCATED]",
+                "coverage_ratio": "[TRUNCATED]",
+                "truncated": "[TRUNCATED]",
+                "requested_top_n": "[TRUNCATED]",
+                "static_scanned_file_count": "[TRUNCATED]",
+                "static_complete": "[TRUNCATED]",
+                "semantic_candidate_file_count": "[TRUNCATED]",
+                "semantic_candidate_source_chars": "[TRUNCATED]",
+                "semantic_selection_strategy": "[TRUNCATED]",
+                "semantic_planned_file_count": "[TRUNCATED]",
+                "semantic_planned_source_chars": "[TRUNCATED]",
+                "semantic_file_count": "[TRUNCATED]",
+                "archive_text_file_count": "[TRUNCATED]",
+                "archive_text_source_chars": "[TRUNCATED]",
+                "binary_or_empty_file_count": "[TRUNCATED]",
+                "archive_binary_or_empty_file_count": "[TRUNCATED]",
+                "candidate_binary_or_empty_file_count": "[TRUNCATED]",
+                "semantic_initial_batch_count": "[TRUNCATED]",
+                "semantic_batch_count": "[TRUNCATED]",
+                "semantic_request_count": "[TRUNCATED]",
+                "semantic_split_count": "[TRUNCATED]",
+                "semantic_successful_batch_count": "[TRUNCATED]",
+                "semantic_failed_batch_count": "[TRUNCATED]",
+                "semantic_output_truncated_leaf_count": "[TRUNCATED]",
+                "semantic_output_limited_leaf_count": "[TRUNCATED]",
+                "semantic_budget_exhausted_leaf_count": "[TRUNCATED]",
+                "semantic_invalid_contract_leaf_count": "[TRUNCATED]",
+                "semantic_invalid_item_count": "[TRUNCATED]",
+                "semantic_invalid_item_kinds": "[TRUNCATED]",
+                "semantic_attempted_source_chars": "[TRUNCATED]",
+                "semantic_source_chars": "[TRUNCATED]",
+                "semantic_failed_source_chars": "[TRUNCATED]",
+                "semantic_accounted_source_chars": "[TRUNCATED]",
+                "total_text_source_chars": "[TRUNCATED]",
+                "semantic_char_coverage_ratio": "[TRUNCATED]",
+                "semantic_scheduled_coverage_ratio": "[TRUNCATED]",
+                "semantic_archive_coverage_ratio": "[TRUNCATED]",
+                "semantic_truncated_file_count": "[TRUNCATED]",
+                "semantic_unscheduled_file_count": "[TRUNCATED]",
+                "semantic_partially_scheduled_file_count": "[TRUNCATED]",
+                "semantic_fully_scheduled_file_count": "[TRUNCATED]",
+                "semantic_verified_file_count": "[TRUNCATED]",
+                "semantic_failed_file_count": "[TRUNCATED]",
+                "semantic_complete": "[TRUNCATED]",
+                "_truncated_fields": 45
+              },
+              "risk_score": 40,
+              "summary": "项目「v4合成漏洞隔离验收」白盒审计静态覆盖 1/1 个文件,发现 4 处严重 / 0 处高危 / 0 处中危 / 0 处低危。风险评分 40/100。",
+              "file_count": 1,
+              "duration_ms": 4377,
+              "source_archive_sha256": "266b823899dcc39f2792f64576e4c7cc5df576e2754cf9c32199f92fa9c4fadb",
+              "source_archive_bytes": 458,
+              "source_archive_filename": "v4合成漏洞隔离验收.zip"
+            }
+          }
+        ],
+        "artifacts": [],
+        "errors": [],
+        "next_action": null
+      },
+      "artifacts": [],
+      "errors": [],
+      "started_at": "2026-09-20T12:18:36.651478",
+      "completed_at": "2026-09-20T12:18:43.512204"
+    },
+    {
+      "task_id": 3,
+      "task_key": "report",
+      "member_id": 3,
+      "member_key": "report",
+      "title": "结果证据复核",
+      "instructions": "核对两条依赖终态与证据，失败不得标记为全部完成。",
+      "depends_on": [
+        "review",
+        "audit"
+      ],
+      "input": {},
+      "status": "completed",
+      "priority": 0,
+      "attempt_count": 1,
+      "max_attempts": 1,
+      "next_attempt_at": "2026-09-20T12:18:54.903461",
+      "lease_expires_at": null,
+      "result": {
+        "status": "completed",
+        "summary": "已核对 2 个子任务的终态与证据，汇总保留问题 9 条；实测范围见各项证据。",
+        "evidence": [
+          {
+            "source": "agent_team_dependency",
+            "task_key": "audit",
+            "data": {
+              "status": "completed",
+              "result": {
+                "status": "[TRUNCATED]",
+                "summary": "[TRUNCATED]",
+                "evidence": "[TRUNCATED]",
+                "artifacts": "[TRUNCATED]",
+                "errors": "[TRUNCATED]",
+                "next_action": "[TRUNCATED]"
+              },
+              "finding_summary": {
+                "items": "[TRUNCATED]",
+                "omitted_count": "[TRUNCATED]",
+                "source_truncated": "[TRUNCATED]"
+              },
+              "artifacts": [],
+              "errors": []
+            }
+          },
+          {
+            "source": "agent_team_dependency",
+            "task_key": "review",
+            "data": {
+              "status": "completed",
+              "result": {
+                "status": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "coverage": "[TRUNCATED]",
+                "findings": "[TRUNCATED]",
+                "finding_count_total": "[TRUNCATED]",
+                "findings_truncated": "[TRUNCATED]",
+                "summary": "[TRUNCATED]",
+                "evidence": "[TRUNCATED]",
+                "artifacts": "[TRUNCATED]",
+                "errors": "[TRUNCATED]",
+                "retryable": "[TRUNCATED]"
+              },
+              "finding_summary": {
+                "items": "[TRUNCATED]",
+                "omitted_count": "[TRUNCATED]",
+                "source_truncated": "[TRUNCATED]"
+              },
+              "artifacts": [
+                "[TRUNCATED]"
+              ],
+              "errors": []
+            }
+          }
+        ],
+        "artifacts": [
+          {
+            "type": "agent_team_summary",
+            "data": {
+              "verification": "dependency_evidence_reconciled",
+              "outcomes": [
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "incomplete_tasks": [],
+              "unique_finding_count": 9,
+              "bounded_finding_tasks": [],
+              "findings": [
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "references": [
+                "[TRUNCATED]"
+              ],
+              "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。"
+            }
+          }
+        ],
+        "errors": [],
+        "next_action": null,
+        "retryable": false
+      },
+      "artifacts": [
+        {
+          "type": "agent_team_summary",
+          "data": {
+            "verification": "dependency_evidence_reconciled",
+            "outcomes": [
+              {
+                "task_key": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "result_status": "[TRUNCATED]",
+                "summary": "[TRUNCATED]"
+              },
+              {
+                "task_key": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "result_status": "[TRUNCATED]",
+                "summary": "[TRUNCATED]"
+              }
+            ],
+            "incomplete_tasks": [],
+            "unique_finding_count": 9,
+            "bounded_finding_tasks": [],
+            "findings": [
+              {
+                "file_id": "[TRUNCATED]",
+                "file_path": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "file_id": "[TRUNCATED]",
+                "file_path": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "file_id": "[TRUNCATED]",
+                "file_path": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "file_id": "[TRUNCATED]",
+                "file_path": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              }
+            ],
+            "references": [
+              {
+                "type": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "route": "[TRUNCATED]",
+                "source_task": "[TRUNCATED]"
+              }
+            ],
+            "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。"
+          }
+        }
+      ],
+      "errors": [],
+      "started_at": "2026-09-20T12:18:54.912458",
+      "completed_at": "2026-09-20T12:18:54.943069"
+    }
+  ],
+  "counts": {
+    "total": 3,
+    "completed": 3,
+    "running": 0,
+    "queued": 0,
+    "failed": 0,
+    "blocked": 0
+  },
+  "events": [
+    {
+      "event_id": 1,
+      "team_id": 1,
+      "task_id": null,
+      "member_id": null,
+      "event_type": "team.created",
+      "from_status": null,
+      "to_status": "queued",
+      "actor_address": "user:1",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "task_count": 3,
+        "origin_trace_id": ""
+      },
+      "created_at": "2026-09-20T12:18:36.587620"
+    },
+    {
+      "event_id": 2,
+      "team_id": 1,
+      "task_id": 1,
+      "member_id": 1,
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "to_status": "running",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": "team-1-task-1-attempt-1-request",
+      "correlation_id": "team:1:task:1",
+      "detail": {
+        "attempt": 1,
+        "task_key": "review",
+        "member_key": "review"
+      },
+      "created_at": "2026-09-20T12:18:36.642456"
+    },
+    {
+      "event_id": 3,
+      "team_id": 1,
+      "task_id": null,
+      "member_id": null,
+      "event_type": "team.status_changed",
+      "from_status": "queued",
+      "to_status": "running",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "counts": {
+          "total": 3,
+          "completed": 0,
+          "running": 1,
+          "queued": 2,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "created_at": "2026-09-20T12:18:36.645964"
+    },
+    {
+      "event_id": 4,
+      "team_id": 1,
+      "task_id": 2,
+      "member_id": 2,
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "to_status": "running",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": "team-1-task-2-attempt-1-request",
+      "correlation_id": "team:1:task:2",
+      "detail": {
+        "attempt": 1,
+        "task_key": "audit",
+        "member_key": "audit"
+      },
+      "created_at": "2026-09-20T12:18:36.658573"
+    },
+    {
+      "event_id": 5,
+      "team_id": 1,
+      "task_id": 2,
+      "member_id": 2,
+      "event_type": "task.completed",
+      "from_status": "running",
+      "to_status": "completed",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": "team-1-task-2-attempt-1-request",
+      "correlation_id": "",
+      "detail": {
+        "result": {
+          "status": "completed",
+          "summary": "安全审查已完成",
+          "evidence": [
+            {
+              "source": "request_scoped_agent",
+              "data": {
+                "findings": "[TRUNCATED]",
+                "threat_model": "[TRUNCATED]",
+                "compliance": "[TRUNCATED]",
+                "risk_score": "[TRUNCATED]",
+                "summary": "[TRUNCATED]",
+                "file_count": "[TRUNCATED]",
+                "duration_ms": "[TRUNCATED]",
+                "source_archive_sha256": "[TRUNCATED]",
+                "source_archive_bytes": "[TRUNCATED]",
+                "source_archive_filename": "[TRUNCATED]"
+              }
+            }
+          ],
+          "artifacts": [],
+          "errors": [],
+          "next_action": null
+        },
+        "task_key": "audit",
+        "member_key": "audit"
+      },
+      "created_at": "2026-09-20T12:18:43.524764"
+    },
+    {
+      "event_id": 6,
+      "team_id": 1,
+      "task_id": 1,
+      "member_id": 1,
+      "event_type": "task.completed",
+      "from_status": "running",
+      "to_status": "completed",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": "team-1-task-1-attempt-1-request",
+      "correlation_id": "",
+      "detail": {
+        "result": {
+          "status": "completed",
+          "task_id": 1,
+          "project_id": 1,
+          "coverage": {
+            "stage": "complete",
+            "completed_files": 1,
+            "total_files": 1,
+            "current_file": null,
+            "completed_chunks": 1,
+            "total_chunks": 1,
+            "files": {
+              "1": {
+                "file_name": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "completed_chunk_indexes": "[TRUNCATED]",
+                "failed_chunks": "[TRUNCATED]"
+              }
+            }
+          },
+          "findings": [
+            {
+              "issue_id": 1,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 7,
+              "title": "函数缺少文档字符串与注释",
+              "severity": "中",
+              "issue_type": "注释完整性"
+            },
+            {
+              "issue_id": 2,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 10,
+              "title": "内存数据库每请求重建导致查询必失败",
+              "severity": "中",
+              "issue_type": "潜在Bug"
+            },
+            {
+              "issue_id": 3,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 11,
+              "title": "SQL 查询字符串拼接导致注入",
+              "severity": "严重",
+              "issue_type": "安全漏洞"
+            },
+            {
+              "issue_id": 4,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 16,
+              "title": "shell=True 拼接执行导致命令注入",
+              "severity": "严重",
+              "issue_type": "安全漏洞"
+            },
+            {
+              "issue_id": 5,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 20,
+              "title": "eval 执行用户输入导致任意代码执行",
+              "severity": "严重",
+              "issue_type": "安全漏洞"
+            }
+          ],
+          "finding_count_total": 5,
+          "findings_truncated": false,
+          "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。",
+          "evidence": [
+            {
+              "source": "review_task",
+              "data": {
+                "task_id": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "review_type": "[TRUNCATED]",
+                "coverage": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "processed_files": "[TRUNCATED]",
+                "total_issues": "[TRUNCATED]",
+                "task_url": "[TRUNCATED]",
+                "report_url": "[TRUNCATED]"
+              }
+            }
+          ],
+          "artifacts": [
+            {
+              "type": "review_task",
+              "task_id": 1,
+              "project_id": 1,
+              "status": "success",
+              "review_type": "full",
+              "coverage": {
+                "stage": "[TRUNCATED]",
+                "completed_files": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "current_file": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "files": "[TRUNCATED]"
+              },
+              "total_files": 1,
+              "processed_files": 1,
+              "total_issues": 5,
+              "task_url": "/reviews/1",
+              "report_url": "/reports/1"
+            }
+          ],
+          "errors": [],
+          "retryable": false
+        },
+        "task_key": "review",
+        "member_key": "review"
+      },
+      "created_at": "2026-09-20T12:18:54.899320"
+    },
+    {
+      "event_id": 7,
+      "team_id": 1,
+      "task_id": 3,
+      "member_id": null,
+      "event_type": "task.queued",
+      "from_status": "waiting_dependency",
+      "to_status": "queued",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "reason": "dependencies_completed",
+        "task_key": "report"
+      },
+      "created_at": "2026-09-20T12:18:54.903836"
+    },
+    {
+      "event_id": 8,
+      "team_id": 1,
+      "task_id": null,
+      "member_id": null,
+      "event_type": "team.status_changed",
+      "from_status": "running",
+      "to_status": "verifying",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "counts": {
+          "total": 3,
+          "completed": 2,
+          "running": 0,
+          "queued": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "created_at": "2026-09-20T12:18:54.906826"
+    },
+    {
+      "event_id": 9,
+      "team_id": 1,
+      "task_id": 3,
+      "member_id": 3,
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "to_status": "running",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": "team-1-task-3-attempt-1-request",
+      "correlation_id": "team:1:task:3",
+      "detail": {
+        "attempt": 1,
+        "task_key": "report",
+        "member_key": "report"
+      },
+      "created_at": "2026-09-20T12:18:54.922877"
+    },
+    {
+      "event_id": 10,
+      "team_id": 1,
+      "task_id": 3,
+      "member_id": 3,
+      "event_type": "task.completed",
+      "from_status": "running",
+      "to_status": "completed",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": "team-1-task-3-attempt-1-request",
+      "correlation_id": "",
+      "detail": {
+        "result": {
+          "status": "completed",
+          "summary": "已核对 2 个子任务的终态与证据，汇总保留问题 9 条；实测范围见各项证据。",
+          "evidence": [
+            {
+              "source": "agent_team_dependency",
+              "task_key": "audit",
+              "data": {
+                "status": "[TRUNCATED]",
+                "result": "[TRUNCATED]",
+                "finding_summary": "[TRUNCATED]",
+                "artifacts": "[TRUNCATED]",
+                "errors": "[TRUNCATED]"
+              }
+            },
+            {
+              "source": "agent_team_dependency",
+              "task_key": "review",
+              "data": {
+                "status": "[TRUNCATED]",
+                "result": "[TRUNCATED]",
+                "finding_summary": "[TRUNCATED]",
+                "artifacts": "[TRUNCATED]",
+                "errors": "[TRUNCATED]"
+              }
+            }
+          ],
+          "artifacts": [
+            {
+              "type": "agent_team_summary",
+              "data": {
+                "verification": "[TRUNCATED]",
+                "outcomes": "[TRUNCATED]",
+                "incomplete_tasks": "[TRUNCATED]",
+                "unique_finding_count": "[TRUNCATED]",
+                "bounded_finding_tasks": "[TRUNCATED]",
+                "findings": "[TRUNCATED]",
+                "references": "[TRUNCATED]",
+                "scope": "[TRUNCATED]"
+              }
+            }
+          ],
+          "errors": [],
+          "next_action": null,
+          "retryable": false
+        },
+        "task_key": "report",
+        "member_key": "report"
+      },
+      "created_at": "2026-09-20T12:18:54.948392"
+    },
+    {
+      "event_id": 11,
+      "team_id": 1,
+      "task_id": null,
+      "member_id": null,
+      "event_type": "team.status_changed",
+      "from_status": "verifying",
+      "to_status": "completed",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "counts": {
+          "total": 3,
+          "completed": 3,
+          "running": 0,
+          "queued": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "created_at": "2026-09-20T12:18:54.954564"
+    }
+  ],
+  "messages": [
+    {
+      "ledger_id": 1,
+      "message_id": "team-1-task-1-attempt-1-request",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "correlation_id": "team:1:task:1",
+      "causation_id": "",
+      "sent_from": "session:user:v4_isolated_20260920T121833Z",
+      "send_to": "agent:review_orchestrator",
+      "message_type": "task.request",
+      "subject": "正式全量代码审查",
+      "status": "completed",
+      "payload": {
+        "title": "正式全量代码审查",
+        "instructions": "运行现有审查画像，保存真实任务与发现，覆盖失败必须如实报告。",
+        "input": {
+          "operation": "run_review",
+          "project_id": 1,
+          "review_type": "full"
+        },
+        "dependency_context": {},
+        "member_snapshot": {}
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 1,
+        "member_id": 1,
+        "source_revision_id": null,
+        "run_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+        "member_snapshot": {}
+      },
+      "artifacts": [],
+      "errors": [],
+      "create_time": "2026-09-20T12:18:36.640196",
+      "created_at": "2026-09-20T12:18:36.640196",
+      "update_time": "2026-09-20T12:18:54.897847"
+    },
+    {
+      "ledger_id": 2,
+      "message_id": "team-1-task-2-attempt-1-request",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "correlation_id": "team:1:task:2",
+      "causation_id": "",
+      "sent_from": "session:user:v4_isolated_20260920T121833Z",
+      "send_to": "agent:security_sentinel",
+      "message_type": "task.request",
+      "subject": "独立白盒安全审计",
+      "status": "completed",
+      "payload": {
+        "title": "独立白盒安全审计",
+        "instructions": "完整审计所有合成代码，检查注入与命令执行，明确证据和覆盖。",
+        "input": {
+          "project_id": 1,
+          "scan_mode": "full"
+        },
+        "dependency_context": {},
+        "member_snapshot": {}
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 2,
+        "member_id": 2,
+        "source_revision_id": null,
+        "run_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+        "member_snapshot": {}
+      },
+      "artifacts": [],
+      "errors": [],
+      "create_time": "2026-09-20T12:18:36.657937",
+      "created_at": "2026-09-20T12:18:36.657937",
+      "update_time": "2026-09-20T12:18:43.522156"
+    },
+    {
+      "ledger_id": 3,
+      "message_id": "team-1-task-2-attempt-1-result",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "correlation_id": "team:1",
+      "causation_id": "team-1-task-2-attempt-1-request",
+      "sent_from": "agent:security_sentinel",
+      "send_to": "session:user:v4_isolated_20260920T121833Z",
+      "message_type": "task.result",
+      "subject": "独立白盒安全审计执行结果",
+      "status": "queued",
+      "payload": {
+        "status": "completed",
+        "summary": "安全审查已完成",
+        "evidence": [
+          {
+            "source": "request_scoped_agent",
+            "data": {
+              "findings": [
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "threat_model": {
+                "entry_points": "[TRUNCATED]",
+                "data_flows": "[TRUNCATED]",
+                "api_endpoints": "[TRUNCATED]",
+                "code_links": "[TRUNCATED]",
+                "attack_surface_summary": "[TRUNCATED]"
+              },
+              "compliance": {
+                "owasp_coverage": "[TRUNCATED]",
+                "gb_t_22239": "[TRUNCATED]",
+                "verification": "[TRUNCATED]",
+                "scan_mode": "[TRUNCATED]",
+                "total_file_count": "[TRUNCATED]",
+                "scanned_file_count": "[TRUNCATED]",
+                "skipped_file_count": "[TRUNCATED]",
+                "coverage_ratio": "[TRUNCATED]",
+                "truncated": "[TRUNCATED]",
+                "requested_top_n": "[TRUNCATED]",
+                "static_scanned_file_count": "[TRUNCATED]",
+                "static_complete": "[TRUNCATED]",
+                "semantic_candidate_file_count": "[TRUNCATED]",
+                "semantic_candidate_source_chars": "[TRUNCATED]",
+                "semantic_selection_strategy": "[TRUNCATED]",
+                "semantic_planned_file_count": "[TRUNCATED]",
+                "semantic_planned_source_chars": "[TRUNCATED]",
+                "semantic_file_count": "[TRUNCATED]",
+                "archive_text_file_count": "[TRUNCATED]",
+                "archive_text_source_chars": "[TRUNCATED]",
+                "binary_or_empty_file_count": "[TRUNCATED]",
+                "archive_binary_or_empty_file_count": "[TRUNCATED]",
+                "candidate_binary_or_empty_file_count": "[TRUNCATED]",
+                "semantic_initial_batch_count": "[TRUNCATED]",
+                "semantic_batch_count": "[TRUNCATED]",
+                "semantic_request_count": "[TRUNCATED]",
+                "semantic_split_count": "[TRUNCATED]",
+                "semantic_successful_batch_count": "[TRUNCATED]",
+                "semantic_failed_batch_count": "[TRUNCATED]",
+                "semantic_output_truncated_leaf_count": "[TRUNCATED]",
+                "semantic_output_limited_leaf_count": "[TRUNCATED]",
+                "semantic_budget_exhausted_leaf_count": "[TRUNCATED]",
+                "semantic_invalid_contract_leaf_count": "[TRUNCATED]",
+                "semantic_invalid_item_count": "[TRUNCATED]",
+                "semantic_invalid_item_kinds": "[TRUNCATED]",
+                "semantic_attempted_source_chars": "[TRUNCATED]",
+                "semantic_source_chars": "[TRUNCATED]",
+                "semantic_failed_source_chars": "[TRUNCATED]",
+                "semantic_accounted_source_chars": "[TRUNCATED]",
+                "total_text_source_chars": "[TRUNCATED]",
+                "semantic_char_coverage_ratio": "[TRUNCATED]",
+                "semantic_scheduled_coverage_ratio": "[TRUNCATED]",
+                "semantic_archive_coverage_ratio": "[TRUNCATED]",
+                "semantic_truncated_file_count": "[TRUNCATED]",
+                "semantic_unscheduled_file_count": "[TRUNCATED]",
+                "semantic_partially_scheduled_file_count": "[TRUNCATED]",
+                "semantic_fully_scheduled_file_count": "[TRUNCATED]",
+                "semantic_verified_file_count": "[TRUNCATED]",
+                "semantic_failed_file_count": "[TRUNCATED]",
+                "semantic_complete": "[TRUNCATED]",
+                "_truncated_fields": 1
+              },
+              "risk_score": 40,
+              "summary": "项目「v4合成漏洞隔离验收」白盒审计静态覆盖 1/1 个文件,发现 4 处严重 / 0 处高危 / 0 处中危 / 0 处低危。风险评分 40/100。",
+              "file_count": 1,
+              "duration_ms": 4377,
+              "source_archive_sha256": "266b823899dcc39f2792f64576e4c7cc5df576e2754cf9c32199f92fa9c4fadb",
+              "source_archive_bytes": 458,
+              "source_archive_filename": "v4合成漏洞隔离验收.zip"
+            }
+          }
+        ],
+        "artifacts": [],
+        "errors": [],
+        "next_action": null
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 2,
+        "member_id": 2,
+        "run_id": "team_a7fb83021a524a9c8dce04b3064bff6a"
+      },
+      "artifacts": [],
+      "errors": [],
+      "create_time": "2026-09-20T12:18:43.523394",
+      "created_at": "2026-09-20T12:18:43.523394",
+      "update_time": "2026-09-20T12:18:43.523398"
+    },
+    {
+      "ledger_id": 4,
+      "message_id": "team-1-task-2-attempt-1-to-3",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "correlation_id": "team:1",
+      "causation_id": "team-1-task-2-attempt-1-result",
+      "sent_from": "agent:security_sentinel",
+      "send_to": "agent:reporter",
+      "message_type": "coordination",
+      "subject": "独立白盒安全审计结果移交给结果证据复核",
+      "status": "completed",
+      "payload": {
+        "source_task_key": "audit",
+        "target_task_key": "report",
+        "result": {
+          "status": "completed",
+          "summary": "安全审查已完成",
+          "evidence": [
+            {
+              "source": "request_scoped_agent",
+              "data": {
+                "findings": "[TRUNCATED]",
+                "threat_model": "[TRUNCATED]",
+                "compliance": "[TRUNCATED]",
+                "risk_score": "[TRUNCATED]",
+                "summary": "[TRUNCATED]",
+                "file_count": "[TRUNCATED]",
+                "duration_ms": "[TRUNCATED]",
+                "source_archive_sha256": "[TRUNCATED]",
+                "source_archive_bytes": "[TRUNCATED]",
+                "source_archive_filename": "[TRUNCATED]"
+              }
+            }
+          ],
+          "artifacts": [],
+          "errors": [],
+          "next_action": null
+        }
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 3,
+        "member_id": 3,
+        "run_id": "team_a7fb83021a524a9c8dce04b3064bff6a"
+      },
+      "artifacts": [],
+      "errors": [],
+      "create_time": "2026-09-20T12:18:43.523399",
+      "created_at": "2026-09-20T12:18:43.523399",
+      "update_time": "2026-09-20T12:18:43.523400"
+    },
+    {
+      "ledger_id": 5,
+      "message_id": "team-1-task-1-attempt-1-result",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "correlation_id": "team:1",
+      "causation_id": "team-1-task-1-attempt-1-request",
+      "sent_from": "agent:review_orchestrator",
+      "send_to": "session:user:v4_isolated_20260920T121833Z",
+      "message_type": "task.result",
+      "subject": "正式全量代码审查执行结果",
+      "status": "queued",
+      "payload": {
+        "status": "completed",
+        "task_id": 1,
+        "project_id": 1,
+        "coverage": {
+          "stage": "complete",
+          "completed_files": 1,
+          "total_files": 1,
+          "current_file": null,
+          "completed_chunks": 1,
+          "total_chunks": 1,
+          "files": {
+            "1": {
+              "file_name": "synthetic_routes.py",
+              "status": "complete",
+              "total_chunks": 1,
+              "completed_chunks": 1,
+              "completed_chunk_indexes": [
+                "[TRUNCATED]"
+              ],
+              "failed_chunks": []
+            }
+          }
+        },
+        "findings": [
+          {
+            "issue_id": 1,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 7,
+            "title": "函数缺少文档字符串与注释",
+            "severity": "中",
+            "issue_type": "注释完整性"
+          },
+          {
+            "issue_id": 2,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 10,
+            "title": "内存数据库每请求重建导致查询必失败",
+            "severity": "中",
+            "issue_type": "潜在Bug"
+          },
+          {
+            "issue_id": 3,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 11,
+            "title": "SQL 查询字符串拼接导致注入",
+            "severity": "严重",
+            "issue_type": "安全漏洞"
+          },
+          {
+            "issue_id": 4,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 16,
+            "title": "shell=True 拼接执行导致命令注入",
+            "severity": "严重",
+            "issue_type": "安全漏洞"
+          },
+          {
+            "issue_id": 5,
+            "project_id": 1,
+            "task_id": 1,
+            "file_id": 1,
+            "file_name": "synthetic_routes.py",
+            "line_number": 20,
+            "title": "eval 执行用户输入导致任意代码执行",
+            "severity": "严重",
+            "issue_type": "安全漏洞"
+          }
+        ],
+        "finding_count_total": 5,
+        "findings_truncated": false,
+        "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。",
+        "evidence": [
+          {
+            "source": "review_task",
+            "data": {
+              "task_id": 1,
+              "project_id": 1,
+              "status": "success",
+              "review_type": "full",
+              "coverage": {
+                "stage": "[TRUNCATED]",
+                "completed_files": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "current_file": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "files": "[TRUNCATED]"
+              },
+              "total_files": 1,
+              "processed_files": 1,
+              "total_issues": 5,
+              "task_url": "/reviews/1",
+              "report_url": "/reports/1"
+            }
+          }
+        ],
+        "artifacts": [
+          {
+            "type": "review_task",
+            "task_id": 1,
+            "project_id": 1,
+            "status": "success",
+            "review_type": "full",
+            "coverage": {
+              "stage": "complete",
+              "completed_files": 1,
+              "total_files": 1,
+              "current_file": null,
+              "completed_chunks": 1,
+              "total_chunks": 1,
+              "files": {
+                "1": "[TRUNCATED]"
+              }
+            },
+            "total_files": 1,
+            "processed_files": 1,
+            "total_issues": 5,
+            "task_url": "/reviews/1",
+            "report_url": "/reports/1"
+          }
+        ],
+        "errors": [],
+        "retryable": false
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 1,
+        "member_id": 1,
+        "run_id": "team_a7fb83021a524a9c8dce04b3064bff6a"
+      },
+      "artifacts": [
+        {
+          "type": "review_task",
+          "task_id": 1,
+          "project_id": 1,
+          "status": "success",
+          "review_type": "full",
+          "coverage": {
+            "stage": "complete",
+            "completed_files": 1,
+            "total_files": 1,
+            "current_file": null,
+            "completed_chunks": 1,
+            "total_chunks": 1,
+            "files": {
+              "1": {
+                "file_name": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "completed_chunk_indexes": "[TRUNCATED]",
+                "failed_chunks": "[TRUNCATED]"
+              }
+            }
+          },
+          "total_files": 1,
+          "processed_files": 1,
+          "total_issues": 5,
+          "task_url": "/reviews/1",
+          "report_url": "/reports/1"
+        }
+      ],
+      "errors": [],
+      "create_time": "2026-09-20T12:18:54.898233",
+      "created_at": "2026-09-20T12:18:54.898233",
+      "update_time": "2026-09-20T12:18:54.898236"
+    },
+    {
+      "ledger_id": 6,
+      "message_id": "team-1-task-1-attempt-1-to-3",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "correlation_id": "team:1",
+      "causation_id": "team-1-task-1-attempt-1-result",
+      "sent_from": "agent:review_orchestrator",
+      "send_to": "agent:reporter",
+      "message_type": "coordination",
+      "subject": "正式全量代码审查结果移交给结果证据复核",
+      "status": "completed",
+      "payload": {
+        "source_task_key": "review",
+        "target_task_key": "report",
+        "result": {
+          "status": "completed",
+          "task_id": 1,
+          "project_id": 1,
+          "coverage": {
+            "stage": "complete",
+            "completed_files": 1,
+            "total_files": 1,
+            "current_file": null,
+            "completed_chunks": 1,
+            "total_chunks": 1,
+            "files": {
+              "1": {
+                "file_name": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "completed_chunk_indexes": "[TRUNCATED]",
+                "failed_chunks": "[TRUNCATED]"
+              }
+            }
+          },
+          "findings": [
+            {
+              "issue_id": 1,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 7,
+              "title": "函数缺少文档字符串与注释",
+              "severity": "中",
+              "issue_type": "注释完整性"
+            },
+            {
+              "issue_id": 2,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 10,
+              "title": "内存数据库每请求重建导致查询必失败",
+              "severity": "中",
+              "issue_type": "潜在Bug"
+            },
+            {
+              "issue_id": 3,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 11,
+              "title": "SQL 查询字符串拼接导致注入",
+              "severity": "严重",
+              "issue_type": "安全漏洞"
+            },
+            {
+              "issue_id": 4,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 16,
+              "title": "shell=True 拼接执行导致命令注入",
+              "severity": "严重",
+              "issue_type": "安全漏洞"
+            },
+            {
+              "issue_id": 5,
+              "project_id": 1,
+              "task_id": 1,
+              "file_id": 1,
+              "file_name": "synthetic_routes.py",
+              "line_number": 20,
+              "title": "eval 执行用户输入导致任意代码执行",
+              "severity": "严重",
+              "issue_type": "安全漏洞"
+            }
+          ],
+          "finding_count_total": 5,
+          "findings_truncated": false,
+          "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。",
+          "evidence": [
+            {
+              "source": "review_task",
+              "data": {
+                "task_id": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "review_type": "[TRUNCATED]",
+                "coverage": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "processed_files": "[TRUNCATED]",
+                "total_issues": "[TRUNCATED]",
+                "task_url": "[TRUNCATED]",
+                "report_url": "[TRUNCATED]"
+              }
+            }
+          ],
+          "artifacts": [
+            {
+              "type": "review_task",
+              "task_id": 1,
+              "project_id": 1,
+              "status": "success",
+              "review_type": "full",
+              "coverage": {
+                "stage": "[TRUNCATED]",
+                "completed_files": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "current_file": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "files": "[TRUNCATED]"
+              },
+              "total_files": 1,
+              "processed_files": 1,
+              "total_issues": 5,
+              "task_url": "/reviews/1",
+              "report_url": "/reports/1"
+            }
+          ],
+          "errors": [],
+          "retryable": false
+        }
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 3,
+        "member_id": 3,
+        "run_id": "team_a7fb83021a524a9c8dce04b3064bff6a"
+      },
+      "artifacts": [
+        {
+          "type": "review_task",
+          "task_id": 1,
+          "project_id": 1,
+          "status": "success",
+          "review_type": "full",
+          "coverage": {
+            "stage": "complete",
+            "completed_files": 1,
+            "total_files": 1,
+            "current_file": null,
+            "completed_chunks": 1,
+            "total_chunks": 1,
+            "files": {
+              "1": {
+                "file_name": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "completed_chunk_indexes": "[TRUNCATED]",
+                "failed_chunks": "[TRUNCATED]"
+              }
+            }
+          },
+          "total_files": 1,
+          "processed_files": 1,
+          "total_issues": 5,
+          "task_url": "/reviews/1",
+          "report_url": "/reports/1"
+        }
+      ],
+      "errors": [],
+      "create_time": "2026-09-20T12:18:54.898237",
+      "created_at": "2026-09-20T12:18:54.898237",
+      "update_time": "2026-09-20T12:18:54.898238"
+    },
+    {
+      "ledger_id": 7,
+      "message_id": "team-1-task-3-attempt-1-request",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "correlation_id": "team:1:task:3",
+      "causation_id": "",
+      "sent_from": "session:user:v4_isolated_20260920T121833Z",
+      "send_to": "agent:reporter",
+      "message_type": "task.request",
+      "subject": "结果证据复核",
+      "status": "completed",
+      "payload": {
+        "title": "结果证据复核",
+        "instructions": "核对两条依赖终态与证据，失败不得标记为全部完成。",
+        "input": {},
+        "dependency_context": {
+          "audit": {
+            "status": "completed",
+            "result": {
+              "status": "completed",
+              "summary": "安全审查已完成",
+              "evidence": [
+                "[TRUNCATED]"
+              ],
+              "artifacts": [],
+              "errors": [],
+              "next_action": null
+            },
+            "finding_summary": {
+              "items": [
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "omitted_count": 0,
+              "source_truncated": false
+            },
+            "artifacts": [],
+            "errors": []
+          },
+          "review": {
+            "status": "completed",
+            "result": {
+              "status": "completed",
+              "task_id": 1,
+              "project_id": 1,
+              "coverage": {
+                "stage": "[TRUNCATED]",
+                "completed_files": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "current_file": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "files": "[TRUNCATED]"
+              },
+              "findings": [
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "finding_count_total": 5,
+              "findings_truncated": false,
+              "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。",
+              "evidence": [
+                "[TRUNCATED]"
+              ],
+              "artifacts": [
+                "[TRUNCATED]"
+              ],
+              "errors": [],
+              "retryable": false
+            },
+            "finding_summary": {
+              "items": [
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "omitted_count": 0,
+              "source_truncated": false
+            },
+            "artifacts": [
+              {
+                "type": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "review_type": "[TRUNCATED]",
+                "coverage": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "processed_files": "[TRUNCATED]",
+                "total_issues": "[TRUNCATED]",
+                "task_url": "[TRUNCATED]",
+                "report_url": "[TRUNCATED]"
+              }
+            ],
+            "errors": []
+          }
+        },
+        "member_snapshot": {}
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 3,
+        "member_id": 3,
+        "source_revision_id": null,
+        "run_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+        "member_snapshot": {}
+      },
+      "artifacts": [],
+      "errors": [],
+      "create_time": "2026-09-20T12:18:54.922017",
+      "created_at": "2026-09-20T12:18:54.922017",
+      "update_time": "2026-09-20T12:18:54.947408"
+    },
+    {
+      "ledger_id": 8,
+      "message_id": "team-1-task-3-attempt-1-result",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "correlation_id": "team:1",
+      "causation_id": "team-1-task-3-attempt-1-request",
+      "sent_from": "agent:reporter",
+      "send_to": "session:user:v4_isolated_20260920T121833Z",
+      "message_type": "task.result",
+      "subject": "结果证据复核执行结果",
+      "status": "queued",
+      "payload": {
+        "status": "completed",
+        "summary": "已核对 2 个子任务的终态与证据，汇总保留问题 9 条；实测范围见各项证据。",
+        "evidence": [
+          {
+            "source": "agent_team_dependency",
+            "task_key": "audit",
+            "data": {
+              "status": "completed",
+              "result": {
+                "status": "[TRUNCATED]",
+                "summary": "[TRUNCATED]",
+                "evidence": "[TRUNCATED]",
+                "artifacts": "[TRUNCATED]",
+                "errors": "[TRUNCATED]",
+                "next_action": "[TRUNCATED]"
+              },
+              "finding_summary": {
+                "items": "[TRUNCATED]",
+                "omitted_count": "[TRUNCATED]",
+                "source_truncated": "[TRUNCATED]"
+              },
+              "artifacts": [],
+              "errors": []
+            }
+          },
+          {
+            "source": "agent_team_dependency",
+            "task_key": "review",
+            "data": {
+              "status": "completed",
+              "result": {
+                "status": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "coverage": "[TRUNCATED]",
+                "findings": "[TRUNCATED]",
+                "finding_count_total": "[TRUNCATED]",
+                "findings_truncated": "[TRUNCATED]",
+                "summary": "[TRUNCATED]",
+                "evidence": "[TRUNCATED]",
+                "artifacts": "[TRUNCATED]",
+                "errors": "[TRUNCATED]",
+                "retryable": "[TRUNCATED]"
+              },
+              "finding_summary": {
+                "items": "[TRUNCATED]",
+                "omitted_count": "[TRUNCATED]",
+                "source_truncated": "[TRUNCATED]"
+              },
+              "artifacts": [
+                "[TRUNCATED]"
+              ],
+              "errors": []
+            }
+          }
+        ],
+        "artifacts": [
+          {
+            "type": "agent_team_summary",
+            "data": {
+              "verification": "dependency_evidence_reconciled",
+              "outcomes": [
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "incomplete_tasks": [],
+              "unique_finding_count": 9,
+              "bounded_finding_tasks": [],
+              "findings": [
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]",
+                "[TRUNCATED]"
+              ],
+              "references": [
+                "[TRUNCATED]"
+              ],
+              "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。"
+            }
+          }
+        ],
+        "errors": [],
+        "next_action": null,
+        "retryable": false
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 3,
+        "member_id": 3,
+        "run_id": "team_a7fb83021a524a9c8dce04b3064bff6a"
+      },
+      "artifacts": [
+        {
+          "type": "agent_team_summary",
+          "data": {
+            "verification": "dependency_evidence_reconciled",
+            "outcomes": [
+              {
+                "task_key": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "result_status": "[TRUNCATED]",
+                "summary": "[TRUNCATED]"
+              },
+              {
+                "task_key": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "result_status": "[TRUNCATED]",
+                "summary": "[TRUNCATED]"
+              }
+            ],
+            "incomplete_tasks": [],
+            "unique_finding_count": 9,
+            "bounded_finding_tasks": [],
+            "findings": [
+              {
+                "file_id": "[TRUNCATED]",
+                "file_path": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "file_id": "[TRUNCATED]",
+                "file_path": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "file_id": "[TRUNCATED]",
+                "file_path": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "file_id": "[TRUNCATED]",
+                "file_path": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              },
+              {
+                "issue_id": "[TRUNCATED]",
+                "file_id": "[TRUNCATED]",
+                "file_name": "[TRUNCATED]",
+                "line_number": "[TRUNCATED]",
+                "title": "[TRUNCATED]",
+                "severity": "[TRUNCATED]",
+                "issue_type": "[TRUNCATED]",
+                "project_id": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "source_tasks": "[TRUNCATED]"
+              }
+            ],
+            "references": [
+              {
+                "type": "[TRUNCATED]",
+                "task_id": "[TRUNCATED]",
+                "route": "[TRUNCATED]",
+                "source_task": "[TRUNCATED]"
+              }
+            ],
+            "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。"
+          }
+        }
+      ],
+      "errors": [],
+      "create_time": "2026-09-20T12:18:54.947601",
+      "created_at": "2026-09-20T12:18:54.947601",
+      "update_time": "2026-09-20T12:18:54.947603"
+    }
+  ],
+  "message_page": {
+    "total": 8,
+    "has_more": false,
+    "next_before_id": null,
+    "page_size": 500
+  }
+}

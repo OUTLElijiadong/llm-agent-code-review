@@ -1,0 +1,47 @@
+[
+  {
+    "文件": "修复前-侧栏按钮裁切.png",
+    "来源": "/tmp/prism-v4-layout-before/layout-alignment-侧栏收起、展开和刷新后按钮完整可点击，且不盖住品牌图标/test-failed-1.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  },
+  {
+    "文件": "修复前-代码中心双重留白.png",
+    "来源": "/tmp/prism-v4-layout-before/layout-alignment-代码中心顶部仅保留主布局间距，搜索框与标题说明区底边对齐/test-failed-1.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  },
+  {
+    "文件": "修复前-问题操作列漂移.png",
+    "来源": "/tmp/prism-v4-layout-before/layout-alignment-问题操作列保持对齐且窄屏无溢出：1440px，只读权限/test-failed-1.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  },
+  {
+    "文件": "修复后-问题追踪-390-可处理.png",
+    "来源": "/tmp/prism-v4-layout-final/layout-alignment-问题操作列保持对齐且窄屏无溢出：390px，可处理权限/issue-cards.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  },
+  {
+    "文件": "修复后-问题追踪-1440-只读.png",
+    "来源": "/tmp/prism-v4-layout-final/layout-alignment-问题操作列保持对齐且窄屏无溢出：1440px，只读权限/issue-cards.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  },
+  {
+    "文件": "修复后-问题追踪-1440-可处理.png",
+    "来源": "/tmp/prism-v4-layout-final/layout-alignment-问题操作列保持对齐且窄屏无溢出：1440px，可处理权限/issue-cards.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  },
+  {
+    "文件": "修复后-问题追踪-390-只读.png",
+    "来源": "/tmp/prism-v4-layout-final/layout-alignment-问题操作列保持对齐且窄屏无溢出：390px，只读权限/issue-cards.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  },
+  {
+    "文件": "修复后-收起侧栏.png",
+    "来源": "/tmp/prism-v4-layout-final/layout-alignment-侧栏收起、展开和刷新后按钮完整可点击，且不盖住品牌图标/sidebar-collapsed.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  },
+  {
+    "文件": "修复后-代码中心.png",
+    "来源": "/tmp/prism-v4-layout-final/layout-alignment-代码中心顶部仅保留主布局间距，搜索框与标题说明区底边对齐/code-hub.png",
+    "说明": "本地实际Vue界面，API桩数据，仅用于布局与交互验收"
+  }
+]

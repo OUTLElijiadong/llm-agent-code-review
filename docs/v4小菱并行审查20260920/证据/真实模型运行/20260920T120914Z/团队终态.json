@@ -1,0 +1,945 @@
+{
+  "team_id": 1,
+  "user_id": 1,
+  "surface": "user",
+  "session_id": "v4_isolated_20260920T120914Z",
+  "title": "现有Agent真实并行验收",
+  "objective": "对合成样本并行执行正式全量代码审查和独立白盒审计，再核对真实结果",
+  "status": "failed",
+  "max_active_children": 2,
+  "max_attempts": 1,
+  "priority": 0,
+  "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+  "deadline_at": null,
+  "started_at": "2026-09-20T12:09:15.387188",
+  "completed_at": "2026-09-20T12:09:16.433063",
+  "summary": {},
+  "error": {
+    "failed_tasks": [
+      "review",
+      "audit",
+      "report"
+    ],
+    "errors": [
+      [
+        {
+          "code": "review_incomplete",
+          "status": "failed"
+        },
+        {
+          "code": "execution_failed",
+          "message": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+        }
+      ],
+      [
+        {
+          "code": "semantic_analysis_failed",
+          "message": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0"
+        },
+        {
+          "code": "execution_failed",
+          "message": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0"
+        }
+      ],
+      [
+        {
+          "code": "dependency_failed",
+          "message": "前置任务失败，任务被阻断"
+        }
+      ]
+    ]
+  },
+  "created_at": "2026-09-20T12:09:15.346217",
+  "updated_at": "2026-09-20T12:09:16.433468",
+  "archived_at": null,
+  "members": [
+    {
+      "member_id": 1,
+      "member_key": "review",
+      "display_name": "正式代码审查",
+      "address": "agent:review_orchestrator",
+      "kind": "runtime",
+      "role": "worker",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "review_orchestrator",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "failed",
+      "started_at": "2026-09-20T12:09:15.387188",
+      "completed_at": "2026-09-20T12:09:16.433324"
+    },
+    {
+      "member_id": 2,
+      "member_key": "audit",
+      "display_name": "白盒安全审计",
+      "address": "agent:security_sentinel",
+      "kind": "runtime",
+      "role": "worker",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "security_sentinel",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "failed",
+      "started_at": "2026-09-20T12:09:15.396692",
+      "completed_at": "2026-09-20T12:09:15.443721"
+    },
+    {
+      "member_id": 3,
+      "member_key": "report",
+      "display_name": "证据复核汇总",
+      "address": "agent:reporter",
+      "kind": "runtime",
+      "role": "summarizer",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "reporter",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "failed",
+      "started_at": null,
+      "completed_at": "2026-09-20T12:09:15.443721"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": 1,
+      "task_key": "review",
+      "member_id": 1,
+      "member_key": "review",
+      "title": "正式全量代码审查",
+      "instructions": "运行现有审查画像，保存真实任务与发现，覆盖失败必须如实报告。",
+      "depends_on": [],
+      "input": {
+        "operation": "run_review",
+        "project_id": 1,
+        "review_type": "full"
+      },
+      "status": "failed",
+      "priority": 0,
+      "attempt_count": 1,
+      "max_attempts": 1,
+      "next_attempt_at": null,
+      "lease_expires_at": null,
+      "result": {
+        "status": "failed",
+        "task_id": 1,
+        "coverage": {
+          "stage": "failed",
+          "completed_files": 0,
+          "total_files": 1,
+          "current_file": "synthetic_routes.py",
+          "completed_chunks": 0,
+          "total_chunks": 1,
+          "files": {
+            "1": {
+              "file_name": "synthetic_routes.py",
+              "status": "failed",
+              "total_chunks": 1,
+              "completed_chunks": 0,
+              "completed_chunk_indexes": [],
+              "failed_chunks": [
+                "[TRUNCATED]"
+              ]
+            }
+          },
+          "error": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+        },
+        "summary": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址",
+        "evidence": [
+          {
+            "source": "review_task",
+            "data": {
+              "task_id": 1,
+              "project_id": 1,
+              "status": "failed",
+              "review_type": "full",
+              "coverage": {
+                "stage": "[TRUNCATED]",
+                "completed_files": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "current_file": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "files": "[TRUNCATED]",
+                "error": "[TRUNCATED]"
+              },
+              "total_files": 1,
+              "processed_files": 0,
+              "total_issues": 1,
+              "task_url": "/reviews/1",
+              "report_url": null
+            }
+          }
+        ],
+        "artifacts": [
+          {
+            "type": "review_task",
+            "task_id": 1,
+            "project_id": 1,
+            "status": "failed",
+            "review_type": "full",
+            "coverage": {
+              "stage": "failed",
+              "completed_files": 0,
+              "total_files": 1,
+              "current_file": "synthetic_routes.py",
+              "completed_chunks": 0,
+              "total_chunks": 1,
+              "files": {
+                "1": "[TRUNCATED]"
+              },
+              "error": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+            },
+            "total_files": 1,
+            "processed_files": 0,
+            "total_issues": 1,
+            "task_url": "/reviews/1",
+            "report_url": null
+          }
+        ],
+        "errors": [
+          {
+            "code": "review_incomplete",
+            "status": "failed"
+          }
+        ],
+        "retryable": false
+      },
+      "artifacts": [
+        {
+          "type": "review_task",
+          "task_id": 1,
+          "project_id": 1,
+          "status": "failed",
+          "review_type": "full",
+          "coverage": {
+            "stage": "failed",
+            "completed_files": 0,
+            "total_files": 1,
+            "current_file": "synthetic_routes.py",
+            "completed_chunks": 0,
+            "total_chunks": 1,
+            "files": {
+              "1": {
+                "file_name": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "completed_chunk_indexes": "[TRUNCATED]",
+                "failed_chunks": "[TRUNCATED]"
+              }
+            },
+            "error": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+          },
+          "total_files": 1,
+          "processed_files": 0,
+          "total_issues": 1,
+          "task_url": "/reviews/1",
+          "report_url": null
+        }
+      ],
+      "errors": [
+        {
+          "code": "review_incomplete",
+          "status": "failed"
+        },
+        {
+          "code": "execution_failed",
+          "message": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+        }
+      ],
+      "started_at": "2026-09-20T12:09:15.387188",
+      "completed_at": "2026-09-20T12:09:16.430040"
+    },
+    {
+      "task_id": 2,
+      "task_key": "audit",
+      "member_id": 2,
+      "member_key": "audit",
+      "title": "独立白盒安全审计",
+      "instructions": "完整审计所有合成代码，检查注入与命令执行，明确证据和覆盖。",
+      "depends_on": [],
+      "input": {
+        "project_id": 1,
+        "scan_mode": "full"
+      },
+      "status": "failed",
+      "priority": 0,
+      "attempt_count": 1,
+      "max_attempts": 1,
+      "next_attempt_at": null,
+      "lease_expires_at": null,
+      "result": {
+        "status": "failed",
+        "summary": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0",
+        "evidence": [
+          {
+            "source": "request_scoped_agent",
+            "data": {
+              "findings": [
+                "[TRUNCATED]"
+              ],
+              "threat_model": {
+                "entry_points": "[TRUNCATED]",
+                "data_flows": "[TRUNCATED]",
+                "api_endpoints": "[TRUNCATED]",
+                "code_links": "[TRUNCATED]",
+                "attack_surface_summary": "[TRUNCATED]"
+              },
+              "compliance": {
+                "owasp_coverage": "[TRUNCATED]",
+                "gb_t_22239": "[TRUNCATED]",
+                "verification": "[TRUNCATED]",
+                "scan_mode": "[TRUNCATED]",
+                "total_file_count": "[TRUNCATED]",
+                "scanned_file_count": "[TRUNCATED]",
+                "skipped_file_count": "[TRUNCATED]",
+                "coverage_ratio": "[TRUNCATED]",
+                "truncated": "[TRUNCATED]",
+                "requested_top_n": "[TRUNCATED]",
+                "static_scanned_file_count": "[TRUNCATED]",
+                "static_complete": "[TRUNCATED]",
+                "semantic_candidate_file_count": "[TRUNCATED]",
+                "semantic_candidate_source_chars": "[TRUNCATED]",
+                "semantic_selection_strategy": "[TRUNCATED]",
+                "semantic_planned_file_count": "[TRUNCATED]",
+                "semantic_planned_source_chars": "[TRUNCATED]",
+                "semantic_file_count": "[TRUNCATED]",
+                "archive_text_file_count": "[TRUNCATED]",
+                "archive_text_source_chars": "[TRUNCATED]",
+                "binary_or_empty_file_count": "[TRUNCATED]",
+                "archive_binary_or_empty_file_count": "[TRUNCATED]",
+                "candidate_binary_or_empty_file_count": "[TRUNCATED]",
+                "semantic_initial_batch_count": "[TRUNCATED]",
+                "semantic_batch_count": "[TRUNCATED]",
+                "semantic_request_count": "[TRUNCATED]",
+                "semantic_split_count": "[TRUNCATED]",
+                "semantic_successful_batch_count": "[TRUNCATED]",
+                "semantic_failed_batch_count": "[TRUNCATED]",
+                "semantic_output_truncated_leaf_count": "[TRUNCATED]",
+                "semantic_output_limited_leaf_count": "[TRUNCATED]",
+                "semantic_budget_exhausted_leaf_count": "[TRUNCATED]",
+                "semantic_invalid_contract_leaf_count": "[TRUNCATED]",
+                "semantic_invalid_item_count": "[TRUNCATED]",
+                "semantic_invalid_item_kinds": "[TRUNCATED]",
+                "semantic_attempted_source_chars": "[TRUNCATED]",
+                "semantic_source_chars": "[TRUNCATED]",
+                "semantic_failed_source_chars": "[TRUNCATED]",
+                "semantic_accounted_source_chars": "[TRUNCATED]",
+                "total_text_source_chars": "[TRUNCATED]",
+                "semantic_char_coverage_ratio": "[TRUNCATED]",
+                "semantic_scheduled_coverage_ratio": "[TRUNCATED]",
+                "semantic_archive_coverage_ratio": "[TRUNCATED]",
+                "semantic_truncated_file_count": "[TRUNCATED]",
+                "semantic_unscheduled_file_count": "[TRUNCATED]",
+                "semantic_partially_scheduled_file_count": "[TRUNCATED]",
+                "semantic_fully_scheduled_file_count": "[TRUNCATED]",
+                "semantic_verified_file_count": "[TRUNCATED]",
+                "semantic_failed_file_count": "[TRUNCATED]",
+                "semantic_complete": "[TRUNCATED]",
+                "_truncated_fields": 45
+              },
+              "risk_score": 85,
+              "summary": "项目「v4合成漏洞隔离验收」白盒审计静态覆盖 1/1 个文件,发现 1 处严重 / 0 处高危 / 0 处中危 / 0 处低危。风险评分 85/100。",
+              "file_count": 1,
+              "duration_ms": 22,
+              "source_archive_sha256": "202571fed85d0f5efafe7a1d9c765342c62d46809bcbccdbbb96ffa3d4a9468c",
+              "source_archive_bytes": 458,
+              "source_archive_filename": "v4合成漏洞隔离验收.zip"
+            }
+          }
+        ],
+        "artifacts": [],
+        "errors": [
+          {
+            "code": "semantic_analysis_failed",
+            "message": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0"
+          }
+        ],
+        "next_action": {
+          "inspect_coverage": true,
+          "retry_with_changed_strategy": true
+        },
+        "retryable": false
+      },
+      "artifacts": [],
+      "errors": [
+        {
+          "code": "semantic_analysis_failed",
+          "message": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0"
+        },
+        {
+          "code": "execution_failed",
+          "message": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0"
+        }
+      ],
+      "started_at": "2026-09-20T12:09:15.396692",
+      "completed_at": "2026-09-20T12:09:15.438293"
+    },
+    {
+      "task_id": 3,
+      "task_key": "report",
+      "member_id": 3,
+      "member_key": "report",
+      "title": "结果证据复核",
+      "instructions": "核对两条依赖终态与证据，失败不得标记为全部完成。",
+      "depends_on": [
+        "review",
+        "audit"
+      ],
+      "input": {},
+      "status": "blocked",
+      "priority": 0,
+      "attempt_count": 0,
+      "max_attempts": 1,
+      "next_attempt_at": null,
+      "lease_expires_at": null,
+      "result": {},
+      "artifacts": [],
+      "errors": [
+        {
+          "code": "dependency_failed",
+          "message": "前置任务失败，任务被阻断"
+        }
+      ],
+      "started_at": null,
+      "completed_at": "2026-09-20T12:09:15.442975"
+    }
+  ],
+  "counts": {
+    "total": 3,
+    "completed": 0,
+    "running": 0,
+    "queued": 0,
+    "failed": 2,
+    "blocked": 1
+  },
+  "events": [
+    {
+      "event_id": 1,
+      "team_id": 1,
+      "task_id": null,
+      "member_id": null,
+      "event_type": "team.created",
+      "from_status": null,
+      "to_status": "queued",
+      "actor_address": "user:1",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "task_count": 3,
+        "origin_trace_id": ""
+      },
+      "created_at": "2026-09-20T12:09:15.379038"
+    },
+    {
+      "event_id": 2,
+      "team_id": 1,
+      "task_id": 1,
+      "member_id": 1,
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "to_status": "running",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "message_id": "team-1-task-1-attempt-1-request",
+      "correlation_id": "team:1:task:1",
+      "detail": {
+        "attempt": 1,
+        "task_key": "review",
+        "member_key": "review"
+      },
+      "created_at": "2026-09-20T12:09:15.394644"
+    },
+    {
+      "event_id": 3,
+      "team_id": 1,
+      "task_id": null,
+      "member_id": null,
+      "event_type": "team.status_changed",
+      "from_status": "queued",
+      "to_status": "running",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "counts": {
+          "total": 3,
+          "completed": 0,
+          "running": 1,
+          "queued": 2,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "created_at": "2026-09-20T12:09:15.395605"
+    },
+    {
+      "event_id": 4,
+      "team_id": 1,
+      "task_id": 2,
+      "member_id": 2,
+      "event_type": "task.claimed",
+      "from_status": "queued",
+      "to_status": "running",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "message_id": "team-1-task-2-attempt-1-request",
+      "correlation_id": "team:1:task:2",
+      "detail": {
+        "attempt": 1,
+        "task_key": "audit",
+        "member_key": "audit"
+      },
+      "created_at": "2026-09-20T12:09:15.398853"
+    },
+    {
+      "event_id": 5,
+      "team_id": 1,
+      "task_id": 2,
+      "member_id": 2,
+      "event_type": "task.failed",
+      "from_status": "running",
+      "to_status": "failed",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "message_id": "team-1-task-2-attempt-1-request",
+      "correlation_id": "",
+      "detail": {
+        "error": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0",
+        "retryable": false,
+        "next_action": {
+          "inspect_coverage": true,
+          "retry_with_changed_strategy": true
+        },
+        "task_key": "audit",
+        "member_key": "audit"
+      },
+      "created_at": "2026-09-20T12:09:15.440469"
+    },
+    {
+      "event_id": 6,
+      "team_id": 1,
+      "task_id": 3,
+      "member_id": null,
+      "event_type": "task.blocked",
+      "from_status": "waiting_dependency",
+      "to_status": "blocked",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "depends_on": [
+          "review",
+          "audit"
+        ],
+        "task_key": "report"
+      },
+      "created_at": "2026-09-20T12:09:15.443081"
+    },
+    {
+      "event_id": 7,
+      "team_id": 1,
+      "task_id": 1,
+      "member_id": 1,
+      "event_type": "task.failed",
+      "from_status": "running",
+      "to_status": "failed",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "message_id": "team-1-task-1-attempt-1-request",
+      "correlation_id": "",
+      "detail": {
+        "error": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址",
+        "retryable": false,
+        "next_action": null,
+        "task_key": "review",
+        "member_key": "review"
+      },
+      "created_at": "2026-09-20T12:09:16.431735"
+    },
+    {
+      "event_id": 8,
+      "team_id": 1,
+      "task_id": null,
+      "member_id": null,
+      "event_type": "team.status_changed",
+      "from_status": "running",
+      "to_status": "failed",
+      "actor_address": "system:agent_team",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "counts": {
+          "total": 3,
+          "completed": 0,
+          "running": 0,
+          "queued": 0,
+          "failed": 2,
+          "blocked": 1
+        }
+      },
+      "created_at": "2026-09-20T12:09:16.433527"
+    }
+  ],
+  "messages": [
+    {
+      "ledger_id": 1,
+      "message_id": "team-1-task-1-attempt-1-request",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "correlation_id": "team:1:task:1",
+      "causation_id": "",
+      "sent_from": "session:user:v4_isolated_20260920T120914Z",
+      "send_to": "agent:review_orchestrator",
+      "message_type": "task.request",
+      "subject": "正式全量代码审查",
+      "status": "failed",
+      "payload": {
+        "title": "正式全量代码审查",
+        "instructions": "运行现有审查画像，保存真实任务与发现，覆盖失败必须如实报告。",
+        "input": {
+          "operation": "run_review",
+          "project_id": 1,
+          "review_type": "full"
+        },
+        "dependency_context": {},
+        "member_snapshot": {}
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 1,
+        "member_id": 1,
+        "source_revision_id": null,
+        "run_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+        "member_snapshot": {}
+      },
+      "artifacts": [],
+      "errors": [],
+      "create_time": "2026-09-20T12:09:15.393901",
+      "created_at": "2026-09-20T12:09:15.393901",
+      "update_time": "2026-09-20T12:09:16.431427"
+    },
+    {
+      "ledger_id": 2,
+      "message_id": "team-1-task-2-attempt-1-request",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "correlation_id": "team:1:task:2",
+      "causation_id": "",
+      "sent_from": "session:user:v4_isolated_20260920T120914Z",
+      "send_to": "agent:security_sentinel",
+      "message_type": "task.request",
+      "subject": "独立白盒安全审计",
+      "status": "failed",
+      "payload": {
+        "title": "独立白盒安全审计",
+        "instructions": "完整审计所有合成代码，检查注入与命令执行，明确证据和覆盖。",
+        "input": {
+          "project_id": 1,
+          "scan_mode": "full"
+        },
+        "dependency_context": {},
+        "member_snapshot": {}
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 2,
+        "member_id": 2,
+        "source_revision_id": null,
+        "run_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+        "member_snapshot": {}
+      },
+      "artifacts": [],
+      "errors": [],
+      "create_time": "2026-09-20T12:09:15.398671",
+      "created_at": "2026-09-20T12:09:15.398671",
+      "update_time": "2026-09-20T12:09:15.439907"
+    },
+    {
+      "ledger_id": 3,
+      "message_id": "team-1-task-2-attempt-1-result",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "correlation_id": "team:1",
+      "causation_id": "team-1-task-2-attempt-1-request",
+      "sent_from": "agent:security_sentinel",
+      "send_to": "session:user:v4_isolated_20260920T120914Z",
+      "message_type": "task.error",
+      "subject": "独立白盒安全审计执行结果",
+      "status": "queued",
+      "payload": {
+        "status": "failed",
+        "summary": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0",
+        "evidence": [
+          {
+            "source": "request_scoped_agent",
+            "data": {
+              "findings": [
+                "[TRUNCATED]"
+              ],
+              "threat_model": {
+                "entry_points": "[TRUNCATED]",
+                "data_flows": "[TRUNCATED]",
+                "api_endpoints": "[TRUNCATED]",
+                "code_links": "[TRUNCATED]",
+                "attack_surface_summary": "[TRUNCATED]"
+              },
+              "compliance": {
+                "owasp_coverage": "[TRUNCATED]",
+                "gb_t_22239": "[TRUNCATED]",
+                "verification": "[TRUNCATED]",
+                "scan_mode": "[TRUNCATED]",
+                "total_file_count": "[TRUNCATED]",
+                "scanned_file_count": "[TRUNCATED]",
+                "skipped_file_count": "[TRUNCATED]",
+                "coverage_ratio": "[TRUNCATED]",
+                "truncated": "[TRUNCATED]",
+                "requested_top_n": "[TRUNCATED]",
+                "static_scanned_file_count": "[TRUNCATED]",
+                "static_complete": "[TRUNCATED]",
+                "semantic_candidate_file_count": "[TRUNCATED]",
+                "semantic_candidate_source_chars": "[TRUNCATED]",
+                "semantic_selection_strategy": "[TRUNCATED]",
+                "semantic_planned_file_count": "[TRUNCATED]",
+                "semantic_planned_source_chars": "[TRUNCATED]",
+                "semantic_file_count": "[TRUNCATED]",
+                "archive_text_file_count": "[TRUNCATED]",
+                "archive_text_source_chars": "[TRUNCATED]",
+                "binary_or_empty_file_count": "[TRUNCATED]",
+                "archive_binary_or_empty_file_count": "[TRUNCATED]",
+                "candidate_binary_or_empty_file_count": "[TRUNCATED]",
+                "semantic_initial_batch_count": "[TRUNCATED]",
+                "semantic_batch_count": "[TRUNCATED]",
+                "semantic_request_count": "[TRUNCATED]",
+                "semantic_split_count": "[TRUNCATED]",
+                "semantic_successful_batch_count": "[TRUNCATED]",
+                "semantic_failed_batch_count": "[TRUNCATED]",
+                "semantic_output_truncated_leaf_count": "[TRUNCATED]",
+                "semantic_output_limited_leaf_count": "[TRUNCATED]",
+                "semantic_budget_exhausted_leaf_count": "[TRUNCATED]",
+                "semantic_invalid_contract_leaf_count": "[TRUNCATED]",
+                "semantic_invalid_item_count": "[TRUNCATED]",
+                "semantic_invalid_item_kinds": "[TRUNCATED]",
+                "semantic_attempted_source_chars": "[TRUNCATED]",
+                "semantic_source_chars": "[TRUNCATED]",
+                "semantic_failed_source_chars": "[TRUNCATED]",
+                "semantic_accounted_source_chars": "[TRUNCATED]",
+                "total_text_source_chars": "[TRUNCATED]",
+                "semantic_char_coverage_ratio": "[TRUNCATED]",
+                "semantic_scheduled_coverage_ratio": "[TRUNCATED]",
+                "semantic_archive_coverage_ratio": "[TRUNCATED]",
+                "semantic_truncated_file_count": "[TRUNCATED]",
+                "semantic_unscheduled_file_count": "[TRUNCATED]",
+                "semantic_partially_scheduled_file_count": "[TRUNCATED]",
+                "semantic_fully_scheduled_file_count": "[TRUNCATED]",
+                "semantic_verified_file_count": "[TRUNCATED]",
+                "semantic_failed_file_count": "[TRUNCATED]",
+                "semantic_complete": "[TRUNCATED]",
+                "_truncated_fields": 1
+              },
+              "risk_score": 85,
+              "summary": "项目「v4合成漏洞隔离验收」白盒审计静态覆盖 1/1 个文件,发现 1 处严重 / 0 处高危 / 0 处中危 / 0 处低危。风险评分 85/100。",
+              "file_count": 1,
+              "duration_ms": 22,
+              "source_archive_sha256": "202571fed85d0f5efafe7a1d9c765342c62d46809bcbccdbbb96ffa3d4a9468c",
+              "source_archive_bytes": 458,
+              "source_archive_filename": "v4合成漏洞隔离验收.zip"
+            }
+          }
+        ],
+        "artifacts": [],
+        "errors": [
+          {
+            "code": "semantic_analysis_failed",
+            "message": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0"
+          }
+        ],
+        "next_action": {
+          "inspect_coverage": true,
+          "retry_with_changed_strategy": true
+        },
+        "retryable": false
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 2,
+        "member_id": 2,
+        "run_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1"
+      },
+      "artifacts": [],
+      "errors": [
+        {
+          "code": "semantic_analysis_failed",
+          "message": "项目语义审计执行未完成: 成功覆盖 0/576 个已调度字符,失败叶片 1,终端截断 0,结果受限 0,预算耗尽 0,契约无效 0"
+        }
+      ],
+      "create_time": "2026-09-20T12:09:15.440018",
+      "created_at": "2026-09-20T12:09:15.440018",
+      "update_time": "2026-09-20T12:09:15.440018"
+    },
+    {
+      "ledger_id": 4,
+      "message_id": "team-1-task-1-attempt-1-result",
+      "trace_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1",
+      "correlation_id": "team:1",
+      "causation_id": "team-1-task-1-attempt-1-request",
+      "sent_from": "agent:review_orchestrator",
+      "send_to": "session:user:v4_isolated_20260920T120914Z",
+      "message_type": "task.error",
+      "subject": "正式全量代码审查执行结果",
+      "status": "queued",
+      "payload": {
+        "status": "failed",
+        "task_id": 1,
+        "coverage": {
+          "stage": "failed",
+          "completed_files": 0,
+          "total_files": 1,
+          "current_file": "synthetic_routes.py",
+          "completed_chunks": 0,
+          "total_chunks": 1,
+          "files": {
+            "1": {
+              "file_name": "synthetic_routes.py",
+              "status": "failed",
+              "total_chunks": 1,
+              "completed_chunks": 0,
+              "completed_chunk_indexes": [],
+              "failed_chunks": [
+                "[TRUNCATED]"
+              ]
+            }
+          },
+          "error": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+        },
+        "summary": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址",
+        "evidence": [
+          {
+            "source": "review_task",
+            "data": {
+              "task_id": 1,
+              "project_id": 1,
+              "status": "failed",
+              "review_type": "full",
+              "coverage": {
+                "stage": "[TRUNCATED]",
+                "completed_files": "[TRUNCATED]",
+                "total_files": "[TRUNCATED]",
+                "current_file": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "files": "[TRUNCATED]",
+                "error": "[TRUNCATED]"
+              },
+              "total_files": 1,
+              "processed_files": 0,
+              "total_issues": 1,
+              "task_url": "/reviews/1",
+              "report_url": null
+            }
+          }
+        ],
+        "artifacts": [
+          {
+            "type": "review_task",
+            "task_id": 1,
+            "project_id": 1,
+            "status": "failed",
+            "review_type": "full",
+            "coverage": {
+              "stage": "failed",
+              "completed_files": 0,
+              "total_files": 1,
+              "current_file": "synthetic_routes.py",
+              "completed_chunks": 0,
+              "total_chunks": 1,
+              "files": {
+                "1": "[TRUNCATED]"
+              },
+              "error": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+            },
+            "total_files": 1,
+            "processed_files": 0,
+            "total_issues": 1,
+            "task_url": "/reviews/1",
+            "report_url": null
+          }
+        ],
+        "errors": [
+          {
+            "code": "review_incomplete",
+            "status": "failed"
+          }
+        ],
+        "retryable": false
+      },
+      "context": {
+        "team_id": 1,
+        "task_id": 1,
+        "member_id": 1,
+        "run_id": "team_ce4844197f4b46f0b81e5e6a256aa5f1"
+      },
+      "artifacts": [
+        {
+          "type": "review_task",
+          "task_id": 1,
+          "project_id": 1,
+          "status": "failed",
+          "review_type": "full",
+          "coverage": {
+            "stage": "failed",
+            "completed_files": 0,
+            "total_files": 1,
+            "current_file": "synthetic_routes.py",
+            "completed_chunks": 0,
+            "total_chunks": 1,
+            "files": {
+              "1": {
+                "file_name": "[TRUNCATED]",
+                "status": "[TRUNCATED]",
+                "total_chunks": "[TRUNCATED]",
+                "completed_chunks": "[TRUNCATED]",
+                "completed_chunk_indexes": "[TRUNCATED]",
+                "failed_chunks": "[TRUNCATED]"
+              }
+            },
+            "error": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+          },
+          "total_files": 1,
+          "processed_files": 0,
+          "total_issues": 1,
+          "task_url": "/reviews/1",
+          "report_url": null
+        }
+      ],
+      "errors": [
+        {
+          "code": "review_incomplete",
+          "status": "failed"
+        }
+      ],
+      "create_time": "2026-09-20T12:09:16.431506",
+      "created_at": "2026-09-20T12:09:16.431506",
+      "update_time": "2026-09-20T12:09:16.431507"
+    }
+  ],
+  "message_page": {
+    "total": 4,
+    "has_more": false,
+    "next_before_id": null,
+    "page_size": 500
+  }
+}

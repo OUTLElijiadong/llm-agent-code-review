@@ -1,0 +1,29 @@
+{
+  "observed_at_utc": "2026-09-20T12:17:28.011823+00:00",
+  "ssh_target": "root@81.70.251.90",
+  "workdir": "/opt/code-review/deploy",
+  "command": "cd /opt/code-review/deploy && docker compose exec -T backend alembic current && docker compose exec -T backend alembic heads && ./ops-check.sh",
+  "exit_code": 0,
+  "stdout": "056_older_run_titles (head)\n056_older_run_titles (head)\n{\n  \"schema_version\": 1,\n  \"status\": \"ok\",\n  \"can_continue\": true,\n  \"summary\": \"全部生产关键检查通过\",\n  \"actions\": [],\n  \"blocking_checks\": [],\n  \"checked_at_utc\": \"2026-09-20T12:17:28Z\",\n  \"checks\": {\n    \"release\": {\"ok\": true, \"status\": \"ok\", \"message\": \"发布账本、运行镜像和默认环境一致\"},\n    \"containers\": {\"ok\": true, \"status\": \"ok\", \"services\": {\"mysql\":\"healthy\",\"redis\":\"healthy\",\"clamav\":\"healthy\",\"backend\":\"healthy\",\"frontend\":\"healthy\"}},\n    \"disk\": {\"ok\": true, \"status\": \"ok\", \"used_percent\": 84, \"max_percent\": 85, \"critical_percent\": 95},\n    \"memory\": {\"ok\": true, \"status\": \"ok\", \"used_percent\": 48, \"max_percent\": 90, \"critical_percent\": 98},\n    \"backup\": {\"ok\": true, \"status\": \"ok\", \"file\": \"code_review_20260920T072208Z_ccc9284af7d9.sql.gz\", \"age_hours\": 4, \"max_age_hours\": 30, \"gzip_ok\": true, \"checksum_ok\": true},\n    \"alembic\": {\"ok\": true, \"status\": \"ok\", \"current\": \"056_older_run_titles\", \"head\": \"056_older_run_titles\"},\n    \"https\": {\"ok\": true, \"status\": \"ok\", \"mode\": \"required\", \"http_redirect_code\": \"308\", \"health\": \"ok\"}\n  }\n}\n",
+  "stderr": "INFO  [alembic.runtime.migration] Context impl MySQLImpl.\nINFO  [alembic.runtime.migration] Will assume non-transactional DDL.\n",
+  "public_checks": [
+    {
+      "url": "https://lijiadong.cn/healthz",
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "version": "3.9.14",
+        "release": "ccc9284af7d9ddf71d47e022a667a68eef4fbe18"
+      }
+    },
+    {
+      "url": "https://lijiadong.cn/readyz",
+      "status": 200,
+      "body": {
+        "status": "ready",
+        "version": "3.9.14",
+        "release": "ccc9284af7d9ddf71d47e022a667a68eef4fbe18"
+      }
+    }
+  ]
+}

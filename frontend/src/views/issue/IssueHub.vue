@@ -9,6 +9,18 @@
     </div>
 
     <el-card shadow="hover" class="filter-card">
+      <el-alert
+        v-if="projectLoadError"
+        data-testid="issue-project-load-error"
+        class="load-error"
+        title="项目筛选选项加载失败"
+        type="warning"
+        :closable="false"
+        show-icon
+      >
+        <span class="load-error-message">{{ projectLoadError }}</span>
+        <el-button :loading="projectsLoading" @click="loadProjects">重新加载项目</el-button>
+      </el-alert>
       <div class="filter-bar">
         <el-select
           v-model="filters.project_id"
@@ -62,13 +74,25 @@
     </el-card>
 
     <el-card shadow="hover">
+      <el-alert
+        v-if="issueLoadError"
+        data-testid="issue-load-error"
+        class="load-error"
+        title="问题列表加载失败"
+        type="error"
+        :closable="false"
+        show-icon
+      >
+        <span class="load-error-message">{{ issueLoadError }}</span>
+        <el-button :loading="loading" @click="loadIssues">重新加载问题</el-button>
+      </el-alert>
       <div class="issue-cards" v-loading="loading" role="list" data-testid="issue-cards">
-        <EmptyState v-if="!rows.length" description="暂无问题" />
+        <EmptyState v-if="!rows.length && !loading && !issueLoadError" description="暂无问题" />
         <article
           v-for="row in rows"
           :key="row.id"
           class="issue-card"
-          :class="{ 'is-expanded': expandedIds.has(row.id) }"
+          :class="{ 'is-expanded': expandedIds.has(row.id), 'has-selection': canBatchIssues }"
           role="listitem"
         >
           <label v-if="canBatchIssues" class="ic-check" @click.stop>
@@ -86,15 +110,6 @@
               <b class="ic-title" :title="row.title || ''">{{ row.title || `问题 #${row.id}` }}</b>
               <el-tag :type="statusTag(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
               <el-tag size="small" type="info" effect="plain">{{ typeLabel(row.issue_type) }}</el-tag>
-              <button
-                type="button"
-                class="ic-toggle"
-                :aria-expanded="expandedIds.has(row.id)"
-                @click="toggleExpand(row.id)"
-              >
-                <el-icon :class="{ 'is-open': expandedIds.has(row.id) }"><ArrowDown /></el-icon>
-                {{ expandedIds.has(row.id) ? '收起' : '详情' }}
-              </button>
             </div>
             <div class="ic-line2 font-mono">
               <span class="ic-file" :title="`${row.file_name || '未知文件'}${row.line_number ? ':' + row.line_number : ''}`">
@@ -104,12 +119,22 @@
               <span :title="`所属任务 #${row.task_id}`">{{ row.task_name || `任务 #${row.task_id}` }}</span>
               <span :title="row.create_time">{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
             </div>
-            <div v-if="expandedIds.has(row.id)" class="ic-desc">
+            <div v-if="expandedIds.has(row.id)" :id="`issue-description-${row.id}`" class="ic-desc">
               <span class="ic-desc-label">问题描述</span>
               <p class="ic-desc-text">{{ row.description || '（无描述）' }}</p>
             </div>
           </div>
           <div class="ic-actions">
+            <button
+              type="button"
+              class="ic-toggle"
+              :aria-expanded="expandedIds.has(row.id)"
+              :aria-controls="`issue-description-${row.id}`"
+              @click="toggleExpand(row.id)"
+            >
+              <el-icon :class="{ 'is-open': expandedIds.has(row.id) }"><ArrowDown /></el-icon>
+              {{ expandedIds.has(row.id) ? '收起' : '详情' }}
+            </button>
             <el-button link type="primary" size="small" @click="onJump(row)">查看任务</el-button>
             <el-dropdown v-if="canHandleIssues" trigger="click" @command="(s: string) => onSetStatus(row, s)">
               <el-button link type="primary" size="small">改状态<el-icon><ArrowDown /></el-icon></el-button>
@@ -163,6 +188,9 @@ const canHandleIssues = computed(() => userStore.hasPermission('issue:handle'))
 const canBatchIssues = computed(() => userStore.hasPermission('issue:batch'))
 
 const loading = ref(false)
+const projectsLoading = ref(false)
+const projectLoadError = ref('')
+const issueLoadError = ref('')
 const rows = ref<IssueListItemOut[]>([])
 const selected = ref<IssueListItemOut[]>([])
 const total = ref(0)
@@ -213,8 +241,24 @@ function statusLabel(s: string): string {
 }
 
 async function loadProjects(): Promise<void> {
-  const data = await getProjects({ page: 1, page_size: 100 })
-  projects.value = data.items
+  if (projectsLoading.value) return
+  projectsLoading.value = true
+  try {
+    const data = await getProjects({ page: 1, page_size: 100 })
+    projects.value = data.items
+    projectLoadError.value = ''
+  } catch (error) {
+    projectLoadError.value = requestErrorMessage(error, '暂时无法读取项目选项，请稍后重试。')
+  } finally {
+    projectsLoading.value = false
+  }
+}
+
+function requestErrorMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return error.message || fallback
+  }
+  return fallback
 }
 
 async function loadIssues(): Promise<void> {
@@ -231,8 +275,12 @@ async function loadIssues(): Promise<void> {
     })
     rows.value = data.items
     total.value = data.total
+    issueLoadError.value = ''
     // 数据刷新后勾选可能指向已不存在的问题,按新列表收敛(与原表格 selection 随数据重置一致)
     selected.value = selected.value.filter((s) => rows.value.some((r) => r.id === s.id))
+  } catch (error) {
+    const message = requestErrorMessage(error, '暂时无法读取问题，请稍后重试。')
+    issueLoadError.value = rows.value.length ? `${message} 当前显示上次成功加载的结果。` : message
   } finally {
     loading.value = false
   }
@@ -317,14 +365,13 @@ function goReviewList(): void {
 }
 
 onMounted(async () => {
-  await loadProjects()
-  await loadIssues()
+  await Promise.all([loadProjects(), loadIssues()])
 })
 </script>
 
 <style scoped lang="scss">
 .issue-hub-page {
-  padding: var(--spacing-lg);
+  min-width: 0;
 }
 
 .page-header {
@@ -332,6 +379,8 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: flex-end;
   margin-bottom: var(--spacing-lg);
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
 
   h2 {
     margin: 0 0 4px;
@@ -350,6 +399,15 @@ onMounted(async () => {
   margin-bottom: var(--spacing-md);
 }
 
+.load-error {
+  margin-bottom: var(--spacing-md);
+}
+
+.load-error-message {
+  display: block;
+  margin-bottom: var(--spacing-sm);
+}
+
 .filter-bar {
   display: flex;
   gap: 12px;
@@ -365,6 +423,7 @@ onMounted(async () => {
 
 /* ── 问题卡片列表(替代表格:标题为主行,文件/任务/时间为次行,描述全文进展开区) ── */
 .issue-cards {
+  container-type: inline-size;
   display: grid;
   gap: 10px;
   min-height: 120px;
@@ -372,7 +431,8 @@ onMounted(async () => {
 
 .issue-card {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  grid-template-areas: 'band main actions';
   gap: 14px;
   align-items: start;
   padding: 13px 16px 13px 12px;
@@ -382,6 +442,12 @@ onMounted(async () => {
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
 }
 
+/* 勾选框按权限存在，显式命名列避免普通用户的正文被放入 auto 列。 */
+.issue-card.has-selection {
+  grid-template-columns: 16px 4px minmax(0, 1fr) auto;
+  grid-template-areas: 'check band main actions';
+}
+
 .issue-card:hover {
   transform: translateY(-1.5px);
   box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
@@ -389,6 +455,7 @@ onMounted(async () => {
 }
 
 .ic-check {
+  grid-area: check;
   display: grid;
   place-items: center;
   padding-top: 3px;
@@ -404,6 +471,7 @@ onMounted(async () => {
 
 /* 严重度色带:危急红/高黄/中蓝/低灰,随展开区一起拉伸 */
 .ic-band {
+  grid-area: band;
   width: 4px;
   align-self: stretch;
   margin: 2px 0;
@@ -416,14 +484,17 @@ onMounted(async () => {
 .ic-band[data-severity='low'] { background: var(--gray-300, #cfd4dc); }
 
 .ic-main {
+  grid-area: main;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
 }
 
 .ic-line1 {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  min-height: 24px;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -431,7 +502,9 @@ onMounted(async () => {
 .ic-title {
   font-size: 13.5px;
   font-weight: 600;
-  max-width: 420px;
+  max-width: min(100%, 420px);
+  min-width: 0;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -441,9 +514,10 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
-  padding: 0 6px;
-  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 48px;
+  height: 24px;
   font-size: 12px;
   color: var(--gray-500);
   background: transparent;
@@ -452,7 +526,8 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-.ic-toggle:hover {
+.ic-toggle:hover,
+.ic-toggle:focus-visible {
   color: var(--brand-600, #2f5ce0);
   background: var(--gray-100, #eef0f4);
 }
@@ -466,11 +541,17 @@ onMounted(async () => {
   flex-wrap: wrap;
   font-size: 11px;
   color: var(--gray-500);
+
+  > span {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
 }
 
-.ic-file,
-.ic-project {
-  max-width: 240px;
+.ic-line2 .ic-file,
+.ic-line2 .ic-project {
+  max-width: min(100%, 240px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -500,11 +581,18 @@ onMounted(async () => {
 }
 
 .ic-actions {
+  grid-area: actions;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  padding-top: 2px;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 0;
   white-space: nowrap;
+
+  :deep(.el-button) {
+    margin: 0;
+    min-height: 24px;
+    padding: 2px 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -518,29 +606,31 @@ onMounted(async () => {
   }
 }
 
-@media (max-width: 760px) {
+/* 以卡片容器宽度响应，桌面收起/展开侧栏后也保持可用。 */
+@container (max-width: 680px) {
   .issue-card {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: 4px minmax(0, 1fr);
+    grid-template-areas: 'band main' 'band actions';
+    gap: 10px;
   }
 
-  .ic-band {
-    display: none;
+  .issue-card.has-selection {
+    grid-template-columns: 16px 4px minmax(0, 1fr);
+    grid-template-areas: 'check band main' '. band actions';
   }
 
   .ic-actions {
-    grid-column: 1 / -1;
+    flex-wrap: wrap;
     justify-content: flex-start;
     padding-top: 8px;
     border-top: 1px solid var(--gray-100, #eef0f4);
   }
+}
 
-  .ic-title {
-    max-width: 52vw;
-  }
-
-  .ic-file,
-  .ic-project {
-    max-width: 60vw;
+@media (max-width: 768px) {
+  .ic-toggle,
+  .ic-actions :deep(.el-button) {
+    min-height: 40px;
   }
 }
 </style>

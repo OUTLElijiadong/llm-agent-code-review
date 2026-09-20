@@ -1,0 +1,12 @@
+{
+  "input_kind": "synthetic_only",
+  "files": 1,
+  "source_sha256": "2b1b76b133e77077d2076fbb1ec31e4b2c54466528c9366fcdc7d29a807b4e2e",
+  "source_lines": 20,
+  "model": "deepseek-v4-flash",
+  "endpoint_host": "api.deepseek.com",
+  "config_source": "system",
+  "db_kind": "isolated_sqlite",
+  "production_data_used": false,
+  "model_response_mocked": false
+}

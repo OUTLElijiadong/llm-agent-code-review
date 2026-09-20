@@ -15,7 +15,8 @@
       </el-input>
     </div>
 
-    <el-alert v-if="loadError" title="项目列表加载失败" :description="loadError" type="error" :closable="false" show-icon>
+    <el-alert v-if="loadError" title="项目列表加载失败" type="error" :closable="false" show-icon>
+      <span class="load-error-message">{{ loadError }}</span>
       <el-button :loading="loading" @click="loadProjects">重新加载</el-button>
     </el-alert>
     <el-alert
@@ -91,7 +92,8 @@ async function loadProjects(): Promise<void> {
     projects.value = data.items
     loadError.value = ''
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : '暂时无法读取项目，请稍后重试。'
+    const message = error && typeof error === 'object' && 'message' in error ? error.message : ''
+    loadError.value = typeof message === 'string' && message ? message : '暂时无法读取项目，请稍后重试。'
   } finally {
     loading.value = false
   }
@@ -102,7 +104,7 @@ onMounted(loadProjects)
 
 <style scoped lang="scss">
 .code-hub-page {
-  padding: var(--spacing-lg);
+  min-width: 0;
 }
 
 .page-header {
@@ -117,27 +119,36 @@ onMounted(loadProjects)
     margin: 0 0 4px;
     font-size: 20px;
     font-weight: 600;
+    line-height: 1.3;
   }
 
   .page-sub {
     margin: 0;
     color: var(--color-text-secondary, #909399);
     font-size: 13px;
+    line-height: 1.5;
   }
 }
 
 .search-input {
-  width: 240px;
+  width: min(100%, 240px);
+}
+
+.load-error-message {
+  display: block;
+  margin-bottom: var(--spacing-sm);
 }
 
 .project-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   gap: var(--spacing-md);
-  margin-top: var(--spacing-md);
 }
 
 .project-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   padding: 18px;
   background: var(--color-bg-card, #fff);
   border: 1px solid var(--color-border-light, #ebeef5);
@@ -177,6 +188,7 @@ onMounted(loadProjects)
   font-size: 15px;
   font-weight: 600;
   color: var(--color-text-primary, #303133);
+  overflow-wrap: anywhere;
 }
 
 .card-desc {
@@ -197,5 +209,6 @@ onMounted(loadProjects)
   justify-content: space-between;
   font-size: 12px;
   color: var(--color-text-secondary, #909399);
+  margin-top: auto;
 }
 </style>

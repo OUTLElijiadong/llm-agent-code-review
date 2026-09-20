@@ -429,7 +429,7 @@ class Orchestrator(BaseAgent):
 
         ChatAssistant 直接 handler、ChatPlanner 固定工具和其他调用方都经过此
         方法。显式文件列表原样下传；缺失或为空时查询请求级数据库，仅选择同
-        项目 `status="active"` 的文件并按 ID 升序。ReviewService 继续负责最终
+        项目 `status="active"` 的有效文本文件并按 ID 升序，排除原因进入覆盖账本。ReviewService 继续负责最终
         权限、归属和数量校验。
 
         Args:
@@ -447,15 +447,13 @@ class Orchestrator(BaseAgent):
         if disabled := self._disabled_result("review_orchestrator"):
             return disabled
         resolved_file_ids = list(file_ids or [])
+        exclusions = []
         if not resolved_file_ids:
             try:
                 if self._db is not None:
-                    from app.models.code_file import CodeFile
-                    rows = self._db.query(CodeFile.id).filter(
-                        CodeFile.project_id == project_id,
-                        CodeFile.status == "active",
-                    ).order_by(CodeFile.id.asc()).all()
-                    resolved_file_ids = [row[0] for row in rows]
+                    from app.services.review_input_service import select_project_review_inputs
+
+                    resolved_file_ids, exclusions = select_project_review_inputs(self._db, project_id)
             except Exception as exc:
                 logger.warning(f"[Orchestrator] 自动获取审查文件失败: {exc}")
 
@@ -465,7 +463,9 @@ class Orchestrator(BaseAgent):
                 error=f"项目 #{project_id} 下没有可审查的代码文件，请先上传代码文件后再发起审查。",
             )
         return self.review_orch.start_review(
-            project_id, resolved_file_ids, review_type, task_name, user, ctx)
+            project_id, resolved_file_ids, review_type, task_name, user, ctx,
+            **({"input_exclusions": exclusions} if exclusions else {}),
+        )
 
     def list_review_tasks(self, *args, **kw) -> AgentResult:
         if disabled := self._disabled_result("review_orchestrator"):

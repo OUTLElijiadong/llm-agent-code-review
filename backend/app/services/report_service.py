@@ -22,6 +22,7 @@ from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.services import rbac_service
+from app.services.project_member_service import get_visible_project_ids, require_project_access
 from app.services.report_exporter import build_report_score_facts
 
 
@@ -34,6 +35,20 @@ def is_report_available(task: ReviewTask | None) -> bool:
             or (task.status == "failed" and task.review_type == "sandbox_test")
         )
     )
+
+
+def get_readable_report_task(db: Session, user: User, task_id: int) -> ReviewTask:
+    """保留发起人/管理员范围，并要求父项目的当前访问权，撤销后不能继续读取。"""
+    task = db.get(ReviewTask, task_id)
+    if not is_report_available(task):
+        raise NotFoundError("报告不存在", code=40400)
+    if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
+        raise NotFoundError("报告不存在", code=40400)
+    try:
+        require_project_access(db, task.project_id, user, need_write=False)
+    except NotFoundError:
+        raise NotFoundError("报告不存在", code=40400) from None
+    return task
 
 
 def list_reports(db: Session, user: User, project_id: int = None,
@@ -57,6 +72,8 @@ def list_reports(db: Session, user: User, project_id: int = None,
         (ReviewTask.status == "success")
         | ((ReviewTask.status == "failed") & (ReviewTask.review_type == "sandbox_test"))
     )
+    visible_ids, _ = get_visible_project_ids(db, user)
+    q = q.filter(ReviewTask.project_id.in_(visible_ids))
     if not rbac_service.is_admin_user(db, int(user.id)):
         q = q.filter(ReviewTask.user_id == user.id)
     if project_id:
@@ -99,11 +116,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
     Returns:
         dict: 报告完整数据
     """
-    task = db.get(ReviewTask, task_id)
-    if not is_report_available(task):
-        raise NotFoundError("报告不存在", code=40400)
-    if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
-        raise NotFoundError("报告不存在", code=40400)
+    task = get_readable_report_task(db, user, task_id)
 
     project = db.get(Project, task.project_id)
 
@@ -470,9 +483,9 @@ def _build_file_summaries(db: Session, task_id: int) -> list[dict]:
         })
         item["severity"][severity] = item["severity"].get(severity, 0) + count
 
-    linked_files = db.query(CodeFile).join(
-        ReviewTaskFile,
-        ReviewTaskFile.file_id == CodeFile.id,
+    linked_files = db.query(ReviewTaskFile, CodeFile).outerjoin(
+        CodeFile,
+        CodeFile.id == ReviewTaskFile.file_id,
     ).filter(
         ReviewTaskFile.task_id == task_id,
     ).order_by(
@@ -481,10 +494,13 @@ def _build_file_summaries(db: Session, task_id: int) -> list[dict]:
 
     summaries = []
     emitted_keys: set[tuple[str, object]] = set()
-    for code_file in linked_files:
-        key = ("id", code_file.id)
+    for link, code_file in linked_files:
+        key = ("id", link.file_id)
         emitted_keys.add(key)
-        summaries.append(_file_summary(code_file, counts.get(key)))
+        summaries.append(_file_summary(
+            code_file, counts.get(key), file_id=link.file_id,
+            file_snapshot=link.file_snapshot,
+        ))
 
     fallback_ids = [key[1] for key in counts if key not in emitted_keys and key[0] == "id"]
     fallback_files = {
@@ -497,7 +513,10 @@ def _build_file_summaries(db: Session, task_id: int) -> list[dict]:
     return summaries
 
 
-def _file_summary(code_file: CodeFile | None, counts: dict | None) -> dict:
+def _file_summary(
+    code_file: CodeFile | None, counts: dict | None, *,
+    file_id: int | None = None, file_snapshot: dict | None = None,
+) -> dict:
     """构造单个报告文件摘要。
 
     Args:
@@ -513,10 +532,12 @@ def _file_summary(code_file: CodeFile | None, counts: dict | None) -> dict:
         "severity": {"严重": 0, "高": 0, "中": 0, "低": 0},
     }
     severity = item["severity"]
+    # 新任务使用冻结元数据；只有无快照的旧任务才回退到当前文件。
+    snapshot = file_snapshot if isinstance(file_snapshot, dict) else {}
     return {
-        "file_id": code_file.id if code_file else item["file_id"],
-        "file_name": code_file.file_name if code_file else item["file_name"],
-        "language": code_file.language if code_file else "",
+        "file_id": file_id if file_id is not None else (code_file.id if code_file else item["file_id"]),
+        "file_name": snapshot.get("file_name") or (code_file.file_name if code_file else item["file_name"]),
+        "language": snapshot.get("language") or (code_file.language if code_file else ""),
         "issue_count": sum(severity.values()),
         "severe_count": severity.get("严重", 0),
         "score": compute_score(severity),
@@ -540,6 +561,7 @@ def delete_report(db: Session, user: User, task_id: int) -> None:
         raise NotFoundError("报告不存在", code=40400)
     if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
         raise ForbiddenError("无权限删除此报告", code=40300)
+    require_project_access(db, task.project_id, user, need_write=False)
     task.status = "deleted"
     # 渗透报告删除联动: 清空委托的 report_task_id, 防止详情页"查看报告"跳 404
     if task.review_type == "pentest":

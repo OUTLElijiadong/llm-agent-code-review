@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import NotFoundError, PermissionError
+from app.core.exceptions import PermissionError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.review_issue import ReviewIssue
@@ -46,7 +46,7 @@ from app.models.user import User
 from app.schemas.common import PageOut, Resp
 from app.schemas.report import DomainReportExportOut, ReportDetailOut, ReportListItem
 from app.schemas.report_template import ReportTemplateIn, ReportTemplateOut, ReportTemplateUpdate
-from app.services import audit_service, rbac_service, report_service, report_template_service
+from app.services import audit_service, report_service, report_template_service
 from app.services.rbac_service import check_permission
 from app.services.report_exporter import (
     export_to_html,
@@ -88,7 +88,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
 
     校验逻辑:
         1. 普通任务必须为 success；沙箱测试失败时仍允许查看已生成的失败报告
-        2. 当前用户必须为管理员或任务发起者
+        2. 当前用户为发起人/管理员，且具有父项目的当前访问权限
 
     Args:
         db: 数据库会话。
@@ -102,12 +102,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     Raises:
         NotFoundError: 任务不存在或未完成,或用户无访问权限(code=40400)。
     """
-    task = db.get(ReviewTask, task_id)
-    if not report_service.is_report_available(task):
-        raise NotFoundError(f"审查任务 #{task_id} 不存在或未完成", code=40400)
-    # 权限校验:管理员或任务发起者可访问
-    if task.user_id != user.id and not rbac_service.is_admin_user(db, user.id):
-        raise NotFoundError("报告不存在", code=40400)
+    task = report_service.get_readable_report_task(db, user, task_id)
 
     if task.review_type in {"sandbox_test", "pentest"}:
         return task, [], task.summary or "", task.score

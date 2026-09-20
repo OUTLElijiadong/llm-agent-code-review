@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "checks": {
+    "existing_runtime_members_only": true,
+    "three_team_nodes_completed": true,
+    "independent_team_tasks_overlap": true,
+    "actual_http_requests_overlap_across_nodes": true,
+    "one_full_review_success": true,
+    "file_coverage_complete": true,
+    "issue_counts_match_database": true,
+    "formal_report_readable": true,
+    "all_review_profiles_have_real_success_logs": true,
+    "each_review_profile_index_recorded": true,
+    "audit_reports_full_semantic_coverage": true,
+    "summary_retains_returned_findings": true,
+    "all_http_attempts_accounted": true,
+    "all_calls_attributed_to_team_tasks": true,
+    "all_real_http_succeeded": true
+  },
+  "dispatch": {
+    "teams": 1,
+    "claimed": 3,
+    "completed": 3,
+    "failed": 0,
+    "recovered": 0,
+    "expired": 0,
+    "cleaned": 0
+  },
+  "elapsed_seconds": 18.39,
+  "http_attempts": 7,
+  "ai_call_logs": 7,
+  "expected_profiles": [
+    "code_reviewer",
+    "security_sentinel"
+  ],
+  "observed_profiles": [
+    "code_reviewer",
+    "security_sentinel"
+  ],
+  "run_directory": "/acceptance-output/20260920T121833Z",
+  "boundary": "合成单文件真实模型隔离集成，不代表生产数据全项目验收；汇总节点依据返回证据确定性核对。"
+}

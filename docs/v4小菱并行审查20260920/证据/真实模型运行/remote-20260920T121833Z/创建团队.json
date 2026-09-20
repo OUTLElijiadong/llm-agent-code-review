@@ -1,0 +1,190 @@
+{
+  "team_id": 1,
+  "user_id": 1,
+  "surface": "user",
+  "session_id": "v4_isolated_20260920T121833Z",
+  "title": "现有Agent真实并行验收",
+  "objective": "对合成样本并行执行正式全量代码审查和独立白盒审计，再核对真实结果",
+  "status": "queued",
+  "max_active_children": 2,
+  "max_attempts": 1,
+  "priority": 0,
+  "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+  "deadline_at": null,
+  "started_at": null,
+  "completed_at": null,
+  "summary": {},
+  "error": {},
+  "created_at": "2026-09-20T12:18:36.440511",
+  "updated_at": "2026-09-20T12:18:36.440515",
+  "archived_at": null,
+  "members": [
+    {
+      "member_id": 1,
+      "member_key": "review",
+      "display_name": "正式代码审查",
+      "address": "agent:review_orchestrator",
+      "kind": "runtime",
+      "role": "worker",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "review_orchestrator",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "created",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "member_id": 2,
+      "member_key": "audit",
+      "display_name": "白盒安全审计",
+      "address": "agent:security_sentinel",
+      "kind": "runtime",
+      "role": "worker",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "security_sentinel",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "created",
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "member_id": 3,
+      "member_key": "report",
+      "display_name": "证据复核汇总",
+      "address": "agent:reporter",
+      "kind": "runtime",
+      "role": "summarizer",
+      "template_id": null,
+      "template_version_id": null,
+      "capabilities": {
+        "dispatch_state": "executable",
+        "code": "reporter",
+        "requires_project_scope": false,
+        "requested_capabilities": {}
+      },
+      "status": "created",
+      "started_at": null,
+      "completed_at": null
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": 1,
+      "task_key": "review",
+      "member_id": 1,
+      "member_key": "review",
+      "title": "正式全量代码审查",
+      "instructions": "运行现有审查画像，保存真实任务与发现，覆盖失败必须如实报告。",
+      "depends_on": [],
+      "input": {
+        "operation": "run_review",
+        "project_id": 1,
+        "review_type": "full"
+      },
+      "status": "queued",
+      "priority": 0,
+      "attempt_count": 0,
+      "max_attempts": 1,
+      "next_attempt_at": "2026-09-20T12:18:36.586130",
+      "lease_expires_at": null,
+      "result": {},
+      "artifacts": [],
+      "errors": [],
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "task_id": 2,
+      "task_key": "audit",
+      "member_id": 2,
+      "member_key": "audit",
+      "title": "独立白盒安全审计",
+      "instructions": "完整审计所有合成代码，检查注入与命令执行，明确证据和覆盖。",
+      "depends_on": [],
+      "input": {
+        "project_id": 1,
+        "scan_mode": "full"
+      },
+      "status": "queued",
+      "priority": 0,
+      "attempt_count": 0,
+      "max_attempts": 1,
+      "next_attempt_at": "2026-09-20T12:18:36.586221",
+      "lease_expires_at": null,
+      "result": {},
+      "artifacts": [],
+      "errors": [],
+      "started_at": null,
+      "completed_at": null
+    },
+    {
+      "task_id": 3,
+      "task_key": "report",
+      "member_id": 3,
+      "member_key": "report",
+      "title": "结果证据复核",
+      "instructions": "核对两条依赖终态与证据，失败不得标记为全部完成。",
+      "depends_on": [
+        "review",
+        "audit"
+      ],
+      "input": {},
+      "status": "waiting_dependency",
+      "priority": 0,
+      "attempt_count": 0,
+      "max_attempts": 1,
+      "next_attempt_at": null,
+      "lease_expires_at": null,
+      "result": {},
+      "artifacts": [],
+      "errors": [],
+      "started_at": null,
+      "completed_at": null
+    }
+  ],
+  "counts": {
+    "total": 3,
+    "completed": 0,
+    "running": 0,
+    "queued": 3,
+    "failed": 0,
+    "blocked": 0
+  },
+  "events": [
+    {
+      "event_id": 1,
+      "team_id": 1,
+      "task_id": null,
+      "member_id": null,
+      "event_type": "team.created",
+      "from_status": null,
+      "to_status": "queued",
+      "actor_address": "user:1",
+      "trace_id": "team_a7fb83021a524a9c8dce04b3064bff6a",
+      "message_id": null,
+      "correlation_id": "",
+      "detail": {
+        "task_count": 3,
+        "origin_trace_id": ""
+      },
+      "created_at": "2026-09-20T12:18:36.587620"
+    }
+  ],
+  "messages": [],
+  "message_page": {
+    "total": 0,
+    "has_more": false,
+    "next_before_id": null,
+    "page_size": 500
+  }
+}

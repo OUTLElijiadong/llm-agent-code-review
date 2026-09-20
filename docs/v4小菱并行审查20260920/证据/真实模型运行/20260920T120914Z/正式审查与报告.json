@@ -1,0 +1,50 @@
+[
+  {
+    "task_id": 1,
+    "status": "failed",
+    "coverage": {
+      "stage": "failed",
+      "completed_files": 0,
+      "total_files": 1,
+      "current_file": "synthetic_routes.py",
+      "completed_chunks": 0,
+      "total_chunks": 1,
+      "files": {
+        "1": {
+          "file_name": "synthetic_routes.py",
+          "status": "failed",
+          "total_chunks": 1,
+          "completed_chunks": 0,
+          "completed_chunk_indexes": [],
+          "failed_chunks": [
+            {
+              "index": 0,
+              "error": "安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+            }
+          ]
+        }
+      },
+      "error": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址"
+    },
+    "review_type": "full",
+    "total_files": 1,
+    "processed_files": 0,
+    "total_issues": 1,
+    "persisted_issues": 1,
+    "team_id": 1,
+    "team_task_id": 1,
+    "error_message": "扫描覆盖不完整: synthetic_routes.py: 安全审查代理: 地址解析到内网或保留地址; 可靠性代理: 地址解析到内网或保留地址; 性能审查代理: 地址解析到内网或保留地址; 可维护性代理: 地址解析到内网或保留地址",
+    "issues": [
+      {
+        "id": 1,
+        "title": "Python 命令注入",
+        "severity": "严重",
+        "cwe": "CWE-78",
+        "file_id": 1,
+        "line": 16,
+        "source": "static",
+        "confirmation_count": 1
+      }
+    ]
+  }
+]

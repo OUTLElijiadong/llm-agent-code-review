@@ -1,0 +1,57 @@
+{
+  "生成时间": "2026-09-20T20:12:13.959173+08:00",
+  "源码基线": "1b2253df4be16b1b560724ee2444984a0c924c99",
+  "注入前端版本": "4.0.0",
+  "验证边界": "本地Vue源代码、Chrome实际排版和交互；网络请求全部使用明确的API桩，不替代生产API、数据库、模型审查验收",
+  "依赖": {
+    "Node": "v24.14.1",
+    "npm": "11.11.0",
+    "Vitest声明": "4.1.11",
+    "Vitest锁定": "4.1.11",
+    "Vitest安装": "4.1.11",
+    "Playwright工具版本": "1.54.1",
+    "Playwright说明": "原本不在项目锁文件中。npm ci移除历史额外包后，从/tmp隔离工具副本执行相同测试，不写回node_modules或修改lock。",
+    "依赖声明与锁文件根字段匹配": true,
+    "package.json与package-lock.json无版本控制差异": true
+  },
+  "命令": [
+    {
+      "命令": "npm ci",
+      "退出码": 0
+    },
+    {
+      "命令": "VITE_APP_VERSION=4.0.0 npm run test -- --maxWorkers=4 --reporter=json --outputFile=/tmp/prism-v4-full-vitest.json",
+      "退出码": 0,
+      "用例通过": 1229,
+      "失败": 0,
+      "跳过": 0,
+      "文件数": 109
+    },
+    {
+      "命令": "npm run lint",
+      "退出码": 0
+    },
+    {
+      "命令": "VITE_APP_VERSION=4.0.0 npm run build",
+      "退出码": 0,
+      "构建结尾": "✓ built in 33.01s"
+    },
+    {
+      "命令": "PLAYWRIGHT_BASE_URL=http://127.0.0.1:5179 PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/prism-v4-layout-final.json node /tmp/prism-v4-browser-tools/node_modules/@playwright/test/cli.js test --config=/tmp/prism-v4-browser-tools/playwright.config.ts e2e/layout-alignment.spec.ts --reporter=list,json --output=/tmp/prism-v4-layout-final",
+      "退出码": 0,
+      "通过": 15,
+      "失败": 0,
+      "跳过": 0
+    }
+  ],
+  "源码SHA256": {
+    "frontend/src/components/layout/AppSidebar.vue": "814c288a6d72f0f01a6f70d3c1256abccb2467bb9872f2f9561816a8aab71a74",
+    "frontend/src/views/code/CodeHub.vue": "aba560b86112d3aaf13217a5682a0d754ab99b379c66cd677fc673780ace8e70",
+    "frontend/src/views/code/CodeHub.recovery.test.ts": "331d566dc5baa5a2a1610c2af1640b94b86e6b11369bcab197f21eb30d0d4c8f",
+    "frontend/src/views/issue/IssueHub.vue": "9d48891fc8c4243c1f276a5d88e5e388cb2fe7feaef42b5fabf3fa5753e87345",
+    "frontend/src/views/issue/IssueHub.recovery.test.ts": "8f7bd35b4f1edbeb87d4864eff5116541413d6a7863e6a9831b85e49cf067960",
+    "frontend/e2e/layout-alignment.spec.ts": "3770422637814c0bb567fb3bc57336b7231f37a8385ad31e568880ecc83b301b"
+  },
+  "隔离浏览器测试副本SHA256": "3770422637814c0bb567fb3bc57336b7231f37a8385ad31e568880ecc83b301b",
+  "锁文件SHA256": "455c954be293268e373b6113fd2c6ce8378bb8b7ebe74eea1307a6a3fedbf2a2"
+}

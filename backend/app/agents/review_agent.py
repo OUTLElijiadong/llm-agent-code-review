@@ -134,20 +134,15 @@ class CodeReviewerAgent(BaseAgent):
             logger.warning(f"[code_reviewer] build_prompt 失败: {e}")
             return AgentResult(success=False, error=f"build_prompt 失败: {e}")
 
-        # 2. 临时覆盖 system_prompt(BaseAgent.call 用 self._system_prompt)
-        #    review_service 后台线程顺序调用,无并发安全问题
-        original_system = self._system_prompt
-        self._system_prompt = compose_system_prompt(self.name, system_prompt)
-        try:
-            result = self.call(
-                user_prompt,
-                ctx=ctx,
-                json_mode=True,
-                api_config=api_config,
-                max_tokens=max_tokens,
-            )
-        finally:
-            self._system_prompt = original_system
+        # 2. 注册 Agent 可被多个审查任务同时调用，提示词只作为本次请求参数。
+        result = self.call(
+            user_prompt,
+            ctx=ctx,
+            json_mode=True,
+            api_config=api_config,
+            max_tokens=max_tokens,
+            system_prompt=compose_system_prompt(self.name, system_prompt),
+        )
 
         if not result.success:
             return result

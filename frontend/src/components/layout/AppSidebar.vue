@@ -194,6 +194,7 @@ function go(item: MenuItem): void {
           class="sidebar-toggle"
           type="button"
           :aria-label="isCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          :aria-expanded="!isCollapsed"
           @click="toggleCollapsed"
         >
           <el-icon><component :is="isCollapsed ? Expand : Fold" /></el-icon>
@@ -271,7 +272,8 @@ function go(item: MenuItem): void {
 
 /* 顶部品牌区 ----------------------------- */
 .sidebar-logo {
-  display: flex;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 30px;
   align-items: center;
   gap: 12px;
   height: var(--header-height);
@@ -281,8 +283,11 @@ function go(item: MenuItem): void {
 }
 
 .is-collapsed .sidebar-logo {
-  justify-content: center;
-  padding: 0 10px;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  gap: 8px;
+  height: auto;
+  padding: 14px 10px 10px;
 }
 
 .logo-meta {
@@ -308,7 +313,7 @@ function go(item: MenuItem): void {
 .sidebar-toggle {
   width: 30px;
   height: 30px;
-  margin-left: auto;
+  padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
@@ -326,11 +331,8 @@ function go(item: MenuItem): void {
 }
 
 .is-collapsed .sidebar-toggle {
-  position: absolute;
-  right: -13px;
-  top: 17px;
-  background: var(--side-bg);
-  box-shadow: 0 8px 20px rgba(8, 12, 24, 0.24);
+  width: 36px;
+  height: 32px;
 }
 
 /* 导航 ----------------------------------- */
@@ -488,8 +490,11 @@ function go(item: MenuItem): void {
   }
 
   .sidebar-toggle {
-    width: 40px;
-    height: 40px;
+    display: none;
+  }
+
+  .sidebar-logo {
+    grid-template-columns: 22px minmax(0, 1fr);
   }
 
   .nav-group-toggle {
@@ -520,13 +525,11 @@ function go(item: MenuItem): void {
   }
 
   .app-sidebar.is-collapsed .sidebar-logo {
-    justify-content: flex-start;
+    grid-template-columns: 22px minmax(0, 1fr);
+    justify-items: start;
+    gap: 12px;
+    height: var(--header-height);
     padding: 0 20px;
-  }
-
-  .app-sidebar.is-collapsed .sidebar-toggle {
-    position: static;
-    margin-left: auto;
   }
 }
 </style>

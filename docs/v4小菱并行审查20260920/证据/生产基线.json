@@ -1,0 +1,24 @@
+{
+  "observed_at": "2026-09-20T12:06:54.219636+00:00",
+  "writes": false,
+  "head": {
+    "exit_code": 0,
+    "output": "ccc9284af7d9ddf71d47e022a667a68eef4fbe18",
+    "error": ""
+  },
+  "health": {
+    "exit_code": 0,
+    "output": "{\"status\":\"ok\",\"version\":\"3.9.14\",\"release\":\"ccc9284af7d9ddf71d47e022a667a68eef4fbe18\"}",
+    "error": ""
+  },
+  "ready": {
+    "exit_code": 0,
+    "output": "{\"status\":\"ready\",\"version\":\"3.9.14\",\"release\":\"ccc9284af7d9ddf71d47e022a667a68eef4fbe18\"}",
+    "error": ""
+  },
+  "containers": {
+    "exit_code": 0,
+    "output": "cr_frontend prism-frontend:ccc9284af7d9ddf71d47e022a667a68eef4fbe18 Up 5 hours (healthy)\ncr_backend prism-backend:ccc9284af7d9ddf71d47e022a667a68eef4fbe18 Up 5 hours (healthy)\ncr_embedding ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.3 Up 2 weeks\ncr_mysql mysql:8.0 Up 2 weeks (healthy)\ncr_testdb mysql:8.0 Up 5 weeks\ncr_clamav clamav/clamav:stable Up 5 weeks (healthy)\ncr_redis redis:7-alpine Up 5 weeks (healthy)",
+    "error": ""
+  }
+}

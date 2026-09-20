@@ -1,0 +1,56 @@
+{
+  "full_suite": {
+    "total": 4316,
+    "passed": 4311,
+    "failed": 0,
+    "errors": 0,
+    "skipped": [
+      {
+        "class": "tests.unit.core.test_login_rate_limit_real_redis",
+        "name": "test_real_lua_keeps_same_window_blocked",
+        "reason": {
+          "type": "pytest.skip",
+          "message": "Requires explicitly created isolated local Redis container"
+        }
+      },
+      {
+        "class": "tests.unit.core.test_login_rate_limit_real_redis",
+        "name": "test_real_lua_subsecond_remaining_reports_one_second_and_then_expires",
+        "reason": {
+          "type": "pytest.skip",
+          "message": "Requires explicitly created isolated local Redis container"
+        }
+      },
+      {
+        "class": "tests.unit.core.test_login_rate_limit_real_redis",
+        "name": "test_real_lua_admission_near_expiry_does_not_restart_window",
+        "reason": {
+          "type": "pytest.skip",
+          "message": "Requires explicitly created isolated local Redis container"
+        }
+      },
+      {
+        "class": "tests.unit.core.test_login_rate_limit_real_redis",
+        "name": "test_real_lua_failure_settlement_near_expiry_does_not_restart_window",
+        "reason": {
+          "type": "pytest.skip",
+          "message": "Requires explicitly created isolated local Redis container"
+        }
+      },
+      {
+        "class": "tests.unit.core.test_login_rate_limit_real_redis",
+        "name": "test_real_lua_check_and_legacy_increment_preserve_subsecond_window",
+        "reason": {
+          "type": "pytest.skip",
+          "message": "Requires explicitly created isolated local Redis container"
+        }
+      }
+    ]
+  },
+  "final_incremental": {
+    "passed": 118,
+    "reason": "全量进程启动后新增的汇总投影、正式问题摘要和末端可见性另跑最终集成"
+  },
+  "ruff_exit": 0,
+  "environment": "本地 Python3.11.15，隔离 SQLite；非生产后端请求"
+}

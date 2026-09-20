@@ -10,6 +10,21 @@ from app.models.code_version import CodeVersion
 from app.models.review_task_file import ReviewTaskFile
 
 
+def select_project_review_inputs(db: Session, project_id: int) -> tuple[list[int], list[dict]]:
+    """默认项目审查只选有效文本，显式记录图片/空文件的排除原因。"""
+    rows = db.query(CodeFile.id, CodeFile.file_name, CodeFile.content, CodeFile.is_binary).filter(
+        CodeFile.project_id == project_id, CodeFile.status == "active",
+    ).order_by(CodeFile.id.asc()).all()
+    file_ids, exclusions = [], []
+    for row in rows:
+        reason = "binary" if row.is_binary == 1 else "empty_text" if not (row.content or "").strip() else ""
+        if reason:
+            exclusions.append({"file_id": row.id, "file_name": row.file_name, "reason": reason})
+        else:
+            file_ids.append(row.id)
+    return file_ids, exclusions
+
+
 def validate_review_input(code_file: CodeFile) -> None:
     if getattr(code_file, "is_binary", 0) == 1 or not (code_file.content or "").strip():
         raise ValidationError(f"文件 {code_file.file_name} 没有有效非空文本，不能进行代码扫描", code=40001)

@@ -64,3 +64,11 @@ it('成功读取空列表时才展示无项目状态', async () => {
   expect(wrapper.find('button').exists()).toBe(false)
   wrapper.unmount()
 })
+it('保留HTTP封装返回的业务错误原因', async () => {
+  mocks.getProjects.mockRejectedValue({ message: '项目存储服务暂不可用' })
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.text()).toContain('项目存储服务暂不可用')
+  expect(wrapper.text()).not.toContain('还没有项目')
+  wrapper.unmount()
+})

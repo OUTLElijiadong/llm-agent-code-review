@@ -1,0 +1,204 @@
+[
+  {
+    "task_id": 1,
+    "status": "success",
+    "coverage": {
+      "stage": "complete",
+      "completed_files": 1,
+      "total_files": 1,
+      "current_file": null,
+      "completed_chunks": 1,
+      "total_chunks": 1,
+      "files": {
+        "1": {
+          "file_name": "synthetic_routes.py",
+          "status": "complete",
+          "total_chunks": 1,
+          "completed_chunks": 1,
+          "completed_chunk_indexes": [
+            0
+          ],
+          "failed_chunks": []
+        }
+      }
+    },
+    "review_type": "full",
+    "total_files": 1,
+    "processed_files": 1,
+    "total_issues": 5,
+    "persisted_issues": 5,
+    "team_id": 1,
+    "team_task_id": 1,
+    "error_message": null,
+    "issues": [
+      {
+        "id": 3,
+        "title": "SQL 查询字符串拼接导致注入",
+        "severity": "严重",
+        "cwe": "CWE-89",
+        "file_id": 1,
+        "line": 11,
+        "source": "llm",
+        "confirmation_count": 4
+      },
+      {
+        "id": 4,
+        "title": "shell=True 拼接执行导致命令注入",
+        "severity": "严重",
+        "cwe": "CWE-78",
+        "file_id": 1,
+        "line": 16,
+        "source": "hybrid",
+        "confirmation_count": 5
+      },
+      {
+        "id": 5,
+        "title": "eval 执行用户输入导致任意代码执行",
+        "severity": "严重",
+        "cwe": "CWE-95",
+        "file_id": 1,
+        "line": 20,
+        "source": "llm",
+        "confirmation_count": 4
+      },
+      {
+        "id": 1,
+        "title": "函数缺少文档字符串与注释",
+        "severity": "中",
+        "cwe": "",
+        "file_id": 1,
+        "line": 7,
+        "source": "llm",
+        "confirmation_count": 1
+      },
+      {
+        "id": 2,
+        "title": "内存数据库每请求重建导致查询必失败",
+        "severity": "中",
+        "cwe": "",
+        "file_id": 1,
+        "line": 10,
+        "source": "llm",
+        "confirmation_count": 3
+      }
+    ],
+    "report": {
+      "project": {
+        "id": 1,
+        "project_name": "v4合成漏洞隔离验收",
+        "language": "python"
+      },
+      "task": {
+        "id": 1,
+        "name": "正式全量代码审查",
+        "task_name": "正式全量代码审查",
+        "review_type": "full",
+        "total_files": 1,
+        "duration_ms": 17626,
+        "total_issues": 5,
+        "score": 49,
+        "score_version": "severity-deduction-v1",
+        "score_breakdown": {
+          "version": "severity-deduction-v1",
+          "base_score": 100,
+          "weights": {
+            "严重": 15,
+            "高": 8,
+            "中": 3,
+            "低": 1
+          },
+          "counts": {
+            "严重": 3,
+            "高": 0,
+            "中": 2,
+            "低": 0
+          },
+          "deductions": {
+            "严重": 45,
+            "高": 0,
+            "中": 6,
+            "低": 0
+          },
+          "total_deduction": 51,
+          "raw_score": 49,
+          "score": 49,
+          "risk_level": "高风险",
+          "score_source": "review_issues"
+        },
+        "status": "success",
+        "create_time": "2026-09-20T12:18:36.747541",
+        "agent_releases": []
+      },
+      "stats": {
+        "total_files": 1,
+        "total_issues": 5,
+        "score": 49,
+        "severe": 3,
+        "high": 0,
+        "medium": 2,
+        "low": 0,
+        "fixed": 0,
+        "confirmed": 0,
+        "refuted": 0,
+        "severity": {
+          "严重": 3,
+          "中": 2
+        },
+        "severity_breakdown": {
+          "严重": 3,
+          "中": 2
+        },
+        "by_type": {
+          "安全漏洞": 3,
+          "注释完整性": 1,
+          "潜在Bug": 1
+        },
+        "score_version": "severity-deduction-v1",
+        "score_breakdown": {
+          "version": "severity-deduction-v1",
+          "base_score": 100,
+          "weights": {
+            "严重": 15,
+            "高": 8,
+            "中": 3,
+            "低": 1
+          },
+          "counts": {
+            "严重": 3,
+            "高": 0,
+            "中": 2,
+            "低": 0
+          },
+          "deductions": {
+            "严重": 45,
+            "高": 0,
+            "中": 6,
+            "低": 0
+          },
+          "total_deduction": 51,
+          "raw_score": 49,
+          "score": 49,
+          "risk_level": "高风险",
+          "score_source": "review_issues"
+        },
+        "risk_level": "高风险"
+      },
+      "source": {
+        "type": "full",
+        "stats_basis": "review_issues"
+      },
+      "summary": "本次采用多 Agent 协同(安全审查代理、可靠性代理、性能审查代理、可维护性代理)完成 1 个文件审查,发现 5 个问题,综合评分 49。",
+      "files": [
+        {
+          "file_id": 1,
+          "file_name": "synthetic_routes.py",
+          "language": "python",
+          "issue_count": 5,
+          "severe_count": 3,
+          "score": 49
+        }
+      ],
+      "rules_snapshot": []
+    }
+  }
+]

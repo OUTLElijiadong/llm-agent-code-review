@@ -73,18 +73,28 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
 
     db = SessionLocal()
     try:
-        team = db.get(AgentTeam, int(team_id))
+        try:
+            team, _task, member = agent_team_service.require_active_task_lease(
+                db, team_id=team_id, task_id=claimed["task_id"], lease_token=claimed["lease_token"],
+            )
+            if int(member.id) != int(claimed["member_id"]) or member.address != claimed["address"]:
+                raise agent_team_service.AgentTeamLeaseError("团队成员声明与持久化任务不匹配")
+        except agent_team_service.AgentTeamError as exc:
+            db.rollback()
+            logger.info("[agent-team-dispatcher] skip inactive team={} task={}: {}", team_id, claimed["task_id"], exc)
+            return {"success": False}
         user = db.get(User, int(team.user_id)) if team else None
-        if team is None or user is None:
+        if user is None or int(user.status or 0) != 1:
+            error = "团队所属账户不存在" if user is None else "账户已停用或删除，团队任务未执行"
             try:
                 agent_team_service.complete_task(
                     db,
                     team_id,
                     claimed["task_id"],
                     lease_token=claimed["lease_token"],
-                    result={"status": "blocked", "summary": "团队所属账户不存在"},
+                    result={"status": "blocked", "summary": error, "retryable": False},
                     success=False,
-                    error="团队所属账户不存在",
+                    error=error,
                 )
             except agent_team_service.AgentTeamError:
                 db.rollback()
