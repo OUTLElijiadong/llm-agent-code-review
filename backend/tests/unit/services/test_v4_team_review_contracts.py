@@ -136,4 +136,5 @@ def test_summary_keeps_shallow_findings_in_public_team_final_result():
     public = _public({"completed_tasks": 3, "final_result": _public(result)})["final_result"]
     assert public["unique_finding_count"] == 1
     assert public["findings"][0]["title"] == "SQL注入"
+    assert public["findings"][0]["source_task_keys"] == "review"
     assert public["references"][0]["route"] == "/reviews/17"

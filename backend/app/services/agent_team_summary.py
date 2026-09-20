@@ -112,7 +112,8 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         "status": "completed" if complete else "failed",
         # 公开团队结果会再次脱敏，关键结论保持浅层；详细聚合仍保留在原始产物。
         "unique_finding_count": len(findings),
-        "findings": list(findings.values())[:20],
+        "findings": [{**item, "source_task_keys": ",".join(item["source_tasks"])}
+                     for item in list(findings.values())[:20]],
         "findings_preview_truncated": len(findings) > 20,
         "references": list(references.values())[:20],
         "bounded_finding_tasks": bounded_tasks,
