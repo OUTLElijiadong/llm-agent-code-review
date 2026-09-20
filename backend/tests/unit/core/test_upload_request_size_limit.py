@@ -143,3 +143,29 @@ async def test_json_limit_counts_chunked_body_without_content_length():
 
     assert called is True
     assert sent[0]["status"] == 413
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["lifespan", "websocket"])
+async def test_non_http_scope_without_headers_reaches_downstream_unchanged(scope_type):
+    scope = {"type": scope_type, "asgi": {"version": "3.0"}, "state": {}}
+    reached = []
+
+    async def receive():
+        raise AssertionError("请求体限制不能消费非 HTTP 消息")
+
+    async def send(_message):
+        raise AssertionError("请求体限制不能为非 HTTP 连接写 HTTP 响应")
+
+    async def downstream(actual_scope, actual_receive, actual_send):
+        reached.append(actual_scope)
+        assert actual_scope is scope
+        assert actual_receive is receive
+        assert actual_send is send
+
+    middleware = UploadRequestSizeLimitMiddleware(
+        downstream, max_source_bytes=4, max_folder_bytes=8, max_avatar_bytes=2,
+    )
+    await middleware(scope, receive, send)
+
+    assert reached == [scope]

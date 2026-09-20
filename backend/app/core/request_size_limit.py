@@ -53,14 +53,19 @@ class UploadRequestSizeLimitMiddleware:
         return self.max_source_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # lifespan 没有 HTTP headers；必须先透传协议消息，避免应用启动被
+        # Uvicorn 判成不支持生命周期，导致后台调度器始终未启动。
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         path = str(scope.get("path", ""))
         method = str(scope.get("method", ""))
         headers = Headers(scope=scope)
         content_type = headers.get("content-type", "").lower()
-        upload_path = scope["type"] == "http" and method == "POST" and is_limited_upload_path(path)
+        upload_path = method == "POST" and is_limited_upload_path(path)
         json_path = (
-            scope["type"] == "http"
-            and method in JSON_REQUEST_METHODS
+            method in JSON_REQUEST_METHODS
             and content_type.startswith("application/json")
         )
         if not upload_path and not json_path:
