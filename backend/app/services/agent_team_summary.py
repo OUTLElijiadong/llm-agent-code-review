@@ -41,6 +41,37 @@ def dependency_finding_summary(result: dict[str, Any], *, redact: Any) -> dict[s
     return {"items": findings, "omitted_count": omitted, "source_truncated": source_truncated}
 
 
+def dependency_coverage_summary(result: dict[str, Any]) -> dict[str, Any]:
+    """只投影已持久化的覆盖标量；未知字段留空，不从完成状态推断覆盖。"""
+    numeric_fields = (
+        "total_files", "processed_files", "total_chunks", "completed_chunks", "failed_chunks",
+        "total_file_count", "scanned_file_count", "skipped_file_count", "coverage_ratio",
+        "static_scanned_file_count", "semantic_file_count", "semantic_candidate_source_chars",
+        "semantic_attempted_source_chars", "semantic_source_chars", "semantic_failed_batch_count",
+        "semantic_char_coverage_ratio", "archive_text_source_chars",
+    )
+    projected: dict[str, Any] = {}
+    for block in _result_blocks(result):
+        sources = [block]
+        sources.extend(block[name] for name in ("coverage", "compliance")
+                       if isinstance(block.get(name), dict))
+        for source in sources:
+            for field in numeric_fields:
+                value = source.get(field)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    projected[field] = value
+            for field in ("semantic_complete", "static_complete", "truncated"):
+                if isinstance(source.get(field), bool):
+                    projected[field] = source[field]
+            if isinstance(source.get("scan_mode"), str) and source["scan_mode"] in {"full", "static_full", "triage"}:
+                projected["scan_mode"] = source["scan_mode"]
+            if isinstance(source.get("stage"), str) and source["stage"] in {
+                "complete", "failed", "cancelled", "running", "queued",
+            }:
+                projected["coverage_stage"] = source["stage"]
+    return projected
+
+
 def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
     outcomes = []
     evidence = []
@@ -48,6 +79,7 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
     references: dict[tuple, dict[str, Any]] = {}
     failed = []
     bounded_tasks = []
+    coverage_summary = []
     for task_key, entry in sorted(dependencies.items()):
         entry = entry if isinstance(entry, dict) else {}
         result = entry.get("result")
@@ -61,6 +93,10 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
             "task_key": task_key, "status": status, "result_status": result_status,
             "summary": str(result.get("summary") or "缺少结果说明"),
         })
+        coverage = entry.get("coverage_summary")
+        if not isinstance(coverage, dict):
+            coverage = dependency_coverage_summary(result)
+        coverage_summary.append({"task_key": task_key, **coverage})
         evidence.append({"source": "agent_team_dependency", "task_key": task_key, "data": entry})
         blocks = _result_blocks(result)
         finding_summary = entry.get("finding_summary")
@@ -102,6 +138,7 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         "bounded_finding_tasks": bounded_tasks,
         "findings": list(findings.values()),
         "references": list(references.values()),
+        "coverage_summary": coverage_summary,
         "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。",
     }
     complete = bool(outcomes) and not failed
@@ -116,6 +153,8 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
                      for item in list(findings.values())[:20]],
         "findings_preview_truncated": len(findings) > 20,
         "references": list(references.values())[:20],
+        "coverage_summary": coverage_summary[:20],
+        "coverage_summary_truncated": len(coverage_summary) > 20,
         "bounded_finding_tasks": bounded_tasks,
         "scope": summary["scope"],
         "summary": (

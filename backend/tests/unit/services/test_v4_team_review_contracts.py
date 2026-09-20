@@ -138,3 +138,48 @@ def test_summary_keeps_shallow_findings_in_public_team_final_result():
     assert public["findings"][0]["title"] == "SQL注入"
     assert public["findings"][0]["source_task_keys"] == "review"
     assert public["references"][0]["route"] == "/reviews/17"
+
+
+def test_audit_coverage_survives_dependency_and_double_public_projection(db):
+    import json
+
+    from app.models.agent_team import AgentTeamTask
+    from app.services.agent_team_service import _dependency_context, _public
+    from app.services.agent_team_summary import summarize_dependencies
+
+    compliance = {"scan_mode": "full", "semantic_complete": True,
+                  "semantic_source_chars": 337, "semantic_attempted_source_chars": 337,
+                  "semantic_failed_batch_count": 0, "static_scanned_file_count": 1,
+                  "static_complete": True, "api_key": "private-secret"}
+    db.add(AgentTeamTask(team_id=82, member_id=1, task_key="audit", title="审计",
+                        instructions="仅代码分析", status="completed",
+                        result_json=json.dumps({"status": "completed", "evidence": [{"data": {
+                            "project_id": 1, "compliance": compliance,
+                        }}]})))
+    db.flush()
+    context = _dependency_context(db, SimpleNamespace(id=82), SimpleNamespace(
+        dependency_keys_json='["audit"]',
+    ))
+    result = summarize_dependencies(context)
+    public = _public({"final_result": _public(result)})["final_result"]
+    coverage = public["coverage_summary"][0]
+    assert coverage["task_key"] == "audit"
+    assert coverage["semantic_complete"] is True
+    assert coverage["semantic_source_chars"] == coverage["semantic_attempted_source_chars"] == 337
+    assert coverage["semantic_failed_batch_count"] == 0
+    assert coverage["static_scanned_file_count"] == 1
+    assert "private-secret" not in json.dumps(coverage)
+
+
+def test_coverage_summary_preserves_partial_counts_and_does_not_infer_unknown():
+    from app.services.agent_team_summary import summarize_dependencies
+
+    result = summarize_dependencies({"review": {"status": "completed", "result": {
+        "status": "failed", "coverage": {"stage": "failed", "total_chunks": 2,
+                                              "completed_chunks": 1, "failed_chunks": 1},
+    }}, "unknown": {"status": "completed", "result": {"status": "completed"}}})
+    coverage = {row["task_key"]: row for row in result["coverage_summary"]}
+    assert result["status"] == "failed"
+    assert coverage["review"]["completed_chunks"] == 1
+    assert coverage["review"]["failed_chunks"] == 1
+    assert coverage["unknown"] == {"task_key": "unknown"}

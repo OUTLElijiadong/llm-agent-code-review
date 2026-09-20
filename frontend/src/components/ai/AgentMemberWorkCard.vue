@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
 
 import type {
   AgentTeamEvent,
@@ -94,9 +95,7 @@ watch(isRunning, (running) => {
 onBeforeUnmount(stopTick)
 
 function parseTime(value?: string | null): number {
-  if (!value) return Number.NaN
-  const parsed = new Date(value).getTime()
-  return Number.isFinite(parsed) ? parsed : Number.NaN
+  return parseUtcTimestamp(value)
 }
 
 const startedTs = computed(() => {
@@ -185,8 +184,7 @@ interface LogLine {
 function formatClockTime(value?: string | null): string {
   const ts = parseTime(value)
   if (!Number.isFinite(ts)) return ''
-  const date = new Date(ts)
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  return formatDateTime(ts, 'HH:mm')
 }
 
 const logLines = computed<LogLine[]>(() => {

@@ -444,7 +444,7 @@
         <div class="ai-summary" v-html="summaryHtml"></div>
       </section>
       <footer class="paper-foot font-mono">
-        PRISM v1.0 · 基于大模型智能体的代码质量审查管理系统 · 生成于 {{ formatDate(new Date().toISOString()) }}
+        PRISM {{ APP_DISPLAY_VERSION }} · 基于大模型智能体的代码质量审查管理系统 · 生成于 {{ formatDate(new Date().toISOString()) }}
       </footer>
     </div>
 
@@ -484,7 +484,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
 import { ArrowLeft, ArrowDown, Document, Download, Printer, View } from '@element-plus/icons-vue'
-import dayjs from 'dayjs'
+import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
 import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -500,6 +500,7 @@ import { getTaskIssues } from '@/api/review'
 import type { ReportDetailOut, ReportIssue, ReportFormat, ReportTemplateType } from '@/types/report'
 import { PRISM_SEVERITY_COLORS, PRISM_DIM_COLORS } from '@/components/chart/prismTheme'
 import { reviewTypeLabel } from '@/constants/reviewType'
+import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
 import { goBack } from '@/utils/navigation'
 import { renderMarkdown, stripMarkdown } from '@/utils/markdown'
 import { reviewRiskLevel, reviewScoreColor } from '@/utils/reviewScore'
@@ -680,7 +681,7 @@ const riskLevel = computed(() => isSandboxReport.value ? '安全风险未评定�
 
 function formatDate(s?: string): string {
   if (!s) return '-'
-  return dayjs(s).format('YYYY-MM-DD HH:mm')
+  return formatDateTime(parseUtcTimestamp(s), 'YYYY-MM-DD HH:mm')
 }
 
 function formatDuration(ms: number): string {

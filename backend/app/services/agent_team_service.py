@@ -141,7 +141,7 @@ def _validate_safe_input(value: Any, *, key: str = "", depth: int = 0) -> None:
 def _dependency_context(db: Session, team: AgentTeam, task: AgentTeamTask) -> dict[str, Any]:
     """只把前置节点的脱敏结果摘要传入下一节点。"""
 
-    from app.services.agent_team_summary import dependency_finding_summary
+    from app.services.agent_team_summary import dependency_coverage_summary, dependency_finding_summary
 
     wanted = {str(item) for item in _unjson(task.dependency_keys_json, [])}
     if not wanted:
@@ -155,6 +155,7 @@ def _dependency_context(db: Session, team: AgentTeam, task: AgentTeamTask) -> di
             "finding_summary": dependency_finding_summary(
                 _unjson(by_key[key].result_json, {}), redact=_public,
             ),
+            "coverage_summary": dependency_coverage_summary(_unjson(by_key[key].result_json, {})),
             "artifacts": _public(_unjson(by_key[key].artifacts_json, [])),
             "errors": _public(_unjson(by_key[key].errors_json, [])),
         }

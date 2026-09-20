@@ -4,6 +4,7 @@ import { Close, CircleCheck, Loading, WarningFilled } from "@element-plus/icons-
 import AgentTeamMemberBadge from "./AgentTeamMemberBadge.vue"
 import AgentMemberWorkCard from "./AgentMemberWorkCard.vue"
 import { getAgentTeam, type AgentTeamDetail, type AgentTeamEvent, type AgentTeamMember, type AgentTeamTask } from "@/api/agentTeams"
+import { formatDateTime, parseUtcTimestamp } from "@/utils/format"
 
 const props = defineProps<{
   teamId: number | null
@@ -129,8 +130,9 @@ const events = computed<AgentTeamEvent[]>(() => team.value?.events ?? [])
 
 const workingDuration = computed(() => {
   if (!team.value) return ""
-  const start = team.value.started_at ? new Date(team.value.started_at).getTime() : new Date(team.value.created_at ?? "").getTime()
-  const end = team.value.completed_at ? new Date(team.value.completed_at).getTime() : now.value
+  const start = parseUtcTimestamp(team.value.started_at || team.value.created_at)
+  const end = team.value.completed_at ? parseUtcTimestamp(team.value.completed_at) : now.value
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return ""
   const diff = Math.max(0, Math.floor((end - start) / 1000))
   const h = Math.floor(diff / 3600)
   const m = Math.floor((diff % 3600) / 60)
@@ -154,8 +156,8 @@ function taskStatusIcon(s: string) {
 }
 
 function eventTime(e: AgentTeamEvent): string {
-  if (!e.created_at) return ""
-  return new Date(e.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  const timestamp = parseUtcTimestamp(e.created_at)
+  return Number.isFinite(timestamp) ? formatDateTime(timestamp, "HH:mm:ss") : ""
 }
 
 function askMember(member: AgentTeamMember): void {

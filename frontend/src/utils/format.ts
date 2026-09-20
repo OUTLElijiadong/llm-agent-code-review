@@ -17,6 +17,12 @@ dayjs.extend(timezone)
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
+/** 解析服务端 UTC 时间；兼容团队旧接口省略时区后缀的 ISO 字符串。 */
+export function parseUtcTimestamp(value: string | undefined | null): number {
+  if (!value) return Number.NaN
+  return dayjs.utc(value).valueOf()
+}
+
 /**
  * 格式化日期时间为标准字符串
  * @param date - 日期字符串、时间戳或Date对象

@@ -11,6 +11,7 @@ import type {
   AgentTeamTask,
 } from '@/api/agentTeams'
 import AgentMemberWorkCard from '@/components/ai/AgentMemberWorkCard.vue'
+import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
 
 const props = withDefaults(defineProps<{
   team: AgentTeamDetail | AgentTeamSummary | null
@@ -147,10 +148,8 @@ watch(
 )
 
 function formatTime(value?: string | null): string {
-  if (!value) return ''
-  const timestamp = new Date(value)
-  if (Number.isNaN(timestamp.getTime())) return ''
-  return timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const timestamp = parseUtcTimestamp(value)
+  return Number.isFinite(timestamp) ? formatDateTime(timestamp, 'HH:mm') : ''
 }
 
 function eventLabel(event: AgentTeamEvent): string {

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import { CircleCheck, Loading, WarningFilled, Timer } from "@element-plus/icons-vue"
 import AgentTeamMemberBadge from "./AgentTeamMemberBadge.vue"
 import type { AgentTeamDetail, AgentTeamEvent, AgentTeamMember, AgentTeamTask } from "@/api/agentTeams"
+import { parseUtcTimestamp } from "@/utils/format"
 
 const props = defineProps<{
   team: AgentTeamDetail | null
@@ -52,8 +53,9 @@ const teamCardLabel = computed(() => (
 
 const workingDuration = computed(() => {
   if (!props.team) return ""
-  const start = props.team.started_at ? new Date(props.team.started_at).getTime() : new Date(props.team.created_at ?? "").getTime()
-  const end = props.team.completed_at ? new Date(props.team.completed_at).getTime() : now.value
+  const start = parseUtcTimestamp(props.team.started_at || props.team.created_at)
+  const end = props.team.completed_at ? parseUtcTimestamp(props.team.completed_at) : now.value
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return ""
   const diff = Math.max(0, Math.floor((end - start) / 1000))
   const m = Math.floor(diff / 60)
   const s = diff % 60
@@ -104,7 +106,7 @@ const EVENT_ACTION_TEXT: Record<string, string> = {
 
 function secondsBetween(start: string | null | undefined, end: number): number {
   if (!start) return 0
-  const value = new Date(start).getTime()
+  const value = parseUtcTimestamp(start)
   if (!Number.isFinite(value)) return 0
   return Math.max(0, Math.floor((end - value) / 1000))
 }
@@ -150,8 +152,8 @@ function eventText(event: AgentTeamEvent): string {
 const latestEvents = computed(() => {
   const list = [...events.value]
   list.sort((a, b) => {
-    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
-    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+    const aTime = parseUtcTimestamp(a.created_at)
+    const bTime = parseUtcTimestamp(b.created_at)
     return (Number.isFinite(aTime) ? aTime : 0) - (Number.isFinite(bTime) ? bTime : 0)
   })
   return list.slice(-3)

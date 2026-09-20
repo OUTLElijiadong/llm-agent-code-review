@@ -28,6 +28,21 @@ beforeEach(() => {
 })
 
 describe('问题追踪失败恢复', () => {
+  it.each(['2026-09-20T12:51:10', '2026-09-20T12:51:10Z', '2026-09-20T20:51:10+08:00'])('服务端时间 %s 在非 UTC 浏览器显示本地时间', async (createdAt) => {
+    vi.stubEnv('TZ', 'Asia/Shanghai')
+    const wrapper = render()
+    try {
+      expect(new Date().getTimezoneOffset()).toBe(-480)
+      mocks.issues.mockResolvedValue({ items: [{ ...row, create_time: createdAt }], total: 1 })
+      await flushPromises()
+      await (wrapper.vm as any).loadIssues()
+      expect(wrapper.get('.ic-line2').text()).toContain('2026-09-20 20:51')
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('项目筛选失败不阻断问题加载，重试项目只刷新项目选项', async () => {
     mocks.projects.mockRejectedValueOnce(new Error('项目读取失败'))
     const wrapper = render()

@@ -99,7 +99,7 @@
               <span class="tc-project">{{ row.project_name }}</span>
               <span>问题 {{ row.review_type === 'sandbox_test' ? (row.report_issue_summary?.total ?? '—') : row.total_issues }}</span>
               <span>{{ formatDuration(row.duration_ms) }}</span>
-              <span>{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
+              <span>{{ formatDateTime(parseUtcTimestamp(row.create_time), 'YYYY-MM-DD HH:mm') }}</span>
             </div>
             <div v-if="row.status === 'running' && row.total_files" class="tc-progress" :title="`${row.processed_files}/${row.total_files} 文件`">
               <span class="tc-progress-fill" :style="{ width: `${Math.min(100, Math.round(((row.processed_files || 0) / row.total_files) * 100))}%` }"></span>
@@ -168,7 +168,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
 import { Plus } from '@element-plus/icons-vue'
 import { getReviewTasks, deleteReviewTask, cancelReviewTask } from '@/api/review'
 import { getProjects } from '@/api/project'

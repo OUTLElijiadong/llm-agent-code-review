@@ -98,6 +98,25 @@ beforeEach(() => {
 })
 
 describe('ReportDetail 报告口径', () => {
+  it.each(['2026-09-20T12:50:47', '2026-09-20T12:50:47Z', '2026-09-20T20:50:47+08:00'])('报告任务时间 %s 按 UTC 解释并保留本地生成时刻', async (createdAt) => {
+    vi.stubEnv('TZ', 'Asia/Shanghai')
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-20T12:51:05Z'))
+    reportApi.getReportDetail.mockResolvedValue({
+      task: { create_time: createdAt }, project: {}, stats: {}, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    try {
+      expect(new Date().getTimezoneOffset()).toBe(-480)
+      await flushPromises()
+      expect(wrapper.get('.cover-date').text()).toBe('2026-09-20 20:50')
+      expect(wrapper.get('.paper-foot').text()).toContain('生成于 2026-09-20 20:51')
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('沙箱4个未分级报告条目不展示四级全零和虚构修复进度', async () => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: { project_name: '沙箱项目' },

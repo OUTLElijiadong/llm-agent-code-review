@@ -26,6 +26,23 @@ async function render() {
 }
 
 describe('任务列表轮询恢复', () => {
+  it.each(['2026-09-20T12:50:47', '2026-09-20T12:50:47Z', '2026-09-20T20:50:47+08:00'])('服务端时间 %s 转为本地时间，刷新时刻和日期筛选保持原义', async (createdAt) => {
+    vi.stubEnv('TZ', 'Asia/Shanghai')
+    try {
+      vi.setSystemTime(new Date('2026-09-20T12:51:05Z'))
+      expect(new Date().getTimezoneOffset()).toBe(-480)
+      api.tasks.mockResolvedValue(pageOf([{ id: 179, status: 'success', create_time: createdAt }]))
+      const vm = await render()
+      expect(wrapper.get('.tc-line2').text()).toContain('2026-09-20 20:50')
+      expect(wrapper.get('[role="status"]').text()).toContain('最近成功读取：2026-09-20 20:51:05')
+      vm.dateRange = ['2026-09-20', '2026-09-21']
+      await vm.loadData()
+      expect(api.tasks).toHaveBeenLastCalledWith(expect.objectContaining({ start: '2026-09-20', end: '2026-09-21' }))
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('R8 轮询错误保留最后结果和错误提示，网络恢复后自动重试', async () => {
     api.tasks.mockResolvedValueOnce(pageOf([running])).mockRejectedValueOnce(new Error('连接中断')).mockResolvedValue(pageOf([{ id: 1, status: 'success' }]))
     const vm = await render()

@@ -14,6 +14,7 @@ import {
 } from '@/api/agentTeams'
 import AgentMemberWorkCard from '@/components/ai/AgentMemberWorkCard.vue'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
+import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
 
 /**
  * 子 Agent 团队独立悬浮窗(Codex 风格多 Agent 群聊视图)。
@@ -182,10 +183,8 @@ function taskMember(task: AgentTeamTask): string {
 }
 
 function formatTime(value?: string | null): string {
-  if (!value) return ''
-  const timestamp = new Date(value)
-  if (Number.isNaN(timestamp.getTime())) return ''
-  return timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const timestamp = parseUtcTimestamp(value)
+  return Number.isFinite(timestamp) ? formatDateTime(timestamp, 'HH:mm') : ''
 }
 
 function formatFullDetail(value: unknown): string {
