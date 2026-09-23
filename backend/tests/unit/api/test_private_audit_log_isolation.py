@@ -13,7 +13,7 @@ from app.schemas.common import PageOut
 def _list(db, *, viewer_id=7, keyword="", actor_id=None):
     result = audit.list_audit_logs(
         action="", keyword=keyword, actor_id=actor_id, start="", end="", page=1, page_size=20,
-        db=db, _=SimpleNamespace(id=viewer_id, role="admin"),
+        db=db, viewer=SimpleNamespace(id=viewer_id, role="admin"),
     ).data
     return PageOut[AuditLogOut].model_validate(result.model_dump())
 

@@ -63,6 +63,7 @@ const menuItems: MenuItem[] = [
   { path: '/pentests',  title: '渗透测试',   icon: Aim,              roles: ['user', 'reviewer'] },
   { path: '/issues',    title: '问题追踪',   icon: Warning,          roles: ['user', 'reviewer'] },
   { path: '/reports',   title: '审查报告',   icon: DataBoard,        roles: ['user', 'reviewer'] },
+  { path: '/audit',     title: '操作审计',   icon: Operation,        roles: ['reviewer'] },
   { path: '/agents',    title: 'Agent 工作台', icon: Cpu,            roles: ['admin', 'user', 'reviewer'] },
   { path: '/sandboxes', title: '代码沙箱',   icon: Monitor,          roles: ['admin', 'user', 'reviewer'] },
   { path: '/security',  title: '安全与规则', icon: Aim,              roles: ['admin', 'user', 'reviewer'] },
@@ -114,7 +115,7 @@ if (typeof window !== 'undefined') {
 
 const userGroupDefinitions = [
   { key: 'workspace', title: '工作区', paths: ['/dashboard', '/projects', '/code'] },
-  { key: 'review', title: '智能审查', paths: ['/reviews', '/issues', '/reports'] },
+  { key: 'review', title: '智能审查与审计', paths: ['/reviews', '/issues', '/reports', '/audit'] },
   { key: 'agents', title: 'Agent 与安全', paths: ['/agents', '/sandboxes', '/security'] },
   { key: 'community', title: '社区与支持', paths: ['/forum', '/support'] },
   { key: 'personal', title: '个人空间', paths: ['/knowledge', '/profile/personalization', '/profile'] },

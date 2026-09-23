@@ -91,6 +91,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '审查报告', permissions: ['report:view'] },
       },
       {
+        path: 'audit',
+        name: 'AuditLogs',
+        component: () => import('@/views/admin/SystemAudit.vue'),
+        meta: { title: '操作审计', roles: ['reviewer'], permissions: ['audit:view'] },
+      },
+      {
         path: 'reports/:id',
         name: 'ReportDetail',
         component: () => import('@/views/report/ReportDetail.vue'),

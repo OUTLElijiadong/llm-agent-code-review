@@ -1,13 +1,12 @@
-"""
-操作审计 API 路由(管理员)
-"""
+"""操作审计 API 路由。读取范围由 ``audit:view`` 权限控制。"""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import require_admin
+from app.core.permission_codes import PermissionCode
+from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.audit import AuditLogOut
 from app.schemas.common import PageOut, Resp
@@ -26,8 +25,8 @@ def list_audit_logs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    viewer: User = Depends(require_permission(PermissionCode.AUDIT_VIEW)),
 ):
-    """审计日志列表(仅管理员)"""
-    result = audit_service.list_logs(db, action, keyword, actor_id, start, end, page, page_size, viewer=_)
+    """审计日志列表(仅授予审计读取权限的账号)"""
+    result = audit_service.list_logs(db, action, keyword, actor_id, start, end, page, page_size, viewer=viewer)
     return Resp(data=PageOut(**result))

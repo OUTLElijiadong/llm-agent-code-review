@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const harness = vi.hoisted(() => ({
   push: vi.fn(),
   permission: true,
+  auditPermission: true,
   role: 'user',
 }))
 
@@ -15,6 +16,8 @@ vi.mock('vue-router', () => ({
       matched: [{}],
       meta: path === '/agents'
         ? { permissions: ['agent:view', 'agent_asset:create'] }
+        : path === '/audit'
+          ? { roles: ['reviewer'], permissions: ['audit:view'] }
         : path === '/projects'
           ? { permissions: ['test:permission'] }
           : {},
@@ -29,7 +32,7 @@ vi.mock('@/stores/user', () => ({
     isAdmin: () => false,
     isSuperAdmin: () => false,
     hasRole: (role: string) => role === harness.role,
-    hasPermission: () => harness.permission,
+    hasPermission: (code: string) => code === 'audit:view' ? harness.auditPermission : harness.permission,
   }),
 }))
 
@@ -41,6 +44,7 @@ describe('AppSidebar ordinary member navigation', () => {
     window.localStorage.clear()
     harness.push.mockClear()
     harness.permission = true
+    harness.auditPermission = true
     harness.role = 'user'
   })
 
@@ -61,6 +65,17 @@ describe('AppSidebar ordinary member navigation', () => {
 
     expect(wrapper.find('[data-route="/agents"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Agent 工作台')
+  })
+
+  it('审查员有 audit:view 时显示操作审计入口，缺权时隐藏', () => {
+    harness.role = 'reviewer'
+    const wrapper = mountSidebar()
+    expect(wrapper.find('[data-route="/audit"]').exists()).toBe(true)
+
+    wrapper.unmount()
+    harness.auditPermission = false
+    const restricted = mountSidebar()
+    expect(restricted.find('[data-route="/audit"]').exists()).toBe(false)
   })
 
   it('普通用户使用同一 Agent 工作台,不再显示重复的 Agent 工坊入口', () => {

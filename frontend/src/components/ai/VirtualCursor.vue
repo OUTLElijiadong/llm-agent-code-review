@@ -115,6 +115,7 @@ const ROUTE_LABELS: Array<[string, string]> = [
   ['/reviews', '审查'],
   ['/issues', '问题'],
   ['/reports', '报告'],
+  ['/audit', '操作审计'],
   ['/security', '安全'],
   ['/sandboxes', '沙箱'],
   ['/agents', 'Agent'],

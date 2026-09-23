@@ -3,7 +3,7 @@ import type { Page } from '@/types/common'
 import type { AuditLogOut, AuditQuery } from '@/types/audit'
 
 /**
- * 管理员审计日志列表
+ * 审计日志列表(需要 audit:view 权限)
  * @param params 查询条件
  * @returns 分页审计记录
  */

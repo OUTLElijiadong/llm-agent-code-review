@@ -25,6 +25,7 @@ const LOCAL_NAVIGATION_ALIASES: Record<string, string[]> = {
   '/admin/operations': ['运行', '监控', '告警', '审计', '总览'],
   '/admin/access': ['用户', '权限', '角色'],
   '/admin/platform': ['平台配置', '模型配置', '节点'],
+  '/audit': ['系统操作审计', '操作审计', '系统审计', '审计日志'],
   '/projects': ['项目'],
   '/code': ['代码'],
   '/reviews': ['审查任务', '审查'],

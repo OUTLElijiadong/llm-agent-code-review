@@ -26,6 +26,7 @@ describe('authenticated route visibility permissions', () => {
     RuleConfig: 'rule:view',
     ReportList: 'report:view',
     ReportDetail: 'report:view',
+    AuditLogs: 'audit:view',
     AgentCenter: 'agent:view',
     SecurityCenter: 'security:view',
   }
@@ -50,5 +51,13 @@ describe('authenticated route visibility permissions', () => {
     const canonical = router.getRoutes().find((item) => item.name === 'ReportTemplateManage')
     expect(legacy?.redirect).toEqual({ path: '/admin/platform', query: { section: 'report-templates' } })
     expect(canonical?.path).toBe('/report/templates')
+  })
+
+  it('操作审计作为审查员权限页面独立于管理员路由开放', () => {
+    const route = router.getRoutes().find((item) => item.name === 'AuditLogs')
+
+    expect(route?.path).toBe('/audit')
+    expect(route?.meta.roles).toContain('reviewer')
+    expect(route?.meta.permissions).toContain('audit:view')
   })
 })

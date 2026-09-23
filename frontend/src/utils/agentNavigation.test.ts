@@ -97,6 +97,7 @@ describe('navigation fallback extraction', () => {
 describe('local navigation cost guard', () => {
   const routeOptions = {
     routes: [
+      { path: '/audit', meta: { title: '操作审计', roles: ['reviewer'], permissions: ['audit:view'] } },
       {
         path: '/admin',
         children: [
@@ -117,7 +118,9 @@ describe('local navigation cost guard', () => {
         meta: path === '/admin/audit'
           ? { title: '系统操作审计', role: 'admin' }
           : path === '/admin/users'
-            ? { title: '用户管理', role: 'admin', permissions: ['user:view'] }
+          ? { title: '用户管理', role: 'admin', permissions: ['user:view'] }
+            : path === '/audit'
+              ? { title: '操作审计', roles: ['reviewer'], permissions: ['audit:view'] }
             : path === '/reviews'
               ? { title: '审查记录', permissions: ['review:view'] }
             : { title: '项目管理', permissions: ['project:view'] },
@@ -128,7 +131,7 @@ describe('local navigation cost guard', () => {
   it('resolves an explicit navigation request without requiring a model round', () => {
     const result = resolveLocalNavigationRequest(
       '请只执行页面导航：打开系统操作审计页面。不要查询、修改、删除或执行任何运维操作。',
-      routerFor('/admin/audit') as never,
+      routerFor('/audit') as never,
       { ...guard(true), isAdmin: () => true },
     )
 
@@ -136,9 +139,22 @@ describe('local navigation cost guard', () => {
       kind: 'navigate',
       directive: {
         action: 'navigate',
-        route: '/admin/audit',
-        label: '系统操作审计',
+        route: '/audit',
+        label: '操作审计',
       },
+    })
+  })
+
+  it('审查员打开系统操作审计时导航到 audit:view 页面', () => {
+    const result = resolveLocalNavigationRequest(
+      '打开系统操作审计页面',
+      routerFor('/audit') as never,
+      { ...guard(true), hasRole: (role: string) => role === 'reviewer' },
+    )
+
+    expect(result).toEqual({
+      kind: 'navigate',
+      directive: { action: 'navigate', route: '/audit', label: '操作审计' },
     })
   })
 

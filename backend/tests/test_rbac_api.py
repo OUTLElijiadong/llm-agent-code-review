@@ -29,7 +29,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
 from app.main import app
-from app.models.rbac import Menu, Permission, Role
+from app.models.rbac import Menu, Permission, Role, RolePermission, UserRole
 from app.models.review_rule import ReviewRule
 from app.models.user import User
 from app.services.admin_capability_registry import CAPABILITY_BY_CODE
@@ -125,6 +125,7 @@ def seed(db: Session) -> Dict[str, Any]:
         ("project:delete", "删除项目", "project"),
         ("agent:view", "查看Agent", "agent"),
         ("agent:chat", "Agent对话", "agent"),
+        ("audit:view", "查看审计", "audit"),
         ("review:start", "启动审查", "review"),
         ("review:view", "查看审查", "review"),
         ("review:cancel", "取消审查", "review"),
@@ -426,6 +427,55 @@ class TestRbacNormalUserForbidden:
         """普通用户删除角色应 403"""
         client = client_factory(seed["normal"])
         _forbidden(client.delete("/api/rbac/roles/10"))
+
+
+def test_merged_reviewer_can_read_audit_logs_but_user_cannot(db, seed, client_factory):
+    """审计员并入审查员后，audit:view 可用；普通账号仍不能读取系统审计。"""
+    reviewer = User(
+        id=3,
+        username="reviewer",
+        password="x",
+        role="reviewer",
+        status=1,
+    )
+    audit_menu = Menu(
+        id=4,
+        parent_id=None,
+        name="操作审计",
+        path="/audit",
+        component=None,
+        icon=None,
+        sort=400,
+        permission_code="audit:view",
+        visible=1,
+        is_builtin=1,
+    )
+    db.add(reviewer)
+    db.flush()
+    db.add_all([
+        UserRole(user_id=reviewer.id, role_id=seed["reviewer_role"].id),
+        RolePermission(
+            role_id=seed["reviewer_role"].id,
+            permission_id=seed["permissions"]["audit:view"].id,
+        ),
+        audit_menu,
+    ])
+    db.commit()
+
+    reviewer_client = client_factory(reviewer)
+    response = reviewer_client.get("/api/admin/audit?page=1&page_size=1")
+    assert response.status_code == 200, response.text
+    assert response.json()["code"] == 0
+    reviewer_menus = _ok(reviewer_client.get("/api/rbac/users/3/menus"))
+    assert any(item["path"] == "/audit" for item in reviewer_menus)
+
+    ordinary_client = client_factory(seed["normal"])
+    _forbidden(ordinary_client.get("/api/admin/audit?page=1&page_size=1"))
+    ordinary_menus = _ok(ordinary_client.get("/api/rbac/users/2/menus"))
+    assert all(item["path"] != "/audit" for item in ordinary_menus)
+
+    admin_client = client_factory(seed["admin"])
+    assert admin_client.get("/api/admin/audit?page=1&page_size=1").status_code == 200
 
 
 # ============================================================================

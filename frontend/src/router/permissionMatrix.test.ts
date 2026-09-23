@@ -74,3 +74,19 @@ describe('全部已注册私有页面的真实路由守卫与用户 store 矩阵
     expect(await installedGuard()(resolve(record.path), resolve('/admin/overview'))).toBe(true)
   })
 })
+
+describe('审查员与审计员合并后的操作审计权限', () => {
+  it('拥有 audit:view 的审查员可进入，缺少该权限时拒绝', async () => {
+    const user = useUserStore()
+    user.token = 'isolated-reviewer-fixture'
+    user.profile = { id: 107, username: 'reviewer', role: 'reviewer', status: 1 }
+    user.roles = ['reviewer']
+    user.permissions = new Set(['audit:view'])
+    const target = resolve('/audit')
+
+    expect(await installedGuard()(target, resolve('/dashboard'))).toBe(true)
+
+    user.permissions = new Set(['review:view'])
+    expect(await installedGuard()(target, resolve('/dashboard'))).toEqual({ path: '/403' })
+  })
+})
