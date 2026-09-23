@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Optional
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.ai.deepseek_agent import DeepSeekAgent
+from app.ai.deepseek_agent import DeepSeekAgent, DeepSeekOutputTruncatedError, _clamp_max_tokens
 from app.ai.multi_agent import format_agent_section
 from app.ai.prompt_builder import build_prompt
 from app.ai.result_parser import parse
+from app.core.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.models.user import User
@@ -132,13 +134,27 @@ def invoke_published_agent(
     )
     client = DeepSeekAgent(api_config=resolve_subagent_config(db, resolve_api_config(db, user.id)))
     with usage_context(int(user.id), current_attribution(int(user.id)), db=db):
-        raw, meta = client.call_raw(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            agent_label=profile.code,
-            temperature=profile.temperature,
-            max_tokens=profile.max_tokens,
-        )
+        call_args = {
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "agent_label": profile.code,
+            "temperature": profile.temperature,
+        }
+        try:
+            raw, meta = client.call_raw(**call_args, max_tokens=profile.max_tokens)
+        except DeepSeekOutputTruncatedError:
+            # 已发布版本可能仍配置 4096；推理与正文共享预算。与正式审查
+            # 一样仅在截断时重试，避免把部分 JSON 当作完整审查结论。
+            ceiling = _clamp_max_tokens(settings.deepseek_max_output_tokens)
+            initial_budget = _clamp_max_tokens(profile.max_tokens)
+            retry_budget = min(max(initial_budget * 4, 8192), ceiling)
+            if retry_budget <= initial_budget:
+                raise
+            logger.warning(
+                f"[published_agent] {profile.code} 输出被截断，按 "
+                f"{initial_budget}→{retry_budget} 提高输出预算重试一次"
+            )
+            raw, meta = client.call_raw(**call_args, max_tokens=retry_budget)
     result = parse(raw)
     client.log_deferred(db, user_id=user.id, meta=meta)
     db.commit()

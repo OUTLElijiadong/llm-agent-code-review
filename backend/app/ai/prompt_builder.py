@@ -6,6 +6,7 @@ v3 增强(2026-06-25):
 - 新增 get_issue_json_schema() 函数,供调试/日志/校验使用
 - build_prompt() 通过模板已包含 v3 字段约束(cvss_score/cvss_vector/remediation/compliance_mapping)
 """
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -89,7 +90,7 @@ def _format_rules(rules, language: str = "") -> str:
     """将规则列表格式化为Prompt中的规则段落,按分类和严重度组织
 
     Args:
-        rules: 启用的规则ORM对象列表
+        rules: 启用的规则 ORM 对象或 JSON 字典列表
         language: 当前审查文件的语言
 
     Returns:
@@ -98,9 +99,13 @@ def _format_rules(rules, language: str = "") -> str:
     if not rules:
         return "(用户未启用任何规则,请按通用最佳实践审查)"
 
+    def field(rule, name: str, default: str = "") -> str:
+        value = rule.get(name, default) if isinstance(rule, Mapping) else getattr(rule, name, default)
+        return str(value) if value is not None else default
+
     by_type: dict[str, list] = {}
     for r in rules:
-        by_type.setdefault(r.rule_type, []).append(r)
+        by_type.setdefault(field(r, "rule_type", "other"), []).append(r)
 
     type_labels = {
         "security": "🔴 安全检查",
@@ -115,8 +120,7 @@ def _format_rules(rules, language: str = "") -> str:
     lang = (language or "").strip().lower()
     lang_filtered_count = sum(
         1 for r in rules if (
-            getattr(r, "language", "*") in ("*", lang) or
-            getattr(r, "language", "*") == "*"
+            field(r, "language", "*").lower() in ("*", lang)
         )
     )
 
@@ -131,16 +135,16 @@ def _format_rules(rules, language: str = "") -> str:
     counter = 0
     for rule_type, type_rules in by_type.items():
         label = type_labels.get(rule_type, rule_type)
-        type_rules.sort(key=lambda r: severity_order.get(getattr(r, "severity", "中"), 3))
+        type_rules.sort(key=lambda r: severity_order.get(field(r, "severity", "中"), 3))
         lines.append(f"### {label}  ({len(type_rules)} 条)")
         for r in type_rules:
             counter += 1
-            sev = getattr(r, "severity", "中")
-            rule_lang = getattr(r, "language", "*")
+            sev = field(r, "severity", "中")
+            rule_lang = field(r, "language", "*")
             lang_tag = f"[{rule_lang}]" if rule_lang != "*" else ""
             lines.append(
-                f"{counter}. [{sev}] {r.rule_name}{lang_tag} ({r.rule_code})\n"
-                f"   {r.rule_content}",
+                f"{counter}. [{sev}] {field(r, 'rule_name')}{lang_tag} ({field(r, 'rule_code')})\n"
+                f"   {field(r, 'rule_content')}",
             )
         lines.append("")
 
