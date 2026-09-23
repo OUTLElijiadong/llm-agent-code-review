@@ -774,6 +774,7 @@ def _runtime_codes() -> set[str]:
 
 def _custom_agents(db: Session, user: User) -> list[dict[str, Any]]:
     from app.services.agent_mesh_dispatcher import dispatch_state
+    from app.services.agent_team_service import MAX_CUSTOM_TEAM_CODE_CHARS
 
     bind = db.get_bind()
     if bind is None or not inspect(bind).has_table(CustomAgent.__tablename__):
@@ -801,6 +802,11 @@ def _custom_agents(db: Session, user: User) -> list[dict[str, Any]]:
             "last_seen_at": "",
             "description": row.description or "",
             "dispatch_state": dispatch_state(f"custom:{row.code}"),
+            "team_input_contract": {
+                "required_one_of": ["code", "project_id + file_id"],
+                "file_id": "当前账号可见项目中的单个可审查文本文件，执行时重新读取源码和权限",
+                "max_code_chars": MAX_CUSTOM_TEAM_CODE_CHARS,
+            },
         }
         for row in rows
     ]

@@ -127,7 +127,8 @@
             <p class="cover-task font-mono">{{ taskName }} · {{ reviewType }}</p>
 
             <div class="cover-tags">
-              <span class="cover-tag">{{ language || 'unknown' }}</span>
+              <span class="cover-tag">项目语言：{{ projectLanguage }}</span>
+              <span v-if="reviewedLanguages" class="cover-tag">审查语言：{{ reviewedLanguages }}</span>
               <span class="cover-tag">{{ totalFiles }} 文件</span>
               <span class="cover-tag">{{ formatDuration(durationMs) }}</span>
               <span class="cover-tag">{{ ruleCount }} 规则</span>
@@ -253,30 +254,32 @@
         <header class="card-head">
           <h3 class="font-display">审查文件 ({{ report.files.length }})</h3>
         </header>
-        <table class="paper-table">
-          <thead>
-            <tr>
-              <th>文件名</th>
-              <th class="col-num">语言</th>
-              <th class="col-num">问题</th>
-              <th class="col-num">严重</th>
-              <th class="col-num">评分</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(f, i) in report.files" :key="i">
-              <td class="font-mono">{{ f.file_name }}</td>
-              <td>{{ f.language || '-' }}</td>
-              <td class="font-mono">{{ f.issue_count }}</td>
-              <td class="font-mono" :style="{ color: f.severe_count ? 'var(--sev-severe)' : 'inherit' }">
-                {{ f.severe_count ?? 0 }}
-              </td>
-              <td class="font-mono" :style="{ color: scoreFlatColor(Number(f.score) || 0) }">
-                {{ f.score ?? '-' }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="paper-table-scroll" role="region" aria-label="审查文件表格，可横向滚动" tabindex="0">
+          <table class="paper-table">
+            <thead>
+              <tr>
+                <th>文件名</th>
+                <th class="col-num">语言</th>
+                <th class="col-num">问题</th>
+                <th class="col-num">严重</th>
+                <th class="col-num">评分</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(f, i) in report.files" :key="i">
+                <td class="font-mono">{{ f.file_name }}</td>
+                <td>{{ f.language || '-' }}</td>
+                <td class="font-mono">{{ f.issue_count }}</td>
+                <td class="font-mono" :style="{ color: f.severe_count ? 'var(--sev-severe)' : 'inherit' }">
+                  {{ f.severe_count ?? 0 }}
+                </td>
+                <td class="font-mono" :style="{ color: scoreFlatColor(Number(f.score) || 0) }">
+                  {{ f.score ?? '-' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <!-- ============ 使用规则 ============ -->
@@ -342,51 +345,53 @@
           </h3>
           <p class="card-desc">按 CVSS 评分降序排列,点击行查看详细修复方案</p>
         </header>
-        <table class="paper-table top10-table">
-          <thead>
-            <tr>
-              <th class="col-rank">#</th>
-              <th>漏洞标题</th>
-              <th class="col-num">CVSS</th>
-              <th class="col-num">CWE</th>
-              <th class="col-num">严重度</th>
-              <th class="col-num">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(it, idx) in top10Issues"
-              :key="it.id"
-              :class="{ 'row-selected': selectedRemediationIssue?.id === it.id }"
-              :aria-current="selectedRemediationIssue?.id === it.id ? 'true' : undefined"
-              @click="selectRemediation(it.id)"
-            >
-              <td class="font-mono col-rank">{{ idx + 1 }}</td>
-              <td class="issue-title">
-                <span class="it-name">{{ it.title || it.issue_type }}</span>
-                <span v-if="it.file_name" class="it-file font-mono">{{ it.file_name }}:{{ it.line_number ?? '?' }}</span>
-              </td>
-              <td class="font-mono col-num" :style="{ color: cvssSeverityColor(deterministicCvssScore(it)), fontWeight: 600 }">
-                {{ deterministicCvssScore(it)?.toFixed(1) ?? '未评分' }}
-              </td>
-              <td class="font-mono col-num">{{ it.cwe || it.issue_type || '-' }}</td>
-              <td class="col-num">
-                <span
-                  class="sev-tag"
-                  :style="{ color: cvssSeverityColor(deterministicCvssScore(it)), borderColor: cvssSeverityColor(deterministicCvssScore(it)) }"
-                >{{ cvssSeverityLabel(deterministicCvssScore(it)) }}</span>
-              </td>
-              <td class="col-num">
-                <el-button
-                  link
-                  type="primary"
-                  size="small"
-                  @click.stop="selectRemediation(it.id)"
-                >查看修复方案</el-button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="paper-table-scroll" role="region" aria-label="高危漏洞表格，可横向滚动" tabindex="0">
+          <table class="paper-table top10-table">
+            <thead>
+              <tr>
+                <th class="col-rank">#</th>
+                <th>漏洞标题</th>
+                <th class="col-num">CVSS</th>
+                <th class="col-num">CWE</th>
+                <th class="col-num">严重度</th>
+                <th class="col-num">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(it, idx) in top10Issues"
+                :key="it.id"
+                :class="{ 'row-selected': selectedRemediationIssue?.id === it.id }"
+                :aria-current="selectedRemediationIssue?.id === it.id ? 'true' : undefined"
+                @click="selectRemediation(it.id)"
+              >
+                <td class="font-mono col-rank">{{ idx + 1 }}</td>
+                <td class="issue-title">
+                  <span class="it-name">{{ it.title || it.issue_type }}</span>
+                  <span v-if="it.file_name" class="it-file font-mono">{{ it.file_name }}:{{ it.line_number ?? '?' }}</span>
+                </td>
+                <td class="font-mono col-num" :style="{ color: cvssSeverityColor(deterministicCvssScore(it)), fontWeight: 600 }">
+                  {{ deterministicCvssScore(it)?.toFixed(1) ?? '未评分' }}
+                </td>
+                <td class="font-mono col-num">{{ it.cwe || it.issue_type || '-' }}</td>
+                <td class="col-num">
+                  <span
+                    class="sev-tag"
+                    :style="{ color: cvssSeverityColor(deterministicCvssScore(it)), borderColor: cvssSeverityColor(deterministicCvssScore(it)) }"
+                  >{{ cvssSeverityLabel(deterministicCvssScore(it)) }}</span>
+                </td>
+                <td class="col-num">
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    @click.stop="selectRemediation(it.id)"
+                  >查看修复方案</el-button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <!-- ============ T15 v3 字段:详细修复方案 ============ -->
@@ -593,7 +598,12 @@ const taskName = computed(() => {
   return typeof name === 'string' ? name : `任务 #${taskId}`
 })
 const reviewType  = computed(() => reviewTypeLabel(report.value?.task?.review_type as string))
-const language    = computed(() => (report.value?.project?.language as string) ?? '')
+const projectLanguage = computed(() => String(report.value?.project?.language ?? '').trim() || '未标注')
+const reviewedLanguages = computed(() => [...new Set(
+  (report.value?.files ?? [])
+    .map(file => String(file.language ?? '').trim().toLowerCase())
+    .filter(Boolean),
+)].join('、'))
 const totalFiles  = computed(() => Number(report.value?.task?.total_files ?? 0))
 const durationMs  = computed(() => Number(report.value?.task?.duration_ms ?? 0))
 const ruleCount   = computed(() => report.value?.rules_snapshot?.length ?? 0)
@@ -1494,6 +1504,12 @@ onBeforeUnmount(() => {
 }
 
 /* ============ 表格 ============ */
+.paper-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
 .paper-table {
   width: 100%;
   border-collapse: collapse;
@@ -1516,6 +1532,65 @@ onBeforeUnmount(() => {
   td { color: var(--gray-700); }
 
   .col-num { text-align: right; width: 80px; }
+}
+
+@media (max-width: 600px) {
+  .page-head {
+    flex-wrap: wrap;
+
+    h1 { min-width: 0; }
+  }
+
+  .head-actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+
+    :deep(.el-button) {
+      flex: 1 1 100px;
+      margin-left: 0;
+    }
+  }
+
+  .cover { padding: 24px 18px; }
+
+  .cover-head {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .cover-id, .cover-date { overflow-wrap: anywhere; }
+
+  .cover-main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+    margin: 24px 0;
+  }
+
+  .cover-meta { min-width: 0; }
+
+  .cover-project {
+    font-size: clamp(28px, 8vw, 34px);
+    overflow-wrap: anywhere;
+  }
+
+  .cover-task, .cover-tag { overflow-wrap: anywhere; }
+
+  .cover-score {
+    flex-direction: row;
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+
+  .score-ring, .score-ring svg {
+    width: 120px;
+    height: 120px;
+  }
+
+  .ring-val { font-size: 42px; }
+  .card { padding: 20px 16px; }
+
+  .paper-table { min-width: 580px; }
+  .top10-table { min-width: 760px; }
 }
 
 /* ============ 规则列表 ============ */
@@ -1822,6 +1897,8 @@ onBeforeUnmount(() => {
   .cover {
     page-break-after: always;
   }
+
+  .paper-table-scroll { overflow: visible; }
 
   .no-break {
     page-break-inside: avoid;

@@ -9,6 +9,8 @@ import pytest
 
 from app.agents.base import AgentResult
 from app.models.agent_team import AgentTeam, AgentTeamTask
+from app.models.code_file import CodeFile
+from app.models.project import Project
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_mesh_dispatcher, agent_team_dispatcher, agent_team_service, published_agent_tools
@@ -421,6 +423,127 @@ def test_custom_handler_forwards_frozen_release_snapshot(monkeypatch):
     assert captured["version_id"] == 12
     assert captured["package_checksum"] == "p" * 64
     assert captured["template_checksum"] == "v" * 64
+
+
+def test_custom_team_reads_authorized_file_at_execution(db, super_admin_user, monkeypatch):
+    project = Project(user_id=super_admin_user.id, project_name="团队源码", language="python", status="active")
+    db.add(project)
+    db.flush()
+    source = CodeFile(
+        project_id=project.id, file_name="auth.py", language="python", content="def allowed():\n    return True\n",
+        size_bytes=31, raw_size=31, line_count=2, version_no=1, is_binary=0, status="active",
+    )
+    db.add(source)
+    db.commit()
+    captured = {}
+    monkeypatch.setattr(
+        agent_team_service, "require_active_task_lease",
+        lambda *_args, **_kwargs: (SimpleNamespace(), SimpleNamespace(),
+                                  SimpleNamespace(id=3, address="custom:published_reviewer")),
+    )
+
+    def fake_invoke(_db, _user, **kwargs):
+        captured.update(kwargs)
+        return {"summary": "已完成", "release_id": 11, "version_id": 12}
+
+    monkeypatch.setattr(published_agent_tools, "invoke_published_agent", fake_invoke)
+    message = {
+        "context": {"team_id": 9, "agent_team_task_id": 12, "member_id": 3, "lease_token": "lease"},
+        "payload": {"project_id": project.id, "file_id": source.id,
+                    "_agent_team": {"member_snapshot": {"release_id": 11, "version_id": 12}}},
+    }
+    result = agent_mesh_dispatcher._custom_handler(
+        db, super_admin_user, "published_reviewer", message, trusted_team_execution=True,
+    )
+    assert result["status"] == "completed"
+    assert captured["code"] == source.content
+    assert captured["file_name"] == "auth.py"
+    assert captured["language"] == "python"
+    assert captured["release_id"] == 11
+    assert result["evidence"][0]["file_id"] == source.id
+    assert "code" not in result["evidence"][0]
+
+    untrusted = agent_mesh_dispatcher._custom_handler(db, super_admin_user, "published_reviewer", message)
+    assert untrusted["status"] == "blocked"
+
+    outsider = User(username="other_team_user", password="x", role="user", status=1)
+    db.add(outsider)
+    db.commit()
+    monkeypatch.setattr(agent_mesh_dispatcher.rbac_service, "check_permission", lambda *_args: True)
+    captured.clear()
+    foreign = agent_mesh_dispatcher._custom_handler(
+        db, outsider, "published_reviewer", message, trusted_team_execution=True,
+    )
+    assert foreign["status"] == "blocked"
+    assert captured == {}
+
+
+def test_custom_team_discards_result_if_source_changes_during_model_call(db, super_admin_user, monkeypatch):
+    project = Project(user_id=super_admin_user.id, project_name="审查中变更", language="python", status="active")
+    db.add(project)
+    db.flush()
+    source = CodeFile(
+        project_id=project.id, file_name="auth.py", language="python", content="old code",
+        size_bytes=8, raw_size=8, line_count=1, version_no=1, is_binary=0, status="active",
+    )
+    db.add(source)
+    db.commit()
+    monkeypatch.setattr(
+        agent_team_service, "require_active_task_lease",
+        lambda *_args, **_kwargs: (SimpleNamespace(), SimpleNamespace(),
+                                  SimpleNamespace(id=3, address="custom:published_reviewer")),
+    )
+
+    def replace_source(db_session, _user, **_kwargs):
+        row = db_session.get(CodeFile, source.id)
+        row.content = "new code"
+        row.version_no += 1
+        db_session.commit()
+        return {"summary": "旧源码结论", "release_id": 11, "version_id": 12}
+
+    monkeypatch.setattr(published_agent_tools, "invoke_published_agent", replace_source)
+    result = agent_mesh_dispatcher._custom_handler(
+        db, super_admin_user, "published_reviewer",
+        {"context": {"team_id": 9, "agent_team_task_id": 12, "member_id": 3, "lease_token": "lease"},
+         "payload": {"project_id": project.id, "file_id": source.id}},
+        trusted_team_execution=True,
+    )
+    assert result["status"] == "blocked"
+    assert "审查结果未回传" in result["summary"]
+
+
+def test_custom_team_discards_result_if_file_renamed_during_model_call(db, super_admin_user, monkeypatch):
+    from app.services import code_file_service
+
+    project = Project(user_id=super_admin_user.id, project_name="审查中重命名", language="python", status="active")
+    db.add(project)
+    db.flush()
+    source = CodeFile(
+        project_id=project.id, file_name="auth.py", language="python", content="old code",
+        size_bytes=8, raw_size=8, line_count=1, version_no=1, is_binary=0, status="active",
+    )
+    db.add(source)
+    db.commit()
+    monkeypatch.setattr(
+        agent_team_service, "require_active_task_lease",
+        lambda *_args, **_kwargs: (SimpleNamespace(), SimpleNamespace(),
+                                  SimpleNamespace(id=3, address="custom:published_reviewer")),
+    )
+
+    def rename_source(db_session, user, **_kwargs):
+        code_file_service.rename_file(db_session, user, source.id, "renamed.py")
+        return {"summary": "旧文件名结论", "release_id": 11, "version_id": 12}
+
+    monkeypatch.setattr(published_agent_tools, "invoke_published_agent", rename_source)
+    result = agent_mesh_dispatcher._custom_handler(
+        db, super_admin_user, "published_reviewer",
+        {"context": {"team_id": 9, "agent_team_task_id": 12, "member_id": 3, "lease_token": "lease"},
+         "payload": {"project_id": project.id, "file_id": source.id}},
+        trusted_team_execution=True,
+    )
+    assert source.version_no == 1  # 正常重命名不递增源码版本号
+    assert result["status"] == "blocked"
+    assert "审查结果未回传" in result["summary"]
 
 
 def test_governed_sandbox_handler_only_runs_for_trusted_team_lease(monkeypatch):

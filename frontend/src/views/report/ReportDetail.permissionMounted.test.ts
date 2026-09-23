@@ -65,6 +65,18 @@ it('仅查看权限实际点击HTML预览仍可用，不触发下载或无权问
   expect(issues.getTaskIssues).not.toHaveBeenCalled()
 })
 
+it('报告封面区分项目主语言与本次审查文件语言', async () => {
+  api.getReportDetail.mockResolvedValueOnce({
+    ...report,
+    project: { project_name: '手工作坊管理系统', language: 'javascript' },
+    files: [{ file_name: 'SecurityConfig.java', language: 'java', issue_count: 0, severe_count: 0, score: 100 }],
+  })
+  await render()
+  const tags = wrapper.findAll('.cover-tag').map(tag => tag.text())
+  expect(tags).toContain('项目语言：javascript')
+  expect(tags).toContain('审查语言：java')
+})
+
 it('JSON独立权限通过真实生成按钮与ElementPlus下拉菜单完成对应调用', async () => {
   useUserStore().permissions.add('report:export:json')
   await render()

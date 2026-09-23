@@ -302,6 +302,74 @@ def test_model_failure_remains_failure(db, actor, model, monkeypatch):
     assert result["status"] == "failed" and result["usage_log_ids"] == [992]
 
 
+def test_output_truncation_retries_once_with_compact_prompt_and_aggregated_usage(db, actor, model, monkeypatch):
+    calls = []
+
+    def answer(instance, message, **kwargs):
+        calls.append((message, kwargs))
+        if len(calls) == 1:
+            return AgentResult(
+                success=False,
+                failure_kind="output_truncated",
+                usage_log_ids=[901],
+                http_attempts=1,
+                model="configured-subagent",
+            )
+        return AgentResult(
+            success=True,
+            data={"summary": "有限结论", "findings": [], "limitations": []},
+            usage_log_ids=[902],
+            http_attempts=1,
+            model="configured-subagent",
+        )
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "completed"
+    assert result["usage_log_ids"] == [901, 902] and result["http_attempts"] == 2
+    assert len(calls) == 2
+    assert calls[0][1]["max_tokens"] == runtime.INITIAL_OUTPUT_TOKENS
+    assert calls[1][1]["max_tokens"] == runtime.RETRY_OUTPUT_TOKENS
+    assert "最多 6 条" in calls[1][0] and "eval(value)" in calls[1][0]
+
+
+def test_repeated_output_truncation_stops_without_outer_identical_retry(db, actor, model, monkeypatch):
+    calls = []
+
+    def answer(*args, **kwargs):
+        calls.append(kwargs)
+        return AgentResult(
+            success=False,
+            failure_kind="output_truncated",
+            usage_log_ids=[900 + len(calls)],
+            http_attempts=1,
+        )
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "failed" and result["retryable"] is False
+    assert result["errors"][0]["failure_kind"] == "output_truncated"
+    assert result["usage_log_ids"] == [901, 902] and result["http_attempts"] == 2
+    assert len(calls) == 2
+
+
+def test_output_truncation_rechecks_account_before_second_request(db, actor, model, monkeypatch):
+    calls = []
+
+    def answer(*args, **kwargs):
+        calls.append(1)
+        db.query(RolePermission).filter_by(permission_id=811).delete()
+        db.commit()
+        return AgentResult(success=False, failure_kind="output_truncated", usage_log_ids=[901], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "blocked" and result["retryable"] is False
+    assert result["usage_log_ids"] == [901] and result["http_attempts"] == 1
+    assert len(calls) == 1
+    assert "eval(value)" not in json.dumps(result)
+
+
 def test_oversized_user_input_is_explicitly_blocked(db, actor, model):
     result = run(db, actor, {"question": "大" * 70000})
     assert result["status"] == "blocked"
@@ -457,3 +525,69 @@ def test_http_attempt_has_exact_owned_ledger_and_contract_status(db, actor, monk
     assert row.total_tokens == 19 and row.model_name == "reported-unit-model"
     assert row.status == ("success" if valid is True else "failed")
     assert row.agent_label.startswith("temporary_") and row.task_id is None
+
+
+def test_http_truncation_retry_records_both_calls_and_raises_budget_once(db, actor, monkeypatch):
+    from types import SimpleNamespace
+
+    import httpx
+
+    from app.agents import base
+    from app.models.ai_call_log import AiCallLog
+    from app.services import agent_model_service
+    from app.services.ai_usage_context import usage_context
+
+    requests = []
+    original_client = httpx.Client
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        stopped = len(requests) == 2
+        return httpx.Response(
+            200,
+            json={
+                "model": "reported-unit-model",
+                "choices": [
+                    {
+                        "finish_reason": "stop" if stopped else "length",
+                        "message": {
+                            "content": json.dumps(
+                                {"summary": "精简复核完成", "findings": [], "limitations": []}
+                            ) if stopped else '{"summary":',
+                        },
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 9, "total_tokens": 19},
+            },
+        )
+
+    def configure(db, agent, user_id=None):
+        assert user_id == actor.id
+        agent._base_url, agent._api_key, agent._model = "https://unit.example/v1", "unit", "requested-unit-model"
+        agent._max_retries = 0
+        agent._emit = lambda *args, **kwargs: None
+        return agent
+
+    monkeypatch.setattr(agent_model_service, "configure_subagent", configure)
+    monkeypatch.setattr(
+        base.httpx, "Client", lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs)
+    )
+    monkeypatch.setattr(
+        base,
+        "pin_public_http_url",
+        lambda url: SimpleNamespace(request_url=url, host_header="unit.example", request_extensions={}),
+    )
+    with usage_context(actor.id, {"agent_team_id": 88, "agent_team_task_id": 99}, db=db):
+        result = run(db, actor, {"file_id": 811})
+    db.rollback()
+    rows = db.query(AiCallLog).order_by(AiCallLog.id).all()
+    assert result["status"] == "completed" and result["http_attempts"] == 2
+    assert len(requests) == len(rows) == 2
+    assert [request["max_tokens"] for request in requests] == [
+        runtime.INITIAL_OUTPUT_TOKENS,
+        runtime.RETRY_OUTPUT_TOKENS,
+    ]
+    assert "最多 6 条" in requests[1]["messages"][1]["content"]
+    assert result["usage_log_ids"] == [row.id for row in rows]
+    assert [row.status for row in rows] == ["failed", "success"]
+    assert all(row.user_id == actor.id and row.agent_team_id == 88 for row in rows)

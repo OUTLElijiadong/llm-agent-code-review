@@ -21,12 +21,14 @@ MAX_FILE_CHARS = 12_000
 MAX_CONTEXT_CHARS = 60_000
 MAX_DEPENDENCIES = 20
 MAX_DEPENDENCY_CHARS = 12_000
+INITIAL_OUTPUT_TOKENS = 8192
+RETRY_OUTPUT_TOKENS = 16_384
 
 
 class _Finding(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    title: str = Field(min_length=1, max_length=240)
-    description: str = Field(min_length=1, max_length=4000)
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=600)
     severity: Literal["严重", "高", "中", "低"]
     kind: Literal["fact", "inference"]
     evidence_refs: list[str] = Field(min_length=1, max_length=10)
@@ -36,9 +38,9 @@ class _Finding(BaseModel):
 
 class _Analysis(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    summary: str = Field(min_length=1, max_length=2000)
-    findings: list[_Finding] = Field(max_length=50)
-    limitations: list[str] = Field(max_length=20)
+    summary: str = Field(min_length=1, max_length=800)
+    findings: list[_Finding] = Field(max_length=12)
+    limitations: list[str] = Field(max_length=8)
 
     @field_validator("summary")
     @classmethod
@@ -50,7 +52,7 @@ class _Analysis(BaseModel):
     @field_validator("limitations")
     @classmethod
     def bounded_limitations(cls, value):
-        if any(not item.strip() or len(item) > 1000 for item in value):
+        if any(not item.strip() or len(item) > 300 for item in value):
             raise ValueError("limitations must be bounded nonempty text")
         return value
 
@@ -298,7 +300,7 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
         + _json(output_schema)
     )
     # 每次实例独立；无注册/永久工坊写入，也不修改共享 Agent 的提示词。
-    agent = BaseAgent(system_prompt=system_prompt, temperature=0.2, max_tokens=8192)
+    agent = BaseAgent(system_prompt=system_prompt, temperature=0.2, max_tokens=INITIAL_OUTPUT_TOKENS)
     address = str(message.get("send_to") or "temporary:analysis")
     agent.name = "temporary_" + hashlib.sha256(address.encode()).hexdigest()[:12]
     context = message.get("context") if isinstance(message.get("context"), dict) else {}
@@ -314,7 +316,7 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
     try:
         configure_subagent(db, agent, user_id=int(user.id))
         agent.bind_usage_source(db, user)
-        response = agent.call_json(prepared, ctx=ctx, max_tokens=8192, recover_truncation=True)
+        response = agent.call_json(prepared, ctx=ctx, max_tokens=INITIAL_OUTPUT_TOKENS, recover_truncation=True)
     except UsageAccountingError:
         return {
             **_result(
@@ -329,7 +331,59 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
             **_result("failed", "临时分析模型调用未完成", errors=[{"code": "temporary_model_failure"}]),
             "retryable": True,
         }
-    usage = {"usage_log_ids": response.usage_log_ids, "model": response.model, "http_attempts": response.http_attempts}
+    usage_log_ids = list(response.usage_log_ids)
+    http_attempts = response.http_attempts
+    if not response.success and response.failure_kind == "output_truncated":
+        # 原样重放会让团队的每次外层重试继续触发 length。只在本次任务内
+        # 压缩输出并增加一次预算；首次及二次请求均保留独立用量流水。
+        try:
+            _recheck_access(db, ctx.user_id, project_id, coverage["included_file_ids"])
+        except Exception:
+            return {
+                **_result(
+                    "blocked",
+                    "当前账号或目标资料权限已变化，临时分析结果不再回传",
+                    errors=[{"code": "temporary_scope_revoked"}],
+                ),
+                "usage_log_ids": usage_log_ids,
+                "model": response.model,
+                "http_attempts": http_attempts,
+                "retryable": False,
+            }
+        retry_prompt = (
+            "上一次模型输出因长度上限截断。请严格精简结果：只列最多 6 条影响最大的发现，"
+            "summary 不超过 300 字，每条 description 不超过 200 字，limitations 最多 3 条；"
+            "未逐项列出的内容在 limitations 中说明，不能声称完整覆盖。只输出完整 JSON。\n"
+            + prepared
+        )
+        try:
+            retry_response = agent.call_json(
+                retry_prompt, ctx=ctx, max_tokens=RETRY_OUTPUT_TOKENS, recover_truncation=True
+            )
+        except UsageAccountingError:
+            return {
+                **_result(
+                    "failed",
+                    "模型已请求但用量审计未完成，不能自动重发",
+                    errors=[{"code": "temporary_usage_accounting_failed"}],
+                ),
+                "usage_log_ids": usage_log_ids,
+                "model": response.model,
+                "http_attempts": http_attempts,
+                "retryable": False,
+            }
+        except Exception:
+            return {
+                **_result("failed", "临时分析模型调用未完成", errors=[{"code": "temporary_model_failure"}]),
+                "usage_log_ids": usage_log_ids,
+                "model": response.model,
+                "http_attempts": http_attempts,
+                "retryable": True,
+            }
+        usage_log_ids.extend(retry_response.usage_log_ids)
+        http_attempts += retry_response.http_attempts
+        response = retry_response
+    usage = {"usage_log_ids": usage_log_ids, "model": response.model, "http_attempts": http_attempts}
     try:
         _recheck_access(db, ctx.user_id, project_id, coverage["included_file_ids"])
     except Exception:
@@ -366,7 +420,7 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
                 errors=[{"code": "temporary_model_failure", "failure_kind": response.failure_kind or "model_failure"}],
             ),
             **usage,
-            "retryable": True,
+            "retryable": response.failure_kind != "output_truncated",
         }
     try:
         analysis = _Analysis.model_validate(response.data)

@@ -53,6 +53,7 @@ class AgentTeamLeaseError(AgentTeamError):
 _TERMINAL_TEAM = frozenset({"completed", "failed", "cancelled", "expired"})
 _TERMINAL_TASK = frozenset({"completed", "failed", "blocked", "cancelled", "dead_letter", "expired"})
 _TEAM_GOVERNED_RUNTIME_CODES = frozenset({"sandbox_deployer", "test_verifier", "operations"})
+MAX_CUSTOM_TEAM_CODE_CHARS = 12_000
 
 
 def _now() -> datetime:
@@ -596,6 +597,43 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
         revision = db.get(ProjectSourceRevision, int(revision_id))
         if revision is None or int(revision.project_id) != int(project_id):
             raise AgentTeamValidationError("源码修订不存在或不属于当前可见项目")
+
+    if address.startswith("custom:"):
+        code = raw.get("code")
+        file_id = raw.get("file_id")
+        if code is not None and (not isinstance(code, str) or not code.strip()):
+            raise AgentTeamValidationError(f"任务 {task_input.task_key} 的 code 必须是非空代码文本")
+        if isinstance(code, str) and len(code) > MAX_CUSTOM_TEAM_CODE_CHARS:
+            raise AgentTeamValidationError(f"任务 {task_input.task_key} 的 code 超过 {MAX_CUSTOM_TEAM_CODE_CHARS} 字符")
+        if code is not None and file_id is not None:
+            raise AgentTeamValidationError("已发布 Agent 的 code 与 file_id 只能提供一个")
+        if code is None and file_id is None:
+            raise AgentTeamValidationError(f"任务 {task_input.task_key} 必须提供 code 或 project_id + file_id")
+        if file_id is not None:
+            if isinstance(file_id, bool) or not isinstance(file_id, int) or file_id <= 0 or project_id is None:
+                raise AgentTeamValidationError(f"任务 {task_input.task_key} 必须提供有效 project_id 和 file_id")
+            from app.core.permission_codes import PermissionCode
+            from app.services import code_file_service, rbac_service
+
+            if not all(
+                rbac_service.check_permission(db, int(user.id), permission)
+                for permission in (PermissionCode.PROJECT_VIEW, PermissionCode.FILE_VIEW)
+            ):
+                raise AgentTeamAccessError("当前账户没有读取项目源码的权限")
+            try:
+                metadata = code_file_service.get_file_meta(db, user=user, file_id=file_id)
+                if metadata["is_binary"]:
+                    raise AgentTeamValidationError("已发布 Agent 的 file_id 必须是可审查的文本文件")
+                source = code_file_service.get_file(db, user, file_id)
+            except AgentTeamValidationError:
+                raise
+            except Exception as exc:
+                raise AgentTeamValidationError("文件不存在或不属于当前账户可见项目") from exc
+            if int(source.project_id) != int(project_id) or not source.is_reviewable:
+                raise AgentTeamValidationError("文件不属于指定项目或不是可审查的文本文件")
+            if len(source.content or "") > MAX_CUSTOM_TEAM_CODE_CHARS:
+                raise AgentTeamValidationError(f"文件源码超过 {MAX_CUSTOM_TEAM_CODE_CHARS} 字符，请拆分或使用正式审查")
+        return
 
     if not address.startswith("agent:"):
         return

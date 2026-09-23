@@ -44,12 +44,12 @@ class CodeFileManagerAgent(BaseAgent):
 
     def list_files(self, project_id: int, language: str = "",
                    page: int = 1, page_size: int = 50,
-                   ctx: Optional[AgentContext] = None) -> AgentResult:
+                   ctx: Optional[AgentContext] = None, *, keyword: str = "") -> AgentResult:
         if not self._db:
             return AgentResult(success=False, error="DB 未注入")
         result = code_file_service.list_files(
             self._db, user=self._user, project_id=project_id,
-            language=language, page=page, page_size=page_size,
+            language=language, keyword=keyword, page=page, page_size=page_size,
         )
         items = [
             {"id": i.id, "file_name": i.file_name,

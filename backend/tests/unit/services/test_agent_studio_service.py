@@ -172,6 +172,8 @@ def test_published_release_remains_callable_by_team_during_draft_and_pending_rev
                     "member_key": "reviewer",
                     "title": "复核代码",
                     "instructions": "复核代码并给出证据",
+                    "input": {"code": "def authorize(owner_id, user_id):\n    return owner_id == user_id\n",
+                              "language": "python", "file_name": "auth.py"},
                 }],
             }),
         )

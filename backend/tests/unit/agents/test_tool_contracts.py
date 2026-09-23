@@ -85,6 +85,11 @@ EXPECTED_FIXED_TOOL_NAMES = [
         ("list_review_tasks", {"project_id": None}, {"project_id": None}),
         ("list_review_issues", {"task_id": 4}, {"task_id": 4}),
         ("list_code_files", {"project_id": 1}, {"project_id": 1}),
+        (
+            "list_code_files",
+            {"project_id": 1, "keyword": "SecurityConfig"},
+            {"project_id": 1, "keyword": "SecurityConfig"},
+        ),
         ("dashboard_summary", {}, {}),
         ("list_rules", {}, {}),
         ("list_reports", {"project_id": None}, {"project_id": None}),

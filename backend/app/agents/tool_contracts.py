@@ -133,6 +133,7 @@ class ListCodeFilesArguments(FixedToolArguments):
 
     project_id: int = Field(description="项目 ID")
     language: str = Field(default="", description="编程语言过滤")
+    keyword: str = Field(default="", description="文件名关键词过滤")
     page: int = Field(default=1, description="页码")
     page_size: int = Field(default=50, description="每页数量")
 
@@ -578,6 +579,8 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
         "至多5文件/每文件12000字符，结构化用户上下文总上限60000字符；"
         "一般任务可传 text，不能替代全项目正式审查或越权写入，写操作由主小菱已有工具完成。"
         "code_reviewer 只接受代码片段 code。"
+        "custom:<code> 已发布审查 Agent 的任务 input 必须二选一：直接传非空 code，或传当前账号"
+        "可见的 project_id + file_id；后者执行时重新校验权限并读取该文本源码，最多12000字符。"
         "needs_configuration/session_only/approval_required"
         "等不可执行成员不会被轮询伪装成可用，需改用 executable Agent。",
         CreateAgentTeamArguments,

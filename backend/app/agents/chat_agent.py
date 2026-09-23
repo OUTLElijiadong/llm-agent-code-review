@@ -1573,7 +1573,12 @@ class ChatAssistantAgent(BaseAgent):
         pid = intent.get("payload", {}).get("project_id")
         if not pid:
             return AgentResult(success=False, error="请指定项目ID")
-        result = self._orchestrator.list_code_files(pid, page_size=50, ctx=ctx)
+        result = self._orchestrator.list_code_files(
+            pid,
+            keyword=str(intent.get("payload", {}).get("keyword") or ""),
+            page_size=50,
+            ctx=ctx,
+        )
         if not result.success:
             return result
         items = result.data.get("items", [])

@@ -3105,6 +3105,8 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "review_type:'full'}，安全专项可用 review_type:'security'，需要指定文件时带 file_ids。"
         "该成员复用正式审查任务，由现有专业画像并行审查并聚合去重，返回真实终态、task_id 和覆盖证据。"
         "agent:code_reviewer 只处理 input.code 中的代码片段，禁止只给它 project_id 假装全项目审查。"
+        "custom:<code> 已发布审查 Agent 的团队任务 input 必须提供非空 code，或同时提供 project_id 与"
+        "file_id；文件模式由服务端在执行时按当前账号权限读取单个文本文件，最多12000字符，不能只给 project_id。"
         "用户要求代码审查与审计并行时，将正式审查与 agent:security_sentinel 作为无互相依赖的工作节点，"
         "安全成员 input={project_id,scan_mode:'full'}；仅用户同意全静态加有界语义范围时用 static_full，"
         "不得把有界语义检查称为完整语义覆盖。max_active_children 至少为2。"

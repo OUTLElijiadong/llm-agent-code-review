@@ -12,6 +12,7 @@ from app.models.agent_capability import SandboxEnvironment
 from app.models.agent_governance import AgentMemory
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
+from app.models.code_file import CodeFile
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
 from app.models.project import Project
 from app.models.project_source_revision import ProjectSourceRevision
@@ -396,7 +397,13 @@ def test_published_custom_member_uses_server_release_snapshot(db):
                         "api_key": "must-not-persist",
                     },
                 },
-            ]
+            ],
+            tasks=[
+                {"task_key": "read", "member_key": "reader", "title": "读取项目", "instructions": "读取项目"},
+                {"task_key": "verify", "member_key": "reviewer", "title": "验证结果",
+                 "instructions": "验证读取结果", "depends_on": ["read"],
+                 "input": {"code": "print('v1')", "language": "python"}},
+            ],
         ),
     )
     member = next(item for item in created["members"] if item["member_key"] == "reviewer")
@@ -467,6 +474,36 @@ def test_published_custom_member_uses_server_release_snapshot(db):
         "package_checksum": "p" * 64,
         "template_checksum": "v" * 64,
     }
+
+
+def test_custom_team_file_input_is_validated_before_queueing(db, super_admin_user):
+    project = Project(user_id=super_admin_user.id, project_name="文件输入项目", language="python", status="active")
+    db.add(project)
+    db.flush()
+    source = CodeFile(
+        project_id=project.id, file_name="auth.py", language="python", content="def authorize():\n    return True\n",
+        size_bytes=33, raw_size=33, line_count=2, version_no=1, is_binary=0, status="active",
+    )
+    db.add(source)
+    db.commit()
+    def task(value):
+        return SimpleNamespace(task_key="review", input=value)
+
+    agent_team_service._validate_task_scope(
+        db, super_admin_user, task({"project_id": project.id, "file_id": source.id}), "custom:reviewer",
+    )
+    for invalid in ({}, {"project_id": project.id}, {"code": " ", "file_id": source.id},
+                    {"project_id": project.id, "file_id": True}, {"project_id": project.id, "file_id": source.id,
+                     "code": "print('duplicate')"}):
+        with pytest.raises(agent_team_service.AgentTeamValidationError):
+            agent_team_service._validate_task_scope(db, super_admin_user, task(invalid), "custom:reviewer")
+
+    source.is_binary = 1
+    db.commit()
+    with pytest.raises(agent_team_service.AgentTeamValidationError, match="文本文件"):
+        agent_team_service._validate_task_scope(
+            db, super_admin_user, task({"project_id": project.id, "file_id": source.id}), "custom:reviewer",
+        )
 
 
 def test_public_redaction_fallback_is_fail_closed(monkeypatch):

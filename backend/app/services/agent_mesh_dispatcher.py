@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from datetime import datetime, timedelta, timezone
@@ -689,6 +690,7 @@ def _runtime_handler(
             result = orch.file_mgr.list_files(
                 int(project_id),
                 language=str(data.get("language") or ""),
+                keyword=str(data.get("keyword") or ""),
                 page=int(data.get("page") or 1),
                 page_size=min(100, int(data.get("page_size") or 50)),
                 ctx=ctx,
@@ -878,13 +880,81 @@ def _monitor_handler(db: Session, user: User, message: dict[str, Any]) -> dict[s
     )
 
 
-def _custom_handler(db: Session, user: User, code: str, message: dict[str, Any]) -> dict[str, Any]:
+def _custom_handler(
+    db: Session, user: User, code: str, message: dict[str, Any], *, trusted_team_execution: bool = False,
+) -> dict[str, Any]:
     from app.services import published_agent_tools
 
     data = _payload(message)
     raw_code = data.get("code")
+    file_id = data.get("file_id")
+    if raw_code is not None and file_id is not None:
+        return _result("needs_clarification", "code 与 file_id 只能提供一个")
+    source_evidence = None
+    effective_user = user
     if not isinstance(raw_code, str) or not raw_code.strip():
-        return _missing("code")
+        if file_id is None:
+            return _missing("code or project_id + file_id")
+        if not trusted_team_execution:
+            return _result("blocked", "按文件读取源码只允许由当前团队有效任务执行")
+        project_id = data.get("project_id")
+        if (
+            isinstance(file_id, bool) or not isinstance(file_id, int) or file_id <= 0
+            or isinstance(project_id, bool) or not isinstance(project_id, int) or project_id <= 0
+        ):
+            return _result("needs_clarification", "按文件审查必须提供有效 project_id 和 file_id")
+        from app.core.permission_codes import PermissionCode
+        from app.services import agent_team_service, code_file_service
+
+        context = message.get("context") if isinstance(message.get("context"), dict) else {}
+        try:
+            # 团队认领和模型调用之间可能撤权；结束旧只读事务，重新校验租约与文件归属。
+            db.rollback()
+            db.expire_all()
+            team, _task, member = agent_team_service.require_active_task_lease(
+                db,
+                team_id=int(context.get("team_id") or 0),
+                task_id=int(context.get("agent_team_task_id") or 0),
+                owner_user_id=int(user.id),
+                lease_token=str(context.get("lease_token") or ""),
+            )
+            if member.address != f"custom:{code}" or int(member.id) != int(context.get("member_id") or 0):
+                raise agent_team_service.AgentTeamAccessError("团队成员与租约不匹配")
+            effective_user = db.get(User, int(user.id))
+            if effective_user is None or int(effective_user.status or 0) != 1:
+                raise agent_team_service.AgentTeamAccessError("当前账户已停用")
+            if not all(
+                rbac_service.check_permission(db, int(effective_user.id), permission)
+                for permission in (PermissionCode.AGENT_CHAT, PermissionCode.PROJECT_VIEW, PermissionCode.FILE_VIEW)
+            ):
+                raise agent_team_service.AgentTeamAccessError("当前账户没有读取项目源码的权限")
+            metadata = code_file_service.get_file_meta(db, user=effective_user, file_id=file_id)
+            if metadata["is_binary"]:
+                raise agent_team_service.AgentTeamValidationError("二进制文件不能供已发布审查 Agent 读取")
+            source = code_file_service.get_file(db, effective_user, file_id)
+            if int(source.project_id) != project_id or not source.is_reviewable:
+                raise agent_team_service.AgentTeamValidationError("文件不属于指定项目或不是可审查文本")
+            raw_code = source.content or ""
+            if len(raw_code) > agent_team_service.MAX_CUSTOM_TEAM_CODE_CHARS:
+                return _result("needs_clarification", "文件源码超过 12000 字符，请拆分或使用正式审查")
+            source_evidence = {
+                "source": "code_file",
+                "project_id": project_id,
+                "file_id": file_id,
+                "file_name": source.file_name,
+                "language": source.language,
+                "status": source.status,
+                "is_reviewable": source.is_reviewable,
+                "version_no": int(source.version_no or 0),
+                "sha256": hashlib.sha256(raw_code.encode("utf-8")).hexdigest(),
+            }
+            language = str(source.language or "plaintext")
+            file_name = str(source.file_name or "snippet.txt")
+        except Exception:
+            return _result("blocked", "文件或团队租约不可用，已停止读取源码")
+    else:
+        language = str(data.get("language") or "plaintext")
+        file_name = str(data.get("file_name") or "snippet.txt")
     team_context = data.get("_agent_team")
     team_context = team_context if isinstance(team_context, dict) else {}
     snapshot = team_context.get("member_snapshot")
@@ -897,11 +967,11 @@ def _custom_handler(db: Session, user: User, code: str, message: dict[str, Any])
         experience = f"{experience}\n本次改道策略：{strategy_instruction}".strip()
     result = published_agent_tools.invoke_published_agent(
         db,
-        user,
+        effective_user,
         agent_code=code,
         code=raw_code,
-        language=str(data.get("language") or "plaintext"),
-        file_name=str(data.get("file_name") or "snippet.txt"),
+        language=language,
+        file_name=file_name,
         rules=data.get("rules") if isinstance(data.get("rules"), list) else [],
         line_offset=int(data.get("line_offset") or 0),
         experience=experience,
@@ -910,10 +980,46 @@ def _custom_handler(db: Session, user: User, code: str, message: dict[str, Any])
         package_checksum=str(snapshot.get("package_checksum") or ""),
         template_checksum=str(snapshot.get("template_checksum") or ""),
     )
+    if source_evidence is not None:
+        # 模型调用会提交用量；用新事务确认期间未撤权、取消团队或替换源码。
+        try:
+            db.expire_all()
+            fresh_user = db.get(User, int(user.id))
+            if fresh_user is None or int(fresh_user.status or 0) != 1:
+                raise ValueError("账户已停用")
+            if not all(
+                rbac_service.check_permission(db, int(fresh_user.id), permission)
+                for permission in (PermissionCode.AGENT_CHAT, PermissionCode.PROJECT_VIEW, PermissionCode.FILE_VIEW)
+            ):
+                raise ValueError("源码读取权限已撤销")
+            agent_team_service.require_active_task_lease(
+                db,
+                team_id=int(context.get("team_id") or 0),
+                task_id=int(context.get("agent_team_task_id") or 0),
+                owner_user_id=int(user.id),
+                lease_token=str(context.get("lease_token") or ""),
+            )
+            current_meta = code_file_service.get_file_meta(db, user=fresh_user, file_id=file_id)
+            if current_meta["is_binary"]:
+                raise ValueError("源码已变为二进制文件")
+            current_source = code_file_service.get_file(db, fresh_user, file_id)
+            if (
+                int(current_source.project_id) != project_id
+                or current_source.file_name != source_evidence["file_name"]
+                or current_source.language != source_evidence["language"]
+                or current_source.status != source_evidence["status"]
+                or current_source.is_reviewable != source_evidence["is_reviewable"]
+                or hashlib.sha256((current_source.content or "").encode("utf-8")).hexdigest()
+                != source_evidence["sha256"]
+                or int(current_source.version_no or 0) != source_evidence["version_no"]
+            ):
+                raise ValueError("源码版本已变化")
+        except Exception:
+            return _result("blocked", "执行期间文件、权限或团队状态已变化，审查结果未回传")
     return _result(
         "completed",
         str(result.get("summary") or "已发布 Agent 审查完成"),
-        evidence=[
+        evidence=([source_evidence] if source_evidence is not None else []) + [
             {
                 "source": "published_agent_release",
                 "release_id": result.get("release_id"),
@@ -957,7 +1063,9 @@ def _handle(
         )
         if asset is None:
             return code, _result("blocked", "已发布 Agent 不存在或已停用")
-        return asset.name, _custom_handler(db, user, code, message)
+        return asset.name, _custom_handler(
+            db, user, code, message, trusted_team_execution=trusted_team_execution,
+        )
     contract = CONTRACTS[code]
     from app.services import agent_governance_service
 
